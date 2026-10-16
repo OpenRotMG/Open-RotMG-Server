@@ -1734,7 +1734,11 @@ impl World {
         let mut tiles = Vec::new();
         for y in ((pos.y as i32 - 20).max(0))..=(pos.y as i32 + 20).min(self.map.height - 1) {
             for x in ((pos.x as i32 - 20).max(0))..=(pos.x as i32 + 20).min(self.map.width - 1) {
-                if !self.players[&id].tiles.contains(&(x as i16, y as i16)) {
+                let dx = x - pos.x as i32;
+                let dy = y - pos.y as i32;
+                if dx * dx + dy * dy <= 20 * 20
+                    && !self.players[&id].tiles.contains(&(x as i16, y as i16))
+                {
                     tiles.push((
                         x as i16,
                         y as i16,
@@ -4326,11 +4330,48 @@ mod tests {
         assert!(!inside_box(a, Pos { x: 0.500001, y: 0. }));
     }
     #[test]
-    fn initial_map_is_fogged() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        assert!(w.players[&id].tiles.len() < w.map.cells.len());
-        assert!(w.players[&id].known.contains(&id));
+    fn fog_reveals_circular_tiles_once_and_remembers_them() {
+        let mut d = directory();
+        let (id, mut rx) = receive(&mut d, -2, 1, WIZARD);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.players.get_mut(&id).unwrap().tiles.clear();
+        let initial_count = w.players[&id].character.tiles;
+        let mut known = BTreeSet::new();
+        for (cx, cy) in [(50, 50), (60, 50), (0, 0), (141, 129), (50, 50)] {
+            w.players.get_mut(&id).unwrap().pos = Pos {
+                x: cx as f32 + 0.25,
+                y: cy as f32 + 0.75,
+            };
+            let circle: BTreeSet<_> = (0..w.map.height)
+                .flat_map(|y| (0..w.map.width).map(move |x| (x, y)))
+                .filter(|(x, y)| (x - cx).pow(2) + (y - cy).pow(2) <= 400)
+                .map(|(x, y)| (x as i16, y as i16))
+                .collect();
+            let expected: BTreeSet<_> = circle.difference(&known).copied().collect();
+            w.updates(id, false).unwrap();
+            let mut received = BTreeSet::new();
+            while let Ok(packet) = rx.try_recv() {
+                if packet.id == wire::UPDATE {
+                    let mut r = crate::wire::Reader::new(&packet.body);
+                    for _ in 0..r.i16().unwrap() {
+                        let (x, y) = (r.i16().unwrap(), r.i16().unwrap());
+                        assert_eq!(
+                            r.u8().unwrap(),
+                            w.map.cells[y as usize * w.map.width as usize + x as usize].ground
+                        );
+                        assert!(received.insert((x, y)), "duplicate tile in UPDATE");
+                    }
+                }
+            }
+            assert_eq!(received, expected);
+            known.extend(circle);
+            assert_eq!(w.players[&id].tiles, known);
+            assert_eq!(
+                w.players[&id].character.tiles - initial_count,
+                known.len() as u64
+            );
+            assert!(w.players[&id].known.contains(&id));
+        }
     }
     #[test]
     fn native_minimap_keeps_distant_players_without_revealing_perception_or_fog() {
