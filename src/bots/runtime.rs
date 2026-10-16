@@ -19,6 +19,16 @@ async fn enter(
     } else {
         world
     };
+    let vault = if app
+        .world
+        .in_world(world)
+        .call(|w| Ok(w.name == "Vault"))
+        .await?
+    {
+        Some(app.store.vault(character.account).await?)
+    } else {
+        None
+    };
     tracing::info!(name = profile.name, saved = %serde_json::to_string(&character)?,
         "autonomous saved character loaded");
     // Concurrent novas and hit receipts must fit between bounded perception updates.
@@ -30,6 +40,9 @@ async fn enter(
         .world
         .in_world(world)
         .call(move |w| {
+            if let Some(vault) = vault {
+                w.load_vault(vault)?;
+            }
             let id = w.enter_at(
                 character,
                 Some(Output { packets, lost }),
@@ -230,6 +243,7 @@ async fn launch(
     let app = app.clone();
     tokio::spawn(async move {
         let mut shutdown = app.shutdown.subscribe();
+        let mut next_bank = app.world.clock.now();
         let result: Result<()> = async {
                 loop {
                     tokio::select! {
@@ -284,7 +298,11 @@ async fn launch(
                         }
                     }
                     if view.lifecycle.busy || view.tick < brain.next_decision { continue; }
+                    // World clocks start at different times; banking delay belongs to this account session.
+                    let now = app.world.clock.now();
+                    brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
                     let decision = brain.decide(&view, &app.content)?;
+                    next_bank = now.checked_add(Duration::from_millis(brain.next_bank.saturating_sub(view.time_ms))).context("autonomous bank cooldown overflow")?;
                     if let Some(text) = decision.chat {
                         let received = app.world.clock.now();
                         match app.world.directory(move |d| d.chat(id, text.into(), received)).await {

@@ -193,6 +193,7 @@ fn view(content: &Content) -> PlayerView {
         tick: 100,
         time_ms: 5000,
         position: Pos { x: 11.5, y: 11.5 },
+        quest: None,
         map: MapInfo {
             name: "Realm".into(),
             width: 40,
@@ -206,6 +207,7 @@ fn view(content: &Content) -> PlayerView {
             hp: 100,
             mp: 100,
             stats: [100, 100, 12, 0, 10, 15, 12, 12],
+            base_stats: [100, 100, 12, 0, 10, 15, 12, 12],
             items: class.equipment.clone(),
             inventory_revision: 0,
             pirate_caves: 0,
@@ -241,6 +243,7 @@ fn object(id: i32, kind: u16, x: f32, y: f32) -> VisibleObject {
         position: Pos { x, y },
         hp: 100,
         max_hp: 100,
+        level: None,
         equipped: vec![],
         contents: vec![],
         blocks: false,
@@ -360,6 +363,7 @@ fn projectile_dodge_uses_observed_trajectory_and_only_known_routes() {
     let grid = Grid {
         walkable: BTreeSet::from([(0, 0), (0, 1), (1, 1), (2, 1)]),
         known: BTreeSet::from([(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)]),
+        dimensions: (3, 2),
     };
     assert!(grid.next(center((0, 0)), center((3, 1))).is_none());
     let next = grid.next(center((0, 0)), center((2, 1))).unwrap();
@@ -369,6 +373,7 @@ fn projectile_dodge_uses_observed_trajectory_and_only_known_routes() {
     let mut straight = Grid {
         walkable: (0..=24).map(|x| (x, 0)).collect(),
         known: (0..=24).map(|x| (x, 0)).collect(),
+        dimensions: (25, 1),
     };
     let mut position = center((0, 0));
     for _ in 0..6 {
@@ -646,6 +651,9 @@ fn observed_crew_can_teleport_and_nexus_arrivals_wait_for_peers() {
     assert!(decision.journey.is_none() && decision.movement.is_none());
     v.time_ms += 10001;
     v.tick += 201;
+    assert_eq!(arrived.decide(&v, &content).unwrap().goal, Goal::Wait);
+    v.time_ms += 30000;
+    v.tick += 600;
     assert_ne!(arrived.decide(&v, &content).unwrap().goal, Goal::Wait);
 }
 
@@ -987,6 +995,16 @@ fn quiet_exploration_revisits_only_an_actually_observed_hunting_ground() {
     v.time_ms += 200;
     let fresh = Brain::new(PROFILES[1], &v).decide(&v, &content).unwrap();
     assert!(matches!(fresh.goal, Goal::Explore(..)));
+    v.position.x = 15.5;
+    brain.decide(&v, &content).unwrap();
+    assert!(brain.hunting.is_none());
+    v.position.x = 25.5;
+    v.tick += 700;
+    v.time_ms += 35000;
+    assert!(!matches!(
+        brain.decide(&v, &content).unwrap().goal,
+        Goal::Revisit(..)
+    ));
     v.map.name = "Pirate Cave".into();
     v.tick += 4;
     v.time_ms += 200;
@@ -1034,4 +1052,752 @@ fn crews_search_recent_observed_contacts_without_teleporting_to_hidden_peers() {
     let search = leader.decide(&v, &content).unwrap();
     assert_eq!(search.goal, Goal::Gather(2));
     assert!(search.movement.is_some());
+}
+
+#[test]
+fn earned_stat_potions_are_worth_collecting() {
+    let c = content();
+    let v = view(&c);
+    assert!(useful(&c, &v, 0xa21).unwrap());
+    assert!(useful(&c, &v, 0xa35).unwrap());
+    assert!(useful(&c, &v, 0xa4c).unwrap());
+}
+
+#[test]
+fn equipped_crews_accept_snake_pit_but_starters_do_not() {
+    let c = content();
+    let mut v = view(&c);
+    v.objects.push(object(2, 0x718, 12.5, 11.5));
+    for (id, name) in [(3, "Bayleaf"), (4, "Trellis")] {
+        let mut peer = object(id, WIZARD, 12.5, 11.5);
+        peer.name = name.into();
+        peer.equipped = c.get(WIZARD).unwrap().equipment[..4].to_vec();
+        v.objects.push(peer);
+    }
+    assert!(!matches!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Portal(2)
+    ));
+    v.character.level = 20;
+    v.character.stats[0] = 650;
+    v.character.hp = 650;
+    v.character.stats[3] = 15;
+    v.character.items[0] = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 17 && o.tier == Some(6))
+        .unwrap()
+        .kind as i32;
+    v.character.items[2] = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 14 && o.tier == Some(6))
+        .unwrap()
+        .kind as i32;
+    for peer in v.objects.iter_mut().filter(|p| !p.equipped.is_empty()) {
+        peer.equipped[0] = v.character.items[0];
+        peer.hp = 500;
+        peer.max_hp = 500;
+        peer.level = Some(20);
+    }
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Portal(2)
+    );
+    assert_eq!(c.objects[&2714].tier, Some(3));
+    v.objects[1].equipped[0] = 2714;
+    assert!(!matches!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Portal(2)
+    ));
+}
+
+#[test]
+fn dungeon_rewards_are_collected_before_the_committed_exit() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Snake Pit".into();
+    v.objects.push(object(2, 0x71d, 12.5, 11.5));
+    let mut bag = object(3, 0x506, 12.5, 11.5);
+    bag.contents = vec![0xa21, -1, -1, -1, -1, -1, -1, -1];
+    v.objects.push(bag);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Loot(3));
+    assert!(matches!(d.item, Some(Action::Swap { .. })));
+    assert!(d.journey.is_none());
+    v.character.items[0] = 2717;
+    v.character.items[4..].fill(2717);
+    v.character.items[6] = 2711;
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert!(matches!(
+        d.item,
+        Some(Action::Swap {
+            from: Slot {
+                object: 3,
+                kind: 0xa21,
+                ..
+            },
+            to: Slot {
+                slot: 6,
+                kind: 2711,
+                ..
+            }
+        })
+    ));
+    assert!(d.journey.is_none());
+    v.character.items[6] = 0xa21;
+    assert!(matches!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().item,
+        Some(Action::Use { slot: 6, .. })
+    ));
+    v.character.items[4..].fill(2594);
+    assert!(
+        progression::pickup(&v, &c, &v.objects[1])
+            .unwrap()
+            .is_none()
+    );
+    v.objects.remove(1);
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Portal(2)
+    );
+}
+
+#[test]
+fn permanent_potion_uses_own_base_not_equipment_bonuses_and_respects_cap() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.items[4] = 0xa21;
+    let cap = c.classes[&WIZARD].caps[4];
+    v.character.stats[4] = cap + 10;
+    v.character.base_stats[4] = cap - 1;
+    assert!(matches!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().item,
+        Some(Action::Use { slot: 4, .. })
+    ));
+    v.character.base_stats[4] = cap;
+    assert!(progression::consume(&v, &c).unwrap().is_none());
+    v.lifecycle.busy = true;
+    assert!(
+        Brain::new(PROFILES[1], &v)
+            .decide(&v, &c)
+            .unwrap()
+            .item
+            .is_none()
+    );
+}
+
+#[test]
+fn banking_uses_only_observed_chest_slots_and_full_vault_does_not_discard_items() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Vault".into();
+    let mut chest = object(2, 0x504, 12.5, 11.5);
+    chest.contents = vec![-1; 8];
+    v.objects.push(chest);
+    v.character.items[4] = 0xa21;
+    v.character.base_stats[4] = c.classes[&WIZARD].caps[4];
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert!(matches!(
+        d.item,
+        Some(Action::Swap {
+            from: Slot {
+                object: 1,
+                slot: 4,
+                kind: 0xa21
+            },
+            to: Slot {
+                object: 2,
+                slot: 0,
+                kind: -1
+            }
+        })
+    ));
+    v.objects[0].contents = vec![0xa21; 8];
+    let mut brain = Brain::new(PROFILES[1], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(d.item.is_none());
+    assert!(matches!(d.journey, Some(Journey::Nexus)));
+    assert!(brain.next_bank > v.time_ms);
+    v.objects.clear();
+    assert!(progression::bank(&v, &c, &Grid::new(&v)).unwrap().is_none());
+}
+
+#[test]
+fn native_quest_drives_only_known_routes_and_does_not_reveal_terrain() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.level = 3;
+    v.map.width = 512;
+    v.map.height = 512;
+    let mut target = object(2, 0x609, 150.5, 150.5);
+    target.max_hp = c.objects[&target.kind].hp;
+    v.objects.push(target);
+    v.quest = Some(2);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    let destination = d.movement.unwrap();
+    assert!(Grid::new(&v).segment(v.position, destination));
+    assert!(destination.distance(v.position) <= 4.001);
+    assert!(v.tiles.iter().any(|t| (t.x, t.y) == tile(destination)));
+    v.objects.clear();
+    assert!(!matches!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Hunt(_)
+    ));
+}
+
+#[test]
+fn beginners_escape_outmatched_encounters_and_shields_do_not_waste_spells() {
+    let c = content();
+    let mut v = view(&c);
+    let mut god = object(2, 0x654, 13.5, 11.5);
+    god.max_hp = c.objects[&god.kind].hp;
+    v.objects.push(god);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Recover);
+    assert!(matches!(d.journey, Some(Journey::Nexus)));
+    v.character.stats[0] = 650;
+    v.character.hp = 650;
+    v.objects[0].condition_mask = Some(crate::condition::bit(crate::condition::INVULNERABLE));
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert!(d.aim.is_none());
+    assert!(d.item.is_none());
+}
+
+#[tokio::test]
+async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
+    use crate::store::{InventoryWrite, Store};
+    let c = std::sync::Arc::new(content());
+    let store = Store::open(std::path::Path::new(":memory:"), &c).unwrap();
+    let account = store.list("prepared-bot-banking".into()).await.unwrap();
+    let mut character = store
+        .create(account.id, c.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    character.base[4] = c.classes[&WIZARD].caps[4];
+    character.items[4] = 0xa21;
+    character.revision = store
+        .exchange(
+            vec![InventoryWrite {
+                id: character.id,
+                account: account.id,
+                revision: character.revision,
+                items: character.items.clone(),
+            }],
+            None,
+        )
+        .await
+        .unwrap()[0];
+    store.progress(character.clone()).await.unwrap();
+    let mut directory = crate::world::Directory::with_seed(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data"),
+        c.clone(),
+        16,
+        42,
+    )
+    .unwrap();
+    let scope = directory.instance("vault", Some(account.id)).unwrap();
+    let w = directory.worlds.get_mut(&scope).unwrap();
+    w.load_vault(store.vault(account.id).await.unwrap())
+        .unwrap();
+    let chest = w.entities.values().find(|e| e.kind == 0x504).unwrap();
+    let position = chest.pos;
+    let (packets, _rx) = tokio::sync::mpsc::channel(OUTPUT_CAPACITY);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let id = w
+        .enter_autonomous(character.clone(), crate::world::Output { packets, lost })
+        .unwrap();
+    w.players.get_mut(&id).unwrap().pos = position;
+    w.updates(id, false).unwrap();
+    let view = directory.player_view(id).unwrap();
+    let decision = Brain::new(PROFILES[1], &view).decide(&view, &c).unwrap();
+    let plan = directory
+        .worlds
+        .get_mut(&scope)
+        .unwrap()
+        .autonomous_action(id, decision.item.unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(
+        store
+            .vault(account.id)
+            .await
+            .unwrap()
+            .items
+            .iter()
+            .all(|i| *i == -1)
+    );
+    assert_eq!(
+        store.load(account.id, character.id).await.unwrap().items[4],
+        0xa21
+    );
+    let revision = store
+        .exchange(
+            vec![InventoryWrite {
+                id: plan.character,
+                account: plan.account,
+                revision: plan.revision,
+                items: plan.items.clone(),
+            }],
+            plan.vault.clone(),
+        )
+        .await
+        .unwrap()[0];
+    directory
+        .worlds
+        .get_mut(&scope)
+        .unwrap()
+        .finish_inventory(plan, Ok(revision))
+        .unwrap();
+    assert_eq!(store.vault(account.id).await.unwrap().items[0], 0xa21);
+    assert_eq!(
+        store.load(account.id, character.id).await.unwrap().items[4],
+        -1
+    );
+    let mut dead = directory.worlds[&scope].players[&id].character.clone();
+    dead.hp = 0;
+    dead.alive = false;
+    store
+        .death(dead, "prepared banking death".into())
+        .await
+        .unwrap();
+    assert!(store.load(account.id, character.id).await.is_err());
+    let fresh = store
+        .create(account.id, c.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    assert_ne!(fresh.id, character.id);
+    assert_eq!(fresh.items, c.get(WIZARD).unwrap().equipment);
+    assert_eq!(store.vault(account.id).await.unwrap().items[0], 0xa21);
+}
+
+#[test]
+fn unknown_quest_route_targets_a_frontier_not_a_known_dead_end() {
+    let mut v = view(&content());
+    v.map.width = 100;
+    v.map.height = 100;
+    let mut grid = Grid::new(&v);
+    // The closest known square is a sealed alcove, not a route into undiscovered rooms.
+    for y in 0..29 {
+        grid.walkable.remove(&(20, y));
+    }
+    let mut from = Pos { x: 18.5, y: 10.5 };
+    for _ in 0..30 {
+        let point = grid.towards(from, Pos { x: 80.5, y: 10.5 }).unwrap();
+        assert!(grid.segment(from, point));
+        from = point;
+        if from.y > 25. {
+            break;
+        }
+    }
+    assert!(from.y > 25.);
+}
+
+#[test]
+fn observed_destructible_cover_is_shot_without_fabricating_a_route_or_wasting_a_spell() {
+    let c = content();
+    let mut v = view(&c);
+    let mut wall = object(2, 0x172, 15.5, 11.5);
+    wall.hp = 5;
+    wall.blocks = true;
+    assert!(c.objects[&wall.kind].destructible);
+    v.objects.push(wall);
+    let grid = Grid::new(&v);
+    let d = progression::clear_cover(&v, &c, &grid, Pos { x: 25.5, y: 11.5 }, 8., false).unwrap();
+    assert_eq!(d.goal, Goal::Break(2));
+    assert!(d.aim.is_some() && d.movement.is_none() && d.item.is_none());
+    v.objects[0].kind = 0x1ed;
+    assert!(
+        progression::clear_cover(&v, &c, &Grid::new(&v), Pos { x: 25.5, y: 11.5 }, 8., false)
+            .is_none()
+    );
+}
+
+#[test]
+fn nearby_durable_threat_outscores_an_endless_stream_of_small_minions() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    let mut minion = object(2, 0x223, 13.5, 11.5);
+    minion.hp = 5;
+    minion.max_hp = 5;
+    let mut python = object(3, 0x228, 17.5, 11.5);
+    python.hp = 500;
+    python.max_hp = 500;
+    v.objects.extend([minion, python]);
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Fight(3)
+    );
+}
+
+#[test]
+fn exhausted_healing_reserves_trigger_retreat_before_the_next_large_volley() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.hp = 34;
+    v.character.items[4..].fill(-1);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert!(matches!(d.journey, Some(Journey::Nexus)));
+    assert!(d.item.is_none());
+    v.character.items[4] = 0xa22;
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert!(d.journey.is_none());
+    assert!(matches!(d.item, Some(Action::Use { slot: 4, .. })));
+}
+
+#[test]
+fn dungeon_push_fires_at_visible_threats_without_camping_endless_reinforcements() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Snake Pit".into();
+    v.map.width = 200;
+    v.map.height = 200;
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    let mut boss = object(2, 0x917, 150.5, 150.5);
+    boss.max_hp = 7500;
+    boss.hp = 7500;
+    let mut snake = object(3, 0x223, 14.5, 11.5);
+    snake.max_hp = 5;
+    snake.hp = 5;
+    v.objects.extend([boss, snake]);
+    v.quest = Some(2);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(d.movement.is_some());
+    assert!(d.aim.unwrap().abs() < 0.001);
+    assert!(d.item.is_none());
+}
+
+#[test]
+fn a_visible_crews_destination_outweighs_the_followers_different_quest_marker() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.level = 20;
+    v.map.width = 200;
+    v.map.height = 200;
+    let mut leader = object(2, WIZARD, 18.5, 11.5);
+    leader.name = "Mossy".into();
+    leader.equipped = v.character.items[..4].to_vec();
+    let target = object(3, 0x609, 150.5, 150.5);
+    v.objects.extend([leader, target]);
+    v.quest = Some(3);
+    let mut brain = Brain::new(PROFILES[0], &v);
+    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Follow(2));
+    v.objects.remove(0);
+    v.tick += 300;
+    v.time_ms += 15000;
+    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Hunt(3));
+}
+
+#[test]
+fn a_leader_gathers_an_observed_straggler_before_pursuing_another_distant_quest() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.level = 20;
+    v.map.width = 200;
+    v.map.height = 200;
+    let mut peer = object(2, WIZARD, 24.5, 11.5);
+    peer.name = "Trellis".into();
+    peer.equipped = v.character.items[..4].to_vec();
+    v.objects.extend([peer, object(3, 0x609, 150.5, 150.5)]);
+    v.quest = Some(3);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Gather(2));
+    assert!(d.movement.is_none());
+}
+
+#[test]
+fn healthy_dodging_keeps_pressure_and_spell_use_on_the_visible_boss() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Snake Pit".into();
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    v.character.mp = c.objects[&(v.character.items[1] as u16)].mana_cost;
+    let mut boss = object(2, 0x917, 17.5, 11.5);
+    boss.hp = 7500;
+    boss.max_hp = 7500;
+    let mut minion = object(3, 0x223, 14.5, 11.5);
+    minion.hp = 5;
+    minion.max_hp = 5;
+    v.objects.extend([boss, minion]);
+    v.quest = Some(2);
+    v.projectiles.push(VisibleProjectile {
+        owner: 9,
+        id: 0,
+        start: Pos { x: 9.5, y: 11.5 },
+        position: Pos { x: 9.5, y: 11.5 },
+        angle: 0.,
+        speed: 50.,
+        lifetime_ms: 1000.,
+        amplitude: 0.,
+        frequency: 0.,
+        passes_cover: false,
+    });
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Dodge);
+    assert!(d.movement.is_some() && d.aim.is_some());
+    assert!(matches!(d.item, Some(Action::Use {slot: 1,x,y}) if x==17.5 && y==11.5));
+}
+
+#[test]
+fn dungeon_room_fighting_preserves_the_last_spell_for_the_published_boss() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Snake Pit".into();
+    v.map.width = 200;
+    v.map.height = 200;
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    v.character.mp = c.objects[&(v.character.items[1] as u16)].mana_cost;
+    let mut boss = object(2, 0x917, 150.5, 150.5);
+    boss.hp = 7500;
+    boss.max_hp = 7500;
+    let mut parent = object(3, 0x226, 15.5, 11.5);
+    parent.hp = 200;
+    parent.max_hp = 200;
+    v.objects.extend([boss, parent]);
+    v.quest = Some(2);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert!(d.aim.is_some() && d.item.is_none());
+    v.objects.pop();
+    v.objects[0].position = Pos { x: 15.5, y: 11.5 };
+    assert!(matches!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().item,
+        Some(Action::Use { slot: 1, .. })
+    ));
+}
+
+#[test]
+fn equipped_adventurers_venture_inland_over_known_terrain_not_hidden_maps() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    v.character.stats[3] = 10;
+    v.character.items[0] = 2715;
+    v.map.width = 512;
+    v.map.height = 512;
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Venture);
+    assert!(Grid::new(&v).segment(v.position, d.movement.unwrap()));
+    v.character.level = 1;
+    assert!(!matches!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Venture
+    ));
+}
+
+#[test]
+fn carried_mana_is_used_without_fabricating_resources_or_bypassing_quiet() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.mp = 0;
+    assert!(progression::mana(&v, &c).unwrap().is_none());
+    v.character.items[5] = 0xa23;
+    assert!(useful(&c, &v, 0xa23).unwrap());
+    assert!(matches!(
+        progression::mana(&v, &c).unwrap(),
+        Some(Action::Use { slot: 5, .. })
+    ));
+    v.character.conditions = crate::condition::bit(crate::condition::QUIET);
+    assert!(progression::mana(&v, &c).unwrap().is_none());
+    v.character.conditions = 0;
+    v.character.mp = v.character.stats[1];
+    assert!(progression::mana(&v, &c).unwrap().is_none());
+}
+
+#[test]
+fn a_distant_dungeon_objective_does_not_outrank_observed_needed_mana() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Snake Pit".into();
+    v.map.width = 200;
+    v.map.height = 200;
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    v.character.stats[1] = 200;
+    v.character.mp = 0;
+    let mut boss = object(2, 0x917, 150.5, 150.5);
+    boss.hp = 7500;
+    boss.max_hp = 7500;
+    let mut bag = object(3, 0x500, 16.5, 11.5);
+    bag.contents = vec![0xa23, -1, -1, -1, -1, -1, -1, -1];
+    v.objects.extend([boss, bag]);
+    v.quest = Some(2);
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Loot(3)
+    );
+    v.character.mp = 200;
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Hunt(2)
+    );
+}
+
+#[test]
+fn cleared_dungeons_keep_stat_rewards_but_do_not_trap_scavengers_in_reinforcements() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Snake Pit".into();
+    v.character.level = 20;
+    v.character.stats[0] = 600;
+    v.character.hp = 350;
+    let exit = object(2, 0x71d, 18.5, 11.5);
+    let mut minion = object(3, 0x223, 15.5, 11.5);
+    minion.hp = 5;
+    minion.max_hp = 5;
+    let mut bag = object(4, 0x500, 13., 11.5);
+    bag.contents = vec![2621, -1, -1, -1, -1, -1, -1, -1];
+    v.objects.extend([exit, minion, bag]);
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Portal(2)
+    );
+    v.objects[2].contents[0] = 0xa21;
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Loot(4)
+    );
+}
+
+#[test]
+fn moving_enemies_need_weapon_lead_but_nova_originates_at_the_observed_target() {
+    let c = content();
+    let v = view(&c);
+    let grid = Grid::new(&v);
+    let mut enemy = object(2, 0x226, 17.5, 11.5);
+    enemy.hp = 500;
+    enemy.max_hp = 500;
+    let mut d = Decision {
+        goal: Goal::Fight(2),
+        movement: None,
+        aim: None,
+        item: None,
+        journey: None,
+        chat: None,
+    };
+    combat::attack(&v, &c, &grid, &enemy, Pos { x: 0., y: 2. }, &mut d).unwrap();
+    assert!(d.aim.is_some_and(|aim| aim > 0.));
+    assert!(
+        matches!(d.item, Some(Action::Use {slot:1,x,y}) if x==enemy.position.x && y==enemy.position.y)
+    );
+}
+
+#[test]
+fn admitted_dungeon_intentions_beat_optional_nearby_fighting() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    v.character.stats[3] = 10;
+    v.character.items[0] = 2715;
+    v.objects.push(object(2, 0x718, 18.5, 11.5));
+    let mut enemy = object(3, 0x226, 17.5, 11.5);
+    enemy.hp = 500;
+    enemy.max_hp = 500;
+    v.objects.push(enemy);
+    for (id, name) in [(4, "Bayleaf"), (5, "Trellis")] {
+        let mut peer = object(id, WIZARD, 18.5, 12.5);
+        peer.name = name.into();
+        peer.hp = 500;
+        peer.max_hp = 500;
+        peer.level = Some(20);
+        peer.equipped = vec![2715, 2773, 2654, -1];
+        v.objects.push(peer);
+    }
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Portal(2)
+    );
+}
+
+#[test]
+fn dungeon_ready_crews_search_a_central_region_instead_of_chasing_distant_quests() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.width = 512;
+    v.map.height = 512;
+    v.position = Pos { x: 256.5, y: 267.5 };
+    v.tiles = (260..301)
+        .flat_map(|y| {
+            (240..281).map(move |x| Tile {
+                x,
+                y,
+                ground: 0,
+                ground_speed: 1.,
+            })
+        })
+        .collect();
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    v.character.stats[3] = 10;
+    v.character.items[0] = 2715;
+    let mut quest = object(2, 0x668, 100.5, 400.5);
+    quest.hp = 7000;
+    quest.max_hp = 7000;
+    v.objects.push(quest);
+    v.quest = Some(2);
+    let mut brain = Brain::new(PROFILES[1], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(matches!(d.goal, Goal::Explore(..)));
+    assert!(Grid::new(&v).segment(v.position, d.movement.unwrap()));
+    v.position = Pos { x: 256.5, y: 322.5 };
+    v.tick += 200;
+    v.time_ms += 10000;
+    v.tiles = (302..343)
+        .flat_map(|y| {
+            (240..281).map(move |x| Tile {
+                x,
+                y,
+                ground: 0,
+                ground_speed: 1.,
+            })
+        })
+        .collect();
+    assert!(matches!(
+        brain.decide(&v, &c).unwrap().goal,
+        Goal::Explore(..)
+    ));
+    v.character.items[0] = 2711;
+    assert_eq!(
+        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        Goal::Hunt(2)
+    );
+}
+
+#[test]
+fn a_dungeon_objective_advances_through_reinforcements_while_returning_fire() {
+    let c = content();
+    let mut v = view(&c);
+    v.map.name = "Snake Pit".into();
+    v.map.width = 200;
+    v.map.height = 200;
+    v.character.level = 20;
+    v.character.hp = 600;
+    v.character.stats[0] = 600;
+    let mut boss = object(2, 0x917, 150.5, 150.5);
+    boss.hp = 7500;
+    boss.max_hp = 7500;
+    boss.condition_mask = Some(crate::condition::bit(crate::condition::STASIS_IMMUNE));
+    let mut guard = object(3, 0x226, 13.5, 11.5);
+    guard.hp = 500;
+    guard.max_hp = 500;
+    v.objects.extend([boss, guard]);
+    v.quest = Some(2);
+    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(d.movement.is_some() && d.aim.is_some());
 }

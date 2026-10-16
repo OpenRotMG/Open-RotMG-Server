@@ -45,8 +45,13 @@ fn restricted_view_excludes_private_inventory_ai_and_undiscovered_collision() {
     w.updates(a, false).unwrap();
     let view = d.player_view(a).unwrap();
     assert_eq!(view.session.world, -2);
+    assert_eq!(
+        view.character.base_stats,
+        d.worlds[&-2].players[&a].character.base
+    );
     let peer = view.objects.iter().find(|o| o.id == b).unwrap();
     assert_eq!(peer.equipped.len(), 4);
+    assert_eq!(peer.level, Some(d.worlds[&-2].players[&b].character.level));
     assert!(peer.contents.is_empty());
     assert_eq!(
         view.objects.iter().find(|o| o.id == bag).unwrap().contents,
@@ -203,6 +208,33 @@ fn known_visible_npc_condition_view_matches_native29_without_hidden_entities() {
             .any(|o| o.id == npc)
     );
 }
+#[test]
+fn quest_view_requires_the_same_published_native_target() {
+    let mut d = super::tests::directory();
+    let (id, _rx) = receive(&mut d, -3, 1, WIZARD);
+    let w = d.worlds.get_mut(&-3).unwrap();
+    w.players.get_mut(&id).unwrap().character.level = 5;
+    w.updates(id, false).unwrap();
+    let quest = w.players[&id].quest.unwrap();
+    assert_eq!(d.player_view(id).unwrap().quest, Some(quest));
+    assert!(
+        d.player_view(id)
+            .unwrap()
+            .objects
+            .iter()
+            .any(|o| o.id == quest)
+    );
+    d.worlds
+        .get_mut(&-3)
+        .unwrap()
+        .players
+        .get_mut(&id)
+        .unwrap()
+        .known
+        .remove(&quest);
+    assert!(d.player_view(id).unwrap().quest.is_none());
+}
+
 #[test]
 fn projectile_view_is_observed_trajectory_not_rng_hit_ledger_or_old_shots() {
     let mut d = super::tests::directory();

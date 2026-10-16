@@ -1,6 +1,6 @@
 # Gameplay bots: vision and research
 
-The three-Wizard shore prototype is deployed. The selected combat and cooperative Priest-adventuring extension below is an unmerged candidate, not the production population.
+PR32's crews are merged; this inland candidate is unmerged and undeployed.
 
 The two video reports record observations and limits; `research/decision-spike.md` records the earlier offline experiment.
 
@@ -12,7 +12,7 @@ Wizards predict visible projectile paths, lead an observed target, kite within w
 
 This candidate inherits main's default-on startup; `--no-shore-bots` or explicit `"shore_bots": false` disables it. Reserve seven slots for six bots and a human; QA control remains separate. Living saves resume unchanged. After committed permanent death, a fresh character receives normal starter gear; Bayleaf/Juniper choose Priest only if that same account earned its Wizard-level-five unlock. Dead inventory is never inherited. Trade negotiation and language services remain outside this slice.
 
-Main-based campaigns verify separate crews and a whole-crew Cave clear/ordinary return. Earlier campaigns earned both Priests, received peer healing and preserved permanent-death/restart continuity. Native footage shows combat, healing and recovery. Fixtures and one paired combat run do not establish causal survival/accuracy superiority or historical fidelity.
+Ordinary crews cleared Snake Pit and returned; native media is prepared. Potion recovery remains unverified.
 
 ## Approved north star
 

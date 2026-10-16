@@ -19,6 +19,7 @@ pub(super) fn healing(v: &PlayerView, content: &Content) -> Result<Option<Action
     if v.character.class != PRIEST
         || v.character.items[1] < 0
         || v.time_ms < v.character.ability_ready_ms
+        || v.character.conditions & crate::condition::bit(crate::condition::QUIET) != 0
     {
         return Ok(None);
     }

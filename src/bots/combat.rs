@@ -93,6 +93,79 @@ pub(super) fn lead(
     point
 }
 
+pub(super) fn target<'a>(
+    v: &PlayerView,
+    content: &Content,
+    grid: &Grid,
+    enemies: &[&'a VisibleObject],
+    range: f32,
+    passes_cover: bool,
+) -> Option<&'a VisibleObject> {
+    enemies
+        .iter()
+        .copied()
+        .filter(|enemy| {
+            progression::can_fight(v, content, enemy)
+                && progression::vulnerable(enemy)
+                && v.position.distance(enemy.position) < range
+                && shot_clear(v, grid, enemy.position, passes_cover)
+        })
+        .max_by(|a, b| {
+            (a.max_hp as f32 / (1. + v.position.distance(a.position)))
+                .total_cmp(&(b.max_hp as f32 / (1. + v.position.distance(b.position))))
+        })
+}
+
+pub(super) fn attack(
+    v: &PlayerView,
+    content: &Content,
+    grid: &Grid,
+    enemy: &VisibleObject,
+    velocity: Pos,
+    decision: &mut Decision,
+) -> Result<()> {
+    if !progression::vulnerable(enemy) {
+        return Ok(());
+    }
+    let weapon = content.get(v.character.items[0] as u16)?;
+    let projectile = weapon
+        .projectiles
+        .get(&0)
+        .context("weapon projectile missing")?;
+    let point = lead(v, enemy, velocity, projectile);
+    let range = projectile.speed * projectile.lifetime / 10000.;
+    if v.character.conditions & crate::content::STUNNED == 0
+        && v.position.distance(point) < range
+        && shot_clear(v, grid, point, projectile.passes_cover)
+    {
+        decision.aim = Some(angle(v.position, point));
+    }
+    if decision.item.is_none()
+        && v.character.items[1] >= 0
+        && v.time_ms >= v.character.ability_ready_ms
+    {
+        let ability = content.get(v.character.items[1] as u16)?;
+        if ability.activate == "BulletNova"
+            && v.character.conditions & crate::condition::bit(crate::condition::QUIET) == 0
+            && v.character.mp >= ability.mana_cost
+            && (v.map.name != "Snake Pit"
+                || v.quest == Some(enemy.id)
+                || v.character.mp - ability.mana_cost >= ability.mana_cost)
+            && enemy.hp > projectile.max * 2
+            && v.position.distance(enemy.position) <= 15.
+            && shot_clear(v, grid, enemy.position, false)
+        {
+            // Nova bullets originate at the cursor, not after the weapon's flight time.
+            decision.item = Some(Action::Use {
+                slot: 1,
+                x: enemy.position.x,
+                y: enemy.position.y,
+            });
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn movement(
     v: &PlayerView,
     grid: &Grid,
