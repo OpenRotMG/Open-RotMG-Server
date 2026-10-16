@@ -166,6 +166,7 @@ pub struct Player {
     native_motion_condition: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
+    weapon_ticks: VecDeque<(i32, i32)>,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     tiles: BTreeSet<(i16, i16)>,
     pub death_started: bool,
@@ -1425,6 +1426,7 @@ impl World {
         self.players.insert(
             id,
             Player {
+                weapon_ticks: VecDeque::from([(-1, ch.items[0])]),
                 character: ch,
                 pos,
                 departing: false,
@@ -2066,6 +2068,7 @@ impl World {
             received,
             queued_ms,
             bullet,
+            kind,
             x = start.x,
             y = start.y,
             angle,
@@ -2118,7 +2121,9 @@ impl World {
             native && matches!(p.ability_shot, Some((k, t, _, _)) if k == kind && t == time);
         let denied_ability = ability && matches!(p.ability_shot, Some((_, _, false, _)));
         ensure!(
-            p.character.items[0] == kind as i32 || ability && p.character.items[1] == kind as i32,
+            p.character.items[0] == kind as i32
+                || native && p.advertised_weapon(kind)
+                || ability && p.character.items[1] == kind as i32,
             "weapon does not match equipped item"
         );
         let item = self.content.get(kind)?;
@@ -3923,6 +3928,7 @@ impl World {
                 }
                 send(p, wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
+                p.remember_weapon_tick();
                 let slow = crate::condition::bit(crate::condition::SLOWED);
                 let paralyzed = crate::condition::bit(crate::condition::PARALYZED);
                 let motion_condition = p.conditions(self.now) & (slow | paralyzed | SPEEDY);

@@ -17,6 +17,107 @@ fn native() -> (World, i32, mpsc::Receiver<Packet>, watch::Receiver<bool>) {
 }
 
 #[test]
+fn weapon_swap_accepts_only_equipped_or_unacknowledged_native_weapons() {
+    for correcting in [false, true] {
+        let (mut w, id, _rx, _loss) = native();
+        w.safe = true;
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.base[5] = 75;
+        p.character.items[4] = 0xa98;
+        let start = Pos {
+            x: p.pos.x + 0.3,
+            y: p.pos.y,
+        };
+        let angle = -w.content.get(0xa97).unwrap().arc.to_radians() / 2.;
+        w.step();
+        w.step();
+        w.acknowledge_tick(id, 0).unwrap();
+        let plan = w
+            .swap(
+                id,
+                Slot {
+                    object: id,
+                    slot: 4,
+                    kind: 0xa98,
+                },
+                Slot {
+                    object: id,
+                    slot: 0,
+                    kind: 0xa97,
+                },
+            )
+            .unwrap();
+        w.finish_inventory(plan, Ok(1)).unwrap();
+        if correcting {
+            w.correct_position(id, 1000, "fixture correction").unwrap();
+        }
+        let received = w.attack_epoch + Duration::from_millis(2500);
+        for time in [2000, 2200] {
+            let bullet = w.players[&id].next_bullet;
+            assert_eq!(
+                w.native_shoot_received(id, (time, received), bullet, 0xa97, start, angle)
+                    .unwrap(),
+                if correcting {
+                    NativeInput::DiscardedUntilGotoAck
+                } else {
+                    NativeInput::Applied
+                }
+            );
+            w.step();
+            w.step();
+        }
+        let bullet = w.players[&id].next_bullet;
+        for kind in [0xa99, 0xa2e] {
+            assert!(
+                w.native_shoot_received(id, (2400, received), bullet, kind, start, angle)
+                    .is_err()
+            );
+        }
+        assert!(w.shoot(id, 2400, bullet, 0xa97, start, angle).is_err());
+        w.acknowledge_tick(id, 0).unwrap();
+        w.native_shoot_received(id, (2400, received), bullet, 0xa97, start, angle)
+            .unwrap();
+        w.acknowledge_tick(id, 1).unwrap();
+        let p = &w.players[&id];
+        let (bullet, seed) = (p.next_bullet, p.seed);
+        assert!(
+            w.native_shoot_received(id, (2600, received), bullet, 0xa97, start, angle)
+                .unwrap_err()
+                .to_string()
+                .contains("weapon does not match")
+        );
+        assert_eq!(
+            (w.players[&id].next_bullet, w.players[&id].seed),
+            (bullet, seed)
+        );
+        if correcting {
+            w.acknowledge_goto(id, 2500).unwrap();
+        }
+        let angle = -w.content.get(0xa98).unwrap().arc.to_radians() / 2.;
+        assert_eq!(
+            w.native_shoot_received(id, (2600, received), bullet, 0xa98, start, angle)
+                .unwrap(),
+            NativeInput::Applied
+        );
+        assert!(w.acknowledge_tick(id, w.players[&id].tick).is_err());
+    }
+}
+
+#[test]
+fn unacknowledged_weapon_ticks_are_bounded_and_do_not_disconnect_bots() {
+    for controller in [Controller::Human, Controller::Autonomous] {
+        let (mut w, id, _rx, loss) = native();
+        let p = w.players.get_mut(&id).unwrap();
+        p.controller = controller;
+        for _ in 0..100 {
+            p.remember_weapon_tick();
+        }
+        assert_eq!(*loss.borrow(), controller == Controller::Human);
+        assert!(p.weapon_ticks.len() <= 64);
+    }
+}
+
+#[test]
 fn restrictive_native_condition_queues_real_stat29_before_one_owned_goto() {
     let (mut w, id, mut rx, loss) = native();
     w.safe = true;
