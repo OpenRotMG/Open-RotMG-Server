@@ -290,3 +290,103 @@ fn priest_range_world_lifecycle_mana_equipment_and_invalid_activations_are_stric
     assert!(w.activate_ability(b, slot, &invalid, position).is_err());
     assert_eq!(w.players[&b].character.mp, 100);
 }
+
+#[test]
+fn fountains_heal_only_nearby_injured_players_up_to_max_hp() {
+    let mut d = super::tests::directory();
+    let (a, mut ar) = receive(&mut d, -2, 1, WIZARD);
+    let (b, mut br) = receive(&mut d, -2, 2, WIZARD);
+    let (far, mut fr) = receive(&mut d, -2, 3, WIZARD);
+    let (full, mut ur) = receive(&mut d, -2, 4, WIZARD);
+    let w = d.worlds.get_mut(&-2).unwrap();
+    let (fountain, pos) = *w.fountains.first().expect("Nexus map has fountains");
+    let cap = w.players[&a].character.effective(&w.content).unwrap()[0];
+    w.players.get_mut(&a).unwrap().pos = pos;
+    w.players.get_mut(&a).unwrap().character.hp = cap - 50;
+    w.players.get_mut(&b).unwrap().pos = Pos {
+        x: pos.x + 4.,
+        y: pos.y,
+    };
+    w.players.get_mut(&b).unwrap().character.hp = 10;
+    w.players.get_mut(&far).unwrap().pos = Pos {
+        x: pos.x + 6.,
+        y: pos.y,
+    };
+    w.players.get_mut(&far).unwrap().character.hp = 10;
+    w.players.get_mut(&full).unwrap().pos = Pos {
+        x: pos.x + 2.,
+        y: pos.y,
+    };
+    w.players.get_mut(&full).unwrap().character.hp = cap;
+    for id in [a, b, far, full] {
+        w.updates(id, false).unwrap();
+    }
+    for rx in [&mut ar, &mut br, &mut fr, &mut ur] {
+        while rx.try_recv().is_ok() {}
+    }
+    w.now = 999;
+    w.step();
+    assert_eq!(w.players[&a].character.hp, cap);
+    assert_eq!(w.players[&b].character.hp, cap);
+    assert_eq!(w.players[&far].character.hp, 10);
+    assert_eq!(w.players[&full].character.hp, cap);
+    let healed: Vec<_> = std::iter::from_fn(|| ur.try_recv().ok())
+        .filter(|p| p.id == wire::NOTIFICATION)
+        .map(|p| Reader::new(&p.body).i32().unwrap())
+        .collect();
+    assert!(
+        !healed.contains(&full),
+        "uninjured player healed: {healed:?}"
+    );
+    let packets: Vec<_> = std::iter::from_fn(|| ar.try_recv().ok()).collect();
+    let effects: Vec<u8> = packets
+        .iter()
+        .filter(|p| p.id == wire::SHOW_EFFECT)
+        .map(|p| p.body[0])
+        .collect();
+    assert!(effects.contains(&1), "heal effect missing from {effects:?}");
+    assert!(
+        effects.contains(&7),
+        "trail effect missing from {effects:?}"
+    );
+    let note = packets
+        .iter()
+        .find(|p| p.id == wire::NOTIFICATION)
+        .expect("heal notification");
+    let mut r = Reader::new(&note.body);
+    assert_eq!(r.i32().unwrap(), a);
+    assert_eq!(r.utf().unwrap(), "+50");
+    assert_eq!(r.i32().unwrap() as u32, 0xff00ff00);
+    assert!(w.players[&far].known.contains(&fountain));
+}
+
+#[test]
+fn fountain_heal_waits_for_its_cadence_and_skips_sick_players() {
+    let mut d = super::tests::directory();
+    let (a, mut ar) = receive(&mut d, -2, 1, WIZARD);
+    let w = d.worlds.get_mut(&-2).unwrap();
+    let (_, pos) = *w.fountains.first().expect("Nexus map has fountains");
+    let cap = w.players[&a].character.effective(&w.content).unwrap()[0];
+    w.players.get_mut(&a).unwrap().pos = pos;
+    w.players.get_mut(&a).unwrap().character.hp = 1;
+    w.updates(a, false).unwrap();
+    while ar.try_recv().is_ok() {}
+    w.now = 5000;
+    w.step();
+    assert_eq!(w.players[&a].character.hp, cap, "fountain heals to the cap");
+    // The same instant must not heal twice: fountains pulse once a second.
+    w.players.get_mut(&a).unwrap().character.hp = 1;
+    w.step();
+    assert_eq!(w.players[&a].character.hp, 1, "cadence gate");
+    // Sick players are skipped, matching the regeneration rules.
+    w.now = 6000;
+    w.apply_condition(a, crate::condition::SICK, 1000).unwrap();
+    w.step();
+    assert_eq!(w.players[&a].character.hp, 1, "sick player healed");
+    w.now = 7100;
+    w.step();
+    assert_eq!(
+        w.players[&a].character.hp, cap,
+        "heals once the sickness ends"
+    );
+}

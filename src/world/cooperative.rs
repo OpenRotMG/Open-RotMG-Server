@@ -140,6 +140,60 @@ impl World {
         Ok(q.pos)
     }
 
+    // The original server heals on a 1s cadence: White Fountain HealPlayer(5, 1000, 100).
+    pub(super) fn fountain_heal(&mut self) {
+        const RANGE: f32 = 5.;
+        const AMOUNT: i32 = 100;
+        if self.fountains.is_empty() || self.now < self.next_fountain_heal {
+            return;
+        }
+        self.next_fountain_heal = self.now + 1000;
+        let fountains = self.fountains.clone();
+        let mut healed = Vec::new();
+        for (fountain, pos) in fountains {
+            for (id, p) in self.players.iter_mut() {
+                if !ready(p)
+                    || p.pos.distance(pos) >= RANGE
+                    || p.conditions(self.now) & crate::condition::bit(crate::condition::SICK) != 0
+                {
+                    continue;
+                }
+                let cap = p
+                    .character
+                    .effective(&self.content)
+                    .expect("validated player equipment and base stats")[0];
+                let amount = (cap - p.character.hp).clamp(0, AMOUNT);
+                if amount == 0 {
+                    continue;
+                }
+                p.character.hp += amount;
+                healed.push((*id, amount, p.pos, fountain));
+            }
+        }
+        for (id, amount, pos, fountain) in healed {
+            let mut out = Writer::new();
+            out.i32(id).utf(&format!("+{amount}")).u32(0xff00ff00);
+            for p in self
+                .players
+                .values()
+                .filter(|p| ready(p) && p.known.contains(&id) && p.known.contains(&fountain))
+            {
+                send(p, wire::NOTIFICATION, out.0.clone());
+                send(p, wire::SHOW_EFFECT, effect(1, id, pos));
+                send(p, wire::SHOW_EFFECT, effect(7, fountain, pos));
+            }
+            tracing::info!(
+                player = id,
+                fountain,
+                amount,
+                x = pos.x,
+                y = pos.y,
+                world = %self.name,
+                "fountain healed player"
+            );
+        }
+    }
+
     pub(super) fn consumable_heal_nova(
         &mut self,
         owner: i32,

@@ -284,6 +284,8 @@ pub struct World {
     ability_state: abilities::State,
     finale: endgame_ai::Actors,
     cells: Vec<BTreeSet<i32>>,
+    fountains: Vec<(i32, Pos)>,
+    next_fountain_heal: u64,
     rng: rand::rngs::StdRng,
     pub now: u64,
     attack_epoch: Instant,
@@ -978,6 +980,7 @@ impl World {
     }
     fn with_ids(content: Arc<Content>, map: Arc<Map>, ids: Arc<AtomicI32>) -> Result<Self> {
         let mut entities = BTreeMap::new();
+        let mut fountains = Vec::new();
         let mut cells = vec![BTreeSet::new(); map.cells.len()];
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
             for (x, c) in row.iter().enumerate() {
@@ -1054,6 +1057,9 @@ impl World {
                             _ => bail!("unsupported map setting {k}"),
                         }
                     }
+                    if o.name == "White Fountain" {
+                        fountains.push((id, pos));
+                    }
                     cells[y * map.width as usize + x].insert(id);
                     entities.insert(id, e);
                 }
@@ -1069,6 +1075,8 @@ impl World {
             ability_state: abilities::State::default(),
             finale: endgame_ai::Actors::default(),
             cells,
+            fountains,
+            next_fountain_heal: 0,
             rng: rand::rngs::StdRng::from_entropy(),
             now: 0,
             attack_epoch: Instant::now(),
@@ -3289,6 +3297,7 @@ impl World {
         self.now += 50;
         self.tick += 1;
         self.trade_step();
+        self.fountain_heal();
         self.expire_goto_acks();
         self.expire_native_projectiles();
         let ids: Vec<_> = self.players.keys().copied().collect();
