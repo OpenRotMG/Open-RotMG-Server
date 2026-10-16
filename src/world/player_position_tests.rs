@@ -7,13 +7,14 @@ fn solo_reentries_sample_spawn_points_and_preserve_prepared_positions() {
     let mut w = open_world();
     Arc::make_mut(&mut w.map).spawns = vec![(1.5, 2.5), (3.5, 2.5)];
     w.rng = rand::rngs::StdRng::seed_from_u64(76);
-    let presentation = || AccountPresentation {
-        fame: 0,
-        best_fame: BTreeMap::new(),
-    };
+    let fixture = w.enter(ch(&w), None).unwrap();
+    let presentation = w.players[&fixture].presentation.clone();
+    w.leave(fixture).unwrap();
     let mut arrivals = BTreeSet::new();
     for _ in 0..32 {
-        let id = w.enter_at(ch(&w), None, None, presentation()).unwrap();
+        let id = w
+            .enter_at(ch(&w), None, None, presentation.clone())
+            .unwrap();
         let pos = w.players[&id].pos;
         assert!(w.map.spawns.contains(&(pos.x, pos.y)));
         arrivals.insert((pos.x as i32, pos.y as i32));
@@ -21,13 +22,15 @@ fn solo_reentries_sample_spawn_points_and_preserve_prepared_positions() {
     }
     assert_eq!(arrivals.len(), 2);
     let pos = Pos { x: 2.5, y: 2.5 };
-    let id = w.enter_at(ch(&w), None, Some(pos), presentation()).unwrap();
+    let id = w
+        .enter_at(ch(&w), None, Some(pos), presentation.clone())
+        .unwrap();
     assert_eq!(w.players[&id].pos.x, pos.x);
     assert_eq!(w.players[&id].pos.y, pos.y);
     w.leave(id).unwrap();
     Arc::make_mut(&mut w.map).spawns.clear();
     assert!(
-        w.enter_at(ch(&w), None, None, presentation())
+        w.enter_at(ch(&w), None, None, presentation)
             .unwrap_err()
             .to_string()
             .contains("no spawn cells")
