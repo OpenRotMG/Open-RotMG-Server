@@ -1382,6 +1382,7 @@ impl World {
             tx,
             None,
             AccountPresentation {
+                credits: 100,
                 fame: 0,
                 best_fame: BTreeMap::new(),
             },
@@ -1524,7 +1525,7 @@ impl World {
             o.i32(id)
                 .f32(p.pos.x)
                 .f32(p.pos.y)
-                .i16(45 + i16::from(id == recipient));
+                .i16(45 + 2 * i16::from(id == recipient));
             for (k, v) in [
                 (0, values[0]),
                 (1, p.character.hp),
@@ -1563,6 +1564,7 @@ impl World {
             stat(&mut o, 33, 0);
             stat(&mut o, 38, p.character.account);
             if id == recipient {
+                stat(&mut o, 35, p.presentation.credits);
                 stat(&mut o, 39, p.presentation.fame);
             }
             for (i, boost) in [46, 47, 48, 49, 50, 53, 51, 52].into_iter().enumerate() {

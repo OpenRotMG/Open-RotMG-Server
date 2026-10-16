@@ -10,6 +10,8 @@ use tokio::sync::oneshot;
 mod account_actions;
 mod accounts;
 #[cfg(test)]
+mod credits_tests;
+#[cfg(test)]
 mod death_date_tests;
 mod hiscores;
 mod legends;
@@ -31,6 +33,7 @@ impl std::error::Error for InvalidCredentials {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountPresentation {
+    pub credits: i32,
     pub fame: i32,
     pub best_fame: BTreeMap<u16, i32>,
 }
@@ -187,6 +190,7 @@ pub struct Account {
     pub id: i32,
     pub name: String,
     pub next_id: i32,
+    pub credits: i32,
     pub fame: i64,
     pub earned_fame: i64,
     pub best_levels: std::collections::BTreeMap<u16, i32>,
@@ -250,8 +254,17 @@ impl Store {
         let mut c = Connection::open(path)?;
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            matches!(version, 0 | 5 | 6 | 7),
+            matches!(version, 0 | 5 | 6 | 7 | 8),
             "unsupported game database schema {version}"
+        );
+        let credits_exist: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            version < 8 || credits_exist,
+            "schema-8 gold balance missing; restore reviewed state instead of recreating balances"
         );
         let wallet_exists: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_fame')",
@@ -297,6 +310,9 @@ CREATE TABLE IF NOT EXISTS account_lists(account INTEGER NOT NULL REFERENCES acc
 CREATE TABLE IF NOT EXISTS update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         let migration = c.transaction()?;
+        if !credits_exist {
+            migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
+        }
         let records = {
             let mut q = migration.prepare("SELECT id,stats FROM characters ORDER BY id")?;
             q.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))?
@@ -368,7 +384,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "account fame wallet missing; restore reviewed state instead of recreating balances"
             );
         }
-        migration.pragma_update(None, "user_version", 7)?;
+        migration.pragma_update(None, "user_version", 8)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -437,7 +453,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let name:String=tx.query_row("SELECT name FROM accounts WHERE id=?1",[id],|r|r.get(0))?;
             let mut characters=Vec::new();{let mut q=tx.prepare("SELECT id,stats,items,revision,alive FROM characters WHERE account=?1 AND alive=1 ORDER BY id")?;let rows=q.query_map([id],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i32>(3)?,r.get::<_,bool>(4)?)))?;
             for row in rows{let(cid,stats,items,rev,alive)=row?;let mut ch:Character=serde_json::from_str(&stats)?;ch.id=cid;ch.account=id;ch.name=name.clone();ch.items=serde_json::from_str(&items)?;ch.revision=rev;ch.alive=alive;characters.push(ch);}}
-            let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = read_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
+            let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = read_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,credits:presentation.credits,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
         self.vault(account.id).await?;
         Ok(account)
     }
@@ -805,13 +821,14 @@ fn read_presentation(
     legacy_base: [i32; 8],
     classes: &BTreeMap<u16, Class>,
 ) -> Result<(AccountPresentation, i64)> {
-    let (balance, earned): (i64, i64) = db
+    let (balance, earned, credits): (i64, i64, i32) = db
         .query_row(
-            "SELECT balance,earned FROM account_fame WHERE account=?1",
+            "SELECT balance,earned,credits FROM account_fame JOIN accounts ON accounts.id=account_fame.account WHERE account=?1",
             [account],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .context("read account fame wallet")?;
+    ensure!(credits >= 0, "invalid account gold balance");
     let fame = i32::try_from(balance).context("account fame exceeds wire range")?;
     ensure!(
         fame >= 0 && earned >= balance && earned <= i64::from(i32::MAX),
@@ -846,7 +863,14 @@ fn read_presentation(
         let best = best_fame.entry(ch.class).or_default();
         *best = (*best).max(ch.fame);
     }
-    Ok((AccountPresentation { fame, best_fame }, earned))
+    Ok((
+        AccountPresentation {
+            credits,
+            fame,
+            best_fame,
+        },
+        earned,
+    ))
 }
 pub fn name_chosen(account: i32, name: &str) -> bool {
     name != format!("Guest{account}")
@@ -896,12 +920,13 @@ impl Account {
             format!("<ClassStats objectType=\"{class}\"><BestLevel>{level}</BestLevel><BestFame>{fame}</BestFame></ClassStats>")
         }).collect();
         format!(
-            "<Chars nextCharId=\"{}\" maxNumChars=\"1\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>0</Credits><NextCharSlotPrice>600</NextCharSlotPrice></Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0</Usage></Server></Servers><News>{news}</News></Chars>",
+            "<Chars nextCharId=\"{}\" maxNumChars=\"1\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>{}</Credits><NextCharSlotPrice>600</NextCharSlotPrice></Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0</Usage></Server></Servers><News>{news}</News></Chars>",
             self.next_id,
             self.id,
             xml_escape(&self.name),
             self.fame,
-            self.earned_fame
+            self.earned_fame,
+            self.credits
         )
     }
 }

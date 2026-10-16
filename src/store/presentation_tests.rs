@@ -49,6 +49,7 @@ fn target_stars_and_next_quest_use_class_maxima_not_wallet_or_current_fame() {
         (i32::MAX, 5, -1),
     ] {
         let p = AccountPresentation {
+            credits: 100,
             fame: i32::MAX,
             best_fame: BTreeMap::from([(WIZARD, fame)]),
         };
@@ -59,6 +60,7 @@ fn target_stars_and_next_quest_use_class_maxima_not_wallet_or_current_fame() {
         assert_eq!(p.next_quest(PRIEST, 0), 20);
     }
     let p = AccountPresentation {
+        credits: 100,
         fame: 0,
         best_fame: BTreeMap::from([(WIZARD, 150), (PRIEST, 20)]),
     };
@@ -66,6 +68,7 @@ fn target_stars_and_next_quest_use_class_maxima_not_wallet_or_current_fame() {
     assert_eq!(p.next_quest(WIZARD, 400), 800);
     assert_eq!(p.next_quest(PRIEST, 149), 150);
     let empty = AccountPresentation {
+        credits: 100,
         fame: 0,
         best_fame: BTreeMap::new(),
     };
@@ -156,6 +159,7 @@ async fn presentation_and_xml_share_committed_class_bests_across_replacement_and
     assert_eq!(
         reopened.presentation(other.id).await.unwrap(),
         AccountPresentation {
+            credits: 100,
             fame: 0,
             best_fame: BTreeMap::new()
         }

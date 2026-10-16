@@ -22,6 +22,7 @@ fn fixture(class: u16, ability: i32) -> (World, i32) {
             None,
             Some(Pos { x: 12., y: 12. }),
             AccountPresentation {
+                credits: 100,
                 fame: 0,
                 best_fame: BTreeMap::new(),
             },

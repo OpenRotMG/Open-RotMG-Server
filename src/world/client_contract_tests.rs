@@ -48,6 +48,7 @@ fn player_status_distinguishes_name_boosts_wallet_character_fame_and_history() {
         .map(|(i, n)| (crate::content::STATS[i].0, n))
         .collect();
     let presentation = AccountPresentation {
+        credits: 73,
         fame: 27,
         best_fame: BTreeMap::from([(crate::content::WIZARD, 40), (crate::content::PRIEST, 150)]),
     };
@@ -58,6 +59,8 @@ fn player_status_distinguishes_name_boosts_wallet_character_fame_and_history() {
         .unwrap();
     let owner = numbers(&w, id, id);
     let peer = numbers(&w, id, 999);
+    assert_eq!(owner[&35], 73);
+    assert!(!peer.contains_key(&35));
     assert_eq!(owner[&39], 27);
     assert!(!peer.contains_key(&39));
     assert_eq!(

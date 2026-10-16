@@ -492,6 +492,7 @@ async fn committed_native_death_is_not_reconnect_and_halts_the_owned_cohort() {
                 Some(crate::world::Output { packets: tx, lost }),
                 Some(pos),
                 crate::store::AccountPresentation {
+                    credits: 100,
                     fame: 0,
                     best_fame: Default::default(),
                 },

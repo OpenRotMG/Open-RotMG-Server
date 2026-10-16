@@ -225,6 +225,49 @@ INSERT INTO account_lists VALUES(1,0,2),(1,1,2),(2,0,1),(1,0,3);''')
             db.execute('CREATE TABLE update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL)')
             db.execute('INSERT INTO update_feed VALUES(1,?,1700000100)', [json.dumps(self.news)])
 
+    def add_gold(self):
+        self.add_updates()
+        with closing(sqlite3.connect(self.game)) as db, db:
+            db.execute('ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100')
+            db.execute('UPDATE accounts SET credits=0 WHERE id=1')
+            db.execute('UPDATE accounts SET credits=27 WHERE id=2')
+
+    def test_gold_roundtrip_preserves_spent_balances_and_schema_without_credentials(self):
+        self.add_gold()
+        before = self.export()
+        self.assertEqual(before['schema'], 8)
+        self.assertEqual([r['credits'] for r in before['game']['accounts'][:3]], [0, 27, 100])
+        self.assertNotIn(b'NEVER_EXPORT', gzip.decompress(self.output.read_bytes()))
+        directory = self.root / 'gold-restored'
+        backup.restore(self.output, directory)
+        self.assertEqual(backup.snapshot(directory / 'game.db', backup.GOLD_GAME), before['game'])
+        with closing(sqlite3.connect(directory / 'game.db')) as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (8,))
+            self.assertTrue(all(r[0] is None for r in db.execute('SELECT guid FROM accounts')))
+            for invalid in [-1, 2147483648]:
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute('UPDATE accounts SET credits=? WHERE id=1', [invalid])
+        empty = deepcopy(before)
+        empty['game'] = {table: [] for table in before['game']}
+        self.output.write_bytes(gzip.compress(json.dumps(empty).encode()))
+        directory = self.root / 'empty-gold-restored'
+        backup.restore(self.output, directory)
+        self.game = directory / 'game.db'
+        self.assertEqual(self.export()['schema'], 8)
+
+    def test_gold_invalid_balances_and_unknown_columns_fail_closed(self):
+        self.add_gold()
+        before = self.export()
+        for value in [True, '100', 1.0, None, -1, 2147483648]:
+            malformed = deepcopy(before)
+            malformed['game']['accounts'][0]['credits'] = value
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'gold balance'):
+                backup.validate(malformed)
+        with closing(sqlite3.connect(self.game)) as db, db:
+            db.execute('ALTER TABLE accounts ADD COLUMN token TEXT')
+        with self.assertRaisesRegex(ValueError, 'columns'):
+            self.export()
+
     def test_updates_roundtrip_preserves_feed_without_credentials(self):
         self.add_updates()
         before = self.export()
@@ -485,7 +528,7 @@ INSERT INTO account_lists VALUES(1,0,2),(1,1,2),(2,0,1),(1,0,3);''')
             del malformed['game'][table]
             with self.subTest(missing=table), self.assertRaisesRegex(ValueError, 'tables'):
                 backup.validate(malformed)
-        for version in [8, True, '3']:
+        for version in [9, True, '3']:
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'envelope'):
                 backup.validate(dict(before, schema=version))
 

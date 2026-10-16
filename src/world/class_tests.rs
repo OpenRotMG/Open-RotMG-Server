@@ -15,6 +15,7 @@ fn player(w: &mut World, class: u16, account: i32, pos: Pos) -> i32 {
             None,
             Some(pos),
             AccountPresentation {
+                credits: 100,
                 fame: 0,
                 best_fame: BTreeMap::new(),
             },
