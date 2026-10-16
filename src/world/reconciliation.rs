@@ -54,6 +54,26 @@ pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
 }
 
 impl Player {
+    pub(super) fn advertised_weapon(&self, kind: u16) -> bool {
+        self.weapon_ticks.iter().any(|(_, k)| *k == i32::from(kind))
+    }
+    pub(super) fn remember_weapon_tick(&mut self) {
+        if self.controller != Controller::Human {
+            return;
+        }
+        if self.weapon_ticks.len() == ACK_LIMIT {
+            tracing::error!(
+                character = self.character.id,
+                "tick acknowledgement backlog exceeded"
+            );
+            if let Some(output) = &self.tx {
+                output.lost.send_replace(true);
+            }
+            return;
+        }
+        self.weapon_ticks
+            .push_back((self.tick, self.character.items[0]));
+    }
     pub(super) fn correcting(&self) -> Result<bool> {
         ensure!(self.active(), "inactive player cannot reconcile position");
         if let Some((_, sent)) = self.goto_acks.iter().find(|(own, _)| *own) {
@@ -79,6 +99,19 @@ impl Player {
 }
 
 impl World {
+    pub fn acknowledge_tick(&mut self, id: i32, tick: i32) -> Result<()> {
+        let p = self
+            .players
+            .get_mut(&id)
+            .context("tick ACK player missing")?;
+        ensure!(
+            tick >= 0 && tick < p.tick,
+            "unsolicited tick acknowledgement"
+        );
+        // NEW_TICK queues MOVE before applying inventory; earlier SHOOTs still use the old weapon.
+        p.weapon_ticks.retain(|(sent, _)| *sent >= tick);
+        Ok(())
+    }
     pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
         let p = self.players.get(&id).context("native player missing")?;
         ensure!(p.active(), "inactive native character");
@@ -145,7 +178,7 @@ impl World {
             "invalid correcting SHOOT time"
         );
         ensure!(
-            p.character.items[0] == i32::from(kind),
+            p.character.items[0] == i32::from(kind) || p.advertised_weapon(kind),
             "weapon does not match equipped item"
         );
         ensure!(bullet == p.next_bullet, "unexpected player bullet counter");

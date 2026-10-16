@@ -71,7 +71,7 @@ async fn pinned_provider_uses_one_strict_request_and_real_json() {
     .await;
     let service = Service::new("test-key", &stub.url, DEADLINE).unwrap();
     let reply = service
-        .ask(&json!({"message":"Trellis, come along?","allowed_intents":["follow","wait","leave","decline","talk"]}), "test")
+        .ask(&json!({"message":"BattleCrus, come along?","allowed_intents":["follow","wait","leave","decline","talk"]}), "test")
         .await
         .unwrap();
     assert_eq!(reply.intent, Intent::Follow);
@@ -316,7 +316,7 @@ fn enabled_dialogue_never_falls_back_to_legacy_follow() {
     peer(&mut v);
     v.objects[0].position.x = v.position.x + 15.;
     let mut brain = Brain::new(PROFILES[2], &v);
-    let p = packet("Aster", 77, "Trellis follow me", "");
+    let p = packet("Aster", 77, "BattleCrus follow me", "");
     assert!(brain.dialogue_request(&p, &v, &c).unwrap().is_none());
     assert!(!brain.receive(p, &v, false).unwrap());
     assert!(brain.companion.is_none());
@@ -327,7 +327,7 @@ fn only_visible_addressed_public_human_context_is_sent() {
     let mut v = view(&c);
     peer(&mut v);
     let brain = Brain::new(PROFILES[2], &v);
-    let p = packet("Aster", 77, "Trellis, fancy adventuring?", "");
+    let p = packet("Aster", 77, "BattleCrus, fancy adventuring?", "");
     let request = brain.dialogue_request(&p, &v, &c).unwrap().unwrap();
     let serialized = request.payload.to_string();
     for forbidden in [
@@ -348,13 +348,17 @@ fn only_visible_addressed_public_human_context_is_sent() {
     );
     assert!(
         brain
-            .dialogue_request(&packet("Aster", 77, "Trellis, secret", "Trellis"), &v, &c)
+            .dialogue_request(
+                &packet("Aster", 77, "BattleCrus, secret", "BattleCrus"),
+                &v,
+                &c
+            )
             .unwrap()
             .is_none()
     );
     assert!(
         brain
-            .dialogue_request(&packet("Mossy", 77, "Trellis, follow?", ""), &v, &c)
+            .dialogue_request(&packet("Biceps", 77, "BattleCrus, follow?", ""), &v, &c)
             .unwrap()
             .is_none()
     );
@@ -368,7 +372,7 @@ fn agreements_follow_wait_resume_leave_and_do_not_claim_hidden_positions() {
     peer(&mut v);
     let mut brain = Brain::new(PROFILES[2], &v);
     let request = brain
-        .dialogue_request(&packet("Aster", 77, "Trellis, join me?", ""), &v, &c)
+        .dialogue_request(&packet("Aster", 77, "BattleCrus, join me?", ""), &v, &c)
         .unwrap()
         .unwrap();
     let mut reply = Reply {
@@ -414,7 +418,7 @@ fn accepted_nexus_agreement_overrides_optional_departure_and_crew_wait() {
     peer(&mut v);
     let mut brain = Brain::new(PROFILES[1], &v);
     let request = brain
-        .dialogue_request(&packet("Aster", 77, "Mossy, join me?", ""), &v, &c)
+        .dialogue_request(&packet("Aster", 77, "Biceps, join me?", ""), &v, &c)
         .unwrap()
         .unwrap();
     let reply = Reply {
@@ -434,7 +438,7 @@ fn stale_sessions_conflicting_partners_recovery_and_invalid_intents_reject_accep
     peer(&mut v);
     let mut brain = Brain::new(PROFILES[2], &v);
     let mut request = brain
-        .dialogue_request(&packet("Aster", 77, "Trellis, follow?", ""), &v, &c)
+        .dialogue_request(&packet("Aster", 77, "BattleCrus, follow?", ""), &v, &c)
         .unwrap()
         .unwrap();
     let follow = Reply {

@@ -2,12 +2,14 @@ import hashlib
 import importlib.util
 import io
 import json
+import sqlite3
 from pathlib import Path
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
 import urllib.error
+from contextlib import closing
 
 spec = importlib.util.spec_from_file_location('update', Path(__file__).with_name('update.py'))
 update = importlib.util.module_from_spec(spec)
@@ -15,6 +17,26 @@ spec.loader.exec_module(update)
 
 
 class UpdateTest(unittest.TestCase):
+    def test_additive_gold_migration_preserves_every_existing_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'game.db'
+            with closing(sqlite3.connect(path)) as db, db:
+                db.executescript("CREATE TABLE accounts(id INTEGER PRIMARY KEY,guid TEXT,name TEXT);"
+                                 "INSERT INTO accounts VALUES(38,'fixture','Bayleaf')")
+            before = update.rows(path)
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute('ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100')
+            after = update.rows(path)
+            self.assertEqual(after['accounts'][0]['credits'], 100)
+            update.verify_migration(before, after)
+            row = after['accounts'][0]
+            invalid = [{}, {'accounts': []}, {'accounts': [row, row]},
+                       {'accounts': [{**row, 'name': 'Changed'}]},
+                       {'accounts': [{k: v for k, v in row.items() if k != 'guid'}]}]
+            for changed in invalid:
+                with self.subTest(changed=changed), self.assertRaisesRegex(RuntimeError, 'Migration changed existing records'):
+                    update.verify_migration(before, changed)
+
     def test_unpack_accepts_exact_files_and_rejects_hash_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -237,8 +259,10 @@ class UpdateTest(unittest.TestCase):
             with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(403):
                 with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
                     update.announce({'bind': '127.0.0.1:18923'}, 'text')
-            with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(404):
+            with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(404) as urlopen:
                 self.assertIsNone(update.announce({'bind': '127.0.0.1:18923'}, 'text'))
+            # axum's Json extractor answers 415 without this header.
+            self.assertEqual(urlopen.call_args.args[0].get_header('Content-type'), 'application/json')
 
     def test_deploy_warns_players_before_stopping_production(self):
         with tempfile.TemporaryDirectory() as tmp:

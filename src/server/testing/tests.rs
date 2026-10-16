@@ -245,7 +245,7 @@ async fn prepared_priest_attaches_the_named_actual_controller() {
     let mut body = spec(pos);
     body["class"] = crate::content::PRIEST.into();
     body["controller"] = "game_bot".into();
-    body["profile"] = "Juniper".into();
+    body["profile"] = "Kadabu".into();
     body["world"] = (-2).into();
     let equipment = &app.content.get(crate::content::PRIEST).unwrap().equipment;
     body["equipment"] = json!(&equipment[..4]);
@@ -261,12 +261,9 @@ async fn prepared_priest_attaches_the_named_actual_controller() {
     )
     .await;
     assert_eq!(view["controller"], "game_bot");
-    assert_eq!(view["registered_profile"], "Juniper");
+    assert_eq!(view["registered_profile"], "Kadabu");
     assert_eq!(view["character"]["class"], crate::content::PRIEST);
-    assert_eq!(
-        app.store.load(account, actor).await.unwrap().name,
-        "Juniper"
-    );
+    assert_eq!(app.store.load(account, actor).await.unwrap().name, "Kadabu");
     assert!(app.world.clock.paused());
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
@@ -285,7 +282,7 @@ async fn actual_gameplay_controller_can_run_a_bounded_time_goal() {
         .unwrap();
     let mut spawn = spec(pos);
     spawn["controller"] = "game_bot".into();
-    spawn["profile"] = "Bramble".into();
+    spawn["profile"] = "Pixl".into();
     spawn["world"] = (-2).into();
     let created = request(&app, "create", json!({"op":"spawn","spec":spawn})).await;
     assert_eq!(created["status"], "succeeded");
@@ -492,6 +489,7 @@ async fn committed_native_death_is_not_reconnect_and_halts_the_owned_cohort() {
                 Some(crate::world::Output { packets: tx, lost }),
                 Some(pos),
                 crate::store::AccountPresentation {
+                    credits: 100,
                     fame: 0,
                     best_fame: Default::default(),
                 },

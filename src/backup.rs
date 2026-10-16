@@ -122,6 +122,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         content: "Backup update\nPersisted public text".into(),
                         published_at: 1700000000,
                         edited_at: None,
+                        attachments: vec![],
                     }],
                 })
                 .await?;

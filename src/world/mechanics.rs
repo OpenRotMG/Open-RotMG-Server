@@ -27,6 +27,18 @@ impl World {
         }
         let gained = e.hp - before;
         if gained > 0 {
+            let pos = e.pos;
+            let mut out = Writer::new();
+            out.i32(target).utf(&format!("+{gained}")).u32(0xff00ff00);
+            for p in self
+                .players
+                .values()
+                .filter(|p| p.known.contains(&healer) && p.known.contains(&target))
+            {
+                send(p, wire::NOTIFICATION, out.0.clone());
+                send(p, wire::SHOW_EFFECT, cooperative::effect(1, target, pos));
+                send(p, wire::SHOW_EFFECT, cooperative::effect(7, healer, pos));
+            }
             tracing::debug!(healer, target, amount = gained, "ordinary enemy healed");
         }
         Ok(gained)

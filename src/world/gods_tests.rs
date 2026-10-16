@@ -263,6 +263,56 @@ fn constructs_heal_only_their_own_partner_and_withdraw_without_fake_kill_rewards
 }
 
 #[test]
+fn each_construct_heal_reports_actual_hp_with_native_potion_and_trail_effects() {
+    let mut d = directory();
+    let (p, mut rx) = tests::receive(&mut d, -3, 1, crate::content::WIZARD);
+    let (unseen, mut unseen_rx) = tests::receive(&mut d, -3, 2, crate::content::WIZARD);
+    let w = d.worlds.get_mut(&-3).unwrap();
+    let rock = enemy(w, 0x905);
+    let pos = w.entities[&rock].pos;
+    w.players.get_mut(&p).unwrap().pos = pos;
+    w.updates(p, false).unwrap();
+    w.players.get_mut(&unseen).unwrap().known.clear();
+    while rx.try_recv().is_ok() {}
+    while unseen_rx.try_recv().is_ok() {}
+    for (healer, target) in [(0x905, 0x907), (0x906, 0x905), (0x907, 0x906)] {
+        let healer = enemy(w, healer);
+        let target = enemy(w, target);
+        let maximum = w.content.objects[&w.entities[&target].kind].hp;
+        let target_pos = w.entities[&target].pos;
+        w.entities.get_mut(&target).unwrap().hp = maximum - 123;
+        w.god_mechanics(healer, 0).unwrap();
+        assert_eq!(w.entities[&target].hp, maximum);
+        let packets: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert_eq!(packets.len(), 3);
+        let mut note = wire::Reader::new(&packets[0].body);
+        assert_eq!(packets[0].id, wire::NOTIFICATION);
+        assert_eq!(note.i32().unwrap(), target);
+        assert_eq!(note.utf().unwrap(), "+123");
+        assert_eq!(note.i32().unwrap() as u32, 0xff00ff00);
+        note.done().unwrap();
+        for (packet, kind, id) in [(&packets[1], 1, target), (&packets[2], 7, healer)] {
+            assert_eq!(packet.id, wire::SHOW_EFFECT);
+            assert_eq!(packet.body, cooperative::effect(kind, id, target_pos));
+        }
+        assert!(unseen_rx.try_recv().is_err());
+        w.now += 1000;
+        w.god_mechanics(healer, 0).unwrap();
+        assert!(rx.try_recv().is_err(), "full HP must not advertise a heal");
+        w.entities.get_mut(&target).unwrap().hp = maximum - 123;
+        w.apply_condition(target, condition::SICK, 2000).unwrap();
+        w.now += 1000;
+        w.god_mechanics(healer, 0).unwrap();
+        assert_eq!(w.entities[&target].hp, maximum - 123);
+        assert!(
+            rx.try_recv().is_err(),
+            "blocked healing must not emit effects"
+        );
+        w.now += 2000;
+    }
+}
+
+#[test]
 fn leviathan_magic_eye_retains_cloaked_targets_without_giving_other_gods_their_position() {
     let mut d = directory();
     let w = d.worlds.get_mut(&-3).unwrap();

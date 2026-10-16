@@ -8,6 +8,15 @@ pub struct UpdatePost {
     pub content: String,
     pub published_at: i64,
     pub edited_at: Option<i64>,
+    #[serde(default)]
+    pub attachments: Vec<UpdateAttachment>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateAttachment {
+    pub filename: String,
+    pub url: String,
+    pub content_type: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +96,34 @@ impl UpdateSnapshot {
                             || matches!(c, '\u{fffe}' | '\u{ffff}')),
                 "Invalid update content"
             );
+            ensure!(post.attachments.len() <= 10, "Too many update attachments");
+            for attachment in &post.attachments {
+                ensure!(
+                    !attachment.filename.trim().is_empty()
+                        && attachment.filename.encode_utf16().count() <= 256
+                        && attachment.url.len() <= 2048
+                        && [
+                            "https://cdn.discordapp.com/attachments/",
+                            "https://media.discordapp.net/attachments/"
+                        ]
+                        .iter()
+                        .any(|prefix| attachment
+                            .url
+                            .strip_prefix(prefix)
+                            .is_some_and(|path| !path.is_empty()))
+                        && !attachment
+                            .url
+                            .chars()
+                            .any(|c| c.is_whitespace() || c.is_control() || c == '#')
+                        && attachment
+                            .content_type
+                            .as_ref()
+                            .is_none_or(|mime| !mime.is_empty()
+                                && mime.len() <= 128
+                                && mime.bytes().all(|b| (32..=126).contains(&b))),
+                    "Invalid update attachment"
+                );
+            }
             ensure!(
                 (1..=i32::MAX as i64).contains(&post.published_at)
                     && post
@@ -106,11 +143,10 @@ impl UpdateFeed {
         if let Some(source) = &self.source {
             for post in source.posts.iter().take(10) {
                 xml += &format!(
-                    "<Item><Icon>news</Icon><Title>{}</Title><TagLine>{}</TagLine><Link>{}/updates/#{}</Link><Date>{}</Date></Item>",
+                    "<Item><Icon>news</Icon><Title>{}</Title><TagLine>{}</TagLine><Link>{}/updates/</Link><Date>{}</Date></Item>",
                     xml_escape(&post.title()),
                     xml_escape(&post.tagline()),
                     xml_escape(origin),
-                    post.id,
                     post.published_at
                 );
             }
@@ -176,6 +212,11 @@ mod tests {
                 content: "Fountains & <friends>\nHeal together <script>\nSecond paragraph".into(),
                 published_at: 1700000000,
                 edited_at: None,
+                attachments: vec![UpdateAttachment {
+                    filename: "demo.mp4".into(),
+                    url: "https://cdn.discordapp.com/attachments/23456789012345678/34567890123456789/demo.mp4?ex=abc&hm=def".into(),
+                    content_type: Some("video/mp4".into()),
+                }],
             }],
         }
     }
@@ -204,12 +245,18 @@ mod tests {
             10
         );
         assert!(xml.contains("Fountains &amp; &lt;friends&gt;"));
-        assert!(xml.contains("/updates/#34567890123456800"));
+        assert!(xml.contains("<Link>https://openrotmg.org/updates/</Link>"));
         drop(store);
         let store = Store::open(&path, &content).unwrap();
         assert_eq!(
             store.updates().await.unwrap().source.unwrap().posts.len(),
             12
+        );
+        assert_eq!(
+            store.updates().await.unwrap().source.unwrap().posts[0].attachments[0]
+                .content_type
+                .as_deref(),
+            Some("video/mp4")
         );
         snapshot.posts.truncate(1);
         snapshot.posts[0].content = "An edited update\nNew paragraph".into();
@@ -263,7 +310,7 @@ mod tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
                 .unwrap(),
-            7
+            8
         );
         store.sync_updates(snapshot()).await.unwrap();
         let mut invalid = snapshot();
@@ -284,6 +331,30 @@ mod tests {
                 .contains("schema-7 update feed missing")
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn old_snapshots_load_and_attachment_urls_are_restricted() {
+        let mut raw = serde_json::to_value(snapshot()).unwrap();
+        raw["posts"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("attachments");
+        let mut old: UpdateSnapshot = serde_json::from_value(raw).unwrap();
+        old.validate().unwrap();
+        assert!(old.posts[0].attachments.is_empty());
+        for url in [
+            "javascript:alert(1)",
+            "https://cdn.discordapp.com.evil.test/attachments/x",
+            "https://example.org/a",
+            "https://cdn.discordapp.com/attachments/",
+        ] {
+            let mut s = snapshot();
+            s.posts[0].attachments[0].url = url.into();
+            assert!(s.validate().is_err());
+        }
+        let mut s = snapshot();
+        s.posts[0].attachments = vec![s.posts[0].attachments[0].clone(); 11];
+        assert!(s.validate().is_err());
     }
     #[test]
     fn updates_reject_invalid_bounded_input() {

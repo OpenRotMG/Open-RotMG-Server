@@ -166,6 +166,7 @@ pub struct Player {
     native_motion_condition: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
+    weapon_ticks: VecDeque<(i32, i32)>,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     tiles: BTreeSet<(i16, i16)>,
     pub death_started: bool,
@@ -1382,6 +1383,7 @@ impl World {
             tx,
             None,
             AccountPresentation {
+                credits: 100,
                 fame: 0,
                 best_fame: BTreeMap::new(),
             },
@@ -1425,6 +1427,7 @@ impl World {
         self.players.insert(
             id,
             Player {
+                weapon_ticks: VecDeque::from([(-1, ch.items[0])]),
                 character: ch,
                 pos,
                 departing: false,
@@ -1524,7 +1527,7 @@ impl World {
             o.i32(id)
                 .f32(p.pos.x)
                 .f32(p.pos.y)
-                .i16(45 + i16::from(id == recipient));
+                .i16(45 + 2 * i16::from(id == recipient));
             for (k, v) in [
                 (0, values[0]),
                 (1, p.character.hp),
@@ -1563,6 +1566,7 @@ impl World {
             stat(&mut o, 33, 0);
             stat(&mut o, 38, p.character.account);
             if id == recipient {
+                stat(&mut o, 35, p.presentation.credits);
                 stat(&mut o, 39, p.presentation.fame);
             }
             for (i, boost) in [46, 47, 48, 49, 50, 53, 51, 52].into_iter().enumerate() {
@@ -1734,7 +1738,11 @@ impl World {
         let mut tiles = Vec::new();
         for y in ((pos.y as i32 - 20).max(0))..=(pos.y as i32 + 20).min(self.map.height - 1) {
             for x in ((pos.x as i32 - 20).max(0))..=(pos.x as i32 + 20).min(self.map.width - 1) {
-                if !self.players[&id].tiles.contains(&(x as i16, y as i16)) {
+                let dx = x - pos.x as i32;
+                let dy = y - pos.y as i32;
+                if dx * dx + dy * dy <= 20 * 20
+                    && !self.players[&id].tiles.contains(&(x as i16, y as i16))
+                {
                     tiles.push((
                         x as i16,
                         y as i16,
@@ -2066,6 +2074,7 @@ impl World {
             received,
             queued_ms,
             bullet,
+            kind,
             x = start.x,
             y = start.y,
             angle,
@@ -2118,7 +2127,9 @@ impl World {
             native && matches!(p.ability_shot, Some((k, t, _, _)) if k == kind && t == time);
         let denied_ability = ability && matches!(p.ability_shot, Some((_, _, false, _)));
         ensure!(
-            p.character.items[0] == kind as i32 || ability && p.character.items[1] == kind as i32,
+            p.character.items[0] == kind as i32
+                || native && p.advertised_weapon(kind)
+                || ability && p.character.items[1] == kind as i32,
             "weapon does not match equipped item"
         );
         let item = self.content.get(kind)?;
@@ -3923,6 +3934,7 @@ impl World {
                 }
                 send(p, wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
+                p.remember_weapon_tick();
                 let slow = crate::condition::bit(crate::condition::SLOWED);
                 let paralyzed = crate::condition::bit(crate::condition::PARALYZED);
                 let motion_condition = p.conditions(self.now) & (slow | paralyzed | SPEEDY);
@@ -4326,11 +4338,48 @@ mod tests {
         assert!(!inside_box(a, Pos { x: 0.500001, y: 0. }));
     }
     #[test]
-    fn initial_map_is_fogged() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        assert!(w.players[&id].tiles.len() < w.map.cells.len());
-        assert!(w.players[&id].known.contains(&id));
+    fn fog_reveals_circular_tiles_once_and_remembers_them() {
+        let mut d = directory();
+        let (id, mut rx) = receive(&mut d, -2, 1, WIZARD);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.players.get_mut(&id).unwrap().tiles.clear();
+        let initial_count = w.players[&id].character.tiles;
+        let mut known = BTreeSet::new();
+        for (cx, cy) in [(50, 50), (60, 50), (0, 0), (141, 129), (50, 50)] {
+            w.players.get_mut(&id).unwrap().pos = Pos {
+                x: cx as f32 + 0.25,
+                y: cy as f32 + 0.75,
+            };
+            let circle: BTreeSet<_> = (0..w.map.height)
+                .flat_map(|y| (0..w.map.width).map(move |x| (x, y)))
+                .filter(|(x, y)| (x - cx).pow(2) + (y - cy).pow(2) <= 400)
+                .map(|(x, y)| (x as i16, y as i16))
+                .collect();
+            let expected: BTreeSet<_> = circle.difference(&known).copied().collect();
+            w.updates(id, false).unwrap();
+            let mut received = BTreeSet::new();
+            while let Ok(packet) = rx.try_recv() {
+                if packet.id == wire::UPDATE {
+                    let mut r = crate::wire::Reader::new(&packet.body);
+                    for _ in 0..r.i16().unwrap() {
+                        let (x, y) = (r.i16().unwrap(), r.i16().unwrap());
+                        assert_eq!(
+                            r.u8().unwrap(),
+                            w.map.cells[y as usize * w.map.width as usize + x as usize].ground
+                        );
+                        assert!(received.insert((x, y)), "duplicate tile in UPDATE");
+                    }
+                }
+            }
+            assert_eq!(received, expected);
+            known.extend(circle);
+            assert_eq!(w.players[&id].tiles, known);
+            assert_eq!(
+                w.players[&id].character.tiles - initial_count,
+                known.len() as u64
+            );
+            assert!(w.players[&id].known.contains(&id));
+        }
     }
     #[test]
     fn native_minimap_keeps_distant_players_without_revealing_perception_or_fog() {

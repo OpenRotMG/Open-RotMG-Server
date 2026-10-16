@@ -784,7 +784,7 @@ async fn handle(
             }
         }
         wire::MOVE => {
-            let _tick = r.i32()?;
+            let tick = r.i32()?;
             let time = r.i32()?;
             let pos = Pos {
                 x: r.f32()?,
@@ -800,12 +800,13 @@ async fn handle(
             r.done()?;
             let id = player.context("MOVE before character")?;
             a.world
-                .call(
-                    move |w| match w.native_move_received(id, pos, (time, received)) {
+                .call(move |w| {
+                    w.acknowledge_tick(id, tick)?;
+                    match w.native_move_received(id, pos, (time, received)) {
                         Ok(_) => Ok(()),
                         Err(e) => w.correct_position(id, time, &e.to_string()),
-                    },
-                )
+                    }
+                })
                 .await?;
         }
         wire::PLAYER_SHOOT => {
