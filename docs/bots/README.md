@@ -12,7 +12,7 @@ Wizards predict visible projectile paths, lead an observed target, kite within w
 
 This candidate inherits main's default-on startup; `--no-shore-bots` or explicit `"shore_bots": false` disables it. Reserve seven slots for six bots and a human; QA control remains separate. Living saves resume unchanged. After committed permanent death, a fresh character receives normal starter gear; Bayleaf/Juniper choose Priest only if that same account earned its Wizard-level-five unlock. Dead inventory is never inherited. Trade negotiation and language services remain outside this slice.
 
-Ordinary crews cleared Snake Pit and returned; native media is prepared. Potion recovery remains unverified.
+Ordinary crews earned Snake Pit clears and returns. Prepared full-backpack clears verify reward exchange and consumption; native media is prepared.
 
 ## Approved north star
 
