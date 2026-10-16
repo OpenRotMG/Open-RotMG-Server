@@ -35,6 +35,7 @@ mod player_position_tests;
 mod population;
 #[cfg(test)]
 mod population_tests;
+mod realm_portal;
 mod realm_quests;
 #[cfg(test)]
 mod realm_quests_tests;
@@ -419,6 +420,8 @@ pub struct Directory {
     portals: BTreeMap<i32, Portal>,
     chat_budgets: BTreeMap<i32, chat::ChatBudget>,
     endgame: endgame::RealmDirectory,
+    realm_portal: i32,
+    realm_name: usize,
     teleports: BTreeMap<i32, Instant>,
     idle: BTreeMap<i32, u64>,
     next_world: i32,
@@ -543,6 +546,8 @@ impl Directory {
             portals: BTreeMap::new(),
             chat_budgets: BTreeMap::new(),
             endgame: endgame::RealmDirectory::default(),
+            realm_portal: 0,
+            realm_name: (seed % realm_portal::NAMES.len() as u64) as usize,
             teleports: BTreeMap::new(),
             idle: BTreeMap::new(),
             next_world: 1,
@@ -576,7 +581,8 @@ impl Directory {
                 (c.region == 2 && c.object.is_none() && nexus.walkable(pos)).then_some(pos)
             })
             .context("Nexus has no walkable Realm portal region")?;
-        nexus.spawn_entity(0x704, pos, vec![])?;
+        d.realm_portal = nexus.spawn_entity(0x712, pos, vec![])?;
+        d.sync_realm_portal();
         Ok(d)
     }
     fn make(&self, template: &str, name: &str, safe: bool, owner: Option<i32>) -> Result<World> {
@@ -765,6 +771,7 @@ impl Directory {
             0x712
         };
         let destination = match kind {
+            0x712 if origin == -2 && portal == Some(self.realm_portal) => self.initial(-3)?,
             0x703 | 0x70d | 0x712 | 0x71d => -2,
             0x704 | 0x70e | 0x71c => self.initial(-3)?,
             0x720 => self.instance("vault", Some(account))?,
@@ -900,6 +907,7 @@ impl Directory {
     }
     fn step(&mut self) {
         self.tick += 1;
+        self.sync_realm_portal();
         self.grants.retain(|_, grant| grant.expires > self.tick);
         for (id, world) in &mut self.worlds {
             world.step();
@@ -3918,10 +3926,11 @@ impl World {
                     .iter()
                     .filter(|entity| {
                         self.players.contains_key(entity)
-                            || self
-                                .entities
-                                .get(entity)
-                                .is_some_and(|e| e.hp > 0 || !e.items.is_empty())
+                            || self.entities.get(entity).is_some_and(|e| {
+                                e.hp > 0
+                                    || !e.items.is_empty()
+                                    || self.content.objects[&e.kind].class == "Portal"
+                            })
                     })
                     .copied()
                     .collect();
@@ -4133,7 +4142,7 @@ mod tests {
         assert_eq!(d.location(first).unwrap(), -1);
         assert_eq!(d.location(second).unwrap(), -2);
         assert!(d.worlds[&-2].safe && !d.worlds[&-3].safe);
-        assert!(d.worlds[&-2].entities.values().any(|e| e.kind == 0x704));
+        assert!(d.worlds[&-2].entities.values().any(|e| e.kind == 0x712));
     }
     #[test]
     fn transfer_grants_are_bound_one_use_expiring_and_private() {

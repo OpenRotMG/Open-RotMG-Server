@@ -371,6 +371,7 @@ impl Directory {
         self.next_world = next;
         self.idle.insert(castle_id, self.tick);
         self.endgame.active = realm_id;
+        self.realm_name = (self.realm_name + 1) % super::realm_portal::NAMES.len();
         self.endgame.cycles.insert(realm_id, next_cycle);
         self.endgame.retry.remove(&origin);
         for player in &players {
@@ -706,6 +707,11 @@ mod tests {
         d.endgame_step();
         let realm = d.initial(-3).unwrap();
         assert!(realm > 0 && realm != -3);
+        d.sync_realm_portal();
+        let portal = &d.worlds[&-2].entities[&d.realm_portal];
+        assert_eq!(portal.name, "Beholder (0/16)");
+        assert!(portal.published);
+        assert_eq!(portal.extra_stats, [(37, 1)]);
         let a_output = d.worlds[&-3].players[&a]
             .tx
             .as_ref()

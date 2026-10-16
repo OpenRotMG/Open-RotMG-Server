@@ -1148,6 +1148,16 @@ async fn handle(
                         return Ok(None);
                     }
                     let (account, character, destination) = d.destination(id, portal)?;
+                    let world = &d.worlds[&destination];
+                    if world.players.len() >= world.max_players {
+                        let message = crate::world::chat_info("Destination is full.");
+                        crate::world::send(
+                            &d.worlds[&d.location(id)?].players[&id],
+                            message.id,
+                            message.body,
+                        );
+                        return Ok(None);
+                    }
                     let (keytime, key, name) = d.issue(account, character, destination)?;
                     Ok(Some((destination, keytime, key, name)))
                 })
