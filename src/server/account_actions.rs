@@ -18,6 +18,40 @@ pub(super) struct ResetRequest {
     token: String,
     password: String,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AnnounceRequest {
+    text: String,
+}
+pub(super) async fn discord_announce(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<AnnounceRequest>,
+) -> Response {
+    if let Some(response) = private_denial(&a, peer, &headers) {
+        return response;
+    }
+    json_result(
+        async {
+            let text = request.text.trim();
+            ensure!(!text.is_empty(), "Announcement text is empty.");
+            ensure!(
+                text.encode_utf16().count() <= 200,
+                "Announcements are limited to 200 characters."
+            );
+            ensure!(
+                !text.chars().any(char::is_control),
+                "Announcement text contains control characters."
+            );
+            let deliver = text.to_owned();
+            let players = a.world.directory(move |d| Ok(d.announce(&deliver))).await?;
+            tracing::info!(players, text, "announcement sent");
+            Ok(serde_json::json!({"players":players}))
+        }
+        .await,
+    )
+}
 pub(super) async fn discord_kick(
     State(a): State<App>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

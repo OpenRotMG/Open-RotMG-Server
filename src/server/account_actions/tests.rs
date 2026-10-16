@@ -83,6 +83,44 @@ async fn private_admission_rejects_forwarding_before_charging_the_shared_limit()
     std::fs::remove_dir_all(dir).unwrap();
 }
 #[tokio::test]
+async fn announcement_requires_private_admission_and_bounded_text() {
+    let (dir, a) = fixture();
+    let peer = "127.0.0.1:1234".parse().unwrap();
+    let announce = |headers: HeaderMap, text: String| {
+        let app = a.clone();
+        async move {
+            discord_announce(
+                State(app),
+                ConnectInfo(peer),
+                headers,
+                Json(AnnounceRequest { text }),
+            )
+            .await
+            .status()
+        }
+    };
+    assert_eq!(
+        announce(HeaderMap::new(), "Restarting soon".into()).await,
+        StatusCode::FORBIDDEN
+    );
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "authorization",
+        format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+    );
+    for text in ["   ", &"x".repeat(201), "two\nlines"] {
+        assert_eq!(
+            announce(headers.clone(), text.into()).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        announce(headers, " Server restarting in 20 seconds ".into()).await,
+        StatusCode::OK
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+#[tokio::test]
 async fn kick_waits_for_save_acknowledgement_and_failed_saves_keep_ownership() {
     let (dir, a) = fixture();
     let owner = a.claim_session(1).unwrap();

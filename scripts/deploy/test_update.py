@@ -180,6 +180,59 @@ class UpdateTest(unittest.TestCase):
                 update.main()
                 download.assert_not_called()
                 self.assertEqual([p.name for p in root.iterdir()], ['status.json'])
+    def test_restart_notice_is_announced_and_awaited_before_the_cutover(self):
+        order = []
+        with patch.object(update.subprocess, 'check_output', return_value='active'), \
+                patch.object(update, 'announce', side_effect=lambda config, text: order.append(('announce', text)) or {'players': 3}), \
+                patch.object(update.time, 'sleep', side_effect=lambda seconds: order.append(('sleep', seconds))):
+            self.assertTrue(update.warn_restart({'bind': '127.0.0.1:18923'}))
+        self.assertEqual(order, [('announce', 'Server restarting in 20 seconds to apply an update.'), ('sleep', 20)])
+
+    def test_inactive_service_is_never_announced(self):
+        with patch.object(update.subprocess, 'check_output', return_value='inactive'), patch.object(update, 'announce') as announce, \
+                patch.object(update.time, 'sleep') as sleep:
+            self.assertFalse(update.warn_restart({'bind': '127.0.0.1:18923'}))
+        announce.assert_not_called()
+        sleep.assert_not_called()
+
+    def test_rejected_announcement_blocks_the_cutover_instead_of_dropping_the_warning(self):
+        with patch.object(update.subprocess, 'check_output', return_value='active'), \
+                patch.object(update, 'announce', side_effect=RuntimeError('Announcement rejected: HTTP 403')), \
+                patch.object(update.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError, 'Announcement rejected: HTTP 403'):
+                update.warn_restart({'bind': '127.0.0.1:18923'})
+        sleep.assert_not_called()
+
+    def test_announcement_endpoint_errors_are_loud_but_an_old_server_still_restarts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp) / 'discord-link-token'
+            token.write_text('a' * 64)
+
+            def fail(code):
+                return patch.object(update.urllib.request, 'urlopen', side_effect=urllib.error.HTTPError(
+                    'http://127.0.0.1:18923/internal/discord/announce', code, 'rejected', {}, None))
+
+            with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(403):
+                with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
+                    update.announce({'bind': '127.0.0.1:18923'}, 'text')
+            with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(404):
+                self.assertIsNone(update.announce({'bind': '127.0.0.1:18923'}, 'text'))
+
+    def test_deploy_warns_players_before_stopping_production(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'backup.lock').touch()
+            order = []
+            with patch.object(update, 'LAST_BACKUP', root / 'receipt.json'), patch.object(update, 'rehearse'), \
+                    patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
+                    patch.object(update, 'main_revision', return_value='a' * 40), \
+                    patch.object(update, 'warn_restart', side_effect=lambda config: order.append('warn')), \
+                    patch.object(update, 'run', side_effect=lambda *args: order.append(args)), \
+                    patch.object(update.subprocess, 'check_output', return_value='failed'):
+                with self.assertRaisesRegex(RuntimeError, 'Shutdown save failed'):
+                    update.deploy(root, root, {'manifest': {}, 'revision': 'a' * 40}, {'state': str(root)})
+            self.assertEqual(order[-2:], ['warn', ('systemctl', 'stop', 'openrotmg.service')])
+
 
 if __name__ == '__main__':
     unittest.main()

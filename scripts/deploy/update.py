@@ -24,6 +24,8 @@ LIVE = Path('/opt/openrotmg/server')
 ROOT = Path('/var/lib/openrotmg-deploy')
 BACKUPS = Path('/opt/openrotmg-backup')
 CONFIG = Path('/etc/openrotmg/config.json')
+ANNOUNCE_TOKEN = Path('/etc/openrotmg/discord-link-token')
+RESTART_NOTICE_SECONDS = 20
 LAST_BACKUP = Path('/var/lib/openrotmg-backup/last-success.json')
 sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -167,6 +169,36 @@ def install_backups(stage):
     start_backup()
 
 
+def announce(config, text):
+    token = ANNOUNCE_TOKEN.read_text().strip()
+    request = urllib.request.Request(
+        'http://127.0.0.1:' + config['bind'].rsplit(':', 1)[1] + '/internal/discord/announce',
+        data=json.dumps({'text': text}).encode(), headers={'authorization': 'Bearer ' + token})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        error.close()
+        if error.code == 404:
+            return None
+        raise RuntimeError('Announcement rejected: HTTP ' + str(error.code)) from error
+
+
+def warn_restart(config):
+    state = subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'ActiveState', '--value'], text=True).strip()
+    if state != 'active':
+        print(json.dumps({'restart_warning': 'skipped', 'service_state': state}), flush=True)
+        return False
+    notice = 'Server restarting in ' + str(RESTART_NOTICE_SECONDS) + ' seconds to apply an update.'
+    result = announce(config, notice)
+    if result is None:
+        print(json.dumps({'restart_warning': 'unsupported', 'detail': 'running server predates the announcement endpoint'}), flush=True)
+        return False
+    print(json.dumps({'restart_warning': notice, 'seconds': RESTART_NOTICE_SECONDS, **result}), flush=True)
+    time.sleep(RESTART_NOTICE_SECONDS)
+    return True
+
+
 def rehearse(stage, work, config):
     run(sys.executable, '-B', str(stage / 'scripts/backups/release_contract.py'),
         str(stage / 'openrotmg'), str(stage / 'data'), str(work / 'writer-contract'),
@@ -213,6 +245,7 @@ def deploy(stage, work, metadata, config):
     require(main_revision() == metadata['revision'], 'Main advanced during rehearsal; no cutover performed')
     with LAST_BACKUP.with_name('backup.lock').open('rb') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        warn_restart(config)
         run('systemctl', 'stop', 'openrotmg.service')
         require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
         frozen = work / 'cutover'

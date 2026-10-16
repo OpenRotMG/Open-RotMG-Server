@@ -5,6 +5,8 @@ pub(super) struct ChatBudget {
     tokens: f32,
 }
 
+pub(crate) const ANNOUNCEMENT: &str = "@ANNOUNCEMENT";
+
 pub(crate) fn chat_private(text: &str) -> Packet {
     text_packet("*Discord*", -1, 0, text)
 }

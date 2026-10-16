@@ -136,7 +136,7 @@ mod account_actions;
 pub(crate) mod diagnostics;
 mod hiscores;
 pub(crate) mod testing;
-use account_actions::{discord_kick, discord_recover, reset_password};
+use account_actions::{discord_announce, discord_kick, discord_recover, reset_password};
 use hiscores::{collection, discord_link, hiscores};
 #[derive(Clone)]
 pub struct App {
@@ -1607,6 +1607,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         .route("/internal/discord/bugs/{id}", post(diagnostics::receipt))
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))
+        .route("/internal/discord/announce", post(discord_announce))
         .route("/internal/discord/link", post(discord_link))
         .route("/internal/discord/kick", post(discord_kick))
         .route("/internal/discord/recover", post(discord_recover))

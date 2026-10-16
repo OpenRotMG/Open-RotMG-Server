@@ -34,6 +34,8 @@ mod population_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 #[cfg(test)]
+mod announce_tests;
+#[cfg(test)]
 mod bot_tests;
 #[cfg(test)]
 mod class_tests;
@@ -431,6 +433,12 @@ impl Directory {
             "total_entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
             "total_projectiles": self.worlds.values().map(|w| w.bullets.len()).sum::<usize>()}),
         )
+    }
+    pub fn announce(&self, text: &str) -> usize {
+        self.worlds
+            .values()
+            .map(|w| w.broadcast_text(chat::ANNOUNCEMENT, text))
+            .sum()
     }
     pub fn competitive_characters(&self) -> Vec<Character> {
         self.worlds
@@ -1649,6 +1657,19 @@ impl World {
                     .then_with(|| a.id.cmp(&b.id))
             })
             .map(|(e, _)| e.id)
+    }
+    fn broadcast_text(&self, name: &str, text: &str) -> usize {
+        let packet = chat::text_packet(name, -1, 0, text);
+        let mut recipients = 0;
+        for p in self
+            .players
+            .values()
+            .filter(|p| !p.departing && p.persistence_failure.is_none())
+        {
+            send(p, packet.id, packet.body.clone());
+            recipients += 1;
+        }
+        recipients
     }
     fn visible(&self, id: i32) -> BTreeSet<i32> {
         let pos = self.players[&id].pos;

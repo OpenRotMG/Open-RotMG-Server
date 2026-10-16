@@ -615,14 +615,7 @@ impl World {
         Ok(())
     }
     fn oryx_notice(&self, text: &str) {
-        let packet = chat::text_packet("Oryx the Mad God", -1, 0, text);
-        for p in self
-            .players
-            .values()
-            .filter(|p| !p.departing && p.persistence_failure.is_none())
-        {
-            send(p, packet.id, packet.body.clone());
-        }
+        self.broadcast_text("Oryx the Mad God", text);
     }
 }
 
