@@ -1,6 +1,6 @@
 # Recovered data
 
-Selected `objects.xml`/`grounds.xml` and map assets remain third-party material; the backend license does not relicense them.
+Selected `objects.xml`/`grounds.xml` and map assets remain third-party material; the backend license does not relicense them. `sfx/music/sorc.mp3` is the selected client's requested track, recovered unchanged from moistosaurus/realm-src `1855c017eab870d13f0b61b1cf0b9e66a01922ff`, `common/resources/web/music/sorc.mp3` (see `REALM-SRC-LICENSE`); no separate music-rights grant is claimed.
 
 **Map candidates, not authenticated official 123.5.1 layouts:**
 - Tutorial, Nexus, Limbo and Vault: trapped/rotmg_svr at `593e490803fe0ad168ead408cacd5287d778acfe`. The old 96×96 shore crop remains a reference; live Realms use seeded 512×512 island terrain with connected roads and selected-client grounds. This is a reconstruction, not the recovered original generator.
