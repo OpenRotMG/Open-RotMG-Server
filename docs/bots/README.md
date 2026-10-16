@@ -88,7 +88,7 @@ The next recommendation is a bounded partial-knowledge/time experiment, not anot
 - **Behavior:** danger versus loot, full inventory, lost leader, declined invitation, silent player, blocked route, death during an interaction, and realistic novice/veteran differences. Expect coherent mistakes, not universal perfect survival.
 - **Population:** controlled game-clock runs across multiple seeds; check stuck actors, synchronized routines, repetitive chat, vanished groups, item creation and population drift. Control event ordering and persistence completions; a seed alone is insufficient for full-system replay.
 - **Performance:** mixed human/bot load against the actual hosting limits; measure tail tick duration, queue pressure, saves and any language costs. No unverified 85-player promise.
-- **Presentation:** normal Ruffle gameplay at real speed. Before/after shots show the same area empty versus inhabited; a 15-second canvas-only demo shows distinct movement, combat and a meaningful interaction. A longer uncut session tests repetition. No overlays substituting for native avatars/chat.
+- **Presentation:** normal Ruffle gameplay at real speed. Before/after shots show the same area empty versus inhabited. A longer gameplay session tests repetition. No overlays substituting for native avatars/chat.
 - **Feel:** compare unseen scenarios with reserved historical examples and get user review. Passing mechanical tests does not prove believable people.
 
 Log meaningful decision changes with actor, observation/trigger, chosen goal/action and rejection reason. Retain enough clock/input/randomness information to reproduce a failure without generating a giant per-tick diary.
