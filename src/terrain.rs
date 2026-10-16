@@ -162,28 +162,39 @@ pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
     for (i, cell) in cells.iter_mut().enumerate() {
         decorate(cell, mix(seed ^ 0xbb67ae8584caa73b ^ i as u64))?;
     }
-    let (x, y) = (2..size - 2)
-        .flat_map(|x| (2..size - 2).map(move |y| (x, y)))
-        .filter(|(x, y)| {
-            (y - 1..=y + 1)
-                .all(|ny| (x - 1..=x + 1).all(|nx| cells[(ny * size + nx) as usize].terrain == 11))
-        })
-        .min_by_key(|(x, y)| ((x - size / 2).abs(), std::cmp::Reverse(*y)))
-        .context("generated Realm has no coastal spawn")?;
-    for y in y - 1..=y + 1 {
-        for x in x - 1..=x + 1 {
-            let cell = &mut cells[(y * size + x) as usize];
-            ensure!(cell.terrain == 11, "generated spawn crosses the coast");
-            cell.object = None;
-            cell.config.clear();
-            cell.region = 1;
+    let mut spawns = Vec::new();
+    // Rivers may cut a cardinal axis, so search each coast after carving.
+    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+        let (x, y) = (2..size - 2)
+            .flat_map(|x| (2..size - 2).map(move |y| (x, y)))
+            .filter(|(x, y)| {
+                let (rx, ry) = (x - size / 2, y - size / 2);
+                let along = dx * rx + dy * ry;
+                along > (dx * ry - dy * rx).abs()
+                    && (y - 1..=y + 1).all(|ny| {
+                        (x - 1..=x + 1).all(|nx| cells[(ny * size + nx) as usize].terrain == 11)
+                    })
+            })
+            .min_by_key(|(x, y)| {
+                let (rx, ry) = (x - size / 2, y - size / 2);
+                ((dx * ry - dy * rx).abs(), -(dx * rx + dy * ry))
+            })
+            .with_context(|| format!("generated Realm has no coastal spawn toward {dx},{dy}"))?;
+        for ny in y - 1..=y + 1 {
+            for nx in x - 1..=x + 1 {
+                let cell = &mut cells[(ny * size + nx) as usize];
+                cell.object = None;
+                cell.config.clear();
+                cell.region = 1;
+            }
         }
+        spawns.push((x as f32 + 0.5, y as f32 + 0.5));
     }
     let map = Map {
         width: size,
         height: size,
         cells,
-        spawns: vec![(x as f32 + 0.5, y as f32 + 0.5)],
+        spawns,
     };
     for cell in &map.cells {
         ensure!(
@@ -202,6 +213,7 @@ pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
     tracing::info!(
         seed,
         size,
+        spawn_points = map.spawns.len(),
         elapsed_ms = started.elapsed().as_millis(),
         roads = map.cells.iter().filter(|c| c.ground == 0xd0).count(),
         scenery = map.cells.iter().filter(|c| c.object.is_some()).count(),
@@ -321,8 +333,25 @@ mod tests {
                 serde_json::to_vec(&m).unwrap(),
                 serde_json::to_vec(&generate(&c, seed.wrapping_add(1), 192).unwrap()).unwrap()
             );
+            assert_eq!(m.spawns.len(), 4);
+            for ((sx, sy), (dx, dy)) in
+                m.spawns
+                    .iter()
+                    .copied()
+                    .zip([(0, 1), (1, 0), (0, -1), (-1, 0)])
+            {
+                assert_eq!(m.cell(sx, sy).unwrap().ground, 0xbe);
+                let (rx, ry) = (sx as i32 - m.width / 2, sy as i32 - m.height / 2);
+                assert!(dx * rx + dy * ry > (dx * ry - dy * rx).abs());
+                for y in sy as i32 - 1..=sy as i32 + 1 {
+                    for x in sx as i32 - 1..=sx as i32 + 1 {
+                        let cell = m.cell(x as f32, y as f32).unwrap();
+                        assert_eq!((cell.terrain, cell.region), (11, 1));
+                        assert!(cell.object.is_none());
+                    }
+                }
+            }
             let (sx, sy) = m.spawns[0];
-            assert_eq!(m.cell(sx, sy).unwrap().terrain, 11);
             let start = (sy as i32 * m.width + sx as i32) as usize;
             let mut seen = BTreeSet::from([start]);
             let mut queue = VecDeque::from([start]);
