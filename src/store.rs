@@ -17,7 +17,9 @@ mod hiscores;
 mod legends;
 #[cfg(test)]
 mod presentation_tests;
+mod purchases;
 mod social;
+pub use purchases::Purchase;
 mod updates;
 pub use social::AccountLists;
 pub use updates::{UpdateFeed, UpdatePost, UpdateSnapshot};

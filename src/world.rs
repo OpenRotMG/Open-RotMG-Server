@@ -69,6 +69,7 @@ pub use reconciliation::{NativeInput, RejectedNativeShot};
 mod progression;
 #[cfg(test)]
 mod progression_tests;
+pub(crate) mod shop;
 mod trade;
 pub(crate) mod view;
 #[cfg(test)]
@@ -324,6 +325,7 @@ pub struct InventoryPlan {
     pub dropped: Option<i32>,
     pub unlock: Option<(i32, i32)>,
     pub collected: Option<u16>,
+    pub purchase: Option<(i32, crate::store::Purchase)>,
     loot_slot: Option<(i32, usize)>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1147,13 +1149,16 @@ impl World {
                                     "mtype" => 34,
                                     "mcount" => 42,
                                     "mtime" => 43,
-                                    "nstar" => 55,
+                                    "nstar" => 45,
                                     _ => unreachable!(),
                                 };
                                 e.extra_stats.push((stat, value));
                             }
                             _ => bail!("unsupported map setting {k}"),
                         }
+                    }
+                    if o.class == "Merchant" {
+                        shop::configure(&mut e, &content)?;
                     }
                     if o.name == "White Fountain" {
                         fountains.push((id, pos));
@@ -2429,6 +2434,7 @@ impl World {
             dropped: None,
             unlock: None,
             collected: None,
+            purchase: None,
             loot_slot: None,
         }
     }
@@ -2694,9 +2700,14 @@ impl World {
             vault.revision += 1;
             self.vault.as_mut().context("committed chest missing")?.1 = vault;
         }
-        o.i32(0);
         tracing::info!(player = plan.player, revision, "inventory committed");
-        send(p, 4, o.0);
+        if plan.purchase.is_some() {
+            let packet = shop::reply(true, "Item purchased!");
+            send(p, packet.id, packet.body);
+        } else {
+            o.i32(0);
+            send(p, 4, o.0);
+        }
         if let Some((amount, range)) = plan.healing_nova {
             self.consumable_heal_nova(plan.player, amount, range)?;
         }
