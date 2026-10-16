@@ -14,41 +14,15 @@ impl World {
             quest::validate(&self.content, *kind)?;
             crate::loot::validate(&self.content, *kind)?;
         }
+        let mut placed = Vec::new();
         for (kind, terrains) in [
             (0x91f, &[7, 6][..]),
             (0x91b, &[6, 7][..]),
             (0x928, &[4, 3][..]),
             (0x675, &[5, 2][..]),
         ] {
-            let mut candidates: Vec<_> = self
-                .map
-                .cells
-                .iter()
-                .enumerate()
-                .filter_map(|(i, c)| {
-                    let p = Pos {
-                        x: (i % self.map.width as usize) as f32 + 0.5,
-                        y: (i / self.map.width as usize) as f32 + 0.5,
-                    };
-                    (terrains.contains(&c.terrain) && c.object.is_none() && self.walkable(p))
-                        .then_some(p)
-                })
-                .collect();
-            candidates.shuffle(&mut self.rng);
-            let pos = candidates
-                .into_iter()
-                .find(|p| {
-                    self.map
-                        .spawns
-                        .iter()
-                        .all(|(x, y)| p.distance(Pos { x: *x, y: *y }) >= 64.)
-                        && self
-                            .entities
-                            .values()
-                            .filter(|e| self.content.objects[&e.kind].enemy)
-                            .all(|e| p.distance(e.pos) >= if e.quest.is_some() { 32. } else { 8. })
-                })
-                .context("Realm cannot place finite named quest in its selected habitat")?;
+            let (pos, area) = self.place_named_setpiece(kind, terrains, &placed)?;
+            placed.push(area);
             let id = self.spawn_entity(kind, pos, vec![])?;
             let e = self.entities.get_mut(&id).unwrap();
             e.quest = Some(id);

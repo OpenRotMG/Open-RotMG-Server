@@ -13,6 +13,7 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        0x122 | 0x162 | 0x163 => &[],
         0x91b | 0x91f | 0x928 | 0x675 | 0x6c2 | 0x923 => &[],
         0x676 => &[(0.05, Item(0xa23))],
         0x677 => &[(0.05, Item(0xa22))],

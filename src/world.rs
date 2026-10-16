@@ -38,6 +38,9 @@ mod population_tests;
 mod realm_quests;
 #[cfg(test)]
 mod realm_quests_tests;
+mod realm_setpieces;
+#[cfg(test)]
+mod realm_setpieces_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 #[cfg(test)]
@@ -630,7 +633,10 @@ impl Directory {
             let kinds: BTreeSet<_> = world
                 .entities
                 .values()
-                .filter(|e| world.content.objects[&e.kind].enemy)
+                .filter(|e| {
+                    let object = &world.content.objects[&e.kind];
+                    object.enemy && object.class != "Wall"
+                })
                 .map(|e| e.kind)
                 .collect();
             for kind in kinds {
@@ -3226,7 +3232,11 @@ impl World {
         let ids: Vec<_> = self
             .entities
             .values()
-            .filter(|e| self.content.objects[&e.kind].enemy || matches!(e.kind, 0x173 | 0xd7d))
+            .filter(|e| {
+                let object = &self.content.objects[&e.kind];
+                // Breakable scenery takes damage but has no movement/attack state machine.
+                object.class != "Wall" && (object.enemy || matches!(e.kind, 0x173 | 0xd7d))
+            })
             .map(|e| e.id)
             .collect();
         for id in ids {
@@ -5410,7 +5420,10 @@ mod tests {
         assert_eq!(
             w.entities
                 .values()
-                .filter(|e| w.content.objects[&e.kind].enemy)
+                .filter(|e| {
+                    let object = &w.content.objects[&e.kind];
+                    object.enemy && object.class != "Wall"
+                })
                 .count(),
             w.population
                 .iter()
