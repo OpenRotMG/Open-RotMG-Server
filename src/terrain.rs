@@ -1,5 +1,6 @@
 use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
+mod rivers;
 
 fn mix(mut value: u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -117,60 +118,6 @@ fn decorate(cell: &mut Cell, random: u64) -> Result<()> {
     Ok(())
 }
 
-fn rivers(cells: &mut [Cell], heights: &[f64], seed: u64, size: i32) -> Result<()> {
-    let center = size as f64 / 2.;
-    let count = size / 64;
-    for sector in 0..count {
-        let mut at = cells
-            .iter()
-            .enumerate()
-            .filter(|(i, c)| {
-                let x = (*i as i32 % size) as f64 + 0.5 - center;
-                let y = (*i as i32 / size) as f64 + 0.5 - center;
-                let angle = y.atan2(x).rem_euclid(std::f64::consts::TAU);
-                matches!(c.terrain, 2..=10)
-                    && (0.28..0.45).contains(&heights[*i])
-                    && (angle / std::f64::consts::TAU * count as f64) as i32 == sector
-            })
-            .max_by_key(|(i, _)| mix(seed ^ *i as u64))
-            .map(|(i, _)| i)
-            .context("Realm river sector has no headwater")?;
-        let mut path = Vec::new();
-        while !matches!(cells[at].ground, 0xbc | 0x72 | 0x73) {
-            path.push(at);
-            let (x, y) = (at as i32 % size, at as i32 / size);
-            let next = (-1..=1)
-                .flat_map(|dy| (-1..=1).map(move |dx| (x + dx, y + dy)))
-                .filter(|(nx, ny)| *nx >= 0 && *ny >= 0 && *nx < size && *ny < size)
-                .map(|(nx, ny)| (ny * size + nx) as usize)
-                .min_by(|a, b| heights[*a].total_cmp(&heights[*b]))
-                .context("Realm river has no downhill neighbor")?;
-            ensure!(
-                heights[next] < heights[at],
-                "Realm river stalled at ({x},{y}), seed {seed}"
-            );
-            at = next;
-        }
-        // Draw after routing so a river does not stop on its own widened bank.
-        for (step, i) in path.into_iter().enumerate() {
-            let (x, y) = (i as i32 % size, i as i32 / size);
-            let width = if step == 0 { 2 } else { 1 };
-            for ny in y - width..=y + width {
-                for nx in x - width..=x + width {
-                    ensure!(
-                        nx >= 0 && ny >= 0 && nx < size && ny < size,
-                        "river bank outside Realm"
-                    );
-                    let cell = &mut cells[(ny * size + nx) as usize];
-                    cell.ground = 0x73;
-                    cell.terrain = 0;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
     ensure!(
         (192..=768).contains(&size),
@@ -210,7 +157,8 @@ pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
             });
         }
     }
-    rivers(&mut cells, &heights, seed, size)?;
+    let streams = rivers::carve(&mut cells, &heights, seed, size)
+        .with_context(|| format!("Realm drainage failed: seed={seed}, size={size}"))?;
     for (i, cell) in cells.iter_mut().enumerate() {
         decorate(cell, mix(seed ^ 0xbb67ae8584caa73b ^ i as u64))?;
     }
@@ -258,7 +206,10 @@ pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
         roads = map.cells.iter().filter(|c| c.ground == 0xd0).count(),
         scenery = map.cells.iter().filter(|c| c.object.is_some()).count(),
         rocks = map.cells.iter().filter(|c| c.object == Some(0x107)).count(),
-        rivers = size / 64,
+        rivers = streams.headwaters,
+        river_edges = streams.edges,
+        river_confluences = streams.confluences,
+        river_bends = streams.bends,
         "generated Realm terrain; original generator unverified"
     );
     Ok(map)

@@ -285,7 +285,9 @@ impl World {
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
-                            c.region == 0 && self.content.grounds[&c.ground] > 0.
+                            c.region == 0
+                                && self.content.grounds[&c.ground] > 0.
+                                && !matches!(c.ground, 0x72 | 0x73)
                         })
                     })
             })
@@ -337,5 +339,32 @@ impl World {
             "named Realm boss setpiece placed"
         );
         Ok((pos, area))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authored_arenas_preserve_generated_waterways() {
+        let content = super::super::tests::world().content;
+        for seed in [0, 12351, u64::MAX] {
+            let d = Directory::prepared(std::path::Path::new("data"), content.clone(), 4, seed)
+                .unwrap();
+            let raw = &d.templates["realm-shore"];
+            let live = &d.worlds[&-3].map;
+            for (i, (before, after)) in raw.cells.iter().zip(&live.cells).enumerate() {
+                if matches!(before.ground, 0x72 | 0x73) {
+                    assert_eq!(
+                        after.ground,
+                        before.ground,
+                        "seed {seed}: arena erased water at {},{}",
+                        i % 512,
+                        i / 512
+                    );
+                }
+            }
+        }
     }
 }
