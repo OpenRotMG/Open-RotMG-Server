@@ -173,7 +173,7 @@ use crate::content::WIZARD;
 use crate::world::view::{
     Lifecycle, MapInfo, OwnCharacter, Session, Tile, VisibleObject, VisibleProjectile,
 };
-fn content() -> Content {
+pub(super) fn content() -> Content {
     Content::load(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("data")
@@ -181,7 +181,7 @@ fn content() -> Content {
     )
     .unwrap()
 }
-fn view(content: &Content) -> PlayerView {
+pub(super) fn view(content: &Content) -> PlayerView {
     let class = content.get(WIZARD).unwrap();
     PlayerView {
         session: Session {
@@ -235,7 +235,7 @@ fn view(content: &Content) -> PlayerView {
         projectiles: vec![],
     }
 }
-fn object(id: i32, kind: u16, x: f32, y: f32) -> VisibleObject {
+pub(super) fn object(id: i32, kind: u16, x: f32, y: f32) -> VisibleObject {
     VisibleObject {
         id,
         kind,
@@ -434,14 +434,26 @@ fn only_addressed_native_chat_changes_companion_memory() {
             body: w.0,
         }
     };
-    assert!(!brain.receive(packet("Trellis follow me"), &v).unwrap());
+    assert!(
+        !brain
+            .receive(packet("Trellis follow me"), &v, true)
+            .unwrap()
+    );
     assert!(brain.companion.is_none());
     let mut sender = object(9, WIZARD, 12.5, 11.5);
     sender.equipped = v.character.items[..4].to_vec();
     v.objects.push(sender);
-    assert!(!brain.receive(packet("Bayleaf follow me"), &v).unwrap());
+    assert!(
+        !brain
+            .receive(packet("Bayleaf follow me"), &v, true)
+            .unwrap()
+    );
     assert!(brain.companion.is_none());
-    assert!(brain.receive(packet("Trellis follow me"), &v).unwrap());
+    assert!(
+        brain
+            .receive(packet("Trellis follow me"), &v, true)
+            .unwrap()
+    );
     assert_eq!(brain.companion, Some(9));
     v.objects[0].position = Pos { x: 20.5, y: 11.5 };
     let mut leader = object(2, WIZARD, 11.5, 22.5);
@@ -492,7 +504,7 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     assert!(follower.decide(&v, &content).unwrap().chat.is_none());
     for (name, actor, recipient) in [("Reed", 9, ""), ("Mossy", -1, ""), ("Mossy", 2, "Human")] {
         follower
-            .receive(packet(name, actor, recipient, "nexus"), &v)
+            .receive(packet(name, actor, recipient, "nexus"), &v, true)
             .unwrap();
         assert!(follower.regroup_call.is_none());
     }
@@ -502,21 +514,21 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     leader_view.time_ms += 10000;
     leader_view.tick += 200;
     leader
-        .receive(packet("Juniper", 9, "", "tp?"), &leader_view)
+        .receive(packet("Juniper", 9, "", "tp?"), &leader_view, true)
         .unwrap();
     assert!(leader.regroup_call.is_none());
     leader
-        .receive(packet("Trellis", 1, "", "tp?"), &leader_view)
+        .receive(packet("Trellis", 1, "", "tp?"), &leader_view, true)
         .unwrap();
     let reply = leader.decide(&leader_view, &content).unwrap();
     assert_eq!(reply.chat, Some("nexus"));
     assert!(matches!(reply.journey, Some(Journey::Nexus)));
     follower
-        .receive(packet("Mossy", 2, "", "tp here"), &v)
+        .receive(packet("Mossy", 2, "", "tp here"), &v, true)
         .unwrap();
     assert!(follower.regroup_call.is_none());
     follower
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Mossy", 2, "", "nexus"), &v, true)
         .unwrap();
     v.tick += 5;
     let decision = follower.decide(&v, &content).unwrap();
@@ -524,26 +536,26 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     assert!(decision.aim.is_none() && decision.item.is_none() && decision.movement.is_none());
     assert!(v.objects.is_empty());
     follower
-        .receive(packet("Mossy", 2, "", "tp here"), &v)
+        .receive(packet("Mossy", 2, "", "tp here"), &v, true)
         .unwrap();
     v.tick += 5;
     assert!(follower.decide(&v, &content).unwrap().journey.is_none());
     let mut unsolicited = Brain::new(PROFILES[2], &v);
     unsolicited
-        .receive(packet("Mossy", 2, "", "tp here"), &v)
+        .receive(packet("Mossy", 2, "", "tp here"), &v, true)
         .unwrap();
     assert!(unsolicited.regroup_call.is_none());
     let mut occupied = Brain::new(PROFILES[2], &v);
     occupied.requested_until = v.time_ms + 5000;
     occupied.companion = Some(9);
     occupied
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Mossy", 2, "", "nexus"), &v, true)
         .unwrap();
     assert!(occupied.regroup_call.is_none());
     occupied.companion = None;
     occupied.leader_seen = Some((2, v.position, v.time_ms));
     occupied
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Mossy", 2, "", "nexus"), &v, true)
         .unwrap();
     assert!(matches!(
         occupied.decide(&v, &content).unwrap().journey,
@@ -552,14 +564,14 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     let mut expired = Brain::new(PROFILES[2], &v);
     expired.requested_until = v.time_ms + 5000;
     expired
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Mossy", 2, "", "nexus"), &v, true)
         .unwrap();
     v.time_ms += 5001;
     assert!(expired.decide(&v, &content).unwrap().journey.is_none());
     let mut injured = Brain::new(PROFILES[2], &v);
     injured.requested_until = v.time_ms + 5000;
     injured
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Mossy", 2, "", "nexus"), &v, true)
         .unwrap();
     v.character.hp = 30;
     assert!(matches!(
@@ -570,7 +582,7 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     let mut endangered = Brain::new(PROFILES[1], &leader_view);
     endangered.next_call = leader_view.time_ms;
     endangered
-        .receive(packet("Trellis", 1, "", "tp?"), &leader_view)
+        .receive(packet("Trellis", 1, "", "tp?"), &leader_view, true)
         .unwrap();
     let kind = content.objects.values().find(|o| o.enemy).unwrap().kind;
     leader_view.objects.push(object(9, kind, 14.5, 11.5));
@@ -604,6 +616,7 @@ fn nexus_call_reunites_the_whole_crew_not_only_the_requester() {
                     body: w.0,
                 },
                 &v,
+                true,
             )
             .unwrap();
         assert!(matches!(
@@ -637,6 +650,7 @@ fn observed_crew_can_teleport_and_nexus_arrivals_wait_for_peers() {
                 body: w.0,
             },
             &v,
+            true,
         )
         .unwrap();
     assert!(matches!(
@@ -952,6 +966,7 @@ fn earned_portal_call_and_observed_cave_exit_drive_normal_transfers() {
                 body: out.0,
             },
             &v,
+            true,
         )
         .unwrap();
     v.objects.remove(0);

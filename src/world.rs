@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
-mod chat;
+pub(crate) mod chat;
 #[cfg(test)]
 mod client_contract_tests;
 mod endgame;

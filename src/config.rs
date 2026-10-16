@@ -16,6 +16,8 @@ pub struct Config {
     pub behind_proxy: bool,
     #[serde(default = "default_shore_bots")]
     pub shore_bots: bool,
+    #[serde(default)]
+    pub bot_llm: bool,
     pub realm_seed: u64,
 }
 fn default_shore_bots() -> bool {
@@ -27,6 +29,7 @@ impl Config {
         let mut port = None;
         let mut control = false;
         let mut shore_bots = None;
+        let mut bot_llm = None;
         let mut client_dir = None;
         let mut state_dir = None;
         let mut test_state = false;
@@ -52,6 +55,10 @@ impl Config {
                     ensure!(shore_bots.is_none(), "duplicate or conflicting bot flags");
                     shore_bots = Some(arg == "--shore-bots");
                 }
+                "--bot-llm" | "--no-bot-llm" => {
+                    ensure!(bot_llm.is_none(), "duplicate or conflicting LLM flags");
+                    bot_llm = Some(arg == "--bot-llm");
+                }
                 "--client" => {
                     ensure!(client_dir.is_none(), "duplicate --client");
                     client_dir = Some(PathBuf::from(
@@ -68,7 +75,7 @@ impl Config {
                     ));
                 }
                 _ => anyhow::bail!(
-                    "usage: openrotmg [--config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--client DIR] [--state DIR]"
+                    "usage: openrotmg [--config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--bot-llm | --no-bot-llm] [--client DIR] [--state DIR]"
                 ),
             }
         }
@@ -91,6 +98,7 @@ impl Config {
                 max_players: 85,
                 behind_proxy: false,
                 shore_bots: true,
+                bot_llm: false,
                 realm_seed: rand::random(),
             }
         };
@@ -108,6 +116,9 @@ impl Config {
         }
         if let Some(enabled) = shore_bots {
             config.shore_bots = enabled;
+        }
+        if let Some(enabled) = bot_llm {
+            config.bot_llm = enabled;
         }
         config.test_state |= test_state;
         control |= test_state;
@@ -187,6 +198,16 @@ mod tests {
         c = config();
         c.state = "relative".into();
         assert!(c.validate(false).is_err());
+    }
+    #[test]
+    fn bot_dialogue_is_explicitly_off_unless_selected() {
+        assert!(!config().bot_llm);
+        assert!(!Config::load(&[]).unwrap().0.bot_llm);
+        assert!(Config::load(&["--bot-llm".into()]).unwrap().0.bot_llm);
+        assert!(!Config::load(&["--no-bot-llm".into()]).unwrap().0.bot_llm);
+        for flags in [["--bot-llm", "--bot-llm"], ["--bot-llm", "--no-bot-llm"]] {
+            assert!(Config::load(&flags.map(String::from)).is_err());
+        }
     }
     #[test]
     fn optional_local_port() {

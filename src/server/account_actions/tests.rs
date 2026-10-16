@@ -27,6 +27,7 @@ pub(crate) fn fixture() -> (PathBuf, App) {
         max_players: 16,
         behind_proxy: false,
         shore_bots: false,
+        dialogue: None,
         requests: Arc::default(),
         connections: Arc::new(tokio::sync::Semaphore::new(32)),
         control: None,

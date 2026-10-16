@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
         .json()
         .init();
     let (config, dev_control) = config::Config::load(&args)?;
+    let dialogue = bots::dialogue::Service::configured(config.bot_llm)?;
     let client = config.client;
     let state = config.state;
     tracing::info!(address=%config.bind, state=%state.display(), client=%client.display(), data=%config.data.display(), "local environment selected");
@@ -137,6 +138,7 @@ async fn main() -> Result<()> {
         max_players: config.max_players,
         behind_proxy: config.behind_proxy,
         shore_bots: config.shore_bots,
+        dialogue,
         requests: Arc::default(),
         connections: Arc::new(tokio::sync::Semaphore::new(config.max_players * 2)),
         control,

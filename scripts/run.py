@@ -92,6 +92,7 @@ def main():
     bots = parser.add_mutually_exclusive_group()
     bots.add_argument("--shore-bots", action="store_true", help="Enable the three default autonomous Wizards explicitly")
     bots.add_argument("--no-shore-bots", action="store_true", help="Disable autonomous Wizards for isolated testing")
+    parser.add_argument("--bot-llm", action="store_true", help="Enable Nemotron social dialogue; requires AI_GATEWAY_API_KEY")
     parser.add_argument("--release", action="store_true", help="Build optimized gameplay")
     args = parser.parse_args()
     if shutil.which("cargo") is None:
@@ -132,6 +133,8 @@ def main():
                 command.append("--shore-bots")
             if args.no_shore_bots:
                 command.append("--no-shore-bots")
+            if args.bot_llm:
+                command.append("--bot-llm")
             code = run(command, ROOT, log)
             if code:
                 raise RuntimeError(f"Server exited with status {code}. See the error above and {LOG}.")
