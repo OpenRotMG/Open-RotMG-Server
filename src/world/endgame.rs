@@ -246,7 +246,8 @@ impl Directory {
         for id in &heroes {
             let hero = world.entities.get(id).context("closure hero missing")?;
             ensure!(
-                (HEROES.contains(&hero.kind) || crate::quest::ROOTS.contains(&hero.kind) && hero.quest == Some(*id))
+                (HEROES.contains(&hero.kind)
+                    || crate::quest::ROOTS.contains(&hero.kind) && hero.quest == Some(*id))
                     && hero.hp > 0,
                 "closure identity is not a living qualifying hero"
             );
@@ -660,12 +661,13 @@ mod tests {
         let mut d = super::super::tests::directory();
         let originals = d.endgame.cycles[&-3].remaining.clone();
         assert_eq!(originals.len(), 10);
-        let saved_cycle=d.endgame.cycles.remove(&-3).unwrap();
-        let w=d.worlds.get_mut(&-3).unwrap();let pos=w.entities[originals.iter().next().unwrap()].pos;
-        let forged=w.spawn_entity(0x91f,pos,vec![]).unwrap();
-        assert!(d.bind_realm_heroes(-3,BTreeSet::from([forged])).is_err());
+        let saved_cycle = d.endgame.cycles.remove(&-3).unwrap();
+        let w = d.worlds.get_mut(&-3).unwrap();
+        let pos = w.entities[originals.iter().next().unwrap()].pos;
+        let forged = w.spawn_entity(0x91f, pos, vec![]).unwrap();
+        assert!(d.bind_realm_heroes(-3, BTreeSet::from([forged])).is_err());
         d.worlds.get_mut(&-3).unwrap().remove_entity(forged);
-        d.endgame.cycles.insert(-3,saved_cycle);
+        d.endgame.cycles.insert(-3, saved_cycle);
         for kind in crate::quest::ROOTS {
             let w = d.worlds.get_mut(&-3).unwrap();
             let tag = w.entities.values().find(|e| e.kind == kind).unwrap().id;
