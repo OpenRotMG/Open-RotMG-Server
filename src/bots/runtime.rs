@@ -83,7 +83,12 @@ async fn continue_character(
 ) -> Result<(Character, i32)> {
     // Departure can commit a death after the transfer was requested.
     let character = store
-        .shore_character(profile.name.into(), content, profile.healer)
+        .shore_character(
+            profile.identity.into(),
+            profile.name.into(),
+            content,
+            profile.healer,
+        )
         .await?;
     ensure!(
         character.account == session.account,
@@ -142,7 +147,7 @@ async fn death_committed_during_departure_rebuilds_in_realm_without_resurrection
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let profile = PROFILES[0];
     let mut wizard = store
-        .shore_character(profile.name.into(), &content, true)
+        .shore_character(profile.identity.into(), profile.name.into(), &content, true)
         .await
         .unwrap();
     wizard.level = 5;
@@ -204,7 +209,12 @@ pub async fn start(app: &App) -> Result<()> {
     for profile in PROFILES {
         let character = app
             .store
-            .shore_character(profile.name.into(), &app.content, profile.healer)
+            .shore_character(
+                profile.identity.into(),
+                profile.name.into(),
+                &app.content,
+                profile.healer,
+            )
             .await?;
         launch(app, profile, character, -3, None, None).await?;
     }
@@ -276,7 +286,7 @@ async fn launch(
                             _=tokio::time::sleep(Duration::from_secs(3))=>{},
                             _=shutdown.changed()=>return Ok(()),
                         }
-                        let character = app.store.shore_character(profile.name.into(), &app.content, profile.healer).await?;
+                        let character = app.store.shore_character(profile.identity.into(), profile.name.into(), &app.content, profile.healer).await?;
                         ensure!(character.account == account && character.id != view.session.character,
                             "replacement did not preserve account and replace the dead character");
                         (id, output, sender, brain) = enter(&app, profile, character, -3, None).await?;

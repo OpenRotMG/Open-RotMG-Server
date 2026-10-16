@@ -4,7 +4,7 @@ fn exploration_remains_available_when_a_higher_ranked_route_is_blocked() {
     let c = content();
     let mut v = view(&c);
     let mut ally = object(4, WIZARD, 22.5, 11.5);
-    ally.name = "Mossy".into();
+    ally.name = "Biceps".into();
     ally.equipped = vec![0xa97];
     v.objects.push(ally);
     assert_eq!(
@@ -267,7 +267,7 @@ fn same_observation_produces_resource_recovery_and_companion_choices() {
     loot.contents = vec![0xa22];
     v.objects.push(loot);
     let mut ally = object(4, WIZARD, 22.5, 11.5);
-    ally.name = "Mossy".into();
+    ally.name = "Biceps".into();
     ally.equipped = vec![0xa97];
     v.objects.push(ally);
     let goals: Vec<_> = PROFILES[..3]
@@ -434,18 +434,18 @@ fn only_addressed_native_chat_changes_companion_memory() {
             body: w.0,
         }
     };
-    assert!(!brain.receive(packet("Trellis follow me"), &v).unwrap());
+    assert!(!brain.receive(packet("BattleCrus follow me"), &v).unwrap());
     assert!(brain.companion.is_none());
     let mut sender = object(9, WIZARD, 12.5, 11.5);
     sender.equipped = v.character.items[..4].to_vec();
     v.objects.push(sender);
-    assert!(!brain.receive(packet("Bayleaf follow me"), &v).unwrap());
+    assert!(!brain.receive(packet("Triceps follow me"), &v).unwrap());
     assert!(brain.companion.is_none());
-    assert!(brain.receive(packet("Trellis follow me"), &v).unwrap());
+    assert!(brain.receive(packet("BattleCrus follow me"), &v).unwrap());
     assert_eq!(brain.companion, Some(9));
     v.objects[0].position = Pos { x: 20.5, y: 11.5 };
     let mut leader = object(2, WIZARD, 11.5, 22.5);
-    leader.name = "Mossy".into();
+    leader.name = "Biceps".into();
     leader.equipped = v.character.items[..4].to_vec();
     v.objects.push(leader);
     brain.goal = Goal::Follow(2);
@@ -490,7 +490,11 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     assert_eq!(follower.requested_until, v.time_ms + 5000);
     v.tick += 5;
     assert!(follower.decide(&v, &content).unwrap().chat.is_none());
-    for (name, actor, recipient) in [("Reed", 9, ""), ("Mossy", -1, ""), ("Mossy", 2, "Human")] {
+    for (name, actor, recipient) in [
+        ("ExElite", 9, ""),
+        ("Biceps", -1, ""),
+        ("Biceps", 2, "Human"),
+    ] {
         follower
             .receive(packet(name, actor, recipient, "nexus"), &v)
             .unwrap();
@@ -502,21 +506,21 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     leader_view.time_ms += 10000;
     leader_view.tick += 200;
     leader
-        .receive(packet("Juniper", 9, "", "tp?"), &leader_view)
+        .receive(packet("Kadabu", 9, "", "tp?"), &leader_view)
         .unwrap();
     assert!(leader.regroup_call.is_none());
     leader
-        .receive(packet("Trellis", 1, "", "tp?"), &leader_view)
+        .receive(packet("BattleCrus", 1, "", "tp?"), &leader_view)
         .unwrap();
     let reply = leader.decide(&leader_view, &content).unwrap();
     assert_eq!(reply.chat, Some("nexus"));
     assert!(matches!(reply.journey, Some(Journey::Nexus)));
     follower
-        .receive(packet("Mossy", 2, "", "tp here"), &v)
+        .receive(packet("Biceps", 2, "", "tp here"), &v)
         .unwrap();
     assert!(follower.regroup_call.is_none());
     follower
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Biceps", 2, "", "nexus"), &v)
         .unwrap();
     v.tick += 5;
     let decision = follower.decide(&v, &content).unwrap();
@@ -524,26 +528,26 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     assert!(decision.aim.is_none() && decision.item.is_none() && decision.movement.is_none());
     assert!(v.objects.is_empty());
     follower
-        .receive(packet("Mossy", 2, "", "tp here"), &v)
+        .receive(packet("Biceps", 2, "", "tp here"), &v)
         .unwrap();
     v.tick += 5;
     assert!(follower.decide(&v, &content).unwrap().journey.is_none());
     let mut unsolicited = Brain::new(PROFILES[2], &v);
     unsolicited
-        .receive(packet("Mossy", 2, "", "tp here"), &v)
+        .receive(packet("Biceps", 2, "", "tp here"), &v)
         .unwrap();
     assert!(unsolicited.regroup_call.is_none());
     let mut occupied = Brain::new(PROFILES[2], &v);
     occupied.requested_until = v.time_ms + 5000;
     occupied.companion = Some(9);
     occupied
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Biceps", 2, "", "nexus"), &v)
         .unwrap();
     assert!(occupied.regroup_call.is_none());
     occupied.companion = None;
     occupied.leader_seen = Some((2, v.position, v.time_ms));
     occupied
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Biceps", 2, "", "nexus"), &v)
         .unwrap();
     assert!(matches!(
         occupied.decide(&v, &content).unwrap().journey,
@@ -552,14 +556,14 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     let mut expired = Brain::new(PROFILES[2], &v);
     expired.requested_until = v.time_ms + 5000;
     expired
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Biceps", 2, "", "nexus"), &v)
         .unwrap();
     v.time_ms += 5001;
     assert!(expired.decide(&v, &content).unwrap().journey.is_none());
     let mut injured = Brain::new(PROFILES[2], &v);
     injured.requested_until = v.time_ms + 5000;
     injured
-        .receive(packet("Mossy", 2, "", "nexus"), &v)
+        .receive(packet("Biceps", 2, "", "nexus"), &v)
         .unwrap();
     v.character.hp = 30;
     assert!(matches!(
@@ -570,7 +574,7 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     let mut endangered = Brain::new(PROFILES[1], &leader_view);
     endangered.next_call = leader_view.time_ms;
     endangered
-        .receive(packet("Trellis", 1, "", "tp?"), &leader_view)
+        .receive(packet("BattleCrus", 1, "", "tp?"), &leader_view)
         .unwrap();
     let kind = content.objects.values().find(|o| o.enemy).unwrap().kind;
     leader_view.objects.push(object(9, kind, 14.5, 11.5));
@@ -590,7 +594,7 @@ fn nexus_call_reunites_the_whole_crew_not_only_the_requester() {
     for profile in [PROFILES[0], PROFILES[2]] {
         let mut follower = Brain::new(profile, &v);
         let mut w = crate::wire::Writer::new();
-        w.utf("Mossy")
+        w.utf("Biceps")
             .i32(2)
             .i32(0)
             .u8(5)
@@ -620,10 +624,10 @@ fn observed_crew_can_teleport_and_nexus_arrivals_wait_for_peers() {
     let mut follower = Brain::new(PROFILES[2], &v);
     follower.requested_until = v.time_ms + 5000;
     let mut peer = object(2, WIZARD, 23.5, 11.5);
-    peer.name = "Mossy".into();
+    peer.name = "Biceps".into();
     v.objects.push(peer);
     let mut w = crate::wire::Writer::new();
-    w.utf("Mossy")
+    w.utf("Biceps")
         .i32(2)
         .i32(0)
         .u8(5)
@@ -802,8 +806,8 @@ fn cohorts_choose_distinct_observed_leaders_not_an_uninvited_human() {
     let content = content();
     let mut v = view(&content);
     for (id, name, x, y) in [
-        (2, "Mossy", 21.5, 11.5),
-        (3, "Reed", 11.5, 21.5),
+        (2, "Biceps", 21.5, 11.5),
+        (3, "ExElite", 11.5, 21.5),
         (4, "Human", 10.5, 11.5),
     ] {
         let mut peer = object(id, WIZARD, x, y);
@@ -825,7 +829,7 @@ fn cohorts_choose_distinct_observed_leaders_not_an_uninvited_human() {
             .goal,
         Goal::Follow(3)
     );
-    v.objects.retain(|o| o.name != "Mossy");
+    v.objects.retain(|o| o.name != "Biceps");
     assert!(matches!(
         Brain::new(PROFILES[1], &v)
             .decide(&v, &content)
@@ -843,7 +847,7 @@ fn priest_heals_actual_public_injury_and_respects_range_mana_and_cooldown() {
     v.character.items = content.get(v.character.class).unwrap().equipment.clone();
     let mut peer = object(2, WIZARD, 12.5, 11.5);
     peer.equipped = vec![0xa97];
-    peer.name = "Mossy".into();
+    peer.name = "Biceps".into();
     v.objects.push(peer);
     let mut brain = Brain::new(PROFILES[0], &v);
     assert!(brain.decide(&v, &content).unwrap().item.is_none());
@@ -878,7 +882,7 @@ fn leader_waits_for_a_real_straggler_and_invitation_expires() {
     let content = content();
     let mut v = view(&content);
     let mut peer = object(2, WIZARD, 23.5, 11.5);
-    peer.name = "Trellis".into();
+    peer.name = "BattleCrus".into();
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.push(peer);
     let d = Brain::new(PROFILES[1], &v).decide(&v, &content).unwrap();
@@ -896,7 +900,7 @@ fn regroup_requests_only_a_visible_healthy_peer_and_is_paced() {
     let content = content();
     let mut v = view(&content);
     let mut leader = object(2, WIZARD, 21.5, 11.5);
-    leader.name = "Mossy".into();
+    leader.name = "Biceps".into();
     leader.equipped = v.character.items[..4].to_vec();
     v.objects.push(leader);
     let mut brain = Brain::new(PROFILES[2], &v);
@@ -922,7 +926,7 @@ fn earned_portal_call_and_observed_cave_exit_drive_normal_transfers() {
     let content = content();
     let mut v = view(&content);
     v.character.level = 2;
-    for (id, name) in [(2, "Bayleaf"), (3, "Trellis")] {
+    for (id, name) in [(2, "Triceps"), (3, "BattleCrus")] {
         let mut member = object(id, WIZARD, 12.5, 11.5);
         member.name = name.into();
         member.equipped = v.character.items[..4].to_vec();
@@ -933,12 +937,12 @@ fn earned_portal_call_and_observed_cave_exit_drive_normal_transfers() {
     assert_eq!(leader.goal, Goal::Portal(4));
     assert_eq!(leader.chat, Some("pc here"));
     assert!(matches!(leader.journey, Some(Journey::Portal(4))));
-    v.objects[0].name = "Mossy".into();
+    v.objects[0].name = "Biceps".into();
     v.objects.remove(1);
     let mut follower = Brain::new(PROFILES[2], &v);
     follower.decide(&v, &content).unwrap();
     let mut out = crate::wire::Writer::new();
-    out.utf("Mossy")
+    out.utf("Biceps")
         .i32(2)
         .i32(0)
         .u8(5)
@@ -1020,7 +1024,7 @@ fn crews_search_recent_observed_contacts_without_teleporting_to_hidden_peers() {
     let content = content();
     let mut v = view(&content);
     let mut peer = object(2, WIZARD, 19.5, 11.5);
-    peer.name = "Mossy".into();
+    peer.name = "Biceps".into();
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.push(peer);
     let mut follower = Brain::new(PROFILES[2], &v);
@@ -1040,7 +1044,7 @@ fn crews_search_recent_observed_contacts_without_teleporting_to_hidden_peers() {
     ));
 
     let mut peer = object(2, WIZARD, 19.5, 11.5);
-    peer.name = "Trellis".into();
+    peer.name = "BattleCrus".into();
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.push(peer);
     let mut leader = Brain::new(PROFILES[1], &v);
@@ -1068,7 +1072,7 @@ fn equipped_crews_accept_snake_pit_but_starters_do_not() {
     let c = content();
     let mut v = view(&c);
     v.objects.push(object(2, 0x718, 12.5, 11.5));
-    for (id, name) in [(3, "Bayleaf"), (4, "Trellis")] {
+    for (id, name) in [(3, "Triceps"), (4, "BattleCrus")] {
         let mut peer = object(id, WIZARD, 12.5, 11.5);
         peer.name = name.into();
         peer.equipped = c.get(WIZARD).unwrap().equipment[..4].to_vec();
@@ -1481,7 +1485,7 @@ fn a_visible_crews_destination_outweighs_the_followers_different_quest_marker() 
     v.map.width = 200;
     v.map.height = 200;
     let mut leader = object(2, WIZARD, 18.5, 11.5);
-    leader.name = "Mossy".into();
+    leader.name = "Biceps".into();
     leader.equipped = v.character.items[..4].to_vec();
     let target = object(3, 0x609, 150.5, 150.5);
     v.objects.extend([leader, target]);
@@ -1502,7 +1506,7 @@ fn a_leader_gathers_an_observed_straggler_before_pursuing_another_distant_quest(
     v.map.width = 200;
     v.map.height = 200;
     let mut peer = object(2, WIZARD, 24.5, 11.5);
-    peer.name = "Trellis".into();
+    peer.name = "BattleCrus".into();
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.extend([peer, object(3, 0x609, 150.5, 150.5)]);
     v.quest = Some(3);
@@ -1708,7 +1712,7 @@ fn admitted_dungeon_intentions_beat_optional_nearby_fighting() {
     enemy.hp = 500;
     enemy.max_hp = 500;
     v.objects.push(enemy);
-    for (id, name) in [(4, "Bayleaf"), (5, "Trellis")] {
+    for (id, name) in [(4, "Triceps"), (5, "BattleCrus")] {
         let mut peer = object(id, WIZARD, 18.5, 12.5);
         peer.name = name.into();
         peer.hp = 500;

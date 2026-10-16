@@ -443,24 +443,30 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     }
     pub async fn shore_character(
         &self,
+        identity: String,
         name: String,
         content: &Content,
         prefer_priest: bool,
     ) -> Result<Character> {
         let guid = self.call(move |db| {
             let tx = db.transaction()?;
-            let existing: Option<String> = tx.query_row(
-                "SELECT guid FROM accounts JOIN shore_bots ON accounts.id=shore_bots.account WHERE shore_bots.name=?1",
-                [&name], |r| r.get(0)).optional()
+            let existing: Option<(String, i32)> = tx.query_row(
+                "SELECT guid,accounts.id FROM accounts JOIN shore_bots ON accounts.id=shore_bots.account WHERE shore_bots.name=?1",
+                [&identity], |r| Ok((r.get(0)?, r.get(1)?))).optional()
                 .context("read shore bot identity; credential-free restores require operator recovery")?;
             let guid = match existing {
-                Some(guid) => guid,
+                Some((guid, account)) => {
+                    if tx.execute("UPDATE accounts SET name=?1 WHERE id=?2 AND name<>?1", params![name,account])? > 0 {
+                        tracing::info!(account, identity, name, "autonomous account renamed");
+                    }
+                    guid
+                },
                 None => {
                     let guid = format!("shore-{:032x}", rand::random::<u128>());
                     tx.execute("INSERT INTO accounts(guid,name) VALUES(?1,?2)", params![guid,name])?;
                     let account = tx.last_insert_rowid();
                     tx.execute("INSERT INTO account_fame(account,balance,earned) VALUES(?1,0,0)", [account])?;
-                    tx.execute("INSERT INTO shore_bots(name,account) VALUES(?1,?2)", params![name,account])?;
+                    tx.execute("INSERT INTO shore_bots(name,account) VALUES(?1,?2)", params![identity,account])?;
                     guid
                 }
             };
@@ -1512,7 +1518,7 @@ mod tests {
         let content = Content::load(Path::new("data")).unwrap();
         let store = Store::open(Path::new(":memory:"), &content).unwrap();
         let mut wizard = store
-            .shore_character("Bayleaf".into(), &content, true)
+            .shore_character("Bayleaf".into(), "Triceps".into(), &content, true)
             .await
             .unwrap();
         assert_eq!(wizard.class, WIZARD);
@@ -1520,7 +1526,7 @@ mod tests {
         wizard.exp = level_start(5).unwrap();
         store.progress(wizard.clone()).await.unwrap();
         let living = store
-            .shore_character("Bayleaf".into(), &content, true)
+            .shore_character("Bayleaf".into(), "Triceps".into(), &content, true)
             .await
             .unwrap();
         assert_eq!(living.id, wizard.id);
@@ -1533,7 +1539,7 @@ mod tests {
             .await
             .unwrap();
         let replacement = store
-            .shore_character("Bayleaf".into(), &content, true)
+            .shore_character("Bayleaf".into(), "Triceps".into(), &content, true)
             .await
             .unwrap();
         assert_eq!(replacement.account, wizard.account);
@@ -1570,9 +1576,9 @@ mod tests {
         let store = Store::open(&path, &content).unwrap();
         let wizard = content.get(WIZARD).unwrap();
         let human = store.list("shore-human".into()).await.unwrap();
-        store.rename(human.id, "Bayleaf".into()).await.unwrap();
+        store.rename(human.id, "Triceps".into()).await.unwrap();
         let mut bot = store
-            .shore_character("Bayleaf".into(), &content, true)
+            .shore_character("Bayleaf".into(), "Bayleaf".into(), &content, true)
             .await
             .unwrap();
         assert_ne!(bot.account, human.id);
@@ -1584,10 +1590,14 @@ mod tests {
         store.progress(bot.clone()).await.unwrap();
         let reopened = Store::open(&path, &content).unwrap();
         let resumed = reopened
-            .shore_character("Bayleaf".into(), &content, true)
+            .shore_character("Bayleaf".into(), "Triceps".into(), &content, true)
             .await
             .unwrap();
         assert_eq!((resumed.account, resumed.id), identity);
+        assert_eq!(resumed.name, "Triceps");
+        assert_eq!(resumed.items, bot.items);
+        assert_eq!(resumed.revision, bot.revision);
+        assert_eq!(reopened.list_id(human.id).await.unwrap().name, "Triceps");
         assert_eq!(resumed.exp, 12);
         assert_eq!(resumed.hp, 42);
         assert_eq!(resumed.shots, 4);
@@ -1595,7 +1605,7 @@ mod tests {
         bot.alive = false;
         store.death(bot, "test enemy".into()).await.unwrap();
         let replacement = reopened
-            .shore_character("Bayleaf".into(), &content, true)
+            .shore_character("Bayleaf".into(), "Triceps".into(), &content, true)
             .await
             .unwrap();
         assert_eq!(replacement.account, identity.0);
@@ -1605,10 +1615,22 @@ mod tests {
         assert_eq!(replacement.exp, 0);
         assert_eq!(replacement.items, wizard.equipment);
         let resumed = store
-            .shore_character("Bayleaf".into(), &content, true)
+            .shore_character("Bayleaf".into(), "Triceps".into(), &content, true)
             .await
             .unwrap();
         assert_eq!(resumed.id, replacement.id);
+        assert_eq!(resumed.name, "Triceps");
+        assert_eq!(
+            store
+                .call(|db| Ok(db.query_row(
+                    "SELECT count(*) FROM shore_bots WHERE name=\'Bayleaf\'",
+                    [],
+                    |r| r.get::<_, i32>(0)
+                )?))
+                .await
+                .unwrap(),
+            1
+        );
         assert!(store.load(identity.0, identity.1).await.is_err());
         let records: i32 = store
             .call(move |db| {
