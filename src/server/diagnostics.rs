@@ -578,7 +578,7 @@ mod tests {
         assert_eq!(d.snapshot()["rtt_samples"].as_array().unwrap().len(), 1);
     }
     #[tokio::test]
-    async fn native_command_spools_privately_and_receipts_survive_restart() {
+    async fn consecutive_native_commands_spool_privately_and_receipts_survive_restart() {
         let (root, mut a) = super::super::account_actions::tests::fixture();
         let account = a.store.list("bug-test".into()).await.unwrap().id;
         let character = a
@@ -613,19 +613,21 @@ mod tests {
         let (lost, _) = tokio::sync::watch::channel(false);
         let mut text = Writer::new();
         text.utf("/bug enemies froze");
-        handle(
-            &mut a,
-            Packet {
-                id: wire::PLAYER_TEXT,
-                body: text.0,
-            },
-            &mut session,
-            &tx,
-            &lost,
-            Instant::now(),
-        )
-        .await
-        .unwrap();
+        for _ in 0..2 {
+            handle(
+                &mut a,
+                Packet {
+                    id: wire::PLAYER_TEXT,
+                    body: text.0.clone(),
+                },
+                &mut session,
+                &tx,
+                &lost,
+                Instant::now(),
+            )
+            .await
+            .unwrap();
+        }
         assert!(
             rx.try_recv().is_err(),
             "only issue creation should produce a success reply"
@@ -752,51 +754,16 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), 1_048_576)
             .await
             .unwrap();
-        assert!(serde_json::from_slice::<Value>(&body).unwrap()["report"].is_null());
+        let remaining: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(remaining["report"]["message_untrusted"], "enemies froze");
+        assert_eq!(remaining["report"]["account_id"], account);
+        assert_ne!(remaining["report"]["id"], id);
         let saved: Value = serde_json::from_slice(
             &std::fs::read(root.join("bug-reports").join(format!("{id}.json"))).unwrap(),
         )
         .unwrap();
         assert_eq!(saved["delivery"]["status"], "delivered");
         session.account.take().unwrap().release();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-    #[tokio::test]
-    async fn consecutive_reports_from_same_account_are_saved_without_waiting() {
-        let (root, a) = super::super::account_actions::tests::fixture();
-        let account = a.store.list("consecutive-bugs".into()).await.unwrap().id;
-        let character = a
-            .store
-            .create(account, a.content.get(crate::content::WIZARD).unwrap())
-            .await
-            .unwrap();
-        let player = a
-            .world
-            .call(move |w| w.enter(character, None))
-            .await
-            .unwrap();
-        let connection = ConnectionDiagnostics::default();
-        for message in ["enemies froze", "inventory did not update"] {
-            super::report(&a, account, player, message, &connection)
-                .await
-                .unwrap();
-        }
-        let reports: Vec<Value> = std::fs::read_dir(root.join("bug-reports"))
-            .unwrap()
-            .map(|entry| {
-                serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap()
-            })
-            .collect();
-        assert_eq!(reports.len(), 2);
-        assert_ne!(reports[0]["id"], reports[1]["id"]);
-        for message in ["enemies froze", "inventory did not update"] {
-            let report = reports
-                .iter()
-                .find(|r| r["message_untrusted"] == message)
-                .unwrap();
-            assert_eq!(report["account_id"], account);
-            assert_eq!(report["delivery"]["status"], "pending");
-        }
         std::fs::remove_dir_all(root).unwrap();
     }
     #[tokio::test]
