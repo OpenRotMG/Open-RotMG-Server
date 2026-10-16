@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import urllib.error
+from contextlib import closing
 
 spec = importlib.util.spec_from_file_location('update', Path(__file__).with_name('update.py'))
 update = importlib.util.module_from_spec(spec)
@@ -19,11 +20,11 @@ class UpdateTest(unittest.TestCase):
     def test_additive_gold_migration_preserves_every_existing_cell(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'game.db'
-            with sqlite3.connect(path) as db:
+            with closing(sqlite3.connect(path)) as db, db:
                 db.executescript("CREATE TABLE accounts(id INTEGER PRIMARY KEY,guid TEXT,name TEXT);"
                                  "INSERT INTO accounts VALUES(38,'fixture','Bayleaf')")
             before = update.rows(path)
-            with sqlite3.connect(path) as db:
+            with closing(sqlite3.connect(path)) as db, db:
                 db.execute('ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100')
             after = update.rows(path)
             self.assertEqual(after['accounts'][0]['credits'], 100)
