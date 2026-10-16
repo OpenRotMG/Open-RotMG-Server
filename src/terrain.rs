@@ -102,27 +102,31 @@ pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
             });
         }
     }
-    let x = size / 2;
-    let y = (2..size - 2)
-        .rev()
-        .find(|y| {
-            (*y - 1..=*y + 1)
-                .all(|y| (x - 1..=x + 1).all(|x| cells[(y * size + x) as usize].terrain == 11))
-        })
-        .context("generated Realm has no coastal spawn")?;
-    for y in y - 1..=y + 1 {
-        for x in x - 1..=x + 1 {
-            let cell = &mut cells[(y * size + x) as usize];
-            ensure!(cell.terrain == 11, "generated spawn crosses the coast");
-            cell.object = None;
-            cell.region = 1;
+    let mut spawns = Vec::new();
+    // Road ends give each coast an arrival connected to the rest of the island.
+    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+        let (x, y) = (2..size / 2 - 2)
+            .rev()
+            .map(|offset| (size / 2 + dx * offset, size / 2 + dy * offset))
+            .find(|&(x, y)| {
+                (y - 1..=y + 1)
+                    .all(|y| (x - 1..=x + 1).all(|x| cells[(y * size + x) as usize].terrain == 11))
+            })
+            .with_context(|| format!("generated Realm has no coastal spawn toward {dx},{dy}"))?;
+        for y in y - 1..=y + 1 {
+            for x in x - 1..=x + 1 {
+                let cell = &mut cells[(y * size + x) as usize];
+                cell.object = None;
+                cell.region = 1;
+            }
         }
+        spawns.push((x as f32 + 0.5, y as f32 + 0.5));
     }
     let map = Map {
         width: size,
         height: size,
         cells,
-        spawns: vec![(x as f32 + 0.5, y as f32 + 0.5)],
+        spawns,
     };
     for cell in &map.cells {
         ensure!(
@@ -137,6 +141,7 @@ pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
     tracing::info!(
         seed,
         size,
+        spawn_points = map.spawns.len(),
         elapsed_ms = started.elapsed().as_millis(),
         "generated Realm terrain; original generator unverified"
     );
@@ -160,8 +165,18 @@ mod tests {
                 serde_json::to_vec(&m).unwrap(),
                 serde_json::to_vec(&generate(&c, seed.wrapping_add(1), 192).unwrap()).unwrap()
             );
+            assert_eq!(m.spawns.len(), 4);
+            for &(sx, sy) in &m.spawns {
+                assert_eq!(m.cell(sx, sy).unwrap().ground, 0xd0);
+                for y in sy as i32 - 1..=sy as i32 + 1 {
+                    for x in sx as i32 - 1..=sx as i32 + 1 {
+                        let cell = m.cell(x as f32, y as f32).unwrap();
+                        assert_eq!((cell.terrain, cell.region), (11, 1));
+                        assert!(cell.object.is_none());
+                    }
+                }
+            }
             let (sx, sy) = m.spawns[0];
-            assert_eq!(m.cell(sx, sy).unwrap().terrain, 11);
             let start = (sy as i32 * m.width + sx as i32) as usize;
             let mut seen = BTreeSet::from([start]);
             let mut queue = VecDeque::from([start]);

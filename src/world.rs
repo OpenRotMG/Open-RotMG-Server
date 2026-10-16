@@ -1377,10 +1377,12 @@ impl World {
     }
     #[cfg(test)]
     pub fn enter(&mut self, ch: Character, tx: Option<Output>) -> Result<i32> {
+        // Combat and inventory fixtures need nearby, repeatable starting positions.
+        let (x, y) = self.map.spawns[self.players.len() % self.map.spawns.len()];
         self.enter_at(
             ch,
             tx,
-            None,
+            Some(Pos { x, y }),
             AccountPresentation {
                 fame: 0,
                 best_fame: BTreeMap::new(),
@@ -1419,8 +1421,16 @@ impl World {
             "account already in this world"
         );
         let id = allocate_id(&self.ids)?;
-        let (x, y) = self.map.spawns[self.players.len() % self.map.spawns.len()];
-        let pos = position.unwrap_or(Pos { x, y });
+        let pos = if let Some(pos) = position {
+            pos
+        } else {
+            let &(x, y) = self
+                .map
+                .spawns
+                .choose(&mut self.rng)
+                .context("world has no spawn cells")?;
+            Pos { x, y }
+        };
         let char_id = ch.id;
         self.players.insert(
             id,
@@ -1491,6 +1501,8 @@ impl World {
             player = id,
             character = char_id,
             world = %self.name,
+            x = pos.x,
+            y = pos.y,
             "player entered development world"
         );
         Ok(id)
