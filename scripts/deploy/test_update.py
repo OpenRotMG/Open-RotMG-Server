@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import sqlite3
 from pathlib import Path
 import tarfile
 import tempfile
@@ -15,6 +16,26 @@ spec.loader.exec_module(update)
 
 
 class UpdateTest(unittest.TestCase):
+    def test_additive_gold_migration_preserves_every_existing_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'game.db'
+            with sqlite3.connect(path) as db:
+                db.executescript("CREATE TABLE accounts(id INTEGER PRIMARY KEY,guid TEXT,name TEXT);"
+                                 "INSERT INTO accounts VALUES(38,'fixture','Bayleaf')")
+            before = update.rows(path)
+            with sqlite3.connect(path) as db:
+                db.execute('ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100')
+            after = update.rows(path)
+            self.assertEqual(after['accounts'][0]['credits'], 100)
+            update.verify_migration(before, after)
+            row = after['accounts'][0]
+            invalid = [{}, {'accounts': []}, {'accounts': [row, row]},
+                       {'accounts': [{**row, 'name': 'Changed'}]},
+                       {'accounts': [{k: v for k, v in row.items() if k != 'guid'}]}]
+            for changed in invalid:
+                with self.subTest(changed=changed), self.assertRaisesRegex(RuntimeError, 'Migration changed existing records'):
+                    update.verify_migration(before, changed)
+
     def test_unpack_accepts_exact_files_and_rejects_hash_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
