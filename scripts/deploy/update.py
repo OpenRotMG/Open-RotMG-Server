@@ -233,7 +233,7 @@ def rehearse(stage, work, config):
     restored = work / 'restored'
     module.restore(archive, restored)
     run(str(stage / 'openrotmg'), '--backup-load', str(restored / 'game.db'), str(stage / 'data'))
-    require(module.snapshot(restored / 'game.db', [*module.GAME_SCHEMAS.values(), module.AUTH_SOCIAL_GAME]) == bundle['game']
+    require(module.snapshot(restored / 'game.db', module.RELOADED_GAME) == bundle['game']
             and module.snapshot(restored / 'levels.sqlite', module.DISCORD) == bundle['discord'], 'Credential-free restore mismatch')
 
 
