@@ -27,7 +27,7 @@ def check(binary, data, directory, revision):
     restored = directory / 'restored'
     backup.restore(archive, restored)
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
-    if backup.snapshot(restored / 'game.db', [*backup.GAME_SCHEMAS.values(), backup.AUTH_SOCIAL_GAME]) != bundle['game']:
+    if backup.snapshot(restored / 'game.db', [*backup.GAME_SCHEMAS.values(), backup.AUTH_SOCIAL_GAME, backup.AUTH_UPDATES_GAME]) != bundle['game']:
         raise RuntimeError('Release loading changed restored gameplay records')
     print(json.dumps({'event': 'release_backup_contract_passed', 'revision': revision}))
 

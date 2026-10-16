@@ -58,6 +58,20 @@ pub async fn run(args: &[String]) -> Result<bool> {
             );
             validate(serde_json::from_slice(&input)?)?;
         }
+        ["--backup-validate-updates"] => {
+            let mut input = Vec::new();
+            std::io::stdin()
+                .take(4 * 1024 * 1024 + 1)
+                .read_to_end(&mut input)?;
+            ensure!(
+                input.len() <= 4 * 1024 * 1024,
+                "Backup update input exceeds 4 MiB"
+            );
+            let mut snapshot: store::UpdateSnapshot = serde_json::from_slice(&input)
+                .map_err(|_| anyhow::anyhow!("Unsupported update snapshot payload"))?;
+            snapshot.validate()?;
+            println!("{}", serde_json::json!({"validated_updates": true}));
+        }
         ["--backup-fixture", directory, data] => {
             let directory = Path::new(directory);
             std::fs::create_dir(directory).context("Backup fixture requires a new directory")?;
@@ -99,6 +113,18 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         .await?;
                 }
             }
+            store
+                .sync_updates(store::UpdateSnapshot {
+                    guild_id: "12345678901234567".into(),
+                    channel_id: "23456789012345678".into(),
+                    posts: vec![store::UpdatePost {
+                        id: "34567890123456789".into(),
+                        content: "Backup update\nPersisted public text".into(),
+                        published_at: 1700000000,
+                        edited_at: None,
+                    }],
+                })
+                .await?;
             println!("{}", serde_json::json!({"fixture_characters": 2}));
         }
         ["--backup-load", database, data] => {
@@ -119,6 +145,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                     .query_map([], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, i32>(1)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>()?
             };
+            store.updates().await?;
             for (account, id) in &rows {
                 store.load(*account, *id).await?.effective(&content)?;
             }

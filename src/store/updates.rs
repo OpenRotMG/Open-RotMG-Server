@@ -61,7 +61,7 @@ impl UpdatePost {
     }
 }
 impl UpdateSnapshot {
-    fn validate(&mut self) -> Result<()> {
+    pub fn validate(&mut self) -> Result<()> {
         ensure!(
             discord_id(&self.guild_id) && discord_id(&self.channel_id),
             "Invalid update source IDs"
@@ -83,7 +83,8 @@ impl UpdateSnapshot {
                     && !post
                         .content
                         .chars()
-                        .any(|c| c.is_control() && c != '\n' && c != '\t'),
+                        .any(|c| (c.is_control() && c != '\n' && c != '\t')
+                            || matches!(c, '\u{fffe}' | '\u{ffff}')),
                 "Invalid update content"
             );
             ensure!(
@@ -145,10 +146,14 @@ impl Store {
                 )
                 .optional()?;
             match row {
-                Some((raw, at)) => Ok(UpdateFeed {
-                    synced_at: Some(at),
-                    source: Some(serde_json::from_str(&raw)?),
-                }),
+                Some((raw, at)) => {
+                    let mut source: UpdateSnapshot = serde_json::from_str(&raw)?;
+                    source.validate()?;
+                    Ok(UpdateFeed {
+                        synced_at: Some(at),
+                        source: Some(source),
+                    })
+                }
                 None => Ok(UpdateFeed {
                     synced_at: None,
                     source: None,
@@ -237,6 +242,49 @@ mod tests {
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
+    #[tokio::test]
+    async fn updates_migrate_schema_six_and_reject_missing_schema_seven_state() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let dir = std::env::temp_dir().join(format!("updates-migration-{}", rand::random::<u64>()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("game.db");
+        let store = Store::open(&path, &content).unwrap();
+        let account = store.list("existing-schema-six".into()).await.unwrap();
+        drop(store);
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("DROP TABLE update_feed; PRAGMA user_version=6")
+            .unwrap();
+        let store = Store::open(&path, &content).unwrap();
+        assert_eq!(
+            store.list("existing-schema-six".into()).await.unwrap().id,
+            account.id
+        );
+        assert!(store.updates().await.unwrap().synced_at.is_none());
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+                .unwrap(),
+            7
+        );
+        store.sync_updates(snapshot()).await.unwrap();
+        let mut invalid = snapshot();
+        invalid.posts[0].content.clear();
+        db.execute(
+            "UPDATE update_feed SET snapshot=?1",
+            [serde_json::to_string(&invalid).unwrap()],
+        )
+        .unwrap();
+        assert!(store.updates().await.is_err());
+        drop(store);
+        db.execute("DROP TABLE update_feed", []).unwrap();
+        assert!(
+            Store::open(&path, &content)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("schema-7 update feed missing")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn updates_reject_invalid_bounded_input() {
         for id in [
@@ -252,6 +300,7 @@ mod tests {
             " ".into(),
             " x".into(),
             "a\0b".into(),
+            "a\u{ffff}b".into(),
             "x".repeat(8001),
             "😀".repeat(4001),
         ] {

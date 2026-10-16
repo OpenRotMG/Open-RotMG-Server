@@ -18,9 +18,7 @@ mod presentation_tests;
 mod social;
 mod updates;
 pub use social::AccountLists;
-#[cfg(test)]
-pub use updates::UpdatePost;
-pub use updates::{UpdateFeed, UpdateSnapshot};
+pub use updates::{UpdateFeed, UpdatePost, UpdateSnapshot};
 
 #[derive(Debug)]
 pub struct InvalidCredentials;
@@ -252,7 +250,7 @@ impl Store {
         let mut c = Connection::open(path)?;
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            matches!(version, 0 | 5 | 6),
+            matches!(version, 0 | 5 | 6 | 7),
             "unsupported game database schema {version}"
         );
         let wallet_exists: bool = c.query_row(
@@ -269,8 +267,15 @@ impl Store {
             [], |r| r.get(0),
         )?;
         ensure!(
-            version != 6 || lists_exist,
+            version < 6 || lists_exist,
             "schema-6 account lists missing; restore reviewed state instead of clearing preferences"
+        );
+        let updates_exist: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type=\'table\' AND name=\'update_feed\')", [], |r| r.get(0),
+        )?;
+        ensure!(
+            version < 7 || updates_exist,
+            "schema-7 update feed missing; restore reviewed state instead of clearing published news"
         );
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY,guid TEXT NOT NULL UNIQUE,name TEXT NOT NULL);
@@ -363,7 +368,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "account fame wallet missing; restore reviewed state instead of recreating balances"
             );
         }
-        migration.pragma_update(None, "user_version", 6)?;
+        migration.pragma_update(None, "user_version", 7)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

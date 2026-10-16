@@ -20,12 +20,14 @@ SHORE_GAME = {**GAME, 'shore_bots': ('name', 'account')}
 HISCORES_GAME = {**SHORE_GAME, 'competitors': ('account',), 'collections': ('account', 'item', 'found_at'), 'discord_links': ('account', 'discord_id')}
 ACTIONS_GAME = {**HISCORES_GAME, 'account_fame': ('account', 'balance', 'earned'), 'discord_recovery': ('account', 'enabled_at', 'last_issued_at')}
 SOCIAL_GAME = {**ACTIONS_GAME, 'account_lists': ('account', 'list_id', 'target')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME}
+UPDATES_GAME = {**SOCIAL_GAME, 'update_feed': ('id', 'snapshot', 'synced_at')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
 AUTH_ACTIONS_GAME = {**ACTIONS_GAME, 'credentials': AUTH_GAME['credentials'], **{t: AUTH_HISCORES_GAME['discord_codes'] for t in ['discord_codes', 'recovery_codes', 'password_resets']}}
 AUTH_SOCIAL_GAME = {**AUTH_ACTIONS_GAME, 'account_lists': SOCIAL_GAME['account_lists']}
+AUTH_UPDATES_GAME = {**AUTH_SOCIAL_GAME, 'update_feed': UPDATES_GAME['update_feed']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -39,6 +41,18 @@ def characters(values):
         raise ValueError('Release character validation failed: ' + result.stderr.strip())
     if json.loads(result.stdout) != {'validated_characters': len(values)}:
         raise ValueError('Release character validator returned an invalid receipt')
+
+
+def update_snapshot(raw):
+    binary = os.environ.get('OPENROTMG_BACKUP_BINARY')
+    if not binary:
+        raise RuntimeError('OPENROTMG_BACKUP_BINARY must name the matching release binary')
+    result = subprocess.run([binary, '--backup-validate-updates'], input=raw,
+                            text=True, capture_output=True, timeout=30)
+    if result.returncode:
+        raise ValueError('Release update validation failed: ' + result.stderr.strip())
+    if json.loads(result.stdout) != {'validated_updates': True}:
+        raise ValueError('Release update validator returned an invalid receipt')
 
 
 def snapshot(path, schema):
@@ -125,13 +139,20 @@ def validate(bundle):
         targets.add(row['target'])
         if len(targets) > 32767:
             raise ValueError('Account list exceeds native count limit')
+    updates = bundle['game'].get('update_feed', [])
+    if len(updates) > 1:
+        raise ValueError('Invalid update feed row count')
+    for row in updates:
+        if type(row['id']) is not int or row['id'] != 1 or type(row['synced_at']) is not int or row['synced_at'] <= 0 or not isinstance(row['snapshot'], str):
+            raise ValueError('Invalid update feed record')
+        update_snapshot(row['snapshot'])
     if bundle['schema'] >= 5 and {r['account'] for r in bundle['game']['account_fame']} != accounts:
         raise ValueError('Every account requires a fame wallet')
     return bundle
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME])
+    game_data = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME])
     version = next(version for version, schema in GAME_SCHEMAS.items() if set(schema) == set(game_data))
     bundle = validate({
         'schema': version, 'created_at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -175,6 +196,8 @@ CREATE TABLE account_fame(account INTEGER PRIMARY KEY REFERENCES accounts(id),ba
 CREATE TABLE discord_recovery(account INTEGER PRIMARY KEY REFERENCES discord_links(account),enabled_at INTEGER NOT NULL,last_issued_at INTEGER NOT NULL);'''
     if bundle['schema'] >= 6:
         definitions['game'] += '\nCREATE TABLE account_lists(account INTEGER NOT NULL REFERENCES accounts(id),list_id INTEGER NOT NULL CHECK(list_id IN (0,1)),target INTEGER NOT NULL REFERENCES accounts(id),PRIMARY KEY(account,list_id,target),CHECK(account<>target));'
+    if bundle['schema'] >= 7:
+        definitions['game'] += '\nCREATE TABLE update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')
