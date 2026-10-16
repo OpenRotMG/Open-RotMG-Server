@@ -193,12 +193,28 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
         assert_eq!(plans[0].0, a);
         assert_eq!(w.players[&b].experience_queued, 1);
         assert!(w.begin_departure(b).is_err());
-        assert_eq!(plans[0].1.dungeons[index - 1], 1);
+        assert_eq!(
+            if index == 4 {
+                plans[0].1.abysses
+            } else {
+                plans[0].1.dungeons[index - 1]
+            },
+            1
+        );
         assert_eq!(w.players[&a].character.dungeons, [0; 3]);
         assert_eq!(w.players[&b].character.dungeons, [0; 3]);
+        assert_eq!(w.players[&a].character.abysses, 0);
+        assert_eq!(w.players[&b].character.abysses, 0);
         w.finish_progress(a, plans[0].1.clone()).unwrap();
         assert!(w.entities[&exit].published);
-        assert_eq!(w.players[&a].character.dungeons[index - 1], 1);
+        assert_eq!(
+            if index == 4 {
+                w.players[&a].character.abysses
+            } else {
+                w.players[&a].character.dungeons[index - 1]
+            },
+            1
+        );
         assert!(w.pending_progress().is_empty());
         assert!(w.drop_loot(&defeated).is_err());
     }
@@ -207,7 +223,11 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
 #[test]
 fn selected_private_boss_rewards_reach_every_eligible_player_including_the_ninth() {
     let mut directory = Directory::load(Path::new("data"), tests::world().content, 16).unwrap();
-    for (template, kind, potion) in [("snake-pit", 0x917, 0xa21), ("undead-lair", 0xd90, 0xa35)] {
+    for (template, kind, potion) in [
+        ("snake-pit", 0x917, 0xa21),
+        ("undead-lair", 0xd90, 0xa35),
+        ("abyss-of-demons", crate::dungeon::abyss::MALPHAS, 0xa34),
+    ] {
         let scope = directory.instance(template, None).unwrap();
         let w = directory.worlds.get_mut(&scope).unwrap();
         let boss = w.entities.values().find(|e| e.kind == kind).unwrap().id;
@@ -238,13 +258,15 @@ fn selected_private_boss_rewards_reach_every_eligible_player_including_the_ninth
                 .values()
                 .filter(|e| e.extra_stats.contains(&(54, account)))
                 .collect::<Vec<_>>();
-            assert_eq!(
-                bags.len(),
-                1,
+            assert!(
+                !bags.is_empty(),
                 "eligible account {account} lost its private reward"
             );
             assert_eq!(
-                bags[0].items.iter().filter(|item| **item == potion).count(),
+                bags.iter()
+                    .flat_map(|bag| &bag.items)
+                    .filter(|item| **item == potion)
+                    .count(),
                 1
             );
         }
@@ -261,14 +283,11 @@ fn selected_private_boss_rewards_reach_every_eligible_player_including_the_ninth
             w.finish_progress(player, snapshot).unwrap();
         }
         assert!(w.entities[&exit].published);
-        assert!(
-            participants.iter().all(|player| w.players[player]
-                .character
-                .dungeons
-                .iter()
-                .sum::<u64>()
-                == 1)
-        );
+        assert!(participants.iter().all(|player| {
+            w.players[player].character.dungeons.iter().sum::<u64>()
+                + w.players[player].character.abysses
+                == 1
+        }));
     }
 }
 

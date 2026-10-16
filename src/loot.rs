@@ -252,6 +252,30 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.2, Tier(4, ABILITIES)),
             (0.3, Tier(3, RINGS)),
         ],
+        0x66d..=0x672 => &[
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.01, Tier(6, WEAPONS)),
+            (0.01, Tier(3, ABILITIES)),
+        ],
+        0x908 | 0x909 | 0x90b => &[],
+        crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL => &[
+            (1., Item(0xa34)),
+            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc01)),
+            (0.8, Tier(7, WEAPONS)),
+            (0.8, Tier(7, ARMOR)),
+            (0.4, Tier(8, WEAPONS)),
+            (0.4, Tier(8, ARMOR)),
+            (0.11, Tier(9, WEAPONS)),
+            (0.11, Tier(9, ARMOR)),
+            (0.05, Tier(10, WEAPONS)),
+            (0.05, Tier(10, ARMOR)),
+            (0.5, Tier(3, ABILITIES)),
+            (0.06, Tier(4, ABILITIES)),
+            (0.5, Tier(3, RINGS)),
+            (0.06, Tier(4, RINGS)),
+        ],
         kind if crate::endgame::ROSTER.contains(&kind) => crate::endgame::loot(kind),
         _ => panic!("loot requested without encounter profile"),
     }
@@ -324,7 +348,15 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     let mut items = if crate::quest::final_root(kind)
         || matches!(
             kind,
-            0x917 | 0xd06 | 0xd90 | 0xd78 | 0xd79 | crate::endgame::ORYX | crate::endgame::ORYX2
+            0x917
+                | 0xd06
+                | 0xd90
+                | 0xd78
+                | 0xd79
+                | crate::dungeon::abyss::MALPHAS
+                | crate::dungeon::abyss::IDOL
+                | crate::endgame::ORYX
+                | crate::endgame::ORYX2
         ) {
         let mut items = Vec::new();
         for (chance, pick) in table(kind) {
@@ -351,6 +383,7 @@ pub fn private(kind: u16) -> bool {
     crate::quest::final_root(kind)
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
+        | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
 }
 #[cfg(test)]

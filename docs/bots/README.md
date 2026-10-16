@@ -1,6 +1,6 @@
 # Gameplay bots: vision and research
 
-PR32's crews are merged; this inland candidate is unmerged and undeployed.
+PR32's crews and PR62's inland progression are merged. Source availability is not a deployment receipt.
 
 The two video reports record observations and limits; `research/decision-spike.md` records the earlier offline experiment.
 
@@ -10,9 +10,11 @@ Run `./run.sh 18923 --release`, then enter the Realm normally. Biceps leads Tric
 
 Wizards predict visible projectile paths, lead an observed target, kite within weapon range, cast equipped spells and commit to recovery. Crews remember recent contacts, explore reachable known terrain, revisit observed Realm hunting grounds and respond to Pirate Cave calls. Visible crewmates regroup through normal teleports; separated crews can arrange a Nexus meeting through public chat. Priests cast equipped tomes for actual nearby injury, MP and accepted cooldowns.
 
-This candidate inherits main's default-on startup; `--no-shore-bots` or explicit `"shore_bots": false` disables it. Reserve seven slots for six bots and a human; QA control remains separate. Living saves resume unchanged. After committed permanent death, a fresh character receives normal starter gear; Triceps/Kadabu choose Priest only if that same account earned its Wizard-level-five unlock. Dead inventory is never inherited. Trade negotiation and language services remain outside this slice.
+Bots start by default; `--no-shore-bots` or explicit `"shore_bots": false` disables it. Reserve seven slots for six bots and a human; QA control remains separate. Living saves resume unchanged. After committed permanent death, a fresh character receives normal starter gear; Triceps/Kadabu choose Priest only if that same account earned its Wizard-level-five unlock. Dead inventory is never inherited.
 
 Ordinary crews earned Snake Pit clears and returns. Prepared full-backpack clears verify reward exchange and consumption; native media is prepared.
+
+Nemotron defaults off. Enable `--bot-llm` with server-only `AI_GATEWAY_API_KEY`: nearby public chat creates validated, two-minute, same-world follow/wait/resume/part agreements. Missing keys fail startup; provider errors produce private system notices, never fake success.
 
 ## Approved north star
 

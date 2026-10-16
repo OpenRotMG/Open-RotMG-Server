@@ -19,6 +19,7 @@ class ReleaseContract(unittest.TestCase):
             with closing(sqlite3.connect(Path(temporary) / 'contract/written/game.db')) as db:
                 value = json.loads(db.execute('SELECT stats FROM characters WHERE alive=1').fetchone()[0])
             self.assertEqual(value['dungeons'], [1, 2, 3])
+            self.assertEqual(value['abysses'], 5)
             backup.characters([value])
             for field in ['password_hash', 'token', 'email']:
                 invalid = {**value, field: 'NEVER_LOG_OR_EXPORT'}

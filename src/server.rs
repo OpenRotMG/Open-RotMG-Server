@@ -158,6 +158,7 @@ pub struct App {
     pub max_players: usize,
     pub behind_proxy: bool,
     pub shore_bots: bool,
+    pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
     pub requests: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
@@ -408,7 +409,13 @@ async fn swf(State(a): State<App>) -> Response {
 async fn health(State(a): State<App>) -> Response {
     let started = a.started;
     match a.world.directory(move |d| Ok(d.health(started))).await {
-        Ok(v) => Json(v).into_response(),
+        Ok(mut v) => {
+            v["bot_dialogue"] = match &a.dialogue {
+                Some(service) => service.health(),
+                None => serde_json::json!({"enabled":false,"status":"disabled"}),
+            };
+            Json(v).into_response()
+        }
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, error(e)).into_response(),
     }
 }
@@ -987,6 +994,18 @@ async fn handle(
             if let (Some(testing), Some(player)) = (&a.testing, player) {
                 testing.acknowledge_native(nonce, *player);
             }
+        }
+        64 => {
+            let time = r.i32()?;
+            let pos = Pos {
+                x: r.f32()?,
+                y: r.f32()?,
+            };
+            r.done()?;
+            let id = player.context("ground damage before character")?;
+            a.world
+                .call(move |w| w.ground_damage(id, time, pos))
+                .await?;
         }
         22 => {
             let time = r.i32()?;

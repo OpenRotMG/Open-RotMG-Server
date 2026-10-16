@@ -254,6 +254,8 @@ async fn launch(
     tokio::spawn(async move {
         let mut shutdown = app.shutdown.subscribe();
         let mut next_bank = app.world.clock.now();
+        let mut pending: Option<dialogue::Pending> = None;
+        let mut last_dialogue: Option<std::time::Instant> = None;
         let result: Result<()> = async {
                 loop {
                     tokio::select! {
@@ -262,6 +264,8 @@ async fn launch(
                     }
                     if app.world.clock.paused() { continue; }
                     if let Some(transfer) = server::automatic_transfer(&app, id).await? {
+                        dialogue::cancel(&app, &mut pending).await;
+                        dialogue::end_agreement(&app, &mut brain, "world changed").await;
                         ensure!(transfer.player == id && transfer.output.packets.same_channel(&sender), "collective transfer does not belong to autonomous output");
                         while output.try_recv().is_ok() {}
                         let destination = transfer.destination;
@@ -280,6 +284,8 @@ async fn launch(
                         continue;
                     }
                     if !view.lifecycle.alive {
+                        dialogue::cancel(&app, &mut pending).await;
+                        dialogue::end_agreement(&app, &mut brain, "character died").await;
                         server::depart(&app, id).await?;
                         if selected.is_some() { return Ok(()); }
                         tokio::select! {
@@ -294,17 +300,74 @@ async fn launch(
                     }
                     ensure!(matches!(view.lifecycle.output, OutputState::Live)
                         && !view.lifecycle.departing && !view.lifecycle.quarantined, "controller is not live");
+                    if let Some(agreement) = &brain.agreement {
+                        let reason = if view.time_ms >= brain.invitation_until {
+                            Some("agreement expired")
+                        } else if agreement.waiting.is_none() && !view.objects.iter().any(|p| p.name==agreement.partner && p.hp>0 && !p.equipped.is_empty()) {
+                            Some("lost sight of partner")
+                        } else { None };
+                        if let Some(reason) = reason { dialogue::end_agreement(&app, &mut brain, reason).await; }
+                    }
                     while let Ok(packet) = output.try_recv() {
                         if packet.id == crate::wire::GOTO {
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
                             continue;
                         }
-                        if brain.receive(packet, &view)? {
+                        if let Some(service) = &app.dialogue
+                            && let Some(request) = brain.dialogue_request(&packet, &view, &app.content)?
+                        {
+                            if pending.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
+                                dialogue::failed(&app, request.speaker, "busy", "busy").await;
+                            } else {
+                                last_dialogue = Some(std::time::Instant::now());
+                                pending = Some(dialogue::Pending::start(service.clone(), request));
+                            }
+                            continue;
+                        }
+                        if brain.receive(packet, &view, app.dialogue.is_none())? {
                             let received = app.world.clock.now();
                             if let Err(error) = app.world.directory(move |d| d.chat(id, "omw".into(), received)).await {
                                 tracing::warn!(player=id,%error,"invitation acknowledgement rejected");
                             }
                             tracing::info!(player=id, companion=brain.companion, "visible invitation accepted");
+                        }
+                    }
+                    if pending.as_ref().is_some_and(|p| p.task.is_finished()) {
+                        let mut completed = pending.take().expect("finished dialogue missing");
+                        let result = match (&mut completed.task).await {
+                            Ok(result) => result,
+                            Err(error) => {
+                                tracing::error!(request=%completed.id,%error,"bot dialogue worker failed");
+                                Err(dialogue::Failure("worker_failed"))
+                            }
+                        };
+                        match result {
+                            Ok(reply) => {
+                                let validation: Result<()> = async {
+                                    brain.validate_dialogue(&completed.request, &reply, &view)?;
+                                    let text = reply.reply.clone();
+                                    let speaker = completed.request.speaker;
+                                    let received = app.world.clock.now();
+                                    let created = completed.request.created;
+                                    app.world.directory(move |d| {
+                                        ensure!(created.elapsed() <= Duration::from_secs(10), "dialogue expired before publication");
+                                        let scope = d.location(id)?;
+                                        d.worlds[&scope].dialogue_participants(id, speaker)?;
+                                        d.chat(id, text, received)
+                                    }).await
+                                }.await;
+                                match validation {
+                                    Ok(()) => {
+                                        brain.apply_dialogue(&completed.request, &reply, &view);
+                                        tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,intent=?reply.intent,"bot dialogue intention applied");
+                                    }
+                                    Err(error) => {
+                                        tracing::error!(request=%completed.id,player=id,%error,"bot dialogue intention rejected");
+                                        dialogue::failed(&app, completed.request.speaker, &completed.id, "rejected").await;
+                                    }
+                                }
+                            }
+                            Err(error) => dialogue::failed(&app, completed.request.speaker, &completed.id, error.0).await,
                         }
                     }
                     if view.lifecycle.busy || view.tick < brain.next_decision { continue; }
@@ -373,6 +436,8 @@ async fn launch(
                                         continue;
                                     }
                                 };
+                                dialogue::cancel(&app, &mut pending).await;
+                                dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 server::depart(&app, id).await?;
                                 let character_id = app.world.directory(move |d| d.consume(account, destination, time, key)).await?;
                                 ensure!(character_id == view.session.character, "transfer character binding changed");
@@ -392,6 +457,8 @@ async fn launch(
                 }
                 server::depart(&app, id).await
             }.await;
+        dialogue::cancel(&app, &mut pending).await;
+        dialogue::end_agreement(&app, &mut brain, "controller stopped").await;
         if let Err(error) = result {
             tracing::error!(player=id,name=profile.name,%error,"autonomous controller stopped; account retained for diagnosis");
             let reason = error.to_string();

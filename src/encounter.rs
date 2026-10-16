@@ -228,7 +228,11 @@ pub fn profile(kind: u16) -> Option<Profile> {
             1000,
             10.,
         ),
+        kind if crate::dungeon::abyss::ROSTER.contains(&kind) => {
+            return Some(crate::dungeon::abyss::profile(kind));
+        }
         kind if crate::quest::ROSTER.contains(&kind) => return crate::quest::profile(kind),
+
         kind if crate::endgame::ROSTER.contains(&kind) => return crate::endgame::profile(kind),
         _ => return None,
     };
@@ -277,6 +281,9 @@ pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
     }
 }
 pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
+    if crate::dungeon::abyss::ROSTER.contains(&kind) {
+        return crate::dungeon::abyss::movement(kind, elapsed);
+    }
     let p = profile(kind).expect("validated encounter motion");
     match kind {
         0x917 if (3750..5625).contains(&hp) => (Motion::Wander, 3.),
@@ -327,6 +334,9 @@ pub fn attacks(kind: u16, hp: i32, heading: f32) -> Vec<(u8, f32)> {
     phased_attacks(kind, hp, heading, 0)
 }
 pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
+    if crate::dungeon::abyss::ROSTER.contains(&kind) {
+        return crate::dungeon::abyss::attacks(kind, heading, elapsed);
+    }
     match kind {
         0x927 if hp < 640 => vec![(0, heading), (1, heading)],
         0x172 | 0x173 | 0x175..=0x179 | 0x927 | 0x68a..=0x68f | 0x653 => vec![],

@@ -169,6 +169,28 @@ class UpdateTest(unittest.TestCase):
                 update.install_backups(Path('/unused'))
             run.assert_not_called()
 
+    def test_rehearsal_explicitly_disables_dialogue_without_changing_live_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stage = root / 'stage'
+            stage.mkdir()
+            (stage / 'REVISION').write_text('a' * 40)
+            config = {'state': str(root / 'live'), 'shore_bots': True, 'bot_llm': True}
+
+            def inspect(command, **kwargs):
+                shadow = json.loads(Path(command[-1]).read_text())
+                self.assertFalse(shadow['shore_bots'])
+                self.assertFalse(shadow['bot_llm'])
+                self.assertTrue(config['bot_llm'])
+                raise RuntimeError('rehearsal inspected')
+
+            with patch.object(update, 'run'), patch.object(update, 'copy_db'), \
+                    patch.object(update, 'rows', return_value={}), \
+                    patch.object(update.shutil, 'copyfile', side_effect=lambda source, target: Path(target).touch()), \
+                    patch.object(update.subprocess, 'Popen', side_effect=inspect):
+                with self.assertRaisesRegex(RuntimeError, 'rehearsal inspected'):
+                    update.rehearse(stage, root, config)
+
     def test_failed_write_rehearsal_cannot_install_tools_or_stop_production(self):
         with patch.object(update, 'run') as run, patch.object(update, 'rehearse', side_effect=RuntimeError('write contract failed')), patch.object(update, 'install_backups') as install:
             with self.assertRaisesRegex(RuntimeError, 'write contract failed'):

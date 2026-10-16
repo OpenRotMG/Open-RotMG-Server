@@ -32,6 +32,7 @@ where
         let bytes = Arc::new(Semaphore::new(MAX_FRAME));
         let mut window = Instant::now();
         let mut count = 0usize;
+        let mut dispatched = 0;
         while let Some(message) = stream.next().await {
             let received = clock.now();
             let inputs = match message {
@@ -91,8 +92,9 @@ where
                     lost.send_replace(true);
                     return;
                 }
-                // A coalesced socket read must not monopolize the executor ahead of its consumer.
-                if index % 16 == 15 {
+                // Buffered separate frames must also let the consumer run before the bounded queue fills.
+                dispatched = (dispatched + 1) % 16;
+                if dispatched == 0 {
                     tokio::task::yield_now().await;
                 }
             }
@@ -148,6 +150,30 @@ mod tests {
         }
         assert_eq!(receipts.len(), 130);
         assert!(receipts.iter().all(|r| *r == receipts[0]));
+        assert!(!*notice.borrow());
+    }
+    #[tokio::test]
+    async fn buffered_separate_frames_yield_to_an_active_consumer() {
+        let (lost, notice) = watch::channel(false);
+        let mut codec = Codec::client();
+        let frames = (0i32..130)
+            .map(|time| {
+                Ok::<_, std::io::Error>(Message::Binary(
+                    codec.frame(38, time.to_be_bytes().to_vec()).into(),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let (mut rx, _task) = receive(
+            futures_util::stream::iter(frames),
+            lost,
+            crate::clock::Clock::default(),
+        );
+        let mut count = 0i32;
+        while let Some(Incoming::Command(packet, _, _bytes)) = rx.recv().await {
+            assert_eq!(packet.body, count.to_be_bytes());
+            count += 1;
+        }
+        assert_eq!(count, 130);
         assert!(!*notice.borrow());
     }
     #[tokio::test]

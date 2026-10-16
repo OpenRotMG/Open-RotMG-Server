@@ -137,13 +137,21 @@ pub struct Object {
     pub occupy_square: bool,
     pub enemy_occupy_square: bool,
     pub static_object: bool,
+    pub protects_ground: bool,
     pub destructible: bool,
+}
+#[derive(Clone)]
+pub struct Hazard {
+    pub name: String,
+    pub min: i32,
+    pub max: i32,
 }
 #[derive(Clone)]
 pub struct Content {
     pub objects: BTreeMap<u16, Object>,
     pub grounds: BTreeMap<u8, f32>,
     pub pushes: BTreeMap<u8, (f32, f32)>,
+    pub hazards: BTreeMap<u8, Hazard>,
     pub classes: BTreeMap<u16, Class>,
 }
 fn child<'a, 'i>(n: Node<'a, 'i>, tag: &str) -> Option<Node<'a, 'i>> {
@@ -363,6 +371,7 @@ impl Content {
                 occupy_square: child(n, "OccupySquare").is_some(),
                 enemy_occupy_square: child(n, "EnemyOccupySquare").is_some(),
                 static_object: child(n, "Static").is_some(),
+                protects_ground: child(n, "ProtectFromGroundDamage").is_some(),
                 destructible: child(n, "Enemy").is_some(),
             };
             ensure!(
@@ -437,6 +446,7 @@ impl Content {
         let doc = roxmltree::Document::parse(&data)?;
         let mut grounds = BTreeMap::new();
         let mut pushes = BTreeMap::new();
+        let mut hazards = BTreeMap::new();
         for n in doc.root_element().children().filter(|n| n.is_element()) {
             let id = u8::try_from(kind(n.attribute("type").context("ground type missing")?)?)?;
             let speed = if child(n, "NoWalk").is_some() {
@@ -459,6 +469,19 @@ impl Content {
             } else {
                 (0., 0.)
             };
+            let min = number(n, "MinDamage", 0.)? as i32;
+            let max = number(n, "MaxDamage", 0.)? as i32;
+            ensure!(min >= 0 && max >= min, "invalid ground damage {id:#x}");
+            if max > 0 {
+                hazards.insert(
+                    id,
+                    Hazard {
+                        name: n.attribute("id").context("hazard name missing")?.into(),
+                        min,
+                        max,
+                    },
+                );
+            }
             pushes.insert(id, push);
             ensure!(
                 grounds.insert(id, speed).is_none(),
@@ -473,6 +496,7 @@ impl Content {
             objects,
             grounds,
             pushes,
+            hazards,
             classes,
         };
         let w = out.get(WIZARD)?;

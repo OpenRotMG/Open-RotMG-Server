@@ -65,6 +65,38 @@ impl Player {
 }
 
 impl World {
+    pub(crate) fn dialogue_participants(&self, bot: i32, speaker: i32) -> Result<()> {
+        let sender = self.players.get(&bot).context("dialogue bot left world")?;
+        let peer = self
+            .players
+            .get(&speaker)
+            .context("dialogue speaker left world")?;
+        ensure!(
+            sender.controller == Controller::Autonomous
+                && sender.can_chat()
+                && peer.can_chat()
+                && sender.known.contains(&speaker)
+                && !peer.account_lists[1].contains(&sender.character.account)
+                && sender.pos.distance(peer.pos) <= 12.,
+            "dialogue participants unavailable"
+        );
+        Ok(())
+    }
+    pub(crate) fn dialogue_notice(&self, speaker: i32, text: &str, failed: bool) -> Result<()> {
+        validate(text)?;
+        let p = self
+            .players
+            .get(&speaker)
+            .context("dialogue recipient left world")?;
+        ensure!(p.can_chat(), "dialogue recipient unavailable");
+        let packet = if failed {
+            chat_error(text)
+        } else {
+            chat_info(text)
+        };
+        send(p, packet.id, packet.body);
+        Ok(())
+    }
     pub fn account_list_target(&self, id: i32, target: i32) -> Result<i32> {
         let sender = self.players.get(&id).context("player missing")?;
         let target_player = self.players.get(&target).context("player not found")?;
@@ -243,6 +275,33 @@ mod tests {
         assert_eq!(r.utf().unwrap(), text);
         assert_eq!(r.utf().unwrap(), "");
         r.done().unwrap();
+    }
+    #[test]
+    fn dialogue_errors_are_private_and_unavailable_participants_cannot_accept() {
+        let mut d = super::super::tests::directory();
+        let (bot, mut bot_rx) = receive(&mut d, -2, 1);
+        let (human, mut human_rx) = receive(&mut d, -2, 2);
+        let (_, mut other_rx) = receive(&mut d, -2, 3);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.dialogue_notice(human, "Bot dialogue failed: timeout.", true)
+            .unwrap();
+        message(
+            human_rx.try_recv().unwrap(),
+            "*Error*",
+            -1,
+            "Bot dialogue failed: timeout.",
+        );
+        assert!(bot_rx.try_recv().is_err() && other_rx.try_recv().is_err());
+        assert!(w.dialogue_participants(bot, human).is_err());
+        let position = w.players[&human].pos;
+        let p = w.players.get_mut(&bot).unwrap();
+        p.controller = Controller::Autonomous;
+        p.known.insert(human);
+        p.pos = position;
+        w.dialogue_participants(bot, human).unwrap();
+        w.players.get_mut(&human).unwrap().departing = true;
+        assert!(w.dialogue_participants(bot, human).is_err());
+        assert!(w.dialogue_notice(human, "No stale reply.", true).is_err());
     }
     #[test]
     fn selected_chat_layout_identity_and_world_routing() {

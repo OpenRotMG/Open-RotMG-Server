@@ -152,6 +152,9 @@ impl World {
     }
 
     pub(super) fn encounter_mechanics(&mut self, id: i32, target: Pos, elapsed: u64) -> Result<()> {
+        if crate::dungeon::abyss::ROSTER.contains(&self.entities[&id].kind) {
+            return self.abyss_mechanics(id, target, elapsed);
+        }
         if self.entities[&id].quest.is_some() {
             return self.quest_mechanics(id);
         }
@@ -431,6 +434,9 @@ impl World {
     }
 
     pub(super) fn encounter_death(&mut self, defeated: &Entity) -> Result<()> {
+        if defeated.kind == crate::dungeon::abyss::IDOL {
+            self.idol_bridge(defeated.home, true)?;
+        }
         if let Some(tag) = defeated.quest {
             if defeated.kind == 0x929 {
                 let king = self

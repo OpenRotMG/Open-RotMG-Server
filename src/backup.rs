@@ -90,6 +90,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 character.gain_experience(&content, 400, &mut rand::thread_rng())?;
                 character.dungeons = [1, 2, 3];
                 character.pirate_caves = 4;
+                character.abysses = 5;
                 store.progress(character.clone()).await?;
                 let mut items = character.items.clone();
                 items[4] = 0xa22;
