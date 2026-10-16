@@ -206,6 +206,26 @@ impl World {
         if matches!(e.kind, 0x652 | 0x656 | 0x658) && e.pos.distance(target) > 10. {
             shots.retain(|(index, _)| *index != 1);
         }
+        self.predict_enemy_shots(id, target, &mut shots, |index| match (e.kind, index) {
+            (0x651 | 0x652 | 0x655 | 0x658 | 0x650 | 0x64f, _)
+            | (0x656 | 0x6d8 | 0x640 | 0x649, 1) => 1.,
+            (0x656 | 0x649, 0) => 0.5,
+            _ => 0.,
+        })?;
+        Ok(shots)
+    }
+    pub(super) fn predict_enemy_shots(
+        &self,
+        id: i32,
+        target: Pos,
+        shots: &mut [(u8, f32)],
+        factor: impl Fn(u8) -> f32,
+    ) -> Result<()> {
+        if shots.is_empty() {
+            return Ok(());
+        }
+        let e = &self.entities[&id];
+        let heading = (target.y - e.pos.y).atan2(target.x - e.pos.x);
         let velocity = if let Some(p) = self
             .players
             .values()
@@ -224,13 +244,8 @@ impl World {
             );
             Pos { x: 0., y: 0. }
         };
-        for (index, angle) in &mut shots {
-            let factor = match (e.kind, *index) {
-                (0x651 | 0x652 | 0x655 | 0x658 | 0x650 | 0x64f, _)
-                | (0x656 | 0x6d8 | 0x640 | 0x649, 1) => 1.,
-                (0x656 | 0x649, 0) => 0.5,
-                _ => 0.,
-            };
+        for (index, angle) in shots.iter_mut() {
+            let factor = factor(*index);
             if factor == 0. {
                 continue;
             }
@@ -244,6 +259,6 @@ impl World {
             };
             *angle += (aim.y - e.pos.y).atan2(aim.x - e.pos.x) - heading;
         }
-        Ok(shots)
+        Ok(())
     }
 }

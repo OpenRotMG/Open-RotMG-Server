@@ -36,7 +36,7 @@ fn assert_budgets(w: &World) {
     for terrain in 1..=12 {
         assert!(w.population_count(terrain) <= if terrain >= 11 { 24 } else { 32 });
     }
-    assert_eq!(w.hero_identities().len(), 6);
+    assert_eq!(w.hero_identities().len(), 10);
 }
 
 #[test]

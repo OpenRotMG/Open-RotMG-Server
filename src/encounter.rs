@@ -9,6 +9,7 @@ pub enum Anchor {
     Home,
     CampLeader,
     CampMember(u16),
+    QuestMember(u16),
 }
 #[derive(Clone, Copy)]
 pub enum Motion {
@@ -227,6 +228,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             1000,
             10.,
         ),
+        kind if crate::quest::ROSTER.contains(&kind) => return crate::quest::profile(kind),
         kind if crate::endgame::ROSTER.contains(&kind) => return crate::endgame::profile(kind),
         _ => return None,
     };
@@ -565,10 +567,14 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
         }
         0xda2 | 0xda3 => ring(0, 12, heading),
         0xda5 | 0xda6 => vec![(u8::from((elapsed / 4000) % 2 == 1), heading)],
+        kind if crate::quest::ROSTER.contains(&kind) => vec![],
         _ => panic!("attack requested without an explicit encounter profile"),
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if crate::quest::ROSTER.contains(&kind) {
+        return crate::quest::validate(content, kind);
+    }
     if crate::endgame::ROSTER.contains(&kind) {
         return crate::endgame::validate_kind(content, kind);
     }

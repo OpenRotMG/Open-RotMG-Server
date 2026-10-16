@@ -155,8 +155,13 @@ impl World {
                     output.lost.send_replace(true);
                 }
                 p.departing = true;
+                let (sent, bullets) = p.shoot_acks.front().expect("expired acknowledgement");
                 tracing::error!(
                     player = id,
+                    pending = p.shoot_acks.len(),
+                    oldest_ms = sent.elapsed().as_millis(),
+                    shooter = ?bullets.first().map(|b|b.owner),
+                    volley = bullets.len(),
                     "SHOOT acknowledgement timed out; connection closed"
                 );
             }

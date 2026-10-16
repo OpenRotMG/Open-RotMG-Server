@@ -31,6 +31,9 @@ mod midlands_tests;
 mod population;
 #[cfg(test)]
 mod population_tests;
+mod realm_quests;
+#[cfg(test)]
+mod realm_quests_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 #[cfg(test)]
@@ -103,6 +106,7 @@ pub struct Entity {
     stage: Option<u64>,
     parent: Option<i32>,
     camp: Option<usize>,
+    quest: Option<i32>,
     expires: Option<u64>,
     next_aux: u64,
     bullet: u8,
@@ -592,6 +596,7 @@ impl Directory {
             world.populate_shore()?;
             world.populate_inland()?;
             world.populate_realm_heroes()?;
+            world.populate_named_quests()?;
         }
         world.prepare_endgame()?;
         if template == "sprite-world" {
@@ -1098,6 +1103,7 @@ impl World {
                         stage: None,
                         parent: None,
                         camp: None,
+                        quest: None,
                         expires: None,
                         next_aux: 0,
                         bullet: 0,
@@ -1286,6 +1292,7 @@ impl World {
                 stage: None,
                 parent: None,
                 camp: None,
+                quest: None,
                 expires: None,
                 next_aux: 0,
                 bullet: 0,
@@ -2966,6 +2973,10 @@ impl World {
     fn drop_loot(&mut self, defeated: &Entity) -> Result<()> {
         if crate::endgame::HEROES.contains(&defeated.kind) {
             self.critical_deaths.push(defeated.id);
+        } else if crate::quest::final_root(defeated.kind)
+            && let Some(original) = defeated.quest
+        {
+            self.critical_deaths.push(original);
         }
         if let Some(index) = crate::dungeon::DUNGEONS
             .iter()
@@ -3195,46 +3206,52 @@ impl World {
                 tracing::error!(entity=id, kind, %error, "encounter mechanic refused");
                 continue;
             }
-            let flags = self.entities[&id].conditions(self.now);
-            let (motion, mut speed) =
-                if kind == 0x6c6 || (self.entities[&id].camp.is_some() && midlands::member(kind)) {
-                    match self.midland_movement(id, target, elapsed) {
-                        Ok(movement) => movement,
-                        Err(error) => {
-                            tracing::error!(entity=id,%error,"inland family movement refused");
-                            continue;
-                        }
+            let Some(current) = self.entities.get(&id) else {
+                continue;
+            };
+            let elapsed = self.now - current.activated.expect("activated encounter");
+            let flags = current.conditions(self.now);
+            let (motion, mut speed) = if current.quest.is_some() {
+                self.quest_movement(id, elapsed)
+            } else if kind == 0x6c6 || (self.entities[&id].camp.is_some() && midlands::member(kind))
+            {
+                match self.midland_movement(id, target, elapsed) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"inland family movement refused");
+                        continue;
                     }
-                } else if gods::GODS.contains(&kind)
-                    || gods::CONSTRUCTS.contains(&kind)
-                    || (kind == 0x653 && self.entities[&id].camp.is_some())
-                {
-                    match self.god_movement(id, target, elapsed) {
-                        Ok(movement) => movement,
-                        Err(error) => {
-                            tracing::error!(entity=id,%error,"Godlands movement refused");
-                            continue;
-                        }
+                }
+            } else if gods::GODS.contains(&kind)
+                || gods::CONSTRUCTS.contains(&kind)
+                || (kind == 0x653 && self.entities[&id].camp.is_some())
+            {
+                match self.god_movement(id, target, elapsed) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"Godlands movement refused");
+                        continue;
                     }
-                } else if self.entities[&id].camp.is_some() {
-                    match self.family_movement(id, target, elapsed) {
-                        Ok(movement) => movement,
-                        Err(error) => {
-                            tracing::error!(entity=id,%error,"family movement refused");
-                            continue;
-                        }
+                }
+            } else if self.entities[&id].camp.is_some() {
+                match self.family_movement(id, target, elapsed) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"family movement refused");
+                        continue;
                     }
-                } else if crate::endgame::ROSTER.contains(&kind) {
-                    match self.finale_movement(id, elapsed) {
-                        Ok(movement) => movement,
-                        Err(error) => {
-                            tracing::error!(entity=id,%error,"endgame movement refused");
-                            continue;
-                        }
+                }
+            } else if crate::endgame::ROSTER.contains(&kind) {
+                match self.finale_movement(id, elapsed) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"endgame movement refused");
+                        continue;
                     }
-                } else {
-                    crate::encounter::movement(kind, self.entities[&id].hp, elapsed)
-                };
+                }
+            } else {
+                crate::encounter::movement(kind, self.entities[&id].hp, elapsed)
+            };
             let goal = match motion {
                 Motion::Stationary => {
                     speed = 0.;
@@ -3365,7 +3382,15 @@ impl World {
                 continue;
             }
             let heading = (target.y - e.pos.y).atan2(target.x - e.pos.x);
-            let shots = if crate::endgame::ROSTER.contains(&kind) {
+            let shots = if e.quest.is_some() {
+                match self.quest_shots(id, target, elapsed) {
+                    Ok(shots) => shots,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"named quest projectiles refused");
+                        continue;
+                    }
+                }
+            } else if crate::endgame::ROSTER.contains(&kind) {
                 match self.finale_shots(id, heading, elapsed) {
                     Ok(shots) => shots,
                     Err(error) => {
@@ -5272,7 +5297,7 @@ mod tests {
                 + w.hero_identities().len()
         );
         assert!(w.population_count(11) <= 24);
-        assert_eq!(w.hero_identities().len(), 6);
+        assert_eq!(w.hero_identities().len(), 10);
         assert!(
             w.population
                 .iter()

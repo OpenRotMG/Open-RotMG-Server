@@ -13,6 +13,53 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        0x91b | 0x91f | 0x928 | 0x675 | 0x6c2 | 0x923 => &[],
+        0x676 => &[(0.05, Item(0xa23))],
+        0x677 => &[(0.05, Item(0xa22))],
+        0x65f | 0x660 | 0x661 | 0x922 => &[(0.02, Item(0xa23))],
+        0x921 | 0x91d | 0x91e | 0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
+        0x6c1 => &[(0.0001, Item(crate::endgame::INCANTATION))],
+        0x920 => &[
+            (0.3, Tier(6, WEAPONS)),
+            (0.1, Tier(7, WEAPONS)),
+            (0.3, Tier(6, ARMOR)),
+            (0.1, Tier(7, ARMOR)),
+            (0.95, Tier(1, ABILITIES)),
+            (0.25, Tier(2, ABILITIES)),
+            (0.05, Tier(3, ABILITIES)),
+            (0.15, Tier(2, RINGS)),
+            (0.04, Tier(3, RINGS)),
+            (0.7, Item(0xa22)),
+            (0.7, Item(0xa23)),
+        ],
+        0x91c => &[
+            (0.3, Tier(5, WEAPONS)),
+            (0.2, Tier(6, WEAPONS)),
+            (0.05, Tier(7, WEAPONS)),
+            (0.3, Tier(5, ARMOR)),
+            (0.2, Tier(6, ARMOR)),
+            (0.05, Tier(7, ARMOR)),
+            (0.9, Tier(1, ABILITIES)),
+            (0.15, Tier(2, ABILITIES)),
+            (0.02, Tier(3, ABILITIES)),
+            (0.11, Tier(2, RINGS)),
+            (0.01, Tier(3, RINGS)),
+            (0.4, Item(0xa22)),
+            (0.4, Item(0xa23)),
+        ],
+        0x92d => &[
+            (0.3, Tier(7, WEAPONS)),
+            (0.1, Tier(8, WEAPONS)),
+            (0.3, Tier(7, ARMOR)),
+            (0.1, Tier(8, ARMOR)),
+            (0.7, Tier(2, ABILITIES)),
+            (0.16, Tier(3, ABILITIES)),
+            (0.02, Tier(4, ABILITIES)),
+            (0.25, Tier(2, RINGS)),
+            (0.08, Tier(3, RINGS)),
+            (0.7, Item(0xa22)),
+            (0.7, Item(0xa23)),
+        ],
         0x600 => &[(0.2, Tier(1, WEAPONS)), (0.03, Item(0xa22))],
         0x601 => &[(0.2, Tier(1, ARMOR)), (0.03, Item(0xa22))],
         0x602 | 0x604 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
@@ -273,10 +320,11 @@ pub fn roll(content: &Content, kind: u16, rng: &mut impl Rng) -> Option<u16> {
     None
 }
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if matches!(
-        kind,
-        0x917 | 0xd06 | 0xd90 | 0xd78 | 0xd79 | crate::endgame::ORYX | crate::endgame::ORYX2
-    ) {
+    let mut items = if crate::quest::final_root(kind)
+        || matches!(
+            kind,
+            0x917 | 0xd06 | 0xd90 | 0xd78 | 0xd79 | crate::endgame::ORYX | crate::endgame::ORYX2
+        ) {
         let mut items = Vec::new();
         for (chance, pick) in table(kind) {
             if rng.gen_bool(*chance) {
@@ -299,7 +347,8 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     items
 }
 pub fn private(kind: u16) -> bool {
-    matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
+    crate::quest::final_root(kind)
+        || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
 }

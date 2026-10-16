@@ -18,6 +18,12 @@ impl World {
         let affects = !crate::condition::protected(flags);
         let damage =
             crate::condition::damage(raw, self.content.objects[&e.kind].defense, flags, piercing);
+        // Evaluation shells select a fight; only the transformed boss can be defeated for rewards.
+        let damage = if e.quest.is_some() && matches!(e.kind, 0x91b | 0x91f | 0x928) {
+            damage.min((e.hp - 1).max(0))
+        } else {
+            damage
+        };
         let actual = damage.min(e.hp).max(0);
         if affects {
             for (index, duration) in effects {
@@ -29,7 +35,10 @@ impl World {
             *e.damage.entry(p.character.id).or_default() += damage.min(e.hp).max(0);
         }
         e.hp -= damage;
-        let kill = e.hp <= 0;
+        let lethal = e.hp <= 0;
+        let transform =
+            lethal && e.quest.is_some() && matches!(e.kind, 0x675 | 0x6c2 | 0x92a | 0x92b);
+        let kill = lethal && !transform;
         let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
         if let Some(p) = self.players.get_mut(&owner) {
             if damage > 0 && bullet.is_some() {
@@ -59,7 +68,9 @@ impl World {
                 send(p, 47, o.0.clone());
             }
         }
-        if kill {
+        if transform {
+            self.quest_lethal_transform(target)?;
+        } else if kill {
             self.defeat_entity(target)?;
             tracing::info!(entity = target, owner = owner, "enemy defeated");
         }

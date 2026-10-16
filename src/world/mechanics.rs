@@ -40,6 +40,15 @@ impl World {
         let e = self.entities.get(&id).context("orbiting entity missing")?;
         match anchor {
             encounter::Anchor::Player => Ok(player),
+            encounter::Anchor::QuestMember(kind) => {
+                let tag = e.quest.context("quest anchor lacks encounter ownership")?;
+                self.entities
+                    .values()
+                    .filter(|x| x.quest == Some(tag) && x.kind == kind)
+                    .min_by(|a, b| a.pos.distance(e.pos).total_cmp(&b.pos.distance(e.pos)))
+                    .map(|x| x.pos)
+                    .context("own quest anchor absent")
+            }
             encounter::Anchor::Home => Ok(e.home),
             encounter::Anchor::CampLeader => {
                 let camp = self
@@ -95,7 +104,7 @@ impl World {
         ensure!(
             self.entities
                 .values()
-                .filter(|e| e.parent.is_some())
+                .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + missing
                 <= 256,
@@ -131,6 +140,9 @@ impl World {
     }
 
     pub(super) fn encounter_mechanics(&mut self, id: i32, target: Pos, elapsed: u64) -> Result<()> {
+        if self.entities[&id].quest.is_some() {
+            return self.quest_mechanics(id);
+        }
         if crate::endgame::ROSTER.contains(&self.entities[&id].kind) {
             return self.finale_mechanics(id, target, elapsed);
         }
@@ -407,6 +419,27 @@ impl World {
     }
 
     pub(super) fn encounter_death(&mut self, defeated: &Entity) -> Result<()> {
+        if let Some(tag) = defeated.quest {
+            if defeated.kind == 0x929 {
+                let king = self
+                    .entities
+                    .values()
+                    .find(|e| e.quest == Some(tag) && e.kind == 0x928)
+                    .map(|e| e.id);
+                if let Some(king) = king {
+                    self.quest_transform(king, 0x92d)?;
+                }
+            } else if defeated.kind == 0x92c
+                && !self
+                    .entities
+                    .values()
+                    .any(|e| e.quest == Some(tag) && e.kind == 0x928)
+            {
+                let count = self.rng.gen_range(2..=3);
+                self.quest_spawn_survivors(defeated, 0x669, count)?;
+            }
+            return Ok(());
+        }
         if crate::endgame::ROSTER.contains(&defeated.kind) {
             return self.finale_death(defeated);
         }

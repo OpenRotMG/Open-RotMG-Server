@@ -246,7 +246,8 @@ impl Directory {
         for id in &heroes {
             let hero = world.entities.get(id).context("closure hero missing")?;
             ensure!(
-                HEROES.contains(&hero.kind) && hero.hp > 0,
+                (HEROES.contains(&hero.kind) || crate::quest::ROOTS.contains(&hero.kind) && hero.quest == Some(*id))
+                    && hero.hp > 0,
                 "closure identity is not a living qualifying hero"
             );
         }
@@ -503,7 +504,10 @@ impl World {
     pub(super) fn hero_identities(&self) -> BTreeSet<i32> {
         self.entities
             .values()
-            .filter(|e| HEROES.contains(&e.kind))
+            .filter(|e| {
+                HEROES.contains(&e.kind)
+                    || (crate::quest::ROOTS.contains(&e.kind) && e.quest == Some(e.id))
+            })
             .map(|e| e.id)
             .collect()
     }
@@ -650,6 +654,37 @@ mod tests {
             w.critical_deaths.push(id);
         }
         d.endgame_step();
+    }
+    #[test]
+    fn final_named_deaths_remove_only_original_bound_closure_ids_once() {
+        let mut d = super::super::tests::directory();
+        let originals = d.endgame.cycles[&-3].remaining.clone();
+        assert_eq!(originals.len(), 10);
+        let saved_cycle=d.endgame.cycles.remove(&-3).unwrap();
+        let w=d.worlds.get_mut(&-3).unwrap();let pos=w.entities[originals.iter().next().unwrap()].pos;
+        let forged=w.spawn_entity(0x91f,pos,vec![]).unwrap();
+        assert!(d.bind_realm_heroes(-3,BTreeSet::from([forged])).is_err());
+        d.worlds.get_mut(&-3).unwrap().remove_entity(forged);
+        d.endgame.cycles.insert(-3,saved_cycle);
+        for kind in crate::quest::ROOTS {
+            let w = d.worlds.get_mut(&-3).unwrap();
+            let tag = w.entities.values().find(|e| e.kind == kind).unwrap().id;
+            let final_kind = match kind {
+                0x91f => 0x920,
+                0x91b => 0x91c,
+                0x928 => 0x92d,
+                _ => 0x6c1,
+            };
+            let final_id = w.quest_transform(tag, final_kind).unwrap();
+            assert!(w.critical_deaths.is_empty());
+            w.defeat_entity(final_id).unwrap();
+            assert_eq!(w.critical_deaths, vec![tag]);
+            d.endgame_step();
+            assert!(!d.endgame.cycles[&-3].remaining.contains(&tag));
+            assert!(d.worlds[&-3].admission_open);
+            assert!(d.worlds[&-3].critical_deaths.is_empty());
+        }
+        assert_eq!(d.endgame.cycles[&-3].remaining.len(), 6);
     }
     #[test]
     fn finite_closure_seals_both_admission_paths_and_replaces_without_erasing_owned_players() {

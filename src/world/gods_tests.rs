@@ -63,7 +63,7 @@ fn complete_godlands_counts_all_real_children_and_trio_inside_32_bodies() {
                 .all(|e| e.parent.is_none() && e.expires.is_none() && e.size == 75)
         );
     }
-    assert_eq!(w.hero_identities().len(), 6);
+    assert_eq!(w.hero_identities().len(), 10);
 }
 
 #[test]
