@@ -374,7 +374,7 @@ pub async fn report(
     player: i32,
     message: &str,
     connection: &ConnectionDiagnostics,
-) -> Result<String> {
+) -> Result<()> {
     ensure!(
         a.discord_link_token.is_some(),
         "Discord bug reporting is not configured."
@@ -413,7 +413,7 @@ pub async fn report(
     let diagnostics = a.diagnostics.clone();
     tokio::task::spawn_blocking(move || diagnostics.save(&report)).await??;
     tracing::info!(report_id=%id, account, player, "bug report saved; awaiting Discord delivery");
-    Ok("Submitting public bug report...".into())
+    Ok(())
 }
 pub async fn browser_sample(
     State(a): State<App>,
@@ -640,15 +640,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let packet = rx.recv().await.unwrap();
-        assert_eq!(packet.id, wire::TEXT);
-        let mut r = Reader::new(&packet.body);
-        assert_eq!(r.utf().unwrap(), "");
-        assert_eq!(r.i32().unwrap(), -1);
-        r.i32().unwrap();
-        r.u8().unwrap();
-        r.utf().unwrap();
-        assert!(r.utf().unwrap().contains("Submitting public bug report"));
+        assert!(
+            rx.try_recv().is_err(),
+            "only issue creation should produce a success reply"
+        );
         let mut headers = HeaderMap::new();
         headers.insert(
             "authorization",
