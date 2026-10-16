@@ -16,7 +16,11 @@ mod legends;
 #[cfg(test)]
 mod presentation_tests;
 mod social;
+mod updates;
 pub use social::AccountLists;
+#[cfg(test)]
+pub use updates::UpdatePost;
+pub use updates::{UpdateFeed, UpdateSnapshot};
 
 #[derive(Debug)]
 pub struct InvalidCredentials;
@@ -285,6 +289,7 @@ CREATE TABLE IF NOT EXISTS discord_recovery(account INTEGER PRIMARY KEY REFERENC
 CREATE TABLE IF NOT EXISTS recovery_codes(account INTEGER PRIMARY KEY REFERENCES accounts(id),hash TEXT NOT NULL UNIQUE,issued_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS password_resets(account INTEGER PRIMARY KEY REFERENCES accounts(id),hash TEXT NOT NULL UNIQUE,issued_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS account_lists(account INTEGER NOT NULL REFERENCES accounts(id),list_id INTEGER NOT NULL CHECK(list_id IN (0,1)),target INTEGER NOT NULL REFERENCES accounts(id),PRIMARY KEY(account,list_id,target),CHECK(account<>target));
+CREATE TABLE IF NOT EXISTS update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         let migration = c.transaction()?;
         let records = {
@@ -849,7 +854,7 @@ pub fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 impl Account {
-    pub fn xml(&self) -> String {
+    pub fn xml(&self, news: &str) -> String {
         let mut chars = String::new();
         for c in &self.characters {
             chars += &format!(
@@ -886,7 +891,7 @@ impl Account {
             format!("<ClassStats objectType=\"{class}\"><BestLevel>{level}</BestLevel><BestFame>{fame}</BestFame></ClassStats>")
         }).collect();
         format!(
-            "<Chars nextCharId=\"{}\" maxNumChars=\"1\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>0</Credits><NextCharSlotPrice>600</NextCharSlotPrice></Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0</Usage></Server></Servers><News/></Chars>",
+            "<Chars nextCharId=\"{}\" maxNumChars=\"1\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>0</Credits><NextCharSlotPrice>600</NextCharSlotPrice></Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0</Usage></Server></Servers><News>{news}</News></Chars>",
             self.next_id,
             self.id,
             xml_escape(&self.name),
@@ -1312,7 +1317,7 @@ mod tests {
         assert!(content.unlocked(0x0310, &account.best_levels).unwrap());
         assert!(!content.unlocked(0x0300, &account.best_levels).unwrap());
         assert!(!content.unlocked(0x031f, &account.best_levels).unwrap());
-        let xml = account.xml();
+        let xml = account.xml("");
         let parsed = roxmltree::Document::parse(&xml).unwrap();
         let record = parsed
             .descendants()

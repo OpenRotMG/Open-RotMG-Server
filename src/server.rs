@@ -140,6 +140,7 @@ mod account_actions;
 pub(crate) mod diagnostics;
 mod hiscores;
 pub(crate) mod testing;
+mod updates;
 use account_actions::{discord_announce, discord_kick, discord_recover, reset_password};
 use hiscores::{collection, discord_link, hiscores};
 #[derive(Clone)]
@@ -245,7 +246,8 @@ async fn chars(
         let password = form.get("password").context("password required")?.clone();
         let _authentication = a.authentication.read().await;
         let account = a.store.characters(guid, password).await?;
-        Ok(account.xml())
+        let feed = a.store.updates().await?;
+        Ok(account.xml(&feed.news_xml(&a.origin)))
     }
     .await;
     match result {
@@ -1683,6 +1685,11 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         )
         .route("/internal/discord/bugs", get(diagnostics::pending))
         .route("/internal/discord/bugs/{id}", post(diagnostics::receipt))
+        .route("/api/updates", get(updates::feed))
+        .route(
+            "/internal/discord/updates",
+            post(updates::sync).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))
         .route("/internal/discord/announce", post(discord_announce))

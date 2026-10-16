@@ -370,7 +370,7 @@ mod tests {
     async fn native_name_choice_is_registered_unique_and_one_time() {
         let (s, _, _) = store("name-choice");
         let guest = s.list("name-guest".into()).await.unwrap();
-        assert!(!guest.xml().contains("<NameChosen/>"));
+        assert!(!guest.xml("").contains("<NameChosen/>"));
         let content = Content::load(Path::new("data")).unwrap();
         let ch = s
             .create(guest.id, content.get(WIZARD).unwrap())
@@ -391,7 +391,7 @@ mod tests {
             .unwrap();
         assert_eq!(a.name, "Pilot");
         assert_eq!(s.load(guest.id, ch.id).await.unwrap().name, "Pilot");
-        assert!(a.xml().contains("<NameChosen/>"));
+        assert!(a.xml("").contains("<NameChosen/>"));
         assert!(s.choose_name(guest.id, "Renamed".into()).await.is_err());
         let second = s
             .register(

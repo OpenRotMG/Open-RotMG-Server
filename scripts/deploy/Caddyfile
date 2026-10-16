@@ -27,7 +27,7 @@ openrotmg.org {
     handle @private {
         respond "Development control is not public" 403
     }
-    @backend path /game /client.swf /legacy-api/* /vendor/* /sfx/* /health /api/hiscores /api/collection/* /api/account/recover /api/diagnostics/* /api/bug-reports/*
+    @backend path /game /client.swf /legacy-api/* /vendor/* /sfx/* /health /api/updates /api/hiscores /api/collection/* /api/account/recover /api/diagnostics/* /api/bug-reports/*
     handle @backend {
         reverse_proxy 127.0.0.1:18923 {
             header_up X-Forwarded-For {http.request.remote.host}

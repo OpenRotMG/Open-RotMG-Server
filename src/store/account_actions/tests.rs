@@ -232,7 +232,7 @@ async fn death_credits_wallet_once_and_play_screen_and_hiscores_share_spendable_
         .characters("owner@example.org".into(), "old-password".into())
         .await
         .unwrap()
-        .xml();
+        .xml("");
     assert!(screen.contains("<Stats><Fame>40</Fame><TotalFame>40</TotalFame>"));
     s.call(move |db| {
         db.execute(
@@ -256,7 +256,7 @@ async fn death_credits_wallet_once_and_play_screen_and_hiscores_share_spendable_
         .characters("owner@example.org".into(), "old-password".into())
         .await
         .unwrap()
-        .xml();
+        .xml("");
     assert!(screen.contains("<Stats><Fame>27</Fame><TotalFame>40</TotalFame>"));
     assert_eq!(
         restarted.hiscores(vec![]).await.unwrap()["players"][0]["total_fame"],
