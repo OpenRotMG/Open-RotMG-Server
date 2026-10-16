@@ -468,7 +468,6 @@ impl World {
                 })
                 .collect();
             candidates.shuffle(&mut self.rng);
-            candidates.sort_by_key(|p| self.map.cell(p.x, p.y).unwrap().ground != 0xd0);
             let mut placed = 0;
             for pos in candidates {
                 if self

@@ -239,6 +239,11 @@ impl World {
                     .map(|e| e.pos),
             )
             .collect();
+        let quest_positions: Vec<_> = self
+            .entities
+            .values()
+            .filter_map(|e| e.quest.map(|_| e.pos))
+            .collect();
         let mut candidates: Vec<_> = self
             .map
             .cells
@@ -271,16 +276,12 @@ impl World {
                         .iter()
                         .all(|(x, y)| a.distance(Pos { x: *x, y: *y }) >= 64.)
                     && protected.iter().all(|p| a.distance(*p) >= 4.)
-                    && self
-                        .entities
-                        .values()
-                        .filter(|e| e.quest.is_some())
-                        .all(|e| {
-                            e.pos.distance(Pos {
-                                x: (a.x + a.width / 2) as f32 + 0.5,
-                                y: (a.y + a.height / 2) as f32 + 0.5,
-                            }) >= 32.
-                        })
+                    && quest_positions.iter().all(|p| {
+                        p.distance(Pos {
+                            x: (a.x + a.width / 2) as f32 + 0.5,
+                            y: (a.y + a.height / 2) as f32 + 0.5,
+                        }) >= 32.
+                    })
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];

@@ -53,14 +53,6 @@ impl World {
                 })
                 .collect();
             candidates.shuffle(&mut self.rng);
-            // Roads make encounters discoverable without placing an arrival-room ambush.
-            candidates.sort_by_key(|pos| {
-                self.map
-                    .cell(pos.x, pos.y)
-                    .expect("candidate in map")
-                    .ground
-                    != 0xd0
-            });
             if *terrain == 1 {
                 self.populate_godlands(&candidates)?;
                 continue;
