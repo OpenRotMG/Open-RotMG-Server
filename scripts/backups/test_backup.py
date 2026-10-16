@@ -220,7 +220,8 @@ INSERT INTO account_lists VALUES(1,0,2),(1,1,2),(2,0,1),(1,0,3);''')
     def add_updates(self):
         self.add_social()
         self.news = {'guild_id': '12345678901234567', 'channel_id': '23456789012345678', 'posts': [
-            {'id': '34567890123456789', 'content': 'News & friends\n\nA public paragraph.', 'published_at': 1700000000, 'edited_at': None}]}
+            {'id': '34567890123456789', 'content': 'News & friends\n\nA public paragraph.', 'published_at': 1700000000, 'edited_at': None,
+             'attachments': [{'filename': 'demo.mp4', 'url': 'https://cdn.discordapp.com/attachments/23456789012345678/34567890123456789/demo.mp4?ex=abc&hm=def', 'content_type': 'video/mp4'}]}]}
         with closing(sqlite3.connect(self.game)) as db, db:
             db.execute('CREATE TABLE update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL)')
             db.execute('INSERT INTO update_feed VALUES(1,?,1700000100)', [json.dumps(self.news)])
@@ -255,7 +256,8 @@ INSERT INTO account_lists VALUES(1,0,2),(1,1,2),(2,0,1),(1,0,3);''')
             backup.validate(malformed)
         for change in [lambda s: s.update(token='NEVER_EXPORT'), lambda s: s['posts'][0].update(password_hash='NEVER_EXPORT'),
                        lambda s: s['posts'][0].update(content=''), lambda s: s['posts'][0].update(content='a\uffffb'),
-                       lambda s: s['posts'].append(s['posts'][0]), lambda s: s['posts'][0].update(edited_at=1)]:
+                       lambda s: s['posts'].append(s['posts'][0]), lambda s: s['posts'][0].update(edited_at=1),
+                       lambda s: s['posts'][0]['attachments'][0].update(url='https://example.org/demo.mp4')]:
             news = deepcopy(self.news)
             change(news)
             malformed = deepcopy(before)
