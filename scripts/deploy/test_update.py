@@ -215,8 +215,10 @@ class UpdateTest(unittest.TestCase):
             with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(403):
                 with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
                     update.announce({'bind': '127.0.0.1:18923'}, 'text')
-            with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(404):
+            with patch.object(update, 'ANNOUNCE_TOKEN', token), fail(404) as urlopen:
                 self.assertIsNone(update.announce({'bind': '127.0.0.1:18923'}, 'text'))
+            # axum's Json extractor answers 415 without this header.
+            self.assertEqual(urlopen.call_args.args[0].get_header('Content-type'), 'application/json')
 
     def test_deploy_warns_players_before_stopping_production(self):
         with tempfile.TemporaryDirectory() as tmp:

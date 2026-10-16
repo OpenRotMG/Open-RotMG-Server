@@ -173,7 +173,7 @@ def announce(config, text):
     token = ANNOUNCE_TOKEN.read_text().strip()
     request = urllib.request.Request(
         'http://127.0.0.1:' + config['bind'].rsplit(':', 1)[1] + '/internal/discord/announce',
-        data=json.dumps({'text': text}).encode(), headers={'authorization': 'Bearer ' + token})
+        data=json.dumps({'text': text}).encode(), headers={'authorization': 'Bearer ' + token, 'content-type': 'application/json'})
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
