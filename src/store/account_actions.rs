@@ -12,7 +12,29 @@ fn reset_hash(token: &str) -> Result<String> {
 fn reset_owner(db: &Connection, hash: &str, time: i64) -> Result<i32> {
     db.query_row("SELECT p.account FROM password_resets p JOIN discord_recovery r ON r.account=p.account JOIN credentials c ON c.account=p.account JOIN accounts a ON a.id=p.account WHERE p.hash=?1 AND p.expires_at>?2 AND a.guid IS NOT NULL", params![hash,time], |r| r.get(0)).optional()?.context("invalid or expired reset link")
 }
+fn replace_password(tx: &rusqlite::Transaction<'_>, account: i32, verifier: &str) -> Result<()> {
+    ensure!(
+        tx.execute(
+            "UPDATE credentials SET password_hash=?2 WHERE account=?1",
+            params![account, verifier]
+        )? == 1,
+        "registered credential missing"
+    );
+    for table in ["password_resets", "recovery_codes", "discord_codes"] {
+        tx.execute(&format!("DELETE FROM {table} WHERE account=?1"), [account])?;
+    }
+    Ok(())
+}
 impl Store {
+    pub async fn change_password(&self, account: i32, verifier: String) -> Result<()> {
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            replace_password(&tx, account, &verifier)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
     pub async fn linked_account(&self, discord: String) -> Result<i32> {
         discord_id(&discord)?;
         self.call(move |db| {
@@ -102,16 +124,7 @@ impl Store {
             .call(move |db| {
                 let tx = db.transaction()?;
                 let account = reset_owner(&tx, &hash, now()?)?;
-                ensure!(
-                    tx.execute(
-                        "UPDATE credentials SET password_hash=?2 WHERE account=?1",
-                        params![account, verifier]
-                    )? == 1,
-                    "registered credential missing"
-                );
-                for table in ["password_resets", "recovery_codes", "discord_codes"] {
-                    tx.execute(&format!("DELETE FROM {table} WHERE account=?1"), [account])?;
-                }
+                replace_password(&tx, account, &verifier)?;
                 tx.commit()?;
                 Ok(account)
             })
