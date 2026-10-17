@@ -24,7 +24,8 @@ UPDATES_GAME = {**SOCIAL_GAME, 'update_feed': ('id', 'snapshot', 'synced_at')}
 GOLD_GAME = {**UPDATES_GAME, 'accounts': (*GAME['accounts'], 'credits')}
 GUILDS_GAME = {**GOLD_GAME, 'guilds': ('id', 'name', 'level', 'fame', 'earned', 'board'), 'guild_members': ('account', 'guild', 'rank', 'fame')}
 REWARDS_GAME = {**GUILDS_GAME, 'gold_rewards': ('account', 'reward', 'awarded_at', 'notified_at')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME}
+SLOTS_GAME = {**REWARDS_GAME, 'accounts': (*GOLD_GAME['accounts'], 'character_slots'), 'character_slot_purchases': ('account', 'timer', 'slots')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -34,7 +35,8 @@ AUTH_UPDATES_GAME = {**AUTH_SOCIAL_GAME, 'update_feed': UPDATES_GAME['update_fee
 # Loading a restore with the release binary recreates its empty credential tables; the deploy helper and release contract share this.
 AUTH_GOLD_GAME = {**AUTH_UPDATES_GAME, 'accounts': GOLD_GAME['accounts']}
 AUTH_GUILDS_GAME = {**AUTH_GOLD_GAME, 'guilds': GUILDS_GAME['guilds'], 'guild_members': GUILDS_GAME['guild_members']}
-RELOADED_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewards']}
+AUTH_REWARDS_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewards']}
+RELOADED_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'character_slot_purchases': SLOTS_GAME['character_slot_purchases']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -120,6 +122,32 @@ def validate_guilds(game, accounts):
         raise ValueError('Invalid guild roster, founder count or contributions')
 
 
+def validate_slots(game):
+    capacities, purchases, timers, living = {}, {}, set(), {}
+    for row in game['accounts']:
+        account, capacity = row['id'], row['character_slots']
+        if (type(account) is not int or not 0 < account <= 2147483647 or account in capacities
+                or type(capacity) is not int or not 1 <= capacity <= 14):
+            raise ValueError('Invalid character slot capacity')
+        capacities[account], purchases[account], living[account] = capacity, [], 0
+    for row in game['character_slot_purchases']:
+        account, timer, slots = row['account'], row['timer'], row['slots']
+        if (type(account) is not int or account not in capacities
+                or type(timer) is not int or not -2147483648 <= timer <= 2147483647
+                or type(slots) is not int or not 2 <= slots <= 14 or (account, timer) in timers):
+            raise ValueError('Invalid character slot purchase')
+        timers.add((account, timer))
+        purchases[account].append(slots)
+    for row in game['characters']:
+        if (type(row['account']) is not int or row['account'] not in capacities
+                or type(row['alive']) is not int or row['alive'] not in (0, 1)):
+            raise ValueError('Invalid character slot owner or living state')
+        living[row['account']] += row['alive']
+    for account, capacity in capacities.items():
+        if sorted(purchases[account]) != list(range(2, capacity + 1)) or living[account] > capacity:
+            raise ValueError('Inconsistent character slot purchase history or living capacity')
+
+
 def validate(bundle):
     if set(bundle) != {'schema', 'created_at', 'revisions', 'game', 'discord'} or type(bundle['schema']) is not int or bundle['schema'] not in GAME_SCHEMAS:
         raise ValueError('Unsupported backup envelope')
@@ -199,12 +227,16 @@ def validate(bundle):
     if bundle['schema'] >= 5 and {r['account'] for r in bundle['game']['account_fame']} != accounts:
         raise ValueError('Every account requires a fame wallet')
     validate_guilds(bundle['game'], accounts)
+    if bundle['schema'] >= 12:
+        validate_slots(bundle['game'])
     return bundle
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
+    if stored_version > max(GAME_SCHEMAS) or (12 in versions and stored_version != 12):
+        raise ValueError('Unsupported database schema version')
     if len(versions) > 1 and stored_version not in versions:
         raise ValueError('Unsupported gold reward schema version')
     version = stored_version if len(versions) > 1 else versions[0]
@@ -264,6 +296,15 @@ CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(
     if bundle['schema'] >= 10:
         rewards = "'discord_link','collection_top_half'" + (",'first_bug_report'" if bundle['schema'] >= 11 else '')
         definitions['game'] += f"\nCREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ({rewards})),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));"
+    if bundle['schema'] >= 12:
+        definitions['game'] += '''
+ALTER TABLE accounts ADD COLUMN character_slots INTEGER NOT NULL DEFAULT 1 CHECK(typeof(character_slots)='integer' AND character_slots BETWEEN 1 AND 14);
+CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots));
+DROP INDEX one_living_character;
+CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1;
+CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
+CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
+CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END;'''
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

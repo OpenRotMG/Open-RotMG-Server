@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod character_slot_tests;
+#[cfg(test)]
 mod client_contract_tests;
 mod input;
 #[cfg(test)]
@@ -372,6 +374,26 @@ async fn account_request(
                     .await?;
                 id
             }
+            "purchaseCharSlot" => {
+                ensure!(
+                    form.get("secret").is_none_or(|s| s.is_empty()),
+                    "external platform authentication is not implemented"
+                );
+                let timer: i32 = form
+                    .get("ignore")
+                    .context("ignore timer required")?
+                    .parse()
+                    .context("invalid signed-32-bit ignore timer")?;
+                let password = form.get("password").context("password required")?.clone();
+                ensure!(
+                    !password.is_empty(),
+                    "Register an account before buying character slots."
+                );
+                let id = a.store.authenticate(guid, password).await?;
+                let _claim = a.claim(id)?;
+                a.store.purchase_character_slot(id, timer).await?;
+                id
+            }
             _ => bail!("account operation not implemented"),
         };
         tracing::info!(account = id, operation, "account request completed");
@@ -382,7 +404,12 @@ async fn account_request(
         Ok(xml) => xml,
         Err(e) => {
             tracing::warn!(error=%e, operation, "account request rejected");
-            format!("<Error>{}</Error>", xml_escape(&e.to_string()))
+            let tag = if e.is::<crate::store::SlotReplay>() {
+                "FatalError"
+            } else {
+                "Error"
+            };
+            format!("<{tag}>{}</{tag}>", xml_escape(&e.to_string()))
         }
     };
     // The original account service carries semantic failures in XML, not HTTP error pages.
