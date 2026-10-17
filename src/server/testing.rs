@@ -659,6 +659,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         name: String::new(),
         level: 1,
         exp: 0,
+        xp_boost: Default::default(),
         fame: 0,
         hp: 1,
         mp: 1,

@@ -7,6 +7,8 @@ mod purchase_tests;
 mod queue_tests;
 #[cfg(test)]
 mod resurrection_tests;
+#[cfg(test)]
+mod xp_booster_tests;
 use crate::{
     content::{Content, WIZARD},
     crypto::Keys,
@@ -563,6 +565,19 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 u16::try_from(pet.source.kind)?,
                 pet.selected,
                 a.content.clone(),
+            )
+            .await
+    } else if let Some(slot) = plan.xp_boost {
+        a.store
+            .consume_xp_booster(
+                InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                },
+                (slot.object == plan.player).then_some(slot.slot),
+                plan.vault.clone(),
             )
             .await
     } else if let Some((slot, tex1, tex2)) = plan.appearance {

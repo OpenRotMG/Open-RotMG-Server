@@ -78,6 +78,12 @@ impl AccountPresentation {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct XpBoost {
+    pub active: bool,
+    pub bonus_exp: i32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Character {
     pub schema: u8,
@@ -94,6 +100,9 @@ pub struct Character {
     pub name: String,
     pub level: i32,
     pub exp: i32,
+    // Pre-booster schema-one writers had no boost metadata; present metadata must be complete.
+    #[serde(default)]
+    pub xp_boost: XpBoost,
     pub fame: i32,
     pub hp: i32,
     pub mp: i32,
@@ -142,11 +151,23 @@ impl Character {
         self.effective(content)?;
         ensure!(amount >= 0, "negative experience reward");
         let mut next = self.clone();
+        let bonus = if next.xp_boost.active { amount } else { 0 };
         next.exp = next
             .exp
             .checked_add(amount)
+            .and_then(|exp| exp.checked_add(bonus))
             .context("experience overflow")?;
-        next.fame = next.exp / 1000;
+        next.xp_boost.bonus_exp = next
+            .xp_boost
+            .bonus_exp
+            .checked_add(bonus)
+            .context("bonus experience overflow")?;
+        // Expired boost XP must never turn into Fame on a later award.
+        next.fame = next
+            .exp
+            .checked_sub(next.xp_boost.bonus_exp)
+            .context("invalid bonus experience")?
+            / 1000;
         let class = &content.classes[&next.class];
         let previous = next.level;
         while next.level < 20 && next.exp >= level_start(next.level + 1)? {
@@ -157,6 +178,9 @@ impl Character {
                     .context("growth overflow")?
                     .min(class.caps[i]);
             }
+        }
+        if next.level == 20 {
+            next.xp_boost.active = false;
         }
         if next.level > previous {
             let effective = next.effective(content)?;
@@ -172,6 +196,15 @@ impl Character {
             .get(&self.class)
             .context("unknown character class")?;
         level_start(self.level)?;
+        ensure!(
+            (0..=self.exp).contains(&self.xp_boost.bonus_exp)
+                && (!self.xp_boost.active || self.level < 20),
+            "invalid XP boost state: level={}, experience={}, bonus={}, active={}",
+            self.level,
+            self.exp,
+            self.xp_boost.bonus_exp,
+            self.xp_boost.active
+        );
         ensure!(
             self.schema == 1 && self.items.len() == 12,
             "invalid character schema or inventory"
@@ -648,6 +681,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 name,
                 level: 1,
                 exp: 0,
+                xp_boost: XpBoost::default(),
                 fame: 0,
                 hp,
                 mp,
@@ -898,7 +932,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             Ok(())
         }).await
     }
-    pub async fn death(&self, ch: Character, killed_by: String) -> Result<()> {
+    pub async fn death(&self, mut ch: Character, killed_by: String) -> Result<()> {
+        ch.xp_boost.active = false;
         ensure!(
             !ch.alive && ch.hp == 0 && ch.fame >= 0,
             "death snapshot must be dead with nonnegative fame"

@@ -81,6 +81,8 @@ mod realm_setpieces_tests;
 mod spider;
 #[cfg(test)]
 mod spider_tests;
+#[cfg(test)]
+mod xp_booster_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
@@ -407,6 +409,7 @@ pub struct InventoryPlan {
     pub effects: Vec<crate::content::ConsumableEffect>,
     pub stat_growth: Option<(Character, Slot, usize, i32)>,
     pub appearance: Option<(Slot, u32, u32)>,
+    pub xp_boost: Option<Slot>,
     pub(crate) companion: Option<companions::Plan>,
     pub vault: Option<Vault>,
     pub dropped: Option<i32>,
@@ -1837,7 +1840,7 @@ impl World {
             o.i32(id)
                 .f32(p.pos.x)
                 .f32(p.pos.y)
-                .i16(45 + 3 * i16::from(id == recipient));
+                .i16(45 + 4 * i16::from(id == recipient));
             for (k, v) in [
                 (0, values[0]),
                 (1, p.character.hp),
@@ -1879,6 +1882,7 @@ impl World {
                 stat(&mut o, 35, p.presentation.credits);
                 stat(&mut o, 39, p.presentation.fame);
                 stat(&mut o, 64, p.oxygen);
+                stat(&mut o, 65, i32::from(p.character.xp_boost.active));
             }
             for (i, boost) in [46, 47, 48, 49, 50, 53, 51, 52].into_iter().enumerate() {
                 stat(&mut o, boost, values[i] - p.character.base[i]);
@@ -2699,6 +2703,24 @@ impl World {
         );
         ensure!(slot.kind >= 0, "empty item slot");
         let item = self.content.get(slot.kind as u16)?.clone();
+        if item.xp_boost {
+            ensure!(
+                item.kind == 0xc42 && item.consumable && item.activations == 0,
+                "unsupported XP booster"
+            );
+            ensure!(
+                p.character.level < 20,
+                "XP boost requires a character below level 20"
+            );
+            ensure!(!p.character.xp_boost.active, "XP boost is already active");
+            ensure!(
+                !p.progress_queued(),
+                "character progress is awaiting commit"
+            );
+            let mut plan = self.consumable_plan(id, slot, -1);
+            plan.xp_boost = Some(slot);
+            return Ok(Some(plan));
+        }
         if !item.abilities.is_empty() {
             ensure!(slot.object == id, "ability must be equipped");
             self.activate_ability(id, slot, &item, pos)?;
@@ -2801,6 +2823,7 @@ impl World {
             effects: Vec::new(),
             stat_growth: None,
             appearance: None,
+            xp_boost: None,
             companion: None,
             vault: None,
             dropped: None,
@@ -3099,6 +3122,10 @@ impl World {
                 "appearance consumable committed"
             );
         }
+        if plan.xp_boost.is_some() {
+            p.character.xp_boost.active = true;
+            tracing::info!(player = plan.player, revision, "XP boost committed");
+        }
         let values = p.effective(&self.content, self.now)?;
         p.character.hp = p.character.hp.min(values[0]);
         p.character.mp = p.character.mp.min(values[1]);
@@ -3277,6 +3304,7 @@ impl World {
             || snapshot.spider_dens > p.character.spider_dens;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
+        p.character.xp_boost = snapshot.xp_boost;
         p.character.fame = snapshot.fame;
         p.character.level = snapshot.level;
         p.character.base = snapshot.base;
@@ -3298,6 +3326,8 @@ impl World {
             player = id,
             level = p.character.level,
             experience = p.character.exp,
+            bonus_experience = p.character.xp_boost.bonus_exp,
+            xp_boost = p.character.xp_boost.active,
             "progress committed"
         );
         if cleared_dungeon && let Some(exit) = self.clear_exit.take() {
@@ -3365,6 +3395,7 @@ impl World {
         tracing::info!(player=id, grave, kind, maxed, expires=?entity.expires, "gravestone created");
         let p = self.players.get_mut(&id).unwrap();
         p.character.alive = false;
+        p.character.xp_boost.active = false;
         p.character.items.fill(-1);
         p.death_pending = false;
         let mut out = Writer::new();
@@ -4843,6 +4874,7 @@ mod tests {
             name: "Test".into(),
             level: 1,
             exp: 0,
+            xp_boost: Default::default(),
             fame: 0,
             hp: 100,
             mp: 100,
