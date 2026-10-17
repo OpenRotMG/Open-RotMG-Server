@@ -12,6 +12,13 @@ fn price(item: &Object) -> Option<(i32, u8)> {
         0xc11 => (300, 0),
         0x710 => (400, 0),
         0xb3e => (11250, 1),
+        // The recovered stock has five doses; retain the comparator's fixed elixir offer.
+        0xb16 => (500, 1),
+        // Preserved pre-Pet-Yard table: wikiwiki.jp/rmd/old/ペット and アイテム売り場.
+        0x1513 => (190, 0),
+        0x151b | 0x151e => (490, 0),
+        0xa50 => (35, 1),
+        0xa51 => (50, 1),
         0xb0d => (150, 1),
         0xb0f => (100, 1),
         // Preserved old-shop table: https://wikiwiki.jp/rmd/アイテム売り場#DrakeEgg
@@ -99,7 +106,7 @@ impl World {
         let mut items = p.character.items.clone();
         items[slot] = i32::from(item);
         self.cancel_trade(id, "Trade cancelled by purchase.");
-        let mut plan = self.plan(id, items, None, 0);
+        let mut plan = self.plan(id, items, None);
         plan.purchase = Some((
             merchant,
             Purchase {

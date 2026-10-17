@@ -157,7 +157,7 @@ impl Directory {
             }
         }
         for (id, origin) in revoked {
-            self.return_to_nexus(id, origin);
+            self.return_to_nexus(id, origin, false);
         }
         Ok(())
     }

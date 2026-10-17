@@ -2,6 +2,8 @@ use anyhow::{Context, Result, bail, ensure};
 use roxmltree::Node;
 mod abilities;
 pub use abilities::Ability;
+mod consumables;
+pub use consumables::{Companion, ConsumableEffect};
 use serde::Serialize;
 use std::{collections::BTreeMap, io::Read, path::Path};
 
@@ -123,6 +125,14 @@ pub struct Object {
     pub stat_increase: Option<(u8, i32)>,
     pub unlock_portal: Option<(String, String)>,
     pub create_object: Option<String>,
+    pub dungeon_name: Option<String>,
+    pub consumable: bool,
+    pub resurrects: bool,
+    pub textures: [Option<u32>; 2],
+    pub successor: Option<String>,
+    pub doses: Option<u8>,
+    pub consumable_effects: Vec<ConsumableEffect>,
+    pub companion: Option<Companion>,
     pub heal_range: f32,
     pub activations: usize,
     pub abilities: Vec<Ability>,
@@ -157,6 +167,18 @@ pub struct Content {
 }
 fn child<'a, 'i>(n: Node<'a, 'i>, tag: &str) -> Option<Node<'a, 'i>> {
     n.children().find(|c| c.has_tag_name(tag))
+}
+fn texture(n: Node<'_, '_>, tag: &str) -> Result<Option<u32>> {
+    child(n, tag)
+        .map(|_| {
+            let value = text(n, tag);
+            Ok(if let Some(hex) = value.strip_prefix("0x") {
+                u32::from_str_radix(hex, 16)?
+            } else {
+                value.parse()?
+            })
+        })
+        .transpose()
 }
 fn text(n: Node<'_, '_>, tag: &str) -> String {
     child(n, tag)
@@ -343,6 +365,23 @@ impl Content {
                             .map(str::to_owned)
                     })
                     .transpose()?,
+                dungeon_name: child(n, "DungeonName").map(|_| text(n, "DungeonName")),
+                consumable: child(n, "Consumable").is_some(),
+                resurrects: child(n, "Resurrects").is_some(),
+                textures: [texture(n, "Tex1")?, texture(n, "Tex2")?],
+                successor: child(n, "SuccessorId").map(|_| text(n, "SuccessorId")),
+                doses: if child(n, "Doses").is_some() {
+                    let doses: u8 = text(n, "Doses").parse()?;
+                    ensure!(doses > 0, "invalid consumable dose count");
+                    Some(doses)
+                } else if child(n, "Consumable").is_some() {
+                    Some(1)
+                } else {
+                    None
+                },
+                consumable_effects: consumables::parse(n)
+                    .with_context(|| format!("item activations {id:#x}"))?,
+                companion: consumables::companion(n)?,
                 heal_range: child(n, "Activate")
                     .and_then(|p| p.attribute("range"))
                     .map(str::parse)

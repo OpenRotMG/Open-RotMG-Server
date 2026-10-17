@@ -27,7 +27,7 @@ pub(super) fn attack_cooldown(
     let rate = if p.conditions(now) & crate::condition::bit(crate::condition::DAZED) != 0 {
         0.0015
     } else {
-        let base = 0.0015 + (0.008 - 0.0015) * p.character.effective(content)?[5] as f64 / 75.;
+        let base = 0.0015 + (0.008 - 0.0015) * p.effective(content, now)?[5] as f64 / 75.;
         base * if p.conditions(now) & crate::condition::bit(crate::condition::BERSERK) != 0 {
             1.5
         } else {
@@ -189,7 +189,7 @@ impl World {
         let item = self.content.get(kind)?;
         let count = if time == last { count } else { 0 };
         if time != last {
-            let rate = 0.0015 + 0.0065 * p.character.effective(&self.content)?[5] as f64 / 75.;
+            let rate = 0.0015 + 0.0065 * p.effective(&self.content, self.now)?[5] as f64 / 75.;
             let cooldown = (1. / (rate * f64::from(item.rate))).floor() as f32;
             ensure!(
                 i64::from(time) - i64::from(last) >= cooldown as i64 - 2,

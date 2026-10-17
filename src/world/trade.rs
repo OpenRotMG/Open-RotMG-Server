@@ -285,8 +285,8 @@ impl World {
             }
         }
         let plans = [
-            self.plan(players[0], inventories[0].clone(), None, 0),
-            self.plan(players[1], inventories[1].clone(), None, 0),
+            self.plan(players[0], inventories[0].clone(), None),
+            self.plan(players[1], inventories[1].clone(), None),
         ];
         for player in players {
             self.players.get_mut(&player).unwrap().pending = true;

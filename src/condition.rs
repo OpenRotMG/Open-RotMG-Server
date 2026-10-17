@@ -60,5 +60,25 @@ pub fn damage(raw: i32, defense: i32, flags: i32, piercing: bool) -> i32 {
     } else {
         defense
     };
-    (raw - defense).max(raw * 15 / 100).max(1)
+    (raw - defense).max(raw * 15 / 100)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_client_armor_floor_allows_zero_without_breaking_piercing_or_protection() {
+        for raw in 0..=100 {
+            for defense in [0, 3, 25, 100] {
+                assert_eq!(
+                    damage(raw, defense, 0, false),
+                    (raw * 3 / 20).max(raw - defense)
+                );
+            }
+        }
+        assert_eq!(damage(4, 25, 0, true), 4);
+        assert_eq!(damage(4, 25, bit(ARMOR_BROKEN), false), 4);
+        assert_eq!(damage(100, 0, bit(INVINCIBLE), false), 0);
+    }
 }

@@ -14,11 +14,13 @@ fn entry(tag: &str, character: &Character) -> Result<String> {
         "invalid Legends death snapshot"
     );
     Ok(format!(
-        "<{tag} accountId=\"{}\" charId=\"{}\"><Name>{}</Name><ObjectType>{}</ObjectType><Tex1>0</Tex1><Tex2>0</Tex2><Equipment>{}</Equipment><TotalFame>{}</TotalFame></{tag}>",
+        "<{tag} accountId=\"{}\" charId=\"{}\"><Name>{}</Name><ObjectType>{}</ObjectType><Tex1>{}</Tex1><Tex2>{}</Tex2><Equipment>{}</Equipment><TotalFame>{}</TotalFame></{tag}>",
         character.account,
         character.id,
         xml_escape(&character.name),
         character.class,
+        character.tex1,
+        character.tex2,
         character
             .items
             .iter()

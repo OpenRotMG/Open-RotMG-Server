@@ -4,8 +4,14 @@ use crate::endgame::{CASTLE, CELLAR, HEROES, INCANTATION, LOCKED_CELLAR, RealmCy
 pub(super) struct RealmDirectory {
     pub active: i32,
     cycles: BTreeMap<i32, RealmCycle>,
-    forced: BTreeMap<i32, (i32, i32)>,
+    forced: BTreeMap<i32, ForcedRoute>,
     retry: BTreeMap<i32, u64>,
+}
+#[derive(Clone, Copy)]
+struct ForcedRoute {
+    origin: i32,
+    destination: i32,
+    frozen: bool,
 }
 impl Default for RealmDirectory {
     fn default() -> Self {
@@ -55,16 +61,26 @@ impl Directory {
                 && p.character.id == plan.character,
             "portal owner reservation changed"
         );
-        let (template, kind) = if let Some(locked) = locked {
+        let kind = w
+            .entities
+            .get(&opened)
+            .context("staged portal missing")?
+            .kind;
+        let template = if let Some(locked) = locked {
             ensure!(
                 w.entities
                     .get(&locked)
                     .is_some_and(|e| e.kind == LOCKED_CELLAR && e.reserved && e.published),
                 "locked portal reservation missing"
             );
-            (CELLAR, 0x700)
+            ensure!(kind == 0x700, "Incantation staged the wrong portal");
+            Some(CELLAR)
         } else {
-            ("pirate-cave", 0x717)
+            crate::dungeon::DUNGEONS
+                .iter()
+                .chain(crate::endgame::DUNGEONS)
+                .find(|(portal, _, _, _)| *portal == kind)
+                .map(|(_, template, _, _)| *template)
         };
         ensure!(
             w.entities
@@ -72,7 +88,10 @@ impl Directory {
                 .is_some_and(|e| e.kind == kind && e.reserved && !e.published),
             "unpublished portal missing"
         );
-        let destination = match self.instance(template, None) {
+        let destination = match template
+            .map(|template| self.instance(template, None))
+            .transpose()
+        {
             Ok(destination) => destination,
             Err(error) => {
                 let w = self.worlds.get_mut(&origin).unwrap();
@@ -140,13 +159,15 @@ impl Directory {
                 .unwrap()
                 .discard_unlock(locked, opened)?;
             self.portals.remove(&opened);
-            ensure!(
-                self.worlds[&destination].players.is_empty()
-                    && !self.grants.values().any(|g| g.destination == destination),
-                "unpublished dungeon acquired a participant"
-            );
-            self.worlds.remove(&destination);
-            self.idle.remove(&destination);
+            if let Some(destination) = destination {
+                ensure!(
+                    self.worlds[&destination].players.is_empty()
+                        && !self.grants.values().any(|g| g.destination == destination),
+                    "unpublished dungeon acquired a participant"
+                );
+                self.worlds.remove(&destination);
+                self.idle.remove(&destination);
+            }
             return self
                 .worlds
                 .get_mut(&origin)
@@ -172,10 +193,11 @@ impl Directory {
         e.reserved = false;
         e.published = true;
         let kind = e.kind;
+        let dungeon = e.name.clone();
         self.portals.get_mut(&opened).unwrap().expires = self.tick + portal.lifetime();
         if locked.is_none() {
             let name = w.players[&player].character.name.clone();
-            w.broadcast_text("", &format!("Pirate Cave opened by {name}!"));
+            w.broadcast_text("", &format!("{dungeon} opened by {name}!"));
         }
         let p = &w.players[&player];
         tracing::info!(
@@ -228,7 +250,7 @@ impl Directory {
                     portal,
                     Portal {
                         origin,
-                        destination,
+                        destination: Some(destination),
                         expires: self.tick + 2400,
                     },
                 );
@@ -331,9 +353,9 @@ impl Directory {
                 tracing::error!(origin, %error, "Realm transfer/replacement withheld; retry in five seconds");
             }
         }
-        self.endgame.forced.retain(|player, (origin, _)| {
+        self.endgame.forced.retain(|player, route| {
             self.worlds
-                .get(origin)
+                .get(&route.origin)
                 .is_some_and(|w| w.players.contains_key(player))
         });
         let retired: Vec<_> = self
@@ -397,7 +419,14 @@ impl Directory {
         self.endgame.cycles.insert(realm_id, next_cycle);
         self.endgame.retry.remove(&origin);
         for player in &players {
-            self.endgame.forced.insert(*player, (origin, castle_id));
+            self.endgame.forced.insert(
+                *player,
+                ForcedRoute {
+                    origin,
+                    destination: castle_id,
+                    frozen: false,
+                },
+            );
         }
         self.worlds
             .get_mut(&origin)
@@ -412,15 +441,27 @@ impl Directory {
         );
         Ok(())
     }
-    pub(super) fn return_to_nexus(&mut self, player: i32, origin: i32) {
-        self.endgame.forced.insert(player, (origin, -2));
+    pub(super) fn return_to_nexus(&mut self, player: i32, origin: i32, frozen: bool) {
+        self.endgame.forced.insert(
+            player,
+            ForcedRoute {
+                origin,
+                destination: -2,
+                frozen,
+            },
+        );
     }
     #[cfg(test)]
     pub fn forced_transfer_candidates(&self) -> Vec<i32> {
         self.endgame.forced.keys().copied().collect()
     }
     pub fn forced_transfer(&mut self, player: i32) -> Result<Option<ForcedTransfer>> {
-        let Some(&(origin, destination)) = self.endgame.forced.get(&player) else {
+        let Some(&ForcedRoute {
+            origin,
+            destination,
+            frozen,
+        }) = self.endgame.forced.get(&player)
+        else {
             return Ok(None);
         };
         let Some(p) = self
@@ -434,7 +475,7 @@ impl Directory {
         if !p.character.alive
             || p.character.hp <= 0
             || p.death_pending
-            || p.departing
+            || p.departing && !frozen
             || p.persistence_failure.is_some()
         {
             self.endgame.forced.remove(&player);
@@ -575,7 +616,7 @@ impl World {
             "another Incantation already reserves this portal"
         );
         let (locked, pos) = (locked.id, locked.pos);
-        self.reserve_portal(id, slot, 0x700, Some(locked), pos)
+        self.reserve_portal(id, slot, 0x700, Some(locked), pos, dungeon.clone())
     }
     pub(super) fn begin_create(
         &mut self,
@@ -584,15 +625,28 @@ impl World {
         item: &crate::content::Object,
     ) -> Result<InventoryPlan> {
         ensure!(
-            item.kind == 0x705 && item.activations == 1,
-            "This dungeon key is not supported yet."
+            item.consumable && item.activations == 1,
+            "invalid dungeon key activation"
         );
-        let portal = self.content.get(0x717)?;
+        let name = item
+            .create_object
+            .as_ref()
+            .context("key portal identity missing")?;
+        let portal = self
+            .content
+            .objects
+            .values()
+            .find(|p| &p.name == name)
+            .context("key references an unknown portal")?;
         ensure!(
-            portal.class == "Portal" && item.create_object.as_deref() == Some(portal.name.as_str()),
-            "Pirate Cave key activation contradicts selected portal"
+            portal.class == "Portal" && portal.dungeon_name.is_some(),
+            "key target is not a dungeon portal"
         );
-        self.reserve_portal(id, slot, 0x717, None, self.players[&id].pos)
+        let dungeon = portal
+            .dungeon_name
+            .clone()
+            .context("key portal dungeon name missing")?;
+        self.reserve_portal(id, slot, portal.kind, None, self.players[&id].pos, dungeon)
     }
     fn reserve_portal(
         &mut self,
@@ -601,26 +655,26 @@ impl World {
         kind: u16,
         locked: Option<i32>,
         pos: Pos,
+        name: String,
     ) -> Result<InventoryPlan> {
-        let name = crate::dungeon::DUNGEONS
+        let usable = crate::dungeon::DUNGEONS
             .iter()
             .chain(crate::endgame::DUNGEONS)
-            .find(|(portal, _, _, _)| *portal == kind)
-            .context("consumable dungeon registration missing")?
-            .2
-            .to_owned();
+            .any(|(portal, _, _, _)| *portal == kind);
         let mut items = self.players[&id].character.items.clone();
         items[slot.slot] = -1;
         let opened = self.spawn_entity(kind, pos, vec![])?;
         let e = self.entities.get_mut(&opened).unwrap();
         e.name = name;
+        e.extra_stats.retain(|(stat, _)| *stat != 37);
+        e.extra_stats.push((37, i32::from(usable)));
         e.published = false;
         e.reserved = true;
         if let Some(locked) = locked {
             self.entities.get_mut(&locked).unwrap().reserved = true;
         }
         self.players.get_mut(&id).unwrap().pending = true;
-        let mut plan = self.plan(id, items, None, 0);
+        let mut plan = self.plan(id, items, None);
         plan.unlock = Some(PortalPlan { locked, opened });
         Ok(plan)
     }
@@ -819,7 +873,7 @@ mod tests {
         let plan = d.stage_unlock(plan).unwrap();
         assert!(d.stage_unlock(plan.clone()).is_err());
         assert!(d.destination(b, Some(opened)).is_err());
-        let cellar = d.portals[&opened].destination;
+        let cellar = d.portals[&opened].destination.unwrap();
         assert_eq!(d.worlds[&cellar].name, "Wine Cellar");
         let replay = plan.clone();
         d.finish_inventory(plan, Ok(1)).unwrap();
@@ -877,7 +931,7 @@ mod tests {
         let plan = incantation(d.worlds.get_mut(&-3).unwrap(), a).unwrap();
         let plan = d.stage_unlock(plan).unwrap();
         let opened = plan.unlock.unwrap().opened;
-        let cellar = d.portals[&opened].destination;
+        let cellar = d.portals[&opened].destination.unwrap();
         assert!(
             d.finish_inventory(plan, Err(anyhow::anyhow!("fixture stale inventory write")))
                 .is_err()

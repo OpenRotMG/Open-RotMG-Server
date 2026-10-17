@@ -9,6 +9,7 @@ use tokio::sync::oneshot;
 
 mod account_actions;
 mod accounts;
+mod consumables;
 #[cfg(test)]
 mod credits_tests;
 #[cfg(test)]
@@ -20,6 +21,7 @@ pub use guilds::{Guild, GuildAction, Membership as GuildMembership};
 #[cfg(test)]
 mod presentation_tests;
 mod purchases;
+mod resurrection;
 mod social;
 pub use purchases::Purchase;
 mod updates;
@@ -76,6 +78,12 @@ pub struct Character {
     pub schema: u8,
     pub class: u16,
     pub base: [i32; 8],
+    #[serde(default)]
+    pub tex1: u32,
+    #[serde(default)]
+    pub tex2: u32,
+    #[serde(default)]
+    pub pet_kind: Option<u16>,
     pub id: i32,
     pub account: i32,
     pub name: String,
@@ -230,6 +238,7 @@ pub struct Store {
     classes: std::sync::Arc<std::collections::BTreeMap<u16, Class>>,
     hashes: std::sync::Arc<tokio::sync::Semaphore>,
     dummy_hash: String,
+    dyes: std::sync::Arc<BTreeMap<u16, [Option<u32>; 2]>>,
 }
 pub(crate) fn decode_character(raw: &str, legacy_base: [i32; 8]) -> Result<Character> {
     let mut value: serde_json::Value = serde_json::from_str(raw)?;
@@ -418,6 +427,14 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             classes: std::sync::Arc::new(content.classes.clone()),
             hashes: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
             dummy_hash: accounts::hash("unknown-account")?,
+            dyes: std::sync::Arc::new(
+                content
+                    .objects
+                    .values()
+                    .filter(|item| item.class == "Dye" && item.activate == "Dye")
+                    .map(|item| (item.kind, item.textures))
+                    .collect(),
+            ),
         })
     }
     async fn call<T: Send + 'static>(
@@ -593,6 +610,9 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 schema: 1,
                 class: kind,
                 base,
+                tex1: 0,
+                tex2: 0,
+                pet_kind: None,
                 id: 0,
                 account,
                 name,
@@ -731,17 +751,23 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         index: usize,
         amount: i32,
     ) -> Result<i32> {
-        let kind = match index {
-            2 => 0xa1f,
-            3 => 0xa20,
-            4 => 0xa21,
-            5 => 0xa4c,
-            6 => 0xa34,
-            7 => 0xa35,
+        let (kind, step) = match index {
+            0 => (0xae9, 5),
+            1 => (0xaea, 5),
+            2 => (0xa1f, 1),
+            3 => (0xa20, 1),
+            4 => (0xa21, 1),
+            5 => (0xa4c, 1),
+            6 => (0xa34, 1),
+            7 => (0xa35, 1),
             _ => anyhow::bail!("unsupported permanent potion stat"),
         };
         ensure!(
-            amount == 1 && slot < 12 && ch.items.len() == 12 && ch.items[slot] == kind,
+            amount > 0
+                && amount <= step
+                && slot < 12
+                && ch.items.len() == 12
+                && ch.items[slot] == kind,
             "permanent potion ownership or activation mismatch"
         );
         let cap = self
@@ -750,7 +776,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             .context("unknown potion class")?
             .caps[index];
         ensure!(
-            ch.alive && ch.hp > 0 && ch.base[index] >= 0 && ch.base[index] < cap,
+            ch.alive
+                && ch.hp > 0
+                && ch.base[index] >= 0
+                && ch.base[index] < cap
+                && amount == (cap - ch.base[index]).min(step),
             "dead character or permanent stat already capped"
         );
         ensure!(
@@ -812,7 +842,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     pub async fn fame(&self, account: i32, id: i32) -> Result<String> {
         let legacy_base = self.legacy_base;
         // The legacy field is called CreatedOn, but the client labels it as the death date.
-        self.call(move|db|{let (snapshot,killer,died_at):(String,String,u64)=db.query_row("SELECT snapshot,killed_by,died_at FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>0</Tex1><Tex2>0</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>0</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame></Fame>",c.id,xml_escape(&c.name),c.class,c.level,died_at,xml_escape(&killer),c.fame,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.dungeons[1],c.fame))}).await
+        self.call(move|db|{let (snapshot,killer,died_at):(String,String,u64)=db.query_row("SELECT snapshot,killed_by,died_at FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>0</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame></Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),c.fame,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.dungeons[1],c.fame))}).await
     }
     #[cfg(test)]
     pub async fn rename(&self, account: i32, name: String) -> Result<()> {
@@ -904,12 +934,14 @@ impl Account {
         let mut chars = String::new();
         for c in &self.characters {
             chars += &format!(
-                "<Char id=\"{}\"><ObjectType>{}</ObjectType><Level>{}</Level><Exp>{}</Exp><CurrentFame>{}</CurrentFame><Tex1>0</Tex1><Tex2>0</Tex2><Equipment>{}</Equipment><MaxHitPoints>{}</MaxHitPoints><HitPoints>{}</HitPoints><MaxMagicPoints>{}</MaxMagicPoints><MagicPoints>{}</MagicPoints><Attack>{}</Attack><Defense>{}</Defense><Speed>{}</Speed><Dexterity>{}</Dexterity><HpRegen>{}</HpRegen><MpRegen>{}</MpRegen></Char>",
+                "<Char id=\"{}\"><ObjectType>{}</ObjectType><Level>{}</Level><Exp>{}</Exp><CurrentFame>{}</CurrentFame><Tex1>{}</Tex1><Tex2>{}</Tex2><Equipment>{}</Equipment><MaxHitPoints>{}</MaxHitPoints><HitPoints>{}</HitPoints><MaxMagicPoints>{}</MaxMagicPoints><MagicPoints>{}</MagicPoints><Attack>{}</Attack><Defense>{}</Defense><Speed>{}</Speed><Dexterity>{}</Dexterity><HpRegen>{}</HpRegen><MpRegen>{}</MpRegen></Char>",
                 c.id,
                 c.class,
                 c.level,
                 c.exp,
                 c.fame,
+                c.tex1,
+                c.tex2,
                 c.items
                     .iter()
                     .map(i32::to_string)

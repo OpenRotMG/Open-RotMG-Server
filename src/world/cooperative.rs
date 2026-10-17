@@ -156,8 +156,7 @@ impl World {
                     continue;
                 }
                 let cap = p
-                    .character
-                    .effective(&self.content)
+                    .effective(&self.content, self.now)
                     .expect("validated player equipment and base stats")[0];
                 let amount = (cap - p.character.hp).clamp(0, AMOUNT);
                 if amount == 0 {
@@ -210,7 +209,7 @@ impl World {
                 && q.pos.distance(position) < range
                 && q.conditions(self.now) & crate::condition::bit(crate::condition::SICK) == 0
         }) {
-            let cap = q.character.effective(&self.content)?[0];
+            let cap = q.effective(&self.content, self.now)?[0];
             q.character.hp = (q.character.hp + amount).min(cap);
         }
         for q in self
@@ -248,7 +247,7 @@ impl World {
             .map(|(id, q)| {
                 Ok((
                     *id,
-                    (q.character.effective(&self.content)?[0] - q.character.hp)
+                    (q.effective(&self.content, self.now)?[0] - q.character.hp)
                         .max(0)
                         .min(amount),
                 ))

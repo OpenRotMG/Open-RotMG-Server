@@ -5,6 +5,8 @@ mod input;
 mod purchase_tests;
 #[cfg(test)]
 mod queue_tests;
+#[cfg(test)]
+mod resurrection_tests;
 use crate::{
     content::{Content, WIZARD},
     crypto::Keys,
@@ -507,7 +509,36 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
             .await;
     }
     let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
-    let result = if let Some((snapshot, slot, index, amount)) = &plan.stat_growth {
+    let result = if let Some(pet) = plan.companion.as_ref().filter(|pet| pet.permanent) {
+        a.store
+            .select_companion(
+                InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                },
+                pet.source.slot,
+                u16::try_from(pet.source.kind)?,
+                pet.selected,
+                a.content.clone(),
+            )
+            .await
+    } else if let Some((slot, tex1, tex2)) = plan.appearance {
+        a.store
+            .consume_dye(
+                InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                },
+                slot.slot,
+                u16::try_from(slot.kind)?,
+                [tex1, tex2],
+            )
+            .await
+    } else if let Some((snapshot, slot, index, amount)) = &plan.stat_growth {
         a.store
             .consume_stat(snapshot.clone(), slot.slot, *index, *amount)
             .await
@@ -533,6 +564,41 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
     a.world
         .directory(move |d| d.finish_inventory(plan, result))
         .await
+}
+async fn persist_death(
+    a: &App,
+    id: i32,
+    ch: crate::store::Character,
+    killer: String,
+) -> Result<()> {
+    let slot = ch
+        .items
+        .iter()
+        .take(4)
+        .position(|kind| *kind >= 0 && a.content.objects[&(*kind as u16)].resurrects);
+    if let Some(slot) = slot {
+        let result = a
+            .store
+            .resurrect(ch, slot, a.content.clone())
+            .await
+            .context("resurrection persistence failed");
+        a.world
+            .directory(move |d| d.finish_resurrection(id, result))
+            .await
+    } else {
+        let result = a
+            .store
+            .death(ch, killer)
+            .await
+            .context("death persistence failed");
+        a.world
+            .for_player(id)
+            .call(move |w| {
+                w.committed(id, result)?;
+                w.finish_death(id)
+            })
+            .await
+    }
 }
 async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
     let id = plan.plans[0].player;
@@ -626,32 +692,28 @@ async fn handle(
         reconnecting,
         diagnostics,
     } = session;
-    if *reconnecting
-        && matches!(
-            packet.id,
-            7 | 14 | 16 | 22 | 24 | 38 | 42 | 51 | 59 | 66 | 76
-        )
-    {
+    if *reconnecting {
         tracing::debug!(
             packet = packet.id,
             "discarded in-flight input after durable departure"
         );
         return Ok(());
     }
-    ensure!(!*reconnecting, "session is transferring");
+    // Resurrection is alive again, but its old scene must stay inert until the owned RECONNECT.
     if let Some(id) = *player
-        && matches!(packet.id, 7 | 38 | 30 | 65 | 33 | 42 | 3)
         && a.world
             .call(move |w| {
                 let p = w.players.get(&id).context("player missing")?;
-                Ok(p.death_pending || !p.character.alive)
+                Ok(p.native_transferring()
+                    || matches!(packet.id, 7 | 38 | 30 | 65 | 33 | 42 | 3)
+                        && (p.death_pending || !p.character.alive))
             })
             .await?
     {
         tracing::debug!(
             player = id,
             packet = packet.id,
-            "ignored queued command from dying character"
+            "ignored queued command from dying or transferring character"
         );
         return Ok(());
     }
@@ -1766,20 +1828,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
                 }
                 let pending = deaths.world.collect(World::pending_deaths).await?;
                 for (id, ch, killer) in pending {
-                    let result = deaths
-                        .store
-                        .death(ch, killer)
-                        .await
-                        .context("death persistence failed");
-                    if let Err(error) = deaths
-                        .world
-                        .for_player(id)
-                        .call(move |w| {
-                            w.committed(id, result)?;
-                            w.finish_death(id)
-                        })
-                        .await
-                    {
+                    if let Err(error) = persist_death(&deaths, id, ch, killer).await {
                         tracing::error!(player=id,error=%format_args!("{error:#}"),"death completion failed");
                     }
                 }

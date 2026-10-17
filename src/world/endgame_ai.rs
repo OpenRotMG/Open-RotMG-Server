@@ -450,7 +450,7 @@ mod tests {
             .unwrap()
             .id;
         assert!(d.worlds[&50].entities[&portal].published);
-        let chamber = d.portals[&portal].destination;
+        let chamber = d.portals[&portal].destination.unwrap();
         for _ in 0..3 {
             d.step();
         }

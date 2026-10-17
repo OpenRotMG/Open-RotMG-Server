@@ -37,18 +37,16 @@ fn shop_publishes_prices_and_only_committed_purchases_change_inventory_wallet_an
         (25, 0)
     );
     for e in w.entities.values().filter(|e| e.kind == 0x1ca) {
-        if price(
-            w.content
-                .get(u16::try_from(value(e, 34).unwrap()).unwrap())
-                .unwrap(),
-        )
-        .is_some()
-        {
-            assert!(value(e, 36).unwrap() > 0);
-            assert!((0..=1).contains(&value(e, 40).unwrap()));
-        } else {
-            assert!(value(e, 36).is_err());
-        }
+        assert!(
+            price(
+                w.content
+                    .get(u16::try_from(value(e, 34).unwrap()).unwrap())
+                    .unwrap()
+            )
+            .is_some()
+        );
+        assert!(value(e, 36).unwrap() > 0);
+        assert!((0..=1).contains(&value(e, 40).unwrap()));
         assert_eq!(value(e, 43).unwrap(), -1);
     }
     let status = w.stats(merchant, id).unwrap();
@@ -166,12 +164,11 @@ fn shop_failed_storage_quarantines_without_publishing_or_releasing_uncertain_sto
     assert!(!w.players[&id].active());
     assert!(price(w.content.get(WIZARD).unwrap()).is_none());
     let (mut w, id, _, _) = fixture();
-    let e = w
-        .entities
-        .values()
-        .find(|e| e.kind == 0x1ca && value(e, 34).unwrap() == 0xb16)
-        .unwrap();
-    let (merchant, pos) = (e.id, e.pos);
+    let pos = w.players[&id].pos;
+    let merchant = w.spawn_entity(0x1ca, pos, vec![]).unwrap();
+    let e = w.entities.get_mut(&merchant).unwrap();
+    e.extra_stats = vec![(34, 0xa97), (42, 2), (45, 0)];
+    configure(e, &w.content).unwrap();
     let p = w.players.get_mut(&id).unwrap();
     p.pos = pos;
     p.known.insert(merchant);

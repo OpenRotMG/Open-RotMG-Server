@@ -21,7 +21,7 @@ fn key(w: &mut World, id: i32) -> Result<InventoryPlan> {
         Slot {
             object: id,
             slot: 5,
-            kind: 0x705,
+            kind: w.players[&id].character.items[5],
         },
         Pos { x: 9999., y: 9999. },
     )?
@@ -47,7 +47,7 @@ fn pirate_key_publishes_once_after_commit_and_both_players_share_the_instance_an
     let plan = d.stage_unlock(plan).unwrap();
     assert!(d.stage_unlock(plan.clone()).is_err());
     assert!(d.destination(b, Some(opened)).is_err());
-    let cave = d.portals[&opened].destination;
+    let cave = d.portals[&opened].destination.unwrap();
     d.tick += 500;
     d.step();
     assert!(d.worlds[&-2].entities.contains_key(&opened));
@@ -96,26 +96,87 @@ fn pirate_key_publishes_once_after_commit_and_both_players_share_the_instance_an
 }
 
 #[test]
+fn every_selected_key_opens_its_own_portal_without_substituting_missing_dungeons() {
+    let (mut d, a, b) = fixture();
+    let keys: Vec<_> = d
+        .content
+        .objects
+        .values()
+        .filter_map(|item| {
+            item.create_object.as_ref().map(|target| {
+                let portal = d
+                    .content
+                    .objects
+                    .values()
+                    .find(|p| &p.name == target)
+                    .unwrap();
+                (item.kind, portal.kind, portal.dungeon_name.clone().unwrap())
+            })
+        })
+        .collect();
+    assert_eq!(keys.len(), 13);
+    for (kind, portal_kind, name) in keys {
+        let supported = crate::dungeon::DUNGEONS
+            .iter()
+            .any(|(p, _, _, _)| *p == portal_kind);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.players.get_mut(&a).unwrap().character.items[5] = i32::from(kind);
+        let revision = w.players[&a].character.revision;
+        let plan = key(w, a).unwrap();
+        let opened = plan.unlock.unwrap().opened;
+        let plan = d.stage_unlock(plan).unwrap();
+        assert!(d.destination(b, Some(opened)).is_err());
+        assert_eq!(d.portals[&opened].destination.is_some(), supported);
+        d.finish_inventory(plan, Ok(revision + 1)).unwrap();
+        let w = &d.worlds[&-2];
+        assert_eq!(w.players[&a].character.items[5], -1);
+        let e = &w.entities[&opened];
+        assert!(e.published && !e.reserved);
+        assert_eq!((e.kind, &e.name), (portal_kind, &name));
+        assert!(e.extra_stats.contains(&(37, i32::from(supported))));
+        if supported {
+            let destination = d.destination(b, Some(opened)).unwrap().2;
+            assert_eq!(d.worlds[&destination].name, name);
+        } else {
+            assert!(
+                d.destination(b, Some(opened))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("not implemented")
+            );
+        }
+        d.tick += 400;
+        d.step();
+        assert!(!d.portals.contains_key(&opened));
+        assert!(!d.worlds[&-2].entities.contains_key(&opened));
+    }
+}
+
+#[test]
 fn unsupported_stale_foreign_paused_and_dead_key_uses_do_not_consume_or_publish() {
     let (mut d, a, b) = fixture();
     let w = d.worlds.get_mut(&-2).unwrap();
     let count = w.entities.len();
-    for kind in [0x706, 0x701, 0x70a, 0x70b, 0x71f] {
-        w.players.get_mut(&a).unwrap().character.items[5] = kind;
-        let result = w.use_item(
-            a,
-            Slot {
-                object: a,
-                slot: 5,
-                kind,
-            },
-            w.players[&a].pos,
-        );
-        assert!(result.err().unwrap().to_string().contains("not supported"));
-        assert_eq!(w.players[&a].character.items[5], kind);
+    let original = w.content.objects[&0x705].create_object.clone();
+    for invalid in [
+        None,
+        Some("does-not-exist".into()),
+        Some(w.content.objects[&0x030e].name.clone()),
+    ] {
+        Arc::make_mut(&mut w.content)
+            .objects
+            .get_mut(&0x705)
+            .unwrap()
+            .create_object = invalid;
+        assert!(key(w, a).is_err());
+        assert_eq!(w.players[&a].character.items[5], 0x705);
         assert!(!w.players[&a].pending);
     }
-    w.players.get_mut(&a).unwrap().character.items[5] = 0x705;
+    Arc::make_mut(&mut w.content)
+        .objects
+        .get_mut(&0x705)
+        .unwrap()
+        .create_object = original;
     for slot in [
         Slot {
             object: b,
@@ -145,7 +206,7 @@ fn unsupported_stale_foreign_paused_and_dead_key_uses_do_not_consume_or_publish(
         .objects
         .get_mut(&0x705)
         .unwrap()
-        .create_object = Some("Spider Den Portal".into());
+        .create_object = Some("does-not-exist".into());
     assert!(key(w, a).is_err());
     assert_eq!(w.entities.len(), count);
     assert_eq!(w.players[&a].character.items[5], 0x705);
@@ -215,7 +276,7 @@ async fn bought_key_consumption_is_durable_and_failed_save_removes_the_unpublish
         let plan = key(w, id).unwrap();
         let opened = plan.unlock.unwrap().opened;
         let plan = d.stage_unlock(plan).unwrap();
-        let cave = d.portals[&opened].destination;
+        let cave = d.portals[&opened].destination.unwrap();
         if fail {
             rusqlite::Connection::open(&path).unwrap().execute_batch("CREATE TRIGGER fail_key BEFORE UPDATE OF items ON characters BEGIN SELECT RAISE(ABORT,'injected key save failure'); END;").unwrap();
         }
