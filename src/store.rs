@@ -13,6 +13,8 @@ mod accounts;
 mod credits_tests;
 #[cfg(test)]
 mod death_date_tests;
+#[cfg(test)]
+mod deletion_tests;
 mod guilds;
 mod hiscores;
 mod legends;
@@ -635,6 +637,24 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     }
     pub async fn load(&self, account: i32, id: i32) -> Result<Character> {
         self.call(move|c|{let(stats,items,revision,name):(String,String,i32,String)=c.query_row("SELECT c.stats,c.items,c.revision,a.name FROM characters c JOIN accounts a ON a.id=c.account WHERE c.id=?1 AND c.account=?2 AND c.alive=1",params![id,account],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).context("character does not belong to this account or is dead")?;let mut ch:Character=serde_json::from_str(&stats)?;ch.id=id;ch.account=account;ch.name=name;ch.items=serde_json::from_str(&items)?;ch.revision=revision;ch.alive=true;Ok(ch)}).await
+    }
+    pub async fn delete_character(&self, account: i32, id: i32) -> Result<()> {
+        self.call(move |db| {
+            // Class unlocks depend on lifetime character records, not just surviving characters.
+            let n = db.execute(
+                "UPDATE characters SET alive=0,items=?3,revision=revision+1,stats=json_set(stats,'$.alive',json('false'),'$.hp',0,'$.items',json(?3),'$.revision',revision+1) WHERE id=?1 AND account=?2 AND alive=1",
+                params![id, account, serde_json::to_string(&vec![-1; 12])?],
+            )?;
+            ensure!(n == 1, "character does not belong to this account or is no longer alive");
+            Ok(())
+        })
+        .await?;
+        tracing::info!(
+            account,
+            character = id,
+            "character deleted without death rewards"
+        );
+        Ok(())
     }
     pub async fn vault(&self, account: i32) -> Result<Vault> {
         self.call(move |c| {
