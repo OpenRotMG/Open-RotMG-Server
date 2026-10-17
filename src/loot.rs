@@ -338,43 +338,59 @@ fn candidates(content: &Content, pick: Pick) -> Vec<u16> {
     }
 }
 pub fn collectibles(content: &Content) -> std::collections::BTreeSet<u16> {
-    [0x600, 0x60e, 0x687, 0x68a, 0x68f, 0x683, 0x927]
-        .into_iter()
+    content
+        .objects
+        .keys()
+        .copied()
+        .filter(|kind| crate::encounter::profile(*kind).is_some())
         .flat_map(|kind| {
             table(kind)
                 .iter()
                 .flat_map(|(_, pick)| candidates(content, *pick))
+                .chain(bonus(kind).iter().map(|(_, item)| *item))
         })
+        .chain([0x67d, 0x668].into_iter().flat_map(|kind| {
+            chest_table(kind)
+                .into_iter()
+                .flat_map(|(_, pick)| candidates(content, pick))
+        }))
         .collect()
 }
-fn god_potion(kind: u16) -> Option<u16> {
+fn bonus(kind: u16) -> &'static [(f64, u16)] {
     match kind {
-        0x651 | 0x652 | 0x657 | 0x905..=0x907 => Some(0xa1f),
-        0x654 | 0x659 | 0x91a => Some(0xa21),
-        0x655 | 0x656 | 0x658 | 0x6d8 => Some(0xa20),
-        _ => None,
-    }
-}
-fn event_unique(kind: u16) -> Option<(u16, f64)> {
-    match kind {
-        0xd56 => Some((0xc0b, 0.001)),
-        0xd59 => Some((0xc0a, 0.001)),
-        0xd60 => Some((0xc06, 0.004)),
-        _ => None,
+        0xd56 => &[
+            (0.001, 0xc0b),
+            (0.01, 0x121e),
+            (0.01, 0x131e),
+            (0.01, 0x1241),
+            (0.01, 0x1341),
+            (0.01, 0x120e),
+            (0.01, 0x130e),
+        ],
+        0xd59 => &[(0.001, 0xc0a)],
+        0xd60 => &[(0.004, 0xc06)],
+        0x1705 => &[(0.04, 0xaea)],
+        0x651 | 0x652 | 0x657 | 0x905..=0x907 => &[(0.015, 0xa1f)],
+        0x654 | 0x659 | 0x91a => &[(0.015, 0xa21)],
+        0x655 | 0x656 | 0x658 | 0x6d8 => &[(0.015, 0xa20)],
+        _ => &[],
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
-    if let Some((item, _)) = event_unique(kind) {
+    for (_, item) in bonus(kind) {
+        let item = content.get(*item)?;
         ensure!(
-            content.get(item)?.class == "Equipment",
-            "event unique is not selected equipment"
+            matches!(item.class.as_str(), "Equipment" | "Dye"),
+            "invalid bonus loot {:#x}: {}",
+            item.kind,
+            item.class
         );
-    }
-    if let Some(potion) = god_potion(kind) {
-        ensure!(
-            content.get(potion)?.stat_increase.is_some(),
-            "Godlands potion is not a selected stat increase"
-        );
+        if matches!(item.kind, 0xa1f | 0xa20 | 0xa21 | 0xaea) {
+            ensure!(
+                item.stat_increase.is_some(),
+                "bonus potion is not a selected stat increase"
+            );
+        }
     }
     for (_, pick) in table(kind) {
         let items = candidates(content, *pick);
@@ -433,25 +449,10 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     } else {
         roll(content, kind, rng).into_iter().collect()
     };
-    if let Some((item, chance)) = event_unique(kind)
-        && rng.gen_bool(chance)
-    {
-        items.push(item);
-    }
-    if kind == 0x1705 && rng.gen_bool(0.04) {
-        items.push(0xaea);
-    }
-    if kind == 0xd56 {
-        for item in [0x121e, 0x131e, 0x1241, 0x1341, 0x120e, 0x130e] {
-            if rng.gen_bool(0.01) {
-                items.push(item);
-            }
+    for &(chance, item) in bonus(kind) {
+        if rng.gen_bool(chance) {
+            items.push(item);
         }
-    }
-    if let Some(potion) = god_potion(kind)
-        && rng.gen_bool(0.015)
-    {
-        items.push(potion);
     }
     items
 }
@@ -466,14 +467,14 @@ pub fn private(kind: u16) -> bool {
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
 }
-pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
+fn chest_table(kind: u16) -> [(f64, Pick); 12] {
     use Pick::Tier;
     let (weapon, armor) = match kind {
         0x67d => (6, 5),
         0x668 => (7, 6),
         _ => unreachable!("selected landmark chest"),
     };
-    let picks = [
+    [
         (0.3, Tier(weapon, WEAPONS)),
         (0.2, Tier(weapon + 1, WEAPONS)),
         (0.1, Tier(weapon + 2, WEAPONS)),
@@ -486,7 +487,10 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
         (0.25, Tier(2, RINGS)),
         (0.15, Tier(3, RINGS)),
         (0.5, Tier(1, &[10])),
-    ];
+    ]
+}
+pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
+    let picks = chest_table(kind);
     for (_, pick) in picks {
         ensure!(
             !candidates(content, pick).is_empty(),
@@ -514,6 +518,45 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+    #[test]
+    fn collection_catalogue_covers_every_encounter_reward() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let catalogue = collectibles(&content);
+        for item in [0xa32, 0xa3a, 0xa6a, 0xa80, 0xa1f, 0xc0b, 0xc10] {
+            assert!(catalogue.contains(&item), "missing collectible {item:#x}");
+        }
+        let mut rng = StdRng::seed_from_u64(127);
+        for kind in [0x67d, 0x668] {
+            for _ in 0..100 {
+                for item in landmark_chest(&content, kind, &mut rng)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|item| *item >= 0)
+                {
+                    assert!(
+                        catalogue.contains(&(item as u16)),
+                        "unlisted chest item {item:#x}"
+                    );
+                }
+            }
+        }
+        for kind in content
+            .objects
+            .keys()
+            .copied()
+            .filter(|kind| crate::encounter::profile(*kind).is_some())
+        {
+            validate(&content, kind).unwrap();
+            for _ in 0..100 {
+                for item in rewards(&content, kind, &mut rng) {
+                    assert!(
+                        catalogue.contains(&item),
+                        "encounter {kind:#x} dropped unlisted {item:#x}"
+                    );
+                }
+            }
+        }
+    }
     #[test]
     fn every_candidate_loot_tier_resolves_and_rolls_selected_items() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
