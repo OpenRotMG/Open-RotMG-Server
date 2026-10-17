@@ -60,10 +60,13 @@ fn complete_pack_is_seeded_sourced_distributed_and_regionally_bounded() {
             }
         }
         for (index, c) in w.camps.iter().enumerate() {
-            assert_eq!(
-                members(w, index).len(),
-                1 + c.family.roles.iter().map(|r| r.initial).sum::<usize>()
-            );
+            let minimum = 1 + c.family.roles.iter().map(|r| r.initial).sum::<usize>();
+            let maximum = if c.family.random_initial {
+                size(w, index)
+            } else {
+                minimum
+            };
+            assert!((minimum..=maximum).contains(&members(w, index).len()));
             for id in members(w, index) {
                 let e = &w.entities[&id];
                 assert_eq!(e.camp, Some(index));
@@ -73,10 +76,19 @@ fn complete_pack_is_seeded_sourced_distributed_and_regionally_bounded() {
             }
         }
         for s in &w.population {
-            assert_eq!(
-                w.map.cell(s.pos.x, s.pos.y).unwrap().terrain,
+            let terrain = if w.content.objects[&s.kind].terrain == 0 {
+                let family = w.camps[s.camp.expect("summoned child lacks owned camp")].family;
+                let role = if matches!(s.kind, 0x6d2..=0x6d4) {
+                    0x6d2
+                } else {
+                    s.kind
+                };
+                assert!(family.roles.iter().any(|r| r.kind == role));
+                family.terrain
+            } else {
                 w.content.objects[&s.kind].terrain
-            );
+            };
+            assert_eq!(w.map.cell(s.pos.x, s.pos.y).unwrap().terrain, terrain);
             assert!(w.walkable(s.pos));
             if let Some(id) = s.entity
                 && w.content.objects[&s.kind].terrain >= 8
@@ -126,15 +138,33 @@ fn every_family_reinforces_on_its_role_clock_without_duplicate_ids() {
             w.remove_entity(id);
         }
         w.repopulate().unwrap();
+        for s in w.population.iter_mut().filter(|s| s.camp != Some(c)) {
+            s.ready = u64::MAX;
+        }
+        for (index, camp) in w.camps.iter_mut().enumerate() {
+            if index != c {
+                camp.ready = u64::MAX;
+            }
+        }
+        if family.leader == 0x206 {
+            let egg = w.population[start].entity.unwrap();
+            w.transform_fauna(egg, 0x209).unwrap();
+        }
         let slot = start + 1;
+        let deadline = family.roles[0].interval.unwrap();
+        if family.roles[0].initial == 0 {
+            assert!(w.population[slot].entity.is_none());
+            w.now = deadline;
+            w.repopulate().unwrap();
+        }
+        let born = w.now;
         let old = w.population[slot].entity.unwrap();
         w.remove_entity(old);
         w.repopulate().unwrap();
-        let deadline = family.roles[0].interval.unwrap();
-        w.now = deadline - 1;
+        w.now = born + deadline - 1;
         w.repopulate().unwrap();
         assert!(w.population[slot].entity.is_none());
-        w.now = deadline;
+        w.now = born + deadline;
         w.repopulate().unwrap();
         let new = w.population[slot].entity.unwrap();
         assert_ne!(old, new);

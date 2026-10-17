@@ -5,9 +5,10 @@ impl World {
     pub(super) fn family_movement(
         &mut self,
         id: i32,
-        target: Pos,
+        target: impl Into<Option<Pos>>,
         elapsed: u64,
     ) -> Result<(Motion, f32)> {
+        let target = target.into();
         let e = &self.entities[&id];
         let camp = self
             .camps
@@ -37,7 +38,7 @@ impl World {
         if e.id == leader.id {
             return Ok(match e.kind {
                 0x609 => {
-                    if elapsed % 6000 < 2000 && e.pos.distance(target) >= 11. {
+                    if elapsed % 6000 < 2000 && target.is_none_or(|p| e.pos.distance(p) >= 11.) {
                         self.entities.get_mut(&id).unwrap().activated = None;
                         return Ok((Motion::Stationary, 0.));
                     }
@@ -99,14 +100,14 @@ impl World {
             0x60c => protect(6., 12.),
             0x616 | 0x619 if e.pos.distance(leader.pos) > 6. => protect(6., 11.),
             0x615 | 0x618 if e.pos.distance(leader.pos) > 6. => protect(6., 12.),
-            0x616 | 0x619 if e.pos.distance(target) < 8. => (
+            0x616 | 0x619 if target.is_some_and(|p| e.pos.distance(p) < 8.) => (
                 Motion::Chase {
                     sight: 8.,
                     stop: 4.,
                 },
                 8.,
             ),
-            0x615 | 0x618 if e.pos.distance(target) < 8. => (
+            0x615 | 0x618 if target.is_some_and(|p| e.pos.distance(p) < 8.) => (
                 Motion::Chase {
                     sight: 8.,
                     stop: 1.,
@@ -143,7 +144,7 @@ impl World {
                 5.,
             ),
             0x607 => protect(6., 6.),
-            0x606 if e.pos.distance(target) < 3. => (
+            0x606 if target.is_some_and(|p| e.pos.distance(p) < 3.) => (
                 Motion::Chase {
                     sight: 3.,
                     stop: 1.,

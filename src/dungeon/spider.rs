@@ -8,6 +8,7 @@ use rand::{Rng, SeedableRng};
 pub const BOSS: u16 = 0x936;
 pub const EGG: u16 = 0x21b;
 pub const HATCHLING: u16 = 0x21c;
+pub const WEB_INTERVAL: u64 = 100;
 pub const ROSTER: [u16; 16] = [
     EGG, HATCHLING, 0x21d, 0x21e, 0x21f, 0x220, BOSS, 0x937, 0x938, 0x939, 0x93a, 0x93b, 0x93c,
     0x93d, 0x93e, 0x93f,
@@ -113,9 +114,10 @@ pub fn profile(kind: u16) -> Profile {
     let (motion, speed, interval, range) = match kind {
         EGG => (Motion::Stationary, 0., 0, 0.),
         HATCHLING => (
-            Motion::Chase {
-                sight: 10.,
+            Motion::Follow {
+                sight: 0.8,
                 stop: 0.,
+                idle: 0.,
             },
             9.6,
             1000,
@@ -134,18 +136,20 @@ pub fn profile(kind: u16) -> Profile {
             10.,
         ),
         0x21e => (
-            Motion::Chase {
-                sight: 10.,
+            Motion::Follow {
+                sight: 0.8,
                 stop: 0.,
+                idle: 0.,
             },
             12.,
             500,
             10.,
         ),
         0x220 => (
-            Motion::Chase {
-                sight: 10.,
+            Motion::Follow {
+                sight: 0.3,
                 stop: 0.,
+                idle: 9.6,
             },
             9.6,
             500,
@@ -153,7 +157,7 @@ pub fn profile(kind: u16) -> Profile {
         ),
         BOSS => (Motion::Wander, 12., 1000, 20.),
         // The source Shoot checks a positive 5ms timer before subtracting its 50ms tick: one volley every two ticks.
-        0x937..=0x93f => (Motion::Stationary, 0., 100, 30.),
+        0x937..=0x93f => (Motion::Stationary, 0., WEB_INTERVAL, 30.),
         _ => panic!("unregistered Spider Den actor {kind:#x}"),
     };
     Profile {
@@ -161,43 +165,5 @@ pub fn profile(kind: u16) -> Profile {
         speed,
         interval,
         range,
-    }
-}
-
-pub fn attacks(kind: u16, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
-    match kind {
-        EGG => vec![],
-        BOSS if elapsed < 2000 => vec![],
-        BOSS => {
-            let mut shots: Vec<_> = (0..12)
-                .map(|i| (0, (22.5 + i as f32 * 30.).to_radians()))
-                .collect();
-            shots.push((0, heading));
-            if ((elapsed - 2000) / 1000).is_multiple_of(2) {
-                shots.push((1, heading));
-            }
-            shots
-        }
-        0x937..=0x93f => {
-            let start = match kind {
-                0x937 | 0x93d => 120.,
-                0x938 => 180.,
-                0x939 | 0x93e => 240.,
-                0x93a => 300.,
-                0x93b | 0x93f => 0.,
-                0x93c => 60.,
-                _ => unreachable!(),
-            };
-            // Equivalent wrapped angles keep the fan in one native volley instead of flooding its ACK queue.
-            (0..3)
-                .map(|i| (0, (start + i as f32 * 60.).to_radians()))
-                .collect()
-        }
-        0x220 => [-20f32, 0., 20.]
-            .into_iter()
-            .map(|d| (0, heading + d.to_radians()))
-            .collect(),
-        HATCHLING..=0x21f => vec![(0, heading)],
-        _ => panic!("unregistered Spider Den attack {kind:#x}"),
     }
 }

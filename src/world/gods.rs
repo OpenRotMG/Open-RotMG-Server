@@ -25,7 +25,13 @@ impl World {
         );
         Ok(())
     }
-    pub(super) fn god_movement(&self, id: i32, target: Pos, elapsed: u64) -> Result<(Motion, f32)> {
+    pub(super) fn god_movement(
+        &self,
+        id: i32,
+        target: impl Into<Option<Pos>>,
+        elapsed: u64,
+    ) -> Result<(Motion, f32)> {
+        let target = target.into();
         let e = &self.entities[&id];
         if e.pos.distance(e.home) > 24. {
             return Ok((
@@ -96,7 +102,7 @@ impl World {
                 _ => (Motion::Tangential, 8.),
             },
             kind if GODS.contains(&kind) => {
-                if e.pos.distance(target) > 7. {
+                if target.is_none_or(|p| e.pos.distance(p) > 7.) {
                     (Motion::Wander, 4.)
                 } else {
                     chase(
@@ -202,9 +208,10 @@ impl World {
             shots.retain(|(index, _)| *index != 1);
         }
         self.predict_enemy_shots(id, target, &mut shots, |index| match (e.kind, index) {
-            (0x651 | 0x652 | 0x655 | 0x658 | 0x650 | 0x64f, _)
-            | (0x656 | 0x6d8 | 0x640 | 0x649, 1) => 1.,
+            (0x651 | 0x652 | 0x655 | 0x658, _) | (0x656 | 0x6d8 | 0x640 | 0x649, 1) => 1.,
             (0x656 | 0x649, 0) => 0.5,
+            (0x609, _) if elapsed % 6000 < 2000 => 0.3,
+            (0x609, _) if elapsed % 6000 < 4000 => 0.5,
             _ => 0.,
         })?;
         Ok(shots)

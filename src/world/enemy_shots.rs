@@ -9,6 +9,16 @@ pub(super) struct EnemyShot {
     pub damage: i32,
 }
 
+pub(super) fn dazed(shots: Vec<(u8, f32)>) -> Vec<(u8, f32)> {
+    if shots.len() <= 1 {
+        return shots;
+    }
+    let count = (shots.len() / 2).max(1);
+    (0..count)
+        .map(|i| shots[(2 * i + 1) * shots.len() / (2 * count)])
+        .collect()
+}
+
 pub(super) fn packets(owner: i32, shots: &[EnemyShot]) -> Vec<Vec<u8>> {
     let mut packets = Vec::new();
     let mut offset = 0;

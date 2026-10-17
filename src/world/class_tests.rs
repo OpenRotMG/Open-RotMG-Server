@@ -89,15 +89,24 @@ fn rogue_cloak_removes_target_without_granting_invulnerability_and_expires() {
     for _ in 0..5 {
         w.npc_step();
     }
-    assert_eq!(w.entities[&enemy].pos.distance(held), 0.);
+    assert_eq!(
+        w.entities[&enemy].motion,
+        Some(crate::encounter::Motion::Wander)
+    );
+    assert!(w.entities[&enemy].pos.distance(held) <= 5. * 4. / 1.5 * 0.05 + 0.001);
     assert_eq!(w.bullets.len(), bullets);
     w.now += 3000;
     assert_eq!(
         w.players[&id].conditions(w.now) & crate::condition::bit(13),
         0
     );
+    let distance = w.entities[&enemy].pos.distance(w.players[&id].pos);
     w.npc_step();
-    assert!(w.entities[&enemy].pos.distance(held) > 0.);
+    assert!(matches!(
+        w.entities[&enemy].motion,
+        Some(crate::encounter::Motion::Chase { .. })
+    ));
+    assert!(w.entities[&enemy].pos.distance(w.players[&id].pos) < distance);
 }
 #[test]
 fn invisible_rogue_does_not_hide_visible_teammate_from_enemy() {

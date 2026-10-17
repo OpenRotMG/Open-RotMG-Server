@@ -16,6 +16,8 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
+#[cfg(test)]
+mod audit_tests;
 mod charges;
 pub(crate) mod chat;
 #[cfg(test)]
@@ -27,9 +29,14 @@ mod endgame_ai;
 mod enemy_damage;
 mod enemy_shots;
 mod families;
+mod fauna;
+mod fauna_births;
+mod fauna_special;
+mod ghost_ship;
 mod gods;
 #[cfg(test)]
 mod gods_tests;
+mod golems;
 mod ground;
 #[cfg(test)]
 mod ground_tests;
@@ -38,9 +45,15 @@ mod guilds;
 mod inventory_safety_tests;
 #[cfg(test)]
 mod key_tests;
+mod lair;
+mod landmark_ai;
+#[cfg(test)]
+mod landmark_tests;
+mod lost_lands;
 mod midlands;
 #[cfg(test)]
 mod midlands_tests;
+mod named_births;
 #[cfg(test)]
 mod player_position_tests;
 mod population;
@@ -87,6 +100,7 @@ mod mechanics_tests;
 mod native_hits;
 #[cfg(test)]
 mod native_hits_tests;
+mod npc_attacks;
 #[cfg(test)]
 mod quiver_tests;
 mod reconciliation;
@@ -119,6 +133,13 @@ impl Pos {
         ((self.x - p.x).powi(2) + (self.y - p.y).powi(2)).sqrt()
     }
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Following {
+    #[default]
+    Unknown,
+    Acquired,
+    Resting,
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct Entity {
     pub id: i32,
@@ -141,11 +162,17 @@ pub struct Entity {
     #[serde(skip)]
     motion: Option<crate::encounter::Motion>,
     #[serde(skip)]
+    following: Following,
+    #[serde(skip)]
     charge: Option<charges::Charge>,
+    #[serde(skip)]
+    script: Option<landmark_ai::Script>,
     last_step: Pos,
     phase: f32,
     orbit: Option<realm_events::Orbit>,
     next_shot: u64,
+    #[serde(skip)]
+    attacks: crate::encounter::attacks::Clocks,
     activated: Option<u64>,
     stage: Option<u64>,
     parent: Option<i32>,
@@ -153,6 +180,8 @@ pub struct Entity {
     quest: Option<i32>,
     expires: Option<u64>,
     next_aux: u64,
+    blocked_since: Option<u64>,
+    reaction_until: u64,
     bullet: u8,
 }
 impl Entity {
@@ -407,6 +436,8 @@ pub struct World {
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
     grenades: Vec<mechanics::Grenade>,
+    fauna_births: Vec<fauna_births::Birth>,
+    named_births: Vec<named_births::Birth>,
     lava_patches: BTreeMap<usize, (u64, u8)>,
     ability_state: abilities::State,
     companions: companions::State,
@@ -416,6 +447,7 @@ pub struct World {
     next_fountain_heal: u64,
     rng: rand::rngs::StdRng,
     pub now: u64,
+    last_npc_step: u64,
     attack_epoch: Instant,
     clock: crate::clock::Clock,
     pub(crate) prepared_seed: Option<u64>,
@@ -1267,7 +1299,9 @@ impl World {
                         home: pos,
                         goal: None,
                         motion: None,
+                        following: Following::Unknown,
                         charge: None,
+                        script: None,
                         last_step: Pos { x: 0., y: 0. },
                         phase: 0.,
                         orbit: None,
@@ -1292,6 +1326,7 @@ impl World {
                         published: true,
                         damage: BTreeMap::new(),
                         next_shot: 0,
+                        attacks: Default::default(),
                         activated: None,
                         stage: None,
                         parent: None,
@@ -1299,6 +1334,8 @@ impl World {
                         quest: None,
                         expires: None,
                         next_aux: 0,
+                        blocked_since: None,
+                        reaction_until: 0,
                         bullet: 0,
                     };
                     for setting in c.config.split(';').filter(|s| !s.is_empty()) {
@@ -1357,6 +1394,8 @@ impl World {
             guild: None,
             bullets: Vec::new(),
             grenades: Vec::new(),
+            fauna_births: Vec::new(),
+            named_births: Vec::new(),
             lava_patches: BTreeMap::new(),
             ability_state: abilities::State::default(),
             companions: companions::State::default(),
@@ -1366,6 +1405,7 @@ impl World {
             next_fountain_heal: 0,
             rng: rand::rngs::StdRng::from_entropy(),
             now: 0,
+            last_npc_step: 0,
             attack_epoch: Instant::now(),
             clock: crate::clock::Clock::default(),
             prepared_seed: None,
@@ -1482,7 +1522,9 @@ impl World {
                 home: pos,
                 goal: None,
                 motion: None,
+                following: Following::Unknown,
                 charge: None,
+                script: None,
                 last_step: Pos { x: 0., y: 0. },
                 phase: 0.,
                 orbit: None,
@@ -1509,6 +1551,7 @@ impl World {
                 published: true,
                 damage: BTreeMap::new(),
                 next_shot: 0,
+                attacks: Default::default(),
                 activated: None,
                 stage: None,
                 parent: None,
@@ -1516,6 +1559,8 @@ impl World {
                 quest: None,
                 expires: None,
                 next_aux: 0,
+                blocked_since: None,
+                reaction_until: 0,
                 bullet: 0,
             },
         );
@@ -1553,6 +1598,7 @@ impl World {
         self.actor_ids.remove(&id);
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
+        self.orphan_satellites(&entity);
         assert!(!entity.reserved, "cannot remove a reserved container");
         self.bag_expiry.remove(&id);
         if let Some(camp) = entity.camp {
@@ -3414,7 +3460,9 @@ impl World {
         let e = self.remove_entity(id);
         let definition = &self.content.objects[&e.kind];
         // Reference Reproduce suppresses follower XP; Pentaract Spawn explicitly allows eye XP.
-        let reward = if e.quest.is_some() && matches!(e.kind, 0xd57 | 0xd58 | 0xd5a..=0xd5c) {
+        let reward = if e.script.as_ref().is_some_and(|script| script.no_experience)
+            || (e.quest.is_some() && matches!(e.kind, 0xd57 | 0xd58 | 0xd5a..=0xd5c))
+        {
             0
         } else {
             (definition.hp as f32 * definition.xp_multiplier / 10.).ceil() as i32
@@ -3657,11 +3705,13 @@ impl World {
         Ok(())
     }
     fn npc_step(&mut self) -> Vec<(i32, Vec<u8>)> {
-        use crate::encounter::{Motion, phased_attacks, profile};
+        use crate::encounter::{Motion, profile};
         let mut packets = Vec::new();
         if !self.encounter || self.safe {
             return packets;
         }
+        let delta = self.now.saturating_sub(self.last_npc_step);
+        self.last_npc_step = self.now;
         let ids: Vec<_> = self
             .actors()
             .filter(|e| {
@@ -3679,7 +3729,9 @@ impl World {
             };
             let kind = entity.kind;
             let pos = entity.pos;
-            if kind == crate::dungeon::abyss::IDOL && entity.hp == self.content.objects[&kind].hp {
+            if entity.hp == self.content.objects[&kind].hp
+                && (kind == crate::dungeon::abyss::IDOL || kind == 0xd7e && entity.stage.is_none())
+            {
                 continue;
             }
             let profile = profile(kind).expect("validated encounter profile");
@@ -3693,19 +3745,7 @@ impl World {
                 && entity.conditions(self.now) & crate::condition::bit(crate::condition::STASIS)
                     != 0
             {
-                let e = self.entities.get_mut(&id).unwrap();
-                if let Some(charge) = &mut e.charge {
-                    charge.suspend(50);
-                }
-                if let Some(activated) = &mut e.activated {
-                    *activated += 50;
-                }
-                if e.next_shot >= self.now - 50 {
-                    e.next_shot += 50;
-                }
-                if e.next_aux >= self.now - 50 {
-                    e.next_aux += 50;
-                }
+                self.suspend_npc(id, delta);
                 continue;
             }
             let nearest = self
@@ -3729,24 +3769,31 @@ impl World {
                 0x617 | 0x61a | 0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS => 12.,
-                0xd90 => 8.,
+                0xd90 | 0xd7e => 8.,
+                0xd82 | 0xd83 => 10.,
                 _ => 20.,
             };
-            let target = if burst {
-                pos
+            let radius = if entity.activated.is_some() {
+                20.
             } else {
-                let Some(target) = nearest.filter(|p| {
-                    pos.distance(*p)
-                        < if entity.activated.is_some() {
-                            20.
-                        } else {
-                            wake
-                        }
-                }) else {
-                    continue;
-                };
-                target
+                wake
             };
+            let target = if burst {
+                Some(pos)
+            } else {
+                nearest.filter(|p| pos.distance(*p) < radius)
+            };
+            let nearby = self.players.values().any(|p| {
+                p.character.alive
+                    && !p.death_pending
+                    && !p.departing
+                    && !p.paused
+                    && pos.distance(p.pos) < radius
+            });
+            if !burst && target.is_none() && !nearby {
+                self.suspend_npc(id, delta);
+                continue;
+            }
             let activated = *self
                 .entities
                 .get_mut(&id)
@@ -3763,10 +3810,26 @@ impl World {
             };
             let elapsed = self.now - current.activated.expect("activated encounter");
             let flags = current.conditions(self.now);
-            let (motion, mut speed) = if kind == 0x909 && current.stage == Some(1) {
+            let (mut motion, mut speed) = if kind == 0x909 && current.stage == Some(1) {
                 (Motion::Stationary, 0.)
+            } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
+                match self.landmark_movement(id, target, elapsed) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"landmark movement refused");
+                        continue;
+                    }
+                }
             } else if current.quest.is_some() {
                 self.quest_movement(id, target, elapsed)
+            } else if crate::encounter::fauna::ROSTER.contains(&kind) {
+                match self.fauna_movement(id, target, elapsed) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"fauna movement refused");
+                        continue;
+                    }
+                }
             } else if kind == 0x6c6 || (self.entities[&id].camp.is_some() && midlands::member(kind))
             {
                 match self.midland_movement(id, target, elapsed) {
@@ -3787,6 +3850,14 @@ impl World {
                         continue;
                     }
                 }
+            } else if golems::ROOTS.contains(&kind) || matches!(kind, 0x6d2..=0x6d7) {
+                match self.golem_movement(id, elapsed) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"golem movement refused");
+                        continue;
+                    }
+                }
             } else if self.entities[&id].camp.is_some() {
                 match self.family_movement(id, target, elapsed) {
                     Ok(movement) => movement,
@@ -3795,8 +3866,16 @@ impl World {
                         continue;
                     }
                 }
+            } else if matches!(kind, 0xdaa | 0xdac) {
+                match self.lair_escort_movement(id) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"Lair escort movement refused");
+                        continue;
+                    }
+                }
             } else if crate::endgame::ROSTER.contains(&kind) {
-                match self.finale_movement(id, elapsed) {
+                match self.finale_movement(id, target, elapsed) {
                     Ok(movement) => movement,
                     Err(error) => {
                         tracing::error!(entity=id,%error,"endgame movement refused");
@@ -3806,30 +3885,92 @@ impl World {
             } else {
                 crate::encounter::movement(kind, self.entities[&id].hp, elapsed)
             };
+            if target.is_none()
+                && matches!(
+                    motion,
+                    Motion::Chase { .. }
+                        | Motion::Maintain { .. }
+                        | Motion::Retreat { .. }
+                        | Motion::Orbit {
+                            anchor: crate::encounter::Anchor::Player,
+                            ..
+                        }
+                        | Motion::Protect {
+                            anchor: crate::encounter::Anchor::Player,
+                            ..
+                        }
+                )
+            {
+                motion = Motion::Wander;
+                speed = 4.;
+            }
             let e = self.entities.get_mut(&id).unwrap();
             if e.motion != Some(motion) {
                 e.motion = Some(motion);
+                e.following = Following::Unknown;
+                e.charge = None;
                 e.goal = None;
                 if matches!(motion, Motion::Pace { .. }) {
                     e.phase = 1.;
                 }
                 tracing::debug!(entity = id, kind, ?motion, speed, "NPC movement entered");
             }
-            let goal = match motion {
+            let planned_motion = if flags & crate::condition::bit(crate::condition::PARALYZED) != 0
+            {
+                if let Some(charge) = &mut e.charge {
+                    charge.suspend(delta);
+                }
+                Motion::Stationary
+            } else {
+                motion
+            };
+            let goal = match planned_motion {
                 Motion::Stationary => {
                     speed = 0.;
                     Some(pos)
                 }
-                Motion::Charge { .. }
-                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 =>
-                {
-                    if let Some(charge) = &mut self.entities.get_mut(&id).unwrap().charge {
-                        charge.suspend(50);
+                Motion::Charge { .. } => self.charge_goal(id, target, motion, speed),
+                Motion::WanderHome { radius } => {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    if e.goal.is_none_or(|p| {
+                        p.distance(e.pos) < 0.1 || p.distance(e.home) > radius + 0.01
+                    }) {
+                        let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                        let distance = self.rng.gen_range(0. ..radius);
+                        e.goal = Some(Pos {
+                            x: e.home.x + distance * angle.cos(),
+                            y: e.home.y + distance * angle.sin(),
+                        });
                     }
-                    speed = 0.;
-                    Some(pos)
+                    e.goal
                 }
-                Motion::Charge { .. } => self.charge_goal(id, Some(target), motion, speed),
+                Motion::Follow { sight, stop, .. } => {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
+                        Some(pos)
+                    } else {
+                        let old = e.following;
+                        let target = target.filter(|p| pos.distance(*p) < sight);
+                        e.following = match target {
+                            None => Following::Unknown,
+                            Some(p)
+                                if pos.distance(p)
+                                    > stop + if old == Following::Resting { 1. } else { 0. } =>
+                            {
+                                Following::Acquired
+                            }
+                            Some(_) => Following::Resting,
+                        };
+                        if old != e.following {
+                            e.goal = None;
+                        }
+                        if e.following == Following::Acquired {
+                            target
+                        } else {
+                            None
+                        }
+                    }
+                }
                 Motion::Pace { distance } => {
                     let e = self.entities.get_mut(&id).unwrap();
                     Some(match e.goal {
@@ -3858,7 +3999,10 @@ impl World {
                         })
                     }
                 }
-                Motion::Maintain { sight, distance } if pos.distance(target) < sight => {
+                Motion::Maintain { sight, distance }
+                    if target.is_some_and(|p| pos.distance(p) < sight) =>
+                {
+                    let target = target.expect("acquired maintain-distance target");
                     let angle = (pos.y - target.y).atan2(pos.x - target.x);
                     Some(Pos {
                         x: target.x + distance * angle.cos(),
@@ -3866,6 +4010,7 @@ impl World {
                     })
                 }
                 Motion::Retreat { distance } => {
+                    let target = target.expect("target-dependent retreat guarded");
                     if pos.distance(target) >= distance {
                         speed = 0.;
                     }
@@ -3888,13 +4033,15 @@ impl World {
                     }
                     Some(leader)
                 }
-                Motion::Chase { sight, stop } if pos.distance(target) < sight => {
-                    if pos.distance(target) <= stop {
+                Motion::Chase { sight, stop }
+                    if target.is_some_and(|p| pos.distance(p) < sight) =>
+                {
+                    if pos.distance(target.expect("acquired chase target")) <= stop {
                         speed = 0.;
                     }
-                    Some(target)
+                    target
                 }
-                Motion::Orbit { anchor, radius } => {
+                Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
                     let target = match self.orbit_anchor(id, anchor, target) {
                         Ok(target) => target,
                         Err(error) => {
@@ -3910,17 +4057,27 @@ impl World {
                         orbit.direction
                     } else {
                         if e.goal.is_none() {
-                            e.phase = (pos.y - target.y).atan2(pos.x - target.x);
+                            e.phase = if matches!(motion, Motion::StrictOrbit { .. }) {
+                                self.rng.gen_range(0. ..std::f32::consts::TAU)
+                            } else {
+                                (pos.y - target.y).atan2(pos.x - target.x)
+                            };
                         }
                         1.
                     };
-                    let angular_speed = if e.quest.is_some() {
-                        speed / 1.5
-                            * if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
-                                0.5
-                            } else {
-                                1.
-                            }
+                    let angular_speed = if e.quest.is_some()
+                        || e.orbit.is_some()
+                        || matches!(motion, Motion::StrictOrbit { .. })
+                    {
+                        (if e.quest.is_some() || e.orbit.is_some() {
+                            speed / 1.5
+                        } else {
+                            speed
+                        }) * if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
+                            0.5
+                        } else {
+                            1.
+                        }
                     } else {
                         speed
                     };
@@ -3967,7 +4124,7 @@ impl World {
                 let e = self.entities.get_mut(&id).unwrap();
                 speed = match motion {
                     Motion::Wander | Motion::Maintain { .. } => speed,
-                    Motion::Charge { idle, .. } => idle,
+                    Motion::Follow { idle, .. } | Motion::Charge { idle, .. } => idle,
                     Motion::Chase { .. } if kind == 0x600 => 4.,
                     Motion::Chase { .. } if !(0x687..=0x689).contains(&kind) => 4.,
                     Motion::Protect { .. } => profile.speed,
@@ -4004,94 +4161,73 @@ impl World {
             } else if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
                 speed *= 0.5;
             }
-            self.entities.get_mut(&id).unwrap().goal = Some(goal);
-            if let Err(error) = self.move_entity(id, goal, speed / 1.5 * 0.05) {
+            if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
+                self.entities.get_mut(&id).unwrap().goal = Some(goal);
+            }
+            let distance = if matches!(motion, Motion::StrictOrbit { .. }) && speed > 0. {
+                pos.distance(goal)
+            } else {
+                speed / 1.5 * 0.05
+            };
+            if let Err(error) = self.move_entity(id, goal, distance) {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.goal = None;
                 e.last_step = Pos { x: 0., y: 0. };
                 tracing::debug!(entity=id,%error,"NPC movement blocked; retargeting");
             }
             let e = &self.entities[&id];
+            let schedule = if burst {
+                None
+            } else {
+                match self.npc_attack_schedule(id, elapsed) {
+                    Ok(schedule) => schedule,
+                    Err(error) => {
+                        tracing::error!(entity=id,kind,%error,"NPC attack schedule refused");
+                        continue;
+                    }
+                }
+            };
             if profile.interval == 0
                 || e.activated.is_none()
                 || (!burst
-                    && (self.now < e.next_shot
-                        || e.pos.distance(target) > profile.range
+                    && ((schedule.is_none()
+                        && (self.now < e.next_shot
+                            || target.is_none_or(|p| e.pos.distance(p) > profile.range)))
                         || flags & crate::condition::bit(crate::condition::STUNNED) != 0))
             {
                 continue;
             }
-            let heading = (target.y - e.pos.y).atan2(target.x - e.pos.x);
-            let shots = if e.quest.is_some() {
-                match self.quest_shots(id, target, elapsed) {
-                    Ok(shots) => shots,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"named quest projectiles refused");
-                        continue;
-                    }
-                }
-            } else if crate::endgame::ROSTER.contains(&kind) {
-                match self.finale_shots(id, heading, elapsed) {
-                    Ok(shots) => shots,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"endgame projectiles refused");
-                        continue;
-                    }
-                }
-            } else if crate::dungeon::spider::ROSTER.contains(&kind) {
-                match self.spider_shots(id, target, heading, elapsed) {
-                    Ok(shots) => shots,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Spider Den projectiles refused");
-                        continue;
-                    }
-                }
-            } else if matches!(kind, 0x900..=0x902) {
-                match self.shield_shots(id, heading) {
-                    Ok(shots) => shots,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Shield Orc commands refused");
-                        continue;
-                    }
-                }
-            } else if gods::GODS.contains(&kind)
-                || gods::CONSTRUCTS.contains(&kind)
-                || midlands::AIMED.contains(&kind)
-            {
-                match self.god_shots(id, target, heading, elapsed) {
-                    Ok(shots) => shots,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Godlands projectiles refused");
-                        continue;
-                    }
-                }
+            let result = if let Some(schedule) = &schedule {
+                self.scheduled_attacks(id, target, schedule)
             } else {
-                let elapsed = if kind == 0x909 && e.stage == Some(1) {
-                    5000
-                } else {
-                    elapsed
-                };
-                phased_attacks(kind, e.hp, heading, elapsed)
+                self.legacy_enemy_shots(id, target.expect("legacy attack target acquired"), elapsed)
             };
-            let shots =
-                if flags & crate::condition::bit(crate::condition::DAZED) != 0 && shots.len() > 1 {
-                    let count = (shots.len() / 2).max(1);
-                    (0..count)
-                        .map(|i| shots[(2 * i + 1) * shots.len() / (2 * count)])
-                        .collect()
-                } else {
-                    shots
-                };
+            let shots = match result {
+                Ok(shots) => shots,
+                Err(error) => {
+                    tracing::error!(entity=id, kind, %error, "NPC projectiles refused");
+                    continue;
+                }
+            };
+            let shots = if schedule.is_none()
+                && flags & crate::condition::bit(crate::condition::DAZED) != 0
+            {
+                enemy_shots::dazed(shots)
+            } else {
+                shots
+            };
             let interval = match kind {
                 0x633 if elapsed % 10000 >= 5000 => 500,
-                0x917 if !(1875..3750).contains(&e.hp) => 1000,
+                0x917 if !(1875..3750).contains(&self.entities[&id].hp) => 1000,
                 0xd06 if elapsed % 43300 >= 32300 => 1300,
                 0xd06 if elapsed % 43300 >= 12300 => 500,
                 0xd90 if (elapsed / 13000) % 4 == 1 => 2000,
                 0xd90 if (elapsed / 13000) % 4 >= 2 => 1000,
                 _ => profile.interval,
             };
-            self.entities.get_mut(&id).unwrap().next_shot = self.now + interval;
+            if schedule.is_none() {
+                self.entities.get_mut(&id).unwrap().next_shot = self.now + interval;
+            }
             if shield_burst {
                 self.entities.get_mut(&id).unwrap().stage = Some(3);
                 tracing::debug!(entity = id, kind, "Shield Orc final command selected");
@@ -4600,6 +4736,21 @@ mod tests {
         let c = Arc::new(Content::load(Path::new("data")).unwrap());
         let m = Arc::new(Map::load(Path::new("data/tutorial.wmap"), &c).unwrap());
         World::new(c, m).unwrap()
+    }
+    pub(super) fn arena(terrain: u8) -> World {
+        let mut w = world();
+        w.encounter = true;
+        for id in w.entities.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(id);
+        }
+        let map = Arc::make_mut(&mut w.map);
+        map.spawns = vec![(1.5, 1.5)];
+        for cell in &mut map.cells {
+            cell.ground = 0x61;
+            cell.terrain = terrain;
+            cell.object = None;
+        }
+        w
     }
     pub(super) fn ch(w: &World) -> Character {
         Character {

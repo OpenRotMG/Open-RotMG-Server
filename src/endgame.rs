@@ -79,24 +79,16 @@ impl RealmCycle {
 
 pub fn profile(kind: u16) -> Option<Profile> {
     let (motion, speed, interval, range) = match kind {
-        0x668 => (
-            Motion::Chase {
-                sight: 12.,
-                stop: 2.,
-            },
-            4.5,
-            500,
-            12.,
-        ),
+        0x668 => (Motion::WanderHome { radius: 1. }, 3., 500, 10.),
         0x669 => (Motion::Wander, 7., 250, 10.),
         0x66a | 0x66b => (Motion::Wander, 7., 1000, 10.),
-        0x67d => (Motion::Wander, 3., 1000, 12.),
+        0x67d => (Motion::WanderHome { radius: 3. }, 3., 1000, 12.),
         0x67e..=0x682 => (
             Motion::Chase {
                 sight: 10.,
                 stop: 2.,
             },
-            8.,
+            10.,
             1000,
             10.,
         ),
@@ -310,7 +302,7 @@ impl BossBrain {
             "Oryx phase clock regressed"
         );
         self.last_elapsed = Some(elapsed);
-        if kind == ORYX2 && hp <= max_hp / 5 {
+        if hp <= max_hp / 5 {
             self.rage_at.get_or_insert(elapsed);
         }
         let phase = if kind == ORYX {
@@ -441,16 +433,11 @@ impl GuardianBrain {
     }
 }
 pub fn attacks(kind: u16, hp: i32, max_hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
+    if let Some(schedule) = crate::encounter::attacks::endgame_schedule(kind, hp, max_hp, elapsed) {
+        return schedule.snapshot(heading);
+    }
     match kind {
-        0x668 => {
-            let mut shots = vec![(1, heading)];
-            if elapsed % 1000 < 500 {
-                shots.extend(fan(0, 5, 5., heading));
-            }
-            shots
-        }
         0x669 | 0x67e..=0x682 | 0xd84 | 0xd87 | 0xde2 | 0xdf2 => vec![(0, heading)],
-        0x66a | 0x66b => fan(0, 3, 5., heading),
         0x67d if elapsed % 10_000 < 5000 => fan(10, 3, 10., heading),
         0x67d => (0..4).map(|index| (index, heading)).collect(),
         0xd70 | 0xd71 | 0xd7a | 0xd7d | 0xde1 | 0xde3 | 0xdf1 => vec![],
@@ -462,7 +449,6 @@ pub fn attacks(kind: u16, hp: i32, max_hp: i32, heading: f32, elapsed: u64) -> V
             _ => ring(2, 10, heading),
         },
         0xd7c => ring(0, 6, heading),
-        0xd7e => fan(0, 2, 15., heading),
         0xd7f => vec![(0, heading)],
         0xd80 => {
             if elapsed % 1500 < 250 {
@@ -478,69 +464,6 @@ pub fn attacks(kind: u16, hp: i32, max_hp: i32, heading: f32, elapsed: u64) -> V
                 vec![(1, heading)]
             }
         }
-        0xd82 => {
-            if elapsed % 10_000 < 5000 {
-                ring(1, 5, heading)
-            } else {
-                let mut shots = ring(2, 5, heading);
-                shots.extend(fan(0, 3, 10., heading));
-                shots
-            }
-        }
-        0xd83 => {
-            if elapsed % 7500 < 5000 {
-                fan(0, 3, 20., heading)
-            } else {
-                vec![(0, heading), (1, heading), (2, heading)]
-            }
-        }
-        ORYX if hp <= max_hp / 5 => {
-            let mut shots = fan(1, 2, 10., heading);
-            shots.extend(fan(16, 5, 10., heading));
-            shots
-        }
-        ORYX => match oryx_phase(elapsed) {
-            OryxPhase::Opening => {
-                if elapsed % 1000 < 200 {
-                    fan(5, 4, 10., heading)
-                } else {
-                    vec![]
-                }
-            }
-            OryxPhase::Dance => {
-                if elapsed % 700 < 200 {
-                    ring(6, 8, heading)
-                } else {
-                    vec![]
-                }
-            }
-            OryxPhase::Artifacts => {
-                let mut shots = vec![];
-                if elapsed % 500 < 200 {
-                    shots.extend(ring(7, 10, heading));
-                }
-                if elapsed % 1500 < 200 {
-                    shots.extend(ring(9, 3, heading));
-                }
-                if elapsed % 2000 < 200 {
-                    shots.extend(ring(8, 10, heading));
-                }
-                shots
-            }
-            OryxPhase::Gaze => {
-                if elapsed % 1000 < 200 {
-                    fan(1, 2, 10., heading)
-                } else {
-                    vec![]
-                }
-            }
-            OryxPhase::DanceTwo => ring(
-                8,
-                4,
-                [0f32, 30., 15., 45.][(elapsed / 200 % 4) as usize].to_radians(),
-            ),
-            OryxPhase::PrepareRage | OryxPhase::Rage => unreachable!(),
-        },
         ORYX2 => oryx2_attacks(
             if hp <= max_hp / 5 {
                 OryxPhase::Rage
@@ -550,15 +473,8 @@ pub fn attacks(kind: u16, hp: i32, max_hp: i32, heading: f32, elapsed: u64) -> V
             elapsed,
             heading,
         ),
-        0x1748 => ring(0, 12, heading),
-        0x174a | 0x174b => ring((elapsed / 700 % 2) as u8, 4, heading),
         0x1749 => {
             let mut shots = fan(0, 3, 10., heading);
-            shots.extend(fan(1, 3, 10., heading));
-            shots
-        }
-        0x944 => {
-            let mut shots = vec![(0, heading)];
             shots.extend(fan(1, 3, 10., heading));
             shots
         }
@@ -569,35 +485,7 @@ pub fn attacks(kind: u16, hp: i32, max_hp: i32, heading: f32, elapsed: u64) -> V
 }
 
 pub fn oryx2_attacks(phase: OryxPhase, age: u64, heading: f32) -> Vec<(u8, f32)> {
-    if phase == OryxPhase::PrepareRage {
-        return if age >= 4000 && age % 4000 < 500 {
-            vec![(13, 0.), (14, 30f32.to_radians())]
-        } else {
-            vec![]
-        };
-    }
-    assert!(
-        matches!(phase, OryxPhase::Opening | OryxPhase::Rage),
-        "invalid Oryx2 projectile phase"
-    );
-    let mut shots = vec![];
-    if age % 1500 < 500 {
-        shots.extend(ring(0, 8, heading));
-    }
-    if age % 1000 < 500 {
-        for (index, count) in [(1, 3), (2, 3), (3, 2), (4, 3), (5, 2), (6, 3)] {
-            shots.extend(fan(index, count, 10., heading));
-        }
-    }
-    if phase == OryxPhase::Rage {
-        if (8000..8500).contains(&age) {
-            shots.push((13, heading));
-        }
-        if (8500..9000).contains(&age) {
-            shots.push((14, heading));
-        }
-    }
-    shots
+    crate::encounter::attacks::oryx2_schedule(phase, age).snapshot(heading)
 }
 pub fn validate_kind(content: &Content, kind: u16) -> Result<()> {
     let object = content.get(kind)?;
@@ -884,7 +772,7 @@ mod tests {
             attacks(ORYX2, 75_000, 75_000, 0., 0)
         );
         assert!(
-            attacks(ORYX, 17_000, 85_000, 0., 0)
+            attacks(ORYX, 17_000, 85_000, 0., 2000)
                 .iter()
                 .any(|(i, _)| *i == 16)
         );

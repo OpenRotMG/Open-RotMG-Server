@@ -18,6 +18,12 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         }
         0x21d..=0x220 => &[(0.2, Item(0x707))],
         0x21b | 0x21c | 0x937..=0x93f => &[],
+        // Behavior coverage alone does not establish new drop probabilities.
+        kind if crate::encounter::fauna::ROSTER.contains(&kind)
+            || crate::encounter::landmarks::ROSTER.contains(&kind) =>
+        {
+            &[]
+        }
         0x122 | 0x162 | 0x163 | 0xd57 | 0xd58 | 0xd5b..=0xd5f => &[],
         0xd5a => &[(0.05, Item(0xa3b))],
         0xd56 | 0xd59 | 0xd60 => &[
@@ -93,6 +99,10 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x601 => &[(0.2, Tier(1, ARMOR)), (0.03, Item(0xa22))],
         0x602 | 0x604 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
         0x603 | 0x954 => &[],
+        0x6d2..=0x6d7 => &[],
+        0x62d | 0x631 => &[(0.03, Tier(5, WEAPONS)), (0.03, Item(0xa22))],
+        0x62e => &[(0.03, Tier(5, ARMOR)), (0.03, Item(0xa22))],
+        0x62f => &[(0.03, Item(0xa22)), (0.01, Tier(2, RINGS))],
         0x629 | 0x62b => &[(0.03, Item(0xa22))],
         0x62a | 0x647 | 0x648 => &[(0.03, Item(0xa23))],
         0x62c => &[

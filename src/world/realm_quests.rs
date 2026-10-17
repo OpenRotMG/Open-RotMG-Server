@@ -122,11 +122,13 @@ impl World {
     ) -> Result<()> {
         crate::encounter::validate(&self.content, kind)?;
         let (tag, home, center) = owner;
-        let own = self.actors().filter(|e| e.quest == Some(tag)).count();
+        let own =
+            self.actors().filter(|e| e.quest == Some(tag)).count() + self.pending_named(tag, None);
         let live = self
             .actors()
             .filter(|e| e.quest == Some(tag) && e.kind == kind)
-            .count();
+            .count()
+            + self.pending_named(tag, Some(kind));
         let count = count.min(maximum.saturating_sub(live));
         if count == 0 {
             return Ok(());
@@ -145,6 +147,7 @@ impl World {
             self.actors()
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
+                + self.named_births.len()
                 + count
                 <= 256,
             "shared summon budget exhausted"
@@ -356,6 +359,12 @@ impl World {
                     }
                 }
                 7 if kind == 0x928 && t >= 140000 => {
+                    let pos = self.entities[&id].pos;
+                    for ghost in self.quest_members(id, &[0x929, 0x92a, 0x92b, 0x92c]) {
+                        if self.entities[&ghost].pos.distance(pos) <= 30. {
+                            self.remove_entity(ghost);
+                        }
+                    }
                     self.quest_transform(id, 0x92d)?;
                 }
                 _ => {}
@@ -502,10 +511,16 @@ impl World {
         }
         Ok(())
     }
-    pub(super) fn quest_movement(&self, id: i32, target: Pos, elapsed: u64) -> (Motion, f32) {
+    pub(super) fn quest_movement(
+        &self,
+        id: i32,
+        target: impl Into<Option<Pos>>,
+        elapsed: u64,
+    ) -> (Motion, f32) {
         if (0xd56..=0xd60).contains(&self.entities[&id].kind) {
             return self.event_movement(id, elapsed);
         }
+        let target = target.into();
         let e = &self.entities[&id];
         let leash = match e.kind {
             0x91f | 0x920 => 6.,
@@ -568,9 +583,10 @@ impl World {
                         },
                         if birdman { 5. } else { 10. },
                     )
-                } else if e.pos.distance(target) < 10.
-                    && e.pos.distance(target) > if e.kind == 0x676 { 9. } else { 7. }
-                {
+                } else if target.is_some_and(|p| {
+                    e.pos.distance(p) < 10.
+                        && e.pos.distance(p) > if e.kind == 0x676 { 9. } else { 7. }
+                }) {
                     (
                         Motion::Chase {
                             sight: 10.,
@@ -610,7 +626,7 @@ impl World {
                     (Motion::Wander, speed)
                 }
             }
-            0x923 | 0x924 if e.pos.distance(target) < 7. => (
+            0x923 | 0x924 if target.is_some_and(|p| e.pos.distance(p) < 7.) => (
                 Motion::Orbit {
                     anchor: Anchor::Player,
                     radius: 4.,
@@ -624,7 +640,7 @@ impl World {
             ),
             0x91d if elapsed % 3000 < 1500 => {
                 let (speed, sight) = if e.hp >= 3900 { (5.5, 5.) } else { (6.5, 10.) };
-                if e.pos.distance(target) < sight {
+                if target.is_some_and(|p| e.pos.distance(p) < sight) {
                     (
                         Motion::Orbit {
                             anchor: Anchor::Player,
@@ -636,7 +652,7 @@ impl World {
                     (Motion::Stationary, 0.)
                 }
             }
-            0x91d if e.pos.distance(target) < 2. => (
+            0x91d if target.is_some_and(|p| e.pos.distance(p) < 2.) => (
                 Motion::Retreat { distance: 2. },
                 if e.hp >= 3900 { 5.5 } else { 6.5 },
             ),

@@ -106,7 +106,7 @@ fn arachna_shields_then_builds_one_owned_web_and_fires_selected_patterns() {
             .all(|t| t[1] - t[0] == spider::profile(0x937).interval)
     );
     for id in &spokes {
-        let shots = spider::attacks(w.entities[id].kind, 0., 0);
+        let shots = crate::encounter::phased_attacks(w.entities[id].kind, 100000, 0., 0);
         let notices: Vec<_> = shots
             .iter()
             .enumerate()

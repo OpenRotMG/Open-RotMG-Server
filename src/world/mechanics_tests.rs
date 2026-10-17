@@ -146,7 +146,7 @@ fn grates_have_bounded_selected_children_and_existing_portal_sources_are_unchang
 }
 
 #[test]
-fn grenades_are_telegraphed_delayed_authoritative_and_cancelled_after_owner_death() {
+fn admitted_grenades_are_telegraphed_delayed_and_survive_owner_death() {
     let mut w = arena();
     let (tx, mut rx) = mpsc::channel(128);
     let (lost, _) = watch::channel(false);
@@ -171,6 +171,11 @@ fn grenades_are_telegraphed_delayed_authoritative_and_cancelled_after_owner_deat
     assert_eq!(w.players[&player].killer, w.content.objects[&0x654].name);
     assert!(w.grenades.is_empty());
 
+    let mut character = tests::ch(&w);
+    character.id = 2;
+    character.account = 2;
+    let survivor = w.enter(character, None).unwrap();
+    w.players.get_mut(&survivor).unwrap().pos = pos;
     w.now = 3000;
     w.encounter_mechanics(medusa, pos, 3000).unwrap();
     assert_eq!(w.grenades.len(), 1);
@@ -178,6 +183,9 @@ fn grenades_are_telegraphed_delayed_authoritative_and_cancelled_after_owner_deat
     w.now = 4500;
     w.grenade_step();
     assert!(w.grenades.is_empty());
+    assert_eq!(w.players[&survivor].character.hp, 0);
+    assert!(w.players[&survivor].death_pending);
+    assert_eq!(w.players[&survivor].killer, w.content.objects[&0x654].name);
 }
 
 #[test]

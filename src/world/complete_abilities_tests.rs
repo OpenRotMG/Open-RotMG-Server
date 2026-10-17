@@ -270,7 +270,7 @@ fn dazed_reduces_enemy_volley_and_stasis_immune_definitions_cannot_be_frozen() {
                 .unwrap();
         }
         w.npc_step();
-        assert_eq!(w.bullets.len(), if dazed { 2 } else { 5 });
+        assert_eq!(w.bullets.len(), if dazed { 1 } else { 3 });
         let _ = id;
     }
     let (mut w, id) = fixture(0x323, 0xae4);

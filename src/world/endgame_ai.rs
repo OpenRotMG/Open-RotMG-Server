@@ -4,11 +4,62 @@ use finale::{BossBrain, GUARDIANS, GuardianBrain, ORYX, ORYX2, OryxPhase};
 
 #[derive(Default)]
 pub(super) struct Actors {
-    bosses: BTreeMap<i32, BossBrain>,
+    pub(super) bosses: BTreeMap<i32, BossBrain>,
     guardians: BTreeMap<i32, GuardianBrain>,
 }
 
 impl World {
+    fn hero_reinforcements(&mut self, id: i32, initial: bool) -> Result<()> {
+        let waves = finale::summons(self.entities[&id].kind);
+        ensure!(!waves.is_empty(), "hero reinforcement roster missing");
+        let selected = if initial {
+            None
+        } else {
+            Some(self.rng.gen_range(0..=waves.len()))
+        };
+        for (index, wave) in waves.iter().enumerate() {
+            if selected.is_some_and(|choice| choice != index) {
+                continue;
+            }
+            let current = self
+                .entities
+                .values()
+                .filter(|e| e.parent == Some(id) && e.kind == wave.kind)
+                .count();
+            let count = (current + self.rng.gen_range(1..=3)).min(wave.count);
+            self.finale_wave(id, finale::Wave { count, ..*wave })?;
+        }
+        Ok(())
+    }
+    fn armor_mechanics(&mut self, id: i32) -> Result<()> {
+        let e = &self.entities[&id];
+        let old = e.stage;
+        let mut stage = old.unwrap_or(1);
+        if stage == 1 && e.hp < self.content.objects[&e.kind].hp / 5 {
+            stage = 2;
+            let e = self.entities.get_mut(&id).unwrap();
+            e.reaction_until = self.now + 1500;
+            e.next_aux = self.now;
+        } else if stage == 2 && self.now >= e.reaction_until {
+            stage = 1;
+        }
+        let e = self.entities.get_mut(&id).unwrap();
+        e.stage = Some(stage);
+        e.condition &= !condition::bit(condition::INVULNERABLE);
+        if stage == 2 {
+            e.condition |= condition::bit(condition::INVULNERABLE);
+        }
+        if old != Some(stage) {
+            e.extra_stats.retain(|(stat, _)| *stat != 61);
+            e.extra_stats.push((61, i32::from(stage == 1)));
+            tracing::debug!(entity = id, stage, "Suit of Armor phase entered");
+        }
+        if stage == 2 && self.now >= e.next_aux {
+            e.next_aux = self.now + 50;
+            self.heal_enemy(id, id, 200)?;
+        }
+        Ok(())
+    }
     fn finale_wave(&mut self, parent: i32, wave: finale::Wave) -> Result<()> {
         ensure!(
             wave.lifetime > 0,
@@ -22,13 +73,40 @@ impl World {
         {
             e.expires = Some(self.now + wave.lifetime);
             e.activated.get_or_insert(self.now);
+            if matches!(e.kind, 0x174a | 0x174b | 0x944) {
+                let rate = match e.kind {
+                    0x174a => 1.,
+                    0x174b => 1.3,
+                    0x944 => 0.1,
+                    _ => unreachable!(),
+                };
+                e.orbit = Some(realm_events::Orbit {
+                    speed: crate::encounter::nr_speed(
+                        rate + self.rng.gen_range(-rate * 0.1..rate * 0.1),
+                    ),
+                    radius: if e.kind == 0x944 {
+                        self.rng.gen_range(0.5..1.5)
+                    } else if e.kind == 0x174a {
+                        1.
+                    } else {
+                        9.
+                    },
+                    direction: -1.,
+                });
+            }
             if matches!(e.kind, 0x1748 | 0x174a | 0x174b | 0xde4) {
                 e.condition |= condition::bit(condition::INVULNERABLE);
             }
         }
         Ok(())
     }
-    pub(super) fn finale_mechanics(&mut self, id: i32, target: Pos, elapsed: u64) -> Result<()> {
+    pub(super) fn finale_mechanics(
+        &mut self,
+        id: i32,
+        target: impl Into<Option<Pos>>,
+        elapsed: u64,
+    ) -> Result<()> {
+        let target = target.into();
         let e = &self.entities[&id];
         let (kind, hp, pos) = (e.kind, e.hp, e.pos);
         if GUARDIANS.contains(&kind) {
@@ -38,7 +116,7 @@ impl World {
                 .any(|e| e.id != id && GUARDIANS.contains(&e.kind) && e.hp > 0);
             let idle = peer
                 && self.entities[&id].stage.is_none_or(|s| s == 0)
-                && pos.distance(target) > 10.;
+                && target.is_none_or(|p| pos.distance(p) > 10.);
             let facts = if idle {
                 None
             } else {
@@ -95,6 +173,35 @@ impl World {
             }
             return Ok(());
         }
+        if kind == 0xd7e {
+            return self.armor_mechanics(id);
+        }
+        if kind == 0x944 && self.entities[&id].orbit.is_none() {
+            self.entities.get_mut(&id).unwrap().orbit = Some(realm_events::Orbit {
+                speed: crate::encounter::nr_speed(0.1 + self.rng.gen_range(-0.01..0.01)),
+                radius: self.rng.gen_range(0.5..1.5),
+                direction: -1.,
+            });
+        }
+        if finale::HEROES.contains(&kind) {
+            let initial = self.entities[&id].stage.is_none();
+            if initial {
+                let e = self.entities.get_mut(&id).unwrap();
+                e.stage = Some(0);
+                if kind == 0x668 {
+                    e.reaction_until = self.now + 5000;
+                }
+            }
+            if initial || self.now >= self.entities[&id].next_aux {
+                self.entities.get_mut(&id).unwrap().next_aux = self.now + 2000;
+                self.hero_reinforcements(id, initial)?;
+            }
+            return Ok(());
+        }
+        if kind == 0x174a && elapsed >= 10000 && self.entities[&id].size != 200 {
+            self.entities.get_mut(&id).unwrap().size = 200;
+            tracing::debug!(entity = id, "inner Guardian Element grew");
+        }
         if matches!(kind, ORYX | ORYX2) {
             let mut brain = self.finale.bosses.entry(id).or_default().clone();
             let facts = brain.update(kind, hp, self.content.objects[&kind].hp, elapsed)?;
@@ -133,12 +240,13 @@ impl World {
             self.finale_wave(id, *wave)?;
         }
         match kind {
-            ORYX if matches!(
-                self.finale.bosses[&id].phase(),
-                Some(OryxPhase::Artifacts | OryxPhase::Rage)
-            ) =>
+            ORYX if target.is_some()
+                && matches!(
+                    self.finale.bosses[&id].phase(),
+                    Some(OryxPhase::Artifacts | OryxPhase::Rage)
+                ) =>
             {
-                self.throw_grenade(id, target, 4., 120)?
+                self.throw_grenade(id, target.unwrap(), 4., 120)?
             }
             ORYX2 if self.finale.bosses[&id].phase() == Some(OryxPhase::Rage) => self.finale_wave(
                 id,
@@ -149,7 +257,7 @@ impl World {
                     lifetime: 10_000,
                 },
             )?,
-            0xde2 if pos.distance(target) < 2. => {
+            0xde2 if target.is_some_and(|p| pos.distance(p) < 2.) => {
                 self.area_damage(
                     kind,
                     pos,
@@ -158,7 +266,9 @@ impl World {
                 )?;
                 self.entities.get_mut(&id).unwrap().expires = Some(self.now + 50);
             }
-            0xdf1 if pos.distance(target) < 2. => self.area_damage(kind, pos, 2., 40)?,
+            0xdf1 if target.is_some_and(|p| pos.distance(p) < 2.) => {
+                self.area_damage(kind, pos, 2., 40)?
+            }
             _ => {}
         }
         Ok(())
@@ -173,26 +283,8 @@ impl World {
         if GUARDIANS.contains(&e.kind) && e.stage == Some(0) {
             return Ok(vec![]);
         }
-        if e.kind == ORYX2 {
-            let brain = self
-                .finale
-                .bosses
-                .get(&id)
-                .context("activated Oryx2 brain missing")?;
-            let phase = brain.phase().context("activated Oryx2 phase missing")?;
-            let age = match phase {
-                OryxPhase::Opening => elapsed,
-                OryxPhase::PrepareRage => brain
-                    .rage_elapsed(elapsed)
-                    .context("rage preparation clock missing")?,
-                OryxPhase::Rage => brain
-                    .rage_elapsed(elapsed)
-                    .context("rage clock missing")?
-                    .checked_sub(10_000)
-                    .context("rage began before protected preparation completed")?,
-                _ => bail!("invalid Oryx2 phase"),
-            };
-            return Ok(finale::oryx2_attacks(phase, age, heading));
+        if let Some(schedule) = self.npc_attack_schedule(id, elapsed)? {
+            return Ok(schedule.snapshot(heading));
         }
         Ok(finale::attacks(
             e.kind,
@@ -203,27 +295,187 @@ impl World {
         ))
     }
     pub(super) fn finale_movement(
-        &self,
+        &mut self,
         id: i32,
+        target: Option<Pos>,
         elapsed: u64,
     ) -> Result<(crate::encounter::Motion, f32)> {
+        use crate::encounter::{Anchor, Motion, nr_speed};
         let e = &self.entities[&id];
-        if e.kind == ORYX2
-            && self
+        match e.kind {
+            0x668 => {
+                let old = e
+                    .stage
+                    .context("activated Red Demon movement phase missing")?;
+                let stage = match old {
+                    0 if self.now >= e.reaction_until => 1,
+                    1 if self.now >= e.reaction_until
+                        || e.conditions(self.now) & condition::bit(condition::PARALYZED) == 0
+                            && target.is_none_or(|p| {
+                                e.pos.distance(p) <= 2. || e.pos.distance(p) >= 10.
+                            }) =>
+                    {
+                        2
+                    }
+                    2 if e.conditions(self.now) & condition::bit(condition::PARALYZED) == 0
+                        && (e.pos.x - e.home.x).abs() <= 1.
+                        && (e.pos.y - e.home.y).abs() <= 1. =>
+                    {
+                        0
+                    }
+                    _ => old,
+                };
+                if stage != old {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    e.stage = Some(stage);
+                    e.reaction_until = if stage < 2 { self.now + 5000 } else { 0 };
+                    tracing::debug!(entity = id, stage, "Red Demon movement phase entered");
+                }
+                return Ok(match stage {
+                    0 => (Motion::WanderHome { radius: 1. }, 3.),
+                    1 if target.is_some() => (
+                        Motion::Chase {
+                            sight: 10.,
+                            stop: 2.,
+                        },
+                        3.,
+                    ),
+                    1 => (Motion::WanderHome { radius: 1. }, 3.),
+                    2 => (
+                        Motion::Protect {
+                            anchor: Anchor::Home,
+                            distance: 1.,
+                        },
+                        3.,
+                    ),
+                    _ => bail!("invalid Red Demon movement phase"),
+                });
+            }
+            0x67e..=0x682 => {
+                let Some(target) = target.filter(|p| e.pos.distance(*p) < 10.) else {
+                    return Ok((Motion::Wander, 10.));
+                };
+                if self.now < e.reaction_until || e.pos.distance(target) <= 2. {
+                    if self.now >= e.reaction_until {
+                        self.entities.get_mut(&id).unwrap().reaction_until = self.now + 1000;
+                    }
+                    return Ok((Motion::Retreat { distance: 8. }, 8.));
+                }
+                return Ok((
+                    Motion::Chase {
+                        sight: 10.,
+                        stop: 2.,
+                    },
+                    10.,
+                ));
+            }
+            0xd7e if e.stage == Some(2) => return Ok((Motion::Stationary, 0.)),
+            0xd7e => {
+                return Ok((
+                    Motion::Follow {
+                        sight: 10.,
+                        stop: 2.,
+                        idle: nr_speed(0.2),
+                    },
+                    nr_speed(0.4),
+                ));
+            }
+            0xd82 => {
+                let charge = elapsed % 9000 >= 5000;
+                return Ok((
+                    Motion::Follow {
+                        sight: 10.,
+                        stop: 1.,
+                        idle: nr_speed(if charge { 0.3 } else { 0.2 }),
+                    },
+                    nr_speed(if charge { 1.2 } else { 0.4 }),
+                ));
+            }
+            0xd83 => {
+                return Ok((
+                    Motion::Follow {
+                        sight: 10.,
+                        stop: 3.,
+                        idle: nr_speed(0.2),
+                    },
+                    nr_speed(if elapsed % 7500 >= 5000 { 0.7 } else { 0.6 }),
+                ));
+            }
+            0x174a | 0x174b => {
+                let orbit = e
+                    .orbit
+                    .context("Guardian Element orbit was not initialized at birth")?;
+                return Ok((
+                    Motion::Orbit {
+                        anchor: Anchor::Parent,
+                        radius: orbit.radius,
+                    },
+                    orbit.speed,
+                ));
+            }
+            0x944 => {
+                if let Some((_, anchor)) = self
+                    .escort_anchor(id, ORYX2)?
+                    .filter(|(boss, _)| e.pos.distance(self.entities[boss].pos) < 10.)
+                {
+                    let orbit = e
+                        .orbit
+                        .context("Henchman orbit was not initialized at activation")?;
+                    return Ok((
+                        Motion::Orbit {
+                            anchor,
+                            radius: orbit.radius,
+                        },
+                        orbit.speed,
+                    ));
+                }
+                return Ok((
+                    Motion::Follow {
+                        sight: 8.,
+                        stop: 3.,
+                        idle: nr_speed(0.2),
+                    },
+                    nr_speed(0.2),
+                ));
+            }
+            ORYX if self
                 .finale
                 .bosses
                 .get(&id)
-                .context("moving Oryx2 brain missing")?
+                .context("moving Oryx brain missing")?
                 .phase()
-                == Some(OryxPhase::Rage)
-        {
-            return Ok((
-                crate::encounter::Motion::Chase {
-                    sight: 25.,
-                    stop: 3.,
-                },
-                8.,
-            ));
+                == Some(OryxPhase::Rage) =>
+            {
+                return Ok(if target.is_some() {
+                    (
+                        Motion::Chase {
+                            sight: 10.,
+                            stop: 1.,
+                        },
+                        nr_speed(0.85),
+                    )
+                } else {
+                    (Motion::Stationary, 0.)
+                });
+            }
+            ORYX2
+                if self
+                    .finale
+                    .bosses
+                    .get(&id)
+                    .context("moving Oryx2 brain missing")?
+                    .phase()
+                    == Some(OryxPhase::Rage) =>
+            {
+                return Ok((
+                    Motion::Chase {
+                        sight: 25.,
+                        stop: 3.,
+                    },
+                    8.,
+                ));
+            }
+            _ => {}
         }
         Ok(crate::encounter::movement(e.kind, e.hp, elapsed))
     }
@@ -564,7 +816,7 @@ mod tests {
             0
         );
         assert_eq!(w.finale.bosses[&boss].phase(), Some(OryxPhase::Rage));
-        assert_eq!(w.finale_movement(boss, 10_000).unwrap().1, 8.);
+        assert_eq!(w.finale_movement(boss, Some(pos), 10_000).unwrap().1, 8.);
         kill(&mut w, boss);
         let exits = w
             .entities
@@ -601,6 +853,7 @@ mod tests {
         p.tx = Some(Output { packets, lost });
         w.apply_condition(id, condition::INVULNERABLE, 1000)
             .unwrap();
+        w.now = 20_150;
         w.step();
         assert!(
             !*notice.borrow(),

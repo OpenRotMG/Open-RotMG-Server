@@ -5,15 +5,25 @@ use crate::{
 };
 
 impl World {
-    pub(super) fn spider_mechanics(&mut self, id: i32, target: Pos, elapsed: u64) -> Result<()> {
+    pub(super) fn spider_mechanics(
+        &mut self,
+        id: i32,
+        target: impl Into<Option<Pos>>,
+        elapsed: u64,
+    ) -> Result<()> {
+        let target = target.into();
         let e = &self.entities[&id];
         if e.kind == EGG {
-            if e.pos.distance(target) < 0.5 {
+            if target.is_some_and(|target| e.pos.distance(target) < 0.5) {
                 self.finish_timed_defeat(id)?;
             }
             return Ok(());
         }
         if e.kind != BOSS {
+            return Ok(());
+        }
+        if e.stage.is_none() && target.is_none() {
+            self.entities.get_mut(&id).unwrap().activated = Some(self.now);
             return Ok(());
         }
         if e.stage.is_none() {
@@ -74,22 +84,6 @@ impl World {
             }
         }
         Ok(())
-    }
-    pub(super) fn spider_shots(
-        &self,
-        id: i32,
-        target: Pos,
-        heading: f32,
-        elapsed: u64,
-    ) -> Result<Vec<(u8, f32)>> {
-        let kind = self.entities[&id].kind;
-        let mut shots = crate::dungeon::spider::attacks(kind, heading, elapsed);
-        if kind == BOSS && elapsed >= 2000 {
-            self.predict_enemy_shots(id, target, &mut shots[12..], |_| 1.)?;
-        } else if (HATCHLING..=0x21f).contains(&kind) {
-            self.predict_enemy_shots(id, target, &mut shots, |_| 1.)?;
-        }
-        Ok(shots)
     }
     pub(super) fn spider_loot(&mut self, boss: &Entity) -> Result<()> {
         let shared: Vec<_> = crate::loot::rewards(&self.content, BOSS, &mut self.rng)

@@ -1,6 +1,10 @@
 use crate::content::Content;
 use anyhow::{Result, ensure};
 
+pub(crate) mod attacks;
+pub(crate) mod fauna;
+pub(crate) mod landmarks;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
     Player,
@@ -9,15 +13,24 @@ pub enum Anchor {
     Home,
     CampLeader,
     CampMember(u16),
+    CampEntity(i32),
     QuestMember(u16),
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Motion {
     Stationary,
     Wander,
+    WanderHome {
+        radius: f32,
+    },
     Chase {
         sight: f32,
         stop: f32,
+    },
+    Follow {
+        sight: f32,
+        stop: f32,
+        idle: f32,
     },
     Charge {
         sight: f32,
@@ -42,6 +55,10 @@ pub enum Motion {
         anchor: Anchor,
         radius: f32,
     },
+    StrictOrbit {
+        anchor: Anchor,
+        radius: f32,
+    },
     Protect {
         anchor: Anchor,
         distance: f32,
@@ -54,7 +71,16 @@ pub struct Profile {
     pub interval: u64,
     pub range: f32,
 }
+pub(crate) fn nr_speed(rate: f32) -> f32 {
+    (5.55 * rate + 0.74) * 1.5
+}
 pub fn profile(kind: u16) -> Option<Profile> {
+    if landmarks::ROSTER.contains(&kind) {
+        return Some(landmarks::profile(kind));
+    }
+    if fauna::ROSTER.contains(&kind) {
+        return Some(fauna::profile(kind));
+    }
     use Motion::*;
     if crate::dungeon::spider::ROSTER.contains(&kind) {
         return Some(crate::dungeon::spider::profile(kind));
@@ -180,16 +206,23 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0x63f => (Wander, 4., 1000, 10.),
         0x624 | 0xd00 => (Wander, 15., 300, 10.),
         0x625 | 0x626 | 0xd01..=0xd04 => (Wander, 15., 1000, 10.),
+        0x62d | 0x631 => (chase(1.), 8., 1000, 10.),
+        0x62e => (chase(1.), 8., 2000, 10.),
+        0x62f => (chase(1.), 8., 1000, 3.),
+        0x6d2..=0x6d4 => (Stationary, 0., 0, 0.),
+        0x6d5..=0x6d7 => (Stationary, 0., 500, 5.),
         0x632 => (chase(1.), 10., 1000, 10.),
         0x633 => (chase(1.), 10., 250, 10.),
         0x640 => (chase(1.), 10., 500, 10.),
-        0x642 | 0x644 => (chase(7.), 12., 1000, 10.),
-        0x643 | 0x645 => (chase(1.), 12., 1000, 3.),
+        0x642 => (chase(7.), 4., 500, 10.),
+        0x644 => (chase(7.), 4., 200, 10.),
+        0x643 => (chase(1.), 12., 500, 10.),
+        0x645 => (chase(1.), 4., 1000, 10.),
         0x646 => (chase(1.), 10., 500, 10.),
         0x64a | 0x64c | 0x64d => (chase(7.), 12., 500, 10.),
         0x64b => (chase(1.), 12., 500, 3.),
-        0x64f => (chase(7.), 15., 1000, 10.),
-        0x650 => (chase(7.), 10., 1000, 10.),
+        0x64f => (chase(7.), 15., 500, 10.),
+        0x650 => (chase(1.), 10., 500, 10.),
         0x651 | 0x654 => (chase(4.), 6., 1000, 12.),
         0x652 | 0xd05 => (Wander, 2., 1000, 12.),
         0x653 => (
@@ -239,12 +272,12 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0xd90 => (Wander, 0.5, 150, 12.),
         0xd91..=0xd93 => (chase(1.), 10., 1000, 6.),
         0xd94..=0xd98 => (chase(7.), 9., 1000, 10.),
-        0xd99 | 0xd9a => (chase(1.), 8., 1000, 10.),
+        0xd99 | 0xd9a => (chase(7.), 8., 1000, 10.),
         0xd9b..=0xd9d => (Wander, 1., 1000, 10.),
         0xd9e | 0xd9f => (Wander, 1., 500, 10.),
         0xda2 | 0xda3 => (Stationary, 0., 1000, 3.),
         0xda4 => (chase(1.), 12., 1000, 10.),
-        0xda5 | 0xda6 => (chase(7.), 10., 1000, 10.),
+        0xda5 | 0xda6 => (chase(1.), 10., 500, 10.),
         0xdaa | 0xdac => (chase(7.), 9., 1000, 8.),
         0xdab | 0xdad..=0xdaf | 0xdb0 | 0xdb2 => (chase(1.), 12., 1000, 10.),
         0xdb1 => (
@@ -318,6 +351,9 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
     let p = profile(kind).expect("validated encounter motion");
     match kind {
         0x917 if (3750..5625).contains(&hp) => (Motion::Wander, 3.),
+        0xd90 if elapsed % 13000 >= 3000 && (elapsed / 13000).is_multiple_of(4) => {
+            (Motion::Stationary, 0.)
+        }
         0xd06 => match stage(kind, hp, elapsed) % 5 {
             0 | 4 => (Motion::Wander, 3.),
             1 => (
@@ -365,52 +401,20 @@ pub fn attacks(kind: u16, hp: i32, heading: f32) -> Vec<(u8, f32)> {
     phased_attacks(kind, hp, heading, 0)
 }
 pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
-    if crate::dungeon::spider::ROSTER.contains(&kind) {
-        return crate::dungeon::spider::attacks(kind, heading, elapsed);
-    }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return crate::dungeon::abyss::attacks(kind, heading, elapsed);
+    }
+    if let Some(schedule) = attacks::schedule(kind, hp, elapsed) {
+        return schedule.snapshot(heading);
     }
     match kind {
         0x927 if hp < 640 => vec![(0, heading), (1, heading)],
         0x172 | 0x173 | 0x175..=0x179 | 0x927 | 0x68a..=0x68f | 0x653 => vec![],
-        0x604 => vec![],
-        0x601 | 0x602 | 0x603 | 0x612 | 0x613 | 0x618 | 0x619 | 0x953 => vec![(0, heading)],
-        0x954 => vec![(((elapsed / 2000) % 2) as u8, heading)],
-        0x60c => {
-            let mut shots = vec![];
-            if elapsed % 5000 < 200 {
-                shots.push((0, heading));
-            }
-            if elapsed % 400 < 200 {
-                shots.push((1, heading));
-            }
-            shots
-        }
-        0x614 => {
-            let mut shots = vec![];
-            if elapsed % 1000 < 100 {
-                shots.push((0, heading));
-            }
-            if elapsed % if hp <= 182 { 1000 } else { 1300 } < 100 {
-                shots.push((1, heading));
-            }
-            shots
-        }
-        0x61a => {
-            let mut shots = if elapsed % 400 < 200 {
-                let phase = (elapsed / 400) % 3;
-                ring(phase as u8, 15, phase as f32 * 8f32.to_radians())
-            } else {
-                vec![]
-            };
-            if elapsed % 1000 < 200 {
-                shots.push((3, heading));
-            }
-            shots
-        }
+        0x604 | 0x6d2..=0x6d4 => vec![],
+        0x62f => spread(0, 2, 7., heading),
+        0x601 | 0x602 | 0x603 | 0x612 | 0x613 | 0x618 | 0x619 => vec![(0, heading)],
         0x60e => spread(0, 2, 10., heading),
-        0x610 => ring(0, 5, 0.),
+        0x610 => ring(0, 5, heading),
         0x600
         | 0x60f
         | 0x683..=0x689
@@ -425,9 +429,13 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
         | 0x63f
         | 0x642
         | 0x643
-        | 0x645
+        | 0x644
         | 0x629
         | 0x62c
+        | 0x62d
+        | 0x62e
+        | 0x631
+        | 0x6d5..=0x6d7
         | 0x647
         | 0x648
         | 0x900..=0x902
@@ -446,31 +454,10 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
         | 0xd9b..=0xd9d
         | 0xda4
         | 0xdaa..=0xdb2 => vec![(0, heading)],
-        0x609 if elapsed % 6000 >= 4000 => vec![],
-        0x609 => spread(0, 3, if elapsed % 6000 < 2000 { 14. } else { 10. }, heading),
-        0x617 => {
-            let phase = (elapsed / 400) % 3;
-            ring(phase as u8, 15, phase as f32 * 8f32.to_radians())
-        }
         0x624 | 0xd00 => spread(0, 2, 7., heading),
         0x625 | 0xd01 => spread(0, 3, 7., heading),
         0x626 | 0xd02 => spread(0, 4, 7., heading),
         0xd03 | 0xd04 => spread(0, 5, 7., heading),
-        0x632 => {
-            if (elapsed / 1000).is_multiple_of(2) {
-                spread(0, 3, 15., heading)
-            } else {
-                vec![(1, heading)]
-            }
-        }
-        0x633 => vec![(u8::from(elapsed % 10000 >= 5000), heading)],
-        0x640 => {
-            if (elapsed / 500).is_multiple_of(2) {
-                spread(0, 3, 7., heading)
-            } else {
-                vec![(1, heading)]
-            }
-        }
         0x646 => {
             if (elapsed / 500).is_multiple_of(3) {
                 ring(0, 20, 0.)
@@ -491,126 +478,18 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
         }
         0x62a => spread(0, 3, 15., heading),
         0x62b => vec![],
-        0x644 => spread(0, 3, 7., heading),
-        0x649 => vec![(u8::from(!(elapsed / 1000).is_multiple_of(2)), heading)],
-        0x650 => spread(0, 5, 7., heading),
+
+        0x650 => spread(0, 3, 7., heading),
         0x651 => spread(0, 3, 15., heading),
-        0x652 | 0xd05 => {
-            let mut shots = spread(0, 4, 10., heading);
-            shots.push((1, heading));
-            shots
-        }
         0x654 | 0x655 => spread(0, 5, 10., heading),
-        0x656 => {
-            let mut shots = if elapsed % 750 < 250 {
-                ring(0, 5, heading)
-            } else {
-                vec![]
-            };
-            if elapsed % 1000 < 250 {
-                shots.push((1, heading));
-            }
-            shots
-        }
-        0x657 => ring(0, 5, 0.),
-        0x658 => {
-            let mut shots = if elapsed % 1000 < 50 {
-                spread(0, 5, 10., heading)
-            } else {
-                vec![]
-            };
-            if elapsed % 650 < 50 {
-                shots.push((1, heading));
-            }
-            shots
-        }
-        0x91a if hp < 400 || elapsed % 3750 < 2700 => vec![],
-        0x91a => {
-            let t = elapsed % 3750 - 2500;
-            if t > 1000 || t % 200 >= 50 {
-                vec![]
-            } else {
-                let step = (t - 200) / 200;
-                let mut shots = ring(0, 4, (step * 10) as f32 * std::f32::consts::PI / 180.);
-                shots.extend(ring(
-                    0,
-                    4,
-                    (90 - step * 10) as f32 * std::f32::consts::PI / 180.,
-                ));
-                shots
-            }
-        }
-        0x6d8 => match elapsed % 4500 {
-            0..1500 => (0..3)
-                .flat_map(|i| spread(0, 3, 10., (i * 120) as f32 * std::f32::consts::PI / 180.))
-                .collect(),
-            1500..3000 => (0..3)
-                .flat_map(|i| {
-                    spread(
-                        0,
-                        4,
-                        10.,
-                        (60 + i * 120) as f32 * std::f32::consts::PI / 180.,
-                    )
-                })
-                .collect(),
-            _ => spread(1, 2, 15., heading),
-        },
+        0x657 => ring(0, 5, heading),
+        0x91a => vec![],
         0x905 => vec![(0, heading)],
-        0x906 | 0x907 if hp < 400 => ring(0, 8, 0.),
         0x906 | 0x907 => spread(0, 3, 20., heading),
         0x659 => spread(0, 7, 25., heading),
         0x228 | 0xd95 | 0xd98 | 0xd9e | 0xd9f => spread(0, 3, 6., heading),
         0x225 => spread(0, 3, 6., heading),
-        0x917 if (3750..5625).contains(&hp) => vec![],
-        0x917 if (1875..3750).contains(&hp) => ring(1, 8, elapsed as f32 / 1000.),
-        0x917 => (0..4)
-            .flat_map(|i| spread(0, 2, 10., i as f32 * std::f32::consts::FRAC_PI_2))
-            .collect(),
-        0xd06 if elapsed % 43300 < 2300 => vec![],
-        0xd06 if elapsed % 43300 < 12300 => {
-            let mut shots = spread(0, 2, 10., heading);
-            shots.extend(spread(0, 2, 10., heading + std::f32::consts::PI));
-            shots
-        }
-        0xd06 if elapsed % 43300 < 32300 => ring(0, 3, elapsed as f32 / 1000.),
-        0xd06 => spread(0, 3, 15., heading),
-        0xd07..=0xd0a => {
-            let corner: f32 = match kind {
-                0xd07 => 90.,
-                0xd08 => 0.,
-                0xd09 => 270.,
-                0xd0a => 180.,
-                _ => unreachable!(),
-            };
-            if elapsed < 2000 {
-                return vec![];
-            }
-            let mut shots = vec![(0, corner.to_radians()), (0, (corner + 90.).to_radians())];
-            if (elapsed - 2000) / 6000 == 1 {
-                shots.push((0, (corner + 45.).to_radians()));
-            }
-            shots
-        }
-        0xd90 if elapsed % 13000 < 3000 => vec![],
-        0xd90 => match (elapsed / 13000) % 4 {
-            0 => ring(0, 3, ((elapsed / 150) % 20) as f32 * 18f32.to_radians()),
-            1 => ring(4, 12, 0.),
-            2 => {
-                let mut shots = ring(1, 8, elapsed as f32 / 1000.);
-                shots.extend(spread(2, 3, 20., heading));
-                shots
-            }
-            3 => spread(1, 3, 10., heading),
-            _ => unreachable!(),
-        },
-        0xd99 | 0xd9a => {
-            let mut shots = vec![(0, heading)];
-            shots.extend(ring(1, 8, 0.));
-            shots
-        }
         0xda2 | 0xda3 => ring(0, 12, heading),
-        0xda5 | 0xda6 => vec![(u8::from((elapsed / 4000) % 2 == 1), heading)],
         kind if crate::quest::ROSTER.contains(&kind) => vec![],
         _ => panic!("attack requested without an explicit encounter profile"),
     }
@@ -628,6 +507,45 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
     );
     for hp in [1, 2000, 4000, 6000, content.get(kind)?.hp] {
         for elapsed in (0..60000).step_by(500) {
+            if let Some(schedule) = attacks::schedule(kind, hp, elapsed) {
+                for attack in schedule.attacks {
+                    ensure!(
+                        attack
+                            .interval
+                            .is_none_or(|ms| ms > 0 && ms.is_multiple_of(50))
+                            && attack.delay.is_multiple_of(50)
+                            && (1..=255).contains(&attack.count)
+                            && attack.gap.is_finite()
+                            && attack.offset.is_finite()
+                            && attack.range.is_finite()
+                            && attack.range >= 0.,
+                        "invalid attack channel for {kind:#x}"
+                    );
+                    match attack.action {
+                        attacks::Action::Shoot { projectile, choice } => {
+                            if let Some(other) = choice {
+                                ensure!(
+                                    (1..=255).contains(&other.count)
+                                        && other.gap.is_finite()
+                                        && other.offset.is_finite(),
+                                    "invalid alternate volley for {kind:#x}"
+                                );
+                            }
+                            for index in std::iter::once(projectile)
+                                .chain(choice.map(|other| other.projectile))
+                            {
+                                ensure!(
+                                    content.get(kind)?.projectiles.contains_key(&index),
+                                    "encounter {kind:#x} references absent selected projectile {index}"
+                                );
+                            }
+                        }
+                        attacks::Action::Grenade { radius, damage } => {
+                            ensure!(radius > 0. && damage > 0, "invalid grenade for {kind:#x}")
+                        }
+                    }
+                }
+            }
             for (index, _) in phased_attacks(kind, hp, 0., elapsed) {
                 ensure!(
                     content.get(kind)?.projectiles.contains_key(&index),

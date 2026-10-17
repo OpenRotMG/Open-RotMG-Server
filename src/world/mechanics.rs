@@ -2,7 +2,6 @@ use super::*;
 use crate::{condition, encounter};
 
 pub(super) struct Grenade {
-    owner: i32,
     kind: u16,
     position: Pos,
     radius: f32,
@@ -43,15 +42,42 @@ impl World {
         }
         Ok(gained)
     }
+    pub(super) fn escort_anchor(
+        &self,
+        id: i32,
+        kind: u16,
+    ) -> Result<Option<(i32, encounter::Anchor)>> {
+        let e = self.entities.get(&id).context("escort entity missing")?;
+        if let Some(parent) = e.parent {
+            let boss = self
+                .entities
+                .get(&parent)
+                .context("escort's owned boss disappeared")?;
+            ensure!(
+                boss.kind == kind,
+                "escort belongs to a different boss identity"
+            );
+            return Ok(Some((parent, encounter::Anchor::Parent)));
+        }
+        let mut bosses = self.entities.values().filter(|e| e.kind == kind);
+        let boss = bosses.next().map(|e| e.id);
+        ensure!(
+            bosses.next().is_none(),
+            "map-born escort has ambiguous boss ownership"
+        );
+        Ok(boss.map(|id| (id, encounter::Anchor::Kind(kind))))
+    }
     pub(super) fn orbit_anchor(
         &self,
         id: i32,
         anchor: encounter::Anchor,
-        player: Pos,
+        player: impl Into<Option<Pos>>,
     ) -> Result<Pos> {
         let e = self.entities.get(&id).context("orbiting entity missing")?;
         match anchor {
-            encounter::Anchor::Player => Ok(player),
+            encounter::Anchor::Player => player
+                .into()
+                .context("player-relative movement lacks a visible target"),
             encounter::Anchor::QuestMember(kind) => {
                 let tag = e.quest.context("quest anchor lacks encounter ownership")?;
                 self.actors()
@@ -74,6 +100,17 @@ impl World {
                     .get(&leader)
                     .context("family leader is no longer alive")?
                     .pos)
+            }
+            encounter::Anchor::CampEntity(member) => {
+                let owner = self
+                    .entities
+                    .get(&member)
+                    .context("owned camp anchor absent")?;
+                ensure!(
+                    e.camp.is_some() && owner.camp == e.camp,
+                    "camp anchor ownership mismatch"
+                );
+                Ok(owner.pos)
             }
             encounter::Anchor::CampMember(kind) => Ok(self.entities[&self
                 .camp_member(id, kind)?
@@ -115,6 +152,7 @@ impl World {
             self.actors()
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
+                + self.named_births.len()
                 + missing
                 <= 256,
             "summon budget exhausted"
@@ -148,9 +186,18 @@ impl World {
         Ok(())
     }
 
-    pub(super) fn encounter_mechanics(&mut self, id: i32, target: Pos, elapsed: u64) -> Result<()> {
+    pub(super) fn encounter_mechanics(
+        &mut self,
+        id: i32,
+        target: impl Into<Option<Pos>>,
+        elapsed: u64,
+    ) -> Result<()> {
+        let target = target.into();
         if crate::dungeon::spider::ROSTER.contains(&self.entities[&id].kind) {
             return self.spider_mechanics(id, target, elapsed);
+        }
+        if crate::encounter::landmarks::ROSTER.contains(&self.entities[&id].kind) {
+            return self.landmark_mechanics(id, target, elapsed);
         }
         if crate::dungeon::abyss::ROSTER.contains(&self.entities[&id].kind) {
             return self.abyss_mechanics(id, target, elapsed);
@@ -162,6 +209,12 @@ impl World {
             return self.finale_mechanics(id, target, elapsed);
         }
         let kind = self.entities[&id].kind;
+        if crate::encounter::fauna::ROSTER.contains(&kind) {
+            return self.fauna_mechanics(id, target, elapsed);
+        }
+        if matches!(kind, 0xdaa | 0xdac) {
+            return Ok(());
+        }
         if matches!(kind, 0x62b | 0x900..=0x902) {
             return self.midland_mechanics(id);
         }
@@ -172,10 +225,36 @@ impl World {
         let (kind, hp, pos, home) = (e.kind, e.hp, e.pos, e.home);
         let stage = encounter::stage(kind, hp, elapsed);
         let changed = e.stage != Some(stage);
+        if kind == 0xd06 {
+            if stage % 5 == 4 && hp < self.content.objects[&kind].hp / 5 {
+                let e = self.entities.get_mut(&id).unwrap();
+                e.activated = Some(self.now);
+                e.stage = None;
+                return self.encounter_mechanics(id, target, 0);
+            }
+            let e = self.entities.get_mut(&id).unwrap();
+            if stage % 5 != 2 {
+                e.blocked_since = None;
+                e.reaction_until = 0;
+            } else if self.now >= e.reaction_until {
+                if e.last_step.x.hypot(e.last_step.y) >= 0.001 {
+                    e.blocked_since = None;
+                } else if self.now >= *e.blocked_since.get_or_insert(self.now) + 500 {
+                    e.blocked_since = None;
+                    e.reaction_until = self.now + 1000;
+                    tracing::debug!(
+                        entity = id,
+                        until = e.reaction_until,
+                        "blocked Limon entered shielded burst"
+                    );
+                }
+            }
+        }
         let shield = match kind {
             0x917 => elapsed % 6000 >= 2000,
             0xd06 => {
                 elapsed % 43300 < 2000
+                    || self.entities[&id].reaction_until > self.now
                     || (12300..32300).contains(&(elapsed % 43300))
                         && (elapsed % 43300 - 12300) % 5000 >= 1500
             }
@@ -252,25 +331,32 @@ impl World {
                 _ => {}
             }
         }
+        if kind == 0xdae
+            && self.entities[&id].conditions(self.now) & condition::bit(condition::STUNNED) != 0
+        {
+            return Ok(());
+        }
         if self.now < self.entities[&id].next_aux {
             return Ok(());
         }
         self.entities.get_mut(&id).unwrap().next_aux = self.now
             + match kind {
                 0x173 | 0xdae => 5000,
-                0x953 => 2500,
                 0x654 => 3000,
                 0x917 => 500,
                 _ => 1000,
             };
         match kind {
-            0x953 => self.throw_grenade(id, target, 2., 12)?,
             0x173 => {
                 self.spawn_children(id, 0x223, 2, 1.5)?;
                 self.spawn_children(id, 0x224, 2, 2.)?;
             }
-            0x654 if pos.distance(target) < 8. => self.throw_grenade(id, target, 4., 150)?,
-            0x917 if stage == 2 => self.throw_grenade(id, target, 5., 100)?,
+            0x654 if target.is_some_and(|p| pos.distance(p) < 8.) => {
+                self.throw_grenade(id, target.unwrap(), 4., 150)?
+            }
+            0x917 if stage == 2 && target.is_some_and(|p| pos.distance(p) <= 10.) => {
+                self.throw_grenade(id, target.unwrap(), 5., 100)?
+            }
             0xd06 if stage % 5 == 4 => {
                 self.spawn_children(id, 0x625, 1, 2.)?;
                 self.spawn_children(id, 0x626, 2, 3.)?;
@@ -280,24 +366,23 @@ impl World {
                     self.spawn_children(id, kind, 2, 2.)?;
                 }
             }
-            0xda2 | 0xda3 if pos.distance(target) < 3. => {
+            0xda2 | 0xda3 if target.is_some_and(|p| pos.distance(p) < 3.) => {
                 self.entities.get_mut(&id).unwrap().expires = Some(self.now + 50);
             }
-            0xd99 | 0xd9a if pos.distance(target) < 3. => {
-                let amount = self.content.objects[&kind].projectiles[&0].min;
-                self.area_damage(kind, pos, 3., amount)?;
-                let e = self.entities.get_mut(&id).unwrap();
-                e.hp = (e.hp + amount).min(self.content.objects[&kind].hp);
-            }
             0xdae => {
+                self.escort_anchor(id, 0xd90)?;
                 let allies: Vec<_> = self
                     .actors()
-                    .filter(|e| (0xdaa..=0xdaf).contains(&e.kind) && pos.distance(e.pos) < 5.)
+                    .filter(|e| {
+                        (0xdaa..=0xdaf).contains(&e.kind)
+                            && pos.distance(e.pos) < 5.
+                            && e.parent == self.entities[&id].parent
+                    })
                     .map(|e| e.id)
                     .collect();
                 for ally in allies {
-                    let e = self.entities.get_mut(&ally).unwrap();
-                    e.hp = (e.hp + 100).min(self.content.objects[&e.kind].hp);
+                    let amount = self.content.objects[&self.entities[&ally].kind].hp;
+                    self.heal_enemy(id, ally, amount)?;
                 }
             }
             _ => {}
@@ -305,6 +390,19 @@ impl World {
         Ok(())
     }
 
+    pub(super) fn telegraph_throw(&self, owner: i32, position: Pos, color: u32) {
+        let mut out = Writer::new();
+        out.u8(4)
+            .i32(owner)
+            .f32(position.x)
+            .f32(position.y)
+            .f32(0.)
+            .f32(0.)
+            .u32(color);
+        for p in self.players.values().filter(|p| p.known.contains(&owner)) {
+            send(p, wire::SHOW_EFFECT, out.0.clone());
+        }
+    }
     pub(super) fn throw_grenade(
         &mut self,
         owner: i32,
@@ -316,19 +414,8 @@ impl World {
         if self.entities[&owner].conditions(self.now) & condition::bit(condition::STUNNED) != 0 {
             return Ok(());
         }
-        let mut out = Writer::new();
-        out.u8(4)
-            .i32(owner)
-            .f32(position.x)
-            .f32(position.y)
-            .f32(0.)
-            .f32(0.)
-            .u32(0xffff0000);
-        for p in self.players.values().filter(|p| p.known.contains(&owner)) {
-            send(p, wire::SHOW_EFFECT, out.0.clone());
-        }
+        self.telegraph_throw(owner, position, 0xffff0000);
         self.grenades.push(Grenade {
-            owner,
             kind: self.entities[&owner].kind,
             position,
             radius,
@@ -388,9 +475,6 @@ impl World {
     pub(super) fn grenade_step(&mut self) {
         let grenades = std::mem::take(&mut self.grenades);
         for grenade in grenades {
-            if !self.entities.contains_key(&grenade.owner) {
-                continue;
-            }
             if grenade.deadline > self.now {
                 self.grenades.push(grenade);
                 continue;
@@ -407,6 +491,8 @@ impl World {
     }
 
     pub(super) fn mechanic_expiry(&mut self) {
+        self.fauna_birth_step();
+        self.named_birth_step();
         let expired: Vec<_> = self
             .actors()
             .filter(|e| {
@@ -417,7 +503,7 @@ impl World {
             .map(|e| e.id)
             .collect();
         for id in expired {
-            if matches!(self.entities[&id].kind, 0x91a | 0x900)
+            if matches!(self.entities[&id].kind, 0x91a | 0xd50)
                 && self.entities[&id]
                     .expires
                     .is_some_and(|deadline| deadline <= self.now)
@@ -434,6 +520,9 @@ impl World {
     pub(super) fn encounter_death(&mut self, defeated: &Entity) -> Result<()> {
         if defeated.kind == crate::dungeon::spider::EGG {
             return self.hatch_spiders(defeated);
+        }
+        if crate::encounter::fauna::ROSTER.contains(&defeated.kind) {
+            return self.fauna_death(defeated);
         }
         if defeated.kind == 0xd5e && defeated.quest.is_some() {
             return self.event_tower_death(defeated);

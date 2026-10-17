@@ -142,7 +142,9 @@ fn inland_population_respects_xml_biomes_caps_and_validated_attack_contracts() {
         let spawns: Vec<_> = w
             .population
             .iter()
-            .filter(|s| roster.contains(&s.kind))
+            .filter(|s| {
+                roster.contains(&s.kind) && s.entity.is_some_and(|id| w.entities.contains_key(&id))
+            })
             .collect();
         assert!(!spawns.is_empty() && spawns.len() <= 32);
         for spawn in spawns {

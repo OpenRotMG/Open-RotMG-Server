@@ -98,14 +98,20 @@ impl World {
         }
     }
 
-    pub(super) fn abyss_mechanics(&mut self, id: i32, target: Pos, elapsed: u64) -> Result<()> {
+    pub(super) fn abyss_mechanics(
+        &mut self,
+        id: i32,
+        target: impl Into<Option<Pos>>,
+        elapsed: u64,
+    ) -> Result<()> {
+        let target = target.into();
         let e = &self.entities[&id];
         let kind = e.kind;
         if kind == 0x909 {
             if e.stage.is_none()
                 && (elapsed >= 5000
                     || e.hp < self.content.objects[&kind].hp
-                    || e.pos.distance(target) < 1.3)
+                    || target.is_some_and(|p| e.pos.distance(p) < 1.3))
             {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.stage = Some(1);
