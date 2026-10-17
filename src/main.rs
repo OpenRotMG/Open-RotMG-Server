@@ -9,9 +9,6 @@ mod dungeon;
 mod encounter;
 mod endgame;
 mod loot;
-#[cfg(test)]
-#[path = "../examples/testing/prepared-state.rs"]
-mod prepared_state_example;
 mod quest;
 mod server;
 mod store;
