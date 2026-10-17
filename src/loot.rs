@@ -13,6 +13,14 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        0x6c4 => &[
+            (0.10, Tier(2, WEAPONS)),
+            (0.10, Tier(2, ARMOR)),
+            (0.10, Tier(1, RINGS)),
+            (0.10, Tier(1, ABILITIES)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+        ],
         crate::dungeon::spider::BOSS => {
             &[(0.2, Item(0xa16)), (0.2, Item(0x708)), (0.2, Item(0x709))]
         }
@@ -562,6 +570,50 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn giant_crab_uses_only_the_approved_ordered_normal_pool() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected = [
+            (0.10, vec![0xa1b, 0xa6d, 0xa70, 0xa72, 0xa99]),
+            (0.10, vec![0xa0d, 0xa0f, 0xa7e]),
+            (
+                0.10,
+                vec![0xa24, 0xa25, 0xa26, 0xa27, 0xa28, 0xa36, 0xa37, 0xa4d],
+            ),
+            (
+                0.10,
+                vec![
+                    0xa09, 0xa42, 0xa57, 0xa62, 0xa67, 0xaa4, 0xaab, 0xab2, 0xad4, 0xad7, 0xad9,
+                    0xb1c, 0xb2e,
+                ],
+            ),
+            (0.03, vec![0xa22]),
+            (0.02, vec![0xa23]),
+        ];
+        let actual: Vec<_> = table(0x6c4)
+            .iter()
+            .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+            .collect();
+        assert_eq!(
+            actual, expected,
+            "ordinary Giant Crab has no approved item table"
+        );
+        assert!(!private(0x6c4));
+        assert!(bonus(0x6c4).is_empty());
+        for (_, items) in expected {
+            for item in items {
+                let object = content.get(item).unwrap();
+                assert_eq!(object.class, "Equipment");
+                assert_eq!(object.bag_type, 0);
+                assert!(!object.soulbound);
+                assert!(collectibles(&content).contains(&item));
+            }
+        }
+        for neighbor in [0x6c7, 0x6c8] {
+            assert!(table(neighbor).is_empty());
+        }
+        assert_eq!(table(crate::dungeon::trench::HERMIT).len(), 3);
     }
     #[test]
     fn every_candidate_loot_tier_resolves_and_rolls_selected_items() {

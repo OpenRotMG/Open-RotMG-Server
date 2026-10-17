@@ -831,6 +831,192 @@ fn gray_blob_emits_one_proximity_ring_then_withdraws_without_defeat_credit() {
     assert_eq!(w.players[&p].experience_queued, 0);
     assert!(w.critical_deaths.is_empty());
 }
+#[tokio::test]
+async fn giant_crab_defeat_pickup_is_committed_once_and_survives_reopen() {
+    use crate::store::{InventoryWrite, Store};
+    let mut w = arena(8);
+    w.name = "Realm".into();
+    w.rng = rand::rngs::StdRng::seed_from_u64(9009);
+    let path = std::env::temp_dir().join(format!("rotmg-giant-crab-{}.db", rand::random::<u64>()));
+    let store = Store::open(&path, &w.content).unwrap();
+    let account = store.list("crab-loot".into()).await.unwrap();
+    let mut ch = store
+        .create(account.id, w.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.gain_experience(
+        &w.content,
+        18050,
+        &mut rand::rngs::StdRng::seed_from_u64(9009),
+    )
+    .unwrap();
+    ch.items[4..].fill(-1);
+    store.progress(ch.clone()).await.unwrap();
+    let id = w.enter(ch.clone(), None).unwrap();
+    let pos = center(&w);
+    w.players.get_mut(&id).unwrap().pos = pos;
+    w.players.get_mut(&id).unwrap().controller = Controller::Human;
+    let mut kills = 0;
+    for _ in 0..8 {
+        let crab = w
+            .spawn_entity(
+                0x6c4,
+                Pos {
+                    x: pos.x + 0.5,
+                    ..pos
+                },
+                vec![],
+            )
+            .unwrap();
+        for _ in 0..4 {
+            w.damage_enemy(id, crab, 100, false, &[], Some(0)).unwrap();
+        }
+        assert!(!w.entities.contains_key(&crab));
+        kills += 1;
+        let state = &w.players[&id];
+        assert_eq!(
+            (state.character.kills, state.character.quests),
+            (kills, kills)
+        );
+        assert_eq!(state.experience_queued, 44 * kills as i32);
+        let queued = state.experience_queued;
+        assert_eq!(
+            w.damage_enemy(id, crab, 100, false, &[], Some(0)).unwrap(),
+            0
+        );
+        assert_eq!(w.players[&id].experience_queued, queued);
+        if !w.bag_expiry.is_empty() {
+            break;
+        }
+    }
+    assert!(
+        !w.bag_expiry.is_empty(),
+        "defeated ordinary Giant Crabs never award item loot"
+    );
+    assert!(w.portal_requests.is_empty());
+    assert!(w.critical_deaths.is_empty());
+    for (player, snapshot) in w.pending_progress() {
+        store.progress(snapshot.clone()).await.unwrap();
+        w.finish_progress(player, snapshot).unwrap();
+    }
+    assert_eq!(w.players[&id].character.exp, ch.exp + 44 * kills as i32);
+    assert_eq!(w.players[&id].character.fame, ch.fame);
+    let bag = *w.bag_expiry.keys().next().unwrap();
+    let source = &w.entities[&bag];
+    assert_eq!(source.kind, 0x500);
+    assert_eq!(source.items.len(), 8);
+    assert!(!source.extra_stats.iter().any(|(stat, _)| *stat == 54));
+    assert_eq!(w.bag_expiry[&bag], w.now + 60_000);
+    let item = source.items[0];
+    let before = w.players[&id].character.clone();
+    let from = Slot {
+        object: bag,
+        slot: 0,
+        kind: item,
+    };
+    let to = Slot {
+        object: id,
+        slot: 4,
+        kind: -1,
+    };
+    let plan = w.swap(id, from, to).unwrap();
+    assert_eq!(plan.collected, Some(item as u16));
+    assert!(w.entities[&bag].reserved && w.players[&id].pending);
+    assert_eq!(w.players[&id].character.items[4], -1);
+    assert!(w.swap(id, from, to).is_err());
+    let write = InventoryWrite {
+        id: plan.character,
+        account: plan.account,
+        revision: plan.revision,
+        items: plan.items.clone(),
+    };
+    let revisions = store
+        .exchange_collected(vec![write.clone()], None, plan.collected)
+        .await
+        .unwrap();
+    assert!(
+        store
+            .exchange_collected(vec![write], None, plan.collected)
+            .await
+            .is_err()
+    );
+    w.finish_inventory(plan, Ok(revisions[0])).unwrap();
+    assert_eq!(w.entities[&bag].items[0], -1);
+    assert!(!w.entities[&bag].reserved);
+    assert!(!w.entities[&bag].drop_slots.contains(&0));
+    assert_eq!(w.players[&id].character.items[4], item);
+    assert_eq!(w.players[&id].character.revision, before.revision + 1);
+    assert!(w.swap(id, from, to).is_err());
+    drop(store);
+    let reopened = Store::open(&path, &w.content).unwrap();
+    let saved = reopened.load(account.id, ch.id).await.unwrap();
+    assert_eq!(saved.items, w.players[&id].character.items);
+    assert_eq!(
+        (saved.exp, saved.fame, saved.kills, saved.quests),
+        (ch.exp + 44 * kills as i32, ch.fame, kills, kills)
+    );
+    assert_eq!(saved.revision, before.revision + 1);
+    assert_eq!(
+        (saved.xp_boost.active, saved.xp_boost.bonus_exp),
+        (ch.xp_boost.active, ch.xp_boost.bonus_exp)
+    );
+    drop(reopened);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn giant_crab_public_attempts_use_only_live_positive_contributors_and_the_current_cap() {
+    for contributors in [0, 1, 2, 5] {
+        let mut w = arena(8);
+        let pos = center(&w);
+        let crab = w.spawn_entity(0x6c4, pos, vec![]).unwrap();
+        for index in 0..contributors + 4 {
+            let mut ch = tests::ch(&w);
+            ch.id = index + 1;
+            ch.account = index + 1;
+            let id = w.enter(ch, None).unwrap();
+            let p = w.players.get_mut(&id).unwrap();
+            if index == contributors {
+                p.character.alive = false;
+            }
+            if index == contributors + 1 {
+                p.death_pending = true;
+            }
+            if index == contributors + 2 {
+                p.departing = true;
+            }
+            w.entities
+                .get_mut(&crab)
+                .unwrap()
+                .damage
+                .insert(index + 1, if index == contributors + 3 { 0 } else { 1 });
+        }
+        let mut expected = Vec::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9009);
+        for _ in 0..(contributors * 2).min(8) {
+            for item in crate::loot::rewards(&w.content, 0x6c4, &mut rng) {
+                if !expected.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
+                    expected.push(item as i32);
+                }
+            }
+        }
+        w.rng = rand::rngs::StdRng::seed_from_u64(9009);
+        let defeated = w.remove_entity(crab);
+        w.drop_loot(&defeated).unwrap();
+        let actual: Vec<_> = w
+            .bag_expiry
+            .keys()
+            .flat_map(|id| {
+                let bag = &w.entities[id];
+                assert_eq!(bag.kind, 0x500);
+                assert!(!bag.extra_stats.iter().any(|(stat, _)| *stat == 54));
+                bag.items.iter().copied().filter(|item| *item >= 0)
+            })
+            .collect();
+        assert_eq!(actual, expected, "contributors={contributors}");
+    }
+}
+
 #[test]
 fn crab_uses_all_four_weapons_then_three_secondaries_without_phase_boundary_loss() {
     let mut w = arena(8);
