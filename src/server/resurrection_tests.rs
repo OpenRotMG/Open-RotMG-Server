@@ -86,6 +86,11 @@ async fn equipped_amulet_is_durably_consumed_before_one_owned_nexus_return() {
         .call(move |w| {
             let p = &w.players[&id];
             assert!(p.departing && p.character.alive && !p.death_pending);
+            assert!(
+                !w.entities
+                    .values()
+                    .any(|e| matches!(e.kind, 0x723..=0x72b | 0x734 | 0x735))
+            );
             let snapshot = (
                 p.pos,
                 p.tx.clone().unwrap(),

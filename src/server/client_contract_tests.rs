@@ -120,51 +120,178 @@ async fn chars_origin_and_rate_denials_do_not_masquerade_as_credentials() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+async fn delete(a: &App, fields: &[(&str, &str)]) -> (StatusCode, String) {
+    let result = delete_character(
+        State(a.clone()),
+        ConnectInfo("127.0.0.1:1234".parse().unwrap()),
+        HeaderMap::new(),
+        Form(
+            fields
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ),
+    )
+    .await;
+    assert_eq!(result.headers()["cache-control"], "no-store");
+    response(result).await
+}
+
 #[tokio::test]
-async fn delete_response_preserves_character_inventory_and_fame_wallet() {
+async fn deletion_authenticates_owns_the_character_and_excludes_active_sessions() {
     let (dir, a) = account_actions::tests::fixture();
     let account = a.store.list("delete-owner".into()).await.unwrap().id;
-    let mut dead = a
-        .store
-        .create(account, a.content.get(WIZARD).unwrap())
-        .await
-        .unwrap();
-    dead.hp = 0;
-    dead.alive = false;
-    dead.fame = 123;
-    a.store.death(dead, "Pirate".into()).await.unwrap();
     let ch = a
         .store
         .create(account, a.content.get(WIZARD).unwrap())
         .await
         .unwrap();
-    let before = serde_json::to_value(a.store.list("delete-owner".into()).await.unwrap()).unwrap();
-    let inventory = serde_json::to_value(a.store.load(account, ch.id).await.unwrap()).unwrap();
-    assert_eq!(before["fame"], 123);
-    let result = response(
-        delete_character(
-            State(a.clone()),
-            ConnectInfo("127.0.0.1:1234".parse().unwrap()),
-            HeaderMap::new(),
+    let id = ch.id.to_string();
+    let form = [
+        ("guid", "delete-owner"),
+        ("password", ""),
+        ("charId", id.as_str()),
+    ];
+    let active = a.claim_session(account).unwrap();
+    let (status, xml) = delete(&a, &form).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(xml.contains("active session"));
+    assert!(a.store.load(account, ch.id).await.is_ok());
+    drop(active);
+    let foreign = a.store.list("delete-other".into()).await.unwrap();
+    assert!(
+        delete(
+            &a,
+            &[("guid", "delete-other"), ("password", ""), ("charId", &id)]
+        )
+        .await
+        .1
+        .starts_with("<Error>")
+    );
+    assert!(
+        a.store
+            .list("delete-other".into())
+            .await
+            .unwrap()
+            .characters
+            .is_empty()
+    );
+    assert!(!a.owners.lock().unwrap().contains_key(&foreign.id));
+    assert_eq!(
+        delete(&a, &form).await,
+        (StatusCode::OK, "<Success/>".into())
+    );
+    assert!(
+        a.store
+            .list("delete-owner".into())
+            .await
+            .unwrap()
+            .characters
+            .is_empty()
+    );
+    assert!(!a.owners.lock().unwrap().contains_key(&account));
+    let replacement = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    assert!(delete(&a, &form).await.1.starts_with("<Error>"));
+    assert!(a.store.load(account, replacement.id).await.is_ok());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn deletion_rejects_bad_credentials_and_malformed_native_forms_without_mutation() {
+    let (dir, a) = account_actions::tests::fixture();
+    let account = a
+        .store
+        .register(
+            "delete-converted".into(),
+            "owner@example.org".into(),
+            "valid-password".into(),
+        )
+        .await
+        .unwrap();
+    let ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let id = ch.id.to_string();
+    for (guid, password) in [
+        ("owner@example.org", "wrong-password"),
+        ("owner@example.org", ""),
+        ("delete-converted", ""),
+        ("unknown-guest", ""),
+    ] {
+        assert_eq!(
+            delete(
+                &a,
+                &[("guid", guid), ("password", password), ("charId", &id)]
+            )
+            .await,
+            (StatusCode::OK, INVALID.into())
+        );
+    }
+    for bad in ["", "0", "-1", "1.5", "2147483648"] {
+        assert!(
+            delete(
+                &a,
+                &[
+                    ("guid", "owner@example.org"),
+                    ("password", "valid-password"),
+                    ("charId", bad)
+                ]
+            )
+            .await
+            .1
+            .contains("invalid charId")
+        );
+    }
+    for missing in ["guid", "password", "charId"] {
+        let fields: Vec<_> = [
+            ("guid", "owner@example.org"),
+            ("password", "valid-password"),
+            ("charId", id.as_str()),
+        ]
+        .into_iter()
+        .filter(|(key, _)| *key != missing)
+        .collect();
+        assert!(delete(&a, &fields).await.1.contains("required"));
+    }
+    assert!(
+        delete(
+            &a,
+            &[
+                ("guid", "owner@example.org"),
+                ("password", "valid-password"),
+                ("charId", &id),
+                ("secret", "external")
+            ]
+        )
+        .await
+        .1
+        .contains("external platform authentication")
+    );
+    assert_eq!(a.store.load(account, ch.id).await.unwrap().items, ch.items);
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM accounts", [], |r| r.get::<_, i32>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        delete(
+            &a,
+            &[
+                ("guid", "OWNER@EXAMPLE.ORG"),
+                ("password", "valid-password"),
+                ("charId", &id),
+                ("reason", "1")
+            ]
         )
         .await,
-    )
-    .await;
-    assert_eq!(
-        result,
-        (
-            StatusCode::OK,
-            "<Error>Character deletion is not implemented; no character was deleted.</Error>"
-                .into()
-        )
-    );
-    assert_eq!(
-        serde_json::to_value(a.store.list("delete-owner".into()).await.unwrap()).unwrap(),
-        before
-    );
-    assert_eq!(
-        serde_json::to_value(a.store.load(account, ch.id).await.unwrap()).unwrap(),
-        inventory
+        (StatusCode::OK, "<Success/>".into())
     );
     std::fs::remove_dir_all(dir).unwrap();
 }

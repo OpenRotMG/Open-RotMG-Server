@@ -274,16 +274,52 @@ async fn delete_character(
     State(a): State<App>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
+    Form(form): Form<HashMap<String, String>>,
 ) -> Response {
     match admit(&a, &headers, peer) {
-        Ok(true) => (
-            [("content-type", "application/xml")],
-            "<Error>Character deletion is not implemented; no character was deleted.</Error>",
-        )
-            .into_response(),
-        Ok(false) => limited(),
-        Err(e) => error(e),
+        Ok(true) => {}
+        Ok(false) => return limited(),
+        Err(e) => return error(e),
     }
+    let result: Result<()> = async {
+        let character: i32 = form
+            .get("charId")
+            .context("charId required")?
+            .parse()
+            .context("invalid charId")?;
+        ensure!(character > 0, "invalid charId");
+        ensure!(
+            form.get("secret").is_none_or(|s| s.is_empty()),
+            "external platform authentication is not implemented"
+        );
+        let guid = form.get("guid").context("guid required")?.clone();
+        let password = form.get("password").context("password required")?.clone();
+        let _authentication = a.authentication.read().await;
+        let account = a.store.authenticate(guid, password).await?;
+        let _claim = a.claim(account)?;
+        a.store.delete_character(account, character).await
+    }
+    .await;
+    let xml = match result {
+        Ok(()) => "<Success/>".into(),
+        Err(e) => {
+            tracing::warn!(error=%e, "character deletion rejected");
+            let message = if e.is::<crate::store::InvalidCredentials>() {
+                "Account credentials not valid".into()
+            } else {
+                e.to_string()
+            };
+            format!("<Error>{}</Error>", xml_escape(&message))
+        }
+    };
+    (
+        [
+            ("content-type", "application/xml"),
+            ("cache-control", "no-store"),
+        ],
+        xml,
+    )
+        .into_response()
 }
 async fn account_request(
     State(a): State<App>,
