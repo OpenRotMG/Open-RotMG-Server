@@ -34,6 +34,8 @@ mod ground;
 mod ground_tests;
 mod guilds;
 #[cfg(test)]
+mod inventory_safety_tests;
+#[cfg(test)]
 mod key_tests;
 mod midlands;
 #[cfg(test)]
@@ -1230,7 +1232,8 @@ impl World {
                                     "mtype" => 34,
                                     "mcount" => 42,
                                     "mtime" => 43,
-                                    "nstar" => 45,
+                                    // NameChanger is not a SellableObject in 123.5.1.
+                                    "nstar" => 55,
                                     _ => unreachable!(),
                                 };
                                 e.extra_stats.push((stat, value));
@@ -2739,40 +2742,58 @@ impl World {
             .context("quarantine owner missing")
             .map(|p| p.quarantine(id, error))
     }
+    #[tracing::instrument(skip_all, fields(player=plan.player, account=plan.account, character=plan.character, expected_revision=plan.revision))]
     pub fn finish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
+        let player = plan.player;
+        let source = (plan.character, plan.revision);
+        let companion = plan.companion.clone();
+        let result = self.publish_inventory(plan, result);
+        if let Err(error) = &result {
+            self.discard_consumable(source);
+            if let Err(cleanup) = self.discard_companion(&companion) {
+                tracing::error!(player,%cleanup,"companion cleanup failed after rejected publication");
+            }
+            self.poison(player, format!("{error:#}"))?;
+        }
+        result
+    }
+    fn publish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
+        ensure!(
+            plan.unlock.is_none(),
+            "portal unlock requires its directory commit"
+        );
+        let revision = result?;
         let p = self
             .players
-            .get(&plan.player)
-            .context("inventory completion owner missing")?;
+            .get_mut(&plan.player)
+            .context("player disappeared during save")?;
         ensure!(
             p.pending
                 && p.persistence_failure.is_none()
                 && p.character.id == plan.character
                 && p.character.account == plan.account
-                && p.character.revision == plan.revision,
-            "stale or foreign inventory completion"
+                && p.character.revision == plan.revision
+                && plan.revision.checked_add(1) == Some(revision),
+            "inventory completion owner, reservation or revision changed"
         );
-        ensure!(
-            plan.unlock.is_none(),
-            "portal unlock requires its directory commit"
-        );
-        if result.is_err() {
-            self.discard_consumable((plan.character, plan.revision));
-            if let Err(error) = self.discard_companion(&plan.companion) {
-                tracing::error!(player=plan.player,%error,"companion cleanup failed after rejected save");
-            }
-        }
-        let revision = self.committed(plan.player, result)?;
-        let p = self
-            .players
-            .get_mut(&plan.player)
-            .context("player disappeared during save")?;
         p.pending = false;
         if let Some((id, _)) = &plan.bag {
-            self.entities
-                .get_mut(id)
-                .context("reserved bag disappeared")?
-                .reserved = false;
+            ensure!(
+                self.entities
+                    .get(id)
+                    .context("reserved bag disappeared")?
+                    .reserved,
+                "inventory source reservation lost"
+            );
+        }
+        if let Some(dropped) = plan.dropped {
+            ensure!(
+                self.entities
+                    .get(&dropped)
+                    .context("reserved ground drop missing")?
+                    .reserved,
+                "ground drop reservation lost"
+            );
         }
         if let Some((bag, slot)) = plan.loot_slot {
             self.entities
@@ -2827,28 +2848,24 @@ impl World {
                 .context("committed loot identity missing")?;
             tracing::info!(player=plan.player,character=p.character.id,bag,slot,item=*item,world=%self.name,"loot slot committed");
         }
-        if let Some((id, items)) = plan.bag {
-            self.entities.get_mut(&id).unwrap().items = items;
-        }
-        if let Some(dropped) = plan.dropped {
-            let e = self
-                .entities
-                .get_mut(&dropped)
-                .context("reserved ground drop missing")?;
-            e.reserved = false;
-            e.published = true;
-            self.bag_expiry.insert(dropped, self.now + 60_000);
-        }
         if let Some(mut vault) = plan.vault {
             vault.revision += 1;
             self.vault.as_mut().context("committed chest missing")?.1 = vault;
         }
+        self.finish_consumable(plan.player, (plan.character, plan.revision), plan.effects)?;
+        self.finish_companion(plan.player, plan.companion)?;
+        if let Some((id, items)) = plan.bag {
+            let bag = self.entities.get_mut(&id).unwrap();
+            bag.items = items;
+            bag.reserved = false;
+        }
+        if let Some(dropped) = plan.dropped {
+            let e = self.entities.get_mut(&dropped).unwrap();
+            e.reserved = false;
+            e.published = true;
+            self.bag_expiry.insert(dropped, self.now + 60_000);
+        }
         tracing::info!(player = plan.player, revision, "inventory committed");
-        let effects =
-            self.finish_consumable(plan.player, (plan.character, plan.revision), plan.effects);
-        self.committed(plan.player, effects)?;
-        let companion = self.finish_companion(plan.player, plan.companion);
-        self.committed(plan.player, companion)?;
         let p = &self.players[&plan.player];
         if plan.purchase.is_some() {
             let packet = shop::reply(true, "Item purchased!");
@@ -4513,6 +4530,8 @@ mod tests {
                 );
             }
             if name == "nexus" {
+                let changer = world.entities.values().find(|e| e.kind == 0x1dc).unwrap();
+                assert_eq!(changer.extra_stats, [(55, 0)]);
                 assert!(
                     world
                         .entities

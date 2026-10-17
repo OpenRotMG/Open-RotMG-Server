@@ -10,6 +10,8 @@ use tokio::sync::oneshot;
 mod account_actions;
 mod accounts;
 mod consumables;
+#[cfg(all(test, unix))]
+mod crash_tests;
 #[cfg(test)]
 mod credits_tests;
 #[cfg(test)]
@@ -309,7 +311,7 @@ impl Store {
             version < 7 || updates_exist,
             "schema-7 update feed missing; restore reviewed state instead of clearing published news"
         );
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY,guid TEXT NOT NULL UNIQUE,name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS shore_bots(name TEXT PRIMARY KEY,account INTEGER NOT NULL UNIQUE REFERENCES accounts(id));
 CREATE TABLE IF NOT EXISTS characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,alive INTEGER NOT NULL DEFAULT 1);
@@ -328,6 +330,17 @@ CREATE TABLE IF NOT EXISTS password_resets(account INTEGER PRIMARY KEY REFERENCE
 CREATE TABLE IF NOT EXISTS account_lists(account INTEGER NOT NULL REFERENCES accounts(id),list_id INTEGER NOT NULL CHECK(list_id IN (0,1)),target INTEGER NOT NULL REFERENCES accounts(id),PRIMARY KEY(account,list_id,target),CHECK(account<>target));
 CREATE TABLE IF NOT EXISTS update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
+        let journal: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
+        let synchronous: i32 = c.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
+        ensure!(
+            journal == "wal" || path == Path::new(":memory:"),
+            "WAL unavailable: {journal}"
+        );
+        ensure!(
+            synchronous == 2,
+            "FULL durability unavailable: synchronous={synchronous}"
+        );
+        tracing::info!(%journal, synchronous, "account store durability configured");
         let migration = c.transaction()?;
         guilds::migrate(&migration, version)?;
         if !credits_exist {

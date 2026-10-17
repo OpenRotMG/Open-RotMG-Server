@@ -324,8 +324,10 @@ impl World {
         let revisions = match result {
             Ok(revisions) => revisions,
             Err(error) => {
-                for p in &plan.plans {
-                    self.poison(p.player, error.to_string())?;
+                for write in &plan.plans {
+                    if let Some(p) = self.players.get_mut(&write.player) {
+                        p.quarantine(write.player, format!("{error:#}"));
+                    }
                 }
                 return Err(error);
             }
@@ -633,6 +635,24 @@ mod tests {
             let ch = &w.players[&id].character;
             assert_eq!(store.load(ch.account, ch.id).await.unwrap().items, ch.items);
         }
+    }
+    #[tokio::test]
+    async fn lost_trade_participant_does_not_prevent_quarantining_the_survivor() {
+        let (mut w, store, ids, _) = fixture().await;
+        start(&mut w, ids);
+        let offers = offers(&mut w, ids);
+        w.accept_trade(ids[0], offers[0], offers[1]).unwrap();
+        let plan = w
+            .accept_trade(ids[1], offers[1], offers[0])
+            .unwrap()
+            .unwrap();
+        let revisions = store.exchange(writes(&plan), None).await.unwrap();
+        let missing = plan.plans[0].player;
+        let survivor = plan.plans[1].player;
+        w.players.remove(&missing);
+        assert!(w.finish_trade(plan, Ok(revisions)).is_err());
+        assert!(w.players[&survivor].persistence_failure.is_some());
+        assert!(w.begin_departure(survivor).is_err());
     }
     #[tokio::test]
     async fn empty_equipped_soulbound_full_and_lifecycle_offers_cannot_mutate_inventory() {

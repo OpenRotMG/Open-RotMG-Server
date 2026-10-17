@@ -483,15 +483,20 @@ mod tests {
 
     #[test]
     fn failed_egg_save_and_companion_limits_preserve_items_without_hidden_reservations() {
-        let (mut w, id) = fixture(0xaa9);
-        let plan = stage(&mut w, id, 5);
-        let entity = plan.companion.as_ref().unwrap().entity.unwrap();
-        assert!(
-            w.finish_inventory(plan, Err(anyhow::anyhow!("injected egg save failure")))
-                .is_err()
-        );
-        assert_eq!(w.players[&id].character.items[5], 0xaa9);
-        assert!(!w.entities.contains_key(&entity) && w.companions.active.is_empty());
+        for failed_write in [true, false] {
+            let (mut w, id) = fixture(0xaa9);
+            let plan = stage(&mut w, id, 5);
+            let entity = plan.companion.as_ref().unwrap().entity.unwrap();
+            let result = if failed_write {
+                Err(anyhow::anyhow!("injected egg save failure"))
+            } else {
+                Ok(plan.revision + 2)
+            };
+            assert!(w.finish_inventory(plan, result).is_err());
+            assert!(w.players[&id].persistence_failure.is_some());
+            assert_eq!(w.players[&id].character.items[5], 0xaa9);
+            assert!(!w.entities.contains_key(&entity) && w.companions.active.is_empty());
+        }
         let (mut w, id) = fixture(0xaa9);
         for _ in 0..8 {
             w.players.get_mut(&id).unwrap().character.items[5] = 0xaa9;

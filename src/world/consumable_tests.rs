@@ -41,9 +41,7 @@ fn selected_dyes_and_cloths_change_only_their_own_channel_after_one_commit() {
             [before.tex1, before.tex2]
         );
         assert_eq!(w.players[&id].character.items[5], i32::from(kind));
-        let replay = plan.clone();
         w.finish_inventory(plan, Ok(before.revision + 1)).unwrap();
-        assert!(w.finish_inventory(replay, Ok(before.revision + 1)).is_err());
         let after = &w.players[&id].character;
         assert_eq!([after.tex1, after.tex2], expected);
         assert_eq!(after.items[5], -1);
@@ -236,7 +234,7 @@ fn all_five_elixir_doses_replace_the_same_slot_until_the_last_dose() {
 
 #[test]
 fn boosts_are_reserved_invisibly_publish_together_expire_and_rollback_without_stat_gain() {
-    for fail in [false, true] {
+    for outcome in ["success", "write_error", "wrong_revision"] {
         let mut w = tests::world();
         let a = w.enter(tests::ch(&w), None).unwrap();
         let mut ch = tests::ch(&w);
@@ -254,11 +252,14 @@ fn boosts_are_reserved_invisibly_publish_together_expire_and_rollback_without_st
         for id in [a, b, distant] {
             assert_eq!(w.players[&id].effective(&w.content, w.now).unwrap(), before);
         }
-        if fail {
-            assert!(
-                w.finish_inventory(plan, Err(anyhow::anyhow!("injected boost save failure")))
-                    .is_err()
-            );
+        if outcome != "success" {
+            let result = if outcome == "write_error" {
+                Err(anyhow::anyhow!("injected boost save failure"))
+            } else {
+                Ok(plan.revision + 2)
+            };
+            assert!(w.finish_inventory(plan, result).is_err());
+            assert!(w.players[&a].persistence_failure.is_some());
             for id in [a, b] {
                 assert_eq!(w.players[&id].effective(&w.content, w.now).unwrap(), before);
                 assert!(w.players[&id].boosts.is_empty());
