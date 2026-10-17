@@ -35,7 +35,7 @@ impl Source {
         match self {
             Self::Encoded(name, bytes) => {
                 let started = std::time::Instant::now();
-                let mut map = Map::decode(bytes, content)
+                let mut map = Map::decode_cells(bytes, content)
                     .with_context(|| format!("decode Realm layout {name}"))?;
                 ensure!(
                     map.width == 2048 && map.height == 2048,
@@ -156,6 +156,131 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
 mod tests {
     use super::*;
     use crate::content::Cell;
+    use std::io::Write;
+
+    fn marker_free_realm_bytes(godlands: bool, connected: bool) -> Vec<u8> {
+        let mut raw = Vec::new();
+        raw.extend(4i16.to_le_bytes());
+        for (ground, name, config, terrain) in [
+            (0xbc, "", "", 0),
+            (0xbd, "", "", 0),
+            (0x60, "", "", u8::from(godlands)),
+            (0xbe, "Bush", "size:150", 11),
+        ] {
+            raw.extend((ground as i16).to_le_bytes());
+            for text in [name, config] {
+                raw.push(text.len() as u8);
+                raw.extend(text.as_bytes());
+            }
+            raw.extend([terrain, 0]);
+        }
+        raw.extend(2048i32.to_le_bytes());
+        raw.extend(2048i32.to_le_bytes());
+        for y in 0i32..2048 {
+            for x in 0i32..2048 {
+                let index: i16 = if [(1024, 1984), (1984, 1024), (1024, 64), (64, 1024)]
+                    .iter()
+                    .any(|&(cx, cy)| (x - cx).abs() <= 1 && (y - cy).abs() <= 1)
+                {
+                    3
+                } else if (x, y) == (1024, 1024) {
+                    2
+                } else if connected
+                    && ((x == 1024 && (64..=1984).contains(&y))
+                        || (y == 1024 && (64..=1984).contains(&x)))
+                {
+                    1
+                } else {
+                    0
+                };
+                raw.extend(index.to_le_bytes());
+            }
+        }
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&raw).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn marker_free_realm_prepares_arrivals() {
+        let content = Content::load(Path::new("data")).unwrap();
+        assert!(!content.objects[&0x105].blocks);
+        let source = Source::Encoded("marker-free-test", marker_free_realm_bytes(true, true));
+        let map = source.open(&content).unwrap();
+        assert_eq!((map.width, map.height), (2048, 2048));
+        assert_eq!(
+            map.spawns,
+            [
+                (1024.5, 1984.5),
+                (1984.5, 1024.5),
+                (1024.5, 64.5),
+                (64.5, 1024.5)
+            ]
+        );
+        assert_eq!(map.cells.iter().filter(|c| c.region == 1).count(), 36);
+        assert!(
+            map.cells
+                .iter()
+                .all(|c| c.object.is_none() && c.config.is_empty())
+        );
+        assert_eq!(map.cell(1024.5, 1024.5).unwrap().terrain, 1);
+        for &(x, y) in &map.spawns {
+            for ny in y as i32 - 1..=y as i32 + 1 {
+                for nx in x as i32 - 1..=x as i32 + 1 {
+                    let cell = map.cell(nx as f32, ny as f32).unwrap();
+                    assert_eq!((cell.terrain, cell.region), (11, 1));
+                }
+            }
+            for step in 0..=(x as i32 - 1024).abs().max((y as i32 - 1024).abs()) {
+                let nx = x as i32 + (1024 - x as i32).signum() * step;
+                let ny = y as i32 + (1024 - y as i32).signum() * step;
+                let cell = map.cell(nx as f32, ny as f32).unwrap();
+                assert!(content.grounds[&cell.ground] > 0. && cell.object.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_map_still_requires_spawns() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let bytes = marker_free_realm_bytes(true, true);
+        let cells = Map::decode_cells(&bytes, &content).unwrap();
+        assert!(cells.spawns.is_empty());
+        assert!(cells.cells.iter().all(|c| c.region == 0));
+        assert_eq!(
+            cells.cells.iter().filter(|c| c.object.is_some()).count(),
+            36
+        );
+        drop(cells);
+        let error = Map::decode(&bytes, &content).unwrap_err().to_string();
+        assert!(error.contains("map has no spawn cells"), "{error}");
+        let path = std::env::temp_dir().join(format!(
+            "openrotmg-marker-free-{}.wmap",
+            rand::random::<u64>()
+        ));
+        std::fs::write(&path, &bytes).unwrap();
+        let error = format!("{:#}", Map::load(&path, &content).unwrap_err());
+        std::fs::remove_file(path).unwrap();
+        assert!(error.contains("map has no spawn cells"), "{error}");
+    }
+
+    #[test]
+    fn encoded_realms_reject_missing_godlands_and_disconnected_beaches() {
+        let content = Content::load(Path::new("data")).unwrap();
+        for (godlands, connected, expected) in [
+            (false, true, "Realm has no walkable Godlands"),
+            (true, false, "Realm has no connected coastal arrival"),
+        ] {
+            let source =
+                Source::Encoded("invalid-test", marker_free_realm_bytes(godlands, connected));
+            let error = format!("{:#}", source.open(&content).unwrap_err());
+            assert!(
+                error.contains("prepare Realm layout invalid-test"),
+                "{error}"
+            );
+            assert!(error.contains(expected), "{error}");
+        }
+    }
 
     #[test]
     fn arrivals_reject_remote_islands_and_missing_habitats() {
