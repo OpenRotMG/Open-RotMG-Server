@@ -12,9 +12,9 @@ from urllib.request import urlopen
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-REVISION = "21b7b40c4b4eae96c8f7f53a3d03859a899a1d2e"
+REVISION = "ea64430488260715ee0ee9915615d6db2d6d96aa"
 URL = f"https://codeload.github.com/OpenRotMG/Open-RotMG-Client/zip/{REVISION}"
-SHA256 = "61f539f52f2634247b703746f0d50bb239a09730c91e73e61012c15d863142e6"
+SHA256 = "e7bcdabb58ee3f2bfde53478fe27a7a54c0a9d69f511c5aa0ca42749085f64fa"
 LOG = ROOT / ".local/server.log"
 
 

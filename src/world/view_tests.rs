@@ -4,6 +4,60 @@ use crate::content::WIZARD;
 use crate::wire::Reader;
 
 #[test]
+fn terrain_views_reuse_storage_but_invalidate_discovery_map_and_content() {
+    let mut d = super::tests::directory();
+    let (id, _rx) = receive(&mut d, -2, 1, WIZARD);
+    let first = d.player_view(id).unwrap().tiles;
+    assert!(Arc::ptr_eq(&first, &d.player_view(id).unwrap().tiles));
+    let w = d.worlds.get_mut(&-2).unwrap();
+    let point = w
+        .map
+        .cells
+        .iter()
+        .enumerate()
+        .find_map(|(i, c)| {
+            let p = (
+                (i % w.map.width as usize) as i16,
+                (i / w.map.width as usize) as i16,
+            );
+            (w.content.grounds.contains_key(&c.ground) && !w.players[&id].tiles.contains(&p))
+                .then_some(p)
+        })
+        .unwrap();
+    w.players.get_mut(&id).unwrap().tiles.insert(point);
+    let discovered = d.player_view(id).unwrap().tiles;
+    assert!(!Arc::ptr_eq(&first, &discovered));
+    assert_eq!(discovered.len(), first.len() + 1);
+    assert!(Arc::ptr_eq(&discovered, &d.player_view(id).unwrap().tiles));
+    let w = d.worlds.get_mut(&-2).unwrap();
+    let tile = &discovered[0];
+    let index = tile.y as usize * w.map.width as usize + tile.x as usize;
+    let ground = *w
+        .content
+        .grounds
+        .keys()
+        .find(|g| **g != tile.ground)
+        .unwrap();
+    Arc::make_mut(&mut w.map).cells[index].ground = ground;
+    let changed = d.player_view(id).unwrap().tiles;
+    assert!(!Arc::ptr_eq(&changed, &discovered));
+    assert_eq!(changed[0].ground, ground);
+    Arc::make_mut(&mut d.worlds.get_mut(&-2).unwrap().content)
+        .grounds
+        .insert(ground, 0.123);
+    let latest = d.player_view(id).unwrap().tiles;
+    assert!(!Arc::ptr_eq(&latest, &changed));
+    assert_eq!(latest[0].ground_speed, 0.123);
+    assert_eq!(
+        serde_json::to_value(d.player_view(id).unwrap()).unwrap()["tiles"]
+            .as_array()
+            .unwrap()
+            .len(),
+        latest.len()
+    );
+}
+
+#[test]
 fn own_condition_mask_matches_timed_native_state_without_private_deadlines() {
     let mut d = super::tests::directory();
     let (id, _rx) = receive(&mut d, -2, 1, WIZARD);
