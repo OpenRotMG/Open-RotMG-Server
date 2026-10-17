@@ -28,6 +28,8 @@ mod gods;
 #[cfg(test)]
 mod gods_tests;
 mod guilds;
+#[cfg(test)]
+mod key_tests;
 mod midlands;
 #[cfg(test)]
 mod midlands_tests;
@@ -323,6 +325,17 @@ pub struct Slot {
     pub slot: usize,
     pub kind: i32,
 }
+#[derive(Clone, Copy)]
+pub struct PortalPlan {
+    locked: Option<i32>,
+    opened: i32,
+}
+impl PortalPlan {
+    fn lifetime(self) -> u64 {
+        // Trapped's Create uses 20 seconds; preserve the existing Cellar's 120-second policy.
+        if self.locked.is_some() { 2400 } else { 400 }
+    }
+}
 #[derive(Clone)]
 pub struct InventoryPlan {
     pub player: i32,
@@ -337,7 +350,7 @@ pub struct InventoryPlan {
     pub stat_growth: Option<(Character, Slot, usize, i32)>,
     pub vault: Option<Vault>,
     pub dropped: Option<i32>,
-    pub unlock: Option<(i32, i32)>,
+    pub unlock: Option<PortalPlan>,
     pub collected: Option<u16>,
     pub purchase: Option<(i32, crate::store::Purchase)>,
     loot_slot: Option<(i32, usize)>,
@@ -2484,6 +2497,7 @@ impl World {
                 self.players.get_mut(&id).unwrap().pending = true;
                 Ok(Some(plan))
             }
+            "Create" => self.begin_create(id, slot, &item).map(Some),
             "UnlockPortal" => self.begin_unlock(id, slot, &item).map(Some),
             "HealNova" if item.kind == 0xa3f => {
                 ensure!(

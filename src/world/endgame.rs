@@ -40,10 +40,11 @@ impl ForcedTransfer {
 }
 impl Directory {
     pub fn stage_unlock(&mut self, plan: InventoryPlan) -> Result<InventoryPlan> {
-        let Some((locked, opened)) = plan.unlock else {
+        let Some(portal) = plan.unlock else {
             return Ok(plan);
         };
-        ensure!(!self.portals.contains_key(&opened), "unlock already staged");
+        let PortalPlan { locked, opened } = portal;
+        ensure!(!self.portals.contains_key(&opened), "portal already staged");
         let origin = self.location(plan.player)?;
         let w = &self.worlds[&origin];
         let p = &w.players[&plan.player];
@@ -52,21 +53,26 @@ impl Directory {
                 && p.character.revision == plan.revision
                 && p.character.account == plan.account
                 && p.character.id == plan.character,
-            "unlock owner reservation changed"
+            "portal owner reservation changed"
         );
-        ensure!(
-            w.entities
-                .get(&locked)
-                .is_some_and(|e| e.kind == LOCKED_CELLAR && e.reserved && e.published),
-            "locked portal reservation missing"
-        );
+        let (template, kind) = if let Some(locked) = locked {
+            ensure!(
+                w.entities
+                    .get(&locked)
+                    .is_some_and(|e| e.kind == LOCKED_CELLAR && e.reserved && e.published),
+                "locked portal reservation missing"
+            );
+            (CELLAR, 0x700)
+        } else {
+            ("pirate-cave", 0x717)
+        };
         ensure!(
             w.entities
                 .get(&opened)
-                .is_some_and(|e| e.kind == 0x700 && e.reserved && !e.published),
-            "unpublished Cellar portal missing"
+                .is_some_and(|e| e.kind == kind && e.reserved && !e.published),
+            "unpublished portal missing"
         );
-        let destination = match self.instance(CELLAR, None) {
+        let destination = match self.instance(template, None) {
             Ok(destination) => destination,
             Err(error) => {
                 let w = self.worlds.get_mut(&origin).unwrap();
@@ -80,24 +86,27 @@ impl Directory {
             Portal {
                 origin,
                 destination,
-                expires: self.tick + 2400,
+                expires: self.tick + portal.lifetime(),
             },
         );
         tracing::info!(
             player = plan.player,
-            locked,
             opened,
             destination,
-            "Cellar binding staged; Incantation not consumed or portal published yet"
+            template,
+            origin,
+            kind,
+            "portal binding staged; consumable not committed or portal published yet"
         );
         Ok(plan)
     }
     pub fn finish_inventory(&mut self, mut plan: InventoryPlan, result: Result<i32>) -> Result<()> {
-        let Some((locked, opened)) = plan.unlock.take() else {
+        let Some(portal) = plan.unlock.take() else {
             return self
                 .resolve(Target::Player(plan.player))?
                 .finish_inventory(plan, result);
         };
+        let PortalPlan { locked, opened } = portal;
         let player = plan.player;
         let origin = self.location(player)?;
         let w = &self.worlds[&origin];
@@ -107,22 +116,23 @@ impl Directory {
                 && p.character.revision == plan.revision
                 && p.character.account == plan.account
                 && p.character.id == plan.character,
-            "stale or foreign unlock completion"
+            "stale or foreign portal completion"
         );
         ensure!(
-            w.entities
-                .get(&locked)
-                .is_some_and(|e| e.reserved && e.kind == LOCKED_CELLAR)
+            locked.is_none_or(|id| w
+                .entities
+                .get(&id)
+                .is_some_and(|e| e.reserved && e.kind == LOCKED_CELLAR))
                 && w.entities
                     .get(&opened)
-                    .is_some_and(|e| e.reserved && !e.published && e.kind == 0x700),
-            "unlock reservation lost or already published"
+                    .is_some_and(|e| e.reserved && !e.published),
+            "portal reservation lost or already published"
         );
         let binding = self
             .portals
             .get(&opened)
-            .context("staged Cellar binding lost")?;
-        ensure!(binding.origin == origin, "staged Cellar origin changed");
+            .context("staged portal binding lost")?;
+        ensure!(binding.origin == origin, "staged portal origin changed");
         let destination = binding.destination;
         if result.is_err() {
             self.worlds
@@ -133,7 +143,7 @@ impl Directory {
             ensure!(
                 self.worlds[&destination].players.is_empty()
                     && !self.grants.values().any(|g| g.destination == destination),
-                "unpublished Cellar acquired a participant"
+                "unpublished dungeon acquired a participant"
             );
             self.worlds.remove(&destination);
             self.idle.remove(&destination);
@@ -148,24 +158,36 @@ impl Directory {
             .unwrap()
             .finish_inventory(plan, result)?;
         let w = self.worlds.get_mut(&origin).unwrap();
-        w.entities
-            .get_mut(&locked)
-            .context("committed locked portal lost")?
-            .reserved = false;
-        w.remove_entity(locked);
+        if let Some(locked) = locked {
+            w.entities
+                .get_mut(&locked)
+                .context("committed locked portal lost")?
+                .reserved = false;
+            w.remove_entity(locked);
+        }
         let e = w
             .entities
             .get_mut(&opened)
-            .context("committed Cellar portal lost")?;
+            .context("committed portal lost")?;
         e.reserved = false;
         e.published = true;
-        self.portals.get_mut(&opened).unwrap().expires = self.tick + 2400;
+        let kind = e.kind;
+        self.portals.get_mut(&opened).unwrap().expires = self.tick + portal.lifetime();
+        if locked.is_none() {
+            let name = w.players[&player].character.name.clone();
+            w.broadcast_text("", &format!("Pirate Cave opened by {name}!"));
+        }
+        let p = &w.players[&player];
         tracing::info!(
             player,
-            locked,
+            account = p.character.account,
+            character = p.character.id,
+            revision = p.character.revision,
             opened,
+            kind,
             destination,
-            "Incantation committed; bound Wine Cellar portal published"
+            origin,
+            "consumable committed; bound dungeon portal published"
         );
         Ok(())
     }
@@ -594,32 +616,70 @@ impl World {
             "another Incantation already reserves this portal"
         );
         let (locked, pos) = (locked.id, locked.pos);
-        let mut items = p.character.items.clone();
+        self.reserve_portal(id, slot, 0x700, Some(locked), pos)
+    }
+    pub(super) fn begin_create(
+        &mut self,
+        id: i32,
+        slot: Slot,
+        item: &crate::content::Object,
+    ) -> Result<InventoryPlan> {
+        ensure!(
+            item.kind == 0x705 && item.activations == 1,
+            "This dungeon key is not supported yet."
+        );
+        let portal = self.content.get(0x717)?;
+        ensure!(
+            portal.class == "Portal" && item.create_object.as_deref() == Some(portal.name.as_str()),
+            "Pirate Cave key activation contradicts selected portal"
+        );
+        self.reserve_portal(id, slot, 0x717, None, self.players[&id].pos)
+    }
+    fn reserve_portal(
+        &mut self,
+        id: i32,
+        slot: Slot,
+        kind: u16,
+        locked: Option<i32>,
+        pos: Pos,
+    ) -> Result<InventoryPlan> {
+        let name = crate::dungeon::DUNGEONS
+            .iter()
+            .chain(crate::endgame::DUNGEONS)
+            .find(|(portal, _, _, _)| *portal == kind)
+            .context("consumable dungeon registration missing")?
+            .2
+            .to_owned();
+        let mut items = self.players[&id].character.items.clone();
         items[slot.slot] = -1;
-        let opened = self.spawn_entity(0x700, pos, vec![])?;
+        let opened = self.spawn_entity(kind, pos, vec![])?;
         let e = self.entities.get_mut(&opened).unwrap();
-        e.name = dungeon.clone();
+        e.name = name;
         e.published = false;
         e.reserved = true;
-        self.entities.get_mut(&locked).unwrap().reserved = true;
+        if let Some(locked) = locked {
+            self.entities.get_mut(&locked).unwrap().reserved = true;
+        }
         self.players.get_mut(&id).unwrap().pending = true;
         let mut plan = self.plan(id, items, None, 0);
-        plan.unlock = Some((locked, opened));
+        plan.unlock = Some(PortalPlan { locked, opened });
         Ok(plan)
     }
-    fn discard_unlock(&mut self, locked: i32, opened: i32) -> Result<()> {
+    fn discard_unlock(&mut self, locked: Option<i32>, opened: i32) -> Result<()> {
         ensure!(
             self.entities
                 .get(&opened)
                 .is_some_and(|e| !e.published && e.reserved),
-            "cannot discard a published Cellar portal"
+            "cannot discard a published portal"
         );
         self.entities.get_mut(&opened).unwrap().reserved = false;
         self.remove_entity(opened);
-        self.entities
-            .get_mut(&locked)
-            .context("reserved locked portal lost")?
-            .reserved = false;
+        if let Some(locked) = locked {
+            self.entities
+                .get_mut(&locked)
+                .context("reserved locked portal lost")?
+                .reserved = false;
+        }
         Ok(())
     }
     fn oryx_notice(&self, text: &str) {
@@ -793,7 +853,7 @@ mod tests {
         let (mut d, a, b, locked) = cellar_fixture();
         let w = d.worlds.get_mut(&-3).unwrap();
         let plan = incantation(w, a).unwrap();
-        let (_, opened) = plan.unlock.unwrap();
+        let opened = plan.unlock.unwrap().opened;
         assert!(incantation(w, b).is_err());
         assert_eq!(w.players[&a].character.items[4], i32::from(INCANTATION));
         assert!(w.finish_inventory(plan.clone(), Ok(1)).is_err());
@@ -838,7 +898,7 @@ mod tests {
         let (mut d, a, _, _) = cellar_fixture();
         let plan = incantation(d.worlds.get_mut(&-3).unwrap(), a).unwrap();
         let plan = d.stage_unlock(plan).unwrap();
-        let (_, opened) = plan.unlock.unwrap();
+        let opened = plan.unlock.unwrap().opened;
         d.finish_inventory(plan, Ok(1)).unwrap();
         for _ in 0..3 {
             d.step();
@@ -857,7 +917,7 @@ mod tests {
         let (mut d, a, b, locked) = cellar_fixture();
         let plan = incantation(d.worlds.get_mut(&-3).unwrap(), a).unwrap();
         let plan = d.stage_unlock(plan).unwrap();
-        let (_, opened) = plan.unlock.unwrap();
+        let opened = plan.unlock.unwrap().opened;
         let cellar = d.portals[&opened].destination;
         assert!(
             d.finish_inventory(plan, Err(anyhow::anyhow!("fixture stale inventory write")))
@@ -873,7 +933,7 @@ mod tests {
             d.instance("pirate-cave", None).unwrap();
         }
         let plan = incantation(d.worlds.get_mut(&-3).unwrap(), b).unwrap();
-        let (_, opened) = plan.unlock.unwrap();
+        let opened = plan.unlock.unwrap().opened;
         assert!(d.stage_unlock(plan).is_err());
         let w = &d.worlds[&-3];
         assert_eq!(w.players[&b].character.items[4], i32::from(INCANTATION));

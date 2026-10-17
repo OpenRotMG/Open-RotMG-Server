@@ -122,6 +122,7 @@ pub struct Object {
     pub heal: i32,
     pub stat_increase: Option<(u8, i32)>,
     pub unlock_portal: Option<(String, String)>,
+    pub create_object: Option<String>,
     pub heal_range: f32,
     pub activations: usize,
     pub abilities: Vec<Ability>,
@@ -331,6 +332,15 @@ impl Content {
                                 .context("unlock lockedName missing")?
                                 .to_owned(),
                         ))
+                    })
+                    .transpose()?,
+                create_object: n
+                    .children()
+                    .find(|p| p.has_tag_name("Activate") && p.text() == Some("Create"))
+                    .map(|p| {
+                        p.attribute("id")
+                            .context("Create activation id missing")
+                            .map(str::to_owned)
                     })
                     .transpose()?,
                 heal_range: child(n, "Activate")
