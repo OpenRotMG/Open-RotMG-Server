@@ -62,7 +62,7 @@ fn every_catalog_realm_preserves_water_scenery_and_safe_arrivals() {
                         .unwrap()
                         .parse::<u16>()
                         .unwrap();
-                    assert!((130..=160).contains(&size) && size % 5 == 0);
+                    assert!((130..=160).contains(&size) && size.is_multiple_of(5));
                 }
             }
             for (terrain, count) in habitats.iter().enumerate() {

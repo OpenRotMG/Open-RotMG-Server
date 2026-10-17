@@ -478,7 +478,7 @@ fn encode(map: &Map, content: &Content) -> Result<(Vec<u8>, usize)> {
                     ensure!(
                         matches!(kind, 0x100..=0x104 | 0x185..=0x18d | 0x197..=0x19f)
                             && (130..=160).contains(&size)
-                            && size % 5 == 0
+                            && size.is_multiple_of(5)
                             && c.config == format!("size:{size}"),
                         "unsupported scenery size/configuration"
                     );
