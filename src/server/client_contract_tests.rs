@@ -321,6 +321,92 @@ async fn loaded(a: &App, guid: &str) -> Session {
 }
 
 #[tokio::test]
+async fn who_player_text_returns_private_roster_and_validation_errors() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world = a.world.in_world(-2);
+    a.world.clock.set_paused(true);
+    let mut session = loaded(&a, "who-sender").await;
+    let peer = loaded(&a, "who-peer").await;
+    let (tx, mut rx) = mpsc::channel(16);
+    let (peer_tx, mut peer_rx) = mpsc::channel(16);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let sender_output = crate::world::Output {
+        packets: tx.clone(),
+        lost: lost.clone(),
+    };
+    let peer_output = crate::world::Output {
+        packets: peer_tx,
+        lost: lost.clone(),
+    };
+    let id = session.player.unwrap();
+    let peer_id = peer.player.unwrap();
+    a.world
+        .call(move |w| {
+            w.players.get_mut(&id).unwrap().tx = Some(sender_output);
+            w.players.get_mut(&peer_id).unwrap().tx = Some(peer_output);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let packet = |text: &str| {
+        let mut body = Writer::new();
+        body.utf(text);
+        Packet {
+            id: wire::PLAYER_TEXT,
+            body: body.0,
+        }
+    };
+    let now = std::time::Instant::now();
+    for (i, (text, expected)) in [
+        (
+            " /WhO ",
+            crate::world::chat_info("Players online: Guest1, Guest2"),
+        ),
+        ("/who extra", crate::world::chat_error("Usage: /who")),
+        (
+            "/who\n",
+            crate::world::chat_error("Chat message contains control characters."),
+        ),
+        (
+            "/whoever",
+            crate::world::chat_error("Unknown chat command."),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        handle(
+            &mut a,
+            packet(text),
+            &mut session,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(i as u64 * 2),
+        )
+        .await
+        .unwrap();
+        let reply = rx.try_recv().unwrap();
+        assert_eq!((reply.id, reply.body), (expected.id, expected.body));
+        assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+    }
+    let mut malformed = packet("/who");
+    malformed.body.push(0);
+    assert!(
+        handle(&mut a, malformed, &mut session, &tx, &lost, now)
+            .await
+            .is_err()
+    );
+    session.player = None;
+    assert!(
+        handle(&mut a, packet("/who"), &mut session, &tx, &lost, now)
+            .await
+            .is_err()
+    );
+    assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn tutorial_chat_reconnect_preserves_the_character_and_rejects_full_entry_before_departure() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world = a.world.in_world(-2);

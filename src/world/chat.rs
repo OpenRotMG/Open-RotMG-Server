@@ -165,12 +165,14 @@ impl Directory {
         let (command, rest) = trimmed
             .split_once(char::is_whitespace)
             .unwrap_or((trimmed, ""));
+        let who = command.eq_ignore_ascii_case("/who");
         let tell = command.eq_ignore_ascii_case("/tell") || command.eq_ignore_ascii_case("/t");
         let guild_chat =
             command.eq_ignore_ascii_case("/g") || command.eq_ignore_ascii_case("/guild");
         ensure!(
             !trimmed.starts_with('/')
                 || tell
+                || who
                 || guild_chat
                 || trimmed.eq_ignore_ascii_case("/pause"),
             "Unknown chat command."
@@ -206,6 +208,21 @@ impl Directory {
             "Choose a name before using /tell."
         );
         self.chat_permit(id, now)?;
+        if who {
+            ensure!(rest.trim().is_empty(), "Usage: /who");
+            // Period /who lists the current realm, not the cross-world tell/guild audience.
+            let world = self.resolve(Target::Player(id))?;
+            let names: Vec<_> = world
+                .players
+                .values()
+                .filter(|p| p.can_chat())
+                .map(|p| p.character.name.as_str())
+                .collect();
+            let packet = chat_info(&format!("Players online: {}", names.join(", ")));
+            send(&world.players[&id], packet.id, packet.body);
+            tracing::info!(player=id, account, world=%world.name, players=names.len(), "who roster sent");
+            return Ok(());
+        }
         if guild_chat {
             let guild = guild.context("You are not in a guild.")?;
             let message = rest.trim();
@@ -344,6 +361,41 @@ mod tests {
         assert!(w.dialogue_notice(human, "No stale reply.", true).is_err());
     }
     #[test]
+    fn who_lists_only_available_current_world_players_privately() {
+        let mut d = super::super::tests::directory();
+        let now = Instant::now();
+        let (a, mut ar) = receive(&mut d, -2, 1);
+        let (b, mut br) = receive(&mut d, -2, 2);
+        let (_, mut remote) = receive(&mut d, -3, 3);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.players.get_mut(&b).unwrap().pos.x += 100.;
+        w.players.get_mut(&b).unwrap().paused = true;
+        w.players.get_mut(&a).unwrap().account_lists[1].insert(2);
+        d.chat(a, " /WhO ".into(), now).unwrap();
+        message(
+            ar.try_recv().unwrap(),
+            "",
+            -1,
+            "Players online: Guest1, Guest2",
+        );
+        for mode in 0..5 {
+            let p = d.worlds.get_mut(&-2).unwrap().players.get_mut(&b).unwrap();
+            p.character.alive = mode != 0;
+            p.character.hp = if mode == 1 { 0 } else { 100 };
+            p.death_pending = mode == 2;
+            p.departing = mode == 3;
+            p.persistence_failure = (mode == 4).then(|| "uncertain save".into());
+            d.chat(
+                a,
+                "/who".into(),
+                now + std::time::Duration::from_secs(mode + 1),
+            )
+            .unwrap();
+            message(ar.try_recv().unwrap(), "", -1, "Players online: Guest1");
+        }
+        assert!(ar.try_recv().is_err() && br.try_recv().is_err() && remote.try_recv().is_err());
+    }
+    #[test]
     fn selected_chat_layout_identity_and_world_routing() {
         let mut d = super::super::tests::directory();
         let (a, mut ar) = receive(&mut d, -2, 1);
@@ -393,7 +445,7 @@ mod tests {
             p.character.alive = mode != 0;
             p.death_pending = mode == 1;
             p.persistence_failure = (mode == 2).then(|| "uncertain save".into());
-            assert!(d.chat(b, "unsafe sender".into(), now).is_err());
+            assert!(d.chat(b, "/who".into(), now).is_err());
             assert!(br.try_recv().is_err());
         }
     }
@@ -530,16 +582,16 @@ mod tests {
         let mut d = super::super::tests::directory();
         let now = Instant::now();
         let (a, mut rx) = receive(&mut d, -2, 1);
-        for _ in 0..3 {
-            d.chat(a, "hi".into(), now).unwrap();
+        for text in ["hi", "/who", "hi"] {
+            d.chat(a, text.into(), now).unwrap();
         }
         assert!(d.chat(a, "burst".into(), now).is_err());
         assert_eq!(std::iter::from_fn(|| rx.try_recv().ok()).count(), 3);
         let p = d.worlds.get_mut(&-2).unwrap().players.get_mut(&a).unwrap();
         p.departing = true;
-        assert!(d.chat(a, "departing".into(), now).is_err());
+        assert!(d.chat(a, "/who".into(), now).is_err());
         d.worlds.get_mut(&-2).unwrap().players.remove(&a);
-        assert!(d.chat(a, "disconnected".into(), now).is_err());
+        assert!(d.chat(a, "/who".into(), now).is_err());
         let (b, mut rx) = receive(&mut d, -3, 1);
         assert!(d.chat(b, "reconnect".into(), now).is_err());
         assert!(rx.try_recv().is_err());
