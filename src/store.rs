@@ -280,7 +280,7 @@ impl Store {
         let mut c = Connection::open(path)?;
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10),
+            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11),
             "unsupported game database schema {version}"
         );
         let rewards_exist: bool = c.query_row(
@@ -290,7 +290,7 @@ impl Store {
         )?;
         ensure!(
             version < 10 || rewards_exist,
-            "schema-10 gold rewards missing; restore reviewed state instead of allowing duplicate grants"
+            "gold reward history missing; restore reviewed state instead of allowing duplicate grants"
         );
         let credits_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
@@ -357,9 +357,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         tracing::info!(%journal, synchronous, "account store durability configured");
         let migration = c.transaction()?;
         guilds::migrate(&migration, version)?;
-        if !rewards_exist {
-            migration.execute_batch(gold::SCHEMA)?;
-        }
+        gold::migrate(&migration, version, rewards_exist)?;
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
         }
@@ -434,7 +432,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "account fame wallet missing; restore reviewed state instead of recreating balances"
             );
         }
-        migration.pragma_update(None, "user_version", 10)?;
+        migration.pragma_update(None, "user_version", 11)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

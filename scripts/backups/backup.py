@@ -24,7 +24,7 @@ UPDATES_GAME = {**SOCIAL_GAME, 'update_feed': ('id', 'snapshot', 'synced_at')}
 GOLD_GAME = {**UPDATES_GAME, 'accounts': (*GAME['accounts'], 'credits')}
 GUILDS_GAME = {**GOLD_GAME, 'guilds': ('id', 'name', 'level', 'fame', 'earned', 'board'), 'guild_members': ('account', 'guild', 'rank', 'fame')}
 REWARDS_GAME = {**GUILDS_GAME, 'gold_rewards': ('account', 'reward', 'awarded_at', 'notified_at')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -74,7 +74,7 @@ def snapshot(path, schema, *, include_schema=False):
         matched = [candidate for candidate in schemas if tables == set(candidate) and all(
             tuple(r[1] for r in db.execute('PRAGMA table_info(' + table + ')')) == columns
             for table, columns in candidate.items())]
-        if len(matched) != 1:
+        if not matched or any(candidate != matched[0] for candidate in matched):
             raise ValueError('Unsupported database tables or columns; update and test the export schema before backing up')
         schema = matched[0]
         result = {}
@@ -84,7 +84,7 @@ def snapshot(path, schema, *, include_schema=False):
             selected = tuple(c for c in columns if c != 'guid')
             rows = db.execute('SELECT ' + ','.join(selected) + ' FROM ' + table + ' ORDER BY ' + ','.join(selected[:2])).fetchall()
             result[table] = [dict(zip(selected, row)) for row in rows]
-        return (result, schema) if include_schema else result
+        return (result, schema, db.execute('PRAGMA user_version').fetchone()[0]) if include_schema else result
 
 
 def validate_guilds(game, accounts):
@@ -173,8 +173,9 @@ def validate(bundle):
         if len(set(identities)) != len(rows) or (table == 'discord_links' and len({r['discord_id'] for r in rows}) != len(rows)):
             raise ValueError('Duplicate hiscores identity: ' + table)
     rewards = bundle['game'].get('gold_rewards', [])
+    reward_types = ('discord_link', 'collection_top_half') + (('first_bug_report',) if bundle['schema'] >= 11 else ())
     for row in rewards:
-        if type(row['account']) is not int or row['account'] not in accounts or row['reward'] not in ('discord_link', 'collection_top_half') or type(row['awarded_at']) is not int or row['awarded_at'] <= 0 or (row['notified_at'] is not None and (type(row['notified_at']) is not int or row['notified_at'] <= 0)):
+        if type(row['account']) is not int or row['account'] not in accounts or row['reward'] not in reward_types or type(row['awarded_at']) is not int or row['awarded_at'] <= 0 or (row['notified_at'] is not None and (type(row['notified_at']) is not int or row['notified_at'] <= 0)):
             raise ValueError('Invalid gold reward')
     if len({(row['account'], row['reward']) for row in rewards}) != len(rewards):
         raise ValueError('Duplicate gold reward')
@@ -202,8 +203,11 @@ def validate(bundle):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, RELOADED_GAME], include_schema=True)
-    version = next(version for version, schema in GAME_SCHEMAS.items() if schema == {k: v for k, v in matched.items() if k in game_data})
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, RELOADED_GAME], include_schema=True)
+    versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
+    if len(versions) > 1 and stored_version not in versions:
+        raise ValueError('Unsupported gold reward schema version')
+    version = stored_version if len(versions) > 1 else versions[0]
     bundle = validate({
         'schema': version, 'created_at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'revisions': {'server': Path(server_revision).read_text().strip(), 'discord_bot': Path(bot_revision).read_text().strip(),
@@ -258,7 +262,8 @@ CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
 CREATE INDEX guild_roster ON guild_members(guild);
 CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;'''
     if bundle['schema'] >= 10:
-        definitions['game'] += "\nCREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));"
+        rewards = "'discord_link','collection_top_half'" + (",'first_bug_report'" if bundle['schema'] >= 11 else '')
+        definitions['game'] += f"\nCREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ({rewards})),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));"
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

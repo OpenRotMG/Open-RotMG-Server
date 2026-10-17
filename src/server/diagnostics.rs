@@ -500,6 +500,19 @@ pub async fn receipt(
             "issue_number" => receipt.id.parse::<u32>().is_ok_and(|n| n > 0),
             _ => false,
         }, "invalid bug delivery target");
+        if receipt.target == "issue_number" {
+            let diagnostics = a.diagnostics.clone();
+            let (id, issue) = (id.clone(), receipt.id.clone());
+            let account = tokio::task::spawn_blocking(move || -> Result<i32> {
+                let report: Value = serde_json::from_slice(&std::fs::read(diagnostics.root.join(format!("{id}.json")))?)?;
+                ensure!(report["id"] == id && matches!(report["delivery"]["status"].as_str(), Some("pending" | "delivered")), "invalid stored bug report");
+                ensure!(report["delivery"]["issue_number"].is_null() || report["delivery"]["issue_number"] == issue, "conflicting delivery receipt");
+                Ok(serde_json::from_value(report["account_id"].clone())?)
+            }).await??;
+            // Keep the report retryable until its once-only reward is durable.
+            a.store.reward_first_bug(account).await?;
+            super::gold::sync(&a, account).await?;
+        }
         let world = a.world.clone();
         let notification = tokio::task::spawn_blocking(move || -> Result<Option<(i32, i32, String)>> {
             let mut pending = a.diagnostics.files.lock().expect("diagnostics poisoned");
@@ -632,6 +645,7 @@ mod tests {
             rx.try_recv().is_err(),
             "only issue creation should produce a success reply"
         );
+        assert_eq!(a.store.gold(account).await.unwrap().balance, 100);
         let mut headers = HeaderMap::new();
         headers.insert(
             "authorization",
@@ -700,9 +714,52 @@ mod tests {
                 .status(),
             StatusCode::BAD_REQUEST
         );
+        let unauthorized = receipt(
+            State(a.clone()),
+            ConnectInfo(peer),
+            Path(id.clone()),
+            HeaderMap::new(),
+            Json(Receipt {
+                target: "issue_number".into(),
+                id: "42".into(),
+            }),
+        )
+        .await;
+        assert_eq!(unauthorized.status(), StatusCode::BAD_REQUEST);
+        rusqlite::Connection::open(root.join("game.db"))
+            .unwrap()
+            .execute(
+                "UPDATE accounts SET credits=2147483647 WHERE id=?1",
+                [account],
+            )
+            .unwrap();
+        let failed = receipt(
+            State(a.clone()),
+            ConnectInfo(peer),
+            Path(id.clone()),
+            headers.clone(),
+            Json(Receipt {
+                target: "issue_number".into(),
+                id: "42".into(),
+            }),
+        )
+        .await;
+        assert_eq!(failed.status(), StatusCode::BAD_REQUEST);
+        let unacknowledged: Value = serde_json::from_slice(
+            &std::fs::read(root.join("bug-reports").join(format!("{id}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert!(unacknowledged["delivery"]["issue_number"].is_null());
+        assert_eq!(unacknowledged["delivery"]["status"], "pending");
+        assert!(a.store.gold(account).await.unwrap().rewards.is_empty());
+        rusqlite::Connection::open(root.join("game.db"))
+            .unwrap()
+            .execute("UPDATE accounts SET credits=100 WHERE id=?1", [account])
+            .unwrap();
         for (target, external_id) in [
-            ("issue_number", "42"),
             ("public_message_id", "1559759855621898313"),
+            ("issue_number", "42"),
+            ("issue_number", "42"),
         ] {
             let response = receipt(
                 State(a.clone()),
@@ -718,6 +775,7 @@ mod tests {
             assert_eq!(response.status(), StatusCode::NO_CONTENT);
         }
         let mut confirmed = false;
+        let mut rewarded = 0;
         while let Ok(packet) = notification_rx.try_recv() {
             if packet.id == wire::TEXT {
                 let mut text = Reader::new(&packet.body);
@@ -726,16 +784,22 @@ mod tests {
                 text.i32().unwrap();
                 text.u8().unwrap();
                 text.utf().unwrap();
-                if text.utf().unwrap()
-                    == "Reported as #42: https://github.com/OpenRotMG/Open-RotMG-Server/issues/42"
-                {
-                    confirmed = true;
-                }
+                let message = text.utf().unwrap();
+                confirmed |= message
+                    == "Reported as #42: https://github.com/OpenRotMG/Open-RotMG-Server/issues/42";
+                rewarded += usize::from(
+                    message == "You received 50 Gold for submitting your first bug report!",
+                );
             }
         }
         assert!(
             confirmed,
             "issue receipt must notify the in-game reporting player"
+        );
+        assert_eq!(a.store.gold(account).await.unwrap().balance, 150);
+        assert_eq!(
+            rewarded, 1,
+            "retries must not repeat the reward notification"
         );
         let bad = receipt(
             State(a.clone()),
@@ -750,7 +814,7 @@ mod tests {
         .await;
         assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
         a.diagnostics = Arc::new(Diagnostics::open(root.join("bug-reports")).unwrap());
-        let response = pending(State(a.clone()), ConnectInfo(peer), headers).await;
+        let response = pending(State(a.clone()), ConnectInfo(peer), headers.clone()).await;
         let body = axum::body::to_bytes(response.into_body(), 1_048_576)
             .await
             .unwrap();
@@ -758,6 +822,20 @@ mod tests {
         assert_eq!(remaining["report"]["message_untrusted"], "enemies froze");
         assert_eq!(remaining["report"]["account_id"], account);
         assert_ne!(remaining["report"]["id"], id);
+        let second = receipt(
+            State(a.clone()),
+            ConnectInfo(peer),
+            Path(remaining["report"]["id"].as_str().unwrap().into()),
+            headers.clone(),
+            Json(Receipt {
+                target: "issue_number".into(),
+                id: "43".into(),
+            }),
+        )
+        .await;
+        assert_eq!(second.status(), StatusCode::NO_CONTENT);
+        assert_eq!(a.store.gold(account).await.unwrap().balance, 150);
+        assert!(a.store.gold(account).await.unwrap().rewards.is_empty());
         let saved: Value = serde_json::from_slice(
             &std::fs::read(root.join("bug-reports").join(format!("{id}.json"))).unwrap(),
         )

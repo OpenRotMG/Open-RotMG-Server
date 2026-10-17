@@ -19,6 +19,43 @@ fn center(w: &World) -> Pos {
 }
 
 #[test]
+fn red_demon_cannot_be_repeatedly_lured_away_from_its_original_fissure() {
+    let mut w = arena();
+    let home = center(&w);
+    let id = w.spawn_entity(0x668, home, vec![]).unwrap();
+    let p = w.enter(tests::ch(&w), None).unwrap();
+    let mut previous = None;
+    let mut returns = 0;
+    for ms in (0..45000).step_by(50) {
+        let pos = w.entities[&id].pos;
+        w.players.get_mut(&p).unwrap().pos = Pos {
+            x: pos.x,
+            y: pos.y + 9.,
+        };
+        w.now = ms;
+        w.npc_step();
+        let e = &w.entities[&id];
+        assert_eq!((e.home.x, e.home.y), (home.x, home.y));
+        // Five chase seconds at two tiles/second must not become a renewable pursuit.
+        assert!(
+            e.pos.distance(home) <= 11.1,
+            "moving lure escaped the fissure at {ms}ms: {:?}",
+            e.pos
+        );
+        if previous == Some(2) && e.stage == Some(0) {
+            returns += 1;
+            assert!((e.pos.x - home.x).abs() <= 1.);
+            assert!((e.pos.y - home.y).abs() <= 1.);
+        }
+        previous = e.stage;
+    }
+    assert!(
+        returns >= 2,
+        "continued aggro prevented repeated home returns"
+    );
+}
+
+#[test]
 fn selected_boss_shields_summons_corners_and_cleanup_are_bounded() {
     let mut w = arena();
     let pos = center(&w);

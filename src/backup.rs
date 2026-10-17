@@ -96,7 +96,9 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 store
                     .redeem_discord_code(code, format!("1234567890123456{}", i32::from(alive)))
                     .await?;
-                if !alive {
+                if alive {
+                    store.reward_first_bug(account.id).await?;
+                } else {
                     store
                         .gold_notified(account.id, vec![store::gold::DISCORD.into()])
                         .await?;

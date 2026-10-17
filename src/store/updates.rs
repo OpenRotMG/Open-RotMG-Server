@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
                 .unwrap(),
-            10
+            11
         );
         store.sync_updates(snapshot()).await.unwrap();
         let mut invalid = snapshot();
