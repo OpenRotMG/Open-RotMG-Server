@@ -181,13 +181,15 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
             state = u64::from(elapsed >= 2000);
             age = elapsed.saturating_sub(2000);
             vec![
-                ring(0, 12, 1000, 3000.).fixed(22.5).enabled(state == 1),
+                ring(0, 12, 1000, 3000.)
+                    .fixed(22.5f32.to_radians())
+                    .enabled(state == 1),
                 fan(0, 1, 0., 1000, 10.).predict(1.).enabled(state == 1),
                 fan(1, 1, 0., 2000, 10.).predict(1.).enabled(state == 1),
             ]
         }
         0x937..=0x93f => {
-            let center = match kind {
+            let center: f32 = match kind {
                 0x937 | 0x93d => 180.,
                 0x938 => 240.,
                 0x939 | 0x93e => 300.,
@@ -197,7 +199,9 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
                 _ => unreachable!(),
             };
             // Equivalent wrapped angles keep all three threads in one native volley/ACK.
-            vec![fan(0, 3, 60., crate::dungeon::spider::WEB_INTERVAL, 0.).fixed(center)]
+            vec![
+                fan(0, 3, 60., crate::dungeon::spider::WEB_INTERVAL, 0.).fixed(center.to_radians()),
+            ]
         }
         0x954 => vec![fan(0, 1, 0., 2000, 8.).choice(1)],
         0x60c => vec![fan(0, 1, 0., 5000, 10.), fan(1, 1, 0., 400, 5.)],

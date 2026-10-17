@@ -80,6 +80,12 @@ fn arachna_shields_then_builds_one_owned_web_and_fires_selected_patterns() {
     );
     w.now = 100;
     w.npc_step();
+    assert!(!w.entities.values().any(|e| e.parent == Some(boss)));
+    w.now = 1550;
+    w.npc_step();
+    assert!(!w.entities.values().any(|e| e.parent == Some(boss)));
+    w.now = 1600;
+    w.npc_step();
     let spokes: Vec<_> = w
         .entities
         .values()
@@ -111,6 +117,25 @@ fn arachna_shields_then_builds_one_owned_web_and_fires_selected_patterns() {
     );
     for id in &spokes {
         let shots = crate::encounter::phased_attacks(w.entities[id].kind, 100000, 0., 0);
+        let expected: [[f32; 3]; 9] = [
+            [120., 180., 240.],
+            [180., 240., 300.],
+            [240., 300., 360.],
+            [300., 360., 420.],
+            [0., 60., 120.],
+            [60., 120., 180.],
+            [120., 180., 240.],
+            [240., 300., 360.],
+            [0., 60., 120.],
+        ];
+        for ((_, angle), degrees) in shots
+            .iter()
+            .zip(expected[(w.entities[id].kind - 0x937) as usize])
+        {
+            let radians = degrees.to_radians();
+            assert!((angle.cos() - radians.cos()).abs() < 0.00001);
+            assert!((angle.sin() - radians.sin()).abs() < 0.00001);
+        }
         let notices: Vec<_> = shots
             .iter()
             .enumerate()

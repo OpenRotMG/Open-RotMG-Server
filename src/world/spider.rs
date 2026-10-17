@@ -26,7 +26,8 @@ impl World {
             self.entities.get_mut(&id).unwrap().activated = Some(self.now);
             return Ok(());
         }
-        if e.stage.is_none() {
+        if e.stage.is_none() || e.stage == Some(0) && elapsed >= 1500 {
+            let tossing = e.stage.is_none();
             let home = e.pos;
             let positions: Vec<_> = (0..9)
                 .map(|i| {
@@ -61,24 +62,32 @@ impl World {
                 crate::encounter::validate(&self.content, *kind)?;
                 crate::loot::validate(&self.content, *kind)?;
             }
-            for (kind, pos) in positions {
-                let child = self.spawn_entity(kind, pos, vec![])?;
-                let e = self.entities.get_mut(&child).unwrap();
-                e.parent = Some(id);
-                e.activated = Some(self.now);
+            if tossing {
+                for (_, pos) in positions {
+                    self.telegraph_throw(id, pos, 0xffffbf00);
+                }
+                let e = self.entities.get_mut(&id).unwrap();
+                e.stage = Some(0);
+                e.next_shot = self.now + 2000;
+                tracing::info!(entity = id, spokes = 9, "Arachna web tosses telegraphed");
+            } else {
+                for (kind, pos) in positions {
+                    let child = self.spawn_entity(kind, pos, vec![])?;
+                    let e = self.entities.get_mut(&child).unwrap();
+                    e.parent = Some(id);
+                    e.activated = Some(self.now);
+                }
+                self.entities.get_mut(&id).unwrap().stage = Some(1);
+                tracing::info!(entity = id, spokes = 9, "Arachna web formation established");
             }
-            let e = self.entities.get_mut(&id).unwrap();
-            e.stage = Some(0);
-            e.next_shot = self.now + 2000;
-            tracing::info!(entity = id, spokes = 9, "Arachna web formation established");
         }
         let e = self.entities.get_mut(&id).unwrap();
         if elapsed < 2000 {
             e.condition |= condition::bit(condition::INVULNERABLE);
         } else {
             e.condition &= !condition::bit(condition::INVULNERABLE);
-            if e.stage != Some(1) {
-                e.stage = Some(1);
+            if e.stage != Some(2) {
+                e.stage = Some(2);
                 tracing::info!(entity = id, "Arachna attack phase entered");
             }
         }
