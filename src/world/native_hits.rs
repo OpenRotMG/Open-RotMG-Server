@@ -7,19 +7,31 @@ pub(super) struct VisibleProjectile {
     consumed: bool,
 }
 
+// Five seconds of Arachna's webs need ~1,900 units; include each queue entry as well as its snapshots.
+pub(super) const MAX_PENDING_SHOOT_UNITS: usize = 4096;
+
 pub(super) fn expect_shoot_ack(p: &mut Player, bullets: Vec<Bullet>) -> bool {
     if p.controller != Controller::Human {
         return true;
     }
-    if p.shoot_acks.len() >= 64 {
+    let pending: usize = p.shoot_acks.iter().map(|(_, shots)| 1 + shots.len()).sum();
+    if pending + 1 + bullets.len() > MAX_PENDING_SHOOT_UNITS {
         let oldest = p.shoot_acks.front().and_then(|(_, shots)| shots.first());
         tracing::error!(
             character = p.character.id,
+            pending_volleys = p.shoot_acks.len(),
+            pending_units = pending,
+            incoming_projectiles = bullets.len(),
+            limit_units = MAX_PENDING_SHOOT_UNITS,
+            oldest_ms = p
+                .shoot_acks
+                .front()
+                .map(|(sent, _)| sent.elapsed().as_millis()),
             owner = oldest.map(|b| b.owner),
             source_kind = oldest.map(|b| b.source_kind),
             born_ms = oldest.map(|b| b.born),
             last_native_move = p.last_move,
-            "SHOOT acknowledgement backlog exceeded"
+            "SHOOT acknowledgement snapshot budget exceeded"
         );
         if let Some(output) = &p.tx {
             output.lost.send_replace(true);
@@ -96,6 +108,8 @@ impl World {
         tracing::debug!(
             player = id,
             client_time = time,
+            ack_ms = sent.elapsed().as_millis(),
+            pending_volleys = p.shoot_acks.len(),
             "native volley acknowledged"
         );
         Ok(())

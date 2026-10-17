@@ -78,6 +78,9 @@ mod realm_quests_tests;
 mod realm_setpieces;
 #[cfg(test)]
 mod realm_setpieces_tests;
+mod spider;
+#[cfg(test)]
+mod spider_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
@@ -237,6 +240,7 @@ pub struct Player {
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
+    view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
     killer: String,
     movement_credit: f32,
@@ -244,7 +248,7 @@ pub struct Player {
     mp_fraction: f32,
     pub pending: bool,
     pub experience_queued: i32,
-    clears_queued: [u64; 6],
+    clears_queued: [u64; crate::dungeon::DUNGEONS.len()],
     pub(crate) progress_started: bool,
     pub death_pending: bool,
     persistence_failure: Option<String>,
@@ -305,7 +309,7 @@ impl Player {
         }
     }
     fn progress_queued(&self) -> bool {
-        self.experience_queued != 0 || self.clears_queued != [0; 6]
+        self.experience_queued != 0 || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
     }
     fn active(&self) -> bool {
         self.character.alive
@@ -433,6 +437,7 @@ pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
     pub(crate) realm_layout: Option<&'static str>,
+    performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: BTreeMap<i32, Entity>,
     actor_ids: BTreeSet<i32>,
     pub players: BTreeMap<i32, Player>,
@@ -524,6 +529,7 @@ pub struct Directory {
     pub tick: u64,
     pub max_tick_us: u64,
     diagnostic_ticks: std::collections::VecDeque<(Instant, u64, u64)>,
+    performance: crate::performance::Window,
     max_players: usize,
     prepared_seed: Option<u64>,
 }
@@ -540,6 +546,9 @@ impl Directory {
             "character_id": p.character.id, "player_name": p.character.name, "class": p.character.class, "level": p.character.level,
             "position": {"x": p.pos.x, "y": p.pos.y}, "visible_entities": p.known.len(),
             "world_players": world.players.len(), "world_entities": world.entities.len(), "world_projectiles": world.bullets.len(),
+            "native_acknowledgements": {"weapon_tick_records":p.weapon_ticks.len(),"goto":p.goto_acks.len(),"shoot":p.shoot_acks.len(),
+                "oldest_goto_ms":p.goto_acks.front().map(|(_,at)|at.elapsed().as_millis()),
+                "oldest_shoot_ms":p.shoot_acks.front().map(|(at,_)|at.elapsed().as_millis())},
             "tick_interval_ms": 50, "recent_ticks": ticks, "tick": self.tick,
             "total_worlds": self.worlds.len(), "total_players": self.worlds.values().map(|w| w.players.len()).sum::<usize>(),
             "total_entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
@@ -705,6 +714,7 @@ impl Directory {
             tick: 0,
             max_tick_us: 0,
             diagnostic_ticks: std::collections::VecDeque::new(),
+            performance: crate::performance::Window::default(),
             max_players,
             prepared_seed,
         };
@@ -760,6 +770,12 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
+            } else if template == "spider-den" {
+                let seed = match self.prepared_seed {
+                    Some(seed) => seed ^ self.next_world as u64,
+                    None => rand::random(),
+                };
+                Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
             } else if template == "snake-pit" {
                 Arc::new(crate::dungeon::snake_pit(&self.content, rand::random())?)
             } else {
@@ -1192,15 +1208,19 @@ impl Handle {
                         let start=Instant::now(); directory.step();
                         let us=start.elapsed().as_micros() as u64;
                         directory.max_tick_us=directory.max_tick_us.max(us);
+                        directory.performance.record("step", start.elapsed());
+                        directory.performance.record("scheduling_lateness", std::time::Duration::from_micros(late));
                         directory.diagnostic_ticks.push_back((start, us, late));
                         while directory.diagnostic_ticks.front().is_some_and(|(t, _, _)| t.elapsed().as_secs() > 120) { directory.diagnostic_ticks.pop_front(); }
                         if us>25_000 {tracing::warn!(tick=directory.tick,elapsed_us=us,"slow aggregate simulation tick");}
-                        if directory.tick.is_multiple_of(100) {
+                        if directory.tick.is_multiple_of(100) { directory.max_tick_us=0; }
+                        if let Some(timings)=directory.performance.report() {
                             tracing::info!(tick=directory.tick,worlds=directory.worlds.len(),
                                 players=directory.worlds.values().map(|w|w.players.len()).sum::<usize>(),
                                 entities=directory.worlds.values().map(|w|w.entities.len()).sum::<usize>(),
-                                max_tick_us=directory.max_tick_us,"directory health");
-                            directory.max_tick_us=0;
+                                actors=directory.worlds.values().map(|w|w.actor_ids.len()).sum::<usize>(),
+                                diagnostic_tick_samples=directory.diagnostic_ticks.len(),queued_jobs=rx.len(),
+                                memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
                     },
                     job=rx.recv()=>match job{Some(f)=>f(&mut directory),None=>break}
@@ -1232,9 +1252,14 @@ impl Handle {
         f: impl FnOnce(&mut Directory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
+        let queued = Instant::now();
         self.tx
             .send(Box::new(move |d| {
-                let _ = tx.send(f(d));
+                d.performance.record("job_wait", queued.elapsed());
+                let started = Instant::now();
+                let result = f(d);
+                d.performance.record("job", started.elapsed());
+                let _ = tx.send(result);
             }))
             .await
             .map_err(|_| anyhow::anyhow!("world directory stopped"))?;
@@ -1312,6 +1337,7 @@ impl World {
                         hp: o.hp,
                         size: o.size,
                         condition: crate::dungeon::abyss::initial_condition(kind)
+                            | crate::dungeon::spider::initial_condition(kind)
                             | if o.stasis_immune {
                                 crate::condition::bit(crate::condition::STASIS_IMMUNE)
                             } else {
@@ -1409,6 +1435,7 @@ impl World {
             rng: rand::rngs::StdRng::from_entropy(),
             now: 0,
             last_npc_step: 0,
+            performance: std::cell::RefCell::default(),
             attack_epoch: Instant::now(),
             clock: crate::clock::Clock::default(),
             prepared_seed: None,
@@ -1534,6 +1561,7 @@ impl World {
                 hp: definition.hp,
                 size: definition.size,
                 condition: crate::dungeon::abyss::initial_condition(kind)
+                    | crate::dungeon::spider::initial_condition(kind)
                     | (if kind == 0x91a {
                         crate::condition::bit(crate::condition::INVULNERABLE)
                     } else {
@@ -1725,6 +1753,7 @@ impl World {
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
+                view_tiles: std::cell::RefCell::default(),
                 death_started: false,
                 killer: String::new(),
                 movement_credit: 0.78,
@@ -1732,7 +1761,7 @@ impl World {
                 mp_fraction: 0.,
                 pending: false,
                 experience_queued: 0,
-                clears_queued: [0; 6],
+                clears_queued: [0; crate::dungeon::DUNGEONS.len()],
                 progress_started: false,
                 death_pending: false,
                 persistence_failure: None,
@@ -2015,6 +2044,7 @@ impl World {
             .collect()
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
+        let started = Instant::now();
         let mut visible = self.visible(id);
         // The native minimap tracks players across this world, including outside explored terrain.
         visible.extend(self.players.keys().copied());
@@ -2080,6 +2110,9 @@ impl World {
             send(p, 34, out.0);
             tracing::debug!(player = id, quest, "native quest target updated");
         }
+        self.performance
+            .borrow_mut()
+            .record("visibility", started.elapsed());
         Ok(())
     }
     #[cfg(test)]
@@ -3203,6 +3236,7 @@ impl World {
                     .chain(snapshot.dungeons.iter_mut())
                     .chain(std::iter::once(&mut snapshot.abysses))
                     .chain(std::iter::once(&mut snapshot.trenches))
+                    .chain(std::iter::once(&mut snapshot.spider_dens))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3217,7 +3251,7 @@ impl World {
             }
             snapshot.alive = true;
             p.experience_queued = 0;
-            p.clears_queued = [0; 6];
+            p.clears_queued = [0; crate::dungeon::DUNGEONS.len()];
             p.pending = true;
             p.progress_started = true;
             plans.push((*id, snapshot));
@@ -3239,7 +3273,8 @@ impl World {
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
             || snapshot.abysses > p.character.abysses
-            || snapshot.trenches > p.character.trenches;
+            || snapshot.trenches > p.character.trenches
+            || snapshot.spider_dens > p.character.spider_dens;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.fame = snapshot.fame;
@@ -3249,6 +3284,7 @@ impl World {
         p.character.dungeons = snapshot.dungeons;
         p.character.abysses = snapshot.abysses;
         p.character.trenches = snapshot.trenches;
+        p.character.spider_dens = snapshot.spider_dens;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -3583,6 +3619,9 @@ impl World {
                 "dungeon clear and exit staged for durable commit"
             );
         }
+        if defeated.kind == crate::dungeon::spider::BOSS {
+            return self.spider_loot(defeated);
+        }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if matches!(defeated.kind, 0xd56 | 0xd59) {
@@ -3787,6 +3826,7 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 0x617 | 0x61a | 0x6d8 => 12.,
                 0x91a => 7.,
+                crate::dungeon::spider::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
                 _ => 20.,
@@ -4312,6 +4352,7 @@ impl World {
         packets
     }
     pub fn step(&mut self) {
+        let started = Instant::now();
         self.now += 50;
         self.tick += 1;
         self.expire_consumable_boosts();
@@ -4450,7 +4491,11 @@ impl World {
         self.ocean_step();
         self.event_step();
         self.ability_step();
+        let npc_started = Instant::now();
         let shots = self.npc_step();
+        self.performance
+            .borrow_mut()
+            .record("npc", npc_started.elapsed());
         self.grenade_step();
         for id in &ids {
             if let Err(e) = self.updates(*id, false) {
@@ -4664,6 +4709,17 @@ impl World {
                 p.tick += 1;
             }
         }
+        let mut performance = self.performance.borrow_mut();
+        performance.record("step", started.elapsed());
+        if let Some(timings) = performance.report() {
+            tracing::info!(world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
+                humans=self.players.values().filter(|p| p.controller==Controller::Human).count(),
+                bots=self.players.values().filter(|p| p.controller==Controller::Autonomous).count(),
+                qa_actors=self.players.values().filter(|p| p.controller==Controller::Qa).count(),
+                discovered_tiles=self.players.values().map(|p|p.tiles.len()).sum::<usize>(),
+                cached_view_tiles=self.players.values().map(|p|p.view_tiles.borrow().tiles.len()).sum::<usize>(),
+                timings=%timings,"world performance");
+        }
     }
 }
 fn inside_box(a: Pos, b: Pos) -> bool {
@@ -4803,6 +4859,7 @@ mod tests {
             dungeons: [0; 3],
             abysses: 0,
             trenches: 0,
+            spider_dens: 0,
         }
     }
     pub(super) fn receive(

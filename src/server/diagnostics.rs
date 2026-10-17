@@ -176,8 +176,22 @@ pub struct ConnectionDiagnostics {
     pub expired_pings: u64,
     pub unmatched_pongs: u64,
     started: Option<Instant>,
+    last_processed: Option<(Instant, u8)>,
+    last_move: Option<Instant>,
+    last_update_ack: Option<Instant>,
+    pub last_socket_send: Option<Instant>,
 }
 impl ConnectionDiagnostics {
+    pub fn processed(&mut self, packet: u8) {
+        let now = Instant::now();
+        self.last_processed = Some((now, packet));
+        if packet == wire::MOVE {
+            self.last_move = Some(now);
+        }
+        if packet == wire::UPDATE_ACK {
+            self.last_update_ack = Some(now);
+        }
+    }
     pub fn sent(&mut self, serial: i32) {
         let now = Instant::now();
         self.started.get_or_insert(now);
@@ -218,6 +232,12 @@ impl ConnectionDiagnostics {
                 .collect::<Vec<_>>()
         });
         json!({"user_agent": self.user_agent, "browser_samples": browser, "rtt_samples": samples,
+            "last_move_received_age_ms":self.last_move.map(|at|at.elapsed().as_secs_f64()*1000.),
+            "last_update_ack_received_age_ms":self.last_update_ack.map(|at|at.elapsed().as_secs_f64()*1000.),
+            "last_processed_packet":self.last_processed.map(|(_,id)|id),
+            "last_processed_age_ms":self.last_processed.map(|(at,_)|at.elapsed().as_secs_f64()*1000.),
+            "last_queued_packet_send_age_ms":self.last_socket_send.map(|at|at.elapsed().as_secs_f64()*1000.),
+            "last_pong_age_ms":self.replies.back().map(|(at,_)|at.elapsed().as_secs_f64()*1000.),
             "pending_ping_ages_ms": self.pending.values().map(|t| t.elapsed().as_millis()).collect::<Vec<_>>(),
             "expired_pings_session": self.expired_pings, "unmatched_pongs_session": self.unmatched_pongs,
             "game_commands_in_session": self.packets_in, "queued_packets_out_session": self.packets_out,
@@ -313,7 +333,14 @@ fn public_diagnostics(report: &Value) -> Value {
         "tick_ms": summary(ticks.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0))),
         "scheduling_delay_ms": summary(ticks.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0))),
         "visible_frame_gap_ms": summary(visible.iter().filter_map(|v| v["sample"]["max_frame_gap_ms"].as_f64())),
-        "connection": {"max_socket_send_ms": connection["max_socket_send_ms_session"], "max_handler_ms": connection["max_handler_ms_session"],
+        "native_acknowledgements":{
+            "weapon_tick_records":report["context"]["native_acknowledgements"]["weapon_tick_records"],"goto":report["context"]["native_acknowledgements"]["goto"],
+            "shoot":report["context"]["native_acknowledgements"]["shoot"],"oldest_goto_ms":report["context"]["native_acknowledgements"]["oldest_goto_ms"],
+            "oldest_shoot_ms":report["context"]["native_acknowledgements"]["oldest_shoot_ms"],"last_update_ack_received_age_ms":connection["last_update_ack_received_age_ms"]},
+
+        "connection": {"last_move_received_age_ms":connection["last_move_received_age_ms"],"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
+            "last_queued_packet_send_age_ms":connection["last_queued_packet_send_age_ms"],"last_pong_age_ms":connection["last_pong_age_ms"],
+            "max_socket_send_ms": connection["max_socket_send_ms_session"], "max_handler_ms": connection["max_handler_ms_session"],
             "max_input_queue_ms": connection["max_input_queue_ms_session"], "outgoing_queue_high_water": connection["observed_outgoing_queue_high_water_session"],
             "expired_pings": connection["expired_pings_session"], "pending_ping_ages_ms": connection["pending_ping_ages_ms"]},
         "capture_window_seconds": 120,
@@ -322,6 +349,37 @@ fn public_diagnostics(report: &Value) -> Value {
         "history": history, "browser_history": browser_history,
         "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable."})
 }
+pub(super) async fn disconnect(
+    a: &App,
+    player: i32,
+    connection: &ConnectionDiagnostics,
+    transport: Value,
+) {
+    // Capture before departure removes the player; never create a public bug report or gold reward.
+    let mut report = json!({"created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before epoch").as_millis(),
+        "server_source_revision":a.diagnostics.source_revision,"server_binary_sha256":a.diagnostics.binary_sha256,
+        "protocol_build":"123.5.1","connection":connection.snapshot()});
+    let started = Instant::now();
+    let context = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        a.world.directory(move |d| d.bug_context(player)),
+    )
+    .await;
+    let context_request_ms = started.elapsed().as_secs_f64() * 1000.;
+    match context {
+        Ok(Ok(context)) => {
+            report["context"] = context;
+            tracing::info!(player,transport=%transport,context_request_ms,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics");
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(player,transport=%transport,context_request_ms,%error,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics unavailable")
+        }
+        Err(error) => {
+            tracing::warn!(player,transport=%transport,context_request_ms,%error,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics deadline exceeded")
+        }
+    }
+}
+
 pub async fn attachment(State(a): State<App>, Path(id): Path<String>) -> Response {
     if !valid_id(&id) {
         return StatusCode::NOT_FOUND.into_response();
@@ -552,12 +610,19 @@ mod tests {
     use super::*;
     #[test]
     fn diagnostic_attachment_is_bounded_and_strictly_allowlisted() {
-        let report = json!({"created_at_unix_ms": 123, "server_source_revision": "a".repeat(40), "server_binary_sha256": "b".repeat(64), "protocol_build": "123.5.1",
+        let mut report = json!({"created_at_unix_ms": 123, "server_source_revision": "a".repeat(40), "server_binary_sha256": "b".repeat(64), "protocol_build": "123.5.1",
             "context": {"player_id": 12345, "world_name": "PRIVATE_WORLD", "position": {"x": 1}, "world_players": 2, "world_entities": 20, "world_projectiles": 4,
                 "recent_ticks": (0..2400).map(|i| json!({"age_ms": i*50, "execution_us": 1000, "scheduling_lateness_us": 2000})).collect::<Vec<_>>()},
             "connection": {"user_agent": "PRIVATE_UA Chrome/123 Linux", "rtt_samples": [{"age_ms": 1000, "rtt_ms": 75}],
                 "browser_samples": [{"age_ms": 1000, "sample": {"build": r#"{"website":"PRIVATE_BUILD"}"#, "renderer": "PRIVATE_GPU", "hidden_during_interval": false, "frames": 300, "elapsed_ms": 5000, "max_frame_gap_ms": 40}}]}});
+        report["context"]["native_acknowledgements"] =
+            json!({"shoot":3,"oldest_shoot_ms":5213,"PRIVATE_ACK":"PRIVATE_VALUE"});
         let attachment = public_diagnostics(&report);
+        assert_eq!(attachment["native_acknowledgements"]["shoot"], 3);
+        assert_eq!(
+            attachment["native_acknowledgements"]["oldest_shoot_ms"],
+            5213
+        );
         assert_eq!(attachment["tick_ms"]["samples"], 2400);
         assert_eq!(attachment["tick_ms"]["max"], 1.0);
         assert_eq!(attachment["game_rtt_ms"]["median"], 75.0);
@@ -583,6 +648,21 @@ mod tests {
     #[test]
     fn ping_serials_are_matched_and_only_recent_samples_are_reported() {
         let mut d = ConnectionDiagnostics::default();
+        assert!(d.snapshot()["last_processed_packet"].is_null());
+        d.processed(38);
+        d.last_socket_send = Some(Instant::now());
+        assert_eq!(d.snapshot()["last_processed_packet"], 38);
+        assert!(d.snapshot()["last_processed_age_ms"].as_f64().unwrap() >= 0.);
+        assert!(d.snapshot()["last_move_received_age_ms"].is_null());
+        d.processed(wire::MOVE);
+        d.processed(wire::UPDATE_ACK);
+        assert!(d.snapshot()["last_move_received_age_ms"].as_f64().unwrap() >= 0.);
+        assert!(
+            d.snapshot()["last_update_ack_received_age_ms"]
+                .as_f64()
+                .unwrap()
+                >= 0.
+        );
         d.sent(1);
         d.pong(2);
         d.pong(1);
@@ -626,6 +706,16 @@ mod tests {
         session.diagnostics.user_agent = Some("PRIVATE_UA".into());
         session.diagnostics.sent(1);
         session.diagnostics.pong(1);
+        let before_gold = a.store.gold(account).await.unwrap().balance;
+        disconnect(
+            &a,
+            player,
+            &session.diagnostics,
+            json!({"reason":"test_disconnect","last_frame_age_ms":12}),
+        )
+        .await;
+        assert_eq!(a.store.gold(account).await.unwrap().balance, before_gold);
+        assert_eq!(std::fs::read_dir(&a.diagnostics.root).unwrap().count(), 0);
         let (tx, mut rx) = mpsc::channel(64);
         let (lost, _) = tokio::sync::watch::channel(false);
         let mut text = Writer::new();
