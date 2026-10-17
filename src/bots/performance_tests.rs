@@ -69,6 +69,14 @@ fn navigation_reuse_invalidates_cover_and_knowledge_and_releases_the_old_cache()
 #[test]
 #[ignore = "release-mode explored-terrain benchmark; no timing gate"]
 fn large_explored_navigation_benchmark() {
+    benchmark(false);
+}
+#[test]
+#[ignore = "release-mode explored-terrain cache-miss benchmark; no timing gate"]
+fn uncached_explored_navigation_benchmark() {
+    benchmark(true);
+}
+fn benchmark(cache_misses: bool) {
     use sha2::{Digest, Sha256};
     let content = tests::content();
     let mut v = tests::view(&content);
@@ -89,6 +97,9 @@ fn large_explored_navigation_benchmark() {
     let mut trace = String::new();
     let start = std::time::Instant::now();
     for _ in 0..24 {
+        if cache_misses {
+            brain.navigation = None;
+        }
         v.tick += 10;
         v.time_ms += 500;
         let d = brain.decide(&v, &content).unwrap();
@@ -107,7 +118,8 @@ fn large_explored_navigation_benchmark() {
         "a4b61bfdc11e824e23a6bcc0a4589ffe4094ab0830ffcfe7467784847acc17ff"
     );
     println!(
-        "navigation_benchmark tiles={} decisions=24 elapsed_us={} decision_sha256={:x}",
+        "navigation_benchmark cache_misses={} tiles={} decisions=24 elapsed_us={} decision_sha256={:x}",
+        cache_misses,
         v.tiles.len(),
         start.elapsed().as_micros(),
         Sha256::digest(trace.as_bytes())

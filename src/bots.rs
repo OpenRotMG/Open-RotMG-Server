@@ -1262,10 +1262,13 @@ impl Grid {
             return reached.clone();
         }
         let mut queue = VecDeque::from([start]);
-        let mut reached = HashSet::from([start]);
+        let mut unvisited: HashSet<_> = self.walkable.iter().copied().collect();
+        unvisited.remove(&start);
+        let mut reached = vec![start];
         while let Some((x, y)) = queue.pop_front() {
             for next in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)] {
-                if self.walkable.contains(&next) && reached.insert(next) {
+                if unvisited.remove(&next) {
+                    reached.push(next);
                     queue.push_back(next);
                 }
             }
