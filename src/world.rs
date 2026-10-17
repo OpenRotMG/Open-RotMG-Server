@@ -1346,6 +1346,13 @@ impl World {
     }
     pub fn spawn_entity(&mut self, kind: u16, pos: Pos, items: Vec<i32>) -> Result<i32> {
         ensure!(self.walkable(pos), "entity spawn is blocked");
+        self.insert_entity(kind, pos, items)
+    }
+    fn insert_entity(&mut self, kind: u16, pos: Pos, items: Vec<i32>) -> Result<i32> {
+        ensure!(
+            pos.x.is_finite() && pos.y.is_finite() && self.map.cell(pos.x, pos.y).is_some(),
+            "entity spawn outside map"
+        );
         let cell = pos.y.floor() as usize * self.map.width as usize + pos.x.floor() as usize;
         let definition = self.content.get(kind)?;
         let id = allocate_id(&self.ids)?;
@@ -3018,8 +3025,34 @@ impl World {
             .collect()
     }
     pub fn finish_death(&mut self, id: i32) -> Result<()> {
-        let p = self.players.get_mut(&id).context("dying player missing")?;
-        ensure!(p.death_started && p.death_pending, "death not pending");
+        let p = self.players.get(&id).context("dying player missing")?;
+        ensure!(
+            p.death_started && p.death_pending && p.persistence_failure.is_none(),
+            "death not pending or persistence failed"
+        );
+        let maxed = p
+            .character
+            .base
+            .iter()
+            .zip(self.content.classes[&p.character.class].caps)
+            .filter(|(value, cap)| **value >= *cap)
+            .count();
+        let (kind, lifetime) = match maxed {
+            0 if p.character.level == 1 => (0x723, Some(30_000)),
+            0 if p.character.level < 20 => (0x724, Some(60_000)),
+            0 => (0x725, Some(300_000)),
+            7 => (0x734, None),
+            8 => (0x735, None),
+            n => (0x725 + n as u16, None),
+        };
+        let (pos, name) = (p.pos, p.character.name.clone());
+        // Gates or terrain can become blocked after the dying player entered the tile.
+        let grave = self.insert_entity(kind, pos, vec![])?;
+        let entity = self.entities.get_mut(&grave).unwrap();
+        entity.name = name;
+        entity.expires = lifetime.map(|ms| self.now + ms);
+        tracing::info!(player=id, grave, kind, maxed, expires=?entity.expires, "gravestone created");
+        let p = self.players.get_mut(&id).unwrap();
         p.character.alive = false;
         p.character.items.fill(-1);
         p.death_pending = false;
@@ -4223,6 +4256,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 #[cfg(test)]
 #[path = "../examples/testing/cover.rs"]
 mod cover_example;
+#[cfg(test)]
+mod gravestones_tests;
 #[cfg(test)]
 #[path = "../examples/testing/timing.rs"]
 mod timing_example;
