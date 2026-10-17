@@ -4199,6 +4199,7 @@ impl World {
                     .iter()
                     .filter(|entity| {
                         self.players.contains_key(entity)
+                            || self.companions.contains(entity)
                             || self.entities.get(entity).is_some_and(|e| {
                                 e.hp > 0
                                     || !e.items.is_empty()

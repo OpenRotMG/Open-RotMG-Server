@@ -22,6 +22,11 @@ pub(super) struct State {
     active: BTreeMap<i32, Companion>,
     bleeds: BTreeMap<i32, (u64, u64)>,
 }
+impl State {
+    pub(super) fn contains(&self, entity: &i32) -> bool {
+        self.active.contains_key(entity)
+    }
+}
 // The selected eggs omit lifetime/AI; the period Drake Eggs table supplies these profiles.
 fn duration(kind: u16) -> Result<u64> {
     match kind {
@@ -568,6 +573,36 @@ mod tests {
         w.now += 50;
         w.companion_step().unwrap();
         assert!(w.companions.bleeds.is_empty());
+    }
+
+    #[test]
+    fn zero_hp_companion_motion_reaches_native_ticks() {
+        let (mut w, id) = fixture(0x1513);
+        let (packets, mut rx) = tokio::sync::mpsc::channel(32);
+        let (lost, _) = tokio::sync::watch::channel(false);
+        w.players.get_mut(&id).unwrap().tx = Some(Output { packets, lost });
+        let plan = stage(&mut w, id, 5);
+        commit(&mut w, plan);
+        let entity = *w.companions.active.keys().next().unwrap();
+        let origin = w.entities[&entity].pos;
+        assert_eq!(w.entities[&entity].hp, 0);
+        assert!(w.entities[&entity].items.is_empty());
+        w.updates(id, false).unwrap();
+        assert!(w.players[&id].known.contains(&entity));
+        while rx.try_recv().is_ok() {}
+        w.players.get_mut(&id).unwrap().pos.x += 3.;
+        w.step();
+        w.step();
+        assert!(w.entities[&entity].pos.distance(origin) > 0.1);
+        let expected = w.stats(entity, id).unwrap();
+        assert!(
+            std::iter::from_fn(|| rx.try_recv().ok())
+                .filter(|packet| packet.id == wire::NEW_TICK)
+                .any(|packet| packet
+                    .body
+                    .windows(expected.len())
+                    .any(|body| body == expected))
+        );
     }
 
     #[test]
