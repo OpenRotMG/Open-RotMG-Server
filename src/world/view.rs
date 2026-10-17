@@ -13,6 +13,7 @@ pub struct PlayerView {
     pub session: Session,
     pub tick: u64,
     pub time_ms: u64,
+    pub elapsed_ms: u64,
     pub position: Pos,
     pub quest: Option<i32>,
     pub map: MapInfo,
@@ -41,6 +42,7 @@ pub struct OwnCharacter {
     pub items: Vec<i32>,
     pub inventory_revision: i32,
     pub pirate_caves: u64,
+    pub snake_pits: u64,
     pub ability_ready_ms: u64,
 }
 #[derive(Serialize)]
@@ -69,6 +71,8 @@ pub struct Tile {
 #[derive(Serialize)]
 pub struct VisibleObject {
     pub id: i32,
+    // Entity IDs change on travel and death; acquaintances bind the public account identity.
+    pub account: Option<i32>,
     pub kind: u16,
     pub name: String,
     pub position: Pos,
@@ -78,6 +82,7 @@ pub struct VisibleObject {
     pub equipped: Vec<i32>,
     pub contents: Vec<i32>,
     pub blocks: bool,
+    pub usable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condition_mask: Option<i32>,
 }
@@ -108,6 +113,7 @@ impl Directory {
                 Ok(if let Some(q) = w.players.get(entity) {
                     VisibleObject {
                         id: *entity,
+                        account: Some(q.character.account),
                         kind: q.character.class,
                         name: q.character.name.clone(),
                         position: q.pos,
@@ -117,12 +123,14 @@ impl Directory {
                         equipped: q.character.items[..4].to_vec(),
                         contents: vec![],
                         blocks: false,
+                        usable: true,
                         condition_mask: None,
                     }
                 } else {
                     let e = &w.entities[entity];
                     VisibleObject {
                         id: *entity,
+                        account: None,
                         kind: e.kind,
                         name: e.name.clone(),
                         position: e.pos,
@@ -132,6 +140,10 @@ impl Directory {
                         equipped: vec![],
                         contents: e.items.clone(),
                         blocks: w.content.objects[&e.kind].blocks,
+                        usable: !e
+                            .extra_stats
+                            .iter()
+                            .any(|(kind, value)| *kind == 37 && *value == 0),
                         condition_mask: Some(e.conditions(w.now)),
                     }
                 })
@@ -182,6 +194,7 @@ impl Directory {
             },
             tick: w.tick,
             time_ms: w.now,
+            elapsed_ms: self.tick * 50,
             position: p.pos,
             quest: p.quest.filter(|quest| p.known.contains(quest)),
             map: MapInfo {
@@ -201,6 +214,7 @@ impl Directory {
                 items: p.character.items.clone(),
                 inventory_revision: p.character.revision,
                 pirate_caves: p.character.pirate_caves,
+                snake_pits: p.character.dungeons[0],
                 ability_ready_ms: match (p.last_ability, p.character.items[1]) {
                     (Some(last), item) if item >= 0 => last
                         .checked_add(w.content.get(item as u16)?.cooldown_ms)

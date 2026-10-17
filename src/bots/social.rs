@@ -2,15 +2,18 @@ use super::*;
 use crate::content::PRIEST;
 use crate::world::view::VisibleObject;
 
-pub(super) fn companions(v: &PlayerView, profile: Profile) -> Vec<&VisibleObject> {
+pub(super) fn companions<'a>(
+    v: &'a PlayerView,
+    group: Option<&adventures::Adventure>,
+) -> Vec<&'a VisibleObject> {
     v.objects
         .iter()
         .filter(|o| {
             o.hp > 0
                 && !o.equipped.is_empty()
-                && PROFILES
-                    .iter()
-                    .any(|p| p.leader == profile.leader && p.name == o.name)
+                && group.is_some_and(|g| {
+                    !g.finished && g.members.iter().any(|m| Some(m.account) == o.account)
+                })
         })
         .collect()
 }

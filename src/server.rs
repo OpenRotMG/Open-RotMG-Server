@@ -162,6 +162,7 @@ pub struct App {
     pub behind_proxy: bool,
     pub shore_bots: bool,
     pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
+    pub society: Arc<Mutex<crate::bots::adventures::Society>>,
     pub requests: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,

@@ -62,6 +62,102 @@ fn envelope(reply: Value) -> String {
         "tool_calls":[{"type":"function","function":{"name":"reply_to_player","arguments":reply.to_string()}}]}}]}).to_string()
 }
 #[tokio::test]
+async fn autonomous_inference_failure_does_not_publish_an_offer_or_use_policy_speech() {
+    let s = stub(
+        StatusCode::TOO_MANY_REQUESTS,
+        "limited".into(),
+        Duration::ZERO,
+    )
+    .await;
+    let service = Service::new("test-key", &s.url, DEADLINE).unwrap();
+    let result=service.ask(&json!({"allowed_intents":["invite"],"message":"Invite the visible player to hunt for equipment"}),"autonomous-failure").await;
+    assert!(matches!(result, Err(Failure("rate_limited"))));
+    assert!(!service.automatic_available());
+    let mut society = adventures::Society::default();
+    assert!(society.outgoing(1, 0).is_none());
+    assert!(society.group(1, 0).is_none());
+    assert_eq!(s.calls.load(Ordering::SeqCst), 1);
+}
+#[tokio::test]
+async fn declarative_invitation_is_a_visible_failure_not_an_offer() {
+    let stub = stub(
+        StatusCode::OK,
+        envelope(json!({"intent":"invite","reply":"Ready, let us go."})),
+        Duration::ZERO,
+    )
+    .await;
+    let service = Service::new("test-key", &stub.url, DEADLINE).unwrap();
+    assert!(matches!(
+        service
+            .ask(
+                &json!({"speaker":{"name":"Aster"},"allowed_intents":["invite"],"message":"Initiate an equipment hunt"}),
+                "not-an-invitation"
+            )
+            .await,
+        Err(Failure("invalid_reply"))
+    ));
+}
+#[test]
+fn invitation_names_are_present_once_and_questions_are_required() {
+    assert!(invitation("Aster, want to hunt gear?", "Aster"));
+    for text in [
+        "Want to hunt gear?",
+        "Aster, Aster, want to hunt gear?",
+        "Aster, ready, let us go.",
+        "Biceps, want to hunt gear?",
+    ] {
+        assert!(!invitation(text, "Aster"));
+    }
+}
+#[test]
+fn an_outgoing_invitation_excludes_other_commitments_and_a_group_can_part() {
+    let c = content();
+    let mut v = view(&c);
+    peer(&mut v);
+    let mut b = Brain::new(PROFILES[1], &v);
+    let own = adventures::Member {
+        account: v.session.account,
+        name: "Biceps".into(),
+    };
+    let partner = adventures::Member {
+        account: 77,
+        name: "Aster".into(),
+    };
+    b.offered = Some(adventures::Offer {
+        from: own.clone(),
+        to: partner.clone(),
+        purpose: adventures::Purpose::Equipment,
+        until: v.elapsed_ms + 60000,
+        text: "Aster, want to hunt gear?".into(),
+        answer_started: false,
+    });
+    assert!(
+        !b.dialogue_allowed(&v, "SomeoneElse")
+            .contains(&Intent::Follow)
+    );
+    b.offered = None;
+    b.group = Some(adventures::Adventure {
+        members: vec![own, partner],
+        purpose: adventures::Purpose::Equipment,
+        until: v.elapsed_ms + 600000,
+        finished: false,
+    });
+    assert!(b.dialogue_allowed(&v, "Aster").contains(&Intent::Leave));
+    assert!(
+        !b.dialogue_allowed(&v, "SomeoneElse")
+            .contains(&Intent::Leave)
+    );
+}
+#[test]
+fn autonomous_allowance_reserves_capacity_for_interactive_requests() {
+    let service = Service::new("test-key", "http://127.0.0.1:1", DEADLINE).unwrap();
+    assert!(service.automatic_available());
+    service.budget.lock().unwrap().daily = 800;
+    assert!(!service.automatic_available());
+    assert_eq!(service.health()["automatic_remaining"], 0);
+    assert!(service.budget.lock().unwrap().daily < 1000);
+}
+#[tokio::test]
 async fn pinned_provider_uses_one_strict_request_and_real_json() {
     let stub = stub(
         StatusCode::OK,

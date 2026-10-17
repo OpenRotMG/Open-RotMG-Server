@@ -1,4 +1,43 @@
 use super::*;
+fn on_adventure(profile: Profile, v: &PlayerView) -> Brain {
+    let names = if ["Biceps", "Triceps", "BattleCrus"].contains(&profile.name) {
+        ["Biceps", "Triceps", "BattleCrus"]
+    } else {
+        ["ExElite", "Kadabu", "Pixl"]
+    };
+    let members = names
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let account = if name == profile.name {
+                v.session.account
+            } else {
+                v.objects
+                    .iter()
+                    .find(|p| p.name == name)
+                    .and_then(|p| p.account)
+                    .unwrap_or(i as i32 + 2)
+            };
+            adventures::Member {
+                account,
+                name: name.into(),
+            }
+        })
+        .collect();
+    let mut b = Brain::new(profile, v);
+    let purpose = if v.objects.iter().any(|o| o.kind == 0x718) {
+        adventures::Purpose::Speed
+    } else {
+        adventures::Purpose::Equipment
+    };
+    b.group = Some(adventures::Adventure {
+        members,
+        purpose,
+        until: v.elapsed_ms + 600000,
+        finished: false,
+    });
+    b
+}
 #[test]
 fn exploration_remains_available_when_a_higher_ranked_route_is_blocked() {
     let c = content();
@@ -8,11 +47,11 @@ fn exploration_remains_available_when_a_higher_ranked_route_is_blocked() {
     ally.equipped = vec![0xa97];
     v.objects.push(ally);
     assert_eq!(
-        Brain::new(PROFILES[2], &v).decide(&v, &c).unwrap().goal,
+        on_adventure(PROFILES[2], &v).decide(&v, &c).unwrap().goal,
         Goal::Follow(4)
     );
     v.tiles.retain(|t| t.x != 15);
-    let d = Brain::new(PROFILES[2], &v).decide(&v, &c).unwrap();
+    let d = on_adventure(PROFILES[2], &v).decide(&v, &c).unwrap();
     assert!(matches!(d.goal, Goal::Explore(x, _) if x < 15));
 }
 
@@ -192,6 +231,7 @@ pub(super) fn view(content: &Content) -> PlayerView {
         },
         tick: 100,
         time_ms: 5000,
+        elapsed_ms: 5000,
         position: Pos { x: 11.5, y: 11.5 },
         quest: None,
         map: MapInfo {
@@ -211,6 +251,7 @@ pub(super) fn view(content: &Content) -> PlayerView {
             items: class.equipment.clone(),
             inventory_revision: 0,
             pirate_caves: 0,
+            snake_pits: 0,
             ability_ready_ms: 0,
         },
         lifecycle: Lifecycle {
@@ -238,6 +279,7 @@ pub(super) fn view(content: &Content) -> PlayerView {
 pub(super) fn object(id: i32, kind: u16, x: f32, y: f32) -> VisibleObject {
     VisibleObject {
         id,
+        account: (kind == WIZARD || kind == crate::content::PRIEST).then_some(id),
         kind,
         name: String::new(),
         position: Pos { x, y },
@@ -247,6 +289,7 @@ pub(super) fn object(id: i32, kind: u16, x: f32, y: f32) -> VisibleObject {
         equipped: vec![],
         contents: vec![],
         blocks: false,
+        usable: true,
         condition_mask: None,
     }
 }
@@ -272,7 +315,7 @@ fn same_observation_produces_resource_recovery_and_companion_choices() {
     v.objects.push(ally);
     let goals: Vec<_> = PROFILES[..3]
         .iter()
-        .map(|p| Brain::new(*p, &v).decide(&v, &content).unwrap().goal)
+        .map(|p| on_adventure(*p, &v).decide(&v, &content).unwrap().goal)
         .collect();
     assert_eq!(goals, vec![Goal::Recover, Goal::Loot(3), Goal::Follow(4)]);
 }
@@ -425,7 +468,7 @@ fn held_resources_compatible_upgrades_and_margin_survive_seeded_replay() {
 fn only_addressed_native_chat_changes_companion_memory() {
     let content = content();
     let mut v = view(&content);
-    let mut brain = Brain::new(PROFILES[2], &v);
+    let mut brain = on_adventure(PROFILES[2], &v);
     let packet = |text: &str| {
         let mut w = crate::wire::Writer::new();
         w.utf("Human").i32(9).i32(0).u8(5).utf("").utf(text).utf("");
@@ -493,7 +536,7 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
             body: w.0,
         }
     };
-    let mut follower = Brain::new(PROFILES[2], &v);
+    let mut follower = on_adventure(PROFILES[2], &v);
     assert!(follower.decide(&v, &content).unwrap().chat.is_none());
     v.time_ms += 10000;
     v.tick += 200;
@@ -514,7 +557,7 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
     }
     let mut leader_view = view(&content);
     leader_view.session.player = 2;
-    let mut leader = Brain::new(PROFILES[1], &leader_view);
+    let mut leader = on_adventure(PROFILES[1], &leader_view);
     leader_view.time_ms += 10000;
     leader_view.tick += 200;
     leader
@@ -544,12 +587,12 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
         .unwrap();
     v.tick += 5;
     assert!(follower.decide(&v, &content).unwrap().journey.is_none());
-    let mut unsolicited = Brain::new(PROFILES[2], &v);
+    let mut unsolicited = on_adventure(PROFILES[2], &v);
     unsolicited
         .receive(packet("Biceps", 2, "", "tp here"), &v, true)
         .unwrap();
     assert!(unsolicited.regroup_call.is_none());
-    let mut occupied = Brain::new(PROFILES[2], &v);
+    let mut occupied = on_adventure(PROFILES[2], &v);
     occupied.requested_until = v.time_ms + 5000;
     occupied.companion = Some(9);
     occupied
@@ -565,14 +608,14 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
         occupied.decide(&v, &content).unwrap().journey,
         Some(Journey::Nexus)
     ));
-    let mut expired = Brain::new(PROFILES[2], &v);
+    let mut expired = on_adventure(PROFILES[2], &v);
     expired.requested_until = v.time_ms + 5000;
     expired
         .receive(packet("Biceps", 2, "", "nexus"), &v, true)
         .unwrap();
     v.time_ms += 5001;
     assert!(expired.decide(&v, &content).unwrap().journey.is_none());
-    let mut injured = Brain::new(PROFILES[2], &v);
+    let mut injured = on_adventure(PROFILES[2], &v);
     injured.requested_until = v.time_ms + 5000;
     injured
         .receive(packet("Biceps", 2, "", "nexus"), &v, true)
@@ -583,7 +626,7 @@ fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
         Some(Journey::Nexus)
     ));
     v.character.hp = 100;
-    let mut endangered = Brain::new(PROFILES[1], &leader_view);
+    let mut endangered = on_adventure(PROFILES[1], &leader_view);
     endangered.next_call = leader_view.time_ms;
     endangered
         .receive(packet("BattleCrus", 1, "", "tp?"), &leader_view, true)
@@ -604,7 +647,7 @@ fn nexus_call_reunites_the_whole_crew_not_only_the_requester() {
     let content = content();
     let v = view(&content);
     for profile in [PROFILES[0], PROFILES[2]] {
-        let mut follower = Brain::new(profile, &v);
+        let mut follower = on_adventure(profile, &v);
         let mut w = crate::wire::Writer::new();
         w.utf("Biceps")
             .i32(2)
@@ -634,7 +677,7 @@ fn nexus_call_reunites_the_whole_crew_not_only_the_requester() {
 fn observed_crew_can_teleport_and_nexus_arrivals_wait_for_peers() {
     let content = content();
     let mut v = view(&content);
-    let mut follower = Brain::new(PROFILES[2], &v);
+    let mut follower = on_adventure(PROFILES[2], &v);
     follower.requested_until = v.time_ms + 5000;
     let mut peer = object(2, WIZARD, 23.5, 11.5);
     peer.name = "Biceps".into();
@@ -663,7 +706,7 @@ fn observed_crew_can_teleport_and_nexus_arrivals_wait_for_peers() {
     ));
     v.map.name = "Nexus".into();
     v.objects.clear();
-    let mut arrived = Brain::new(PROFILES[2], &v);
+    let mut arrived = on_adventure(PROFILES[2], &v);
     let decision = arrived.decide(&v, &content).unwrap();
     assert_eq!(decision.goal, Goal::Wait);
     assert!(decision.journey.is_none() && decision.movement.is_none());
@@ -830,14 +873,14 @@ fn cohorts_choose_distinct_observed_leaders_not_an_uninvited_human() {
         v.objects.push(peer);
     }
     assert_eq!(
-        Brain::new(PROFILES[2], &v)
+        on_adventure(PROFILES[2], &v)
             .decide(&v, &content)
             .unwrap()
             .goal,
         Goal::Follow(2)
     );
     assert_eq!(
-        Brain::new(PROFILES[3], &v)
+        on_adventure(PROFILES[3], &v)
             .decide(&v, &content)
             .unwrap()
             .goal,
@@ -845,7 +888,7 @@ fn cohorts_choose_distinct_observed_leaders_not_an_uninvited_human() {
     );
     v.objects.retain(|o| o.name != "Biceps");
     assert!(matches!(
-        Brain::new(PROFILES[1], &v)
+        on_adventure(PROFILES[1], &v)
             .decide(&v, &content)
             .unwrap()
             .goal,
@@ -899,10 +942,10 @@ fn leader_waits_for_a_real_straggler_and_invitation_expires() {
     peer.name = "BattleCrus".into();
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.push(peer);
-    let d = Brain::new(PROFILES[1], &v).decide(&v, &content).unwrap();
+    let d = on_adventure(PROFILES[1], &v).decide(&v, &content).unwrap();
     assert_eq!(d.goal, Goal::Gather(2));
     assert!(d.movement.is_none());
-    let mut brain = Brain::new(PROFILES[0], &v);
+    let mut brain = on_adventure(PROFILES[0], &v);
     brain.companion = Some(2);
     brain.invitation_until = v.time_ms;
     brain.decide(&v, &content).unwrap();
@@ -917,7 +960,7 @@ fn regroup_requests_only_a_visible_healthy_peer_and_is_paced() {
     leader.name = "Biceps".into();
     leader.equipped = v.character.items[..4].to_vec();
     v.objects.push(leader);
-    let mut brain = Brain::new(PROFILES[2], &v);
+    let mut brain = on_adventure(PROFILES[2], &v);
     assert!(matches!(
         brain.decide(&v, &content).unwrap().journey,
         Some(Journey::Regroup(2))
@@ -947,13 +990,13 @@ fn earned_portal_call_and_observed_cave_exit_drive_normal_transfers() {
         v.objects.push(member);
     }
     v.objects.push(object(4, 0x717, 12.5, 11.5));
-    let leader = Brain::new(PROFILES[1], &v).decide(&v, &content).unwrap();
+    let leader = on_adventure(PROFILES[1], &v).decide(&v, &content).unwrap();
     assert_eq!(leader.goal, Goal::Portal(4));
     assert_eq!(leader.chat, Some("pc here"));
     assert!(matches!(leader.journey, Some(Journey::Portal(4))));
     v.objects[0].name = "Biceps".into();
     v.objects.remove(1);
-    let mut follower = Brain::new(PROFILES[2], &v);
+    let mut follower = on_adventure(PROFILES[2], &v);
     follower.decide(&v, &content).unwrap();
     let mut out = crate::wire::Writer::new();
     out.utf("Biceps")
@@ -982,7 +1025,7 @@ fn earned_portal_call_and_observed_cave_exit_drive_normal_transfers() {
     ));
     v.map.name = "Pirate Cave".into();
     v.objects.clear();
-    let mut cave = Brain::new(PROFILES[2], &v);
+    let mut cave = on_adventure(PROFILES[2], &v);
     assert!(cave.decide(&v, &content).unwrap().journey.is_none());
     v.tick += 5;
     v.time_ms += 250;
@@ -1042,7 +1085,7 @@ fn crews_search_recent_observed_contacts_without_teleporting_to_hidden_peers() {
     peer.name = "Biceps".into();
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.push(peer);
-    let mut follower = Brain::new(PROFILES[2], &v);
+    let mut follower = on_adventure(PROFILES[2], &v);
     follower.decide(&v, &content).unwrap();
     v.objects.clear();
     v.tick += 5;
@@ -1054,15 +1097,15 @@ fn crews_search_recent_observed_contacts_without_teleporting_to_hidden_peers() {
     v.tick += 300;
     v.time_ms += 15000;
     assert!(matches!(
-        follower.decide(&v, &content).unwrap().goal,
-        Goal::Explore(..)
+        follower.decide(&v, &content).unwrap().journey,
+        Some(Journey::Nexus)
     ));
 
     let mut peer = object(2, WIZARD, 19.5, 11.5);
     peer.name = "BattleCrus".into();
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.push(peer);
-    let mut leader = Brain::new(PROFILES[1], &v);
+    let mut leader = on_adventure(PROFILES[1], &v);
     leader.decide(&v, &content).unwrap();
     v.objects.clear();
     v.position.x = 25.5;
@@ -1094,7 +1137,7 @@ fn equipped_crews_accept_snake_pit_but_starters_do_not() {
         v.objects.push(peer);
     }
     assert!(!matches!(
-        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        on_adventure(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
         Goal::Portal(2)
     ));
     v.character.level = 20;
@@ -1120,13 +1163,13 @@ fn equipped_crews_accept_snake_pit_but_starters_do_not() {
         peer.level = Some(20);
     }
     assert_eq!(
-        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        on_adventure(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
         Goal::Portal(2)
     );
     assert_eq!(c.objects[&2714].tier, Some(3));
     v.objects[1].equipped[0] = 2714;
     assert!(!matches!(
-        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        on_adventure(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
         Goal::Portal(2)
     ));
 }
@@ -1505,7 +1548,7 @@ fn a_visible_crews_destination_outweighs_the_followers_different_quest_marker() 
     let target = object(3, 0x609, 150.5, 150.5);
     v.objects.extend([leader, target]);
     v.quest = Some(3);
-    let mut brain = Brain::new(PROFILES[0], &v);
+    let mut brain = on_adventure(PROFILES[0], &v);
     assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Follow(2));
     v.objects.remove(0);
     v.tick += 300;
@@ -1525,7 +1568,7 @@ fn a_leader_gathers_an_observed_straggler_before_pursuing_another_distant_quest(
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.extend([peer, object(3, 0x609, 150.5, 150.5)]);
     v.quest = Some(3);
-    let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
+    let d = on_adventure(PROFILES[1], &v).decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Gather(2));
     assert!(d.movement.is_none());
 }
@@ -1737,7 +1780,7 @@ fn admitted_dungeon_intentions_beat_optional_nearby_fighting() {
         v.objects.push(peer);
     }
     assert_eq!(
-        Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
+        on_adventure(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
         Goal::Portal(2)
     );
 }
