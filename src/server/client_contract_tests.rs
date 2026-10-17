@@ -355,11 +355,16 @@ async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
     a.world
         .call(move |w| {
             let pos = w.players[&id].pos;
+            let far_pos = crate::world::Pos {
+                x: pos.x + 20.,
+                y: pos.y,
+            };
+            assert!(w.walkable(far_pos));
             for (id, output) in [id, far_id].into_iter().zip(outputs) {
                 w.players.get_mut(&id).unwrap().tx = Some(output);
             }
             let p = w.players.get_mut(&far_id).unwrap();
-            p.pos.x = pos.x + 100.;
+            p.pos = far_pos;
             p.known.clear();
             Ok(())
         })
