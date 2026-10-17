@@ -90,6 +90,21 @@ fn arachna_shields_then_builds_one_owned_web_and_fires_selected_patterns() {
     assert!(spokes.iter().all(|id| w.entities[id].conditions(w.now)
         & crate::condition::bit(crate::condition::INVULNERABLE)
         != 0));
+    let mut source_timer = 0;
+    let mut source_shots = Vec::new();
+    for now in (0..1000).step_by(50) {
+        if source_timer <= 0 {
+            source_shots.push(now);
+            source_timer = 5;
+        } else {
+            source_timer -= 50;
+        }
+    }
+    assert!(
+        source_shots
+            .windows(2)
+            .all(|t| t[1] - t[0] == spider::profile(0x937).interval)
+    );
     for id in &spokes {
         let shots = spider::attacks(w.entities[id].kind, 0., 0);
         let notices: Vec<_> = shots

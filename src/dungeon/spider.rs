@@ -152,7 +152,8 @@ pub fn profile(kind: u16) -> Profile {
             10.,
         ),
         BOSS => (Motion::Wander, 12., 1000, 20.),
-        0x937..=0x93f => (Motion::Stationary, 0., 50, 30.),
+        // The source Shoot checks a positive 5ms timer before subtracting its 50ms tick: one volley every two ticks.
+        0x937..=0x93f => (Motion::Stationary, 0., 100, 30.),
         _ => panic!("unregistered Spider Den actor {kind:#x}"),
     };
     Profile {

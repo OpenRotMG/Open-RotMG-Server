@@ -287,6 +287,7 @@ fn selected_private_boss_rewards_reach_every_eligible_player_including_the_ninth
         assert!(participants.iter().all(|player| {
             w.players[player].character.dungeons.iter().sum::<u64>()
                 + w.players[player].character.abysses
+                + w.players[player].character.spider_dens
                 == 1
         }));
     }
