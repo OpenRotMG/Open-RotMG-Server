@@ -55,6 +55,7 @@ mod midlands;
 #[cfg(test)]
 mod midlands_tests;
 mod named_births;
+mod names;
 mod ocean;
 mod ocean_setpiece;
 #[cfg(test)]

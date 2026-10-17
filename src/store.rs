@@ -11,6 +11,8 @@ mod account_actions;
 mod accounts;
 mod character_slots;
 mod consumables;
+#[cfg(test)]
+mod name_choice_tests;
 pub(crate) use character_slots::SlotReplay;
 #[cfg(all(test, unix))]
 mod crash_tests;
@@ -34,6 +36,12 @@ pub use purchases::Purchase;
 mod updates;
 pub use social::AccountLists;
 pub use updates::{UpdateFeed, UpdatePost, UpdateSnapshot};
+
+#[derive(Debug)]
+pub(crate) enum NameChoice {
+    Rejected(&'static str),
+    Committed { balance: i32 },
+}
 
 #[derive(Debug)]
 pub struct InvalidCredentials;

@@ -90,23 +90,38 @@ fn guest(db: &Connection, guid: &str, create: bool, authentication: bool) -> Res
 }
 impl Store {
     pub async fn choose_name(&self, account: i32, name: String) -> Result<()> {
-        ensure!(
-            (3..=10).contains(&name.len()) && name.bytes().all(|c| c.is_ascii_alphabetic()),
-            "names must be 3–10 letters"
-        );
+        match self.name_choice(account, name, false).await? {
+            NameChoice::Committed { .. } => Ok(()),
+            NameChoice::Rejected(reason) => anyhow::bail!(reason),
+        }
+    }
+    pub(crate) async fn name_choice(
+        &self,
+        account: i32,
+        name: String,
+        allow_paid: bool,
+    ) -> Result<NameChoice> {
+        if !(3..=10).contains(&name.len()) || !name.bytes().all(|c| c.is_ascii_alphabetic()) {
+            return Ok(NameChoice::Rejected("names must be 3–10 letters"));
+        }
         self.call(move |db| {
-            let tx = db.transaction()?;
-            let (current, registered): (String, bool) = tx.query_row(
-                "SELECT name,EXISTS(SELECT 1 FROM credentials WHERE account=accounts.id) FROM accounts WHERE id=?1",
-                [account], |r| Ok((r.get(0)?, r.get(1)?)),
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let (current, registered, balance): (String, bool, i32) = tx.query_row(
+                "SELECT name,EXISTS(SELECT 1 FROM credentials WHERE account=accounts.id),credits FROM accounts WHERE id=?1",
+                [account], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )?;
-            ensure!(registered, "register before choosing a name");
-            ensure!(!name_chosen(account, &current), "paid name changes are not implemented");
+            ensure!(balance >= 0, "invalid account Gold balance");
+            if !registered { return Ok(NameChoice::Rejected("register before choosing a name")); }
+            let price = if name_chosen(account, &current) { 1000 } else { 0 };
+            if price > 0 && !allow_paid { return Ok(NameChoice::Rejected("Paid name changes must be made in game.")); }
             let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE name=?1 COLLATE NOCASE)", [&name], |r| r.get(0))?;
-            ensure!(!taken, "name already taken");
-            tx.execute("UPDATE accounts SET name=?2 WHERE id=?1", params![account,name])?;
+            if taken { return Ok(NameChoice::Rejected("name already taken")); }
+            if balance < price { return Ok(NameChoice::Rejected("Not enough Gold.")); }
+            let balance = balance - price;
+            ensure!(tx.execute("UPDATE accounts SET name=?2,credits=?3 WHERE id=?1", params![account,name,balance])? == 1, "name choice account missing");
             tx.commit()?;
-            Ok(())
+            tracing::info!(account, name, price, balance, "account name choice committed");
+            Ok(NameChoice::Committed { balance })
         }).await
     }
     pub(super) async fn guest(&self, guid: String, create: bool) -> Result<i32> {

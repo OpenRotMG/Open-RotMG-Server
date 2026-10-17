@@ -4,6 +4,10 @@ mod character_slot_tests;
 mod client_contract_tests;
 mod input;
 #[cfg(test)]
+mod name_choice_boundaries_tests;
+#[cfg(test)]
+mod name_choice_tests;
+#[cfg(test)]
 mod purchase_tests;
 #[cfg(test)]
 mod queue_tests;
@@ -1372,28 +1376,46 @@ async fn handle(
             let name = r.utf()?;
             r.done()?;
             let account = account.as_ref().context("name before HELLO")?.id;
-            if let Err(e) = a.store.choose_name(account, name.clone()).await {
-                tracing::warn!(account, error=%e, "name choice rejected");
-                let mut o = Writer::new();
-                o.u8(0).utf(&e.to_string());
-                enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
-                return Ok(());
-            }
-            if let Some(id) = player {
-                let id = *id;
+            let _gold = a.gold_updates.lock().await;
+            let reservation = if let Some(id) = *player {
+                match a
+                    .world
+                    .for_player(id)
+                    .call(move |w| w.begin_name_choice(id, account))
+                    .await
+                {
+                    Ok(plan) => Some((id, plan)),
+                    Err(error) => {
+                        let mut o = Writer::new();
+                        o.u8(0).utf(&error.to_string());
+                        enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
+                        return Ok(());
+                    }
+                }
+            } else {
+                None
+            };
+            let result = a
+                .store
+                .name_choice(account, name.clone(), reservation.is_some())
+                .await;
+            let rejection = if let Some((id, plan)) = reservation {
                 a.world
-                    .call(move |w| {
-                        w.players
-                            .get_mut(&id)
-                            .context("player missing")?
-                            .character
-                            .name = name;
-                        Ok(())
-                    })
-                    .await?;
+                    .for_player(id)
+                    .call(move |w| w.finish_name_choice(plan, name, result))
+                    .await?
+            } else {
+                match result? {
+                    crate::store::NameChoice::Rejected(reason) => Some(reason),
+                    crate::store::NameChoice::Committed { .. } => None,
+                }
+            };
+            if let Some(reason) = rejection {
+                tracing::info!(account, reason, "name choice rejected without charge");
             }
             let mut o = Writer::new();
-            o.u8(1).utf("");
+            o.u8(u8::from(rejection.is_none()))
+                .utf(rejection.unwrap_or(""));
             enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
         }
         42 | 3 => {
