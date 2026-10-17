@@ -2744,6 +2744,10 @@ impl World {
     }
     #[tracing::instrument(skip_all, fields(player=plan.player, account=plan.account, character=plan.character, expected_revision=plan.revision))]
     pub fn finish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
+        ensure!(
+            plan.unlock.is_none(),
+            "portal unlock requires its directory commit"
+        );
         let player = plan.player;
         let source = (plan.character, plan.revision);
         let companion = plan.companion.clone();
@@ -2758,10 +2762,6 @@ impl World {
         result
     }
     fn publish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
-        ensure!(
-            plan.unlock.is_none(),
-            "portal unlock requires its directory commit"
-        );
         let revision = result?;
         let p = self
             .players
