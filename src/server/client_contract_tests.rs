@@ -321,6 +321,255 @@ async fn loaded(a: &App, guid: &str) -> Session {
 }
 
 #[tokio::test]
+async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    a.world = a.world.in_world(-3);
+    let mut remote = loaded(&a, "yell-remote").await;
+    let (remote_tx, mut remote_rx) = mpsc::channel(64);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let remote_output = crate::world::Output {
+        packets: remote_tx.clone(),
+        lost: lost.clone(),
+    };
+    let remote_id = remote.player.unwrap();
+    a.world
+        .call(move |w| {
+            w.players.get_mut(&remote_id).unwrap().tx = Some(remote_output);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    a.world = a.world.in_world(-2);
+    let mut sender = loaded(&a, "yell-sender").await;
+    let far = loaded(&a, "yell-far").await;
+    let id = sender.player.unwrap();
+    let far_id = far.player.unwrap();
+    let account = sender.account.as_ref().unwrap().id;
+    let (tx, mut rx) = mpsc::channel(64);
+    let (far_tx, mut far_rx) = mpsc::channel(64);
+    let outputs = [tx.clone(), far_tx].map(|packets| crate::world::Output {
+        packets,
+        lost: lost.clone(),
+    });
+    a.world
+        .call(move |w| {
+            let pos = w.players[&id].pos;
+            let far_pos = crate::world::Pos {
+                x: pos.x + 20.,
+                y: pos.y,
+            };
+            assert!(w.walkable(far_pos));
+            for (id, output) in [id, far_id].into_iter().zip(outputs) {
+                w.players.get_mut(&id).unwrap().tx = Some(output);
+            }
+            let p = w.players.get_mut(&far_id).unwrap();
+            p.pos = far_pos;
+            p.known.clear();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let packet = |text: &str| {
+        let mut body = Writer::new();
+        body.utf(text);
+        Packet {
+            id: wire::PLAYER_TEXT,
+            body: body.0,
+        }
+    };
+    let check = |actual: Packet, expected: &Packet| {
+        assert_eq!(
+            (actual.id, actual.body),
+            (expected.id, expected.body.clone())
+        )
+    };
+    let now = std::time::Instant::now();
+    for (i, (input, body)) in [
+        (
+            " /YeLl  /yell <Guest1>: café  ".to_string(),
+            "/yell <Guest1>: café".to_string(),
+        ),
+        (
+            "  normal /yell hi  ".to_string(),
+            "  normal /yell hi  ".to_string(),
+        ),
+        (format!("/yell {}", "é".repeat(122)), "é".repeat(122)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        handle(
+            &mut a,
+            packet(&input),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(i as u64 * 2),
+        )
+        .await
+        .unwrap();
+        let mut expected = Writer::new();
+        expected
+            .utf("Guest2")
+            .i32(id)
+            .i32(0)
+            .u8(5)
+            .utf("")
+            .utf(&body)
+            .utf("");
+        let expected = Packet {
+            id: wire::TEXT,
+            body: expected.0,
+        };
+        check(rx.try_recv().unwrap(), &expected);
+        check(far_rx.try_recv().unwrap(), &expected);
+        assert!(
+            rx.try_recv().is_err() && far_rx.try_recv().is_err() && remote_rx.try_recv().is_err()
+        );
+    }
+    for (i, (input, error)) in [
+        ("/yell".to_string(), "Usage: /yell <message>"),
+        ("/yell   ".to_string(), "Usage: /yell <message>"),
+        ("/yelling hi".to_string(), "Unknown chat command."),
+        (
+            "/yell hello\n".to_string(),
+            "Chat message contains control characters.",
+        ),
+        (
+            "/yell \u{202e}spoof".to_string(),
+            "Chat message contains control characters.",
+        ),
+        (
+            format!("/yell {}", "a".repeat(123)),
+            "Chat messages are limited to 128 characters.",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        handle(
+            &mut a,
+            packet(&input),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(20 + i as u64 * 2),
+        )
+        .await
+        .unwrap();
+        check(rx.try_recv().unwrap(), &crate::world::chat_error(error));
+        assert!(
+            rx.try_recv().is_err() && far_rx.try_recv().is_err() && remote_rx.try_recv().is_err()
+        );
+    }
+    a.world = a.world.for_player(remote_id);
+    handle(
+        &mut a,
+        packet("/yell no relay"),
+        &mut remote,
+        &remote_tx,
+        &lost,
+        now,
+    )
+    .await
+    .unwrap();
+    check(
+        remote_rx.try_recv().unwrap(),
+        &crate::world::chat_error("You can only /yell in the Nexus."),
+    );
+    assert!(rx.try_recv().is_err() && far_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
+    a.world = a.world.for_player(id);
+    for mode in 0..3 {
+        a.world
+            .call(move |w| {
+                let ignored = if mode == 0 {
+                    std::collections::BTreeSet::from([account])
+                } else {
+                    std::collections::BTreeSet::new()
+                };
+                w.sync_account_lists(far_id, Some([Default::default(), ignored]))?;
+                w.players.get_mut(&far_id).unwrap().departing = mode == 1;
+                w.players.get_mut(&id).unwrap().departing = mode == 2;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            assert_eq!(far_rx.try_recv().unwrap().id, wire::ACCOUNT_LIST);
+        }
+        handle(
+            &mut a,
+            packet("/yell filtered"),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(40 + mode * 2),
+        )
+        .await
+        .unwrap();
+        if mode < 2 {
+            let reply = rx.try_recv().unwrap();
+            assert_eq!(reply.id, wire::TEXT);
+            let mut r = Reader::new(&reply.body);
+            assert_eq!(r.utf().unwrap(), "Guest2");
+        }
+        assert!(
+            rx.try_recv().is_err() && far_rx.try_recv().is_err() && remote_rx.try_recv().is_err()
+        );
+    }
+    a.world
+        .call(move |w| {
+            w.players.get_mut(&id).unwrap().departing = false;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for input in ["/who", "ordinary", "/yell allowed", "/yell throttled"] {
+        handle(
+            &mut a,
+            packet(input),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(100),
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(std::iter::from_fn(|| far_rx.try_recv().ok()).count(), 2);
+    for _ in 0..3 {
+        assert_eq!(rx.try_recv().unwrap().id, wire::TEXT);
+    }
+    check(
+        rx.try_recv().unwrap(),
+        &crate::world::chat_error("Chat rate limit: wait one second before sending again."),
+    );
+    let mut malformed = packet("/yell bad packet");
+    malformed.body.push(0);
+    assert!(
+        handle(&mut a, malformed, &mut sender, &tx, &lost, now)
+            .await
+            .is_err()
+    );
+    sender.player = None;
+    assert!(
+        handle(
+            &mut a,
+            packet("/yell unloaded"),
+            &mut sender,
+            &tx,
+            &lost,
+            now
+        )
+        .await
+        .is_err()
+    );
+    assert!(rx.try_recv().is_err() && far_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn named_trade_player_text_matches_native_requests_and_reciprocal_starts() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);

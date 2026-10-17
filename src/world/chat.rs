@@ -168,6 +168,7 @@ impl Directory {
         let who = command.eq_ignore_ascii_case("/who");
         let teleport = command.eq_ignore_ascii_case("/teleport");
         let trade = command.eq_ignore_ascii_case("/trade");
+        let yell = command.eq_ignore_ascii_case("/yell");
         let tell = command.eq_ignore_ascii_case("/tell") || command.eq_ignore_ascii_case("/t");
         let guild_chat =
             command.eq_ignore_ascii_case("/g") || command.eq_ignore_ascii_case("/guild");
@@ -177,6 +178,7 @@ impl Directory {
                 || who
                 || teleport
                 || trade
+                || yell
                 || guild_chat
                 || trimmed.eq_ignore_ascii_case("/pause"),
             "Unknown chat command."
@@ -317,9 +319,21 @@ impl Directory {
             );
             return Ok(());
         }
-        let packet = text_packet(&name, id, 5, &text);
+        let text = if yell {
+            // Period sources establish the Nexus audience, not a cross-world relay.
+            ensure!(
+                self.resolve(Target::World(-2))?.players.contains_key(&id),
+                "You can only /yell in the Nexus."
+            );
+            let message = rest.trim();
+            ensure!(!message.is_empty(), "Usage: /yell <message>");
+            message
+        } else {
+            &text
+        };
+        let packet = text_packet(&name, id, 5, text);
         let world = self.resolve(Target::Player(id))?;
-        world.ocean_response(id, &text)?;
+        world.ocean_response(id, text)?;
         let mut recipients = 0;
         for player in world
             .players
