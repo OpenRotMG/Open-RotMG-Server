@@ -85,6 +85,9 @@ pub fn profile(kind: u16) -> Option<Profile> {
         return Some(fauna::profile(kind));
     }
     use Motion::*;
+    if crate::dungeon::spider::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::spider::profile(kind));
+    }
     let chase = |stop| Chase { sight: 10., stop };
     let (motion, speed, interval, range) = match kind {
         0x172 | 0x173 | 0x175..=0x179 => (Stationary, 0., 0, 0.),
@@ -342,6 +345,9 @@ pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
     }
 }
 pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
+    if kind == crate::dungeon::spider::BOSS && elapsed < 2000 {
+        return (Motion::Stationary, 0.);
+    }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return crate::dungeon::abyss::movement(kind, elapsed);
     }

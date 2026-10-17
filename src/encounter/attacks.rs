@@ -173,6 +173,36 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
     let mut state = 0;
     let mut age = elapsed;
     let attacks = match kind {
+        0x21b => vec![],
+        0x21c => vec![fan(0, 1, 0., 1000, 10.).predict(1.)],
+        0x21d..=0x21f => vec![fan(0, 1, 0., 500, 10.).predict(1.)],
+        0x220 => vec![fan(0, 3, 20., 500, 10.)],
+        0x936 => {
+            state = u64::from(elapsed >= 2000);
+            age = elapsed.saturating_sub(2000);
+            vec![
+                ring(0, 12, 1000, 3000.)
+                    .fixed(22.5f32.to_radians())
+                    .enabled(state == 1),
+                fan(0, 1, 0., 1000, 10.).predict(1.).enabled(state == 1),
+                fan(1, 1, 0., 2000, 10.).predict(1.).enabled(state == 1),
+            ]
+        }
+        0x937..=0x93f => {
+            let center: f32 = match kind {
+                0x937 | 0x93d => 180.,
+                0x938 => 240.,
+                0x939 | 0x93e => 300.,
+                0x93a => 360.,
+                0x93b | 0x93f => 60.,
+                0x93c => 120.,
+                _ => unreachable!(),
+            };
+            // Equivalent wrapped angles keep all three threads in one native volley/ACK.
+            vec![
+                fan(0, 3, 60., crate::dungeon::spider::WEB_INTERVAL, 0.).fixed(center.to_radians()),
+            ]
+        }
         0x954 => vec![fan(0, 1, 0., 2000, 8.).choice(1)],
         0x60c => vec![fan(0, 1, 0., 5000, 10.), fan(1, 1, 0., 400, 5.)],
         0x953 => vec![fan(0, 1, 0., 1000, 8.), grenade(2., 12, 2500, 5.)],

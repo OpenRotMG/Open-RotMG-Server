@@ -78,6 +78,9 @@ mod realm_quests_tests;
 mod realm_setpieces;
 #[cfg(test)]
 mod realm_setpieces_tests;
+mod spider;
+#[cfg(test)]
+mod spider_tests;
 #[cfg(test)]
 mod xp_booster_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
@@ -246,7 +249,7 @@ pub struct Player {
     mp_fraction: f32,
     pub pending: bool,
     pub experience_queued: i32,
-    clears_queued: [u64; 6],
+    clears_queued: [u64; crate::dungeon::DUNGEONS.len()],
     pub(crate) progress_started: bool,
     pub death_pending: bool,
     persistence_failure: Option<String>,
@@ -307,7 +310,7 @@ impl Player {
         }
     }
     fn progress_queued(&self) -> bool {
-        self.experience_queued != 0 || self.clears_queued != [0; 6]
+        self.experience_queued != 0 || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
     }
     fn active(&self) -> bool {
         self.character.alive
@@ -763,6 +766,12 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
+            } else if template == "spider-den" {
+                let seed = match self.prepared_seed {
+                    Some(seed) => seed ^ self.next_world as u64,
+                    None => rand::random(),
+                };
+                Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
             } else if template == "snake-pit" {
                 Arc::new(crate::dungeon::snake_pit(&self.content, rand::random())?)
             } else {
@@ -1315,6 +1324,7 @@ impl World {
                         hp: o.hp,
                         size: o.size,
                         condition: crate::dungeon::abyss::initial_condition(kind)
+                            | crate::dungeon::spider::initial_condition(kind)
                             | if o.stasis_immune {
                                 crate::condition::bit(crate::condition::STASIS_IMMUNE)
                             } else {
@@ -1537,6 +1547,7 @@ impl World {
                 hp: definition.hp,
                 size: definition.size,
                 condition: crate::dungeon::abyss::initial_condition(kind)
+                    | crate::dungeon::spider::initial_condition(kind)
                     | (if kind == 0x91a {
                         crate::condition::bit(crate::condition::INVULNERABLE)
                     } else {
@@ -1735,7 +1746,7 @@ impl World {
                 mp_fraction: 0.,
                 pending: false,
                 experience_queued: 0,
-                clears_queued: [0; 6],
+                clears_queued: [0; crate::dungeon::DUNGEONS.len()],
                 progress_started: false,
                 death_pending: false,
                 persistence_failure: None,
@@ -3230,6 +3241,7 @@ impl World {
                     .chain(snapshot.dungeons.iter_mut())
                     .chain(std::iter::once(&mut snapshot.abysses))
                     .chain(std::iter::once(&mut snapshot.trenches))
+                    .chain(std::iter::once(&mut snapshot.spider_dens))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3244,7 +3256,7 @@ impl World {
             }
             snapshot.alive = true;
             p.experience_queued = 0;
-            p.clears_queued = [0; 6];
+            p.clears_queued = [0; crate::dungeon::DUNGEONS.len()];
             p.pending = true;
             p.progress_started = true;
             plans.push((*id, snapshot));
@@ -3266,7 +3278,8 @@ impl World {
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
             || snapshot.abysses > p.character.abysses
-            || snapshot.trenches > p.character.trenches;
+            || snapshot.trenches > p.character.trenches
+            || snapshot.spider_dens > p.character.spider_dens;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
@@ -3277,6 +3290,7 @@ impl World {
         p.character.dungeons = snapshot.dungeons;
         p.character.abysses = snapshot.abysses;
         p.character.trenches = snapshot.trenches;
+        p.character.spider_dens = snapshot.spider_dens;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -3614,6 +3628,9 @@ impl World {
                 "dungeon clear and exit staged for durable commit"
             );
         }
+        if defeated.kind == crate::dungeon::spider::BOSS {
+            return self.spider_loot(defeated);
+        }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if matches!(defeated.kind, 0xd56 | 0xd59) {
@@ -3818,6 +3835,7 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 0x617 | 0x61a | 0x6d8 => 12.,
                 0x91a => 7.,
+                crate::dungeon::spider::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
                 _ => 20.,
@@ -4835,6 +4853,7 @@ mod tests {
             dungeons: [0; 3],
             abysses: 0,
             trenches: 0,
+            spider_dens: 0,
         }
     }
     pub(super) fn receive(

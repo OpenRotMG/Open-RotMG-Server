@@ -13,6 +13,11 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        crate::dungeon::spider::BOSS => {
+            &[(0.2, Item(0xa16)), (0.2, Item(0x708)), (0.2, Item(0x709))]
+        }
+        0x21d..=0x220 => &[(0.2, Item(0x707))],
+        0x21b | 0x21c | 0x937..=0x93f => &[],
         crate::dungeon::trench::HERMIT => {
             &[(0.1, Item(0xa34)), (0.1, Item(0xa4c)), (0.004, Item(0xc08))]
         }
@@ -430,6 +435,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | 0xd90
                 | 0xd78
                 | 0xd79
+                | crate::dungeon::spider::BOSS
                 | crate::dungeon::abyss::MALPHAS
                 | crate::dungeon::abyss::IDOL
                 | crate::endgame::ORYX

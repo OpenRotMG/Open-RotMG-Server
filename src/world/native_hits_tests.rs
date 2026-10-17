@@ -135,18 +135,69 @@ fn reported_fatal_hit_uses_existing_permanent_death_state_and_conditions_engine(
 }
 
 #[test]
-fn native_shoot_ack_backlog_and_timeout_keep_existing_transport_bounds() {
+fn native_shoot_ack_bounds_both_empty_entries_and_wide_snapshot_vectors() {
+    let limit = native_hits::MAX_PENDING_SHOOT_UNITS;
     let (mut w, id, _rx, loss) = native();
     let p = w.players.get_mut(&id).unwrap();
-    for _ in 0..64 {
+    for _ in 0..limit {
         assert!(native_hits::expect_shoot_ack(p, vec![]));
     }
     assert!(!native_hits::expect_shoot_ack(p, vec![]));
     assert!(*loss.borrow());
-    assert_eq!(p.shoot_acks.len(), 64);
+    assert_eq!(p.shoot_acks.len(), limit);
+
+    let (mut w, id, _rx, loss) = native();
+    offer(&mut w, id, None, 3, 20);
+    let shot = w.bullets.last().unwrap().clone();
+    let p = w.players.get_mut(&id).unwrap();
     p.shoot_acks.clear();
-    p.shoot_acks
-        .push_back((Instant::now() - std::time::Duration::from_secs(6), vec![]));
+    assert!(native_hits::expect_shoot_ack(p, vec![shot; limit - 1]));
+    assert!(!*loss.borrow());
+    assert!(!native_hits::expect_shoot_ack(p, vec![]));
+    assert!(*loss.borrow());
+    assert_eq!(p.shoot_acks.len(), 1);
+}
+
+#[test]
+fn dense_native_backlog_drains_and_retains_exactly_once_hit_authority() {
+    let (mut w, id, _rx, loss) = native();
+    offer(&mut w, id, None, 3, 20);
+    let shot = w.bullets.last().unwrap().clone();
+    w.players.get_mut(&id).unwrap().shoot_acks.clear();
+    for _ in 0..450 {
+        assert!(native_hits::expect_shoot_ack(
+            w.players.get_mut(&id).unwrap(),
+            vec![shot.clone(); 3]
+        ));
+    }
+    assert!(!*loss.borrow());
+    let hp = w.players[&id].character.hp;
+    w.native_player_hit(id, shot.owner, shot.id).unwrap();
+    assert_eq!(w.players[&id].character.hp, hp);
+    for _ in 0..450 {
+        w.acknowledge_shoot(id, 100).unwrap();
+    }
+    assert!(w.players[&id].shoot_acks.is_empty());
+    assert!(w.acknowledge_shoot(id, 100).is_err());
+    w.native_player_hit(id, shot.owner, shot.id).unwrap();
+    w.native_player_hit(id, shot.owner, shot.id).unwrap();
+    assert_eq!(w.players[&id].character.hp, hp - 20);
+    assert!(!*loss.borrow());
+}
+
+#[test]
+fn native_shoot_ack_five_second_timeout_remains_fail_closed() {
+    let (mut w, id, _rx, loss) = native();
+    offer(&mut w, id, None, 3, 20);
+    w.players
+        .get_mut(&id)
+        .unwrap()
+        .shoot_acks
+        .front_mut()
+        .unwrap()
+        .0 = Instant::now() - std::time::Duration::from_secs(6);
+    assert!(!*loss.borrow());
     w.expire_native_projectiles();
     assert!(*loss.borrow());
+    assert!(w.players[&id].departing);
 }
