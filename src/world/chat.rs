@@ -166,6 +166,7 @@ impl Directory {
             .split_once(char::is_whitespace)
             .unwrap_or((trimmed, ""));
         let who = command.eq_ignore_ascii_case("/who");
+        let teleport = command.eq_ignore_ascii_case("/teleport");
         let tell = command.eq_ignore_ascii_case("/tell") || command.eq_ignore_ascii_case("/t");
         let guild_chat =
             command.eq_ignore_ascii_case("/g") || command.eq_ignore_ascii_case("/guild");
@@ -173,6 +174,7 @@ impl Directory {
             !trimmed.starts_with('/')
                 || tell
                 || who
+                || teleport
                 || guild_chat
                 || trimmed.eq_ignore_ascii_case("/pause"),
             "Unknown chat command."
@@ -208,6 +210,22 @@ impl Directory {
             "Choose a name before using /tell."
         );
         self.chat_permit(id, now)?;
+        if teleport {
+            let name = rest.trim();
+            ensure!(
+                !name.is_empty() && !name.contains(char::is_whitespace),
+                "Usage: /teleport <player name>"
+            );
+            let target = self
+                .resolve(Target::Player(id))?
+                .players
+                .iter()
+                .find(|(_, p)| p.character.name.eq_ignore_ascii_case(name))
+                .map(|(id, _)| *id)
+                .context("Player not found in this world.")?;
+            self.teleport(id, target, now)?;
+            return Ok(());
+        }
         if who {
             ensure!(rest.trim().is_empty(), "Usage: /who");
             // Period /who lists the current realm, not the cross-world tell/guild audience.

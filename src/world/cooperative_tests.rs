@@ -23,6 +23,96 @@ fn setup() -> (
     (d, a, b, ar, br)
 }
 #[test]
+fn named_teleport_preserves_native_guards_and_shared_chat_throttle() {
+    let (mut d, a, b, _ar, _br) = setup();
+    let destination = d.worlds[&-2].players[&b].pos;
+    let start = d.worlds[&-2].players[&a].pos;
+    let now = Instant::now();
+    for (mode, expected) in [
+        "Cannot teleport while paused.",
+        "Cannot teleport to a paused player.",
+        "Teleport target is busy, dead, departing or quarantined.",
+        "Teleport target is busy, dead, departing or quarantined.",
+        "Teleport target is busy, dead, departing or quarantined.",
+        "Teleport target has not been observed.",
+        "Teleport target's position is blocked.",
+        "Cannot teleport in this world.",
+        "Position correction awaits GOTO acknowledgement.",
+        "Busy, dead, departing or quarantined players cannot teleport.",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.name = if mode == 7 { "Vault" } else { "Nexus" }.into();
+        let p = w.players.get_mut(&a).unwrap();
+        p.paused = mode == 0;
+        p.pending = mode == 9;
+        if mode == 5 {
+            p.known.remove(&b);
+        } else {
+            p.known.insert(b);
+        }
+        if mode == 8 {
+            reconciliation::goto(p, true, vec![]);
+        }
+        let q = w.players.get_mut(&b).unwrap();
+        q.character.name = "Benny".into();
+        q.paused = mode == 1;
+        q.pending = mode == 2;
+        q.death_pending = mode == 3;
+        q.persistence_failure = (mode == 4).then(|| "uncertain commit".into());
+        q.pos = if mode == 6 {
+            Pos { x: -1., y: -1. }
+        } else {
+            destination
+        };
+        assert_eq!(
+            d.chat(
+                a,
+                "/teleport Benny".into(),
+                now + Duration::from_secs(mode as u64)
+            )
+            .unwrap_err()
+            .to_string(),
+            expected
+        );
+        assert!(d.teleports.is_empty());
+        assert_eq!(d.worlds[&-2].players[&a].pos.distance(start), 0.);
+        if mode == 8 {
+            d.worlds
+                .get_mut(&-2)
+                .unwrap()
+                .acknowledge_goto(a, 0)
+                .unwrap();
+        }
+    }
+    d.worlds
+        .get_mut(&-2)
+        .unwrap()
+        .players
+        .get_mut(&a)
+        .unwrap()
+        .pending = false;
+    let next = now + Duration::from_secs(10);
+    for _ in 0..3 {
+        assert_eq!(
+            d.chat(a, "/teleport Missing".into(), next)
+                .unwrap_err()
+                .to_string(),
+            "Player not found in this world."
+        );
+    }
+    assert!(
+        d.chat(a, "/who".into(), next)
+            .unwrap_err()
+            .to_string()
+            .contains("Chat rate limit")
+    );
+    assert!(d.teleports.is_empty());
+}
+
+#[test]
 fn selected_minimap_teleport_goto_effect_and_current_view() {
     let (mut d, a, b, mut ar, mut br) = setup();
     let info = d.worlds[&-2].map_info();
