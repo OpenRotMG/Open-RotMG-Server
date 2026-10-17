@@ -69,6 +69,7 @@ async fn rejected_replies(closed: bool) {
         "item",
         "name",
         "reconnect",
+        "tutorial",
     ] {
         let guid = format!("queue-{case}-{closed}");
         a.store.list(guid.clone()).await.unwrap();
@@ -86,6 +87,7 @@ async fn rejected_replies(closed: bool) {
             "bug" => text("/bug"),
             "ignore" => text("/ignore"),
             "chat" => text(""),
+            "tutorial" => text("/tutorial"),
             "teleport" => Packet {
                 id: wire::TELEPORT,
                 body: i32::MAX.to_be_bytes().to_vec(),
@@ -161,7 +163,7 @@ async fn rejected_replies(closed: bool) {
             assert_eq!((retained.id, retained.body), (255, vec![1, 2, 3]));
             assert!(rx.try_recv().is_err());
         }
-        if case == "reconnect" {
+        if matches!(case, "reconnect" | "tutorial") {
             assert!(session.player.is_none());
             assert!(!session.reconnecting);
             assert!(session.account.is_some());

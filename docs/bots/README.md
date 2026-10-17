@@ -6,7 +6,7 @@ The two video reports record observations and limits; `research/decision-spike.m
 
 ## Local autonomous crews
 
-Run `./run.sh 18923 --release`, then enter the Realm normally. Biceps leads Triceps/BattleCrus; ExElite leads Kadabu/Pixl. Profiles weigh recovery, resources and companions differently. They use restricted observations and ordinary movement, combat, inventory, XP, teleport and transfer rules. Uninvited humans are not permanent anchors. Native local chat `BattleCrus follow me` requests a temporary follow while the sender is visible.
+Run `./run.sh 18923 --release`: no fixed crews. Visible needs trigger invitations requiring actual acceptance. Temporary pairs survive travel but end on death. Account lock lists remember shared clears, not inventory or positions. LLM use is optional; failures never publish invitations or fake acceptance.
 
 Wizards predict visible projectile paths, lead an observed target, kite within weapon range, cast equipped spells and commit to recovery. Crews remember recent contacts, explore reachable known terrain, revisit observed Realm hunting grounds and respond to Pirate Cave calls. Visible crewmates regroup through normal teleports; separated crews can arrange a Nexus meeting through public chat. Priests cast equipped tomes for actual nearby injury, MP and accepted cooldowns.
 

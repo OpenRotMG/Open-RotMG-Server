@@ -247,15 +247,22 @@ async fn launch(
     selected: Option<i32>,
 ) -> Result<()> {
     let account = character.account;
+    let mut completed = [character.pirate_caves, character.dungeons[0]];
     let owner = app.claim(account)?;
+    let lists = app.store.account_lists(account).await?;
     let (mut id, mut output, mut sender, mut brain) =
         enter(app, profile, character, world, position).await?;
+    app.society
+        .lock()
+        .expect("adventure registry poisoned")
+        .register(account, lists);
     let app = app.clone();
     tokio::spawn(async move {
         let mut shutdown = app.shutdown.subscribe();
         let mut next_bank = app.world.clock.now();
         let mut pending: Option<dialogue::Pending> = None;
         let mut last_dialogue: Option<std::time::Instant> = None;
+        let mut phase = adventures::Phase::Seeking;
         let result: Result<()> = async {
                 loop {
                     tokio::select! {
@@ -279,11 +286,37 @@ async fn launch(
                     let view = app.world.directory(move |d| d.player_view(id)).await?;
                     ensure!(view.session.account == account, "autonomous account binding changed");
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }
+                    if view.map.name=="Nexus" && brain.agreement.as_ref().is_none_or(|a|a.waiting.is_none()) && brain.group_lost_since.is_some_and(|since|view.time_ms.saturating_sub(since)>=30000) {
+                        app.society.lock().expect("adventure registry poisoned").leave(account);
+                        brain.group_lost_since=None;
+                        tracing::info!(account,"autonomous rendezvous timed out; continuing independently");
+                    }
+                    {
+                        let mut society=app.society.lock().expect("adventure registry poisoned");
+                        brain.group=society.group(account,view.elapsed_ms);
+                        brain.offered=society.outgoing(account,view.elapsed_ms);
+                    }
+                    let observed_phase=brain.group.as_ref().map_or(adventures::Phase::Seeking,|g|g.phase(&view));
+                    if observed_phase!=phase {tracing::info!(account,?observed_phase,"autonomous adventure phase changed");phase=observed_phase;}
+                    let observed=[view.character.pirate_caves,view.character.snake_pits];
+                    let objective=brain.group.as_ref().map(|g|usize::from(g.purpose==adventures::Purpose::Speed));
+                    if view.lifecycle.alive && !view.lifecycle.death_pending && objective.is_some_and(|n|observed[n]>completed[n]) {
+                        let peers = app.society.lock().expect("adventure registry poisoned").completed(account, &view, completed);
+                        for peer in peers {
+                            if app.society.lock().expect("adventure registry poisoned").remember(account, peer) {
+                                let lists = app.store.edit_account_list(account,0,true,peer).await?;
+                                app.world.for_player(id).call(move |w| w.sync_account_lists(id,Some(lists))).await?;
+                                tracing::info!(account,peer,"autonomous shared clear remembered in account lock list");
+                            }
+                        }
+                    }
+                    completed = observed;
                     if view.lifecycle.death_pending {
                         while output.try_recv().is_ok() {}
                         continue;
                     }
                     if !view.lifecycle.alive {
+                        app.society.lock().expect("adventure registry poisoned").leave(account);
                         dialogue::cancel(&app, &mut pending).await;
                         dialogue::end_agreement(&app, &mut brain, "character died").await;
                         server::depart(&app, id).await?;
@@ -332,6 +365,20 @@ async fn launch(
                             tracing::info!(player=id, companion=brain.companion, "visible invitation accepted");
                         }
                     }
+                    if pending.is_none() && app.dialogue.as_ref().is_none_or(|service|service.automatic_available()) {
+                        let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
+                        if let Some(plan)=plan {
+                            let request=brain.adventure_request(plan,&view,&app.content)?;
+                            if let Some(service)=&app.dialogue {pending=Some(dialogue::Pending::start(service.clone(),request));}
+                            else {
+                                let intent:dialogue::Intent=serde_json::from_value(request.payload["allowed_intents"][0].clone())?;
+                                let reply=adventures::policy_reply(&request,intent)?;
+                                if let Err(error)=dialogue::publish(&app,&mut brain,&request,&reply,&view).await {
+                                    tracing::warn!(account,%error,"autonomous policy invitation rejected");
+                                }
+                            }
+                        }
+                    }
                     if pending.as_ref().is_some_and(|p| p.task.is_finished()) {
                         let mut completed = pending.take().expect("finished dialogue missing");
                         let result = match (&mut completed.task).await {
@@ -343,22 +390,9 @@ async fn launch(
                         };
                         match result {
                             Ok(reply) => {
-                                let validation: Result<()> = async {
-                                    brain.validate_dialogue(&completed.request, &reply, &view)?;
-                                    let text = reply.reply.clone();
-                                    let speaker = completed.request.speaker;
-                                    let received = app.world.clock.now();
-                                    let created = completed.request.created;
-                                    app.world.directory(move |d| {
-                                        ensure!(created.elapsed() <= Duration::from_secs(10), "dialogue expired before publication");
-                                        let scope = d.location(id)?;
-                                        d.worlds[&scope].dialogue_participants(id, speaker)?;
-                                        d.chat(id, text, received)
-                                    }).await
-                                }.await;
+                                let validation = dialogue::publish(&app,&mut brain,&completed.request,&reply,&view).await;
                                 match validation {
                                     Ok(()) => {
-                                        brain.apply_dialogue(&completed.request, &reply, &view);
                                         tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,intent=?reply.intent,"bot dialogue intention applied");
                                     }
                                     Err(error) => {
@@ -370,6 +404,7 @@ async fn launch(
                             Err(error) => dialogue::failed(&app, completed.request.speaker, &completed.id, error.0).await,
                         }
                     }
+                    brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
                     if view.lifecycle.busy || view.tick < brain.next_decision { continue; }
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();
@@ -457,6 +492,10 @@ async fn launch(
                 }
                 server::depart(&app, id).await
             }.await;
+        app.society
+            .lock()
+            .expect("adventure registry poisoned")
+            .unregister(account);
         dialogue::cancel(&app, &mut pending).await;
         dialogue::end_agreement(&app, &mut brain, "controller stopped").await;
         if let Err(error) = result {

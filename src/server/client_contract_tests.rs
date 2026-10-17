@@ -321,7 +321,128 @@ async fn loaded(a: &App, guid: &str) -> Session {
 }
 
 #[tokio::test]
-async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits() {
+async fn tutorial_chat_reconnect_preserves_the_character_and_rejects_full_entry_before_departure() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world = a.world.in_world(-2);
+    a.world.clock.set_paused(true);
+    let mut session = loaded(&a, "tutorial-command").await;
+    let player = session.player.unwrap();
+    let (tx, mut rx) = mpsc::channel(8);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let output = crate::world::Output {
+        packets: tx.clone(),
+        lost: lost.clone(),
+    };
+    let before = a
+        .world
+        .call(move |w| {
+            let p = w.players.get_mut(&player).unwrap();
+            p.character.hp -= 1;
+            p.tx = Some(output);
+            Ok(p.character.clone())
+        })
+        .await
+        .unwrap();
+    let mut body = Writer::new();
+    body.utf(" /TuToRiAl ");
+    a.world
+        .in_world(-1)
+        .call(|w| {
+            w.max_players = 0;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    handle(
+        &mut a,
+        Packet {
+            id: wire::PLAYER_TEXT,
+            body: body.0.clone(),
+        },
+        &mut session,
+        &tx,
+        &lost,
+        std::time::Instant::now(),
+    )
+    .await
+    .unwrap();
+    let reply = rx.try_recv().unwrap();
+    assert_eq!((reply.id, reply.body), {
+        let p = crate::world::chat_info("Destination is full.");
+        (p.id, p.body)
+    });
+    assert_eq!(session.player, Some(player));
+    assert!(session.account.is_some() && !session.reconnecting);
+    assert!(
+        a.world
+            .call(move |w| Ok(w.players.contains_key(&player)))
+            .await
+            .unwrap()
+    );
+    a.world
+        .in_world(-1)
+        .call(|w| {
+            w.max_players = 85;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    handle(
+        &mut a,
+        Packet {
+            id: wire::PLAYER_TEXT,
+            body: body.0,
+        },
+        &mut session,
+        &tx,
+        &lost,
+        std::time::Instant::now(),
+    )
+    .await
+    .unwrap();
+    let reply = rx.try_recv().unwrap();
+    assert_eq!(reply.id, 39);
+    let mut r = Reader::new(&reply.body);
+    assert_eq!(r.utf().unwrap(), "Tutorial");
+    assert_eq!(r.utf().unwrap(), "");
+    assert_eq!(r.i32().unwrap(), 2050);
+    assert_eq!(r.i32().unwrap(), -1);
+    let time = r.i32().unwrap();
+    let count = r.i16().unwrap();
+    assert_eq!(count, 16);
+    let key = r.take(count as usize).unwrap().to_vec();
+    r.done().unwrap();
+    assert!(session.player.is_none() && session.account.is_none() && session.reconnecting);
+    assert!(rx.try_recv().is_err());
+    assert!(
+        !a.world
+            .call(move |w| Ok(w.players.contains_key(&player)))
+            .await
+            .unwrap()
+    );
+    assert!(a.owners.lock().unwrap().is_empty());
+    let saved = a.store.load(before.account, before.id).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(saved).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    a.world
+        .directory(move |d| {
+            assert!(
+                d.consume(before.account + 1, -1, time, key.clone())
+                    .is_err()
+            );
+            assert_eq!(d.consume(before.account, -1, time, key.clone())?, before.id);
+            assert!(d.consume(before.account, -1, time, key).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn rejected_stale_and_foreign_useitem_then_ground_and_owned_potions_commit() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world = a.world.in_world(-2);
     a.world.clock.set_paused(true);
@@ -344,7 +465,7 @@ async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits(
         .unwrap();
     let (tx, mut rx) = mpsc::channel(8);
     let (lost, _) = tokio::sync::watch::channel(false);
-    for (object, slot) in [(bag, 0), (other, 4)] {
+    for (object, slot) in [(other, 4), (bag, 1), (bag, 8)] {
         handle(
             &mut a,
             use_item(object, slot),
@@ -391,6 +512,37 @@ async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits(
     }
     handle(
         &mut a,
+        use_item(bag, 0),
+        &mut session,
+        &tx,
+        &lost,
+        std::time::Instant::now(),
+    )
+    .await
+    .unwrap();
+    let (ground, contents, reserved) = a
+        .world
+        .call(move |w| {
+            Ok((
+                w.players[&player].character.clone(),
+                w.entities[&bag].items.clone(),
+                w.entities[&bag].reserved,
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(ground.items, before.items);
+    assert_eq!(ground.revision, before.revision + 1);
+    assert!(ground.hp > before.hp);
+    assert_eq!(contents[0], -1);
+    assert!(!reserved);
+    let saved = a.store.load(before.account, before.id).await.unwrap();
+    assert_eq!(
+        (saved.items, saved.revision),
+        (ground.items, ground.revision)
+    );
+    handle(
+        &mut a,
         use_item(player, 4),
         &mut session,
         &tx,
@@ -406,7 +558,7 @@ async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits(
         .unwrap();
     assert_eq!(after.items[4], -1);
     assert!(after.hp > before.hp);
-    assert_eq!(after.revision, before.revision + 1);
+    assert_eq!(after.revision, before.revision + 2);
     let saved = a.store.load(before.account, before.id).await.unwrap();
     assert_eq!((saved.items, saved.revision), (after.items, after.revision));
     for s in [&mut session, &mut foreign] {

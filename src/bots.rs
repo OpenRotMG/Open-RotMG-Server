@@ -10,6 +10,7 @@ use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
+pub(crate) mod adventures;
 mod combat;
 pub(crate) mod dialogue;
 mod progression;
@@ -24,7 +25,6 @@ struct Profile {
     resources: f32,
     companions: f32,
     reaction: u64,
-    leader: &'static str,
     healer: bool,
 }
 // Names transcribed from Whcxy3RJKIA 4:46, fubGzGmVqpI 9:33 and Ex_Ix3dlB4U 5:33 (YouTube).
@@ -36,7 +36,6 @@ const PROFILES: [Profile; 6] = [
         resources: 4.,
         companions: 3.,
         reaction: 6,
-        leader: "Biceps",
         healer: true,
     },
     Profile {
@@ -46,7 +45,6 @@ const PROFILES: [Profile; 6] = [
         resources: 8.,
         companions: 3.,
         reaction: 4,
-        leader: "Biceps",
         healer: false,
     },
     Profile {
@@ -56,7 +54,6 @@ const PROFILES: [Profile; 6] = [
         resources: 3.,
         companions: 8.,
         reaction: 5,
-        leader: "Biceps",
         healer: false,
     },
     Profile {
@@ -66,7 +63,6 @@ const PROFILES: [Profile; 6] = [
         resources: 3.,
         companions: 7.,
         reaction: 5,
-        leader: "ExElite",
         healer: true,
     },
     Profile {
@@ -76,7 +72,6 @@ const PROFILES: [Profile; 6] = [
         resources: 4.,
         companions: 5.,
         reaction: 6,
-        leader: "ExElite",
         healer: false,
     },
     Profile {
@@ -86,7 +81,6 @@ const PROFILES: [Profile; 6] = [
         resources: 6.,
         companions: 6.,
         reaction: 4,
-        leader: "ExElite",
         healer: false,
     },
 ];
@@ -123,6 +117,10 @@ struct Decision {
 }
 struct Brain {
     profile: Profile,
+    group: Option<adventures::Adventure>,
+    group_lost_since: Option<u64>,
+    offered: Option<adventures::Offer>,
+    proposing: bool,
     session: (i32, i32, i32),
     last_tick: Option<u64>,
     goal: Goal,
@@ -160,6 +158,10 @@ impl Brain {
         let heading = rng.gen_range(0.0..std::f32::consts::TAU);
         Self {
             profile,
+            group: None,
+            group_lost_since: None,
+            offered: None,
+            proposing: false,
             session: (
                 view.session.world,
                 view.session.player,
@@ -219,9 +221,9 @@ impl Brain {
         r.done()?;
         if actor > 0 && actor != self.session.1 && recipient.is_empty() && self.agreement.is_none()
         {
-            let leader = self.profile.name == self.profile.leader;
+            let leader = self.profile.name == self.leader();
             if (!leader
-                && name == self.profile.leader
+                && name == self.leader()
                 && self.companion.is_none()
                 && (text == "nexus"
                     || (text == "tp here"
@@ -232,9 +234,10 @@ impl Brain {
                         }))))
                 || (leader
                     && text == "tp?"
-                    && PROFILES
-                        .iter()
-                        .any(|p| p.leader == self.profile.name && p.name == name))
+                    && self
+                        .group
+                        .as_ref()
+                        .is_some_and(|g| g.members.iter().any(|p| p.name == name)))
             {
                 let journey = if text == "nexus" {
                     Journey::Nexus
@@ -245,7 +248,7 @@ impl Brain {
             }
         }
         if recipient.is_empty()
-            && name == self.profile.leader
+            && name == self.leader()
             && matches!(text.as_str(), "pc here" | "snake here")
             && self.leader_seen.is_some_and(|(id, _, seen)| {
                 id == actor && view.time_ms.saturating_sub(seen) < 2000
@@ -353,12 +356,17 @@ impl Brain {
         if v.lifecycle.busy {
             return Ok(decision);
         }
-        let party = social::companions(v, self.profile);
+        let party = social::companions(v, self.group.as_ref());
+        if self.group.is_some() && party.is_empty() {
+            self.group_lost_since.get_or_insert(v.time_ms);
+        } else {
+            self.group_lost_since = None;
+        }
         self.contacts
             .retain(|_, (_, seen)| v.time_ms.saturating_sub(*seen) < 10000);
         for peer in &party {
             self.contacts.insert(peer.id, (peer.position, v.time_ms));
-            if peer.name == self.profile.leader {
+            if peer.name == self.leader() {
                 self.leader_seen = Some((peer.id, peer.position, v.time_ms));
             }
         }
@@ -543,6 +551,17 @@ impl Brain {
                 return Ok(decision);
             }
         }
+        if (self.proposing
+            || self
+                .offered
+                .as_ref()
+                .is_some_and(|o| o.until > v.elapsed_ms))
+            && peaceful(&enemies, v.position)
+        {
+            self.destination = None;
+            self.stationary = v.tick;
+            return Ok(decision);
+        }
         if v.map.name == "Vault"
             && self.agreement.is_none()
             && let Some(banking) = progression::bank(v, content, &grid)?
@@ -556,10 +575,12 @@ impl Brain {
             && (v.time_ms < self.nexus_until
                 || (!banking
                     && v.time_ms < self.nexus_until + 30000
-                    && if self.profile.name == self.profile.leader {
-                        party.len() < 2
+                    && if self.profile.name == self.leader() {
+                        self.group
+                            .as_ref()
+                            .is_some_and(|g| party.len() + 1 < g.members.len())
                     } else {
-                        !party.iter().any(|peer| peer.name == self.profile.leader)
+                        !party.iter().any(|peer| peer.name == self.leader())
                     }))
         {
             return Ok(decision);
@@ -578,6 +599,9 @@ impl Brain {
             && health >= 0.75
         {
             decision.journey = Some(Journey::Nexus);
+            if self.group.is_some() {
+                decision.chat = Some("nexus");
+            }
             return Ok(decision);
         }
         if v.map.name == "Realm"
@@ -587,7 +611,7 @@ impl Brain {
             && nearest.is_none_or(|e| e.position.distance(v.position) > 5.)
         {
             if let Some((journey, _)) = self.regroup_call.take().filter(|(_, t)| *t > v.time_ms) {
-                if self.profile.name == self.profile.leader {
+                if self.profile.name == self.leader() {
                     if v.time_ms >= self.next_call {
                         let Journey::Regroup(actor) = journey else {
                             anyhow::bail!("leader received an invalid reunion request");
@@ -607,7 +631,7 @@ impl Brain {
                 if decision.journey.is_some() {
                     return Ok(decision);
                 }
-            } else if self.profile.name != self.profile.leader
+            } else if self.profile.name != self.leader()
                 && self
                     .leader_seen
                     .is_none_or(|(_, _, seen)| v.time_ms.saturating_sub(seen) >= 10000)
@@ -617,6 +641,15 @@ impl Brain {
                 self.requested_until = v.time_ms + 5000;
                 self.next_call = v.time_ms + 30000;
             }
+        }
+        if matches!(v.map.name.as_str(), "Realm" | "Pirate Cave" | "Snake Pit")
+            && self
+                .group_lost_since
+                .is_some_and(|since| v.time_ms.saturating_sub(since) >= 15000)
+        {
+            decision.chat = Some("nexus");
+            decision.journey = Some(Journey::Nexus);
+            return Ok(decision);
         }
         let mut choices = Vec::new();
         let inland = Pos {
@@ -629,8 +662,8 @@ impl Brain {
         if v.map.name == "Realm"
             && progression::ready(v, content, 0x718)
             && !self.inland_reached
-            && (self.profile.name == self.profile.leader
-                || !party.iter().any(|peer| peer.name == self.profile.leader))
+            && (self.profile.name == self.leader()
+                || !party.iter().any(|peer| peer.name == self.leader()))
         {
             choices.push((60. + self.profile.resources, Goal::Venture, inland));
         }
@@ -652,8 +685,8 @@ impl Brain {
                 && (v.character.level >= 3 || d <= 48.)
                 && (v.map.name != "Realm" || !progression::ready(v, content, 0x718) || d <= 32.)
                 && (v.map.name != "Realm"
-                    || self.profile.name == self.profile.leader
-                    || !party.iter().any(|peer| peer.name == self.profile.leader))
+                    || self.profile.name == self.leader()
+                    || !party.iter().any(|peer| peer.name == self.leader()))
             {
                 choices.push((
                     if v.map.name == "Snake Pit" {
@@ -695,43 +728,52 @@ impl Brain {
             }
         }
         let peaceful = nearest.is_none_or(|e| e.position.distance(v.position) > 5.);
-        for portal in v.objects.iter().filter(|p| match v.map.name.as_str() {
-            "Nexus" => {
-                if banking {
-                    p.kind == 0x720
-                } else {
-                    matches!(p.kind, 0x704 | 0x70e | 0x71c)
-                        && (self.profile.name == self.profile.leader
-                            || v.time_ms >= self.nexus_until + 30000
-                            || self.leader_seen.is_some_and(|(_, position, seen)| {
-                                v.time_ms.saturating_sub(seen) < 10000
-                                    && position.distance(p.position) < 8.
-                            }))
+        for portal in v
+            .objects
+            .iter()
+            .filter(|p| p.usable)
+            .filter(|p| match v.map.name.as_str() {
+                "Nexus" => {
+                    if banking {
+                        p.kind == 0x720
+                    } else {
+                        matches!(p.kind, 0x704 | 0x70e | 0x71c | 0x712)
+                            && (self.profile.name == self.leader()
+                                || v.time_ms >= self.nexus_until + 30000
+                                || self.leader_seen.is_some_and(|(_, position, seen)| {
+                                    v.time_ms.saturating_sub(seen) < 10000
+                                        && position.distance(p.position) < 8.
+                                }))
+                    }
                 }
-            }
-            // The committed exit is public even when a straggler missed personal clear credit.
-            "Pirate Cave" | "Snake Pit" => p.kind == 0x71d,
-            "Realm" => {
-                progression::ready(v, content, p.kind)
-                    && (p.kind == 0x717
-                        || party.iter().all(|peer| {
-                            peer.max_hp >= 350
-                                && peer.hp * 4 >= peer.max_hp * 3
-                                && peer.level.is_some_and(|level| level >= 14)
-                                && peer.equipped[0] >= 0
-                                && content.objects[&(peer.equipped[0] as u16)]
-                                    .tier
-                                    .is_some_and(|tier| tier >= 4)
-                        }))
-                    && (self
-                        .portal
-                        .is_some_and(|(id, until)| id == p.id && until > v.time_ms)
-                        || (self.profile.name == self.profile.leader
-                            && party.len() >= 2
-                            && party.iter().all(|q| q.position.distance(p.position) < 8.)))
-            }
-            _ => false,
-        }) {
+                // The committed exit is public even when a straggler missed personal clear credit.
+                "Pirate Cave" | "Snake Pit" => p.kind == 0x71d,
+                "Realm" => {
+                    progression::ready(v, content, p.kind)
+                        && self
+                            .group
+                            .as_ref()
+                            .is_none_or(|g| !g.finished && g.purpose.portal() == p.kind)
+                        && (p.kind == 0x717
+                            || party.iter().all(|peer| {
+                                peer.max_hp >= 350
+                                    && peer.hp * 4 >= peer.max_hp * 3
+                                    && peer.level.is_some_and(|level| level >= 14)
+                                    && peer.equipped[0] >= 0
+                                    && content.objects[&(peer.equipped[0] as u16)]
+                                        .tier
+                                        .is_some_and(|tier| tier >= 4)
+                            }))
+                        && (self
+                            .portal
+                            .is_some_and(|(id, until)| id == p.id && until > v.time_ms)
+                            || (self.profile.name == self.leader()
+                                && (self.group.is_none() || !party.is_empty())
+                                && party.iter().all(|q| q.position.distance(p.position) < 8.)))
+                }
+                _ => false,
+            })
+        {
             let exiting = portal.kind == 0x71d;
             if exiting || (peaceful && health >= 0.75) {
                 let reward_waiting = choices.iter().any(|(_, goal, _)| {
@@ -759,7 +801,7 @@ impl Brain {
                 ));
             }
         }
-        if self.profile.name == self.profile.leader
+        if self.profile.name == self.leader()
             && let Some(straggler) = party
                 .iter()
                 .filter(|p| p.position.distance(v.position) > 10. || p.hp * 10 < p.max_hp * 7)
@@ -792,8 +834,7 @@ impl Brain {
             let d = player.position.distance(v.position);
             if d > 4.
                 && (self.companion == Some(player.id)
-                    || (self.profile.name != self.profile.leader
-                        && player.name == self.profile.leader))
+                    || (self.profile.name != self.leader() && player.name == self.leader()))
             {
                 let score = if self.companion == Some(player.id) {
                     // An accepted invitation must outrank an existing crew-follow commitment.
@@ -804,7 +845,7 @@ impl Brain {
                 choices.push((score, Goal::Follow(player.id), player.position));
             }
         }
-        if self.profile.name == self.profile.leader {
+        if self.profile.name == self.leader() {
             for (id, (position, _)) in &self.contacts {
                 if !party.iter().any(|p| p.id == *id) && v.position.distance(*position) > 3. {
                     choices.push((75., Goal::Gather(*id), *position));
@@ -964,7 +1005,7 @@ impl Brain {
             if let Goal::Portal(portal) = goal
                 && self.goal != goal
                 && v.map.name == "Realm"
-                && self.profile.name == self.profile.leader
+                && self.profile.name == self.leader()
             {
                 let portal = v
                     .objects
