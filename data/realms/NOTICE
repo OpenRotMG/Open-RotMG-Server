@@ -1,9 +1,9 @@
-Classic World 2 candidate reconstruction, not an authenticated original map.
+Classic Worlds 2 and 3 candidate reconstructions, not authenticated original maps.
 
-Frozen 20927-1 Perlin layers were exported twice under Ruffle from Amit J Patel's
+Frozen 20927-1 and 84542-1 Perlin layers were exported twice under Ruffle from Amit J Patel's
 legacy demo, https://theory.stanford.edu/~amitp/_test/mapgen2-13.swf, linked in
 https://simblob.blogspot.com/2012/02/polygon-map-generation-faq.html.
-world02.json pins byte hashes, x-major orientation, emulator and source identity.
+world02.json and world03.json pin byte hashes, x-major orientation, emulator and source identity.
 The executable's exact source revision is unverified. No exporter, source dump,
 client dump, sprites or historical catalogue image is bundled here.
 
@@ -28,3 +28,5 @@ unresolved.
 Rebuild offline from checkout data (no client, game state or exporter required):
   openrotmg build-realm --data data --id classic-world-02-reconstruction
   openrotmg build-realm --data data --id classic-world-02-reconstruction --check
+  openrotmg build-realm --data data --id classic-world-03-reconstruction
+  openrotmg build-realm --data data --id classic-world-03-reconstruction --check

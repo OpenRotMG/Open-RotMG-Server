@@ -409,15 +409,20 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("openrotmg-catalog-{}", rand::random::<u64>()));
         std::fs::create_dir_all(root.join("realms")).unwrap();
-        let dependencies = [
-            "realm-catalog.json",
-            "realm-fsod-1.wmap",
-            "realm-fsod-2.wmap",
-            "realm-fsod-3.wmap",
-            "realms/world02.json",
-            "realms/classic-world-02-reconstruction.wmap",
-        ];
-        for relative in dependencies {
+        let mut dependencies = vec!["realm-catalog.json".to_owned()];
+        let catalog: Vec<Entry> =
+            serde_json::from_slice(&std::fs::read("data/realm-catalog.json").unwrap()).unwrap();
+        for entry in catalog {
+            match entry {
+                Entry::Baseline { path, .. } => dependencies.push(path),
+                Entry::Reconstruction { recipe, .. } => {
+                    let metadata = read_recipe(Path::new("data/realms"), &recipe).unwrap();
+                    dependencies.push(format!("realms/{recipe}"));
+                    dependencies.push(format!("realms/{}", metadata.output));
+                }
+            }
+        }
+        for relative in &dependencies {
             std::fs::copy(Path::new("data").join(relative), root.join(relative)).unwrap();
         }
         let content = Arc::new(Content::load(Path::new("data")).unwrap());
@@ -430,7 +435,7 @@ mod tests {
                     .expect("startup must reject catalog dependency")
             )
         };
-        for relative in dependencies {
+        for relative in &dependencies {
             let file = root.join(relative);
             let original = std::fs::read(&file).unwrap();
             std::fs::remove_file(&file).unwrap();

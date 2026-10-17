@@ -31,6 +31,17 @@ jobs:
         run: |
           cargo +1.94.1 build --locked --release
           python3 scripts/deploy/package.py "$GITHUB_SHA" target/release/openrotmg dist
+          mkdir staged-release
+          tar -xzf dist/server.tar.gz -C staged-release
+          cargo +1.94.1 test --locked --no-run --message-format=json > test-executables.jsonl
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          artifacts = [json.loads(line) for line in pathlib.Path('test-executables.jsonl').read_text().splitlines()]
+          tests = [pathlib.Path(a['executable']).resolve() for a in artifacts if a.get('executable') and a.get('profile', {}).get('test') and a['target']['name'] == 'openrotmg']
+          if len(tests) != 1:
+              raise RuntimeError(f'Expected one server test executable, got {tests}')
+          subprocess.run([str(tests[0]), 'world::realm_maps_tests::', '--nocapture'], cwd='staged-release', check=True)
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: server-${{ github.sha }}
