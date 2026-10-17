@@ -1484,7 +1484,7 @@ async fn connection_io<S, I>(
     let (tx, mut rx) = mpsc::channel::<Packet>(64);
     let (lost, mut lost_rx) = tokio::sync::watch::channel(false);
     // Actor work and output backpressure must not manufacture late, clustered input receipts.
-    let (mut incoming, _input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
+    let (mut incoming, input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
     let mut shutdown = a.shutdown.subscribe();
     let deadline = tokio::time::sleep(std::time::Duration::from_secs(10));
     tokio::pin!(deadline);
@@ -1498,6 +1498,7 @@ async fn connection_io<S, I>(
     let mut transfers = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut testing_stop = a.testing.as_ref().map(|t| t.stopped.subscribe());
     let mut terminal_drain = false;
+    let mut close_reason = "transport_ended";
     'connection: loop {
         tokio::select! {
             _=async { match testing_stop.as_mut() { Some(stop) => { if stop.borrow().is_none() { let _ = stop.changed().await; } }, None => std::future::pending::<()>().await } } => {
@@ -1519,11 +1520,12 @@ async fn connection_io<S, I>(
                     if !session.reconnecting {
                         let id=packet.id;
                         session.diagnostics.packets_in += 1;
+                        session.diagnostics.processed(id);
                         let handling = std::time::Instant::now();
                         session.diagnostics.max_input_queue_ms = session.diagnostics.max_input_queue_ms.max(a.world.clock.now().saturating_duration_since(received).as_secs_f64()*1000.0);
                         if let Err(e)=handle(&mut a,packet,&mut session,&tx,&lost,received).await {
                             tracing::error!(account=session.account.as_ref().map(|o|o.id),player=session.player,packet=id,error=%format_args!("{e:#}"),"game command rejected");
-                            if e.is::<ReplyQueueError>() { break 'connection; }
+                            if e.is::<ReplyQueueError>() { close_reason="reply_queue_full";break 'connection; }
                             if matches!(id,1|21|37|57) && let Some(player) = session.player {
                                 let reason = e.to_string();
                                 let closed = a.world.for_player(player).call(move |w| Ok(w.cancel_trade(player, &reason))).await;
@@ -1535,6 +1537,7 @@ async fn connection_io<S, I>(
                                 if wsout.send(Message::Binary(codec.frame(4,o.0).into())).await.is_err(){break 'connection;}
                                 continue;
                             }
+                            close_reason="command_rejected";
                             let f=fail(&e.to_string());
                             let _=wsout.send(Message::Binary(codec.frame(f.id,f.body).into())).await;
                             break 'connection;
@@ -1578,9 +1581,9 @@ async fn connection_io<S, I>(
                     None => std::future::pending::<()>().await,
                 }
             }=>{tracing::info!(account=session.account.as_ref().map(|o|o.id),"closing requested game session");break;},
-            _=shutdown.changed()=>break,
-            _=lost_rx.changed()=>{tracing::warn!(player=session.player,"closing slow game connection before its state diverges");break;},
-            _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
+            _=shutdown.changed()=>{close_reason="shutdown";break;},
+            _=lost_rx.changed()=>{close_reason="lag_or_protocol_guard";tracing::warn!(player=session.player,"closing slow game connection before its state diverges");break;},
+            _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{close_reason="connection_deadline";tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
             outgoing=rx.recv()=>{
                 let Some(packet)=outgoing else {break};
                 let reconnect=packet.id==39;
@@ -1591,6 +1594,7 @@ async fn connection_io<S, I>(
                 let sending = std::time::Instant::now();
                 if wsout.send(Message::Binary(frame.into())).await.is_err(){break;}
                 session.diagnostics.packets_out += 1;
+                session.diagnostics.last_socket_send=Some(std::time::Instant::now());
                 session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
                 // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
                 if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
@@ -1599,6 +1603,11 @@ async fn connection_io<S, I>(
                 session.diagnostics.sent(serial);
                 if wsout.send(Message::Binary(codec.frame(wire::PING,o.0).into())).await.is_err(){break;}}}
         }
+    }
+    input_task.abort();
+    if let Some(id) = session.player {
+        diagnostics::disconnect(&a,id,&session.diagnostics,serde_json::json!({"reason":close_reason,
+            "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()})).await;
     }
     if let Some(id) = session.player
         && let Err(e) = depart(&a, id).await

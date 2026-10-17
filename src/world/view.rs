@@ -1,5 +1,12 @@
 use super::*;
 
+#[derive(Default)]
+pub(super) struct Terrain {
+    map: std::sync::Weak<Map>,
+    content: std::sync::Weak<Content>,
+    pub(super) tiles: Arc<Vec<Tile>>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Session {
     pub world: i32,
@@ -19,7 +26,7 @@ pub struct PlayerView {
     pub map: MapInfo,
     pub character: OwnCharacter,
     pub lifecycle: Lifecycle,
-    pub tiles: Vec<Tile>,
+    pub tiles: Arc<Vec<Tile>>,
     pub objects: Vec<VisibleObject>,
     pub projectiles: Vec<VisibleProjectile>,
 }
@@ -61,7 +68,7 @@ pub enum OutputState {
     Live,
     Lost,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Tile {
     pub x: i16,
     pub y: i16,
@@ -102,6 +109,7 @@ pub struct VisibleProjectile {
 
 impl Directory {
     pub fn player_view(&self, id: i32) -> Result<PlayerView> {
+        let started = Instant::now();
         let scope = self.location(id)?;
         let w = &self.worlds[&scope];
         let p = &w.players[&id];
@@ -149,19 +157,35 @@ impl Directory {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let tiles = p
-            .tiles
-            .iter()
-            .map(|(x, y)| {
-                let cell = &w.map.cells[*y as usize * w.map.width as usize + *x as usize];
-                Tile {
-                    x: *x,
-                    y: *y,
-                    ground: cell.ground,
-                    ground_speed: w.content.grounds[&cell.ground],
-                }
-            })
-            .collect();
+        let tiles = {
+            let mut cache = p.view_tiles.borrow_mut();
+            let map = Arc::downgrade(&w.map);
+            let content = Arc::downgrade(&w.content);
+            // Discovery only grows within a session. Weak identities invalidate copy-on-write changes without retaining an old map.
+            if cache.tiles.len() != p.tiles.len()
+                || !cache.map.ptr_eq(&map)
+                || !cache.content.ptr_eq(&content)
+            {
+                cache.tiles = Arc::new(
+                    p.tiles
+                        .iter()
+                        .map(|(x, y)| {
+                            let cell =
+                                &w.map.cells[*y as usize * w.map.width as usize + *x as usize];
+                            Tile {
+                                x: *x,
+                                y: *y,
+                                ground: cell.ground,
+                                ground_speed: w.content.grounds[&cell.ground],
+                            }
+                        })
+                        .collect(),
+                );
+                cache.map = map;
+                cache.content = content;
+            }
+            cache.tiles.clone()
+        };
         // A newly discovered shooter does not reveal its earlier, unreceived shots.
         let projectiles = w
             .bullets
@@ -185,6 +209,9 @@ impl Directory {
                 passes_cover: b.spec.passes_cover,
             })
             .collect();
+        w.performance
+            .borrow_mut()
+            .record("perception", started.elapsed());
         Ok(PlayerView {
             session: Session {
                 world: scope,

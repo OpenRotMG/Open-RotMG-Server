@@ -50,7 +50,7 @@ fn exploration_remains_available_when_a_higher_ranked_route_is_blocked() {
         on_adventure(PROFILES[2], &v).decide(&v, &c).unwrap().goal,
         Goal::Follow(4)
     );
-    v.tiles.retain(|t| t.x != 15);
+    Arc::make_mut(&mut v.tiles).retain(|t| t.x != 15);
     let d = on_adventure(PROFILES[2], &v).decide(&v, &c).unwrap();
     assert!(matches!(d.goal, Goal::Explore(x, _) if x < 15));
 }
@@ -97,7 +97,7 @@ fn bounded_waypoint_checks_its_actual_endpoint_not_a_distant_sampling_grid() {
         x: 12.1716,
         y: 12.1715,
     };
-    v.tiles.retain(|t| (t.x, t.y) != (15, 14));
+    Arc::make_mut(&mut v.tiles).retain(|t| (t.x, t.y) != (15, 14));
     let grid = Grid::new(&v);
     let target = Pos { x: 25.5, y: 25.5 };
     assert!(grid.segment(v.position, target));
@@ -120,7 +120,8 @@ fn observed_static_cover_survives_leaving_view_but_not_a_verified_clear_tile() {
                 ground_speed: 1.,
             })
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     let mut wall = object(2, 0x1ce, 2.5, 11.5);
     wall.blocks = true;
     assert!(!c.objects[&wall.kind].enemy);
@@ -156,7 +157,8 @@ fn remembered_routes_advance_nearby_before_revalidating_distant_cover() {
                 ground_speed: 1.,
             })
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     let destination = Pos { x: 8.5, y: 93.5 };
     let grid = Grid::new(&v);
     let next = grid.next(v.position, destination).unwrap();
@@ -176,7 +178,7 @@ fn dodge_predictions_use_actual_movement_conditions_and_ground() {
     let c = content();
     let mut v = view(&c);
     v.character.stats[4] = 75;
-    for t in &mut v.tiles {
+    for t in Arc::make_mut(&mut v.tiles) {
         t.ground_speed = 0.6;
     }
     for (flags, expected) in [
@@ -271,7 +273,8 @@ pub(super) fn view(content: &Content) -> PlayerView {
                     ground_speed: 1.,
                 })
             })
-            .collect(),
+            .collect::<Vec<_>>()
+            .into(),
         objects: vec![],
         projectiles: vec![],
     }
@@ -407,6 +410,7 @@ fn projectile_dodge_uses_observed_trajectory_and_only_known_routes() {
         walkable: BTreeSet::from([(0, 0), (0, 1), (1, 1), (2, 1)]),
         known: BTreeSet::from([(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)]),
         dimensions: (3, 2),
+        ..Grid::default()
     };
     assert!(grid.next(center((0, 0)), center((3, 1))).is_none());
     let next = grid.next(center((0, 0)), center((2, 1))).unwrap();
@@ -417,6 +421,7 @@ fn projectile_dodge_uses_observed_trajectory_and_only_known_routes() {
         walkable: (0..=24).map(|x| (x, 0)).collect(),
         known: (0..=24).map(|x| (x, 0)).collect(),
         dimensions: (25, 1),
+        ..Grid::default()
     };
     let mut position = center((0, 0));
     for _ in 0..6 {
@@ -1801,7 +1806,8 @@ fn dungeon_ready_crews_search_a_central_region_instead_of_chasing_distant_quests
                 ground_speed: 1.,
             })
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     v.character.level = 20;
     v.character.hp = 600;
     v.character.stats[0] = 600;
@@ -1828,7 +1834,8 @@ fn dungeon_ready_crews_search_a_central_region_instead_of_chasing_distant_quests
                 ground_speed: 1.,
             })
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .into();
     assert!(matches!(
         brain.decide(&v, &c).unwrap().goal,
         Goal::Explore(..)
