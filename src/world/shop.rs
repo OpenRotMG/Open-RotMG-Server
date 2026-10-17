@@ -12,6 +12,13 @@ fn price(item: &Object) -> Option<(i32, u8)> {
         0xc11 => (300, 0),
         0x710 => (400, 0),
         0xb3e => (11250, 1),
+        // The recovered stock has five doses; retain the comparator's fixed seven-dose elixir price.
+        0xb16 => (500, 1),
+        // Preserved old-shop tables: https://wikiwiki.jp/rmd/old/ペット and /rmd/アイテム売り場.
+        0x1513 => (190, 0),
+        0x151b | 0x151e => (490, 0),
+        0xa50 => (35, 1),
+        0xa51 => (50, 1),
         0xb0d => (150, 1),
         0xb0f => (100, 1),
         // Preserved old-shop table: https://wikiwiki.jp/rmd/アイテム売り場#DrakeEgg
@@ -38,12 +45,14 @@ pub(super) fn configure(e: &mut Entity, content: &Content) -> Result<()> {
         "merchant stock is not an item"
     );
     ensure!(value(e, 42)? >= 0, "invalid merchant stock count");
-    if let Some((price, currency)) = price(item) {
-        e.extra_stats
-            .extend([(36, price), (40, i32::from(currency))]);
-    } else {
-        tracing::warn!(merchant=e.id, item=item.kind, name=%item.name, "merchant unavailable: no sourced shop price configured");
-    }
+    let (price, currency) = price(item).with_context(|| {
+        format!(
+            "merchant {} has no configured shop price for {} ({:#x})",
+            e.id, item.name, item.kind
+        )
+    })?;
+    e.extra_stats
+        .extend([(36, price), (40, i32::from(currency))]);
     // The static stock does not rotate; don't advertise the recovered snapshot's expired countdown.
     e.extra_stats.retain(|(id, _)| *id != 43);
     e.extra_stats.push((43, -1));

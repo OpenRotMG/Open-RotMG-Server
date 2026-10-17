@@ -27,6 +27,44 @@ fn fixture() -> (World, i32, i32, mpsc::Receiver<Packet>) {
 }
 
 #[test]
+fn recovered_nexus_quotes_match_purchase_prices() {
+    let (mut w, id, _, _rx) = fixture();
+    for (item, cost, currency) in [
+        (0xa50, 35, 1),
+        (0xa51, 50, 1),
+        (0xb16, 500, 1),
+        (0x1513, 190, 0),
+        (0x151b, 490, 0),
+        (0x151e, 490, 0),
+    ] {
+        let e = w
+            .entities
+            .values()
+            .find(|e| e.kind == 0x1ca && value(e, 34).unwrap() == item)
+            .unwrap();
+        let (merchant, pos) = (e.id, e.pos);
+        assert_eq!(
+            (value(e, 36).unwrap(), value(e, 40).unwrap()),
+            (cost, currency)
+        );
+        let p = w.players.get_mut(&id).unwrap();
+        p.pos = pos;
+        p.known.insert(merchant);
+        let plan = w.buy(id, merchant).unwrap();
+        let quote = &plan.purchase.as_ref().unwrap().1;
+        assert_eq!(
+            (
+                i32::from(quote.item),
+                quote.price,
+                i32::from(quote.currency)
+            ),
+            (item, cost, currency)
+        );
+        w.finish_purchase(plan, Ok(None)).unwrap();
+    }
+}
+
+#[test]
 fn shop_publishes_prices_and_only_committed_purchases_change_inventory_wallet_and_stock() {
     let (mut w, id, merchant, mut rx) = fixture();
     assert_eq!(
@@ -37,18 +75,8 @@ fn shop_publishes_prices_and_only_committed_purchases_change_inventory_wallet_an
         (25, 0)
     );
     for e in w.entities.values().filter(|e| e.kind == 0x1ca) {
-        if price(
-            w.content
-                .get(u16::try_from(value(e, 34).unwrap()).unwrap())
-                .unwrap(),
-        )
-        .is_some()
-        {
-            assert!(value(e, 36).unwrap() > 0);
-            assert!((0..=1).contains(&value(e, 40).unwrap()));
-        } else {
-            assert!(value(e, 36).is_err());
-        }
+        assert!(value(e, 36).unwrap() > 0);
+        assert!((0..=1).contains(&value(e, 40).unwrap()));
         assert_eq!(value(e, 43).unwrap(), -1);
     }
     let status = w.stats(merchant, id).unwrap();
@@ -165,16 +193,20 @@ fn shop_failed_storage_quarantines_without_publishing_or_releasing_uncertain_sto
     assert!(w.players[&id].pending && w.entities[&merchant].reserved);
     assert!(!w.players[&id].active());
     assert!(price(w.content.get(WIZARD).unwrap()).is_none());
-    let (mut w, id, _, _) = fixture();
-    let e = w
-        .entities
-        .values()
-        .find(|e| e.kind == 0x1ca && value(e, 34).unwrap() == 0xb16)
-        .unwrap();
-    let (merchant, pos) = (e.id, e.pos);
-    let p = w.players.get_mut(&id).unwrap();
-    p.pos = pos;
-    p.known.insert(merchant);
+    let (mut w, id, merchant, _) = fixture();
+    let e = w.entities.get_mut(&merchant).unwrap();
+    e.extra_stats.retain(|(stat, _)| !matches!(stat, 36 | 40));
+    e.extra_stats
+        .iter_mut()
+        .find(|(stat, _)| *stat == 34)
+        .unwrap()
+        .1 = 0xaf4;
+    assert!(
+        configure(e, &w.content)
+            .unwrap_err()
+            .to_string()
+            .contains("no configured shop price")
+    );
     assert!(
         w.buy(id, merchant)
             .err()
