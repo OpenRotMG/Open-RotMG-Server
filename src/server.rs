@@ -4,6 +4,8 @@ mod character_slot_tests;
 mod client_contract_tests;
 mod input;
 #[cfg(test)]
+mod password_tests;
+#[cfg(test)]
 mod purchase_tests;
 #[cfg(test)]
 mod queue_tests;
@@ -340,9 +342,31 @@ async fn account_request(
         Ok(false) => return limited(),
         Err(e) => return error(e),
     }
-    let result: Result<String> = async {
-        let _authentication = a.authentication.read().await;
+    let result: Result<i32> = async {
         let guid = form.get("guid").context("guid required")?.clone();
+        if operation == "changePassword" {
+            ensure!(
+                form.get("secret").is_none_or(|s| s.is_empty()),
+                "external platform authentication is not implemented"
+            );
+            let password = form.get("password").context("password required")?.clone();
+            ensure!(!password.is_empty(), crate::store::InvalidCredentials);
+            let verifier = a
+                .store
+                .prepare_password(
+                    form.get("newPassword")
+                        .context("newPassword required")?
+                        .clone(),
+                )
+                .await?;
+            // Fence the current verifier through ownership and commit, without upgrading a read lock.
+            let _authentication = a.authentication.write().await;
+            let id = a.store.authenticate(guid, password).await?;
+            let _claim = a.claim(id)?;
+            a.store.change_password(id, verifier).await?;
+            return Ok(id);
+        }
+        let _authentication = a.authentication.read().await;
         let id = match operation.as_str() {
             "register" => {
                 a.store
@@ -396,12 +420,14 @@ async fn account_request(
             }
             _ => bail!("account operation not implemented"),
         };
-        tracing::info!(account = id, operation, "account request completed");
-        Ok("<Success/>".into())
+        Ok(id)
     }
     .await;
     let xml = match result {
-        Ok(xml) => xml,
+        Ok(id) => {
+            tracing::info!(account = id, operation, "account request completed");
+            "<Success/>".into()
+        }
         Err(e) => {
             tracing::warn!(error=%e, operation, "account request rejected");
             let tag = if e.is::<crate::store::SlotReplay>() {
