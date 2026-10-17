@@ -14,5 +14,6 @@ ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=/opt/openrotmg /opt/openrotmg-backup /var/lib/openrotmg-deploy /var/lib/openrotmg /run/lock
 InaccessiblePaths=/etc/openrotmg-discord-bot/token /etc/openrotmg-backup/github-token
-MemoryMax=256M
+# The rehearsal game-server child loads a full-size Realm in this cgroup.
+MemoryMax=1G
 CPUQuota=20%
