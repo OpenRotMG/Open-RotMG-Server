@@ -321,6 +321,159 @@ async fn loaded(a: &App, guid: &str) -> Session {
 }
 
 #[tokio::test]
+async fn named_teleport_player_text_reuses_native_outputs_and_account_cooldown() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    a.world = a.world.in_world(-3);
+    let _remote = loaded(&a, "teleport-remote").await;
+    a.world = a.world.in_world(-2);
+    let mut session = loaded(&a, "teleport-sender").await;
+    let peer = loaded(&a, "teleport-peer").await;
+    let id = session.player.unwrap();
+    let target = peer.player.unwrap();
+    let (tx, mut rx) = mpsc::channel(128);
+    let (peer_tx, mut peer_rx) = mpsc::channel(128);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let outputs = [tx.clone(), peer_tx].map(|packets| crate::world::Output {
+        packets,
+        lost: lost.clone(),
+    });
+    let (before, destination) = a
+        .world
+        .call(move |w| {
+            for (player, output) in [id, target].into_iter().zip(outputs) {
+                let p = w.players.get_mut(&player).unwrap();
+                p.tx = Some(output);
+                p.known.extend([id, target]);
+            }
+            Ok((w.players[&id].pos, w.players[&target].pos))
+        })
+        .await
+        .unwrap();
+    assert!(before.distance(destination) > 0.);
+    let chat = |text: &str| {
+        let mut body = Writer::new();
+        body.utf(text);
+        Packet {
+            id: wire::PLAYER_TEXT,
+            body: body.0,
+        }
+    };
+    let native = || Packet {
+        id: wire::TELEPORT,
+        body: target.to_be_bytes().to_vec(),
+    };
+    let now = std::time::Instant::now();
+    for (packet, seconds, success) in [
+        (chat(" /TeLePoRt gUeSt3 "), 0, true),
+        (native(), 1, false),
+        (native(), 10, true),
+        (chat("/teleport Guest3"), 11, false),
+    ] {
+        handle(
+            &mut a,
+            packet,
+            &mut session,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(seconds),
+        )
+        .await
+        .unwrap();
+        if success {
+            for output in [&mut rx, &mut peer_rx] {
+                let packets: Vec<_> = std::iter::from_fn(|| output.try_recv().ok()).collect();
+                assert!(!packets.iter().any(|p| p.id == wire::TEXT));
+                let goto = packets.iter().find(|p| p.id == wire::GOTO).unwrap();
+                let mut body = Reader::new(&goto.body);
+                assert_eq!(body.i32().unwrap(), id);
+                assert_eq!(
+                    (body.f32().unwrap(), body.f32().unwrap()),
+                    (destination.x, destination.y)
+                );
+                body.done().unwrap();
+                assert!(
+                    packets
+                        .iter()
+                        .any(|p| p.id == wire::SHOW_EFFECT && p.body[0] == 2)
+                );
+            }
+            a.world
+                .call(move |w| w.acknowledge_goto(id, 0))
+                .await
+                .unwrap();
+        } else {
+            let reply = rx.try_recv().unwrap();
+            let expected =
+                crate::world::chat_error("Too soon to teleport again; wait ten seconds.");
+            assert_eq!((reply.id, reply.body), (expected.id, expected.body));
+            assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+        }
+        a.world
+            .call(move |w| {
+                assert_eq!(w.players[&id].pos.distance(destination), 0.);
+                assert_eq!(w.players[&target].pos.distance(destination), 0.);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    for (i, (text, expected)) in [
+        ("/teleport", "Usage: /teleport <player name>"),
+        ("/teleport Guest3 extra", "Usage: /teleport <player name>"),
+        ("/teleport Nobody", "Player not found in this world."),
+        ("/teleport Guest1", "Player not found in this world."),
+        ("/teleport Guest2", "You are already at yourself."),
+        (
+            "/teleport Guest3\n",
+            "Chat message contains control characters.",
+        ),
+        ("/tp Guest3", "Unknown chat command."),
+        ("/teleportation Guest3", "Unknown chat command."),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        handle(
+            &mut a,
+            chat(text),
+            &mut session,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(20 + i as u64 * 2),
+        )
+        .await
+        .unwrap();
+        let reply = rx.try_recv().unwrap();
+        let expected = crate::world::chat_error(expected);
+        assert_eq!((reply.id, reply.body), (expected.id, expected.body));
+        assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+    }
+    let mut malformed = chat("/teleport Guest3");
+    malformed.body.push(0);
+    assert!(
+        handle(&mut a, malformed, &mut session, &tx, &lost, now)
+            .await
+            .is_err()
+    );
+    session.player = None;
+    assert!(
+        handle(
+            &mut a,
+            chat("/teleport Guest3"),
+            &mut session,
+            &tx,
+            &lost,
+            now
+        )
+        .await
+        .is_err()
+    );
+    assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn who_player_text_returns_private_roster_and_validation_errors() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world = a.world.in_world(-2);
