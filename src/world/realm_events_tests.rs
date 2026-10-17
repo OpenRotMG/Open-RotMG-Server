@@ -1,7 +1,7 @@
 use super::*;
 
 fn realm() -> World {
-    let mut d = Directory::prepared(
+    let mut d = Directory::test_prepared(
         std::path::Path::new("data"),
         tests::world().content,
         16,
@@ -21,7 +21,7 @@ fn root(w: &World, kind: u16) -> i32 {
 #[test]
 fn landmarks_have_selected_geometry_hazards_and_unchanged_population_reservations() {
     for seed in [1, 2, 42, 12351] {
-        let d = Directory::prepared(
+        let d = Directory::test_prepared(
             std::path::Path::new("data"),
             tests::world().content,
             16,

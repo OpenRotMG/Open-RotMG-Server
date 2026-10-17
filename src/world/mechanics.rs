@@ -54,8 +54,7 @@ impl World {
             encounter::Anchor::Player => Ok(player),
             encounter::Anchor::QuestMember(kind) => {
                 let tag = e.quest.context("quest anchor lacks encounter ownership")?;
-                self.entities
-                    .values()
+                self.actors()
                     .filter(|x| x.quest == Some(tag) && x.kind == kind)
                     .min_by(|a, b| a.pos.distance(e.pos).total_cmp(&b.pos.distance(e.pos)))
                     .map(|x| x.pos)
@@ -105,8 +104,7 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         let count = self
-            .entities
-            .values()
+            .actors()
             .filter(|e| e.parent == Some(parent) && e.kind == kind)
             .count();
         let missing = maximum.saturating_sub(count);
@@ -114,8 +112,7 @@ impl World {
             return Ok(());
         }
         ensure!(
-            self.entities
-                .values()
+            self.actors()
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + missing
@@ -291,8 +288,7 @@ impl World {
             }
             0xdae => {
                 let allies: Vec<_> = self
-                    .entities
-                    .values()
+                    .actors()
                     .filter(|e| (0xdaa..=0xdaf).contains(&e.kind) && pos.distance(e.pos) < 5.)
                     .map(|e| e.id)
                     .collect();
@@ -409,8 +405,7 @@ impl World {
 
     pub(super) fn mechanic_expiry(&mut self) {
         let expired: Vec<_> = self
-            .entities
-            .values()
+            .actors()
             .filter(|e| {
                 e.expires.is_some_and(|deadline| deadline <= self.now)
                     || e.parent
@@ -443,8 +438,7 @@ impl World {
         if let Some(tag) = defeated.quest {
             if defeated.kind == 0x929 {
                 let king = self
-                    .entities
-                    .values()
+                    .actors()
                     .find(|e| e.quest == Some(tag) && e.kind == 0x928)
                     .map(|e| e.id);
                 if let Some(king) = king {
@@ -452,8 +446,7 @@ impl World {
                 }
             } else if defeated.kind == 0x92c
                 && !self
-                    .entities
-                    .values()
+                    .actors()
                     .any(|e| e.quest == Some(tag) && e.kind == 0x928)
             {
                 let count = self.rng.gen_range(2..=3);
@@ -472,8 +465,7 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         ensure!(
-            self.entities
-                .values()
+            self.actors()
                 .filter(|e| self.content.objects[&e.kind].enemy)
                 .count()
                 + count

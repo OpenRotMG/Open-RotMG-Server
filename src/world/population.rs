@@ -517,8 +517,7 @@ impl World {
                                 self.family_ground(*p, family.terrain)
                                     && self.players.values().all(|q| q.pos.distance(*p) >= 0.75)
                                     && self
-                                        .entities
-                                        .values()
+                                        .actors()
                                         .filter(|e| e.camp == Some(camp))
                                         .all(|e| e.pos.distance(*p) >= 0.75)
                             });

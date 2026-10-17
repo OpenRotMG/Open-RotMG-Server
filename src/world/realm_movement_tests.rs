@@ -2,7 +2,7 @@ use super::*;
 use crate::encounter::{Anchor, Motion};
 
 fn realm() -> World {
-    Directory::prepared(
+    Directory::test_prepared(
         std::path::Path::new("data"),
         tests::world().content,
         16,

@@ -1,7 +1,7 @@
 use super::*;
 use crate::{condition, encounter};
 fn directory() -> Directory {
-    Directory::prepared(
+    Directory::test_prepared(
         std::path::Path::new("data"),
         tests::world().content,
         16,

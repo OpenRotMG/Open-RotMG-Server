@@ -140,8 +140,7 @@ impl World {
             .camp
             .context("Shield Orc has no command camp")?;
         Ok(self
-            .entities
-            .values()
+            .actors()
             .filter(|e| e.camp == Some(camp) && matches!(e.kind, 0x900..=0x902))
             .map(|e| e.id)
             .collect())

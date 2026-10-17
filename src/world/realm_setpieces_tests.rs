@@ -106,7 +106,7 @@ fn named_setpieces_are_accessible_and_preserve_templates_camps_and_closure() {
 }
 #[test]
 fn temple_walls_are_damageable_cover_not_npcs_or_quest_rewards() {
-    let mut d = Directory::prepared(
+    let mut d = Directory::test_prepared(
         std::path::Path::new("data"),
         tests::world().content,
         16,

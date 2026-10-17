@@ -107,8 +107,7 @@ impl World {
         let pos = self.entities[&id].pos;
         // Reference Reproduce caps nearby density, not the number born to one parent.
         if self
-            .entities
-            .values()
+            .actors()
             .filter(|e| e.kind == kind && e.pos.distance(pos) < radius)
             .count()
             < maximum
@@ -251,8 +250,7 @@ impl World {
     }
     pub(super) fn event_step(&mut self) {
         let roots: Vec<_> = self
-            .entities
-            .values()
+            .actors()
             .filter(|e| e.kind == 0xd5f && e.quest == Some(e.id))
             .map(|e| e.id)
             .collect();

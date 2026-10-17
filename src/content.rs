@@ -583,10 +583,17 @@ impl MapReader {
 impl Map {
     pub fn load(path: &Path, content: &Content) -> Result<Self> {
         let bytes = std::fs::read(path)?;
+        Self::decode(&bytes, content).with_context(|| format!("load map {}", path.display()))
+    }
+    pub(crate) fn decode(bytes: &[u8], content: &Content) -> Result<Self> {
         let mut data = Vec::new();
-        flate2::read::ZlibDecoder::new(bytes.as_slice())
-            .take(16 * 1024 * 1024)
+        flate2::read::ZlibDecoder::new(bytes)
+            .take(16 * 1024 * 1024 + 1)
             .read_to_end(&mut data)?;
+        ensure!(
+            data.len() <= 16 * 1024 * 1024,
+            "decompressed map exceeds 16 MiB"
+        );
         let mut r = MapReader { data, pos: 0 };
         let count = r.short()?;
         ensure!(count > 0, "empty map dictionary");
@@ -622,8 +629,8 @@ impl Map {
         let width = r.int()?;
         let height = r.int()?;
         ensure!(
-            width > 0 && height > 0 && width as i64 * height as i64 <= 1_000_000,
-            "map dimensions exceed development limit"
+            width > 0 && height > 0 && width <= 2048 && height <= 2048,
+            "map dimensions must be within 1..=2048"
         );
         let mut cells = Vec::new();
         let mut spawns = Vec::new();

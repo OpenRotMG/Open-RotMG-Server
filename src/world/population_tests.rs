@@ -2,7 +2,7 @@ use super::*;
 use crate::encounter::{Anchor, Motion};
 use std::path::Path;
 fn directory(seed: u64) -> Directory {
-    Directory::prepared(Path::new("data"), tests::world().content, 16, seed)
+    Directory::test_prepared(Path::new("data"), tests::world().content, 16, seed)
         .unwrap_or_else(|error| panic!("seed {seed}: {error}"))
 }
 fn camp(w: &World, leader: u16) -> usize {
@@ -100,7 +100,7 @@ fn complete_pack_is_seeded_sourced_distributed_and_regionally_bounded() {
         );
     }
     let ordinary =
-        Directory::with_seed(Path::new("data"), tests::world().content, 16, 12351).unwrap();
+        Directory::test_with_seed(Path::new("data"), tests::world().content, 16, 12351).unwrap();
     assert_budgets(&ordinary.worlds[&-3]);
 }
 

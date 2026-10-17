@@ -592,10 +592,11 @@ async fn committed_native_death_is_not_reconnect_and_halts_the_owned_cohort() {
 fn prepared_castle_is_full_strength_and_not_available_on_an_ordinary_directory() {
     let content = Arc::new(Content::load(Path::new("data")).unwrap());
     let mut ordinary =
-        crate::world::Directory::with_seed(Path::new("data"), content.clone(), 16, 12351).unwrap();
+        crate::world::Directory::test_with_seed(Path::new("data"), content.clone(), 16, 12351)
+            .unwrap();
     assert!(ordinary.prepared_instance(crate::endgame::CASTLE).is_err());
     let mut prepared =
-        crate::world::Directory::prepared(Path::new("data"), content, 16, 12351).unwrap();
+        crate::world::Directory::test_prepared(Path::new("data"), content, 16, 12351).unwrap();
     let id = prepared.prepared_instance(crate::endgame::CASTLE).unwrap();
     let guards = prepared.worlds[&id]
         .entities

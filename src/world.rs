@@ -47,6 +47,8 @@ mod realm_events;
 #[cfg(test)]
 mod realm_events_tests;
 #[cfg(test)]
+mod realm_maps_tests;
+#[cfg(test)]
 mod realm_movement_tests;
 mod realm_portal;
 mod realm_quests;
@@ -385,7 +387,9 @@ struct Spawn {
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
+    pub(crate) realm_layout: Option<&'static str>,
     pub entities: BTreeMap<i32, Entity>,
+    actor_ids: BTreeSet<i32>,
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
@@ -454,6 +458,8 @@ pub struct Directory {
     pub clock: crate::clock::Clock,
     pub worlds: BTreeMap<i32, World>,
     templates: BTreeMap<String, Arc<Map>>,
+    realms: Vec<crate::terrain::realms::Source>,
+    realm_rng: rand::rngs::StdRng,
     content: Arc<Content>,
     ids: Arc<AtomicI32>,
     grants: BTreeMap<Vec<u8>, Grant>,
@@ -529,7 +535,43 @@ impl Directory {
     }
     #[cfg(test)]
     pub fn load(path: &std::path::Path, content: Arc<Content>, max_players: usize) -> Result<Self> {
-        Self::with_seed(path, content, max_players, 0)
+        Self::test_with_seed(path, content, max_players, 0)
+    }
+    #[cfg(test)]
+    pub(crate) fn test_with_seed(
+        path: &std::path::Path,
+        content: Arc<Content>,
+        max_players: usize,
+        seed: u64,
+    ) -> Result<Self> {
+        Self::fixture(path, content, max_players, seed, None)
+    }
+    #[cfg(test)]
+    pub(crate) fn test_prepared(
+        path: &std::path::Path,
+        content: Arc<Content>,
+        max_players: usize,
+        seed: u64,
+    ) -> Result<Self> {
+        Self::fixture(path, content, max_players, seed, Some(seed))
+    }
+    #[cfg(test)]
+    fn fixture(
+        path: &std::path::Path,
+        content: Arc<Content>,
+        max_players: usize,
+        seed: u64,
+        prepared_seed: Option<u64>,
+    ) -> Result<Self> {
+        let map = Arc::new(crate::terrain::generate(&content, seed, 512)?);
+        Self::configured(
+            path,
+            content,
+            max_players,
+            seed,
+            prepared_seed,
+            vec![crate::terrain::realms::Source::Fixture(map)],
+        )
     }
     pub fn with_seed(
         path: &std::path::Path,
@@ -537,7 +579,14 @@ impl Directory {
         max_players: usize,
         seed: u64,
     ) -> Result<Self> {
-        Self::configured(path, content, max_players, seed, None)
+        Self::configured(
+            path,
+            content,
+            max_players,
+            seed,
+            None,
+            crate::terrain::realms::sources(path)?,
+        )
     }
     pub(crate) fn prepared(
         path: &std::path::Path,
@@ -545,7 +594,14 @@ impl Directory {
         max_players: usize,
         seed: u64,
     ) -> Result<Self> {
-        Self::configured(path, content, max_players, seed, Some(seed))
+        Self::configured(
+            path,
+            content,
+            max_players,
+            seed,
+            Some(seed),
+            crate::terrain::realms::sources(path)?,
+        )
     }
     fn configured(
         path: &std::path::Path,
@@ -553,7 +609,9 @@ impl Directory {
         max_players: usize,
         seed: u64,
         prepared_seed: Option<u64>,
+        realms: Vec<crate::terrain::realms::Source>,
     ) -> Result<Self> {
+        ensure!(!realms.is_empty(), "Realm layout pool is empty");
         crate::endgame::validate(&content)?;
         let mut templates = BTreeMap::new();
         for name in [
@@ -577,14 +635,12 @@ impl Directory {
                 Arc::new(Map::load(&path.join(format!("{name}.wmap")), &content)?),
             );
         }
-        templates.insert(
-            "realm-shore".into(),
-            Arc::new(crate::terrain::generate(&content, seed, 512)?),
-        );
         let mut d = Self {
             clock: crate::clock::Clock::default(),
             worlds: BTreeMap::new(),
             templates,
+            realms,
+            realm_rng: rand::rngs::StdRng::seed_from_u64(seed),
             content,
             ids: Arc::new(AtomicI32::new(1000)),
             grants: BTreeMap::new(),
@@ -631,10 +687,20 @@ impl Directory {
         d.sync_realm_portal();
         Ok(d)
     }
-    fn make(&self, template: &str, name: &str, safe: bool, owner: Option<i32>) -> Result<World> {
+    fn make(
+        &mut self,
+        template: &str,
+        name: &str,
+        safe: bool,
+        owner: Option<i32>,
+    ) -> Result<World> {
+        let layout =
+            (template == "realm-shore").then(|| self.realm_rng.gen_range(0..self.realms.len()));
         let mut world = World::with_ids(
             self.content.clone(),
-            if template == "abyss-of-demons" {
+            if let Some(index) = layout {
+                self.realms[index].open(&self.content)?
+            } else if template == "abyss-of-demons" {
                 let seed = match self.prepared_seed {
                     Some(seed) => seed ^ self.next_world as u64,
                     None => rand::random(),
@@ -650,6 +716,7 @@ impl Directory {
             },
             self.ids.clone(),
         )?;
+        world.realm_layout = layout.map(|index| self.realms[index].name());
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
         if let Some(seed) = self.prepared_seed {
@@ -673,6 +740,12 @@ impl Directory {
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
+            tracing::info!(
+                layout = world.realm_layout,
+                entities = world.entities.len(),
+                actors = world.actor_ids.len(),
+                "Realm simulation populated"
+            );
         }
         world.prepare_endgame()?;
         if template == "sprite-world" {
@@ -1152,6 +1225,7 @@ impl World {
     }
     fn with_ids(content: Arc<Content>, map: Arc<Map>, ids: Arc<AtomicI32>) -> Result<Self> {
         let mut entities = BTreeMap::new();
+        let mut actor_ids = BTreeSet::new();
         let mut fountains = Vec::new();
         let mut cells = vec![BTreeSet::new(); map.cells.len()];
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
@@ -1241,6 +1315,13 @@ impl World {
                         fountains.push((id, pos));
                     }
                     cells[y * map.width as usize + x].insert(id);
+                    if o.enemy
+                        || o.quest
+                        || !o.static_object
+                        || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805)
+                    {
+                        actor_ids.insert(id);
+                    }
                     entities.insert(id, e);
                 }
             }
@@ -1248,7 +1329,9 @@ impl World {
         Ok(Self {
             content,
             map,
+            realm_layout: None,
             entities,
+            actor_ids,
             players: BTreeMap::new(),
             guild: None,
             bullets: Vec::new(),
@@ -1413,6 +1496,7 @@ impl World {
             },
         );
         self.cells[cell].insert(id);
+        self.actor_ids.insert(id);
         Ok(id)
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
@@ -1442,6 +1526,7 @@ impl World {
         self.spawn_entity(kind, pos, vec![])
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
+        self.actor_ids.remove(&id);
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
         assert!(!entity.reserved, "cannot remove a reserved container");
@@ -1796,8 +1881,7 @@ impl World {
             return None;
         }
         let player = &self.players[&id];
-        self.entities
-            .values()
+        self.actors()
             .filter_map(|e| {
                 let definition = &self.content.objects[&e.kind];
                 if !definition.quest || e.hp <= 0 || !e.accessible(player.character.account) {
@@ -1838,11 +1922,8 @@ impl World {
     }
     fn visible(&self, id: i32) -> BTreeSet<i32> {
         let pos = self.players[&id].pos;
-        self.entities
-            .values()
-            .filter(|e| {
-                e.pos.distance(pos) < 20. && e.accessible(self.players[&id].character.account)
-            })
+        self.entities_near(pos, 20.)
+            .filter(|e| e.accessible(self.players[&id].character.account))
             .map(|e| e.id)
             .chain(self.quest_target(id))
             .chain(
@@ -2140,7 +2221,7 @@ impl World {
         }) {
             return false;
         }
-        self.entities.values().all(|e| {
+        self.near_entities(pos, pos).all(|e| {
             let cell = (e.pos.x.floor() as i32, e.pos.y.floor() as i32);
             if check_own && cell == own {
                 !self.content.objects[&e.kind].blocks
@@ -2160,6 +2241,27 @@ impl World {
         }
         self.entities_at(pos)
             .all(|e| !self.content.objects[&e.kind].blocks)
+    }
+    // Immutable map scenery participates in collision/visibility, not per-tick AI scans.
+    fn actors(&self) -> impl Iterator<Item = &Entity> {
+        self.actor_ids.iter().map(|id| {
+            self.entities
+                .get(id)
+                .expect("simulated entity missing from storage")
+        })
+    }
+    fn entities_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
+        self.near_entities(
+            Pos {
+                x: pos.x - radius,
+                y: pos.y - radius,
+            },
+            Pos {
+                x: pos.x + radius,
+                y: pos.y + radius,
+            },
+        )
+        .filter(move |e| e.pos.distance(pos) < radius)
     }
     fn entities_at(&self, pos: Pos) -> impl Iterator<Item = &Entity> {
         self.map.cell(pos.x, pos.y).into_iter().flat_map(move |_| {
@@ -3158,9 +3260,8 @@ impl World {
     pub fn observe(&self, id: i32) -> Result<serde_json::Value> {
         let p = self.players.get(&id).context("player missing")?;
         let entities: Vec<_> = self
-            .entities
-            .values()
-            .filter(|e| p.pos.distance(e.pos) < 20. && e.accessible(p.character.account))
+            .entities_near(p.pos, 20.)
+            .filter(|e| e.accessible(p.character.account))
             .collect();
         let others: Vec<_> = self
             .players
@@ -3459,8 +3560,7 @@ impl World {
             return packets;
         }
         let ids: Vec<_> = self
-            .entities
-            .values()
+            .actors()
             .filter(|e| {
                 let object = &self.content.objects[&e.kind];
                 // Breakable scenery takes damage but has no movement/attack state machine.
@@ -3718,8 +3818,7 @@ impl World {
                 }
                 Motion::Circle => {
                     let boss = self
-                        .entities
-                        .values()
+                        .actors()
                         .find(|e| e.kind == 0x927 && pos.distance(e.pos) < 10.)
                         .map(|e| e.pos);
                     boss.map(|boss| {
@@ -4077,8 +4176,7 @@ impl World {
             self.send_enemy_shot(owner, shot);
         }
         let guns: Vec<_> = self
-            .entities
-            .values()
+            .actors()
             .filter(|e| (0x0802..=0x0805).contains(&e.kind) && self.now >= e.next_shot)
             .map(|e| e.id)
             .collect();
@@ -4316,9 +4414,11 @@ mod tests {
     fn prepared_worlds_share_explicit_seed_without_changing_normal_creation() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
         let first =
-            Directory::prepared(std::path::Path::new("data"), content.clone(), 4, 12351).unwrap();
+            Directory::test_prepared(std::path::Path::new("data"), content.clone(), 4, 12351)
+                .unwrap();
         let second =
-            Directory::prepared(std::path::Path::new("data"), content.clone(), 4, 12351).unwrap();
+            Directory::test_prepared(std::path::Path::new("data"), content.clone(), 4, 12351)
+                .unwrap();
         for id in [-1, -2, -3, -4] {
             let mut a = first.worlds[&id].rng.clone();
             let mut b = second.worlds[&id].rng.clone();
@@ -4329,7 +4429,7 @@ mod tests {
             assert!(first.worlds[&id].prepared_seed.is_some());
         }
         let ordinary =
-            Directory::with_seed(std::path::Path::new("data"), content, 4, 12351).unwrap();
+            Directory::test_with_seed(std::path::Path::new("data"), content, 4, 12351).unwrap();
         assert!(ordinary.worlds.values().all(|w| w.prepared_seed.is_none()));
     }
     use crate::content::WIZARD;

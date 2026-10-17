@@ -1,5 +1,9 @@
+#[cfg(test)]
 use crate::content::{Cell, Content, Map};
+#[cfg(test)]
 use anyhow::{Context, Result, ensure};
+pub(crate) mod realms;
+#[cfg(test)]
 mod rivers;
 
 fn mix(mut value: u64) -> u64 {
@@ -20,6 +24,7 @@ pub(crate) fn noise(seed: u64, x: f64, y: f64) -> f64 {
     let b = sample(ix, iy + 1) * (1. - fx) + sample(ix + 1, iy + 1) * fx;
     a * (1. - fy) + b * fy
 }
+#[cfg(test)]
 fn biome(depth: f64, moisture: f64, radius: f64) -> (u8, u8) {
     if depth < -4. {
         return (0xbc, 0);
@@ -61,6 +66,7 @@ fn biome(depth: f64, moisture: f64, radius: f64) -> (u8, u8) {
     }
 }
 
+#[cfg(test)]
 fn decorate(cell: &mut Cell, random: u64) -> Result<()> {
     let trees: &[u16] = &[0x100, 0x101, 0x105, 0x106];
     let floor: &[u16] = &[
@@ -118,6 +124,7 @@ fn decorate(cell: &mut Cell, random: u64) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
     ensure!(
         (192..=768).contains(&size),

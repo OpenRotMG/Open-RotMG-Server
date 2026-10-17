@@ -95,7 +95,7 @@ fn ghost_introduction_is_once_not_an_extra_second_of_shielding_each_cycle() {
     }
 }
 fn realm() -> World {
-    Directory::prepared(
+    Directory::test_prepared(
         std::path::Path::new("data"),
         tests::world().content,
         16,
@@ -135,7 +135,7 @@ fn transformed(w: &World, tag: i32, kind: u16) -> i32 {
 #[test]
 fn named_quests_have_selected_profiles_and_finite_separate_habitat_budgets() {
     for seed in [1, 2, 42, 12351] {
-        let d = Directory::prepared(
+        let d = Directory::test_prepared(
             std::path::Path::new("data"),
             tests::world().content,
             16,

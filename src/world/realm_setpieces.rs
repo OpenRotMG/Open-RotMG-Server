@@ -536,9 +536,10 @@ mod tests {
     fn authored_arenas_preserve_generated_waterways() {
         let content = super::super::tests::world().content;
         for seed in [0, 12351, u64::MAX] {
-            let d = Directory::prepared(std::path::Path::new("data"), content.clone(), 4, seed)
-                .unwrap();
-            let raw = &d.templates["realm-shore"];
+            let d =
+                Directory::test_prepared(std::path::Path::new("data"), content.clone(), 4, seed)
+                    .unwrap();
+            let raw = d.realms[0].open(&content).unwrap();
             let live = &d.worlds[&-3].map;
             for (i, (before, after)) in raw.cells.iter().zip(&live.cells).enumerate() {
                 if matches!(before.ground, 0x72 | 0x73) {

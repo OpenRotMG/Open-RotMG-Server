@@ -1309,7 +1309,7 @@ async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
         .await
         .unwrap()[0];
     store.progress(character.clone()).await.unwrap();
-    let mut directory = crate::world::Directory::with_seed(
+    let mut directory = crate::world::Directory::test_with_seed(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data"),
         c.clone(),
         16,

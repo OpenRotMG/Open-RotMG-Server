@@ -132,8 +132,7 @@ impl World {
             .collect()
     }
     fn ability_enemies(&self, pos: Pos, radius: f32) -> Vec<i32> {
-        self.entities
-            .values()
+        self.actors()
             .filter(|e| {
                 e.hp > 0 && self.content.objects[&e.kind].enemy && e.pos.distance(pos) <= radius
             })
@@ -435,8 +434,7 @@ impl World {
                     == 0
         };
         let first = self
-            .entities
-            .values()
+            .actors()
             .filter(eligible)
             .filter(|e| {
                 origin.distance(e.pos) <= 14.
@@ -454,8 +452,7 @@ impl World {
             while chain.len() < maximum {
                 let from = self.entities[chain.last().unwrap()].pos;
                 let next = self
-                    .entities
-                    .values()
+                    .actors()
                     .filter(eligible)
                     .filter(|e| !chain.contains(&e.id) && from.distance(e.pos) <= 10.)
                     .min_by(|a, b| from.distance(a.pos).total_cmp(&from.distance(b.pos)))
