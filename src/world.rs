@@ -1210,7 +1210,7 @@ impl Handle {
                                 players=directory.worlds.values().map(|w|w.players.len()).sum::<usize>(),
                                 entities=directory.worlds.values().map(|w|w.entities.len()).sum::<usize>(),
                                 actors=directory.worlds.values().map(|w|w.actor_ids.len()).sum::<usize>(),
-                                diagnostic_tick_samples=directory.diagnostic_ticks.len(),
+                                diagnostic_tick_samples=directory.diagnostic_ticks.len(),queued_jobs=rx.len(),
                                 memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
                     },

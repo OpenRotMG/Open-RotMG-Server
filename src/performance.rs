@@ -54,13 +54,21 @@ impl Window {
         if elapsed < Duration::from_secs(5) {
             return None;
         }
+        let achieved_step_hz = self
+            .samples
+            .get("step")
+            .map(|s| s.count as f64 / elapsed.as_secs_f64());
+        let missed_tick_deadlines = self
+            .samples
+            .get("scheduling_lateness")
+            .map(|s| s.over_budget);
         let timings: BTreeMap<_, _> = std::mem::take(&mut self.samples)
             .into_iter()
             .map(|(name, s)| (name, s.snapshot()))
             .collect();
         self.started = Some(Instant::now());
         Some(
-            json!({"pid":std::process::id(),"window_seconds":elapsed.as_secs_f64(),
+            json!({"pid":std::process::id(),"window_seconds":elapsed.as_secs_f64(),"achieved_step_hz":achieved_step_hz,"missed_tick_deadlines":missed_tick_deadlines,
             "percentiles":"latest 256 samples; count/max cover full window","timings":timings}),
         )
     }
@@ -108,7 +116,14 @@ mod tests {
             ..Window::default()
         };
         window.record("step", Duration::from_millis(7));
-        assert_eq!(window.report().unwrap()["timings"]["step"]["count"], 1);
+        window.record("scheduling_lateness", Duration::from_millis(60));
+        let report = window.report().unwrap();
+        assert_eq!(report["timings"]["step"]["count"], 1);
+        assert_eq!(
+            report["achieved_step_hz"].as_f64().unwrap(),
+            1. / report["window_seconds"].as_f64().unwrap()
+        );
+        assert_eq!(report["missed_tick_deadlines"], 1);
         assert!(window.report().is_none());
         window.started = Some(window.started.unwrap() - Duration::from_secs(6));
         assert_eq!(window.report().unwrap()["timings"], json!({}));

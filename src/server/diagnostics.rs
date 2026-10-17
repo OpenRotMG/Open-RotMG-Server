@@ -356,23 +356,26 @@ pub(super) async fn disconnect(
     transport: Value,
 ) {
     // Capture before departure removes the player; never create a public bug report or gold reward.
+    let mut report = json!({"created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before epoch").as_millis(),
+        "server_source_revision":a.diagnostics.source_revision,"server_binary_sha256":a.diagnostics.binary_sha256,
+        "protocol_build":"123.5.1","connection":connection.snapshot()});
+    let started = Instant::now();
     let context = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         a.world.directory(move |d| d.bug_context(player)),
     )
     .await;
+    let context_request_ms = started.elapsed().as_secs_f64() * 1000.;
     match context {
         Ok(Ok(context)) => {
-            let report = json!({"created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before epoch").as_millis(),
-                "server_source_revision":a.diagnostics.source_revision,"server_binary_sha256":a.diagnostics.binary_sha256,
-                "protocol_build":"123.5.1","context":context,"connection":connection.snapshot()});
-            tracing::info!(player,transport=%transport,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics");
+            report["context"] = context;
+            tracing::info!(player,transport=%transport,context_request_ms,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics");
         }
         Ok(Err(error)) => {
-            tracing::warn!(player,transport=%transport,%error,"game disconnect diagnostics unavailable")
+            tracing::warn!(player,transport=%transport,context_request_ms,%error,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics unavailable")
         }
         Err(error) => {
-            tracing::warn!(player,transport=%transport,%error,"game disconnect diagnostics deadline exceeded")
+            tracing::warn!(player,transport=%transport,context_request_ms,%error,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics deadline exceeded")
         }
     }
 }
