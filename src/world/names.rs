@@ -14,20 +14,22 @@ impl World {
         &mut self,
         player: i32,
         account: i32,
-    ) -> Result<NameReservation> {
-        ensure!(
-            self.trade_key(player).is_none(),
-            "Finish your trade before choosing a name."
-        );
+    ) -> Result<std::result::Result<NameReservation, &'static str>> {
+        if self.trade_key(player).is_some() {
+            return Ok(Err("Finish your trade before choosing a name."));
+        }
         let p = self
             .players
             .get_mut(&player)
             .context("name choice player missing")?;
         ensure!(p.character.account == account, "name choice owner mismatch");
         ensure!(
-            p.active() && !p.pending && p.character.hp > 0,
-            "Cannot choose a name while busy or dead."
+            p.persistence_failure.is_none(),
+            "name choice owner quarantined"
         );
+        if !p.active() || p.pending || p.character.hp <= 0 {
+            return Ok(Err("Cannot choose a name while busy or dead."));
+        }
         let plan = NameReservation {
             player,
             account,
@@ -36,7 +38,7 @@ impl World {
             name: p.character.name.clone(),
         };
         p.pending = true;
-        Ok(plan)
+        Ok(Ok(plan))
     }
 
     pub(crate) fn finish_name_choice(

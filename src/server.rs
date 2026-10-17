@@ -1382,12 +1382,13 @@ async fn handle(
                     .world
                     .for_player(id)
                     .call(move |w| w.begin_name_choice(id, account))
-                    .await
+                    .await?
                 {
                     Ok(plan) => Some((id, plan)),
-                    Err(error) => {
+                    Err(reason) => {
+                        tracing::info!(account, reason, "name choice rejected before reservation");
                         let mut o = Writer::new();
-                        o.u8(0).utf(&error.to_string());
+                        o.u8(0).utf(reason);
                         enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
                         return Ok(());
                     }

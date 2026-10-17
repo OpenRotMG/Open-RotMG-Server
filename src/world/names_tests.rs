@@ -7,7 +7,7 @@ fn name_publication_preserves_pending_death_progress_and_departure() {
         let mut w = world();
         let id = w.enter(ch(&w), None).unwrap();
         w.players.get_mut(&id).unwrap().presentation.credits = 1000;
-        let plan = w.begin_name_choice(id, 1).unwrap();
+        let plan = w.begin_name_choice(id, 1).unwrap().unwrap();
         assert_eq!(w.players[&id].character.name, "Test");
         assert_eq!(w.players[&id].presentation.credits, 1000);
         match lifecycle {
@@ -70,7 +70,7 @@ fn name_user_rejections_release_only_their_reservation_but_failures_quarantine()
         let mut w = world();
         let id = w.enter(ch(&w), None).unwrap();
         w.players.get_mut(&id).unwrap().presentation.credits = 1000;
-        let plan = w.begin_name_choice(id, 1).unwrap();
+        let plan = w.begin_name_choice(id, 1).unwrap().unwrap();
         let outcome = match failure {
             0 => Ok(NameChoice::Rejected("name already taken")),
             1 => Err(anyhow::anyhow!("SQLite commit failed")),
@@ -125,10 +125,15 @@ fn name_reservation_rejects_foreign_busy_terminal_and_trading_without_side_effec
                 assert!(w.trade_key(id).is_some());
             }
         }
-        assert!(
-            w.begin_name_choice(id, if reason == 0 { 2 } else { 1 })
-                .is_err()
-        );
+        let result = w.begin_name_choice(id, if reason == 0 { 2 } else { 1 });
+        if matches!(reason, 0 | 4) {
+            assert!(
+                result.is_err(),
+                "authority/persistence failures are not user rejections"
+            );
+        } else {
+            assert!(result.unwrap().is_err());
+        }
         assert_eq!(w.players[&id].character.name, "Test");
         if reason == 5 {
             assert!(w.trade_key(id).is_some());
