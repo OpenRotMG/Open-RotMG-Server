@@ -123,7 +123,7 @@ fn crossed_slow_proposals_cannot_publish_two_offers_and_can_answer_once() {
     let mut other = fixture().1;
     other.session.account = 2;
     other.session.player = 2;
-    other.elapsed_ms = 5000;
+    other.elapsed_ms = v.elapsed_ms + 5000;
     other.objects[0].id = 3;
     other.objects[0].account = Some(3);
     other.objects[0].name = "Aster".into();
@@ -135,10 +135,10 @@ fn crossed_slow_proposals_cannot_publish_two_offers_and_can_answer_once() {
         first,
         false,
         "ExElite, want to gain levels?".into(),
-        8000,
+        v.elapsed_ms + 8000,
     );
-    assert!(s.validate(2, &crossed, 8000).is_err());
-    other.elapsed_ms = 8000;
+    assert!(s.validate(2, &crossed, v.elapsed_ms + 8000).is_err());
+    other.elapsed_ms = v.elapsed_ms + 8000;
     other.objects[0].id = 1;
     other.objects[0].account = Some(1);
     other.objects[0].name = "Biceps".into();
