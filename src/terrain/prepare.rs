@@ -122,8 +122,13 @@ impl Recipe {
             self.schema
         );
         ensure!(
-            self.id == "classic-world-02-reconstruction",
-            "unsupported Realm ID {}",
+            self.id.split('-').all(|part| {
+                !part.is_empty()
+                    && part
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            }),
+            "invalid Realm ID {}: expected lowercase ASCII alphanumeric segments separated by hyphens",
             self.id
         );
         ensure!(
@@ -812,7 +817,7 @@ mod tests {
         for (field, value) in [
             ("unknown", serde_json::json!(0)),
             ("schema", serde_json::json!(2)),
-            ("id", serde_json::json!("world2")),
+            ("id", serde_json::json!("../world2")),
             ("profile", serde_json::json!("private-curve")),
             ("orientation", serde_json::json!("row-major")),
             ("width", serde_json::json!(4096)),
@@ -865,6 +870,43 @@ mod tests {
     }
 
     #[test]
+    fn realm_prepare_stable_recipe_ids() {
+        for id in [
+            "world2",
+            "synthetic-world02-copy",
+            "classic-world-02-reconstruction",
+        ] {
+            let mut v = recipe_value();
+            v["id"] = serde_json::json!(id);
+            v["output"] = serde_json::json!(format!("{id}.wmap"));
+            assert_eq!(recipe(v).unwrap().id, id);
+        }
+        for id in [
+            "",
+            ".",
+            "..",
+            "../escaped",
+            "/absolute",
+            "nested/world2",
+            "nested\\world2",
+            "World2",
+            "world_2",
+            "world.2",
+            "world 2",
+            "wörld2",
+            "-world2",
+            "world2-",
+            "world--2",
+            "world2\n",
+        ] {
+            let mut v = recipe_value();
+            v["id"] = serde_json::json!(id);
+            v["output"] = serde_json::json!(format!("{id}.wmap"));
+            assert!(recipe(v).is_err(), "{id:?}");
+        }
+    }
+
+    #[test]
     fn realm_prepare_recipe_discovery_symlinks_and_file_bounds() {
         let root = std::env::temp_dir().join(format!("realm-prepare-{}", rand::random::<u64>()));
         std::fs::create_dir(&root).unwrap();
@@ -873,6 +915,21 @@ mod tests {
         };
         write("a.json", &recipe_value());
         assert_eq!(recipes(&root).unwrap().len(), 1);
+        let mut synthetic = recipe_value();
+        synthetic["id"] = serde_json::json!("synthetic-world02-copy");
+        synthetic["output"] = serde_json::json!("synthetic-world02-copy.wmap");
+        synthetic["provenance"]["status"] =
+            serde_json::json!("synthetic World 2 copy for test only");
+        write("b.json", &synthetic);
+        let found = recipes(&root).unwrap();
+        assert_eq!(
+            found.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["classic-world-02-reconstruction", "synthetic-world02-copy"]
+        );
+        for (id, recipe) in &found {
+            assert_eq!(recipe.output, format!("{id}.wmap"));
+            recipe.validate().unwrap();
+        }
         write("b.json", &recipe_value());
         assert!(
             recipes(&root)
