@@ -420,9 +420,13 @@ pub(super) async fn publish(
             adventures::Plan::Answer(o) => o.purpose,
         };
         ensure!(
-            adventures::ready(v, &app.content)
-                && progression::ready(v, &app.content, purpose.portal()),
-            "adventure no longer safe or ready"
+            purpose.ready(v, &app.content),
+            "adventure no longer safe or ready: level={} hp={}/{} mp={}/{}",
+            v.character.level,
+            v.character.hp,
+            v.character.stats[0],
+            v.character.mp,
+            v.character.stats[1]
         );
         ensure!(
             v.objects

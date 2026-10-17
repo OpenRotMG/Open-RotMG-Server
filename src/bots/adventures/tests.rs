@@ -47,6 +47,42 @@ fn invite(s: &mut Society, b: &Brain, v: &PlayerView, c: &Content) -> Offer {
     s.outgoing(1, v.elapsed_ms).unwrap()
 }
 #[test]
+fn beginners_can_seek_equipment_companions_without_bypassing_dungeon_rules() {
+    let (c, mut v, _, mut s) = fixture();
+    v.character.level = 1;
+    v.character.items = c.get(WIZARD).unwrap().equipment.clone();
+    let mut b = Brain::new(PROFILES[1], &v);
+    let plan = s.next(&b, &v, &c, true).unwrap();
+    assert!(matches!(
+        plan,
+        Plan::Invite {
+            purpose: Purpose::Equipment,
+            ..
+        }
+    ));
+    assert!(Purpose::Equipment.ready(&v, &c));
+    assert!(!progression::ready(&v, &c, 0x717));
+    b.proposing = true;
+    let d = b.decide(&v, &c).unwrap();
+    assert!(matches!(d.goal, Goal::Wait) && d.movement.is_none() && d.journey.is_none());
+    b.proposing = false;
+    v.tick += 5;
+    v.time_ms += 250;
+    v.objects.push(object(7, 0x717, 12.5, 11.5));
+    assert!(!matches!(
+        b.decide(&v, &c).unwrap().journey,
+        Some(Journey::Portal(7))
+    ));
+    b.proposing = true;
+    v.tick += 5;
+    v.time_ms += 250;
+    v.character.hp = 1;
+    let d = b.decide(&v, &c).unwrap();
+    assert!(
+        matches!(d.goal, Goal::Recover | Goal::Dodge) || matches!(d.journey, Some(Journey::Nexus))
+    );
+}
+#[test]
 fn old_crew_names_do_not_create_a_group_and_invitations_are_not_acceptance() {
     let (c, mut v, mut b, mut s) = fixture();
     v.objects[0].name = "BattleCrus".into();

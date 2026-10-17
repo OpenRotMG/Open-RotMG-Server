@@ -404,6 +404,7 @@ async fn launch(
                             Err(error) => dialogue::failed(&app, completed.request.speaker, &completed.id, error.0).await,
                         }
                     }
+                    brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
                     if view.lifecycle.busy || view.tick < brain.next_decision { continue; }
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();

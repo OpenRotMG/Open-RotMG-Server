@@ -120,6 +120,7 @@ struct Brain {
     group: Option<adventures::Adventure>,
     group_lost_since: Option<u64>,
     offered: Option<adventures::Offer>,
+    proposing: bool,
     session: (i32, i32, i32),
     last_tick: Option<u64>,
     goal: Goal,
@@ -160,6 +161,7 @@ impl Brain {
             group: None,
             group_lost_since: None,
             offered: None,
+            proposing: false,
             session: (
                 view.session.world,
                 view.session.player,
@@ -549,10 +551,11 @@ impl Brain {
                 return Ok(decision);
             }
         }
-        if self
-            .offered
-            .as_ref()
-            .is_some_and(|o| o.until > v.elapsed_ms)
+        if (self.proposing
+            || self
+                .offered
+                .as_ref()
+                .is_some_and(|o| o.until > v.elapsed_ms))
             && peaceful(&enemies, v.position)
         {
             self.destination = None;

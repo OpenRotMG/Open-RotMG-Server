@@ -27,6 +27,9 @@ impl Purpose {
                     *k >= 0 && c.objects[&(*k as u16)].tier.is_some_and(|t| t >= 4)
                 }))
     }
+    pub(super) fn ready(self, v: &PlayerView, c: &Content) -> bool {
+        ready(v, c) && (self != Self::Speed || progression::ready(v, c, self.portal()))
+    }
     pub fn portal(self) -> u16 {
         match self {
             Self::Equipment | Self::Experience => 0x717,
@@ -393,7 +396,7 @@ pub(super) fn policy_reply(
     })
 }
 pub(super) fn ready(v: &PlayerView, content: &Content) -> bool {
-    v.character.level >= 2
+    v.character.level >= 1
         && matches!(v.map.name.as_str(), "Realm" | "Nexus")
         && v.character.hp * 4 >= v.character.stats[0] * 3
         && v.character.mp * 3 >= v.character.stats[1]
@@ -426,13 +429,11 @@ impl Brain {
             ),
             Plan::Answer(o) => (
                 &o.from,
-                vec![
-                    if ready(v, content) && progression::ready(v, content, o.purpose.portal()) {
-                        dialogue::Intent::Join
-                    } else {
-                        dialogue::Intent::Decline
-                    },
-                ],
+                vec![if o.purpose.ready(v, content) {
+                    dialogue::Intent::Join
+                } else {
+                    dialogue::Intent::Decline
+                }],
                 format!(
                     "{} invited you: {}. Join means accept that adventure with its organizer, not order them to follow you. Decline if not ready.",
                     o.from.name, o.text
