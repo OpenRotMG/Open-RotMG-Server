@@ -2,16 +2,20 @@ use crate::content::{Cell, Content, Map};
 use anyhow::{Result, ensure};
 use rand::{Rng, SeedableRng};
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 4] = [
+pub mod abyss;
+
+pub const DUNGEONS: [(u16, &str, &str, u16); 5] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
     (0x71a, "undead-lair", "Undead Lair", 0xd90),
+    (0x71b, "abyss-of-demons", "Abyss of Demons", abyss::MALPHAS),
 ];
 
 pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
     match enemy {
         0x60e..=0x610 => Some((0x717, 0.01)),
+        0x651 => Some((0x71b, 0.17)),
         0x640 | 0x645 | 0x649 | 0x650 | 0x654 => Some((0x718, 0.17)),
         0x653 => Some((0x70c, 0.11)),
         0x659 => Some((0x71a, 0.17)),
@@ -177,7 +181,9 @@ mod tests {
         let content = Content::load(Path::new("data")).unwrap();
         for (portal, name, _, boss) in DUNGEONS {
             assert_eq!(content.objects[&portal].class, "Portal");
-            let map = if name == "snake-pit" {
+            let map = if name == "abyss-of-demons" {
+                abyss::generate(&content, 12351).unwrap()
+            } else if name == "snake-pit" {
                 snake_pit(&content, 12351).unwrap()
             } else {
                 Map::load(&Path::new("data").join(format!("{name}.wmap")), &content).unwrap()

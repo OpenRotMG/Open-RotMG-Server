@@ -88,11 +88,19 @@ def copy_db(source, target):
 
 def rows(path):
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as db:
+        db.row_factory = sqlite3.Row
         db.execute('BEGIN')
         require(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'SQLite integrity failed')
         require(not db.execute('PRAGMA foreign_key_check').fetchall(), 'SQLite foreign keys failed')
         tables = [r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
-        return {table: db.execute('SELECT * FROM "' + table.replace('"', '""') + '" ORDER BY 1').fetchall() for table in tables}
+        return {table: [dict(row) for row in db.execute('SELECT * FROM "' + table.replace('"', '""') + '" ORDER BY 1')] for table in tables}
+
+
+def verify_migration(before, after):
+    # The release backup contract validates additions; existing cells must stay exact.
+    require(all(table in after and len(data) == len(after[table])
+                and all(a.items() <= b.items() for a, b in zip(data, after[table]))
+                for table, data in before.items()), 'Migration changed existing records')
 
 
 def ready(port, process=None):
@@ -173,7 +181,7 @@ def announce(config, text):
     token = ANNOUNCE_TOKEN.read_text().strip()
     request = urllib.request.Request(
         'http://127.0.0.1:' + config['bind'].rsplit(':', 1)[1] + '/internal/discord/announce',
-        data=json.dumps({'text': text}).encode(), headers={'authorization': 'Bearer ' + token})
+        data=json.dumps({'text': text}).encode(), headers={'authorization': 'Bearer ' + token, 'content-type': 'application/json'})
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
@@ -210,7 +218,7 @@ def rehearse(stage, work, config):
     (shadow / 'server.pem').chmod(0o600)
     before = rows(shadow / 'game.db')
     cfg = {**config, 'bind': '127.0.0.1:18939', 'data': str(stage / 'data'),
-           'state': str(shadow), 'shore_bots': False}
+           'state': str(shadow), 'shore_bots': False, 'bot_llm': False}
     path = work / 'shadow.json'
     path.write_text(json.dumps(cfg))
     with (work / 'shadow.log').open('w') as log:
@@ -225,7 +233,7 @@ def rehearse(stage, work, config):
             process.wait(timeout=20)
         require(process.returncode == 0, 'Rehearsal shutdown failed')
     after = rows(shadow / 'game.db')
-    require(all(after.get(table) == data for table, data in before.items()), 'Migration changed existing records')
+    verify_migration(before, after)
     module = backup_module(stage)
     archive = work / 'shadow-export.json.gz'
     bundle = module.export(shadow / 'game.db', '/var/lib/openrotmg-discord-bot/levels.sqlite', archive,
@@ -233,7 +241,7 @@ def rehearse(stage, work, config):
     restored = work / 'restored'
     module.restore(archive, restored)
     run(str(stage / 'openrotmg'), '--backup-load', str(restored / 'game.db'), str(stage / 'data'))
-    require(module.snapshot(restored / 'game.db', [*module.GAME_SCHEMAS.values(), module.AUTH_SOCIAL_GAME]) == bundle['game']
+    require(module.snapshot(restored / 'game.db', module.RELOADED_GAME) == bundle['game']
             and module.snapshot(restored / 'levels.sqlite', module.DISCORD) == bundle['discord'], 'Credential-free restore mismatch')
 
 

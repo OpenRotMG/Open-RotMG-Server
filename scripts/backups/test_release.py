@@ -19,6 +19,11 @@ class ReleaseContract(unittest.TestCase):
             with closing(sqlite3.connect(Path(temporary) / 'contract/written/game.db')) as db:
                 value = json.loads(db.execute('SELECT stats FROM characters WHERE alive=1').fetchone()[0])
             self.assertEqual(value['dungeons'], [1, 2, 3])
+            self.assertEqual(value['abysses'], 5)
+            with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as db:
+                self.assertEqual(db.execute('SELECT name,level,fame,earned,board FROM guilds').fetchone(),
+                                 ('Backup Guild', 2, 2500, 12500, 'Welcome & prepare!\n日本語 🧙'))
+                self.assertEqual(db.execute('SELECT rank,fame FROM guild_members').fetchone(), (40, 12500))
             backup.characters([value])
             for field in ['password_hash', 'token', 'email']:
                 invalid = {**value, field: 'NEVER_LOG_OR_EXPORT'}

@@ -54,6 +54,7 @@ mod tests {
             content: "A new update\nRead the full post".into(),
             published_at: 1700000000,
             edited_at: None,
+            attachments: vec![],
         };
         let snapshot = UpdateSnapshot {
             guild_id: "12345678901234567".into(),
@@ -140,7 +141,7 @@ mod tests {
             .unwrap()
             .text()
             .unwrap();
-        assert_eq!(link, "http://127.0.0.1:1/updates/#34567890123456789");
+        assert_eq!(link, "http://127.0.0.1:1/updates/");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

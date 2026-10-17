@@ -158,7 +158,7 @@ async fn legacy_migration_credits_deaths_once_and_missing_wallets_never_rebuild_
     ch.hp = 0;
     s.death(ch, "test".into()).await.unwrap();
     s.call(|db| {
-        db.execute("DROP TABLE account_fame", [])?;
+        db.execute_batch("DROP TABLE guild_members; DROP TABLE guilds; DROP TABLE account_fame;")?;
         db.pragma_update(None, "user_version", 0)?;
         Ok(())
     })

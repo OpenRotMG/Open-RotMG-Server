@@ -11,11 +11,14 @@ use rand::{Rng, SeedableRng};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 mod combat;
+pub(crate) mod dialogue;
 mod progression;
 mod social;
 
 #[derive(Clone, Copy)]
 struct Profile {
+    // Keep persisted registry keys independent of the names visible to players.
+    identity: &'static str,
     name: &'static str,
     recovery: f32,
     resources: f32,
@@ -24,59 +27,66 @@ struct Profile {
     leader: &'static str,
     healer: bool,
 }
+// Names transcribed from Whcxy3RJKIA 4:46, fubGzGmVqpI 9:33 and Ex_Ix3dlB4U 5:33 (YouTube).
 const PROFILES: [Profile; 6] = [
     Profile {
-        name: "Bayleaf",
+        identity: "Bayleaf",
+        name: "Triceps",
         recovery: 0.62,
         resources: 4.,
         companions: 3.,
         reaction: 6,
-        leader: "Mossy",
+        leader: "Biceps",
         healer: true,
     },
     Profile {
-        name: "Mossy",
+        identity: "Mossy",
+        name: "Biceps",
         recovery: 0.35,
         resources: 8.,
         companions: 3.,
         reaction: 4,
-        leader: "Mossy",
+        leader: "Biceps",
         healer: false,
     },
     Profile {
-        name: "Trellis",
+        identity: "Trellis",
+        name: "BattleCrus",
         recovery: 0.48,
         resources: 3.,
         companions: 8.,
         reaction: 5,
-        leader: "Mossy",
+        leader: "Biceps",
         healer: false,
     },
     Profile {
-        name: "Juniper",
+        identity: "Juniper",
+        name: "Kadabu",
         recovery: 0.55,
         resources: 3.,
         companions: 7.,
         reaction: 5,
-        leader: "Reed",
+        leader: "ExElite",
         healer: true,
     },
     Profile {
-        name: "Reed",
+        identity: "Reed",
+        name: "ExElite",
         recovery: 0.42,
         resources: 4.,
         companions: 5.,
         reaction: 6,
-        leader: "Reed",
+        leader: "ExElite",
         healer: false,
     },
     Profile {
-        name: "Bramble",
+        identity: "Bramble",
+        name: "Pixl",
         recovery: 0.38,
         resources: 6.,
         companions: 6.,
         reaction: 4,
-        leader: "Reed",
+        leader: "ExElite",
         healer: false,
     },
 ];
@@ -125,6 +135,7 @@ struct Brain {
     cover: BTreeSet<(i16, i16)>,
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
+    agreement: Option<dialogue::Agreement>,
     invitation_until: u64,
     next_decision: u64,
     recover_until: u64,
@@ -165,6 +176,7 @@ impl Brain {
             cover: BTreeSet::new(),
             visits: BTreeMap::new(),
             companion: None,
+            agreement: None,
             invitation_until: 0,
             next_decision: view.tick + seed % profile.reaction,
             recover_until: 0,
@@ -187,7 +199,12 @@ impl Brain {
             last_encounter: view.time_ms,
         }
     }
-    fn receive(&mut self, packet: Packet, view: &PlayerView) -> Result<bool> {
+    fn receive(
+        &mut self,
+        packet: Packet,
+        view: &PlayerView,
+        legacy_invitations: bool,
+    ) -> Result<bool> {
         if packet.id != wire::TEXT {
             return Ok(false);
         }
@@ -200,7 +217,8 @@ impl Brain {
         let text = r.utf()?;
         r.utf()?;
         r.done()?;
-        if actor > 0 && actor != self.session.1 && recipient.is_empty() {
+        if actor > 0 && actor != self.session.1 && recipient.is_empty() && self.agreement.is_none()
+        {
             let leader = self.profile.name == self.profile.leader;
             if (!leader
                 && name == self.profile.leader
@@ -239,7 +257,8 @@ impl Brain {
         {
             self.portal = Some((portal.id, view.time_ms + 30000));
         }
-        if actor > 0
+        if legacy_invitations
+            && actor > 0
             && actor != self.session.1
             && recipient.is_empty()
             && view
@@ -308,6 +327,7 @@ impl Brain {
         self.blocked.retain(|_, until| *until > v.tick);
         if v.time_ms >= self.invitation_until {
             self.companion = None;
+            self.agreement = None;
         }
         if self.previous.distance(v.position) > 0.15 {
             self.stationary = v.tick;
@@ -524,6 +544,7 @@ impl Brain {
             }
         }
         if v.map.name == "Vault"
+            && self.agreement.is_none()
             && let Some(banking) = progression::bank(v, content, &grid)?
         {
             self.next_bank = v.time_ms + 300000;
@@ -531,6 +552,7 @@ impl Brain {
         }
         let banking = v.time_ms >= self.next_bank && progression::stash(v, content)?;
         if v.map.name == "Nexus"
+            && self.agreement.is_none()
             && (v.time_ms < self.nexus_until
                 || (!banking
                     && v.time_ms < self.nexus_until + 30000
@@ -543,6 +565,7 @@ impl Brain {
             return Ok(decision);
         }
         if v.map.name == "Realm"
+            && self.agreement.is_none()
             && banking
             && v.character
                 .items
@@ -558,6 +581,7 @@ impl Brain {
             return Ok(decision);
         }
         if v.map.name == "Realm"
+            && self.agreement.is_none()
             && health >= 0.75
             && decision.item.is_none()
             && nearest.is_none_or(|e| e.position.distance(v.position) > 5.)
@@ -747,6 +771,19 @@ impl Brain {
         {
             choices.push((75., Goal::Gather(straggler.id), v.position));
         }
+        if let Some(agreement) = &self.agreement {
+            let destination = match agreement.waiting {
+                Some(position) => Some((Goal::Gather(v.session.player), position)),
+                None => v
+                    .objects
+                    .iter()
+                    .find(|p| p.name == agreement.partner && p.hp > 0)
+                    .map(|p| (Goal::Follow(p.id), p.position)),
+            };
+            if let Some((goal, position)) = destination {
+                choices.push((110., goal, position));
+            }
+        }
         for player in v
             .objects
             .iter()
@@ -854,6 +891,9 @@ impl Brain {
         choices.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (_, goal, destination) in choices {
             if self.blocked.contains_key(&tile(destination)) {
+                if self.agreement.as_ref().is_some_and(|a| a.waiting.is_some()) {
+                    return Ok(decision);
+                }
                 continue;
             }
             let movement = match goal {
@@ -900,6 +940,9 @@ impl Brain {
                 } {
                     Some(pos) => Some(pos),
                     None => {
+                        if self.agreement.as_ref().is_some_and(|a| a.waiting.is_some()) {
+                            return Ok(decision);
+                        }
                         if matches!(goal, Goal::Hunt(_))
                             && let Some(mut clearing) = progression::clear_cover(
                                 v,
@@ -950,6 +993,20 @@ impl Brain {
             }
             decision.goal = goal;
             decision.movement = movement;
+            if self.agreement.is_some()
+                && matches!(decision.goal, Goal::Follow(_) | Goal::Gather(_))
+                && let Some(enemy) =
+                    combat::target(v, content, &grid, &enemies, range, projectile.passes_cover)
+            {
+                combat::attack(
+                    v,
+                    content,
+                    &grid,
+                    enemy,
+                    self.tracks[&enemy.id].2,
+                    &mut decision,
+                )?;
+            }
             if let Goal::Fight(id) | Goal::Hunt(id) = decision.goal {
                 let enemy = enemies
                     .iter()

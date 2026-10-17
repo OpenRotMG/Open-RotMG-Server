@@ -2,6 +2,8 @@
 mod client_contract_tests;
 mod input;
 #[cfg(test)]
+mod purchase_tests;
+#[cfg(test)]
 mod queue_tests;
 use crate::{
     content::{Content, WIZARD},
@@ -138,6 +140,7 @@ impl App {
 use tokio::sync::mpsc;
 mod account_actions;
 pub(crate) mod diagnostics;
+mod guilds;
 mod hiscores;
 pub(crate) mod testing;
 mod updates;
@@ -158,12 +161,14 @@ pub struct App {
     pub max_players: usize,
     pub behind_proxy: bool,
     pub shore_bots: bool,
+    pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
     pub requests: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
     pub owners: Arc<Mutex<BTreeMap<i32, Option<SessionControl>>>>,
     pub authentication: Arc<tokio::sync::RwLock<()>>,
+    pub guild_actions: Arc<tokio::sync::Mutex<()>>,
     pub bots: Arc<Mutex<BTreeMap<i32, Owner>>>,
     pub quarantined: Arc<Mutex<Vec<Owner>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
@@ -444,7 +449,13 @@ async fn swf(State(a): State<App>) -> Response {
 async fn health(State(a): State<App>) -> Response {
     let started = a.started;
     match a.world.directory(move |d| Ok(d.health(started))).await {
-        Ok(v) => Json(v).into_response(),
+        Ok(mut v) => {
+            v["bot_dialogue"] = match &a.dialogue {
+                Some(service) => service.health(),
+                None => serde_json::json!({"enabled":false,"status":"disabled"}),
+            };
+            Json(v).into_response()
+        }
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, error(e)).into_response(),
     }
 }
@@ -512,6 +523,25 @@ fn slot(r: &mut Reader<'_>) -> Result<Slot> {
     })
 }
 pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
+    if let Some((_, purchase)) = &plan.purchase {
+        let result = a
+            .store
+            .purchase(
+                InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                },
+                purchase.clone(),
+            )
+            .await;
+        return a
+            .world
+            .for_player(plan.player)
+            .call(move |w| w.finish_purchase(plan, result))
+            .await;
+    }
     let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
     let result = if let Some((snapshot, slot, index, amount)) = &plan.stat_growth {
         a.store
@@ -734,6 +764,7 @@ async fn handle(
             );
         }
         wire::CREATE | wire::LOAD => {
+            let _guild = a.guild_actions.lock().await;
             ensure!(player.is_none(), "character already loaded");
             let account = account
                 .as_ref()
@@ -790,6 +821,10 @@ async fn handle(
                     })
                     .await?,
             );
+            if expected.is_none() {
+                let id = player.context("guild sign-on player missing")?;
+                a.world.directory(move |d| d.guild_sign_on(id)).await?;
+            }
             if let Some(testing) = &a.testing {
                 testing.native_entered(account)?;
             }
@@ -813,7 +848,7 @@ async fn handle(
             }
         }
         wire::MOVE => {
-            let _tick = r.i32()?;
+            let tick = r.i32()?;
             let time = r.i32()?;
             let pos = Pos {
                 x: r.f32()?,
@@ -829,12 +864,13 @@ async fn handle(
             r.done()?;
             let id = player.context("MOVE before character")?;
             a.world
-                .call(
-                    move |w| match w.native_move_received(id, pos, (time, received)) {
+                .call(move |w| {
+                    w.acknowledge_tick(id, tick)?;
+                    match w.native_move_received(id, pos, (time, received)) {
                         Ok(_) => Ok(()),
                         Err(e) => w.correct_position(id, time, &e.to_string()),
-                    },
-                )
+                    }
+                })
                 .await?;
         }
         wire::PLAYER_SHOOT => {
@@ -864,8 +900,43 @@ async fn handle(
                 })
                 .await?;
         }
+        wire::CREATE_GUILD
+        | wire::GUILD_INVITE
+        | wire::JOIN_GUILD
+        | wire::CHANGE_GUILD_RANK
+        | wire::GUILD_REMOVE => {
+            let id = player.context("guild action before character")?;
+            guilds::native(a, id, packet.id, &mut r, tx, received).await?;
+        }
+        50 if guilds::merchant(
+            a,
+            player.context("purchase before character")?,
+            &packet.body,
+        )
+        .await? =>
+        {
+            let id = player.context("guild purchase before character")?;
+            guilds::native(a, id, packet.id, &mut r, tx, received).await?;
+        }
         wire::PLAYER_TEXT => {
             let text = player_text(&mut r)?;
+            if let Some((kind, name)) = guilds::chat_command(&text) {
+                let id = player.context("guild command before character")?;
+                let mut body = Writer::new();
+                body.utf(name);
+                guilds::native(a, id, kind, &mut Reader::new(&body.0), tx, received).await?;
+                return Ok(());
+            }
+            let guild_chat = text
+                .split_whitespace()
+                .next()
+                .is_some_and(|s| s.eq_ignore_ascii_case("/g") || s.eq_ignore_ascii_case("/guild"));
+            // A revoked member must not receive chat between the database commit and cache publication.
+            let _guild = if guild_chat {
+                Some(a.guild_actions.lock().await)
+            } else {
+                None
+            };
             let id = player.context("chat before character")?;
 
             if let Some(message) = text
@@ -1001,6 +1072,27 @@ async fn handle(
                 enqueue_reply(tx, crate::world::chat_error(&error.to_string()))?;
             }
         }
+        wire::BUY => {
+            let merchant = r.i32()?;
+            r.done()?;
+            let id = player.context("purchase before character")?;
+            let registered = account
+                .as_ref()
+                .context("purchase before HELLO")?
+                .registered;
+            let plan = if registered {
+                a.world.call(move |w| w.buy(id, merchant)).await
+            } else {
+                Err(anyhow::anyhow!("Register and sign in before buying items."))
+            };
+            match plan {
+                Ok(plan) => persist(a, plan).await?,
+                Err(error) => {
+                    tracing::warn!(player=id, merchant, error=%error, "purchase rejected");
+                    enqueue_reply(tx, crate::world::shop::reply(false, &error.to_string()))?;
+                }
+            }
+        }
         wire::TELEPORT => {
             let target = r.i32()?;
             r.done()?;
@@ -1022,6 +1114,18 @@ async fn handle(
             if let (Some(testing), Some(player)) = (&a.testing, player) {
                 testing.acknowledge_native(nonce, *player);
             }
+        }
+        64 => {
+            let time = r.i32()?;
+            let pos = Pos {
+                x: r.f32()?,
+                y: r.f32()?,
+            };
+            r.done()?;
+            let id = player.context("ground damage before character")?;
+            a.world
+                .call(move |w| w.ground_damage(id, time, pos))
+                .await?;
         }
         22 => {
             let time = r.i32()?;
@@ -1169,9 +1273,25 @@ async fn handle(
             enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
         }
         42 | 3 => {
+            let _guild = a.guild_actions.lock().await;
             let portal = if packet.id == 3 { Some(r.i32()?) } else { None };
             r.done()?;
             let id = player.context("transfer before character")?;
+            let guild_portal = a
+                .world
+                .call(move |w| {
+                    Ok(portal
+                        .and_then(|p| w.entities.get(&p))
+                        .is_some_and(|e| e.kind == 0x72f))
+                })
+                .await?;
+            if guild_portal {
+                let guild = a
+                    .store
+                    .guild(account.as_ref().context("guild portal before HELLO")?.id)
+                    .await?;
+                a.world.directory(move |d| d.guild_instance(guild)).await?;
+            }
             let transfer = a
                 .world
                 .directory(move |d| {
@@ -1183,6 +1303,16 @@ async fn handle(
                         return Ok(None);
                     }
                     let (account, character, destination) = d.destination(id, portal)?;
+                    let world = &d.worlds[&destination];
+                    if world.players.len() >= world.max_players {
+                        let message = crate::world::chat_info("Destination is full.");
+                        crate::world::send(
+                            &d.worlds[&d.location(id)?].players[&id],
+                            message.id,
+                            message.body,
+                        );
+                        return Ok(None);
+                    }
                     let (keytime, key, name) = d.issue(account, character, destination)?;
                     Ok(Some((destination, keytime, key, name)))
                 })
@@ -1707,6 +1837,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         .route("/legacy-api/char/delete", post(delete_character))
         .route("/legacy-api/account/{operation}", post(account_request))
         .route("/legacy-api/fame/list", post(legends))
+        .route("/legacy-api/guild/{operation}", post(guilds::request))
         .nest_service("/sfx", tower_http::services::ServeDir::new(a.sfx.clone()))
         .route("/client.swf", get(swf))
         .route("/game", get(websocket))

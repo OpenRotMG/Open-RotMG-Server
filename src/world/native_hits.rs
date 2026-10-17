@@ -12,8 +12,13 @@ pub(super) fn expect_shoot_ack(p: &mut Player, bullets: Vec<Bullet>) -> bool {
         return true;
     }
     if p.shoot_acks.len() >= 64 {
+        let oldest = p.shoot_acks.front().and_then(|(_, shots)| shots.first());
         tracing::error!(
             character = p.character.id,
+            owner = oldest.map(|b| b.owner),
+            source_kind = oldest.map(|b| b.source_kind),
+            born_ms = oldest.map(|b| b.born),
+            last_native_move = p.last_move,
             "SHOOT acknowledgement backlog exceeded"
         );
         if let Some(output) = &p.tx {
@@ -162,6 +167,11 @@ impl World {
                     oldest_ms = sent.elapsed().as_millis(),
                     shooter = ?bullets.first().map(|b|b.owner),
                     volley = bullets.len(),
+                    source_kind = bullets.first().map(|b| b.source_kind),
+                    projectile = bullets.first().map(|b| b.id),
+                    born_ms = bullets.first().map(|b| b.born),
+                    last_native_move = p.last_move,
+
                     "SHOOT acknowledgement timed out; connection closed"
                 );
             }

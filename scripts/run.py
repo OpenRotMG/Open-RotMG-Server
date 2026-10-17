@@ -12,9 +12,9 @@ from urllib.request import urlopen
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-REVISION = "7e3f4b83df7f65ea2a7b57b10c2288ef02c5ae8c"
+REVISION = "d57a0c37bad63bbcc6242d66243104dbf93bd156"
 URL = f"https://codeload.github.com/OpenRotMG/Open-RotMG-Client/zip/{REVISION}"
-SHA256 = "228b163d22b087ead417a1f3d6bc8dbadb13e7c598386239cea9fd26be04fe8c"
+SHA256 = "ca4175d3c707c73bbfc48578a29c8d185b744cd3cbbf9fa976624344b7fc81d1"
 LOG = ROOT / ".local/server.log"
 
 
@@ -92,6 +92,7 @@ def main():
     bots = parser.add_mutually_exclusive_group()
     bots.add_argument("--shore-bots", action="store_true", help="Enable the three default autonomous Wizards explicitly")
     bots.add_argument("--no-shore-bots", action="store_true", help="Disable autonomous Wizards for isolated testing")
+    parser.add_argument("--bot-llm", action="store_true", help="Enable Nemotron social dialogue; requires AI_GATEWAY_API_KEY")
     parser.add_argument("--release", action="store_true", help="Build optimized gameplay")
     args = parser.parse_args()
     if shutil.which("cargo") is None:
@@ -132,6 +133,8 @@ def main():
                 command.append("--shore-bots")
             if args.no_shore_bots:
                 command.append("--no-shore-bots")
+            if args.bot_llm:
+                command.append("--bot-llm")
             code = run(command, ROOT, log)
             if code:
                 raise RuntimeError(f"Server exited with status {code}. See the error above and {LOG}.")

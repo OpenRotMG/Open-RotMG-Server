@@ -56,12 +56,13 @@ impl World {
                     (Motion::Wander, 4.)
                 }
             }
+            // Legacy orbit constructors take radius first; Swirling's center never follows a player.
             0x905 => (
                 Motion::Orbit {
-                    anchor: Anchor::Player,
-                    radius: 5.,
+                    anchor: Anchor::Home,
+                    radius: 2.,
                 },
-                2.,
+                5.,
             ),
             0x906 | 0x907 => {
                 let camp = &self.camps[e.camp.context("construct lacks its trio")?];
@@ -72,9 +73,9 @@ impl World {
                     (
                         Motion::Orbit {
                             anchor: Anchor::CampLeader,
-                            radius: 5.,
+                            radius: 4.,
                         },
-                        4.,
+                        5.,
                     )
                 } else {
                     (Motion::Wander, 8.)
@@ -88,17 +89,11 @@ impl World {
                 2000..4000 => (
                     Motion::Orbit {
                         anchor: Anchor::Player,
-                        radius: 8.,
-                    },
-                    5.,
-                ),
-                _ => (
-                    Motion::Orbit {
-                        anchor: Anchor::Player,
-                        radius: e.pos.distance(target).max(0.1),
+                        radius: 5.,
                     },
                     8.,
                 ),
+                _ => (Motion::Tangential, 8.),
             },
             kind if GODS.contains(&kind) => {
                 if e.pos.distance(target) > 7. {

@@ -13,7 +13,30 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
-        0x122 | 0x162 | 0x163 => &[],
+        0x122 | 0x162 | 0x163 | 0xd57 | 0xd58 | 0xd5b..=0xd5f => &[],
+        0xd5a => &[(0.05, Item(0xa3b))],
+        0xd56 | 0xd59 | 0xd60 => &[
+            (0.15, Tier(8, WEAPONS)),
+            (0.1, Tier(9, WEAPONS)),
+            (0.07, Tier(10, WEAPONS)),
+            (0.05, Tier(11, WEAPONS)),
+            (0.15, Tier(4, ABILITIES)),
+            (0.07, Tier(5, ABILITIES)),
+            (0.2, Tier(8, ARMOR)),
+            (0.15, Tier(9, ARMOR)),
+            (0.1, Tier(10, ARMOR)),
+            (0.07, Tier(11, ARMOR)),
+            (0.04, Tier(12, ARMOR)),
+            (0.15, Tier(3, RINGS)),
+            (0.07, Tier(4, RINGS)),
+            (0.03, Tier(5, RINGS)),
+            (0.1, Item(0xa1f)),
+            (0.1, Item(0xa20)),
+            (0.1, Item(0xa21)),
+            (0.1, Item(0xa34)),
+            (0.1, Item(0xa35)),
+            (0.1, Item(0xa4c)),
+        ],
         0x91b | 0x91f | 0x928 | 0x675 | 0x6c2 | 0x923 => &[],
         0x676 => &[(0.05, Item(0xa23))],
         0x677 => &[(0.05, Item(0xa22))],
@@ -252,6 +275,30 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.2, Tier(4, ABILITIES)),
             (0.3, Tier(3, RINGS)),
         ],
+        0x66d..=0x672 => &[
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.01, Tier(6, WEAPONS)),
+            (0.01, Tier(3, ABILITIES)),
+        ],
+        0x908 | 0x909 | 0x90b => &[],
+        crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL => &[
+            (1., Item(0xa34)),
+            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc01)),
+            (0.8, Tier(7, WEAPONS)),
+            (0.8, Tier(7, ARMOR)),
+            (0.4, Tier(8, WEAPONS)),
+            (0.4, Tier(8, ARMOR)),
+            (0.11, Tier(9, WEAPONS)),
+            (0.11, Tier(9, ARMOR)),
+            (0.05, Tier(10, WEAPONS)),
+            (0.05, Tier(10, ARMOR)),
+            (0.5, Tier(3, ABILITIES)),
+            (0.06, Tier(4, ABILITIES)),
+            (0.5, Tier(3, RINGS)),
+            (0.06, Tier(4, RINGS)),
+        ],
         kind if crate::endgame::ROSTER.contains(&kind) => crate::endgame::loot(kind),
         _ => panic!("loot requested without encounter profile"),
     }
@@ -285,7 +332,21 @@ fn god_potion(kind: u16) -> Option<u16> {
         _ => None,
     }
 }
+fn event_unique(kind: u16) -> Option<(u16, f64)> {
+    match kind {
+        0xd56 => Some((0xc0b, 0.001)),
+        0xd59 => Some((0xc0a, 0.001)),
+        0xd60 => Some((0xc06, 0.004)),
+        _ => None,
+    }
+}
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if let Some((item, _)) = event_unique(kind) {
+        ensure!(
+            content.get(item)?.class == "Equipment",
+            "event unique is not selected equipment"
+        );
+    }
     if let Some(potion) = god_potion(kind) {
         ensure!(
             content.get(potion)?.stat_increase.is_some(),
@@ -322,9 +383,18 @@ pub fn roll(content: &Content, kind: u16, rng: &mut impl Rng) -> Option<u16> {
 }
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     let mut items = if crate::quest::final_root(kind)
+        || kind == 0xd60
         || matches!(
             kind,
-            0x917 | 0xd06 | 0xd90 | 0xd78 | 0xd79 | crate::endgame::ORYX | crate::endgame::ORYX2
+            0x917
+                | 0xd06
+                | 0xd90
+                | 0xd78
+                | 0xd79
+                | crate::dungeon::abyss::MALPHAS
+                | crate::dungeon::abyss::IDOL
+                | crate::endgame::ORYX
+                | crate::endgame::ORYX2
         ) {
         let mut items = Vec::new();
         for (chance, pick) in table(kind) {
@@ -340,6 +410,18 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     } else {
         roll(content, kind, rng).into_iter().collect()
     };
+    if let Some((item, chance)) = event_unique(kind)
+        && rng.gen_bool(chance)
+    {
+        items.push(item);
+    }
+    if kind == 0xd56 {
+        for item in [0x121e, 0x131e, 0x1241, 0x1341, 0x120e, 0x130e] {
+            if rng.gen_bool(0.01) {
+                items.push(item);
+            }
+        }
+    }
     if let Some(potion) = god_potion(kind)
         && rng.gen_bool(0.015)
     {
@@ -349,9 +431,55 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
 }
 pub fn private(kind: u16) -> bool {
     crate::quest::final_root(kind)
+        || matches!(kind, 0xd5a | 0xd60)
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
+        | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
+}
+pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
+    use Pick::Tier;
+    let (weapon, armor) = match kind {
+        0x67d => (6, 5),
+        0x668 => (7, 6),
+        _ => unreachable!("selected landmark chest"),
+    };
+    let picks = [
+        (0.3, Tier(weapon, WEAPONS)),
+        (0.2, Tier(weapon + 1, WEAPONS)),
+        (0.1, Tier(weapon + 2, WEAPONS)),
+        (0.3, Tier(armor, ARMOR)),
+        (0.2, Tier(armor + 1, ARMOR)),
+        (0.1, Tier(armor + 2, ARMOR)),
+        (0.3, Tier(2, ABILITIES)),
+        (0.2, Tier(3, ABILITIES)),
+        (0.1, Tier(4, ABILITIES)),
+        (0.25, Tier(2, RINGS)),
+        (0.15, Tier(3, RINGS)),
+        (0.5, Tier(1, &[10])),
+    ];
+    for (_, pick) in picks {
+        ensure!(
+            !candidates(content, pick).is_empty(),
+            "landmark {kind:#x} chest has an empty selected tier"
+        );
+    }
+    let maximum = rng.gen_range(5..8);
+    let mut items = Vec::new();
+    for (chance, pick) in picks {
+        if rng.gen_bool(chance) {
+            items.push(i32::from(
+                *candidates(content, pick)
+                    .choose(rng)
+                    .expect("selected landmark chest tier"),
+            ));
+            if items.len() == maximum {
+                break;
+            }
+        }
+    }
+    items.resize(8, -1);
+    Ok(items)
 }
 #[cfg(test)]
 mod tests {

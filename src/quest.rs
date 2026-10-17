@@ -2,19 +2,30 @@ use crate::encounter::{Motion, Profile};
 use anyhow::{Result, ensure};
 
 pub const ROOTS: [u16; 4] = [0x91f, 0x91b, 0x928, 0x675];
+pub const EVENTS: [u16; 3] = [0xd56, 0xd59, 0xd5f];
+pub fn root(kind: u16) -> bool {
+    ROOTS.contains(&kind) || EVENTS.contains(&kind)
+}
 pub const ROSTER: &[u16] = &[
     0x91b, 0x91c, 0x91d, 0x91e, 0x91f, 0x920, 0x921, 0x922, 0x923, 0x924, 0x928, 0x929, 0x92a,
-    0x92b, 0x92c, 0x92d, 0x675, 0x676, 0x677, 0x6c1, 0x6c2, 0x65f, 0x660, 0x661,
+    0x92b, 0x92c, 0x92d, 0x675, 0x676, 0x677, 0x6c1, 0x6c2, 0x65f, 0x660, 0x661, 0xd56, 0xd57,
+    0xd58, 0xd59, 0xd5a, 0xd5b, 0xd5c, 0xd5d, 0xd5e, 0xd5f, 0xd60,
 ];
 pub fn final_root(kind: u16) -> bool {
-    matches!(kind, 0x920 | 0x91c | 0x92d | 0x6c1)
+    matches!(kind, 0x920 | 0x91c | 0x92d | 0x6c1 | 0xd56 | 0xd59 | 0xd5f)
 }
 pub fn profile(kind: u16) -> Option<Profile> {
     ROSTER.contains(&kind).then_some(Profile {
         motion: Motion::Wander,
         speed: 3.,
         interval: 50,
-        range: 15.,
+        range: match kind {
+            0xd56 | 0xd59 => 30.,
+            0xd57 | 0xd58 => 12.,
+            0xd5a..=0xd5c => 10.,
+            0xd5d => 9.,
+            _ => 15.,
+        },
     })
 }
 pub fn validate(content: &crate::content::Content, kind: u16) -> Result<()> {
@@ -25,9 +36,9 @@ pub fn validate(content: &crate::content::Content, kind: u16) -> Result<()> {
     let object = content.get(kind)?;
     ensure!(object.enemy && object.hp > 0, "invalid Realm quest enemy");
     let indexes: &[u8] = match kind {
-        0x6c2 => &[],
+        0x6c2 | 0xd5e..=0xd60 => &[],
         0x920 => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-        0x91b | 0x91c | 0x91d | 0x6c1 => &[0, 1],
+        0x91b | 0x91c | 0x91d | 0x6c1 | 0xd59 | 0xd5a | 0xd5c => &[0, 1],
         _ => &[0],
     };
     for index in indexes {

@@ -143,7 +143,7 @@ fn named_quests_have_selected_profiles_and_finite_separate_habitat_budgets() {
         )
         .unwrap();
         let w = &d.worlds[&-3];
-        assert_eq!(w.hero_identities().len(), 10);
+        assert_eq!(w.hero_identities().len(), 13);
         for kind in quest::ROOTS {
             let id = root(w, kind);
             assert_eq!(w.entities[&id].quest, Some(id));

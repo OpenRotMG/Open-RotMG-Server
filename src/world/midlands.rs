@@ -67,7 +67,7 @@ impl World {
             }
             0x61d => {
                 if e.pos.distance(target) < 10. {
-                    chase(10., 10., 7.)
+                    chase(10., 10., 4.)
                 } else {
                     (
                         Motion::Protect {
@@ -96,8 +96,22 @@ impl World {
             0x63a | 0x63b | 0x63e => chase(10., 10., 1.),
             0x63c | 0x640 => chase(10., 10., 7.),
             0x63f => (Motion::Wander, 4.),
-            0x642 | 0x644 => chase(12., 10., 7.),
-            0x643 | 0x645 => chase(12., 10., 1.),
+            0x642 | 0x644 => (
+                Motion::Maintain {
+                    sight: 10.,
+                    distance: 8.,
+                },
+                4.,
+            ),
+            0x643 if elapsed % 3000 < 1500 => chase(12., 15., 2.),
+            0x643 => (
+                Motion::Protect {
+                    anchor: Anchor::CampLeader,
+                    distance: 2.,
+                },
+                12.,
+            ),
+            0x645 => chase(12., 10., 1.),
             0x647 | 0x648 => chase(12., 10., 7.),
             0x649 | 0x650 => chase(10., 10., 7.),
             0x64a | 0x64c | 0x64d => chase(12., 10., 7.),

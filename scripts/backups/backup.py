@@ -21,13 +21,18 @@ HISCORES_GAME = {**SHORE_GAME, 'competitors': ('account',), 'collections': ('acc
 ACTIONS_GAME = {**HISCORES_GAME, 'account_fame': ('account', 'balance', 'earned'), 'discord_recovery': ('account', 'enabled_at', 'last_issued_at')}
 SOCIAL_GAME = {**ACTIONS_GAME, 'account_lists': ('account', 'list_id', 'target')}
 UPDATES_GAME = {**SOCIAL_GAME, 'update_feed': ('id', 'snapshot', 'synced_at')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME}
+GOLD_GAME = {**UPDATES_GAME, 'accounts': (*GAME['accounts'], 'credits')}
+GUILDS_GAME = {**GOLD_GAME, 'guilds': ('id', 'name', 'level', 'fame', 'earned', 'board'), 'guild_members': ('account', 'guild', 'rank', 'fame')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
 AUTH_ACTIONS_GAME = {**ACTIONS_GAME, 'credentials': AUTH_GAME['credentials'], **{t: AUTH_HISCORES_GAME['discord_codes'] for t in ['discord_codes', 'recovery_codes', 'password_resets']}}
 AUTH_SOCIAL_GAME = {**AUTH_ACTIONS_GAME, 'account_lists': SOCIAL_GAME['account_lists']}
 AUTH_UPDATES_GAME = {**AUTH_SOCIAL_GAME, 'update_feed': UPDATES_GAME['update_feed']}
+# Loading a restore with the release binary recreates its empty credential tables; the deploy helper and release contract share this.
+AUTH_GOLD_GAME = {**AUTH_UPDATES_GAME, 'accounts': GOLD_GAME['accounts']}
+RELOADED_GAME = {**AUTH_GOLD_GAME, 'guilds': GUILDS_GAME['guilds'], 'guild_members': GUILDS_GAME['guild_members']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -55,7 +60,7 @@ def update_snapshot(raw):
         raise ValueError('Release update validator returned an invalid receipt')
 
 
-def snapshot(path, schema):
+def snapshot(path, schema, *, include_schema=False):
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as db, db:
         db.execute('BEGIN')
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
@@ -64,20 +69,53 @@ def snapshot(path, schema):
             raise ValueError('Source SQLite foreign keys failed')
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
         schemas = schema if isinstance(schema, list) else [schema]
-        matched = [candidate for candidate in schemas if tables == set(candidate)]
+        matched = [candidate for candidate in schemas if tables == set(candidate) and all(
+            tuple(r[1] for r in db.execute('PRAGMA table_info(' + table + ')')) == columns
+            for table, columns in candidate.items())]
         if len(matched) != 1:
-            raise ValueError('Unsupported database tables; update and test the export schema before backing up')
+            raise ValueError('Unsupported database tables or columns; update and test the export schema before backing up')
         schema = matched[0]
         result = {}
         for table, columns in schema.items():
-            if tuple(r[1] for r in db.execute('PRAGMA table_info(' + table + ')')) != columns:
-                raise ValueError('Unsupported database columns: ' + table)
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
                 continue
             selected = tuple(c for c in columns if c != 'guid')
             rows = db.execute('SELECT ' + ','.join(selected) + ' FROM ' + table + ' ORDER BY ' + ','.join(selected[:2])).fetchall()
             result[table] = [dict(zip(selected, row)) for row in rows]
-        return result
+        return (result, schema) if include_schema else result
+
+
+def validate_guilds(game, accounts):
+    guilds, names = {}, set()
+    for row in game.get('guilds', []):
+        if (type(row['id']) is not int or not 0 < row['id'] <= 2147483647
+                or type(row['name']) is not str or not re.fullmatch('[A-Za-z ]{1,20}', row['name'])
+                or row['name'] != ' '.join(row['name'].split())
+                or type(row['level']) is not int or not 1 <= row['level'] <= 4
+                or any(type(row[k]) is not int for k in ['fame', 'earned'])
+                or not 0 <= row['fame'] <= row['earned'] <= 2147483647
+                or type(row['board']) is not str or len(row['board'].encode('utf-16-le')) // 2 > 4096
+                or any((ord(c) < 32 or 127 <= ord(c) <= 159) and c not in '\r\n\t' for c in row['board'])):
+            raise ValueError('Invalid guild record')
+        if row['id'] in guilds or row['name'].lower() in names:
+            raise ValueError('Duplicate guild identity')
+        guilds[row['id']] = row
+        names.add(row['name'].lower())
+    members, counts, founders, contributions = set(), {}, {}, {}
+    for row in game.get('guild_members', []):
+        if (any(type(row[k]) is not int for k in ['account', 'guild', 'rank', 'fame'])
+                or row['account'] not in accounts or row['guild'] not in guilds
+                or row['rank'] not in [0, 10, 20, 30, 40] or not 0 <= row['fame'] <= 2147483647):
+            raise ValueError('Invalid guild member')
+        if row['account'] in members:
+            raise ValueError('Account belongs to multiple guilds')
+        members.add(row['account'])
+        g = row['guild']
+        counts[g] = counts.get(g, 0) + 1
+        founders[g] = founders.get(g, 0) + (row['rank'] == 40)
+        contributions[g] = contributions.get(g, 0) + row['fame']
+    if any(not 1 <= counts.get(g, 0) <= 50 or founders[g] > 1 or contributions[g] > guilds[g]['earned'] for g in guilds):
+        raise ValueError('Invalid guild roster, founder count or contributions')
 
 
 def validate(bundle):
@@ -108,6 +146,9 @@ def validate(bundle):
             raise ValueError('Invalid eight-slot vault inventory')
     bots = bundle['game'].get('shore_bots', [])
     accounts = {row['id'] for row in bundle['game']['accounts']}
+    for row in bundle['game']['accounts']:
+        if bundle['schema'] >= 8 and (type(row['credits']) is not int or not 0 <= row['credits'] <= 2147483647):
+            raise ValueError('Invalid account gold balance')
     for row in bots:
         if not isinstance(row['name'], str) or not row['name'] or type(row['account']) is not int or row['account'] <= 0 or row['account'] not in accounts:
             raise ValueError('Invalid shore bot name/account')
@@ -148,12 +189,13 @@ def validate(bundle):
         update_snapshot(row['snapshot'])
     if bundle['schema'] >= 5 and {r['account'] for r in bundle['game']['account_fame']} != accounts:
         raise ValueError('Every account requires a fame wallet')
+    validate_guilds(bundle['game'], accounts)
     return bundle
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME])
-    version = next(version for version, schema in GAME_SCHEMAS.items() if set(schema) == set(game_data))
+    game_data, matched = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, RELOADED_GAME], include_schema=True)
+    version = next(version for version, schema in GAME_SCHEMAS.items() if schema == {k: v for k, v in matched.items() if k in game_data})
     bundle = validate({
         'schema': version, 'created_at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'revisions': {'server': Path(server_revision).read_text().strip(), 'discord_bot': Path(bot_revision).read_text().strip(),
@@ -198,6 +240,15 @@ CREATE TABLE discord_recovery(account INTEGER PRIMARY KEY REFERENCES discord_lin
         definitions['game'] += '\nCREATE TABLE account_lists(account INTEGER NOT NULL REFERENCES accounts(id),list_id INTEGER NOT NULL CHECK(list_id IN (0,1)),target INTEGER NOT NULL REFERENCES accounts(id),PRIMARY KEY(account,list_id,target),CHECK(account<>target));'
     if bundle['schema'] >= 7:
         definitions['game'] += '\nCREATE TABLE update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);'
+    if bundle['schema'] >= 8:
+        definitions['game'] += '\nALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647);'
+    if bundle['schema'] >= 9:
+        definitions['game'] += '''
+CREATE TABLE guilds(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE CHECK(length(name) BETWEEN 1 AND 20 AND name=trim(name) AND name NOT GLOB '*[^A-Za-z ]*'),level INTEGER NOT NULL DEFAULT 1 CHECK(level BETWEEN 1 AND 4),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647),earned INTEGER NOT NULL DEFAULT 0 CHECK(earned BETWEEN fame AND 2147483647),board TEXT NOT NULL DEFAULT '');
+CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild INTEGER NOT NULL REFERENCES guilds(id),rank INTEGER NOT NULL CHECK(rank IN (0,10,20,30,40)),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647));
+CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
+CREATE INDEX guild_roster ON guild_members(guild);
+CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;'''
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

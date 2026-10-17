@@ -12,7 +12,6 @@ pub struct Diagnostics {
     pub binary_sha256: String,
     source_revision: Option<String>,
     browsers: Mutex<HashMap<String, std::sync::Weak<Mutex<Browser>>>>,
-    budgets: Mutex<HashMap<i32, Instant>>,
     files: Mutex<BTreeSet<String>>,
 }
 #[derive(Default)]
@@ -108,7 +107,6 @@ impl Diagnostics {
             source_revision,
             binary_sha256: format!("{:x}", Sha256::digest(std::fs::read(executable)?)),
             browsers: Mutex::default(),
-            budgets: Mutex::default(),
             files: Mutex::new(pending),
         })
     }
@@ -126,17 +124,6 @@ impl Diagnostics {
         let browser = Arc::new(Mutex::new(Browser::default()));
         browsers.insert(key.into(), Arc::downgrade(&browser));
         Ok(browser)
-    }
-    fn reserve(&self, account: i32) -> Result<()> {
-        let mut budgets = self.budgets.lock().expect("diagnostics poisoned");
-        budgets.retain(|_, t| t.elapsed().as_secs() < 60);
-        ensure!(
-            !budgets.contains_key(&account),
-            "Wait one minute between bug reports."
-        );
-        ensure!(budgets.len() < 4096, "Bug report rate limit reached.");
-        budgets.insert(account, Instant::now());
-        Ok(())
     }
     fn save(&self, report: &Value) -> Result<()> {
         let mut pending = self.files.lock().expect("diagnostics poisoned");
@@ -387,7 +374,6 @@ pub async fn report(
         message.chars().count() <= 500,
         "Bug message is too long (maximum 500 characters)."
     );
-    a.diagnostics.reserve(account)?;
     let requested = Instant::now();
     let context = a.world.directory(move |d| d.bug_context(player)).await?;
     let id = {
@@ -592,7 +578,7 @@ mod tests {
         assert_eq!(d.snapshot()["rtt_samples"].as_array().unwrap().len(), 1);
     }
     #[tokio::test]
-    async fn native_command_spools_privately_and_receipts_survive_restart() {
+    async fn consecutive_native_commands_spool_privately_and_receipts_survive_restart() {
         let (root, mut a) = super::super::account_actions::tests::fixture();
         let account = a.store.list("bug-test".into()).await.unwrap().id;
         let character = a
@@ -627,19 +613,21 @@ mod tests {
         let (lost, _) = tokio::sync::watch::channel(false);
         let mut text = Writer::new();
         text.utf("/bug enemies froze");
-        handle(
-            &mut a,
-            Packet {
-                id: wire::PLAYER_TEXT,
-                body: text.0,
-            },
-            &mut session,
-            &tx,
-            &lost,
-            Instant::now(),
-        )
-        .await
-        .unwrap();
+        for _ in 0..2 {
+            handle(
+                &mut a,
+                Packet {
+                    id: wire::PLAYER_TEXT,
+                    body: text.0.clone(),
+                },
+                &mut session,
+                &tx,
+                &lost,
+                Instant::now(),
+            )
+            .await
+            .unwrap();
+        }
         assert!(
             rx.try_recv().is_err(),
             "only issue creation should produce a success reply"
@@ -766,7 +754,10 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), 1_048_576)
             .await
             .unwrap();
-        assert!(serde_json::from_slice::<Value>(&body).unwrap()["report"].is_null());
+        let remaining: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(remaining["report"]["message_untrusted"], "enemies froze");
+        assert_eq!(remaining["report"]["account_id"], account);
+        assert_ne!(remaining["report"]["id"], id);
         let saved: Value = serde_json::from_slice(
             &std::fs::read(root.join("bug-reports").join(format!("{id}.json"))).unwrap(),
         )
@@ -833,7 +824,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn spool_is_durable_private_and_rate_limited() {
+    fn spool_is_durable_and_private() {
         let root = std::env::temp_dir().join(format!("bug-spool-{}", rand::random::<u64>()));
         let d = Diagnostics::open(root.clone()).unwrap();
         let id = "a".repeat(24);
@@ -847,9 +838,6 @@ mod tests {
             .unwrap(),
             value
         );
-        assert!(d.reserve(1).is_ok());
-        assert!(d.reserve(1).is_err());
-        assert!(d.reserve(2).is_ok());
         assert!(d.save(&json!({"id": "../escape"})).is_err());
         assert!(d.browser("bad").is_err());
         let browser = d.browser(&"b".repeat(32)).unwrap();

@@ -20,14 +20,14 @@ pub(crate) fn chat_info(text: &str) -> Packet {
 }
 
 pub(super) fn text_packet(name: &str, object: i32, bubble: u8, text: &str) -> Packet {
-    text_to(name, object, bubble, "", text)
+    text_to(name, object, bubble, "", text, 0)
 }
 
-fn text_to(name: &str, object: i32, bubble: u8, recipient: &str, text: &str) -> Packet {
+fn text_to(name: &str, object: i32, bubble: u8, recipient: &str, text: &str, stars: i32) -> Packet {
     let mut out = Writer::new();
     out.utf(name)
         .i32(object)
-        .i32(0)
+        .i32(stars)
         .u8(bubble)
         .utf(recipient)
         .utf(text)
@@ -65,6 +65,38 @@ impl Player {
 }
 
 impl World {
+    pub(crate) fn dialogue_participants(&self, bot: i32, speaker: i32) -> Result<()> {
+        let sender = self.players.get(&bot).context("dialogue bot left world")?;
+        let peer = self
+            .players
+            .get(&speaker)
+            .context("dialogue speaker left world")?;
+        ensure!(
+            sender.controller == Controller::Autonomous
+                && sender.can_chat()
+                && peer.can_chat()
+                && sender.known.contains(&speaker)
+                && !peer.account_lists[1].contains(&sender.character.account)
+                && sender.pos.distance(peer.pos) <= 12.,
+            "dialogue participants unavailable"
+        );
+        Ok(())
+    }
+    pub(crate) fn dialogue_notice(&self, speaker: i32, text: &str, failed: bool) -> Result<()> {
+        validate(text)?;
+        let p = self
+            .players
+            .get(&speaker)
+            .context("dialogue recipient left world")?;
+        ensure!(p.can_chat(), "dialogue recipient unavailable");
+        let packet = if failed {
+            chat_error(text)
+        } else {
+            chat_info(text)
+        };
+        send(p, packet.id, packet.body);
+        Ok(())
+    }
     pub fn account_list_target(&self, id: i32, target: i32) -> Result<i32> {
         let sender = self.players.get(&id).context("player missing")?;
         let target_player = self.players.get(&target).context("player not found")?;
@@ -134,8 +166,13 @@ impl Directory {
             .split_once(char::is_whitespace)
             .unwrap_or((trimmed, ""));
         let tell = command.eq_ignore_ascii_case("/tell") || command.eq_ignore_ascii_case("/t");
+        let guild_chat =
+            command.eq_ignore_ascii_case("/g") || command.eq_ignore_ascii_case("/guild");
         ensure!(
-            !trimmed.starts_with('/') || tell || trimmed.eq_ignore_ascii_case("/pause"),
+            !trimmed.starts_with('/')
+                || tell
+                || guild_chat
+                || trimmed.eq_ignore_ascii_case("/pause"),
             "Unknown chat command."
         );
         let world = self.resolve(Target::Player(id))?;
@@ -162,11 +199,45 @@ impl Directory {
         }
         let account = sender.character.account;
         let name = sender.character.name.clone();
+        let guild = sender.presentation.guild.clone();
+        let stars = sender.presentation.stars();
         ensure!(
             !tell || crate::store::name_chosen(account, &name),
             "Choose a name before using /tell."
         );
         self.chat_permit(id, now)?;
+        if guild_chat {
+            let guild = guild.context("You are not in a guild.")?;
+            let message = rest.trim();
+            ensure!(!message.is_empty(), "Usage: /g <message>");
+            let packet = text_to(&name, -1, 0, "*Guild*", message, stars);
+            let mut recipients = 0;
+            for p in self
+                .worlds
+                .values()
+                .flat_map(|w| w.players.values())
+                .filter(|p| {
+                    p.can_chat()
+                        && p.presentation
+                            .guild
+                            .as_ref()
+                            .is_some_and(|g| g.id == guild.id)
+                        && !p.account_lists[1].contains(&account)
+                })
+            {
+                send(p, packet.id, packet.body.clone());
+                recipients += 1;
+            }
+            tracing::info!(
+                player = id,
+                account,
+                guild = guild.id,
+                recipients,
+                bytes = message.len(),
+                "guild chat delivered"
+            );
+            return Ok(());
+        }
         if tell {
             let (recipient, message) = rest
                 .trim_start()
@@ -183,7 +254,7 @@ impl Directory {
                 target.character.account != account,
                 "You cannot tell yourself."
             );
-            let packet = text_to(&name, -1, 0, &target.character.name, message.trim());
+            let packet = text_to(&name, -1, 0, &target.character.name, message.trim(), 0);
             let ignored = target.account_lists[1].contains(&account);
             if !ignored {
                 send(target, packet.id, packet.body.clone());
@@ -243,6 +314,33 @@ mod tests {
         assert_eq!(r.utf().unwrap(), text);
         assert_eq!(r.utf().unwrap(), "");
         r.done().unwrap();
+    }
+    #[test]
+    fn dialogue_errors_are_private_and_unavailable_participants_cannot_accept() {
+        let mut d = super::super::tests::directory();
+        let (bot, mut bot_rx) = receive(&mut d, -2, 1);
+        let (human, mut human_rx) = receive(&mut d, -2, 2);
+        let (_, mut other_rx) = receive(&mut d, -2, 3);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.dialogue_notice(human, "Bot dialogue failed: timeout.", true)
+            .unwrap();
+        message(
+            human_rx.try_recv().unwrap(),
+            "*Error*",
+            -1,
+            "Bot dialogue failed: timeout.",
+        );
+        assert!(bot_rx.try_recv().is_err() && other_rx.try_recv().is_err());
+        assert!(w.dialogue_participants(bot, human).is_err());
+        let position = w.players[&human].pos;
+        let p = w.players.get_mut(&bot).unwrap();
+        p.controller = Controller::Autonomous;
+        p.known.insert(human);
+        p.pos = position;
+        w.dialogue_participants(bot, human).unwrap();
+        w.players.get_mut(&human).unwrap().departing = true;
+        assert!(w.dialogue_participants(bot, human).is_err());
+        assert!(w.dialogue_notice(human, "No stale reply.", true).is_err());
     }
     #[test]
     fn selected_chat_layout_identity_and_world_routing() {

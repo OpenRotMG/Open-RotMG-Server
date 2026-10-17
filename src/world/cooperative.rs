@@ -21,7 +21,7 @@ fn ready(p: &Player) -> bool {
             .is_none_or(|tx| !*tx.lost.borrow() && !tx.packets.is_closed())
 }
 
-fn effect(kind: u8, target: i32, position: Pos) -> Vec<u8> {
+pub(super) fn effect(kind: u8, target: i32, position: Pos) -> Vec<u8> {
     let mut out = Writer::new();
     out.u8(kind)
         .i32(target)

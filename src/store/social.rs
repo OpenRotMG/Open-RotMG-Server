@@ -110,6 +110,8 @@ mod tests {
         let db = Connection::open(&path).unwrap();
         db.execute("DROP TABLE account_lists", []).unwrap();
         assert!(Store::open(&path, &content).is_err());
+        db.execute_batch("DROP TABLE guild_members; DROP TABLE guilds;")
+            .unwrap();
         db.pragma_update(None, "user_version", 5).unwrap();
         assert_eq!(
             Store::open(&path, &content)

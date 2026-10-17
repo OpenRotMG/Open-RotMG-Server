@@ -48,19 +48,14 @@ impl World {
                         x: (i % self.map.width as usize) as f32 + 0.5,
                         y: (i / self.map.width as usize) as f32 + 0.5,
                     };
-                    (cell.terrain == *terrain && cell.object.is_none() && self.walkable(pos))
-                        .then_some(pos)
+                    (cell.terrain == *terrain
+                        && cell.object.is_none()
+                        && self.walkable(pos)
+                        && self.outside_setpieces(pos))
+                    .then_some(pos)
                 })
                 .collect();
             candidates.shuffle(&mut self.rng);
-            // Roads make encounters discoverable without placing an arrival-room ambush.
-            candidates.sort_by_key(|pos| {
-                self.map
-                    .cell(pos.x, pos.y)
-                    .expect("candidate in map")
-                    .ground
-                    != 0xd0
-            });
             if *terrain == 1 {
                 self.populate_godlands(&candidates)?;
                 continue;

@@ -36,7 +36,7 @@ fn assert_budgets(w: &World) {
     for terrain in 1..=12 {
         assert!(w.population_count(terrain) <= if terrain >= 11 { 24 } else { 32 });
     }
-    assert_eq!(w.hero_identities().len(), 10);
+    assert_eq!(w.hero_identities().len(), 13);
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn distinct_leader_phases_and_independent_projectile_clocks_are_real() {
     );
     assert!(matches!(
         w.family_movement(leader, home, 0).unwrap().0,
-        Motion::Wiggle
+        Motion::Pace { distance: 5. }
     ));
     assert!(crate::encounter::phased_attacks(0x609, 200, 0., 4000).is_empty());
 }

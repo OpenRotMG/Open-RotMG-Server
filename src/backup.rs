@@ -90,6 +90,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 character.gain_experience(&content, 400, &mut rand::thread_rng())?;
                 character.dungeons = [1, 2, 3];
                 character.pirate_caves = 4;
+                character.abysses = 5;
                 store.progress(character.clone()).await?;
                 let mut items = character.items.clone();
                 items[4] = 0xa22;
@@ -106,10 +107,34 @@ pub async fn run(args: &[String]) -> Result<bool> {
                     .await?;
                 character = store.load(account.id, character.id).await?;
                 if !alive {
+                    character.fame = 11000;
                     character.alive = false;
                     character.hp = 0;
                     store
                         .death(character, "Backup contract fixture".into())
+                        .await?;
+                    let mut funding = store
+                        .create_prepared(
+                            account.id,
+                            content.get(content::WIZARD)?,
+                            Some("Backupchief".into()),
+                        )
+                        .await?;
+                    store
+                        .change_guild(
+                            account.id,
+                            store::GuildAction::Create("Backup Guild".into()),
+                        )
+                        .await?;
+                    funding.fame = 12500;
+                    funding.hp = 0;
+                    funding.alive = false;
+                    store.death(funding, "Guild backup fixture".into()).await?;
+                    store
+                        .change_guild(account.id, store::GuildAction::Upgrade { level: 1 })
+                        .await?;
+                    store
+                        .guild_board(account.id, Some("Welcome & prepare!\n日本語 🧙".into()))
                         .await?;
                 }
             }
@@ -122,10 +147,11 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         content: "Backup update\nPersisted public text".into(),
                         published_at: 1700000000,
                         edited_at: None,
+                        attachments: vec![],
                     }],
                 })
                 .await?;
-            println!("{}", serde_json::json!({"fixture_characters": 2}));
+            println!("{}", serde_json::json!({"fixture_characters": 3}));
         }
         ["--backup-load", database, data] => {
             ensure!(
