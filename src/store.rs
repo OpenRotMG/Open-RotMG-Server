@@ -760,9 +760,10 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     pub async fn consume_stat(
         &self,
         mut ch: Character,
-        slot: usize,
+        slot: Option<usize>,
         index: usize,
         amount: i32,
+        vault: Option<Vault>,
     ) -> Result<i32> {
         let kind = match index {
             2 => 0xa1f,
@@ -774,7 +775,9 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             _ => anyhow::bail!("unsupported permanent potion stat"),
         };
         ensure!(
-            amount == 1 && slot < 12 && ch.items.len() == 12 && ch.items[slot] == kind,
+            amount == 1
+                && ch.items.len() == 12
+                && slot.is_none_or(|slot| ch.items.get(slot) == Some(&kind)),
             "permanent potion ownership or activation mismatch"
         );
         let cap = self
@@ -790,6 +793,12 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             ch.revision >= 0 && ch.revision < i32::MAX,
             "invalid potion revision"
         );
+        ensure!(
+            vault
+                .as_ref()
+                .is_none_or(|v| slot.is_none() && v.account == ch.account),
+            "potion vault owner mismatch"
+        );
         self.call(move |db| {
             let tx = db.transaction()?;
             let (raw, items): (String, String) = tx.query_row(
@@ -803,11 +812,17 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "permanent potion reservation changed");
             ch.base[index] += amount;
-            ch.items[slot] = -1;
+            if let Some(slot) = slot {
+                ch.items[slot] = -1;
+            }
             ch.revision += 1;
             let n = tx.execute("UPDATE characters SET stats=?4,items=?5,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![ch.id, ch.account, ch.revision - 1, serde_json::to_string(&ch)?, serde_json::to_string(&ch.items)?])?;
             ensure!(n == 1, "permanent potion commit lost its reservation");
+            if let Some(vault) = vault {
+                let n = tx.execute("UPDATE vaults SET items=?3,revision=revision+1 WHERE account=?1 AND revision=?2", params![vault.account, vault.revision, serde_json::to_string(&vault.items)?])?;
+                ensure!(n == 1, "permanent potion vault conflict");
+            }
             tx.commit()?;
             Ok(ch.revision)
         }).await
@@ -996,6 +1011,65 @@ impl Account {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn ground_stat_potions_preserve_backpacks_and_commit_vault_sources_atomically() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let s = Store::open(Path::new(":memory:"), &content).unwrap();
+        let account = s.list("ground-stat-potion".into()).await.unwrap();
+        let mut ch = s
+            .create(account.id, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let mut vault = s.vault(account.id).await.unwrap();
+        vault.items[0] = 0xa1f;
+        ch.revision = s
+            .exchange(
+                vec![InventoryWrite {
+                    id: ch.id,
+                    account: ch.account,
+                    revision: ch.revision,
+                    items: ch.items.clone(),
+                }],
+                Some(vault),
+            )
+            .await
+            .unwrap()[0];
+        let source = s.vault(account.id).await.unwrap();
+        let mut consumed = source.clone();
+        consumed.items[0] = -1;
+        let mut stale = consumed.clone();
+        stale.revision += 1;
+        assert!(
+            s.consume_stat(ch.clone(), None, 2, 1, Some(stale))
+                .await
+                .is_err()
+        );
+        let saved = s.load(account.id, ch.id).await.unwrap();
+        assert_eq!((saved.base, saved.revision), (ch.base, ch.revision));
+        assert_eq!(s.vault(account.id).await.unwrap().items, source.items);
+        let revision = s
+            .consume_stat(ch.clone(), None, 2, 1, Some(consumed.clone()))
+            .await
+            .unwrap();
+        assert!(
+            s.consume_stat(ch.clone(), None, 2, 1, Some(consumed))
+                .await
+                .is_err()
+        );
+        let saved = s.load(account.id, ch.id).await.unwrap();
+        assert_eq!(saved.items, ch.items);
+        assert_eq!(saved.base[2], ch.base[2] + 1);
+        assert_eq!(saved.revision, revision);
+        let after = s.vault(account.id).await.unwrap();
+        assert_eq!(after.items[0], -1);
+        assert_eq!(after.revision, source.revision + 1);
+        s.consume_stat(saved.clone(), None, 2, 1, None)
+            .await
+            .unwrap();
+        let ground = s.load(account.id, ch.id).await.unwrap();
+        assert_eq!(ground.items, saved.items);
+        assert_eq!(ground.base[2], saved.base[2] + 1);
+    }
+    #[tokio::test]
     async fn permanent_potions_commit_items_and_base_together_and_reject_replay() {
         let content = Content::load(Path::new("data")).unwrap();
         let s = Store::open(Path::new(":memory:"), &content).unwrap();
@@ -1026,11 +1100,22 @@ mod tests {
                 .await
                 .unwrap()[0];
             let before = ch.base;
-            let revision = s.consume_stat(ch.clone(), slot, index, 1).await.unwrap();
-            assert!(s.consume_stat(ch.clone(), slot, index, 1).await.is_err());
+            let revision = s
+                .consume_stat(ch.clone(), Some(slot), index, 1, None)
+                .await
+                .unwrap();
+            assert!(
+                s.consume_stat(ch.clone(), Some(slot), index, 1, None)
+                    .await
+                    .is_err()
+            );
             let mut foreign = ch.clone();
             foreign.account += 1;
-            assert!(s.consume_stat(foreign, slot, index, 1).await.is_err());
+            assert!(
+                s.consume_stat(foreign, Some(slot), index, 1, None)
+                    .await
+                    .is_err()
+            );
             ch = s.load(ch.account, ch.id).await.unwrap();
             assert_eq!(ch.revision, revision);
             assert_eq!(ch.items[slot], -1);
@@ -1054,8 +1139,16 @@ mod tests {
             )
             .await
             .unwrap()[0];
-        assert!(s.consume_stat(ch.clone(), 4, 4, 1).await.is_err());
-        assert!(s.consume_stat(ch.clone(), 4, 4, 2).await.is_err());
+        assert!(
+            s.consume_stat(ch.clone(), Some(4), 4, 1, None)
+                .await
+                .is_err()
+        );
+        assert!(
+            s.consume_stat(ch.clone(), Some(4), 4, 2, None)
+                .await
+                .is_err()
+        );
         let saved = s.load(ch.account, ch.id).await.unwrap();
         assert_eq!(
             (saved.base[4], saved.items[4], saved.revision),
@@ -1065,7 +1158,7 @@ mod tests {
         dead.alive = false;
         dead.hp = 0;
         s.death(dead, "potion regression".into()).await.unwrap();
-        assert!(s.consume_stat(ch, 4, 4, 1).await.is_err());
+        assert!(s.consume_stat(ch, Some(4), 4, 1, None).await.is_err());
     }
     #[tokio::test]
     async fn permanent_potion_conflicts_with_trade_and_vault_without_duplication() {
@@ -1122,11 +1215,17 @@ mod tests {
                         None
                     };
                     if potion_first {
-                        s.consume_stat(source.clone(), 4, index, 1).await.unwrap();
+                        s.consume_stat(source.clone(), Some(4), index, 1, None)
+                            .await
+                            .unwrap();
                         assert!(s.exchange(writes, vault).await.is_err());
                     } else {
                         s.exchange(writes, vault).await.unwrap();
-                        assert!(s.consume_stat(source.clone(), 4, index, 1).await.is_err());
+                        assert!(
+                            s.consume_stat(source.clone(), Some(4), index, 1, None)
+                                .await
+                                .is_err()
+                        );
                     }
                     let saved = s.load(owner.id, source.id).await.unwrap();
                     let other = s.load(recipient.id, target.id).await.unwrap();

@@ -2463,13 +2463,30 @@ impl World {
             p.active() && !p.pending && p.character.hp > 0,
             "player is busy, departing, quarantined or dead"
         );
+        let source = if slot.object == id {
+            &p.character.items
+        } else {
+            let bag = self
+                .entities
+                .get(&slot.object)
+                .context("item ownership mismatch")?;
+            ensure!(
+                !bag.reserved
+                    && bag.accessible(p.character.account)
+                    && p.pos.distance(bag.pos) < 1.5
+                    && self.content.get(bag.kind)?.class == "Container",
+                "item container inaccessible"
+            );
+            &bag.items
+        };
         ensure!(
-            slot.object == id && slot.slot < 12 && p.character.items[slot.slot] == slot.kind,
+            source.get(slot.slot) == Some(&slot.kind),
             "item ownership mismatch"
         );
         ensure!(slot.kind >= 0, "empty item slot");
         let item = self.content.get(slot.kind as u16)?.clone();
         if !item.abilities.is_empty() {
+            ensure!(slot.object == id, "ability must be equipped");
             self.activate_ability(id, slot, &item, pos)?;
             return Ok(None);
         }
@@ -2481,10 +2498,7 @@ impl World {
                             == 0,
                     "cannot restore mana while Quiet"
                 );
-                let mut items = p.character.items.clone();
-                items[slot.slot] = -1;
-                self.players.get_mut(&id).unwrap().pending = true;
-                let mut plan = self.plan(id, items, None, 0);
+                let mut plan = self.consumable_plan(id, slot);
                 if item.activate == "Heal" {
                     plan.healing = item.heal;
                 } else {
@@ -2512,29 +2526,54 @@ impl World {
                     "stat is already at its class cap"
                 );
                 let snapshot = p.character.clone();
-                let mut items = snapshot.items.clone();
-                items[slot.slot] = -1;
-                let mut plan = self.plan(id, items, None, 0);
+                let mut plan = self.consumable_plan(id, slot);
                 plan.stat_growth = Some((snapshot, slot, index, amount));
-                self.players.get_mut(&id).unwrap().pending = true;
                 Ok(Some(plan))
             }
-            "Create" => self.begin_create(id, slot, &item).map(Some),
-            "UnlockPortal" => self.begin_unlock(id, slot, &item).map(Some),
+            "Create" | "UnlockPortal" => {
+                ensure!(
+                    slot.object == id,
+                    "portal consumable must be in your inventory"
+                );
+                if item.activate == "Create" {
+                    self.begin_create(id, slot, &item).map(Some)
+                } else {
+                    self.begin_unlock(id, slot, &item).map(Some)
+                }
+            }
             "HealNova" if item.kind == 0xa3f => {
                 ensure!(
                     item.activations == 1 && item.heal == 100 && item.heal_range == 10.,
                     "invalid selected Snake Oil activation"
                 );
-                let mut items = p.character.items.clone();
-                items[slot.slot] = -1;
-                let mut plan = self.plan(id, items, None, 0);
+                let mut plan = self.consumable_plan(id, slot);
                 plan.healing_nova = Some((item.heal, item.heal_range));
-                self.players.get_mut(&id).unwrap().pending = true;
                 Ok(Some(plan))
             }
             _ => bail!("item activation not implemented: {}", item.activate),
         }
+    }
+    fn consumable_plan(&mut self, id: i32, slot: Slot) -> InventoryPlan {
+        let mut plan = self.plan(id, self.players[&id].character.items.clone(), None, 0);
+        if slot.object == id {
+            plan.items[slot.slot] = -1;
+        } else {
+            let bag = self.entities.get_mut(&slot.object).unwrap();
+            let mut items = bag.items.clone();
+            items[slot.slot] = -1;
+            bag.reserved = true;
+            if let Some((container, vault)) = &self.vault
+                && *container == slot.object
+            {
+                let mut vault = vault.clone();
+                vault.items = items.clone();
+                plan.vault = Some(vault);
+            }
+            plan.bag = Some((slot.object, items));
+            plan.loot_slot = Some((slot.object, slot.slot));
+        }
+        self.players.get_mut(&id).unwrap().pending = true;
+        plan
     }
     fn plan(
         &self,
@@ -2597,13 +2636,8 @@ impl World {
             slot.kind >= 0 && inventory.get(slot.slot) == Some(&slot.kind),
             "empty or stale drop slot"
         );
-        let soulbound = self.content.get(u16::try_from(slot.kind)?)?.soulbound;
         inventory[slot.slot] = -1;
-        let dropped = self.loot_bag(pos, soulbound.then_some(account), vec![slot.kind])?;
-        let e = self.entities.get_mut(&dropped).unwrap();
-        e.kind = if soulbound { 0x503 } else { 0x500 };
-        e.published = false;
-        e.reserved = true;
+        let dropped = self.reserve_drop(pos, account, slot.kind, false)?;
         if let Some((source, _)) = &source {
             self.entities.get_mut(source).unwrap().reserved = true;
         }
@@ -2621,6 +2655,15 @@ impl World {
         }
         plan.dropped = Some(dropped);
         Ok(plan)
+    }
+    fn reserve_drop(&mut self, pos: Pos, account: i32, kind: i32, private: bool) -> Result<i32> {
+        let soulbound = self.content.get(u16::try_from(kind)?)?.soulbound;
+        let dropped = self.loot_bag(pos, (soulbound || private).then_some(account), vec![kind])?;
+        let bag = self.entities.get_mut(&dropped).unwrap();
+        bag.kind = if soulbound { 0x503 } else { 0x500 };
+        bag.published = false;
+        bag.reserved = true;
+        Ok(dropped)
     }
     pub fn swap(&mut self, id: i32, from: Slot, to: Slot) -> Result<InventoryPlan> {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
@@ -2661,20 +2704,25 @@ impl World {
         let a = get(&from)?;
         let b = get(&to)?;
         ensure!(a == from.kind && b == to.kind, "stale inventory offer");
+        let mut replacement = None;
         for (s, k) in [(&from, b), (&to, a)] {
             if s.object != id && k >= 0 {
                 let item = self.content.get(u16::try_from(k)?)?;
                 let container = &self.entities[&s.object];
                 let definition = self.content.get(container.kind)?;
-                ensure!(
-                    if item.soulbound {
-                        definition.put_soulbound
-                            && container.extra_stats.contains(&(54, p.character.account))
-                    } else {
-                        definition.put_normal
-                    },
-                    "container rejects this normal or Soulbound item"
-                );
+                let accepts = if item.soulbound {
+                    definition.put_soulbound
+                        && container.extra_stats.contains(&(54, p.character.account))
+                } else {
+                    definition.put_normal
+                };
+                if !accepts {
+                    ensure!(
+                        a >= 0 && b >= 0 && self.bag_expiry.contains_key(&s.object),
+                        "container rejects this normal or Soulbound item"
+                    );
+                    replacement = Some(k);
+                }
             }
             if s.object == id && s.slot < 4 && k >= 0 {
                 let obj = self.content.get(k as u16)?;
@@ -2698,11 +2746,23 @@ impl World {
         } else {
             bag[to.slot] = a
         }
+        let dropped = if let Some(kind) = replacement {
+            // A swap must not put Soulbound gear in public loot or violate the source bag's put flags.
+            let source = if from.object == id { to } else { from };
+            bag[source.slot] = -1;
+            let private = self.entities[&source.object]
+                .extra_stats
+                .contains(&(54, p.character.account));
+            Some(self.reserve_drop(p.pos, p.character.account, kind, private)?)
+        } else {
+            None
+        };
         if let Some(b) = bag_id {
             self.entities.get_mut(&b).unwrap().reserved = true;
         }
         self.players.get_mut(&id).unwrap().pending = true;
         let mut plan = self.plan(id, items, bag_id.map(|b| (b, bag)), 0);
+        plan.dropped = dropped;
         if let Some(container) = bag_id {
             let source = if from.object == container { &from } else { &to };
             plan.loot_slot = Some((container, source.slot));
@@ -4291,6 +4351,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod cover_example;
 #[cfg(test)]
 mod gravestones_tests;
+#[cfg(test)]
+mod loot_interactions_tests;
 #[cfg(test)]
 #[path = "../examples/testing/timing.rs"]
 mod timing_example;

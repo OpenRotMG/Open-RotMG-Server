@@ -545,7 +545,13 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
     let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
     let result = if let Some((snapshot, slot, index, amount)) = &plan.stat_growth {
         a.store
-            .consume_stat(snapshot.clone(), slot.slot, *index, *amount)
+            .consume_stat(
+                snapshot.clone(),
+                (slot.object == plan.player).then_some(slot.slot),
+                *index,
+                *amount,
+                plan.vault.clone(),
+            )
             .await
     } else {
         a.store
