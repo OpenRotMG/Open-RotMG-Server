@@ -15,9 +15,7 @@ impl World {
         player: i32,
         account: i32,
     ) -> Result<std::result::Result<NameReservation, &'static str>> {
-        if self.trade_key(player).is_some() {
-            return Ok(Err("Finish your trade before choosing a name."));
-        }
+        let trading = self.trade_key(player).is_some();
         let p = self
             .players
             .get_mut(&player)
@@ -27,6 +25,9 @@ impl World {
             p.persistence_failure.is_none(),
             "name choice owner quarantined"
         );
+        if trading {
+            return Ok(Err("Finish your trade before choosing a name."));
+        }
         if !p.active() || p.pending || p.character.hp <= 0 {
             return Ok(Err("Cannot choose a name while busy or dead."));
         }

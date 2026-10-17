@@ -102,7 +102,8 @@ fn name_user_rejections_release_only_their_reservation_but_failures_quarantine()
 
 #[test]
 fn name_reservation_rejects_foreign_busy_terminal_and_trading_without_side_effects() {
-    for reason in 0..6 {
+    let mut masked = Vec::new();
+    for reason in 0..8 {
         let mut w = world();
         let id = w.enter(ch(&w), None).unwrap();
         match reason {
@@ -125,19 +126,26 @@ fn name_reservation_rejects_foreign_busy_terminal_and_trading_without_side_effec
                 assert!(w.trade_key(id).is_some());
             }
         }
-        let result = w.begin_name_choice(id, if reason == 0 { 2 } else { 1 });
-        if matches!(reason, 0 | 4) {
-            assert!(
-                result.is_err(),
-                "authority/persistence failures are not user rejections"
-            );
+        if reason == 7 {
+            w.players.get_mut(&id).unwrap().persistence_failure =
+                Some("existing failure while trading".into());
+        }
+        let result = w.begin_name_choice(id, if matches!(reason, 0 | 6) { 2 } else { 1 });
+        if matches!(reason, 0 | 4 | 6 | 7) {
+            if result.is_ok() {
+                masked.push(reason);
+            }
         } else {
             assert!(result.unwrap().is_err());
         }
         assert_eq!(w.players[&id].character.name, "Test");
-        if reason == 5 {
+        if reason >= 5 {
             assert!(w.trade_key(id).is_some());
             assert!(!w.players[&id].pending);
         }
     }
+    assert!(
+        masked.is_empty(),
+        "authority/persistence failures masked as user rejections: {masked:?}"
+    );
 }
