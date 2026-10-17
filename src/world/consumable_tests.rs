@@ -343,6 +343,71 @@ fn invalid_compound_effects_and_full_boost_budgets_reject_before_consumption_or_
 }
 
 #[tokio::test]
+async fn vault_life_and_mana_clamp_atomically_without_consuming_a_backpack_slot() {
+    let content = Content::load(std::path::Path::new("data")).unwrap();
+    for (kind, index) in [(0xae9, 0), (0xaea, 1)] {
+        let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let account = store.list("vault-cap-fixture".into()).await.unwrap().id;
+        let mut ch = store
+            .create(account, content.get(0x030e).unwrap())
+            .await
+            .unwrap();
+        let cap = content.classes[&ch.class].caps[index];
+        ch.base[index] = cap - 3;
+        store.progress(ch.clone()).await.unwrap();
+        let mut vault = store.vault(account).await.unwrap();
+        vault.items[0] = kind;
+        ch.revision = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: ch.id,
+                    account,
+                    revision: ch.revision,
+                    items: ch.items.clone(),
+                }],
+                Some(vault),
+            )
+            .await
+            .unwrap()[0];
+        let before = store.vault(account).await.unwrap();
+        let mut consumed = before.clone();
+        consumed.items[0] = -1;
+        let mut stale = consumed.clone();
+        stale.revision += 1;
+        assert!(
+            store
+                .consume_stat(ch.clone(), None, index, 3, Some(stale))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.load(account, ch.id).await.unwrap().base[index],
+            cap - 3
+        );
+        assert_eq!(store.vault(account).await.unwrap().items, before.items);
+        let revision = store
+            .consume_stat(ch.clone(), None, index, 3, Some(consumed.clone()))
+            .await
+            .unwrap();
+        let saved = store.load(account, ch.id).await.unwrap();
+        assert_eq!(saved.base[index], cap);
+        assert_eq!(saved.items, ch.items);
+        assert_eq!(
+            (saved.hp, saved.mp, saved.revision),
+            (ch.hp, ch.mp, revision)
+        );
+        let vault = store.vault(account).await.unwrap();
+        assert_eq!((vault.items[0], vault.revision), (-1, before.revision + 1));
+        assert!(
+            store
+                .consume_stat(ch.clone(), None, index, 3, Some(consumed))
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
 async fn life_and_mana_potions_commit_five_or_the_remaining_cap_without_extra_healing() {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     for (kind, index) in [(0xae9, 0), (0xaea, 1)] {
@@ -376,7 +441,7 @@ async fn life_and_mana_potions_commit_five_or_the_remaining_cap_without_extra_he
         assert_eq!(plan.stat_growth.as_ref().unwrap().3, 3);
         let (snapshot, slot, stat, amount) = plan.stat_growth.clone().unwrap();
         let result = store
-            .consume_stat(snapshot.clone(), slot.slot, stat, amount)
+            .consume_stat(snapshot.clone(), Some(slot.slot), stat, amount, None)
             .await;
         w.finish_inventory(plan, result).unwrap();
         assert_eq!(w.players[&id].character.base[index], cap);
@@ -386,7 +451,7 @@ async fn life_and_mana_potions_commit_five_or_the_remaining_cap_without_extra_he
         );
         assert!(
             store
-                .consume_stat(snapshot, slot.slot, stat, amount)
+                .consume_stat(snapshot, Some(slot.slot), stat, amount, None)
                 .await
                 .is_err()
         );

@@ -76,8 +76,7 @@ impl World {
                 );
             }
         }
-        let mut items = self.players[&id].character.items.clone();
-        items[slot.slot] = if let Some(name) = &item.successor {
+        let next = if let Some(name) = &item.successor {
             let next = self
                 .content
                 .objects
@@ -137,9 +136,8 @@ impl World {
         for (target, boost) in reservations {
             self.players.get_mut(&target).unwrap().boosts.push(boost);
         }
-        let mut plan = self.plan(id, items, None);
+        let mut plan = self.consumable_plan(id, slot, next);
         plan.effects = item.consumable_effects.clone();
-        self.players.get_mut(&id).unwrap().pending = true;
         Ok(plan)
     }
     pub(super) fn discard_consumable(&mut self, source: (i32, i32)) {

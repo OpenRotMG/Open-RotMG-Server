@@ -576,7 +576,13 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
             .await
     } else if let Some((snapshot, slot, index, amount)) = &plan.stat_growth {
         a.store
-            .consume_stat(snapshot.clone(), slot.slot, *index, *amount)
+            .consume_stat(
+                snapshot.clone(),
+                (slot.object == plan.player).then_some(slot.slot),
+                *index,
+                *amount,
+                plan.vault.clone(),
+            )
             .await
     } else {
         a.store

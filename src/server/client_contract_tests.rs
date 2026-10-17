@@ -321,7 +321,7 @@ async fn loaded(a: &App, guid: &str) -> Session {
 }
 
 #[tokio::test]
-async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits() {
+async fn rejected_stale_and_foreign_useitem_then_ground_and_owned_potions_commit() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world = a.world.in_world(-2);
     a.world.clock.set_paused(true);
@@ -344,7 +344,7 @@ async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits(
         .unwrap();
     let (tx, mut rx) = mpsc::channel(8);
     let (lost, _) = tokio::sync::watch::channel(false);
-    for (object, slot) in [(bag, 0), (other, 4)] {
+    for (object, slot) in [(other, 4), (bag, 1), (bag, 8)] {
         handle(
             &mut a,
             use_item(object, slot),
@@ -391,6 +391,37 @@ async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits(
     }
     handle(
         &mut a,
+        use_item(bag, 0),
+        &mut session,
+        &tx,
+        &lost,
+        std::time::Instant::now(),
+    )
+    .await
+    .unwrap();
+    let (ground, contents, reserved) = a
+        .world
+        .call(move |w| {
+            Ok((
+                w.players[&player].character.clone(),
+                w.entities[&bag].items.clone(),
+                w.entities[&bag].reserved,
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(ground.items, before.items);
+    assert_eq!(ground.revision, before.revision + 1);
+    assert!(ground.hp > before.hp);
+    assert_eq!(contents[0], -1);
+    assert!(!reserved);
+    let saved = a.store.load(before.account, before.id).await.unwrap();
+    assert_eq!(
+        (saved.items, saved.revision),
+        (ground.items, ground.revision)
+    );
+    handle(
+        &mut a,
         use_item(player, 4),
         &mut session,
         &tx,
@@ -406,7 +437,7 @@ async fn rejected_container_and_foreign_useitem_reply_then_owned_potion_commits(
         .unwrap();
     assert_eq!(after.items[4], -1);
     assert!(after.hp > before.hp);
-    assert_eq!(after.revision, before.revision + 1);
+    assert_eq!(after.revision, before.revision + 2);
     let saved = a.store.load(before.account, before.id).await.unwrap();
     assert_eq!((saved.items, saved.revision), (after.items, after.revision));
     for s in [&mut session, &mut foreign] {
