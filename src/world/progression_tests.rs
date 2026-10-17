@@ -349,7 +349,7 @@ fn spell_rolls_xml_damage_and_publishes_the_authoritative_values_without_weapon_
 }
 
 #[test]
-fn timed_conditions_expire_and_quiet_blocks_mana_consumption_and_spells() {
+fn timed_conditions_expire_and_quiet_wastes_mana_potions_but_blocks_spells() {
     let mut w = tests::world();
     w.safe = true;
     let mut character = tests::ch(&w);
@@ -359,18 +359,24 @@ fn timed_conditions_expire_and_quiet_blocks_mana_consumption_and_spells() {
         .unwrap();
     w.apply_condition(id, 8, 600).unwrap();
     assert_eq!(w.players[&id].character.mp, 0);
-    assert!(
-        w.use_item(
+    let plan = w
+        .use_item(
             id,
             Slot {
                 object: id,
                 slot: 4,
-                kind: 0xa23
+                kind: 0xa23,
             },
-            w.players[&id].pos
+            w.players[&id].pos,
         )
-        .is_err()
-    );
+        .unwrap()
+        .unwrap();
+    assert_eq!(w.players[&id].character.items[4], 0xa23);
+    assert_eq!(w.players[&id].character.mp, 0);
+    let revision = plan.revision + 1;
+    w.finish_inventory(plan, Ok(revision)).unwrap();
+    assert_eq!(w.players[&id].character.items[4], -1);
+    assert_eq!(w.players[&id].character.mp, 0);
     let ability = w.players[&id].character.items[1];
     assert!(
         w.use_item(
@@ -384,7 +390,6 @@ fn timed_conditions_expire_and_quiet_blocks_mana_consumption_and_spells() {
         )
         .is_err()
     );
-    assert_eq!(w.players[&id].character.items[4], 0xa23);
     for _ in 0..19 {
         w.step();
     }
