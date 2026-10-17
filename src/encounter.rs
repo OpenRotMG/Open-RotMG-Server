@@ -15,14 +15,37 @@ pub enum Anchor {
 pub enum Motion {
     Stationary,
     Wander,
-    Chase { sight: f32, stop: f32 },
+    Chase {
+        sight: f32,
+        stop: f32,
+    },
+    Charge {
+        sight: f32,
+        cooldown: u64,
+        delay: u64,
+        stop: f32,
+        idle: f32,
+    },
     Circle,
-    Pace { distance: f32 },
+    Pace {
+        distance: f32,
+    },
     Tangential,
-    Maintain { sight: f32, distance: f32 },
-    Retreat { distance: f32 },
-    Orbit { anchor: Anchor, radius: f32 },
-    Protect { anchor: Anchor, distance: f32 },
+    Maintain {
+        sight: f32,
+        distance: f32,
+    },
+    Retreat {
+        distance: f32,
+    },
+    Orbit {
+        anchor: Anchor,
+        radius: f32,
+    },
+    Protect {
+        anchor: Anchor,
+        distance: f32,
+    },
 }
 #[derive(Clone, Copy)]
 pub struct Profile {
@@ -33,6 +56,9 @@ pub struct Profile {
 }
 pub fn profile(kind: u16) -> Option<Profile> {
     use Motion::*;
+    if crate::dungeon::spider::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::spider::profile(kind));
+    }
     let chase = |stop| Chase { sight: 10., stop };
     let (motion, speed, interval, range) = match kind {
         0x172 | 0x173 | 0x175..=0x179 => (Stationary, 0., 0, 0.),
@@ -283,6 +309,9 @@ pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
     }
 }
 pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
+    if kind == crate::dungeon::spider::BOSS && elapsed < 2000 {
+        return (Motion::Stationary, 0.);
+    }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return crate::dungeon::abyss::movement(kind, elapsed);
     }
@@ -336,6 +365,9 @@ pub fn attacks(kind: u16, hp: i32, heading: f32) -> Vec<(u8, f32)> {
     phased_attacks(kind, hp, heading, 0)
 }
 pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
+    if crate::dungeon::spider::ROSTER.contains(&kind) {
+        return crate::dungeon::spider::attacks(kind, heading, elapsed);
+    }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return crate::dungeon::abyss::attacks(kind, heading, elapsed);
     }

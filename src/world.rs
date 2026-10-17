@@ -16,6 +16,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
+mod charges;
 pub(crate) mod chat;
 #[cfg(test)]
 mod client_contract_tests;
@@ -59,6 +60,9 @@ mod realm_quests_tests;
 mod realm_setpieces;
 #[cfg(test)]
 mod realm_setpieces_tests;
+mod spider;
+#[cfg(test)]
+mod spider_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
@@ -136,6 +140,8 @@ pub struct Entity {
     goal: Option<Pos>,
     #[serde(skip)]
     motion: Option<crate::encounter::Motion>,
+    #[serde(skip)]
+    charge: Option<charges::Charge>,
     last_step: Pos,
     phase: f32,
     orbit: Option<realm_events::Orbit>,
@@ -206,7 +212,7 @@ pub struct Player {
     mp_fraction: f32,
     pub pending: bool,
     pub experience_queued: i32,
-    clears_queued: [u64; 5],
+    clears_queued: [u64; crate::dungeon::DUNGEONS.len()],
     pub(crate) progress_started: bool,
     pub death_pending: bool,
     persistence_failure: Option<String>,
@@ -267,7 +273,7 @@ impl Player {
         }
     }
     fn progress_queued(&self) -> bool {
-        self.experience_queued != 0 || self.clears_queued != [0; 5]
+        self.experience_queued != 0 || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
     }
     fn active(&self) -> bool {
         self.character.alive
@@ -714,6 +720,12 @@ impl Directory {
                     None => rand::random(),
                 };
                 Arc::new(crate::dungeon::abyss::generate(&self.content, seed)?)
+            } else if template == "spider-den" {
+                let seed = match self.prepared_seed {
+                    Some(seed) => seed ^ self.next_world as u64,
+                    None => rand::random(),
+                };
+                Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
             } else if template == "snake-pit" {
                 Arc::new(crate::dungeon::snake_pit(&self.content, rand::random())?)
             } else {
@@ -1255,12 +1267,14 @@ impl World {
                         home: pos,
                         goal: None,
                         motion: None,
+                        charge: None,
                         last_step: Pos { x: 0., y: 0. },
                         phase: 0.,
                         orbit: None,
                         hp: o.hp,
                         size: o.size,
                         condition: crate::dungeon::abyss::initial_condition(kind)
+                            | crate::dungeon::spider::initial_condition(kind)
                             | if o.stasis_immune {
                                 crate::condition::bit(crate::condition::STASIS_IMMUNE)
                             } else {
@@ -1468,12 +1482,14 @@ impl World {
                 home: pos,
                 goal: None,
                 motion: None,
+                charge: None,
                 last_step: Pos { x: 0., y: 0. },
                 phase: 0.,
                 orbit: None,
                 hp: definition.hp,
                 size: definition.size,
                 condition: crate::dungeon::abyss::initial_condition(kind)
+                    | crate::dungeon::spider::initial_condition(kind)
                     | (if kind == 0x91a {
                         crate::condition::bit(crate::condition::INVULNERABLE)
                     } else {
@@ -1667,7 +1683,7 @@ impl World {
                 mp_fraction: 0.,
                 pending: false,
                 experience_queued: 0,
-                clears_queued: [0; 5],
+                clears_queued: [0; crate::dungeon::DUNGEONS.len()],
                 progress_started: false,
                 death_pending: false,
                 persistence_failure: None,
@@ -3136,6 +3152,7 @@ impl World {
                 for (count, queued) in std::iter::once(&mut snapshot.pirate_caves)
                     .chain(snapshot.dungeons.iter_mut())
                     .chain(std::iter::once(&mut snapshot.abysses))
+                    .chain(std::iter::once(&mut snapshot.spider_dens))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3150,7 +3167,7 @@ impl World {
             }
             snapshot.alive = true;
             p.experience_queued = 0;
-            p.clears_queued = [0; 5];
+            p.clears_queued = [0; crate::dungeon::DUNGEONS.len()];
             p.pending = true;
             p.progress_started = true;
             plans.push((*id, snapshot));
@@ -3171,7 +3188,8 @@ impl World {
         );
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
-            || snapshot.abysses > p.character.abysses;
+            || snapshot.abysses > p.character.abysses
+            || snapshot.spider_dens > p.character.spider_dens;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.fame = snapshot.fame;
@@ -3180,6 +3198,7 @@ impl World {
         p.character.pirate_caves = snapshot.pirate_caves;
         p.character.dungeons = snapshot.dungeons;
         p.character.abysses = snapshot.abysses;
+        p.character.spider_dens = snapshot.spider_dens;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -3511,6 +3530,9 @@ impl World {
                 "dungeon clear and exit staged for durable commit"
             );
         }
+        if defeated.kind == crate::dungeon::spider::BOSS {
+            return self.spider_loot(defeated);
+        }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if matches!(defeated.kind, 0xd56 | 0xd59) {
@@ -3672,6 +3694,9 @@ impl World {
                     != 0
             {
                 let e = self.entities.get_mut(&id).unwrap();
+                if let Some(charge) = &mut e.charge {
+                    charge.suspend(50);
+                }
                 if let Some(activated) = &mut e.activated {
                     *activated += 50;
                 }
@@ -3703,6 +3728,7 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 0x617 | 0x61a | 0x6d8 => 12.,
                 0x91a => 7.,
+                crate::dungeon::spider::BOSS => 12.,
                 0xd90 => 8.,
                 _ => 20.,
             };
@@ -3794,6 +3820,16 @@ impl World {
                     speed = 0.;
                     Some(pos)
                 }
+                Motion::Charge { .. }
+                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 =>
+                {
+                    if let Some(charge) = &mut self.entities.get_mut(&id).unwrap().charge {
+                        charge.suspend(50);
+                    }
+                    speed = 0.;
+                    Some(pos)
+                }
+                Motion::Charge { .. } => self.charge_goal(id, Some(target), motion, speed),
                 Motion::Pace { distance } => {
                     let e = self.entities.get_mut(&id).unwrap();
                     Some(match e.goal {
@@ -3931,6 +3967,7 @@ impl World {
                 let e = self.entities.get_mut(&id).unwrap();
                 speed = match motion {
                     Motion::Wander | Motion::Maintain { .. } => speed,
+                    Motion::Charge { idle, .. } => idle,
                     Motion::Chase { .. } if kind == 0x600 => 4.,
                     Motion::Chase { .. } if !(0x687..=0x689).contains(&kind) => 4.,
                     Motion::Protect { .. } => profile.speed,
@@ -3998,6 +4035,14 @@ impl World {
                     Ok(shots) => shots,
                     Err(error) => {
                         tracing::error!(entity=id,%error,"endgame projectiles refused");
+                        continue;
+                    }
+                }
+            } else if crate::dungeon::spider::ROSTER.contains(&kind) {
+                match self.spider_shots(id, target, heading, elapsed) {
+                    Ok(shots) => shots,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"Spider Den projectiles refused");
                         continue;
                     }
                 }
@@ -4584,6 +4629,7 @@ mod tests {
             pirate_caves: 0,
             dungeons: [0; 3],
             abysses: 0,
+            spider_dens: 0,
         }
     }
     pub(super) fn receive(

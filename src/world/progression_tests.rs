@@ -194,10 +194,10 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
         assert_eq!(w.players[&b].experience_queued, 1);
         assert!(w.begin_departure(b).is_err());
         assert_eq!(
-            if index == 4 {
-                plans[0].1.abysses
-            } else {
-                plans[0].1.dungeons[index - 1]
+            match *boss {
+                crate::dungeon::spider::BOSS => plans[0].1.spider_dens,
+                crate::dungeon::abyss::MALPHAS => plans[0].1.abysses,
+                _ => plans[0].1.dungeons[index - 1],
             },
             1
         );
@@ -208,10 +208,10 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
         w.finish_progress(a, plans[0].1.clone()).unwrap();
         assert!(w.entities[&exit].published);
         assert_eq!(
-            if index == 4 {
-                w.players[&a].character.abysses
-            } else {
-                w.players[&a].character.dungeons[index - 1]
+            match *boss {
+                crate::dungeon::spider::BOSS => w.players[&a].character.spider_dens,
+                crate::dungeon::abyss::MALPHAS => w.players[&a].character.abysses,
+                _ => w.players[&a].character.dungeons[index - 1],
             },
             1
         );
@@ -224,6 +224,7 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
 fn selected_private_boss_rewards_reach_every_eligible_player_including_the_ninth() {
     let mut directory = Directory::load(Path::new("data"), tests::world().content, 16).unwrap();
     for (template, kind, potion) in [
+        ("spider-den", crate::dungeon::spider::BOSS, 0x707),
         ("snake-pit", 0x917, 0xa21),
         ("undead-lair", 0xd90, 0xa35),
         ("abyss-of-demons", crate::dungeon::abyss::MALPHAS, 0xa34),
