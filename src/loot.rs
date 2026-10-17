@@ -31,6 +31,14 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.04, Item(0xc13)),
         ],
         0xd63..=0xd65 | 0x1700..=0x1704 | 0x1707..=0x170e => &[],
+        0x623 => &[
+            (0.1, Tier(3, WEAPONS)),
+            (0.05, Tier(4, WEAPONS)),
+            (0.1, Tier(3, ARMOR)),
+            (0.05, Tier(4, ARMOR)),
+            (0.05, Tier(1, ABILITIES)),
+            (0.05, Tier(1, RINGS)),
+        ],
         // Behavior coverage alone does not establish new drop probabilities.
         kind if crate::encounter::fauna::ROSTER.contains(&kind)
             || crate::encounter::landmarks::ROSTER.contains(&kind) =>
@@ -524,6 +532,54 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+    #[test]
+    fn desert_werewolf_uses_only_existing_ordered_public_tiers_without_a_minimum() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected = [
+            (0.1, 3, WEAPONS),
+            (0.05, 4, WEAPONS),
+            (0.1, 3, ARMOR),
+            (0.05, 4, ARMOR),
+            (0.05, 1, ABILITIES),
+            (0.05, 1, RINGS),
+        ];
+        assert_eq!(table(0x623).len(), expected.len());
+        let existing: std::collections::BTreeSet<_> = [0x614, 0x62c]
+            .into_iter()
+            .flat_map(|kind| {
+                table(kind)
+                    .iter()
+                    .flat_map(|(_, pick)| candidates(&content, *pick))
+            })
+            .collect();
+        for ((chance, pick), (expected_chance, tier, slots)) in table(0x623).iter().zip(expected) {
+            let Pick::Tier(actual_tier, actual_slots) = pick else {
+                panic!("ordinary selected tier")
+            };
+            assert_eq!(
+                (*chance, *actual_tier, *actual_slots),
+                (expected_chance, tier, slots)
+            );
+            for item in candidates(&content, *pick) {
+                assert!(existing.contains(&item));
+                let item = content.get(item).unwrap();
+                assert_eq!(item.class, "Equipment");
+                assert!(!item.soulbound && item.bag_type == 0);
+            }
+        }
+        let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(rewards(&content, 0x623, &mut misses).is_empty());
+        let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+        let first = rewards(&content, 0x623, &mut hits);
+        assert_eq!(first.len(), 1);
+        let first = content.get(first[0]).unwrap();
+        assert_eq!(first.tier, Some(3));
+        assert!(WEAPONS.contains(&first.slot_type));
+        for kind in [0x620, 0x622, 0x205] {
+            assert!(rewards(&content, kind, &mut hits).is_empty());
+        }
+        assert!(!private(0x623));
+    }
     #[test]
     fn collection_catalogue_covers_every_encounter_reward() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
