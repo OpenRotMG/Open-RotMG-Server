@@ -1224,7 +1224,8 @@ impl World {
                                     "mtype" => 34,
                                     "mcount" => 42,
                                     "mtime" => 43,
-                                    "nstar" => 45,
+                                    // NameChanger is not a SellableObject in 123.5.1.
+                                    "nstar" => 55,
                                     _ => unreachable!(),
                                 };
                                 e.extra_stats.push((stat, value));
@@ -4475,6 +4476,8 @@ mod tests {
                 );
             }
             if name == "nexus" {
+                let changer = world.entities.values().find(|e| e.kind == 0x1dc).unwrap();
+                assert_eq!(changer.extra_stats, [(55, 0)]);
                 assert!(
                     world
                         .entities
