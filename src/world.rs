@@ -1086,7 +1086,8 @@ impl Directory {
             Portal {
                 origin,
                 destination: Some(destination),
-                expires: self.tick + 600,
+                // The May 2012 Sprite World guide specifies 15 seconds, unlike newer references.
+                expires: self.tick + if kind == 0x70c { 300 } else { 600 },
             },
         );
         tracing::info!(
@@ -6109,6 +6110,7 @@ mod tests {
         w.players.get_mut(&a).unwrap().pos = pos;
         w.players.get_mut(&b).unwrap().pos = pos;
         let portal = d.drop_portal(-3, pos).unwrap();
+        assert_eq!(d.portals[&portal].expires, d.tick + 600);
         d.worlds
             .get_mut(&-3)
             .unwrap()
@@ -6157,7 +6159,7 @@ mod tests {
         assert!(d.destination(a, Some(portal)).is_err());
     }
     #[test]
-    fn sprite_world_portal_stays_usable_for_thirty_seconds_then_expires() {
+    fn sprite_world_portal_stays_usable_for_fifteen_seconds_then_expires() {
         let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
         let w = d.worlds.get_mut(&-3).unwrap();
         let pos = w.population[0].pos;
@@ -6166,7 +6168,7 @@ mod tests {
         d.tick = 1234;
         let born = d.tick;
         let portal = d.drop_dungeon_portal(-3, 0x70c, pos).unwrap();
-        for age in [400, 599] {
+        for age in [200, 299] {
             d.tick = born + age - 1;
             d.step();
             assert!(d.worlds[&-3].entities.contains_key(&portal));
@@ -6174,7 +6176,7 @@ mod tests {
             assert_eq!(d.worlds[&destination].name, "Sprite World");
         }
         d.step();
-        assert_eq!(d.tick - born, 600);
+        assert_eq!(d.tick - born, 300);
         assert!(!d.portals.contains_key(&portal));
         assert!(!d.worlds[&-3].entities.contains_key(&portal));
         assert!(d.destination(player, Some(portal)).is_err());
