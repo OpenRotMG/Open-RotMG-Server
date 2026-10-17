@@ -769,7 +769,7 @@ mod tests {
                 let error = format!("{:#}", decode(&bytes, &content).unwrap_err());
                 assert!(error.contains(expected), "expected {expected}: {error}");
             }
-            let source = crate::terrain::realms::Source::Encoded("malformed-test", bytes);
+            let source = crate::terrain::realms::Source::encoded_fixture("malformed-test", bytes);
             let error = format!("{:#}", source.open(&content).unwrap_err());
             assert!(
                 error.contains("decode Realm layout malformed-test"),

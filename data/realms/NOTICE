@@ -23,7 +23,7 @@ lake water, snow becomes Snowy Rock: no new damaging/freezing ground.
 Scenery/configuration is deterministic reconstruction, not recovered placement.
 Catalogue coastline/road/lake/Godlands alignment is approximate: island outlines,
 polygon detail, snow extent, historical structures and unverified variant remain
-unresolved. Runtime registration is deliberately unchanged in this phase.
+unresolved.
 
 Rebuild offline from checkout data (no client, game state or exporter required):
   openrotmg build-realm --data data --id classic-world-02-reconstruction

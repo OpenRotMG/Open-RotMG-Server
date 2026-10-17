@@ -15,23 +15,30 @@ const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Recipe {
+pub(super) struct Recipe {
     schema: u8,
-    id: String,
-    profile: Profile,
+    pub(super) id: String,
+    pub(super) profile: Profile,
     width: usize,
     height: usize,
     orientation: Orientation,
     scenery_seed: u64,
     content: ContentIdentity,
     layers: Layers,
-    output: String,
+    pub(super) output: String,
     provenance: Provenance,
 }
 #[derive(Debug, Deserialize, Serialize)]
-enum Profile {
+pub(super) enum Profile {
     #[serde(rename = "classic-v1")]
     ClassicV1,
+}
+impl Profile {
+    pub(super) fn name(&self) -> &'static str {
+        match self {
+            Self::ClassicV1 => "classic-v1",
+        }
+    }
 }
 #[derive(Debug, Deserialize, Serialize)]
 enum Orientation {
@@ -73,13 +80,13 @@ struct Provenance {
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
-fn valid_hash(hash: &str) -> bool {
+pub(super) fn valid_hash(hash: &str) -> bool {
     hash.len() == 64
         && hash
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
-fn safe_path(root: &Path, relative: &str) -> Result<PathBuf> {
+pub(super) fn safe_path(root: &Path, relative: &str) -> Result<PathBuf> {
     ensure!(!relative.is_empty(), "empty recipe path");
     let mut path = root.to_path_buf();
     for part in Path::new(relative).components() {
@@ -98,7 +105,7 @@ fn safe_path(root: &Path, relative: &str) -> Result<PathBuf> {
     }
     Ok(path)
 }
-fn bounded_read(path: &Path, max: usize) -> Result<Vec<u8>> {
+pub(super) fn bounded_read(path: &Path, max: usize) -> Result<Vec<u8>> {
     let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     ensure!(
         file.metadata()?.is_file(),
@@ -114,6 +121,14 @@ fn bounded_read(path: &Path, max: usize) -> Result<Vec<u8>> {
     );
     Ok(bytes)
 }
+pub(super) fn valid_id(id: &str) -> bool {
+    id.split('-').all(|part| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    })
+}
 impl Recipe {
     fn validate(&self) -> Result<()> {
         ensure!(
@@ -122,12 +137,7 @@ impl Recipe {
             self.schema
         );
         ensure!(
-            self.id.split('-').all(|part| {
-                !part.is_empty()
-                    && part
-                        .bytes()
-                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-            }),
+            valid_id(&self.id),
             "invalid Realm ID {}: expected lowercase ASCII alphanumeric segments separated by hyphens",
             self.id
         );
@@ -176,26 +186,30 @@ fn recipes(root: &Path) -> Result<BTreeMap<String, Recipe>> {
             .context("recipe filename missing")?
             .to_str()
             .context("non-UTF8 recipe path")?;
-        let path = safe_path(root, name)?;
-        let recipe: Recipe = serde_json::from_slice(&bounded_read(&path, 64 * 1024)?)
-            .with_context(|| format!("parse recipe {}", path.display()))?;
-        recipe
-            .validate()
-            .with_context(|| format!("validate recipe {}", path.display()))?;
-        for relative in [
-            &recipe.layers.elevation.path,
-            &recipe.layers.moisture.path,
-            &recipe.layers.overrides.path,
-            &recipe.output,
-        ] {
-            safe_path(root, relative).with_context(|| format!("recipe {}", path.display()))?;
-        }
+        let recipe = read_recipe(root, name)?;
         ensure!(
             found.insert(recipe.id.clone(), recipe).is_none(),
             "duplicate Realm recipe ID"
         );
     }
     Ok(found)
+}
+pub(super) fn read_recipe(root: &Path, relative: &str) -> Result<Recipe> {
+    let path = safe_path(root, relative)?;
+    let recipe: Recipe = serde_json::from_slice(&bounded_read(&path, 64 * 1024)?)
+        .with_context(|| format!("parse recipe {}", path.display()))?;
+    recipe
+        .validate()
+        .with_context(|| format!("validate recipe {}", path.display()))?;
+    for relative in [
+        &recipe.layers.elevation.path,
+        &recipe.layers.moisture.path,
+        &recipe.layers.overrides.path,
+        &recipe.output,
+    ] {
+        safe_path(root, relative).with_context(|| format!("recipe {}", path.display()))?;
+    }
+    Ok(recipe)
 }
 fn expand_layer(bytes: &[u8], count: usize, expected: &str) -> Result<Vec<u8>> {
     ensure!(
