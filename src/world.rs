@@ -1085,7 +1085,7 @@ impl Directory {
             Portal {
                 origin,
                 destination: Some(destination),
-                expires: self.tick + if kind == 0x70c { 300 } else { 600 },
+                expires: self.tick + 600,
             },
         );
         tracing::info!(
@@ -6154,6 +6154,29 @@ mod tests {
         assert!(!d.portals.contains_key(&portal));
         assert!(!d.worlds[&-3].entities.contains_key(&portal));
         assert!(d.destination(a, Some(portal)).is_err());
+    }
+    #[test]
+    fn sprite_world_portal_stays_usable_for_thirty_seconds_then_expires() {
+        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
+        let w = d.worlds.get_mut(&-3).unwrap();
+        let pos = w.population[0].pos;
+        let player = w.enter(ch(w), None).unwrap();
+        w.players.get_mut(&player).unwrap().pos = pos;
+        d.tick = 1234;
+        let born = d.tick;
+        let portal = d.drop_dungeon_portal(-3, 0x70c, pos).unwrap();
+        for age in [400, 599] {
+            d.tick = born + age - 1;
+            d.step();
+            assert!(d.worlds[&-3].entities.contains_key(&portal));
+            let destination = d.destination(player, Some(portal)).unwrap().2;
+            assert_eq!(d.worlds[&destination].name, "Sprite World");
+        }
+        d.step();
+        assert_eq!(d.tick - born, 600);
+        assert!(!d.portals.contains_key(&portal));
+        assert!(!d.worlds[&-3].entities.contains_key(&portal));
+        assert!(d.destination(player, Some(portal)).is_err());
     }
     #[test]
     fn shore_population_is_bounded_sourced_and_cannot_respawn_on_players() {
