@@ -321,6 +321,237 @@ async fn loaded(a: &App, guid: &str) -> Session {
 }
 
 #[tokio::test]
+async fn named_trade_player_text_matches_native_requests_and_reciprocal_starts() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    a.world = a.world.in_world(-3);
+    let _remote = loaded(&a, "trade-remote").await;
+    a.world = a.world.in_world(-2);
+    let mut sender = loaded(&a, "trade-sender").await;
+    let mut peer = loaded(&a, "trade-peer").await;
+    let id = sender.player.unwrap();
+    let target = peer.player.unwrap();
+    let (tx, mut rx) = mpsc::channel(64);
+    let (peer_tx, mut peer_rx) = mpsc::channel(64);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let outputs = [tx.clone(), peer_tx.clone()].map(|packets| crate::world::Output {
+        packets,
+        lost: lost.clone(),
+    });
+    let before = a
+        .world
+        .call(move |w| {
+            let pos = w.players[&id].pos;
+            w.players.get_mut(&target).unwrap().pos = crate::world::Pos {
+                x: pos.x + 1.,
+                y: pos.y,
+            };
+            for (player, output) in [id, target].into_iter().zip(outputs) {
+                w.players.get_mut(&player).unwrap().tx = Some(output);
+            }
+            Ok([id, target].map(|id| w.players[&id].character.items.clone()))
+        })
+        .await
+        .unwrap();
+    let packet = |kind, text: &str| {
+        let mut body = Writer::new();
+        body.utf(text);
+        Packet {
+            id: kind,
+            body: body.0,
+        }
+    };
+    let now = std::time::Instant::now();
+    let mut native_starts = Vec::new();
+    for (round, (first, reciprocal)) in [
+        (
+            packet(21, "Guest3"),
+            packet(wire::PLAYER_TEXT, " /TrAdE Guest2 "),
+        ),
+        (
+            packet(wire::PLAYER_TEXT, " /trade Guest3 "),
+            packet(21, "Guest2"),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let received = now + std::time::Duration::from_secs(round as u64 * 4);
+        handle(&mut a, first, &mut sender, &tx, &lost, received)
+            .await
+            .unwrap();
+        let request = peer_rx.try_recv().unwrap();
+        assert_eq!(request.id, 61);
+        let mut body = Reader::new(&request.body);
+        assert_eq!(body.utf().unwrap(), "Guest2");
+        body.done().unwrap();
+        assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+        handle(&mut a, reciprocal, &mut peer, &peer_tx, &lost, received)
+            .await
+            .unwrap();
+        for (side, output) in [&mut rx, &mut peer_rx].into_iter().enumerate() {
+            let start = output.try_recv().unwrap();
+            assert_eq!(start.id, 67);
+            if round == 0 {
+                native_starts.push(start.body);
+            } else {
+                assert_eq!(start.body, native_starts[side]);
+            }
+            assert!(output.try_recv().is_err());
+        }
+        a.world
+            .call(move |w| {
+                assert!(w.cancel_trade(id, "test reset"));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        for output in [&mut rx, &mut peer_rx] {
+            assert_eq!(output.try_recv().unwrap().id, 12);
+            assert!(output.try_recv().is_err());
+        }
+    }
+    for (i, (text, guard, expected)) in [
+        ("/trade", 0, "Usage: /trade <player name>"),
+        ("/trade Guest3 extra", 0, "Usage: /trade <player name>"),
+        (
+            "/trade Nobody",
+            0,
+            "trade target missing, ambiguous or self",
+        ),
+        (
+            "/trade Guest1",
+            0,
+            "trade target missing, ambiguous or self",
+        ),
+        (
+            "/trade Guest2",
+            0,
+            "trade target missing, ambiguous or self",
+        ),
+        (
+            "/trade guest3",
+            0,
+            "trade target missing, ambiguous or self",
+        ),
+        ("/trade AAAAAAAAAAAAAAAAA", 0, "invalid trade target name"),
+        ("/trade Guest3", 1, "trade target out of range"),
+        (
+            "/trade Guest3",
+            2,
+            "trade player busy, dead, departing or quarantined",
+        ),
+        (
+            "/trade Guest3",
+            3,
+            "trade player busy, dead, departing or quarantined",
+        ),
+        (
+            "/trade Guest3",
+            4,
+            "trade player busy, dead, departing or quarantined",
+        ),
+        (
+            "/trade Guest3\n",
+            0,
+            "Chat message contains control characters.",
+        ),
+        ("/trades Guest3", 0, "Unknown chat command."),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        a.world
+            .call(move |w| {
+                let pos = w.players[&id].pos;
+                w.players.get_mut(&id).unwrap().pending = guard == 2;
+                let p = w.players.get_mut(&target).unwrap();
+                p.pos = crate::world::Pos {
+                    x: pos.x + if guard == 1 { 2. } else { 1. },
+                    y: pos.y,
+                };
+                p.pending = guard == 3;
+                p.departing = guard == 4;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        handle(
+            &mut a,
+            packet(wire::PLAYER_TEXT, text),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(10 + i as u64 * 2),
+        )
+        .await
+        .unwrap();
+        let reply = rx.try_recv().unwrap();
+        let expected = crate::world::chat_error(expected);
+        assert_eq!(
+            (reply.id, reply.body),
+            (expected.id, expected.body),
+            "{text}"
+        );
+        assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+    }
+    let received = now + std::time::Duration::from_secs(100);
+    for text in ["/who", "/trade Guest3", "/who", "/trade Guest3"] {
+        handle(
+            &mut a,
+            packet(wire::PLAYER_TEXT, text),
+            &mut sender,
+            &tx,
+            &lost,
+            received,
+        )
+        .await
+        .unwrap();
+    }
+    for _ in 0..2 {
+        assert_eq!(rx.try_recv().unwrap().id, wire::TEXT);
+    }
+    let reply = rx.try_recv().unwrap();
+    let expected =
+        crate::world::chat_error("Chat rate limit: wait one second before sending again.");
+    assert_eq!((reply.id, reply.body), (expected.id, expected.body));
+    assert_eq!(peer_rx.try_recv().unwrap().id, 61);
+    assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+    let mut malformed = packet(wire::PLAYER_TEXT, "/trade Guest3");
+    malformed.body.push(0);
+    assert!(
+        handle(&mut a, malformed, &mut sender, &tx, &lost, received)
+            .await
+            .is_err()
+    );
+    sender.player = None;
+    assert!(
+        handle(
+            &mut a,
+            packet(wire::PLAYER_TEXT, "/trade Guest3"),
+            &mut sender,
+            &tx,
+            &lost,
+            received
+        )
+        .await
+        .is_err()
+    );
+    assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err());
+    a.world
+        .call(move |w| {
+            assert_eq!(
+                [id, target].map(|id| w.players[&id].character.items.clone()),
+                before
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn named_teleport_player_text_reuses_native_outputs_and_account_cooldown() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);

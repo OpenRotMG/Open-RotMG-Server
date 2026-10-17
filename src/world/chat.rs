@@ -167,6 +167,7 @@ impl Directory {
             .unwrap_or((trimmed, ""));
         let who = command.eq_ignore_ascii_case("/who");
         let teleport = command.eq_ignore_ascii_case("/teleport");
+        let trade = command.eq_ignore_ascii_case("/trade");
         let tell = command.eq_ignore_ascii_case("/tell") || command.eq_ignore_ascii_case("/t");
         let guild_chat =
             command.eq_ignore_ascii_case("/g") || command.eq_ignore_ascii_case("/guild");
@@ -175,6 +176,7 @@ impl Directory {
                 || tell
                 || who
                 || teleport
+                || trade
                 || guild_chat
                 || trimmed.eq_ignore_ascii_case("/pause"),
             "Unknown chat command."
@@ -210,6 +212,16 @@ impl Directory {
             "Choose a name before using /tell."
         );
         self.chat_permit(id, now)?;
+        if trade {
+            let name = rest.trim();
+            ensure!(
+                !name.is_empty() && !name.contains(char::is_whitespace),
+                "Usage: /trade <player name>"
+            );
+            return self
+                .resolve(Target::Player(id))?
+                .request_trade(id, name.into());
+        }
         if teleport {
             let name = rest.trim();
             ensure!(
