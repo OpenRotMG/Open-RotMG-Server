@@ -439,6 +439,80 @@ fn stasis_projectiles_pass_through_and_decoys_absorb_ordinary_hostile_projectile
     }
 }
 #[test]
+fn friendly_projectiles_respect_collision_conditions() {
+    use crate::condition::{INVINCIBLE, INVULNERABLE, STASIS, bit};
+    for (condition, transparent) in [
+        (INVINCIBLE, true),
+        (STASIS, true),
+        (INVULNERABLE, false),
+        (0, false),
+    ] {
+        for multi_hit in [false, true] {
+            for damage in [3, 50] {
+                let (mut w, id) = fixture(0x320, 0xaa3);
+                let first = enemy(&mut w, 14., 12.);
+                let behind = enemy(&mut w, 16., 12.);
+                w.entities.get_mut(&first).unwrap().condition =
+                    PARALYZED | if condition == 0 { 0 } else { bit(condition) };
+                w.entities.get_mut(&behind).unwrap().condition = PARALYZED;
+                let mut spec = w.content.objects[&0x650].projectiles[&0].clone();
+                spec.speed = 500.;
+                spec.multi_hit = multi_hit;
+                let pos = Pos { x: 12., y: 12. };
+                w.bullets.push(Bullet {
+                    owner: id,
+                    source_kind: 0x650,
+                    id: 0,
+                    friendly: true,
+                    start: pos,
+                    pos,
+                    angle: 0.,
+                    born: w.now,
+                    damage,
+                    spec,
+                    hit: BTreeSet::new(),
+                });
+                w.step();
+                assert_eq!(
+                    w.entities[&first].damage.is_empty(),
+                    transparent,
+                    "condition={condition}, multi_hit={multi_hit}, damage={damage}"
+                );
+                let shot = w.bullets.iter().find(|b| b.friendly && b.owner == id);
+                assert_eq!(shot.is_some(), transparent || multi_hit);
+                if let Some(shot) = shot {
+                    assert_eq!(shot.hit.contains(&first), !transparent);
+                    assert!(!shot.hit.contains(&behind));
+                }
+                let first_hp = w.entities[&first].hp;
+                w.step();
+                assert_eq!(w.entities[&first].hp, first_hp);
+                assert_eq!(
+                    w.entities[&behind].hp,
+                    900 - if transparent || multi_hit {
+                        (damage - 12).max(damage * 15 / 100)
+                    } else {
+                        0
+                    }
+                );
+                if transparent || condition == INVULNERABLE {
+                    assert_eq!(first_hp, 900);
+                }
+                let shot = w.bullets.iter().find(|b| b.friendly && b.owner == id);
+                if multi_hit {
+                    let shot = shot.unwrap();
+                    assert_eq!(shot.hit.contains(&first), !transparent);
+                    assert!(shot.hit.contains(&behind));
+                    assert_eq!(shot.hit.len(), if transparent { 1 } else { 2 });
+                } else {
+                    assert!(shot.is_none());
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn all_new_families_reject_quiet_mana_and_cooldown_without_side_effects() {
     for (class, item) in [
         (0x320, 0xaa3),

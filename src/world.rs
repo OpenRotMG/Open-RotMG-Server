@@ -4543,7 +4543,8 @@ impl World {
                         .filter(|e| {
                             e.hp > 0
                                 && e.conditions(self.now)
-                                    & crate::condition::bit(crate::condition::STASIS)
+                                    & (crate::condition::bit(crate::condition::STASIS)
+                                        | crate::condition::bit(crate::condition::INVINCIBLE))
                                     == 0
                                 && self.content.objects[&e.kind].destructible
                                 && !b.hit.contains(&e.id)
