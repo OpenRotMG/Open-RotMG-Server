@@ -320,9 +320,41 @@ async fn loaded(a: &App, guid: &str) -> Session {
     }
 }
 
+async fn ranked_sender(a: &App, guid: &str, fame: i32) -> Session {
+    let account = a.store.list(guid.into()).await.unwrap().id;
+    let mut ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.fame = fame;
+    ch.hp = 0;
+    ch.alive = false;
+    a.store
+        .death(ch, "prepared chat history".into())
+        .await
+        .unwrap();
+    let ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let presentation = a.store.presentation(account).await.unwrap();
+    let player = a
+        .world
+        .call(move |w| w.enter_at(ch, None, None, presentation))
+        .await
+        .unwrap();
+    Session {
+        account: Some(a.claim_session(account).unwrap()),
+        player: Some(player),
+        ..Session::default()
+    }
+}
+
 #[tokio::test]
 async fn local_player_text_uses_live_distance_without_narrowing_other_audiences() {
-    for world in [-2, -3] {
+    for (world, stars) in [(-2, 0), (-2, 2), (-3, 0), (-3, 2)] {
         let (dir, mut a) = account_actions::tests::fixture();
         a.world.clock.set_paused(true);
         a.world = a.world.in_world(if world == -2 { -3 } else { -2 });
@@ -342,7 +374,7 @@ async fn local_player_text_uses_live_distance_without_narrowing_other_audiences(
             .await
             .unwrap();
         a.world = a.world.in_world(world);
-        let mut sender = loaded(&a, "local-sender").await;
+        let mut sender = ranked_sender(&a, "local-sender", if stars == 0 { 0 } else { 150 }).await;
         let near = loaded(&a, "local-near").await;
         let far = loaded(&a, "local-far").await;
         let id = sender.player.unwrap();
@@ -391,11 +423,20 @@ async fn local_player_text_uses_live_distance_without_narrowing_other_audiences(
                 body: body.0,
             }
         };
+        let before = a
+            .world
+            .call(move |w| Ok(serde_json::to_value(&w.players[&id].character)?))
+            .await
+            .unwrap();
         let frame = |name: &str, object: i32, recipient: &str, text: &str| {
             let mut body = Writer::new();
             body.utf(name)
                 .i32(object)
-                .i32(0)
+                .i32(if object >= 0 || recipient == "*Guild*" {
+                    stars
+                } else {
+                    0
+                })
                 .u8(if object < 0 { 0 } else { 5 })
                 .utf(recipient)
                 .utf(text)
@@ -624,6 +665,13 @@ async fn local_player_text_uses_live_distance_without_narrowing_other_audiences(
                     && remote_rx.try_recv().is_err()
             );
         }
+        assert_eq!(
+            a.world
+                .call(move |w| Ok(serde_json::to_value(&w.players[&id].character)?))
+                .await
+                .unwrap(),
+            before
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -649,7 +697,7 @@ async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
         .await
         .unwrap();
     a.world = a.world.in_world(-2);
-    let mut sender = loaded(&a, "yell-sender").await;
+    let mut sender = ranked_sender(&a, "yell-sender", 150).await;
     let far = loaded(&a, "yell-far").await;
     let id = sender.player.unwrap();
     let far_id = far.player.unwrap();
@@ -723,7 +771,7 @@ async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
         expected
             .utf("Guest2")
             .i32(id)
-            .i32(0)
+            .i32(2)
             .u8(5)
             .utf("")
             .utf(&body)

@@ -331,7 +331,7 @@ impl Directory {
         } else {
             &text
         };
-        let packet = text_packet(&name, id, 5, text);
+        let packet = text_to(&name, id, 5, "", text, stars);
         let world = self.resolve(Target::Player(id))?;
         world.ocean_response(id, text)?;
         let pos = world.players[&id].pos;
@@ -462,6 +462,9 @@ mod tests {
         );
         assert!(other.try_recv().is_err());
         message(chat_error("Wait."), "*Error*", -1, "Wait.");
+        message(chat_info("Notice."), "", -1, "Notice.");
+        message(chat_private("External."), "*Discord*", -1, "External.");
+        message(text_packet("NPC", 42, 5, "Hello."), "NPC", 42, "Hello.");
     }
     #[test]
     fn lifecycle_and_world_changes_do_not_replay_or_leak_chat() {
