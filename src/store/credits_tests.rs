@@ -10,7 +10,7 @@ async fn starting_gold_is_account_owned_and_survives_death_registration_and_rest
         s.list("starting-gold".into())
             .await
             .unwrap()
-            .xml("")
+            .xml("", 0.0)
             .contains("<Credits>100</Credits>")
     );
     let mut ch = s
@@ -46,7 +46,7 @@ async fn starting_gold_is_account_owned_and_survives_death_registration_and_rest
             .characters("gold@example.org".into(), "test-password".into())
             .await
             .unwrap()
-            .xml("")
+            .xml("", 0.0)
             .contains("<Credits>27</Credits>")
     );
     assert!(
@@ -54,7 +54,7 @@ async fn starting_gold_is_account_owned_and_survives_death_registration_and_rest
             .list("another-gold-account".into())
             .await
             .unwrap()
-            .xml("")
+            .xml("", 0.0)
             .contains("<Credits>100</Credits>")
     );
     reopened
@@ -79,7 +79,7 @@ async fn starting_gold_is_account_owned_and_survives_death_registration_and_rest
             .characters("gold@example.org".into(), "test-password".into())
             .await
             .unwrap()
-            .xml("")
+            .xml("", 0.0)
             .contains("<Credits>0</Credits>")
     );
     assert_eq!(restarted.presentation(account).await.unwrap().fame, 10);
@@ -104,7 +104,7 @@ async fn legacy_accounts_receive_starting_gold_once_and_missing_gold_state_is_an
             .list("legacy-gold".into())
             .await
             .unwrap()
-            .xml("")
+            .xml("", 0.0)
             .contains("<Credits>100</Credits>")
     );
     migrated
@@ -120,7 +120,7 @@ async fn legacy_accounts_receive_starting_gold_once_and_missing_gold_state_is_an
             .list("legacy-gold".into())
             .await
             .unwrap()
-            .xml("")
+            .xml("", 0.0)
             .contains("<Credits>0</Credits>")
     );
     reopened

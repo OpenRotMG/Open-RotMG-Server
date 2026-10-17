@@ -12,6 +12,8 @@ mod queue_tests;
 #[cfg(test)]
 mod resurrection_tests;
 #[cfg(test)]
+mod usage_tests;
+#[cfg(test)]
 mod xp_booster_tests;
 use crate::{
     content::{Content, WIZARD},
@@ -80,6 +82,32 @@ impl Drop for Owner {
     }
 }
 impl App {
+    fn server_usage(&self) -> Result<f64> {
+        ensure!(
+            (1..=85).contains(&self.max_players),
+            "invalid server capacity: {}",
+            self.max_players
+        );
+        // Admission includes claims before avatars exist and retains them through failed saves.
+        let occupied = self
+            .owners
+            .lock()
+            .map_err(|_| anyhow::anyhow!("ownership registry poisoned"))?
+            .len();
+        ensure!(
+            occupied <= self.max_players,
+            "ownership exceeds capacity: {occupied}/{}",
+            self.max_players
+        );
+        let usage = occupied as f64 / self.max_players as f64;
+        tracing::debug!(
+            occupied,
+            capacity = self.max_players,
+            usage,
+            "advertised admission usage"
+        );
+        Ok(usage)
+    }
     pub(crate) fn claim(&self, id: i32) -> Result<Owner> {
         let mut owners = self.owners.lock().expect("ownership registry poisoned");
         ensure!(owners.len() < self.max_players, "development world full");
@@ -263,7 +291,7 @@ async fn chars(
         let _authentication = a.authentication.read().await;
         let account = a.store.characters(guid, password).await?;
         let feed = a.store.updates().await?;
-        Ok(account.xml(&feed.news_xml(&a.origin)))
+        Ok(account.xml(&feed.news_xml(&a.origin), a.server_usage()?))
     }
     .await;
     match result {

@@ -156,7 +156,7 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
         .characters(EMAIL.into(), OLD.into())
         .await
         .unwrap()
-        .xml("");
+        .xml("", 0.0);
     let (url, server) = serve(&app).await;
     let client = reqwest::Client::new();
     assert_eq!(pending(&db, account), 3);
@@ -214,7 +214,7 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
             .characters(EMAIL.into(), NEW.into())
             .await
             .unwrap()
-            .xml("")
+            .xml("", 0.0)
             == before_xml
     );
     for (password, expected) in [(OLD, "<Error>"), (NEW, "<Chars")] {

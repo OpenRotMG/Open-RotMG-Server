@@ -69,7 +69,7 @@ async fn guild_creation_is_atomic_named_unique_and_spends_only_wallet_fame() {
     assert_eq!(listed.earned_fame, 1000);
     assert!(
         listed
-            .xml("")
+            .xml("", 0.0)
             .contains("<Guild id=\"1\"><Name>Guild One</Name><Rank>40</Rank></Guild>")
     );
     let (b, _) = account(&s, &c, 1, 1000).await;

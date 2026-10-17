@@ -1038,7 +1038,7 @@ pub fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 impl Account {
-    pub fn xml(&self, news: &str) -> String {
+    pub fn xml(&self, news: &str, usage: f64) -> String {
         let mut chars = String::new();
         for c in &self.characters {
             chars += &format!(
@@ -1089,7 +1089,7 @@ impl Account {
             format!("<ClassStats objectType=\"{class}\"><BestLevel>{level}</BestLevel><BestFame>{fame}</BestFame></ClassStats>")
         }).collect();
         format!(
-            "<Chars nextCharId=\"{}\" maxNumChars=\"{}\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>{}</Credits><NextCharSlotPrice>{}</NextCharSlotPrice>{guild}</Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0</Usage></Server></Servers><News>{news}</News></Chars>",
+            "<Chars nextCharId=\"{}\" maxNumChars=\"{}\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>{}</Credits><NextCharSlotPrice>{}</NextCharSlotPrice>{guild}</Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>{usage}</Usage></Server></Servers><News>{news}</News></Chars>",
             self.next_id,
             self.character_slots,
             self.id,
@@ -1610,7 +1610,7 @@ mod tests {
         assert!(content.unlocked(0x0310, &account.best_levels).unwrap());
         assert!(!content.unlocked(0x0300, &account.best_levels).unwrap());
         assert!(!content.unlocked(0x031f, &account.best_levels).unwrap());
-        let xml = account.xml("");
+        let xml = account.xml("", 0.0);
         let parsed = roxmltree::Document::parse(&xml).unwrap();
         let record = parsed
             .descendants()

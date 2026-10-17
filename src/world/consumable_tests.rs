@@ -120,7 +120,11 @@ async fn dye_consumption_and_portrait_persist_together_and_failed_writes_publish
             assert_eq!(saved.items[5], -1);
             assert_eq!([saved.tex1, saved.tex2], [tex1, tex2]);
             let listed = restarted.list("dye-fixture".into()).await.unwrap();
-            assert!(listed.xml("").contains(&format!("<Tex2>{tex2}</Tex2>")));
+            assert!(
+                listed
+                    .xml("", 0.0)
+                    .contains(&format!("<Tex2>{tex2}</Tex2>"))
+            );
             assert!(w.players[&id].persistence_failure.is_none());
         }
     }
