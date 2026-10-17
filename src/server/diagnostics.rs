@@ -177,11 +177,20 @@ pub struct ConnectionDiagnostics {
     pub unmatched_pongs: u64,
     started: Option<Instant>,
     last_processed: Option<(Instant, u8)>,
+    last_move: Option<Instant>,
+    last_update_ack: Option<Instant>,
     pub last_socket_send: Option<Instant>,
 }
 impl ConnectionDiagnostics {
     pub fn processed(&mut self, packet: u8) {
-        self.last_processed = Some((Instant::now(), packet));
+        let now = Instant::now();
+        self.last_processed = Some((now, packet));
+        if packet == wire::MOVE {
+            self.last_move = Some(now);
+        }
+        if packet == wire::UPDATE_ACK {
+            self.last_update_ack = Some(now);
+        }
     }
     pub fn sent(&mut self, serial: i32) {
         let now = Instant::now();
@@ -223,6 +232,8 @@ impl ConnectionDiagnostics {
                 .collect::<Vec<_>>()
         });
         json!({"user_agent": self.user_agent, "browser_samples": browser, "rtt_samples": samples,
+            "last_move_received_age_ms":self.last_move.map(|at|at.elapsed().as_secs_f64()*1000.),
+            "last_update_ack_received_age_ms":self.last_update_ack.map(|at|at.elapsed().as_secs_f64()*1000.),
             "last_processed_packet":self.last_processed.map(|(_,id)|id),
             "last_processed_age_ms":self.last_processed.map(|(at,_)|at.elapsed().as_secs_f64()*1000.),
             "last_queued_packet_send_age_ms":self.last_socket_send.map(|at|at.elapsed().as_secs_f64()*1000.),
@@ -323,11 +334,11 @@ fn public_diagnostics(report: &Value) -> Value {
         "scheduling_delay_ms": summary(ticks.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0))),
         "visible_frame_gap_ms": summary(visible.iter().filter_map(|v| v["sample"]["max_frame_gap_ms"].as_f64())),
         "native_acknowledgements":{
-            "ticks":report["context"]["native_acknowledgements"]["ticks"],"goto":report["context"]["native_acknowledgements"]["goto"],
+            "weapon_tick_records":report["context"]["native_acknowledgements"]["weapon_tick_records"],"goto":report["context"]["native_acknowledgements"]["goto"],
             "shoot":report["context"]["native_acknowledgements"]["shoot"],"oldest_goto_ms":report["context"]["native_acknowledgements"]["oldest_goto_ms"],
-            "oldest_shoot_ms":report["context"]["native_acknowledgements"]["oldest_shoot_ms"],"initial_update_acked":report["context"]["native_acknowledgements"]["initial_update_acked"]},
+            "oldest_shoot_ms":report["context"]["native_acknowledgements"]["oldest_shoot_ms"],"last_update_ack_received_age_ms":connection["last_update_ack_received_age_ms"]},
 
-        "connection": {"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
+        "connection": {"last_move_received_age_ms":connection["last_move_received_age_ms"],"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
             "last_queued_packet_send_age_ms":connection["last_queued_packet_send_age_ms"],"last_pong_age_ms":connection["last_pong_age_ms"],
             "max_socket_send_ms": connection["max_socket_send_ms_session"], "max_handler_ms": connection["max_handler_ms_session"],
             "max_input_queue_ms": connection["max_input_queue_ms_session"], "outgoing_queue_high_water": connection["observed_outgoing_queue_high_water_session"],
@@ -639,6 +650,16 @@ mod tests {
         d.last_socket_send = Some(Instant::now());
         assert_eq!(d.snapshot()["last_processed_packet"], 38);
         assert!(d.snapshot()["last_processed_age_ms"].as_f64().unwrap() >= 0.);
+        assert!(d.snapshot()["last_move_received_age_ms"].is_null());
+        d.processed(wire::MOVE);
+        d.processed(wire::UPDATE_ACK);
+        assert!(d.snapshot()["last_move_received_age_ms"].as_f64().unwrap() >= 0.);
+        assert!(
+            d.snapshot()["last_update_ack_received_age_ms"]
+                .as_f64()
+                .unwrap()
+                >= 0.
+        );
         d.sent(1);
         d.pong(2);
         d.pong(1);
