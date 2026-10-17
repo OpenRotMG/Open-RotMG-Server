@@ -334,16 +334,17 @@ impl Directory {
         let packet = text_packet(&name, id, 5, text);
         let world = self.resolve(Target::Player(id))?;
         world.ocean_response(id, text)?;
+        let pos = world.players[&id].pos;
         let mut recipients = 0;
-        for player in world
-            .players
-            .values()
-            .filter(|p| p.can_chat() && !p.account_lists[1].contains(&account))
-        {
+        for player in world.players.values().filter(|p| {
+            p.can_chat()
+                && !p.account_lists[1].contains(&account)
+                && (yell || pos.distance(p.pos) < 15.)
+        }) {
             send(player, packet.id, packet.body.clone());
             recipients += 1;
         }
-        tracing::info!(player=id, account, world=%world.name, recipients, bytes=text.len(), "local chat delivered");
+        tracing::info!(player=id, account, world=%world.name, yell, recipients, bytes=text.len(), "local chat delivered");
         Ok(())
     }
 }

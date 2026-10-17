@@ -321,6 +321,314 @@ async fn loaded(a: &App, guid: &str) -> Session {
 }
 
 #[tokio::test]
+async fn local_player_text_uses_live_distance_without_narrowing_other_audiences() {
+    for world in [-2, -3] {
+        let (dir, mut a) = account_actions::tests::fixture();
+        a.world.clock.set_paused(true);
+        a.world = a.world.in_world(if world == -2 { -3 } else { -2 });
+        let remote = loaded(&a, "local-remote").await;
+        let remote_id = remote.player.unwrap();
+        let (remote_tx, mut remote_rx) = mpsc::channel(64);
+        let (lost, _) = tokio::sync::watch::channel(false);
+        let remote_output = crate::world::Output {
+            packets: remote_tx,
+            lost: lost.clone(),
+        };
+        a.world
+            .call(move |w| {
+                w.players.get_mut(&remote_id).unwrap().tx = Some(remote_output);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        a.world = a.world.in_world(world);
+        let mut sender = loaded(&a, "local-sender").await;
+        let near = loaded(&a, "local-near").await;
+        let far = loaded(&a, "local-far").await;
+        let id = sender.player.unwrap();
+        let near_id = near.player.unwrap();
+        let far_id = far.player.unwrap();
+        let account = sender.account.as_ref().unwrap().id;
+        let (tx, mut rx) = mpsc::channel(64);
+        let (near_tx, mut near_rx) = mpsc::channel(64);
+        let (far_tx, mut far_rx) = mpsc::channel(64);
+        let outputs = [tx.clone(), near_tx, far_tx].map(|packets| crate::world::Output {
+            packets,
+            lost: lost.clone(),
+        });
+        let pos = a
+            .world
+            .call(move |w| {
+                for (id, output) in [id, near_id, far_id].into_iter().zip(outputs) {
+                    w.players.get_mut(&id).unwrap().tx = Some(output);
+                }
+                w.players.get_mut(&id).unwrap().character.name = "Speaker".into();
+                let pos = w.players[&id].pos;
+                let p = w.players.get_mut(&near_id).unwrap();
+                p.pos = crate::world::Pos {
+                    x: pos.x + 1.,
+                    y: pos.y,
+                };
+                p.known.clear();
+                w.players.get_mut(&far_id).unwrap().known.insert(id);
+                Ok(pos)
+            })
+            .await
+            .unwrap();
+        a.world
+            .for_player(remote_id)
+            .call(move |w| {
+                w.players.get_mut(&remote_id).unwrap().pos = pos;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let packet = |text: &str| {
+            let mut body = Writer::new();
+            body.utf(text);
+            Packet {
+                id: wire::PLAYER_TEXT,
+                body: body.0,
+            }
+        };
+        let frame = |name: &str, object: i32, recipient: &str, text: &str| {
+            let mut body = Writer::new();
+            body.utf(name)
+                .i32(object)
+                .i32(0)
+                .u8(if object < 0 { 0 } else { 5 })
+                .utf(recipient)
+                .utf(text)
+                .utf("");
+            Packet {
+                id: wire::TEXT,
+                body: body.0,
+            }
+        };
+        let check = |actual: Packet, expected: &Packet| {
+            assert_eq!(
+                (actual.id, actual.body),
+                (expected.id, expected.body.clone())
+            );
+        };
+        let now = std::time::Instant::now();
+        for (i, (dx, dy, reaches)) in [
+            (14.999, 0., true),
+            (15., 0., false),
+            (15.001, 0., false),
+            (-14.999, 0., true),
+            (-15., 0., false),
+            (0., 14.999, true),
+            (0., 15., false),
+            (12., 8., true),
+            (9., 12., false),
+            (11., 11., false),
+            (20., 0., false),
+            (1., 0., true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            a.world
+                .call(move |w| {
+                    w.players.get_mut(&far_id).unwrap().pos = crate::world::Pos {
+                        x: pos.x + dx,
+                        y: pos.y + dy,
+                    };
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let body = format!("  <Guest1>: /yell café {i}  ");
+            handle(
+                &mut a,
+                packet(&body),
+                &mut sender,
+                &tx,
+                &lost,
+                now + std::time::Duration::from_secs(i as u64 * 2),
+            )
+            .await
+            .unwrap();
+            let expected = frame("Speaker", id, "", &body);
+            check(rx.try_recv().unwrap(), &expected);
+            check(near_rx.try_recv().unwrap(), &expected);
+            if reaches {
+                check(far_rx.try_recv().unwrap(), &expected);
+            }
+            assert!(
+                rx.try_recv().is_err()
+                    && near_rx.try_recv().is_err()
+                    && far_rx.try_recv().is_err()
+                    && remote_rx.try_recv().is_err(),
+                "world {world}, offset ({dx}, {dy})"
+            );
+        }
+        a.world
+            .call(move |w| {
+                w.players.get_mut(&id).unwrap().pos.x = pos.x + 20.;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        handle(
+            &mut a,
+            packet("moved speaker"),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(98),
+        )
+        .await
+        .unwrap();
+        check(
+            rx.try_recv().unwrap(),
+            &frame("Speaker", id, "", "moved speaker"),
+        );
+        assert!(
+            rx.try_recv().is_err()
+                && near_rx.try_recv().is_err()
+                && far_rx.try_recv().is_err()
+                && remote_rx.try_recv().is_err()
+        );
+        a.world
+            .call(move |w| {
+                w.players.get_mut(&id).unwrap().pos = pos;
+                w.players.get_mut(&far_id).unwrap().pos.x = pos.x + 20.;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        if world == -2 {
+            handle(
+                &mut a,
+                packet("/yell whole Nexus"),
+                &mut sender,
+                &tx,
+                &lost,
+                now + std::time::Duration::from_secs(100),
+            )
+            .await
+            .unwrap();
+            let expected = frame("Speaker", id, "", "whole Nexus");
+            for actual in [
+                rx.try_recv().unwrap(),
+                near_rx.try_recv().unwrap(),
+                far_rx.try_recv().unwrap(),
+            ] {
+                check(actual, &expected);
+            }
+            assert!(remote_rx.try_recv().is_err());
+        }
+        handle(
+            &mut a,
+            packet("/tell Guest4 still private"),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(102),
+        )
+        .await
+        .unwrap();
+        let expected = frame("Speaker", -1, "Guest4", "still private");
+        check(rx.try_recv().unwrap(), &expected);
+        check(far_rx.try_recv().unwrap(), &expected);
+        assert!(near_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
+        for session in [&sender, &far, &remote] {
+            let account = session.account.as_ref().unwrap().id;
+            let mut presentation = a.store.presentation(account).await.unwrap();
+            presentation.guild = Some(crate::store::GuildMembership {
+                id: 7,
+                name: "Local test guild".into(),
+                rank: 0,
+            });
+            a.world
+                .directory(move |d| d.sync_guild(account, presentation, false))
+                .await
+                .unwrap();
+        }
+        handle(
+            &mut a,
+            packet("/g still cross-world"),
+            &mut sender,
+            &tx,
+            &lost,
+            now + std::time::Duration::from_secs(104),
+        )
+        .await
+        .unwrap();
+        let expected = frame("Speaker", -1, "*Guild*", "still cross-world");
+        for actual in [
+            rx.try_recv().unwrap(),
+            far_rx.try_recv().unwrap(),
+            remote_rx.try_recv().unwrap(),
+        ] {
+            check(actual, &expected);
+        }
+        assert!(near_rx.try_recv().is_err());
+        assert_eq!(
+            a.world
+                .directory(|d| Ok(d.announce("Still an announcement")))
+                .await
+                .unwrap(),
+            4
+        );
+        let expected = frame("@ANNOUNCEMENT", -1, "", "Still an announcement");
+        for actual in [
+            rx.try_recv().unwrap(),
+            near_rx.try_recv().unwrap(),
+            far_rx.try_recv().unwrap(),
+            remote_rx.try_recv().unwrap(),
+        ] {
+            check(actual, &expected);
+        }
+        for mode in 0..5 {
+            a.world
+                .call(move |w| {
+                    let ignored = if mode == 0 {
+                        std::collections::BTreeSet::from([account])
+                    } else {
+                        std::collections::BTreeSet::new()
+                    };
+                    w.sync_account_lists(near_id, Some([Default::default(), ignored]))?;
+                    let p = w.players.get_mut(&near_id).unwrap();
+                    p.departing = mode == 1;
+                    p.character.hp = if mode == 2 { 0 } else { 100 };
+                    p.death_pending = mode == 3;
+                    p.character.alive = mode != 4;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            for _ in 0..2 {
+                assert_eq!(near_rx.try_recv().unwrap().id, wire::ACCOUNT_LIST);
+            }
+            handle(
+                &mut a,
+                packet("filtered local"),
+                &mut sender,
+                &tx,
+                &lost,
+                now + std::time::Duration::from_secs(200 + mode * 2),
+            )
+            .await
+            .unwrap();
+            check(
+                rx.try_recv().unwrap(),
+                &frame("Speaker", id, "", "filtered local"),
+            );
+            assert!(
+                rx.try_recv().is_err()
+                    && near_rx.try_recv().is_err()
+                    && far_rx.try_recv().is_err()
+                    && remote_rx.try_recv().is_err()
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
 async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);
@@ -385,16 +693,18 @@ async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
         )
     };
     let now = std::time::Instant::now();
-    for (i, (input, body)) in [
+    for (i, (input, body, reaches_far)) in [
         (
             " /YeLl  /yell <Guest1>: café  ".to_string(),
             "/yell <Guest1>: café".to_string(),
+            true,
         ),
         (
             "  normal /yell hi  ".to_string(),
             "  normal /yell hi  ".to_string(),
+            false,
         ),
-        (format!("/yell {}", "é".repeat(122)), "é".repeat(122)),
+        (format!("/yell {}", "é".repeat(122)), "é".repeat(122), true),
     ]
     .into_iter()
     .enumerate()
@@ -423,7 +733,9 @@ async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
             body: expected.0,
         };
         check(rx.try_recv().unwrap(), &expected);
-        check(far_rx.try_recv().unwrap(), &expected);
+        if reaches_far {
+            check(far_rx.try_recv().unwrap(), &expected);
+        }
         assert!(
             rx.try_recv().is_err() && far_rx.try_recv().is_err() && remote_rx.try_recv().is_err()
         );
@@ -537,7 +849,7 @@ async fn nexus_yell_player_text_preserves_local_frames_audience_and_guards() {
         .await
         .unwrap();
     }
-    assert_eq!(std::iter::from_fn(|| far_rx.try_recv().ok()).count(), 2);
+    assert_eq!(std::iter::from_fn(|| far_rx.try_recv().ok()).count(), 1);
     for _ in 0..3 {
         assert_eq!(rx.try_recv().unwrap().id, wire::TEXT);
     }
