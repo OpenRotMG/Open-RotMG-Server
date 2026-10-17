@@ -87,9 +87,13 @@ fn arachna_shields_then_builds_one_owned_web_and_fires_selected_patterns() {
         .map(|e| e.id)
         .collect();
     assert_eq!(spokes.len(), 9);
-    assert!(spokes.iter().all(|id| w.entities[id].conditions(w.now)
-        & crate::condition::bit(crate::condition::INVULNERABLE)
-        != 0));
+    let protections = crate::condition::bit(crate::condition::INVULNERABLE)
+        | crate::condition::bit(crate::condition::STASIS_IMMUNE);
+    assert!(
+        spokes
+            .iter()
+            .all(|id| w.entities[id].conditions(w.now) & protections == protections)
+    );
     let mut source_timer = 0;
     let mut source_shots = Vec::new();
     for now in (0..1000).step_by(50) {

@@ -66,7 +66,6 @@ impl World {
                 let e = self.entities.get_mut(&child).unwrap();
                 e.parent = Some(id);
                 e.activated = Some(self.now);
-                e.condition = condition::bit(condition::INVULNERABLE);
             }
             let e = self.entities.get_mut(&id).unwrap();
             e.stage = Some(0);
