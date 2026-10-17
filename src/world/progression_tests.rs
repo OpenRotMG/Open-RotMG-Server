@@ -194,7 +194,7 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
         assert_eq!(w.players[&b].experience_queued, 1);
         assert!(w.begin_departure(b).is_err());
         assert_eq!(
-            match *boss {
+            match defeated.kind {
                 crate::dungeon::spider::BOSS => plans[0].1.spider_dens,
                 crate::dungeon::abyss::MALPHAS => plans[0].1.abysses,
                 _ => plans[0].1.dungeons[index - 1],
@@ -208,7 +208,7 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
         w.finish_progress(a, plans[0].1.clone()).unwrap();
         assert!(w.entities[&exit].published);
         assert_eq!(
-            match *boss {
+            match defeated.kind {
                 crate::dungeon::spider::BOSS => w.players[&a].character.spider_dens,
                 crate::dungeon::abyss::MALPHAS => w.players[&a].character.abysses,
                 _ => w.players[&a].character.dungeons[index - 1],
