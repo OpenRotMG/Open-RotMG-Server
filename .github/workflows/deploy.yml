@@ -1,0 +1,12 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  deploy:
+    uses: OpenRotMG/.github/.github/workflows/deploy.yml@main
+    secrets:
+      DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}

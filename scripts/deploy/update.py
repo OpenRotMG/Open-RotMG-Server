@@ -1,9 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 import ctypes
 import datetime
 import fcntl
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,8 @@ CONFIG = Path('/etc/openrotmg/config.json')
 ANNOUNCE_TOKEN = Path('/etc/openrotmg/discord-link-token')
 RESTART_NOTICE_SECONDS = 20
 LAST_BACKUP = Path('/var/lib/openrotmg-backup/last-success.json')
+LOCK = Path('/run/lock/openrotmg-deploy.lock')
+LIMIT = 64 * 1024 * 1024
 sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
@@ -57,21 +60,16 @@ def status(state, desired, **fields):
     print(json.dumps(value), flush=True)
 
 
-def download(url, path):
-    with urllib.request.urlopen(url, timeout=30) as response:
-        require(response.url.startswith('https://'), 'Non-HTTPS artifact redirect')
-        body = response.read(64 * 1024 * 1024 + 1)
-    require(len(body) <= 64 * 1024 * 1024, 'Release exceeds 64 MiB limit')
-    path.write_bytes(body)
-
-
 def unpack(archive, directory, metadata):
     directory.mkdir(mode=0o755)
     directory.chmod(0o755)
     with tarfile.open(archive) as bundle:
-        for member in bundle.getmembers():
+        members = bundle.getmembers()
+        require(sum(m.size for m in members) <= LIMIT and len({m.name for m in members}) == len(members),
+                'Release exceeds size limit or contains duplicate paths')
+        for member in members:
             require(not Path(member.name).is_absolute() and '..' not in Path(member.name).parts
-                    and member.isfile(), 'Unsafe release archive member')
+                    and str(Path(member.name)) == member.name and member.isfile(), 'Unsafe release archive member')
         bundle.extractall(directory)
     for path in directory.rglob('*'):
         path.chmod(0o755 if path.is_dir() or path.name == 'openrotmg' or path.suffix == '.sh' else 0o644)
@@ -281,54 +279,50 @@ def main_revision():
     return revision
 
 
-def main(retry=False):
-    os.umask(0o077)
+def main(desired, raw):
+    require(re.fullmatch('[0-9a-f]{40}', desired), 'Only an exact server commit SHA is accepted')
+    require(main_revision() == desired, 'Main advanced; refusing stale server deployment')
+    require(len(raw) <= LIMIT, 'Deployment archive exceeds 64 MiB')
     ROOT.mkdir(mode=0o700, exist_ok=True)
-    desired = main_revision()
-    previous = ROOT / 'status.json'
-    if previous.exists() and not retry:
-        last = json.loads(previous.read_text())
-        if last['desired'] == desired and last['state'] == 'blocked':
-            print(json.dumps(last), flush=True)
-            return
-    if (LIVE / 'REVISION').read_text().strip() == desired:
-        ready(int(json.loads(CONFIG.read_text())['bind'].rsplit(':', 1)[1]))
-        previous = ROOT / 'status.json'
-        if previous.exists() and json.loads(previous.read_text())['state'] in {'failed', 'blocked', 'activated_unverified'}:
-            start_backup()
-        status('up_to_date', desired)
-        return
     require(shutil.disk_usage(ROOT).free >= 2 * 1024**3, 'Less than 2 GiB free; inspect retained recovery data before deploying')
-    status('checking_release', desired)
     work = ROOT / (desired + '-' + str(time.time_ns()))
     work.mkdir(mode=0o700)
     try:
-        url = REPO + '/releases/download/server-' + desired
-        try:
-            download(url + '/release.json', work / 'release.json')
-        except urllib.error.HTTPError as error:
-            error.close()
-            if error.code != 404:
-                raise
-            status('waiting_for_build', desired)
-            return
+        with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as archive:
+            members = archive.getmembers()
+            require(sorted(m.name for m in members) == ['release.json', 'server.tar.gz']
+                    and all(m.isfile() for m in members) and sum(m.size for m in members) <= LIMIT,
+                    'Expected only release.json and server.tar.gz')
+            for member in members:
+                (work / member.name).write_bytes(archive.extractfile(member).read())
         metadata = json.loads((work / 'release.json').read_text())
         require(metadata['format'] == 1 and metadata['revision'] == desired, 'Artifact source mismatch')
-        download(url + '/server.tar.gz', work / 'server.tar.gz')
         require(digest(work / 'server.tar.gz') == metadata['archive_sha256'], 'Artifact archive mismatch')
+        config = json.loads(CONFIG.read_text())
+        if (LIVE / 'REVISION').read_text().strip() == desired:
+            require(files(LIVE) == metadata['manifest'], 'Already deployed server differs from this artifact')
+            pid = int(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'MainPID', '--value'], text=True))
+            require(pid > 0 and digest(f'/proc/{pid}/exe') == metadata['binary_sha256'], 'Running process binary mismatch')
+            ready(int(config['bind'].rsplit(':', 1)[1]))
+            verify_backup(0)
+            status('up_to_date', desired)
+            return
         stage = LIVE.with_name('server-stage-' + str(time.time_ns()))
         unpack(work / 'server.tar.gz', stage, metadata)
         status('rehearsing', desired)
-        config = json.loads(CONFIG.read_text())
         deploy(stage, work, metadata, config)
         status('deployed', desired, recovery_directory=str(work), backup=json.loads(LAST_BACKUP.read_text()))
     except Exception as error:
         activated = (LIVE / 'REVISION').read_text().strip() == desired
-        state = 'activated_unverified' if activated else ('failed' if isinstance(error, OSError) else 'blocked')
+        state = 'activated_unverified' if activated else 'failed'
         status(state, desired, recovery_directory=str(work), error=str(error))
         raise
 
 
 if __name__ == '__main__':
-    require(sys.argv[1:] in ([], ['--retry']), 'Only --retry is accepted')
-    main(retry=bool(sys.argv[1:]))
+    os.umask(0o077)
+    require(len(sys.argv) == 2, 'Expected the server commit SHA')
+    raw = sys.stdin.buffer.read(LIMIT + 1)
+    with LOCK.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        main(sys.argv[1], raw)

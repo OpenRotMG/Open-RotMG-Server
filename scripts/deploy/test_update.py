@@ -68,47 +68,65 @@ class UpdateTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Unsafe release'):
                     update.unpack(archive, root / str(index), {})
 
-    def test_missing_release_is_visible_waiting_not_deployment(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            live = root / 'live'
-            live.mkdir()
-            (live / 'REVISION').write_text('b' * 40)
-            pending = urllib.error.HTTPError('https://example.invalid', 404, 'not built', {}, None)
-            with patch.object(update, 'ROOT', root / 'state'), patch.object(update, 'LIVE', live), \
-                    patch.object(update.subprocess, 'check_output', return_value='a' * 40 + '\trefs/heads/main'), \
-                    patch.object(update, 'download', side_effect=pending), patch.object(update, 'deploy') as deploy:
-                update.main()
-                state = json.loads((root / 'state/status.json').read_text())
-                self.assertEqual((state['state'], state['running'], state['desired']), ('waiting_for_build', 'b' * 40, 'a' * 40))
-                deploy.assert_not_called()
+    def delivery(self, transform=lambda entries: entries):
+        contents = {'openrotmg': b'binary', 'REVISION': b'a' * 40 + b'\n'}
+        inner = io.BytesIO()
+        with tarfile.open(fileobj=inner, mode='w:gz') as archive:
+            for name, value in contents.items():
+                entry = tarfile.TarInfo(name)
+                entry.size = len(value)
+                archive.addfile(entry, io.BytesIO(value))
+        metadata = {'format': 1, 'revision': 'a' * 40, 'binary_sha256': hashlib.sha256(b'binary').hexdigest(),
+                    'manifest': {k: hashlib.sha256(v).hexdigest() for k, v in contents.items()},
+                    'archive_sha256': hashlib.sha256(inner.getvalue()).hexdigest()}
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode='w:') as archive:
+            for name, data in transform([('release.json', json.dumps(metadata).encode()), ('server.tar.gz', inner.getvalue())]):
+                entry = tarfile.TarInfo(name)
+                entry.size = len(data)
+                archive.addfile(entry, io.BytesIO(data))
+        return output.getvalue(), metadata
 
-    def test_transport_failure_is_failed_and_raised(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            live = root / 'live'
-            live.mkdir()
-            (live / 'REVISION').write_text('b' * 40)
-            with patch.object(update, 'ROOT', root / 'state'), patch.object(update, 'LIVE', live), \
-                    patch.object(update.subprocess, 'check_output', return_value='a' * 40 + '\trefs/heads/main'), \
-                    patch.object(update, 'download', side_effect=TimeoutError('network timeout')):
-                with self.assertRaises(TimeoutError):
-                    update.main()
-                self.assertEqual(json.loads((root / 'state/status.json').read_text())['state'], 'failed')
+    def test_delivery_rejects_stale_main_unsafe_paths_corruption_and_limits(self):
+        raw, _ = self.delivery()
+        with patch.object(update, 'main_revision', return_value='b' * 40), patch.object(update, 'deploy') as deploy:
+            with self.assertRaisesRegex(RuntimeError, 'Main advanced'):
+                update.main('a' * 40, raw)
+            deploy.assert_not_called()
+        for transform, error in [
+                (lambda entries: entries + [('../escape', b'bad')], 'Expected only'),
+                (lambda entries: entries + [entries[0]], 'Expected only'),
+                (lambda entries: [(n, b'corrupt' if n == 'server.tar.gz' else d) for n, d in entries], 'archive mismatch')]:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / 'REVISION').write_text('b' * 40)
+                raw, _ = self.delivery(transform)
+                with patch.object(update, 'ROOT', root / 'state'), patch.object(update, 'LIVE', root), \
+                        patch.object(update, 'main_revision', return_value='a' * 40), patch.object(update, 'deploy') as deploy:
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        update.main('a' * 40, raw)
+                    deploy.assert_not_called()
+                    self.assertEqual(json.loads((root / 'state/status.json').read_text())['state'], 'failed')
+        with patch.object(update, 'main_revision', return_value='a' * 40), patch.object(update, 'LIMIT', 1):
+            with self.assertRaisesRegex(RuntimeError, 'exceeds'):
+                update.main('a' * 40, raw)
 
-    def test_up_to_date_requires_actual_health(self):
+    def test_up_to_date_requires_matching_artifact_process_and_health(self):
+        raw, metadata = self.delivery()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'REVISION').write_text('a' * 40)
             config = root / 'config.json'
             config.write_text('{"bind":"127.0.0.1:18923"}')
             with patch.object(update, 'ROOT', root / 'state'), patch.object(update, 'LIVE', root), \
-                    patch.object(update, 'CONFIG', config), \
-                    patch.object(update.subprocess, 'check_output', return_value='a' * 40), \
+                    patch.object(update, 'CONFIG', config), patch.object(update, 'main_revision', return_value='a' * 40), \
+                    patch.object(update, 'files', return_value=metadata['manifest']), \
+                    patch.object(update, 'digest', side_effect=[metadata['archive_sha256'], metadata['binary_sha256']]), \
+                    patch.object(update.subprocess, 'check_output', return_value='123'), \
                     patch.object(update, 'ready', side_effect=RuntimeError('dead process')):
                 with self.assertRaisesRegex(RuntimeError, 'dead process'):
-                    update.main()
-                self.assertFalse((root / 'state/status.json').exists())
+                    update.main('a' * 40, raw)
+                self.assertEqual(json.loads((root / 'state/status.json').read_text())['state'], 'activated_unverified')
 
     def test_successful_backup_starts_reset_the_retry_counter(self):
         with patch.object(update.subprocess, 'check_output', return_value='success'), patch.object(update, 'run') as run, patch.object(update, 'verify_backup') as verify:
@@ -215,15 +233,6 @@ class UpdateTest(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, 'Fresh uploaded backup'):
                         update.verify_backup(stamp - 1)
 
-    def test_blocked_revision_waits_without_allocating_another_recovery_tree(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            proof = {'state': 'blocked', 'desired': 'a' * 40, 'running': 'b' * 40, 'error': 'contract failed'}
-            (root / 'status.json').write_text(json.dumps(proof))
-            with patch.object(update, 'ROOT', root), patch.object(update, 'main_revision', return_value='a' * 40), patch.object(update, 'download') as download:
-                update.main()
-                download.assert_not_called()
-                self.assertEqual([p.name for p in root.iterdir()], ['status.json'])
     def test_restart_notice_is_announced_and_awaited_before_the_cutover(self):
         order = []
         with patch.object(update.subprocess, 'check_output', return_value='active'), \
