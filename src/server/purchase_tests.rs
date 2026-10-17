@@ -153,3 +153,205 @@ async fn buy_packet_delivers_an_item_and_rejections_leave_the_session_usable() {
     session.account.take().unwrap().release();
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn xp_booster_shop_loads_real_stock_and_commits_only_funded_current_purchases() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    a.world = a.world.in_world(-2);
+    let merchant = a
+        .world
+        .call(|w| {
+            assert!(
+                !w.entities
+                    .values()
+                    .any(|e| e.extra_stats.contains(&(34, 0xc43)))
+            );
+            let e = w
+                .entities
+                .values()
+                .find(|e| e.kind == 0x1ca && e.extra_stats.contains(&(34, 0xc42)))
+                .context("normal XP Booster must be stocked in the loaded Nexus")?;
+            assert!(e.extra_stats.contains(&(36, 100)) && e.extra_stats.contains(&(40, 0)));
+            Ok(e.id)
+        })
+        .await
+        .unwrap();
+    for case in ["normal", "full", "level20", "boosted", "stale"] {
+        let account = a
+            .store
+            .register(
+                format!("xp-shop-{case}"),
+                format!("{case}@example.test"),
+                "test-password".into(),
+            )
+            .await
+            .unwrap();
+        let mut ch = a
+            .store
+            .create(account, a.content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        if case == "level20" {
+            ch.gain_experience(&a.content, 100_000, &mut rand::thread_rng())
+                .unwrap();
+            assert_eq!(ch.level, 20);
+        }
+        ch.xp_boost.active = case == "boosted";
+        a.store.progress(ch.clone()).await.unwrap();
+        if case == "full" {
+            ch.items[4..].fill(0xa50);
+            ch.revision = a
+                .store
+                .exchange(
+                    vec![crate::store::InventoryWrite {
+                        id: ch.id,
+                        account,
+                        revision: ch.revision,
+                        items: ch.items.clone(),
+                    }],
+                    None,
+                )
+                .await
+                .unwrap()[0];
+        }
+        let character = ch.id;
+        let before = ch.clone();
+        let presentation = a.store.presentation(account).await.unwrap();
+        let (id, stock) = a
+            .world
+            .call(move |w| {
+                let e = &w.entities[&merchant];
+                let stock = e.extra_stats.iter().find(|(k, _)| *k == 42).unwrap().1;
+                let pos = Pos {
+                    x: e.pos.x,
+                    y: e.pos.y + 0.6,
+                };
+                assert!(w.walkable(pos));
+                let id = w.enter_at(ch, None, Some(pos), presentation)?;
+                w.players.get_mut(&id).unwrap().known.insert(merchant);
+                Ok((id, stock))
+            })
+            .await
+            .unwrap();
+        if case == "full" {
+            assert!(
+                a.world
+                    .call(move |w| w.buy(id, merchant))
+                    .await
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("inventory space")
+            );
+        } else {
+            if case == "stale" {
+                a.store
+                    .exchange(
+                        vec![crate::store::InventoryWrite {
+                            id: character,
+                            account,
+                            revision: before.revision,
+                            items: before.items.clone(),
+                        }],
+                        None,
+                    )
+                    .await
+                    .unwrap();
+            }
+            let plan = a.world.call(move |w| w.buy(id, merchant)).await.unwrap();
+            let purchase = &plan.purchase.as_ref().unwrap().1;
+            let slot = purchase.slot;
+            assert_eq!(
+                (purchase.item, purchase.price, purchase.currency),
+                (0xc42, 100, 0)
+            );
+            assert_eq!(a.store.presentation(account).await.unwrap().credits, 100);
+            assert_eq!(
+                a.store.load(account, character).await.unwrap().items,
+                before.items
+            );
+            let result = persist(&a, plan).await;
+            if case == "stale" {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("purchase conflict")
+                );
+            } else {
+                result.unwrap();
+                let saved = a.store.load(account, character).await.unwrap();
+                assert_eq!(a.store.presentation(account).await.unwrap().credits, 0);
+                assert_eq!(saved.items[slot], 0xc42);
+                assert_eq!(saved.revision, before.revision + 1);
+                assert_eq!(
+                    (saved.level, saved.xp_boost.active),
+                    (before.level, before.xp_boost.active)
+                );
+                if case == "normal" {
+                    let plan = a.world.call(move |w| w.buy(id, merchant)).await.unwrap();
+                    persist(&a, plan).await.unwrap();
+                    let declined = a.store.load(account, character).await.unwrap();
+                    assert_eq!(
+                        (declined.items, declined.revision),
+                        (saved.items, saved.revision)
+                    );
+                    let plan = a
+                        .world
+                        .call(move |w| {
+                            w.use_item(
+                                id,
+                                Slot {
+                                    object: id,
+                                    slot,
+                                    kind: 0xc42,
+                                },
+                                w.players[&id].pos,
+                            )
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    persist(&a, plan).await.unwrap();
+                    let used = a.store.load(account, character).await.unwrap();
+                    assert!(used.xp_boost.active);
+                    assert_eq!((used.items[slot], used.revision), (-1, saved.revision + 1));
+                }
+            }
+        }
+        let rejected = matches!(case, "full" | "stale");
+        if rejected {
+            let saved = a.store.load(account, character).await.unwrap();
+            assert_eq!(saved.items, before.items);
+            assert_eq!(saved.revision, before.revision + i32::from(case == "stale"));
+            assert_eq!(a.store.presentation(account).await.unwrap().credits, 100);
+        }
+        a.world
+            .call(move |w| {
+                let p = &w.players[&id];
+                assert_eq!(
+                    w.entities[&merchant]
+                        .extra_stats
+                        .iter()
+                        .find(|(k, _)| *k == 42)
+                        .unwrap()
+                        .1,
+                    stock - i32::from(!rejected)
+                );
+                if case == "stale" {
+                    assert!(p.pending && w.entities[&merchant].reserved);
+                    assert_eq!(p.character.items, before.items);
+                } else {
+                    assert!(!p.pending && !w.entities[&merchant].reserved);
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        if case != "stale" {
+            depart(&a, id).await.unwrap();
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

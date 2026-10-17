@@ -8,6 +8,8 @@ fn price(item: &Object) -> Option<(i32, u8)> {
         0x705 | 0x706 => (25, 0),
         0x701 | 0x70a | 0x70b | 0x71f | 0xc19 => (50, 0),
         0xc23 => (80, 0),
+        // Target-era offer, not later timed boosters: wikiwiki.jp/rmd/version/build123.5.0.
+        0xc42 => (100, 0),
         0xc2e => (200, 0),
         0xc11 => (300, 0),
         0x710 => (400, 0),
