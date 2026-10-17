@@ -50,7 +50,11 @@ impl Store {
         tracing::info!(account, "private Discord link code issued");
         Ok(code)
     }
-    pub async fn redeem_discord_code(&self, code: String, discord: String) -> Result<String> {
+    pub async fn redeem_discord_code(
+        &self,
+        code: String,
+        discord: String,
+    ) -> Result<(i32, String)> {
         discord_id(&discord)?;
         let hash = code_hash(&code)?;
         let time = now()?;
@@ -63,9 +67,10 @@ impl Store {
             ensure!(!conflict, "a game or Discord account is already linked; links are never silently replaced");
             tx.execute("INSERT INTO discord_links(account,discord_id) VALUES(?1,?2)", params![account,discord])?;
             tx.execute("DELETE FROM discord_codes WHERE account=?1", [account])?;
+            let rewarded = gold::grant(&tx, account, gold::DISCORD)?;
             tx.commit()?;
-            tracing::info!(account, "Discord account linked");
-            Ok(name)
+            tracing::info!(account, rewarded, reward=gold::DISCORD, "Discord account linked");
+            Ok((account, name))
         }).await
     }
     pub async fn hiscores(&self, living: Vec<Character>) -> Result<serde_json::Value> {
@@ -155,7 +160,8 @@ mod tests {
         assert_eq!(
             s.redeem_discord_code(code.clone(), "1558662335076376578".into())
                 .await
-                .unwrap(),
+                .unwrap()
+                .1,
             guest.name
         );
         assert!(

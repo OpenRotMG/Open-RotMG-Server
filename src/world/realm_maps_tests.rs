@@ -36,6 +36,20 @@ fn all_three_full_realms_preserve_water_scenery_and_safe_arrivals() {
         assert_eq!(world.realm_layout, Some(name));
         assert_eq!((world.map.width, world.map.height), (2048, 2048));
         assert_eq!(world.map.spawns.len(), 4);
+        let hermits: Vec<_> = world
+            .actors()
+            .filter(|e| e.kind == crate::dungeon::trench::HERMIT)
+            .collect();
+        assert_eq!(hermits.len(), 1, "{name}: one original Hermit");
+        assert!(world.walkable(world.ocean_reward_position(hermits[0]).unwrap()));
+        assert_eq!(world.hero_identities().len(), 14);
+        assert_eq!(
+            world
+                .actors()
+                .filter(|e| e.kind == 0xd65 && e.parent == Some(hermits[0].id))
+                .count(),
+            8
+        );
         for (i, ground) in water {
             assert_eq!(world.map.cells[i].ground, ground, "{name}: water at {i}");
         }

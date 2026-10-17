@@ -75,6 +75,9 @@ pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
 pub fn profile(kind: u16) -> Option<Profile> {
+    if let Some(profile) = crate::dungeon::trench::profile(kind) {
+        return Some(profile);
+    }
     if landmarks::ROSTER.contains(&kind) {
         return Some(landmarks::profile(kind));
     }
@@ -495,6 +498,9 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if crate::dungeon::trench::ROSTER.contains(&kind) {
+        return crate::dungeon::trench::validate(content, kind);
+    }
     if crate::quest::ROSTER.contains(&kind) {
         return crate::quest::validate(content, kind);
     }

@@ -36,6 +36,7 @@ mod ghost_ship;
 mod gods;
 #[cfg(test)]
 mod gods_tests;
+mod gold;
 mod golems;
 mod ground;
 #[cfg(test)]
@@ -54,6 +55,10 @@ mod midlands;
 #[cfg(test)]
 mod midlands_tests;
 mod named_births;
+mod ocean;
+mod ocean_setpiece;
+#[cfg(test)]
+mod ocean_tests;
 #[cfg(test)]
 mod player_position_tests;
 mod population;
@@ -233,6 +238,7 @@ pub struct Player {
     weapon_ticks: VecDeque<(i32, i32)>,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     ground_hits: BTreeMap<usize, i32>,
+    oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
     pub death_started: bool,
     killer: String,
@@ -752,6 +758,11 @@ impl Directory {
                     None => rand::random(),
                 };
                 Arc::new(crate::dungeon::abyss::generate(&self.content, seed)?)
+            } else if template == "ocean-trench" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
             } else if template == "spider-den" {
                 let seed = match self.prepared_seed {
                     Some(seed) => seed ^ self.next_world as u64,
@@ -792,6 +803,7 @@ impl Directory {
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
+            world.populate_hermit()?;
             tracing::info!(
                 layout = world.realm_layout,
                 entities = world.entities.len(),
@@ -1721,6 +1733,7 @@ impl World {
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
                 ground_hits: BTreeMap::new(),
+                oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
                 death_started: false,
                 killer: String::new(),
@@ -1805,7 +1818,7 @@ impl World {
             o.i32(id)
                 .f32(p.pos.x)
                 .f32(p.pos.y)
-                .i16(45 + 2 * i16::from(id == recipient));
+                .i16(45 + 3 * i16::from(id == recipient));
             for (k, v) in [
                 (0, values[0]),
                 (1, p.character.hp),
@@ -1846,6 +1859,7 @@ impl World {
             if id == recipient {
                 stat(&mut o, 35, p.presentation.credits);
                 stat(&mut o, 39, p.presentation.fame);
+                stat(&mut o, 64, p.oxygen);
             }
             for (i, boost) in [46, 47, 48, 49, 50, 53, 51, 52].into_iter().enumerate() {
                 stat(&mut o, boost, values[i] - p.character.base[i]);
@@ -3198,6 +3212,7 @@ impl World {
                 for (count, queued) in std::iter::once(&mut snapshot.pirate_caves)
                     .chain(snapshot.dungeons.iter_mut())
                     .chain(std::iter::once(&mut snapshot.abysses))
+                    .chain(std::iter::once(&mut snapshot.trenches))
                     .chain(std::iter::once(&mut snapshot.spider_dens))
                     .zip(p.clears_queued)
                 {
@@ -3235,6 +3250,7 @@ impl World {
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
             || snapshot.abysses > p.character.abysses
+            || snapshot.trenches > p.character.trenches
             || snapshot.spider_dens > p.character.spider_dens;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
@@ -3244,6 +3260,7 @@ impl World {
         p.character.pirate_caves = snapshot.pirate_caves;
         p.character.dungeons = snapshot.dungeons;
         p.character.abysses = snapshot.abysses;
+        p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
@@ -3487,7 +3504,8 @@ impl World {
             && let Some((portal, chance)) = crate::dungeon::portal_drop(e.kind)
             && self.rng.gen_bool(chance)
         {
-            self.portal_requests.push((portal, e.pos));
+            self.portal_requests
+                .push((portal, self.ocean_reward_position(&e)?));
             tracing::info!(
                 enemy = e.kind,
                 entity = id,
@@ -3585,7 +3603,10 @@ impl World {
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if matches!(defeated.kind, 0xd56 | 0xd59) {
             self.content.objects[&defeated.kind].hp / 20
-        } else if matches!(defeated.kind, 0xd5a | 0xd60) {
+        } else if matches!(
+            defeated.kind,
+            0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | 0x1705
+        ) {
             self.content.objects[&defeated.kind].hp / 100
         } else if defeated.kind == 0x927 {
             100
@@ -3616,7 +3637,14 @@ impl World {
             (eligible.len() * 2).min(8)
         };
         for i in 0..attempts {
-            for item in crate::loot::rewards(&self.content, defeated.kind, &mut self.rng) {
+            let mut rewards = crate::loot::rewards(&self.content, defeated.kind, &mut self.rng);
+            if defeated.kind == crate::dungeon::trench::THESSAL
+                && i64::from(eligible[i % eligible.len()].1) * 100
+                    >= i64::from(self.content.objects[&defeated.kind].hp) * 32
+            {
+                rewards.push(0xaea);
+            }
+            for item in rewards {
                 let owner = if private {
                     eligible[i % eligible.len()].0
                 } else {
@@ -3629,7 +3657,11 @@ impl World {
             }
         }
         for (owner, items) in drops {
-            self.loot_bags(defeated.pos, (owner >= 0).then_some(owner), &items)?;
+            self.loot_bags(
+                self.ocean_reward_position(defeated)?,
+                (owner >= 0).then_some(owner),
+                &items,
+            )?;
         }
         Ok(())
     }
@@ -3676,10 +3708,13 @@ impl World {
         };
         let samples = (distance / 0.1).ceil().max(1.) as usize;
         ensure!(
-            (1..=samples).all(|i| self.walkable(Pos {
-                x: old.x + (pos.x - old.x) * i as f32 / samples as f32,
-                y: old.y + (pos.y - old.y) * i as f32 / samples as f32
-            })),
+            (1..=samples).all(|i| self.ocean_walkable(
+                self.entities[&id].kind,
+                Pos {
+                    x: old.x + (pos.x - old.x) * i as f32 / samples as f32,
+                    y: old.y + (pos.y - old.y) * i as f32 / samples as f32
+                }
+            )),
             "NPC movement crosses a blocked tile"
         );
         self.position_entity(id, pos)
@@ -3812,6 +3847,8 @@ impl World {
             let flags = current.conditions(self.now);
             let (mut motion, mut speed) = if kind == 0x909 && current.stage == Some(1) {
                 (Motion::Stationary, 0.)
+            } else if crate::dungeon::trench::ROSTER.contains(&kind) {
+                self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
                 match self.landmark_movement(id, target, elapsed) {
                     Ok(movement) => movement,
@@ -4427,6 +4464,7 @@ impl World {
         self.mechanic_expiry();
         self.abyss_step();
         self.ground_step();
+        self.ocean_step();
         self.event_step();
         self.ability_step();
         let shots = self.npc_step();
@@ -4780,6 +4818,7 @@ mod tests {
             pirate_caves: 0,
             dungeons: [0; 3],
             abysses: 0,
+            trenches: 0,
             spider_dens: 0,
         }
     }
@@ -6173,7 +6212,7 @@ mod tests {
                     let object = &w.content.objects[&e.kind];
                     object.enemy
                         && object.class != "Wall"
-                        && !(e.quest.is_some() && e.kind == 0xd5e)
+                        && !(e.quest.is_some() && matches!(e.kind, 0xd5e | 0xd65))
                 })
                 .count(),
             w.population
@@ -6183,7 +6222,7 @@ mod tests {
                 + w.hero_identities().len()
         );
         assert!(w.population_count(11) <= 24);
-        assert_eq!(w.hero_identities().len(), 13);
+        assert_eq!(w.hero_identities().len(), 14);
         assert!(
             w.population
                 .iter()

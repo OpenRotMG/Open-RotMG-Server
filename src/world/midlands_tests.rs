@@ -98,7 +98,7 @@ fn ordinary_seed_density_stays_within_real_body_budgets_and_preserves_closure() 
                 "seed{seed} terrain{terrain}"
             );
         }
-        assert_eq!(w.hero_identities().len(), 13);
+        assert_eq!(w.hero_identities().len(), 14);
         assert!(w.critical_deaths.is_empty());
     }
 }

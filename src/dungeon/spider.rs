@@ -111,6 +111,7 @@ pub fn initial_condition(kind: u16) -> i32 {
 }
 
 pub fn profile(kind: u16) -> Profile {
+    let nr = crate::encounter::nr_speed;
     let (motion, speed, interval, range) = match kind {
         EGG => (Motion::Stationary, 0., 0, 0.),
         HATCHLING => (
@@ -119,7 +120,7 @@ pub fn profile(kind: u16) -> Profile {
                 stop: 0.,
                 idle: 0.,
             },
-            9.6,
+            nr(0.8),
             1000,
             10.,
         ),
@@ -129,9 +130,9 @@ pub fn profile(kind: u16) -> Profile {
                 cooldown: 2000,
                 delay: 0,
                 stop: 0.1,
-                idle: 9.6,
+                idle: nr(0.8),
             },
-            10.8,
+            nr(0.9),
             500,
             10.,
         ),
@@ -141,7 +142,7 @@ pub fn profile(kind: u16) -> Profile {
                 stop: 0.,
                 idle: 0.,
             },
-            12.,
+            nr(1.),
             500,
             10.,
         ),
@@ -149,13 +150,13 @@ pub fn profile(kind: u16) -> Profile {
             Motion::Follow {
                 sight: 0.3,
                 stop: 0.,
-                idle: 9.6,
+                idle: nr(0.8),
             },
-            9.6,
+            nr(0.8),
             500,
             10.,
         ),
-        BOSS => (Motion::Wander, 12., 1000, 20.),
+        BOSS => (Motion::Wander, nr(1.), 1000, 20.),
         // The source Shoot checks a positive 5ms timer before subtracting its 50ms tick: one volley every two ticks.
         0x937..=0x93f => (Motion::Stationary, 0., WEB_INTERVAL, 30.),
         _ => panic!("unregistered Spider Den actor {kind:#x}"),

@@ -83,7 +83,24 @@ pub async fn run(args: &[String]) -> Result<bool> {
             let content = content::Content::load(Path::new(data))?;
             let store = store::Store::open(&directory.join("game.db"), &content)?;
             for alive in [true, false] {
-                let account = store.list(format!("BACKUP_FIXTURE_SECRET_{alive}")).await?;
+                let guid = format!("BACKUP_FIXTURE_SECRET_{alive}");
+                let account = store.list(guid.clone()).await?;
+                store
+                    .register(
+                        guid,
+                        format!("backup-{alive}@example.invalid"),
+                        "backup-fixture-password".into(),
+                    )
+                    .await?;
+                let code = store.issue_discord_code(account.id).await?;
+                store
+                    .redeem_discord_code(code, format!("1234567890123456{}", i32::from(alive)))
+                    .await?;
+                if !alive {
+                    store
+                        .gold_notified(account.id, vec![store::gold::DISCORD.into()])
+                        .await?;
+                }
                 let mut character = store
                     .create(account.id, content.get(content::WIZARD)?)
                     .await?;
@@ -91,6 +108,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 character.dungeons = [1, 2, 3];
                 character.pirate_caves = 4;
                 character.abysses = 5;
+                character.trenches = 6;
                 store.progress(character.clone()).await?;
                 let mut items = character.items.clone();
                 items[4] = 0xa22;

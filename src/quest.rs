@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 pub const ROOTS: [u16; 4] = [0x91f, 0x91b, 0x928, 0x675];
 pub const EVENTS: [u16; 3] = [0xd56, 0xd59, 0xd5f];
 pub fn root(kind: u16) -> bool {
-    ROOTS.contains(&kind) || EVENTS.contains(&kind)
+    ROOTS.contains(&kind) || EVENTS.contains(&kind) || kind == crate::dungeon::trench::HERMIT
 }
 pub const ROSTER: &[u16] = &[
     0x91b, 0x91c, 0x91d, 0x91e, 0x91f, 0x920, 0x921, 0x922, 0x923, 0x924, 0x928, 0x929, 0x92a,
@@ -12,7 +12,10 @@ pub const ROSTER: &[u16] = &[
     0xd58, 0xd59, 0xd5a, 0xd5b, 0xd5c, 0xd5d, 0xd5e, 0xd5f, 0xd60,
 ];
 pub fn final_root(kind: u16) -> bool {
-    matches!(kind, 0x920 | 0x91c | 0x92d | 0x6c1 | 0xd56 | 0xd59 | 0xd5f)
+    matches!(
+        kind,
+        0x920 | 0x91c | 0x92d | 0x6c1 | 0xd56 | 0xd59 | 0xd5f | crate::dungeon::trench::HERMIT
+    )
 }
 pub fn profile(kind: u16) -> Option<Profile> {
     ROSTER.contains(&kind).then_some(Profile {

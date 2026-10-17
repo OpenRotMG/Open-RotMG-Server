@@ -272,6 +272,7 @@ impl Directory {
         }
         let packet = text_packet(&name, id, 5, &text);
         let world = self.resolve(Target::Player(id))?;
+        world.ocean_response(id, &text)?;
         let mut recipients = 0;
         for player in world
             .players

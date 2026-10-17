@@ -729,7 +729,7 @@ mod tests {
     fn final_named_deaths_remove_only_original_bound_closure_ids_once() {
         let mut d = super::super::tests::directory();
         let originals = d.endgame.cycles[&-3].remaining.clone();
-        assert_eq!(originals.len(), 13);
+        assert_eq!(originals.len(), 14);
         let saved_cycle = d.endgame.cycles.remove(&-3).unwrap();
         let w = d.worlds.get_mut(&-3).unwrap();
         let pos = w.entities[originals.iter().next().unwrap()].pos;
@@ -755,7 +755,7 @@ mod tests {
             assert!(d.worlds[&-3].admission_open);
             assert!(d.worlds[&-3].critical_deaths.is_empty());
         }
-        assert_eq!(d.endgame.cycles[&-3].remaining.len(), 9);
+        assert_eq!(d.endgame.cycles[&-3].remaining.len(), 10);
     }
     #[test]
     fn finite_closure_seals_both_admission_paths_and_replaces_without_erasing_owned_players() {

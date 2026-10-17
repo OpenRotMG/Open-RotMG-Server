@@ -36,6 +36,7 @@ pub(crate) fn fixture() -> (PathBuf, App) {
         owners: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),
+        gold_updates: Arc::default(),
         bots: Arc::default(),
         quarantined: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,

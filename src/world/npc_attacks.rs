@@ -127,7 +127,9 @@ impl World {
         let e = &self.entities[&id];
         let kind = e.kind;
         let heading = (target.y - e.pos.y).atan2(target.x - e.pos.x);
-        if e.quest.is_some() {
+        if crate::dungeon::trench::ROSTER.contains(&kind) {
+            self.ocean_shots(id, target)
+        } else if e.quest.is_some() {
             self.quest_shots(id, target, elapsed)
         } else if crate::endgame::ROSTER.contains(&kind) {
             self.finale_shots(id, heading, elapsed)

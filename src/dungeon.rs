@@ -4,18 +4,21 @@ use rand::{Rng, SeedableRng};
 
 pub mod abyss;
 pub mod spider;
+pub mod trench;
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 6] = [
+pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
     (0x71a, "undead-lair", "Undead Lair", 0xd90),
     (0x71b, "abyss-of-demons", "Abyss of Demons", abyss::MALPHAS),
+    (0x730, "ocean-trench", "Ocean Trench", trench::THESSAL),
     (0x719, "spider-den", "Spider Den", spider::BOSS),
 ];
 
 pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
     match enemy {
+        trench::HERMIT => Some((0x730, 1.)),
         0x60e..=0x610 => Some((0x717, 0.01)),
         0x651 => Some((0x71b, 0.17)),
         0x62c | 0x637 => Some((0x719, 0.1)),
@@ -186,6 +189,8 @@ pub(crate) mod tests {
             assert_eq!(content.objects[&portal].class, "Portal");
             let map = if name == "abyss-of-demons" {
                 abyss::generate(&content, 12351).unwrap()
+            } else if name == "ocean-trench" {
+                trench::generate(&content, 12351).unwrap()
             } else if name == "spider-den" {
                 spider::generate(&content, 12351).unwrap()
             } else if name == "snake-pit" {

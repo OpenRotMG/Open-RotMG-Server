@@ -130,7 +130,7 @@ fn temple_walls_are_damageable_cover_not_npcs_or_quest_rewards() {
     assert!(w.walkable(pos));
     assert_eq!(w.players[&p].character.exp, exp);
     assert!(w.critical_deaths.is_empty());
-    assert_eq!(w.hero_identities().len(), 13);
+    assert_eq!(w.hero_identities().len(), 14);
 }
 #[test]
 fn missing_setpiece_space_errors_without_plain_terrain_boss_fallback() {

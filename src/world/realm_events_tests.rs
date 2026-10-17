@@ -29,8 +29,8 @@ fn landmarks_have_selected_geometry_hazards_and_unchanged_population_reservation
         )
         .unwrap();
         let w = &d.worlds[&-3];
-        assert_eq!(w.hero_identities().len(), 13);
-        assert_eq!(w.setpieces.len(), 13);
+        assert_eq!(w.hero_identities().len(), 14);
+        assert_eq!(w.setpieces.len(), 14);
         assert!(w.population.iter().all(|s| w.outside_setpieces(s.pos)));
         assert_eq!(w.entities.values().filter(|e| e.kind == 0x501).count(), 6);
         assert!(w.map.cells.iter().any(|c| c.ground == 0xcb));

@@ -172,10 +172,11 @@ fn charging_spiders_lock_the_destination_and_respect_paralysis_and_collision() {
     let pos = Pos { x: 12.5, y: 74.5 };
     let id = w.spawn_entity(0x21d, pos, vec![]).unwrap();
     let target = Pos { x: 17.5, y: 74.5 };
-    let motion = spider::profile(0x21d).motion;
+    let profile = spider::profile(0x21d);
+    let motion = profile.motion;
     w.now = 100;
     assert_eq!(
-        w.charge_goal(id, Some(target), motion, 10.8)
+        w.charge_goal(id, Some(target), motion, profile.speed)
             .unwrap()
             .distance(target),
         0.
@@ -183,7 +184,7 @@ fn charging_spiders_lock_the_destination_and_respect_paralysis_and_collision() {
     let moved_target = Pos { x: 12.5, y: 79.5 };
     w.now = 150;
     assert_eq!(
-        w.charge_goal(id, Some(moved_target), motion, 10.8)
+        w.charge_goal(id, Some(moved_target), motion, profile.speed)
             .unwrap()
             .distance(target),
         0.

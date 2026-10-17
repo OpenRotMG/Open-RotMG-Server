@@ -67,14 +67,6 @@ impl World {
             if let ConsumableEffect::Unsupported(name) = effect {
                 bail!("item activation not implemented: {name}");
             }
-            if let ConsumableEffect::Mana { range: None, .. } = effect {
-                ensure!(
-                    self.players[&id].conditions(self.now)
-                        & crate::condition::bit(crate::condition::QUIET)
-                        == 0,
-                    "cannot restore mana while Quiet"
-                );
-            }
         }
         let next = if let Some(name) = &item.successor {
             let next = self

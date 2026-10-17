@@ -23,7 +23,8 @@ SOCIAL_GAME = {**ACTIONS_GAME, 'account_lists': ('account', 'list_id', 'target')
 UPDATES_GAME = {**SOCIAL_GAME, 'update_feed': ('id', 'snapshot', 'synced_at')}
 GOLD_GAME = {**UPDATES_GAME, 'accounts': (*GAME['accounts'], 'credits')}
 GUILDS_GAME = {**GOLD_GAME, 'guilds': ('id', 'name', 'level', 'fame', 'earned', 'board'), 'guild_members': ('account', 'guild', 'rank', 'fame')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME}
+REWARDS_GAME = {**GUILDS_GAME, 'gold_rewards': ('account', 'reward', 'awarded_at', 'notified_at')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -32,7 +33,8 @@ AUTH_SOCIAL_GAME = {**AUTH_ACTIONS_GAME, 'account_lists': SOCIAL_GAME['account_l
 AUTH_UPDATES_GAME = {**AUTH_SOCIAL_GAME, 'update_feed': UPDATES_GAME['update_feed']}
 # Loading a restore with the release binary recreates its empty credential tables; the deploy helper and release contract share this.
 AUTH_GOLD_GAME = {**AUTH_UPDATES_GAME, 'accounts': GOLD_GAME['accounts']}
-RELOADED_GAME = {**AUTH_GOLD_GAME, 'guilds': GUILDS_GAME['guilds'], 'guild_members': GUILDS_GAME['guild_members']}
+AUTH_GUILDS_GAME = {**AUTH_GOLD_GAME, 'guilds': GUILDS_GAME['guilds'], 'guild_members': GUILDS_GAME['guild_members']}
+RELOADED_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewards']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -170,6 +172,12 @@ def validate(bundle):
         identities = [(row['account'], row['item']) if table == 'collections' else row['account'] for row in rows]
         if len(set(identities)) != len(rows) or (table == 'discord_links' and len({r['discord_id'] for r in rows}) != len(rows)):
             raise ValueError('Duplicate hiscores identity: ' + table)
+    rewards = bundle['game'].get('gold_rewards', [])
+    for row in rewards:
+        if type(row['account']) is not int or row['account'] not in accounts or row['reward'] not in ('discord_link', 'collection_top_half') or type(row['awarded_at']) is not int or row['awarded_at'] <= 0 or (row['notified_at'] is not None and (type(row['notified_at']) is not int or row['notified_at'] <= 0)):
+            raise ValueError('Invalid gold reward')
+    if len({(row['account'], row['reward']) for row in rewards}) != len(rewards):
+        raise ValueError('Duplicate gold reward')
     lists = {}
     for row in bundle['game'].get('account_lists', []):
         if any(type(row[key]) is not int or not 0 < row[key] <= 2147483647 or row[key] not in accounts for key in ['account', 'target']) or type(row['list_id']) is not int or row['list_id'] not in (0, 1) or row['account'] == row['target']:
@@ -194,7 +202,7 @@ def validate(bundle):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, RELOADED_GAME], include_schema=True)
     version = next(version for version, schema in GAME_SCHEMAS.items() if schema == {k: v for k, v in matched.items() if k in game_data})
     bundle = validate({
         'schema': version, 'created_at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -249,6 +257,8 @@ CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),g
 CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
 CREATE INDEX guild_roster ON guild_members(guild);
 CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;'''
+    if bundle['schema'] >= 10:
+        definitions['game'] += "\nCREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));"
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

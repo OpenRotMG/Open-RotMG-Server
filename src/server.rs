@@ -142,6 +142,7 @@ impl App {
 use tokio::sync::mpsc;
 mod account_actions;
 pub(crate) mod diagnostics;
+mod gold;
 mod guilds;
 mod hiscores;
 pub(crate) mod testing;
@@ -172,6 +173,7 @@ pub struct App {
     pub owners: Arc<Mutex<BTreeMap<i32, Option<SessionControl>>>>,
     pub authentication: Arc<tokio::sync::RwLock<()>>,
     pub guild_actions: Arc<tokio::sync::Mutex<()>>,
+    pub gold_updates: Arc<tokio::sync::Mutex<()>>,
     pub bots: Arc<Mutex<BTreeMap<i32, Owner>>>,
     pub quarantined: Arc<Mutex<Vec<Owner>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
@@ -527,6 +529,7 @@ fn slot(r: &mut Reader<'_>) -> Result<Slot> {
 }
 pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
     if let Some((_, purchase)) = &plan.purchase {
+        let _gold = a.gold_updates.lock().await;
         let result = a
             .store
             .purchase(
@@ -546,6 +549,7 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
             .await;
     }
     let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
+    let collector = plan.collected.map(|_| plan.account);
     let result = if let Some(pet) = plan.companion.as_ref().filter(|pet| pet.permanent) {
         a.store
             .select_companion(
@@ -606,7 +610,11 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
     };
     a.world
         .directory(move |d| d.finish_inventory(plan, result))
-        .await
+        .await?;
+    if let Some(account) = collector {
+        gold::sync(a, account).await?;
+    }
+    Ok(())
 }
 async fn persist_death(
     a: &App,
@@ -894,6 +902,7 @@ async fn handle(
                 let id = player.context("guild sign-on player missing")?;
                 a.world.directory(move |d| d.guild_sign_on(id)).await?;
             }
+            gold::sync(a, account).await?;
             if let Some(testing) = &a.testing {
                 testing.native_entered(account)?;
             }

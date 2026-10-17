@@ -4,13 +4,13 @@ use super::*;
 
 #[derive(Clone, Copy)]
 pub(super) struct Area {
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
+    pub(super) x: i32,
+    pub(super) y: i32,
+    pub(super) width: i32,
+    pub(super) height: i32,
 }
 impl Area {
-    fn distance(&self, p: Pos) -> f32 {
+    pub(super) fn distance(&self, p: Pos) -> f32 {
         let dx = (self.x as f32 - p.x)
             .max(p.x - (self.x + self.width) as f32)
             .max(0.);
@@ -19,7 +19,7 @@ impl Area {
             .max(0.);
         dx.hypot(dy)
     }
-    fn separate(&self, other: &Self) -> bool {
+    pub(super) fn separate(&self, other: &Self) -> bool {
         self.x + self.width + 2 <= other.x
             || other.x + other.width + 2 <= self.x
             || self.y + self.height + 2 <= other.y
