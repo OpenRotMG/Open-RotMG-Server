@@ -590,6 +590,14 @@ CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),g
         backup.restore(self.output, restored)
         self.assertEqual(backup.snapshot(restored / 'game.db', backup.SHORE_GAME), before['game'])
 
+    def test_schema_twelve_metadata_cannot_export_legacy_tables(self):
+        self.add_shore_state()
+        with closing(sqlite3.connect(self.game)) as db:
+            db.execute('PRAGMA user_version=12')
+        with self.assertRaisesRegex(ValueError, 'schema version'):
+            self.export()
+        self.assertFalse(self.output.exists())
+
     def test_shore_schema_version_must_match_exact_tables(self):
         self.add_shore_state()
         before = self.export()

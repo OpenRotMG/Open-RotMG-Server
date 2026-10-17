@@ -65,12 +65,14 @@ class ReleaseContract(unittest.TestCase):
             malformed['game']['characters'].append({**live, 'id': 99999})
             with self.assertRaisesRegex(ValueError, 'character slot'):
                 backup.validate(malformed)
-            with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
-                source.backup(future)
-                future.execute('PRAGMA user_version=13')
             revision = Path(temporary) / 'contract/REVISION'
-            with self.assertRaisesRegex(ValueError, 'schema version'):
-                backup.export(Path(temporary) / 'future.db', Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'future.gz', revision, revision, revision)
+            for version in [0, 11, 13]:
+                with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
+                    source.backup(future)
+                    future.execute(f'PRAGMA user_version={version}')
+                with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'schema version'):
+                    backup.export(Path(temporary) / 'future.db', Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'future.gz', revision, revision, revision)
+                self.assertFalse((Path(temporary) / 'future.gz').exists())
             legacy = deepcopy(bundle)
             legacy['schema'] = 10
             del legacy['game']['character_slot_purchases']

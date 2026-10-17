@@ -235,7 +235,7 @@ def validate(bundle):
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
     game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
-    if stored_version > max(GAME_SCHEMAS) or (12 in versions and stored_version != 12):
+    if stored_version > max(GAME_SCHEMAS) or ((stored_version == 12) != (12 in versions)):
         raise ValueError('Unsupported database schema version')
     if len(versions) > 1 and stored_version not in versions:
         raise ValueError('Unsupported gold reward schema version')
