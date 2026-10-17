@@ -382,7 +382,10 @@ pub async fn report(
         rand::rngs::OsRng.fill_bytes(&mut bytes);
         bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
     };
-    let mut report = json!({"schema": 2, "id": id, "created_at_unix_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis(),
+    let reporter_name = context["player_name"]
+        .as_str()
+        .context("bug reporter name missing")?;
+    let mut report = json!({"schema": 3, "reporter_name": reporter_name, "id": id, "created_at_unix_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis(),
         "delivery": {"status": "pending"}, "message_untrusted": message, "account_id": account,
         "server_binary_sha256": a.diagnostics.binary_sha256, "server_source_revision": a.diagnostics.source_revision, "protocol_build": "123.5.1", "context": context,
         "server_uptime_ms": a.started.elapsed().as_millis(), "configured_player_cap": a.max_players,
@@ -594,6 +597,7 @@ mod tests {
     async fn consecutive_native_commands_spool_privately_and_receipts_survive_restart() {
         let (root, mut a) = super::super::account_actions::tests::fixture();
         let account = a.store.list("bug-test".into()).await.unwrap().id;
+        a.store.rename(account, "BugWizard".into()).await.unwrap();
         let character = a
             .store
             .create(account, a.content.get(crate::content::WIZARD).unwrap())
@@ -659,6 +663,8 @@ mod tests {
             .unwrap();
         let value: Value = serde_json::from_slice(&body).unwrap();
         let report = &value["report"];
+        assert_eq!(report["schema"], 3);
+        assert_eq!(report["reporter_name"], "BugWizard");
         assert_eq!(report["message_untrusted"], "enemies froze");
         assert!(report.get("connection").is_none());
         assert_eq!(report["account_id"], account);
@@ -675,6 +681,8 @@ mod tests {
             "player_id",
             "position",
             "message_untrusted",
+            "reporter_name",
+            "BugWizard",
             "investigation",
             "enemies froze",
         ] {
@@ -819,6 +827,7 @@ mod tests {
             .await
             .unwrap();
         let remaining: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(remaining["report"]["reporter_name"], "BugWizard");
         assert_eq!(remaining["report"]["message_untrusted"], "enemies froze");
         assert_eq!(remaining["report"]["account_id"], account);
         assert_ne!(remaining["report"]["id"], id);

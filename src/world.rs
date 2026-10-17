@@ -540,7 +540,7 @@ impl Directory {
         let ticks = self.diagnostic_ticks.iter().filter(|(t, _, _)| t.elapsed().as_secs() <= 120).map(|(time, duration, late)| serde_json::json!({"age_ms": time.elapsed().as_millis(), "execution_us": duration, "scheduling_lateness_us": late})).collect::<Vec<_>>();
         Ok(
             serde_json::json!({"world_id": world_id, "world_name": world.name, "player_id": player,
-            "character_id": p.character.id, "class": p.character.class, "level": p.character.level,
+            "character_id": p.character.id, "player_name": p.character.name, "class": p.character.class, "level": p.character.level,
             "position": {"x": p.pos.x, "y": p.pos.y}, "visible_entities": p.known.len(),
             "world_players": world.players.len(), "world_entities": world.entities.len(), "world_projectiles": world.bullets.len(),
             "tick_interval_ms": 50, "recent_ticks": ticks, "tick": self.tick,
@@ -4561,7 +4561,8 @@ impl World {
                         .filter(|e| {
                             e.hp > 0
                                 && e.conditions(self.now)
-                                    & crate::condition::bit(crate::condition::STASIS)
+                                    & (crate::condition::bit(crate::condition::STASIS)
+                                        | crate::condition::bit(crate::condition::INVINCIBLE))
                                     == 0
                                 && self.content.objects[&e.kind].destructible
                                 && !b.hit.contains(&e.id)
