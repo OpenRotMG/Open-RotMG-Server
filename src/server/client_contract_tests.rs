@@ -1266,6 +1266,265 @@ async fn named_teleport_player_text_reuses_native_outputs_and_account_cooldown()
 }
 
 #[tokio::test]
+async fn server_player_text_reports_current_world_privately_without_gameplay_changes() {
+    use std::time::{Duration, Instant};
+    fn packet(text: &str) -> Packet {
+        let mut out = Writer::new();
+        out.utf(text);
+        Packet {
+            id: wire::PLAYER_TEXT,
+            body: out.0,
+        }
+    }
+    fn reply(packet: Packet, name: &str, text: &str) {
+        assert_eq!(packet.id, wire::TEXT);
+        let mut r = Reader::new(&packet.body);
+        let actual_name = r.utf().unwrap();
+        assert_eq!(r.i32().unwrap(), -1);
+        assert_eq!(r.i32().unwrap(), 0);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert_eq!(r.utf().unwrap(), "");
+        assert_eq!(r.utf().unwrap(), text);
+        assert_eq!(actual_name, name);
+        assert_eq!(r.utf().unwrap(), "");
+        r.done().unwrap();
+    }
+    fn snapshot(w: &crate::world::World, id: i32) -> serde_json::Value {
+        let p = &w.players[&id];
+        serde_json::json!({"character": p.character, "position": p.pos,
+            "pending": p.pending, "xp_queued": p.experience_queued,
+            "world": w.name, "entities": w.entities.len(), "projectiles": w.bullets.len()})
+    }
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world = a.world.in_world(-2);
+    a.world.clock.set_paused(true);
+    let mut session = loaded(&a, "server-info-sender").await;
+    let peer = loaded(&a, "server-info-peer").await;
+    let remote = loaded(
+        &App {
+            world: a.world.in_world(-3),
+            ..a.clone()
+        },
+        "server-info-remote",
+    )
+    .await;
+    let mut id = session.player.unwrap();
+    let peer_id = peer.player.unwrap();
+    let remote_id = remote.player.unwrap();
+    let account = session.account.as_ref().unwrap().id;
+    let (tx, mut rx) = mpsc::channel(16);
+    let (peer_tx, mut peer_rx) = mpsc::channel(16);
+    let (remote_tx, mut remote_rx) = mpsc::channel(16);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    for (player, packets) in [(id, tx.clone()), (peer_id, peer_tx), (remote_id, remote_tx)] {
+        let output = crate::world::Output {
+            packets,
+            lost: lost.clone(),
+        };
+        a.world
+            .for_player(player)
+            .call(move |w| {
+                w.players.get_mut(&player).unwrap().tx = Some(output);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    a.world
+        .call(move |w| {
+            w.players.get_mut(&peer_id).unwrap().pos.x += 100.;
+            w.sync_account_lists(peer_id, Some([Default::default(), [account].into()]))
+        })
+        .await
+        .unwrap();
+    while peer_rx.try_recv().is_ok() {}
+    a.world
+        .directory(move |d| d.chat(id, "/pause".into(), Instant::now()))
+        .await
+        .unwrap();
+    reply(rx.try_recv().unwrap(), "", "Game paused.");
+    let mut now = Instant::now();
+    for (text, name, expected) in [
+        (" /SeRvEr ".into(), "", "Current world: Nexus"),
+        ("/server    ".into(), "", "Current world: Nexus"),
+        (
+            format!("/server{}", " ".repeat(121)),
+            "",
+            "Current world: Nexus",
+        ),
+        ("/server extra".into(), "*Error*", "Usage: /server"),
+        (
+            "/server\n".into(),
+            "*Error*",
+            "Chat message contains control characters.",
+        ),
+        (
+            format!("/server{}", " ".repeat(122)),
+            "*Error*",
+            "Chat messages are limited to 128 characters.",
+        ),
+        ("/servers".into(), "*Error*", "Unknown chat command."),
+        // Exact native /help is intercepted locally, not a new backend command.
+        ("/help".into(), "*Error*", "Unknown chat command."),
+        (
+            "/guild unchanged".into(),
+            "*Error*",
+            "You are not in a guild.",
+        ),
+        (
+            "/tell Guest2 unchanged".into(),
+            "*Error*",
+            "Choose a name before using /tell.",
+        ),
+    ] {
+        let before = a
+            .world
+            .for_player(id)
+            .call(move |w| Ok(snapshot(w, id)))
+            .await
+            .unwrap();
+        handle(&mut a, packet(&text), &mut session, &tx, &lost, now)
+            .await
+            .unwrap();
+        reply(rx.try_recv().unwrap(), name, expected);
+        assert!(
+            rx.try_recv().is_err() && peer_rx.try_recv().is_err() && remote_rx.try_recv().is_err()
+        );
+        let after = a
+            .world
+            .for_player(id)
+            .call(move |w| Ok(snapshot(w, id)))
+            .await
+            .unwrap();
+        assert_eq!(after, before);
+        now += Duration::from_secs(2);
+    }
+    let ch = a
+        .world
+        .for_player(id)
+        .call(move |w| Ok(w.players[&id].character.clone()))
+        .await
+        .unwrap();
+    depart(&a, id).await.unwrap();
+    let output = crate::world::Output {
+        packets: tx.clone(),
+        lost: lost.clone(),
+    };
+    id = a
+        .world
+        .in_world(-1)
+        .call(move |w| w.enter(ch, Some(output)))
+        .await
+        .unwrap();
+    session.player = Some(id);
+    a.world = a.world.for_player(id);
+    while rx.try_recv().is_ok() {}
+    let (expected, map_name) = a
+        .world
+        .for_player(id)
+        .call(move |w| {
+            let body = w.map_info();
+            let mut r = Reader::new(&body);
+            r.i32()?;
+            r.i32()?;
+            Ok((format!("Current world: {}", w.name), r.utf()?))
+        })
+        .await
+        .unwrap();
+    assert_eq!(map_name, "Tutorial");
+    for text in ["/server", "/who", "/server"] {
+        let before = a
+            .world
+            .for_player(id)
+            .call(move |w| Ok(snapshot(w, id)))
+            .await
+            .unwrap();
+        handle(&mut a, packet(text), &mut session, &tx, &lost, now)
+            .await
+            .unwrap();
+        reply(
+            rx.try_recv().unwrap(),
+            "",
+            if text == "/who" {
+                "Players online: Guest1"
+            } else {
+                &expected
+            },
+        );
+        let after = a
+            .world
+            .for_player(id)
+            .call(move |w| Ok(snapshot(w, id)))
+            .await
+            .unwrap();
+        assert_eq!(after, before);
+    }
+    handle(&mut a, packet("/server"), &mut session, &tx, &lost, now)
+        .await
+        .unwrap();
+    reply(
+        rx.try_recv().unwrap(),
+        "*Error*",
+        "Chat rate limit: wait one second before sending again.",
+    );
+    now += Duration::from_secs(2);
+    handle(&mut a, packet("normal chat"), &mut session, &tx, &lost, now)
+        .await
+        .unwrap();
+    let p = rx.try_recv().unwrap();
+    let mut r = Reader::new(&p.body);
+    assert_eq!(p.id, wire::TEXT);
+    assert_eq!(r.utf().unwrap(), "Guest1");
+    assert_eq!(r.i32().unwrap(), id);
+    assert!(peer_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
+    for mode in 0..5 {
+        a.world
+            .for_player(id)
+            .call(move |w| {
+                let p = w.players.get_mut(&id).unwrap();
+                p.character.alive = mode != 0;
+                p.character.hp = if mode == 1 { 0 } else { 100 };
+                p.death_pending = mode == 2;
+                p.departing = mode == 3;
+                if mode == 4 {
+                    w.poison(id, "test save failure".into())?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        now += Duration::from_secs(2);
+        handle(&mut a, packet("/server"), &mut session, &tx, &lost, now)
+            .await
+            .unwrap();
+        if mode == 3 {
+            assert!(rx.try_recv().is_err());
+        } else {
+            reply(
+                rx.try_recv().unwrap(),
+                "*Error*",
+                "Dead, departing or quarantined players cannot chat.",
+            );
+        }
+    }
+    let mut malformed = packet("/server");
+    malformed.body.push(0);
+    assert!(
+        handle(&mut a, malformed, &mut session, &tx, &lost, now)
+            .await
+            .is_err()
+    );
+    session.player = None;
+    assert!(
+        handle(&mut a, packet("/server"), &mut session, &tx, &lost, now)
+            .await
+            .is_err()
+    );
+    assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn who_player_text_returns_private_roster_and_validation_errors() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world = a.world.in_world(-2);

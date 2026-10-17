@@ -166,6 +166,7 @@ impl Directory {
             .split_once(char::is_whitespace)
             .unwrap_or((trimmed, ""));
         let who = command.eq_ignore_ascii_case("/who");
+        let server = command.eq_ignore_ascii_case("/server");
         let teleport = command.eq_ignore_ascii_case("/teleport");
         let trade = command.eq_ignore_ascii_case("/trade");
         let yell = command.eq_ignore_ascii_case("/yell");
@@ -176,6 +177,7 @@ impl Directory {
             !trimmed.starts_with('/')
                 || tell
                 || who
+                || server
                 || teleport
                 || trade
                 || yell
@@ -214,6 +216,14 @@ impl Directory {
             "Choose a name before using /tell."
         );
         self.chat_permit(id, now)?;
+        if server {
+            ensure!(rest.trim().is_empty(), "Usage: /server");
+            let world = self.resolve(Target::Player(id))?;
+            let packet = chat_info(&format!("Current world: {}", world.name));
+            send(&world.players[&id], packet.id, packet.body);
+            tracing::info!(player=id, account, world=%world.name, "server location sent");
+            return Ok(());
+        }
         if trade {
             let name = rest.trim();
             ensure!(
