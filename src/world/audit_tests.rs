@@ -968,10 +968,22 @@ async fn giant_crab_defeat_pickup_is_committed_once_and_survives_reopen() {
 
 #[test]
 fn giant_crab_public_attempts_use_only_live_positive_contributors_and_the_current_cap() {
+    ordinary_public_attempts_use_only_live_positive_contributors_and_the_current_cap(0x6c4, 8);
+}
+
+#[test]
+fn swarm_public_attempts_use_only_live_positive_contributors_and_the_current_cap() {
+    ordinary_public_attempts_use_only_live_positive_contributors_and_the_current_cap(0x955, 6);
+}
+
+fn ordinary_public_attempts_use_only_live_positive_contributors_and_the_current_cap(
+    kind: u16,
+    terrain: u8,
+) {
     for contributors in [0, 1, 2, 5] {
-        let mut w = arena(8);
+        let mut w = arena(terrain);
         let pos = center(&w);
-        let crab = w.spawn_entity(0x6c4, pos, vec![]).unwrap();
+        let enemy = w.spawn_entity(kind, pos, vec![]).unwrap();
         for index in 0..contributors + 4 {
             let mut ch = tests::ch(&w);
             ch.id = index + 1;
@@ -988,7 +1000,7 @@ fn giant_crab_public_attempts_use_only_live_positive_contributors_and_the_curren
                 p.departing = true;
             }
             w.entities
-                .get_mut(&crab)
+                .get_mut(&enemy)
                 .unwrap()
                 .damage
                 .insert(index + 1, if index == contributors + 3 { 0 } else { 1 });
@@ -996,14 +1008,14 @@ fn giant_crab_public_attempts_use_only_live_positive_contributors_and_the_curren
         let mut expected = Vec::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(9009);
         for _ in 0..(contributors * 2).min(8) {
-            for item in crate::loot::rewards(&w.content, 0x6c4, &mut rng) {
+            for item in crate::loot::rewards(&w.content, kind, &mut rng) {
                 if !expected.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
                     expected.push(item as i32);
                 }
             }
         }
         w.rng = rand::rngs::StdRng::seed_from_u64(9009);
-        let defeated = w.remove_entity(crab);
+        let defeated = w.remove_entity(enemy);
         w.drop_loot(&defeated).unwrap();
         let actual: Vec<_> = w
             .bag_expiry
@@ -1015,7 +1027,10 @@ fn giant_crab_public_attempts_use_only_live_positive_contributors_and_the_curren
                 bag.items.iter().copied().filter(|item| *item >= 0)
             })
             .collect();
-        assert_eq!(actual, expected, "contributors={contributors}");
+        assert_eq!(
+            actual, expected,
+            "kind={kind:#x} contributors={contributors}"
+        );
     }
 }
 
