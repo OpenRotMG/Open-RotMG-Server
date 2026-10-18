@@ -236,6 +236,11 @@ async fn swarm_combat_drops_collect_once_and_survive_inventory_cas_reopen() {
     ordinary_combat_drops_collect_once_and_survive_inventory_cas_reopen(0x955, 6, 360, 65).await;
 }
 
+#[tokio::test]
+async fn horned_drake_combat_drops_collect_once_and_survive_inventory_cas_reopen() {
+    ordinary_combat_drops_collect_once_and_survive_inventory_cas_reopen(0x945, 7, 1270, 229).await;
+}
+
 async fn ordinary_combat_drops_collect_once_and_survive_inventory_cas_reopen(
     kind: u16,
     terrain: u8,
@@ -345,18 +350,29 @@ async fn ordinary_combat_drops_collect_once_and_survive_inventory_cas_reopen(
             );
             let item = w.entities[&bag].items[0];
             let object = w.content.get(item as u16).unwrap();
-            assert!(matches!(
-                (object.tier.unwrap(), object.slot_type),
-                (3 | 4, 1 | 2 | 3 | 8 | 17 | 6 | 7 | 14)
-                    | (
-                        1,
-                        4 | 5 | 11 | 12 | 13 | 15 | 16 | 18 | 19 | 20 | 21 | 22 | 23 | 9
-                    )
-            ));
-            assert!(
-                object.tier != Some(4) || kind == 0x623,
-                "only the Werewolf includes tier four"
-            );
+            if kind == 0x945 {
+                assert!(
+                    matches!(item, 0xa22 | 0xa23)
+                        || (object.tier == Some(5)
+                            && (crate::loot::WEAPONS.contains(&object.slot_type)
+                                || crate::loot::ARMOR.contains(&object.slot_type)))
+                        || (object.tier == Some(2)
+                            && crate::loot::ABILITIES.contains(&object.slot_type))
+                );
+            } else {
+                assert!(matches!(
+                    (object.tier.unwrap(), object.slot_type),
+                    (3 | 4, 1 | 2 | 3 | 8 | 17 | 6 | 7 | 14)
+                        | (
+                            1,
+                            4 | 5 | 11 | 12 | 13 | 15 | 16 | 18 | 19 | 20 | 21 | 22 | 23 | 9
+                        )
+                ));
+                assert!(
+                    object.tier != Some(4) || kind == 0x623,
+                    "only the Werewolf includes tier four"
+                );
+            }
             assert!(!object.soulbound && object.bag_type == 0);
             let from = Slot {
                 object: bag,
