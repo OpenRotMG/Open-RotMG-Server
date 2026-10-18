@@ -700,7 +700,6 @@ impl Directory {
             crate::endgame::CASTLE,
             crate::endgame::CHAMBER,
             crate::endgame::CELLAR,
-            "sprite-world",
             "undead-lair",
             "guild-hall-1",
             "guild-hall-2",
@@ -800,6 +799,11 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::snake_pit(&self.content, seed)?)
+            } else if template == "sprite-world" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
             } else {
                 self.templates
                     .get(template)
@@ -2855,10 +2859,6 @@ impl World {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("player missing")?;
         ensure!(!p.paused, "Cannot use items while paused.");
-        ensure!(
-            p.active() && !p.pending && p.character.hp > 0,
-            "player is busy, departing, quarantined or dead"
-        );
         let source = if slot.object == id {
             &p.character.items
         } else {
@@ -2881,6 +2881,13 @@ impl World {
         );
         ensure!(slot.kind >= 0, "empty item slot");
         let item = self.content.get(slot.kind as u16)?.clone();
+        // Saving earned XP must not freeze abilities; inventory mutations remain serialized.
+        ensure!(
+            p.active()
+                && p.character.hp > 0
+                && (!p.pending || p.progress_started && !item.abilities.is_empty()),
+            "player is busy, departing, quarantined or dead"
+        );
         if item.xp_boost {
             ensure!(
                 item.kind == 0xc42 && item.consumable && item.activations == 0,
@@ -6861,6 +6868,30 @@ mod tests {
         assert!(!d.portals.contains_key(&portal));
         assert!(!d.worlds[&-3].entities.contains_key(&portal));
         assert!(d.destination(player, Some(portal)).is_err());
+    }
+    #[test]
+    fn successive_sprite_worlds_are_not_the_same_map() {
+        let content = Arc::new(Content::load(Path::new("data")).unwrap());
+        let mut d = Directory::test_prepared(Path::new("data"), content, 16, 12351).unwrap();
+        let first = d.prepared_instance("sprite-world").unwrap();
+        let second = d.prepared_instance("sprite-world").unwrap();
+        let grounds = |id| {
+            d.worlds[&id]
+                .map
+                .cells
+                .iter()
+                .map(|c| (c.ground, c.object))
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(grounds(first), grounds(second));
+        assert_eq!(
+            d.worlds[&first]
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x70e && e.published)
+                .count(),
+            0
+        );
     }
     #[test]
     fn shore_population_is_bounded_sourced_and_cannot_respawn_on_players() {
