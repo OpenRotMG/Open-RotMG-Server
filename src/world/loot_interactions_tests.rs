@@ -228,15 +228,29 @@ fn occupied_ground_swaps_drop_incompatible_replacements_without_exposing_soulbou
 
 #[tokio::test]
 async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reopen() {
+    ordinary_combat_drops_collect_once_and_survive_inventory_cas_reopen(0x623, 5, 320, 52).await;
+}
+
+#[tokio::test]
+async fn swarm_combat_drops_collect_once_and_survive_inventory_cas_reopen() {
+    ordinary_combat_drops_collect_once_and_survive_inventory_cas_reopen(0x955, 6, 360, 65).await;
+}
+
+async fn ordinary_combat_drops_collect_once_and_survive_inventory_cas_reopen(
+    kind: u16,
+    terrain: u8,
+    hp: i32,
+    xp: i32,
+) {
     use crate::store::{InventoryWrite, Store};
     use rand::{SeedableRng, rngs::StdRng};
     let mut drops = 0;
     let mut nondrops = 0;
     for seed in 0..16 {
-        let mut w = tests::arena(5);
+        let mut w = tests::arena(terrain);
         Arc::make_mut(&mut w.map).spawns = vec![(12.5, 12.5)];
         let path = std::env::temp_dir().join(format!(
-            "werewolf-loot-{}-{}-{seed}",
+            "ordinary-loot-{kind:x}-{}-{}-{seed}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -246,7 +260,7 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
         std::fs::create_dir(&path).unwrap();
         let db = path.join("game.db");
         let store = Store::open(&db, &w.content).unwrap();
-        let account = store.list("werewolf-combat-fixture".into()).await.unwrap();
+        let account = store.list("ordinary-combat-fixture".into()).await.unwrap();
         let mut ch = store
             .create(account.id, w.content.get(crate::content::WIZARD).unwrap())
             .await
@@ -276,7 +290,7 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
         let origin = w.players[&player].pos;
         let enemy = w
             .spawn_entity(
-                0x623,
+                kind,
                 Pos {
                     x: origin.x + 2.,
                     y: origin.y,
@@ -284,7 +298,7 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
                 vec![],
             )
             .unwrap();
-        assert_eq!(w.entities[&enemy].hp, 320);
+        assert_eq!(w.entities[&enemy].hp, hp);
         w.rng = StdRng::seed_from_u64(seed);
         for _ in 0..200 {
             let Some(e) = w.entities.get(&enemy) else {
@@ -304,7 +318,8 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
         assert!(p.character.shots > 0 && p.character.hits > 0);
         assert_eq!((p.character.kills, p.character.quests), (1, 1));
         let earned = p.experience_queued;
-        assert!(earned > 0);
+        assert_eq!(earned, xp);
+        assert!(w.portal_requests.is_empty() && w.critical_deaths.is_empty());
         assert_eq!(
             w.damage_enemy(player, enemy, 1000, false, &[], Some(0))
                 .unwrap(),
@@ -319,7 +334,8 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
         assert!(bags.len() <= 1);
         if let Some(&bag) = bags.first() {
             drops += 1;
-            assert!(!crate::loot::private(0x623));
+            assert!(!crate::loot::private(kind));
+            assert_eq!(w.bag_expiry[&bag], w.now + 60_000);
             assert_eq!(w.entities[&bag].kind, 0x500);
             assert!(
                 !w.entities[&bag]
@@ -337,7 +353,11 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
                         4 | 5 | 11 | 12 | 13 | 15 | 16 | 18 | 19 | 20 | 21 | 22 | 23 | 9
                     )
             ));
-            assert!(!object.soulbound);
+            assert!(
+                object.tier != Some(4) || kind == 0x623,
+                "only the Werewolf includes tier four"
+            );
+            assert!(!object.soulbound && object.bag_type == 0);
             let from = Slot {
                 object: bag,
                 slot: 0,
@@ -433,7 +453,7 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
     }
     assert!(
         drops > 0,
-        "defeated Desert Werewolves never produced an item drop"
+        "defeated ordinary actor {kind:#x} never produced an item drop"
     );
     assert!(nondrops > 0, "loot must not have a guaranteed minimum");
 }
