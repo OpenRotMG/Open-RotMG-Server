@@ -93,6 +93,44 @@ fn player_status_distinguishes_name_boosts_wallet_character_fame_and_history() {
     assert!(!numbers(&w, id, 999).contains_key(&39));
 }
 #[test]
+fn living_class_star_thresholds_publish_after_progress_commit_without_wallet_credit() {
+    for threshold in [20, 150, 400, 800, 2000] {
+        let mut w = arena();
+        let mut ch = tests::ch(&w);
+        ch.level = 20;
+        ch.exp = threshold * 1000 - 1;
+        ch.fame = threshold - 1;
+        let presentation = AccountPresentation {
+            guild: None,
+            credits: 100,
+            fame: 27,
+            best_fame: BTreeMap::from([
+                (crate::content::WIZARD, threshold - 1),
+                (crate::content::PRIEST, 150),
+            ]),
+        };
+        let old_stars = presentation.stars();
+        let id = w.enter_at(ch, None, None, presentation).unwrap();
+        w.players.get_mut(&id).unwrap().experience_queued = 1;
+        let (_, snapshot) = w.pending_progress().pop().unwrap();
+        assert_eq!(snapshot.fame, threshold);
+        assert_eq!(numbers(&w, id, id)[&30], old_stars);
+        assert_eq!(numbers(&w, id, id)[&57], threshold - 1);
+        w.finish_progress(id, snapshot).unwrap();
+        let stats = numbers(&w, id, id);
+        assert_eq!(
+            (stats[&30], stats[&57], stats[&39]),
+            (old_stars + 1, threshold, 27)
+        );
+        assert_eq!(
+            w.players[&id].presentation.best_fame[&crate::content::WIZARD],
+            threshold
+        );
+        assert!(w.players[&id].character.alive);
+    }
+}
+
+#[test]
 fn weapon_damage_matches_number_precision_order_and_rng_draw_contract() {
     for draw in [25, 125] {
         let mut w = arena();
