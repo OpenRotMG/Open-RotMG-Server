@@ -89,9 +89,11 @@ impl Store {
             let mut characters = std::collections::BTreeMap::new();
             {
                 // Tombstones prevent stale world snapshots from restoring dead or deleted scores.
-                let mut q=tx.prepare("SELECT stats FROM characters")?;
-                for raw in q.query_map([],|r|r.get::<_,String>(0))? {
-                    let c=decode_character(&raw?,base)?; characters.insert(c.id,c);
+                let mut q=tx.prepare("SELECT id,alive,stats FROM characters")?;
+                for row in q.query_map([],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,bool>(1)?,r.get::<_,String>(2)?)))? {
+                    let (id,alive,raw)=row?;
+                    let mut c=decode_character(&raw,base)?; c.id=id; c.alive=alive;
+                    characters.insert(id,c);
                 }
             }
             for c in living {
@@ -325,6 +327,13 @@ mod tests {
         assert_eq!(scores["players"][0]["base_fame"], 0);
         assert_eq!(scores["players"][0]["total_fame"], 140);
         assert_eq!(scores["players"][0]["collection"], 1);
+        let mut unsaved = s.create(a.id, content.get(WIZARD).unwrap()).await.unwrap();
+        unsaved.fame = 100;
+        s.delete_character(a.id, unsaved.id).await.unwrap();
+        assert_eq!(
+            s.hiscores(vec![unsaved]).await.unwrap()["players"],
+            scores["players"]
+        );
         let restarted = Store::open(&dir.join("game.db"), &content).unwrap();
         assert_eq!(
             restarted.hiscores(vec![]).await.unwrap()["players"],
