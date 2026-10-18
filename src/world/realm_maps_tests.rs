@@ -205,11 +205,6 @@ fn every_catalog_realm_preserves_water_scenery_and_safe_arrivals() {
         );
         assert_eq!(world.tick, 4);
         assert!(players.iter().all(|p| world.players[p].character.alive));
-        let original = world.map.cells[0].region;
-        let mut second = directory.make("realm-shore", "Realm", false, None).unwrap();
-        assert!(!Arc::ptr_eq(&directory.worlds[&-3].map, &second.map));
-        Arc::make_mut(&mut second.map).cells[0].region = 99;
-        assert_eq!(directory.worlds[&-3].map.cells[0].region, original);
         tested.insert(name);
     }
     assert_eq!(tested, catalog_ids);
@@ -276,7 +271,7 @@ fn spatial_queries_keep_passive_scenery_and_transient_actors_indexed() {
 }
 
 #[test]
-fn realm_layout_selection_happens_at_creation_not_player_entry() {
+fn realm_creation_selects_layout_and_isolates_map_edits() {
     let content = tests::world().content;
     let mut directory = Directory::load(Path::new("data"), content, 8).unwrap();
     let Source::Fixture(map) = directory.realms.pop().unwrap() else {
@@ -309,6 +304,9 @@ fn realm_layout_selection_happens_at_creation_not_player_entry() {
             directory.realm_rng.clone().next_u64(),
             rng.clone().next_u64()
         );
+        let template = directory.realms[index].open(&world.content).unwrap();
+        Arc::make_mut(&mut world.map).cells[0].region = 99;
+        assert_eq!(template.cells[0].region, 20 + index as u8);
     }
     assert_eq!(selected.len(), 3);
 }
