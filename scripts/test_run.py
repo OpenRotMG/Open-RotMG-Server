@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,18 +11,26 @@ from zipfile import ZipFile, ZipInfo
 spec = importlib.util.spec_from_file_location("launcher", Path(__file__).with_name("run.py"))
 launcher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(launcher)
+resolve_selection = launcher.client_selection
 
 
 class LauncherTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.prefix = f"Open-RotMG-Client-{launcher.REVISION}"
+        self.revision = 'a' * 40
+        self.prefix = f"Open-RotMG-Client-{self.revision}"
+        self.url = f'https://codeload.github.com/OpenRotMG/Open-RotMG-Client/zip/{self.revision}'
         self.client = self.root / '.local' / self.prefix
-        self.data = self.archive({"client.swf": b"reference", "index.html": b"page", "scripts/run.py": b"prepare", "run.sh": b"#!/bin/sh\n"})
-        self.patch = patch.multiple(launcher, ROOT=self.root, LOG=self.root / ".local/server.log",
-                                    SHA256=hashlib.sha256(self.data).hexdigest())
+        self.lock = {'version': '0.7.1-openrotmg.7', 'bundleSha256': 'b' * 64}
+        self.data = self.archive({"client.swf": b"reference", "index.html": b"page", "scripts/run.py": b"prepare", "run.sh": b"#!/bin/sh\n",
+                                  'ruffle/lock.json': json.dumps(self.lock).encode()})
+        self.selection = {'client': self.revision, 'client_archive_sha256': hashlib.sha256(self.data).hexdigest(),
+                          'runtime_version': self.lock['version'], 'runtime_bundle_sha256': self.lock['bundleSha256']}
+        self.patch = patch.multiple(launcher, ROOT=self.root, LOG=self.root / ".local/server.log")
         self.patch.start()
+        self.resolve = patch.object(launcher, 'client_selection', return_value=self.selection)
+        self.resolve.start()
         self.git = patch.object(launcher.subprocess, 'check_output', side_effect=lambda command, **_: 'test-revision\n' if command[1] == 'rev-parse' else '')
         self.git.start()
         self.port = patch.object(launcher.socket, 'socket')
@@ -39,13 +48,14 @@ class LauncherTests(unittest.TestCase):
     def tearDown(self):
         self.port.stop()
         self.git.stop()
+        self.resolve.stop()
         self.patch.stop()
         self.temp.cleanup()
 
     def test_download_then_verified_cache(self):
         with patch.object(launcher, "urlopen", return_value=io.BytesIO(self.data)) as download:
             self.assertEqual(launcher.prepare_client(), self.client)
-            download.assert_called_once_with(launcher.URL, timeout=60)
+            download.assert_called_once_with(self.url, timeout=60)
         self.assertEqual((self.client / 'run.sh').stat().st_mode & 0o777, 0o755)
         (self.client / 'run.sh').chmod(0o644)
         with patch.object(launcher, "urlopen", side_effect=AssertionError("no silent redownload")):
@@ -53,8 +63,25 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((self.client / 'index.html').read_bytes(), b'page')
         self.assertEqual((self.client / 'run.sh').stat().st_mode & 0o777, 0o755)
 
+    def test_default_checks_deployed_selection_even_with_a_cached_client(self):
+        def response(request, **_):
+            if isinstance(request, launcher.Request):
+                self.assertEqual(request.full_url, 'https://openrotmg.org/diagnostics-build.json')
+                self.assertEqual(request.get_header('Cache-control'), 'no-cache')
+                return io.BytesIO(json.dumps(self.selection).encode())
+            self.assertEqual(request, self.url)
+            return io.BytesIO(self.data)
+        with patch.object(launcher, 'client_selection', side_effect=resolve_selection), \
+                patch.object(launcher, 'urlopen', side_effect=response) as download:
+            self.assertEqual(launcher.prepare_client(), self.client)
+            self.assertEqual(launcher.prepare_client(), self.client)
+        self.assertEqual([getattr(call.args[0], 'full_url', call.args[0]) for call in download.call_args_list],
+                         [launcher.CLIENT_SELECTION_URL, self.url, launcher.CLIENT_SELECTION_URL])
+        self.assertEqual(json.loads((self.client.parent / 'client-selection.json').read_text()), self.selection)
+        self.assertIn(self.lock['version'], launcher.LOG.read_text())
+
     def test_corrupt_download_and_archive_cache_fail(self):
-        cache = self.root / f'.local/client-{launcher.REVISION}.zip'
+        cache = self.root / f'.local/client-{self.revision}.zip'
         with patch.object(launcher, "urlopen", return_value=io.BytesIO(b"corrupt")):
             with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
                 launcher.prepare_client()
@@ -80,7 +107,7 @@ class LauncherTests(unittest.TestCase):
             link.external_attr = 0o120777 << 16
             archive.writestr(link, '../../outside')
         for data in [self.archive({'../../outside': b'bad'}), stream.getvalue()]:
-            with patch.object(launcher, 'SHA256', hashlib.sha256(data).hexdigest()), \
+            with patch.dict(self.selection, client_archive_sha256=hashlib.sha256(data).hexdigest()), \
                     patch.object(launcher, 'urlopen', return_value=io.BytesIO(data)):
                 with self.assertRaisesRegex(RuntimeError, 'Unsafe client archive'):
                     launcher.prepare_client()
@@ -125,7 +152,7 @@ class LauncherTests(unittest.TestCase):
                 patch.object(launcher, 'run', return_value=0) as run:
             launcher.main()
         self.assertEqual((run.call_args.args[0][-2:], launcher.LOG.parent,
-                          (state / f'client-{launcher.REVISION}.zip').exists(),
+                          (state / f'client-{self.revision}.zip').exists(),
                           (self.root / '.local').exists()),
                          (['--state', str(state)], state, True, False))
 
@@ -176,7 +203,7 @@ class LauncherTests(unittest.TestCase):
         with patch('sys.argv', ['run.py', '8080']), patch.object(launcher.shutil, 'which', return_value='/cargo'), \
                 patch.object(launcher, 'urlopen', side_effect=OSError('connection refused')):
             self.assertEqual(launcher.main(), 1)
-        self.assertIn(launcher.URL, launcher.LOG.read_text())
+        self.assertIn(self.url, launcher.LOG.read_text())
         self.assertIn('connection refused', launcher.LOG.read_text())
 
     def test_failed_preparation_does_not_start_backend(self):
@@ -187,6 +214,77 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(launcher.main(), 1)
             self.assertEqual(run.call_count, 1)
         self.assertIn('status 37', launcher.LOG.read_text())
+
+    def test_manifest_failure_never_uses_a_stale_cached_client(self):
+        with patch.object(launcher, 'urlopen', return_value=io.BytesIO(self.data)):
+            launcher.prepare_client()
+        with patch.object(launcher, 'client_selection', side_effect=resolve_selection), \
+                patch.object(launcher, 'urlopen', side_effect=OSError('offline')):
+            with self.assertRaisesRegex(RuntimeError, 'Resolve deployed client.*offline'):
+                launcher.prepare_client()
+        self.assertEqual((self.client / 'index.html').read_bytes(), b'page')
+
+    def test_manifest_validates_revision_checksums_and_runtime(self):
+        for field in self.selection:
+            for bad in [None, '', '../main', 'latest', 7]:
+                with self.subTest(field=field, bad=bad), patch.object(launcher, 'urlopen', return_value=io.BytesIO(json.dumps({**self.selection, field: bad}).encode())):
+                    with self.assertRaisesRegex(RuntimeError, 'Invalid deployed client selection: ' + field):
+                        resolve_selection()
+        with patch.object(launcher, 'urlopen', return_value=io.BytesIO(b'{broken')):
+            with self.assertRaisesRegex(RuntimeError, 'Resolve deployed client'):
+                resolve_selection()
+
+    def test_new_deployment_selects_a_new_immutable_cache_without_changing_old_client(self):
+        with patch.object(launcher, 'urlopen', return_value=io.BytesIO(self.data)):
+            launcher.prepare_client()
+        old_client = self.client
+        self.prefix = 'Open-RotMG-Client-' + 'c' * 40
+        data = self.archive({'client.swf': b'next', 'index.html': b'next-page', 'scripts/run.py': b'prepare',
+                             'run.sh': b'#!/bin/sh\n', 'ruffle/lock.json': json.dumps(self.lock).encode()})
+        with patch.dict(self.selection, client='c' * 40, client_archive_sha256=hashlib.sha256(data).hexdigest()), \
+                patch.object(launcher, 'urlopen', return_value=io.BytesIO(data)):
+            new_client = launcher.prepare_client()
+        self.assertNotEqual(old_client, new_client)
+        self.assertEqual((old_client / 'index.html').read_bytes(), b'page')
+        self.assertEqual((new_client / 'index.html').read_bytes(), b'next-page')
+
+    def test_saved_manifest_is_an_explicit_offline_revision_override(self):
+        manifest = self.root / 'saved-selection.json'
+        manifest.write_text(json.dumps(self.selection))
+        with patch.object(launcher, 'urlopen', return_value=io.BytesIO(self.data)):
+            launcher.prepare_client()
+        with patch.object(launcher, 'client_selection', side_effect=resolve_selection), \
+                patch.object(launcher, 'urlopen', side_effect=AssertionError('explicit verified cache needs no network')):
+            self.assertEqual(launcher.prepare_client(manifest), self.client)
+        with patch('sys.argv', ['run.py', '8081', '--client', str(self.client), '--client-manifest', str(manifest)]), \
+                patch('sys.stderr', new_callable=io.StringIO), self.assertRaises(SystemExit):
+            launcher.main()
+
+    def test_cli_saved_manifest_is_forwarded_once_for_the_whole_session(self):
+        manifest = self.root / 'saved-selection.json'
+        with patch('sys.argv', ['run.py', '8081', '--client-manifest', str(manifest)]), \
+                patch.object(launcher, 'prepare_client', return_value=self.client) as prepare, \
+                patch.object(launcher, 'run', return_value=0), \
+                patch.object(launcher.shutil, 'which', return_value='/cargo'):
+            (self.client / 'scripts').mkdir(parents=True)
+            (self.client / 'scripts/run.py').write_text('prepare')
+            self.assertEqual(launcher.main(), 0)
+        prepare.assert_called_once_with(manifest)
+
+    def test_manifest_runtime_must_match_archive_before_executing_its_launcher(self):
+        with patch.dict(self.selection, runtime_version='0.7.1-openrotmg.8'), \
+                patch.object(launcher, 'urlopen', return_value=io.BytesIO(self.data)):
+            with self.assertRaisesRegex(RuntimeError, 'runtime lock does not match'):
+                launcher.prepare_client()
+        self.assertFalse(self.client.exists())
+
+    def test_cached_runtime_lock_cannot_drift(self):
+        with patch.object(launcher, 'urlopen', return_value=io.BytesIO(self.data)):
+            launcher.prepare_client()
+        (self.client / 'ruffle/lock.json').write_text('{}')
+        with self.assertRaisesRegex(RuntimeError, 'missing or modified'):
+            launcher.prepare_client()
+        self.assertEqual((self.client / 'ruffle/lock.json').read_text(), '{}')
 
     def test_backend_failure_is_printed_and_logged(self):
         (self.client / 'scripts').mkdir(parents=True)

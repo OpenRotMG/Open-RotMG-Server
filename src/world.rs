@@ -245,7 +245,6 @@ pub struct Player {
     pub known: BTreeSet<i32>,
     quest: Option<i32>,
     statuses: BTreeMap<u8, (u64, u64)>,
-    native_motion_condition: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32)>,
@@ -1915,7 +1914,6 @@ impl World {
                 known: BTreeSet::new(),
                 quest: None,
                 statuses: BTreeMap::new(),
-                native_motion_condition: 0,
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
@@ -4913,37 +4911,6 @@ impl World {
                 send(p, wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
                 p.remember_weapon_tick();
-                let slow = crate::condition::bit(crate::condition::SLOWED);
-                let paralyzed = crate::condition::bit(crate::condition::PARALYZED);
-                let motion_condition = p.conditions(self.now) & (slow | paralyzed | SPEEDY);
-                let base = 0.004
-                    + 0.0056
-                        * p.effective(&self.content, self.now)
-                            .expect("valid player equipment")[4] as f32
-                        / 75.;
-                let speed = |flags: i32| {
-                    if flags & paralyzed != 0 {
-                        0.
-                    } else if flags & slow != 0 {
-                        0.004
-                    } else {
-                        base * if flags & SPEEDY != 0 { 1.5 } else { 1. }
-                    }
-                };
-                let restricts_motion = speed(motion_condition) < speed(p.native_motion_condition);
-                if p.controller == Controller::Human && p.active() && restricts_motion {
-                    // The client must consume its real stat29 before acknowledging the new motor baseline.
-                    let mut out = Writer::new();
-                    out.i32(id).f32(p.pos.x).f32(p.pos.y);
-                    reconciliation::goto(p, true, out.0);
-                    tracing::info!(
-                        player = id,
-                        previous = p.native_motion_condition,
-                        current = motion_condition,
-                        "native movement condition synchronized"
-                    );
-                }
-                p.native_motion_condition = motion_condition;
                 p.tick += 1;
             }
         }
