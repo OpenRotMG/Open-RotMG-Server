@@ -381,7 +381,8 @@ async fn death_schema_rejects_noncanonical_current_metadata_before_any_write() {
         if new == "character INTEGER" {
             db.execute_batch("INSERT INTO deaths SELECT * FROM deaths; UPDATE account_fame SET balance=38,earned=38;").unwrap();
         }
-        drop(db);
+        // A deferred fixture WAL checkpoint must not race the byte-for-byte preflight assertion.
+        db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         let before = std::fs::read(&path).unwrap();
         let error = Store::open(&path, &content).err().expect(new);
         assert!(
@@ -393,6 +394,7 @@ async fn death_schema_rejects_noncanonical_current_metadata_before_any_write() {
             before,
             "schema/version/data changed for {new}"
         );
+        drop(db);
         std::fs::remove_file(path).unwrap();
     }
 }
