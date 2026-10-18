@@ -1780,6 +1780,81 @@ async fn tutorial_chat_reconnect_preserves_the_character_and_rejects_full_entry_
 }
 
 #[tokio::test]
+async fn native_spell_cast_during_xp_save_commits_progress_without_refunding_mana() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world = a.world.in_world(-2);
+    a.world.clock.set_paused(true);
+    let mut session = loaded(&a, "wizard-progress-cast").await;
+    let player = session.player.unwrap();
+    let (snapshot, kind, pos, mana) = a
+        .world
+        .call(move |w| {
+            let p = w.players.get_mut(&player).unwrap();
+            p.experience_queued = 1;
+            let (kind, pos, mana) = (p.character.items[1], p.pos, p.character.mp);
+            let (owner, snapshot) = w.pending_progress().pop().unwrap();
+            assert_eq!(owner, player);
+            Ok((snapshot, kind, pos, mana))
+        })
+        .await
+        .unwrap();
+    let mut out = Writer::new();
+    out.i32(1)
+        .i32(player)
+        .u8(1)
+        .i16(kind as i16)
+        .f32(pos.x)
+        .f32(pos.y);
+    let (tx, mut rx) = mpsc::channel(64);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    handle(
+        &mut a,
+        Packet {
+            id: 30,
+            body: out.0,
+        },
+        &mut session,
+        &tx,
+        &lost,
+        std::time::Instant::now(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rx.try_recv().is_err(),
+        "native cast must not return a rejection"
+    );
+    let spent = mana - a.content.get(kind as u16).unwrap().mana_cost;
+    a.world
+        .call(move |w| {
+            assert!(w.players[&player].pending && w.players[&player].progress_started);
+            assert_eq!(w.players[&player].character.mp, spent);
+            assert_eq!(w.bullets.len(), 20);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let result = a.store.progress_batch(vec![snapshot.clone()]).await;
+    a.world
+        .call(move |w| {
+            w.committed(player, result)?;
+            w.finish_progress(player, snapshot)?;
+            assert_eq!(w.players[&player].character.mp, spent);
+            assert!(!w.players[&player].pending);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let saved = a
+        .store
+        .load(session.account.as_ref().unwrap().id, 1)
+        .await
+        .unwrap();
+    assert_eq!(saved.exp, 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn rejected_stale_and_foreign_useitem_then_ground_and_owned_potions_commit() {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world = a.world.in_world(-2);

@@ -56,7 +56,7 @@ impl World {
             p.character.alive
                 && !p.death_pending
                 && !p.departing
-                && !p.pending
+                && (!p.pending || p.progress_started)
                 && !p.paused
                 && p.persistence_failure.is_none(),
             "ability caster is unavailable"

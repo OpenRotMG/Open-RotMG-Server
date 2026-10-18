@@ -100,7 +100,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         spawns: vec![(centers[0].0 as f32 + 0.5, centers[0].1 as f32 + 0.5)],
     };
     for (i, &(cx, cy)) in centers.iter().enumerate() {
-        let radius = if i == 6 { 16 } else { rng.gen_range(11..=14) };
+        let radius = if i == 6 { 16 } else { rng.gen_range(7..=9) };
         for y in -radius..=radius {
             for x in -radius..=radius {
                 if x * x + y * y > radius * radius {
@@ -122,7 +122,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             for (dx, dy) in [(-4, 0), (4, 0)] {
                 map.cells[((cy + dy) * width + cx + dx) as usize].object = Some(0x173);
             }
-            for (dx, dy) in [(-6, -6), (6, -6), (-6, 6), (6, 6)] {
+            for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
                 map.cells[((cy + dy) * width + cx + dx) as usize].object =
                     Some(rng.gen_range(0x225..=0x229));
             }

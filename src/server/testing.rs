@@ -23,6 +23,25 @@ struct NativeLease {
     expires: Instant,
     actors: Vec<i32>,
 }
+struct NativeControlRequest {
+    trace: Arc<crate::performance::NativeControlTrace>,
+    requests: Arc<Mutex<crate::performance::Requests>>,
+    outcome: &'static str,
+    error: Option<String>,
+}
+impl Drop for NativeControlRequest {
+    fn drop(&mut self) {
+        let message = if self.outcome == "dropped" {
+            "native control request dropped"
+        } else {
+            "native control request completed"
+        };
+        tracing::info!(request=%self.trace.request,operation=%self.trace.operation,outcome=self.outcome,
+            elapsed_ms=self.trace.started.elapsed().as_secs_f64()*1000.,
+            world_requests=%self.requests.lock().expect("request timings poisoned").snapshot(),
+            error=?self.error,"{message}");
+    }
+}
 
 #[derive(Clone)]
 pub struct Testing {
@@ -836,11 +855,13 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::NativeSync{actors} => native_sync(a,t,actors).await,
         Command::NativeState{actors} => native_state(a,t,actors).await,
         Command::NativeLease{owner,operation,actors} => {
-            let started = Instant::now();
-            let requests = Arc::new(Mutex::new(crate::performance::Requests::default()));
+            let trace = Arc::new(crate::performance::NativeControlTrace {request:id.into(),operation:operation.clone(),started:Instant::now()});
+            let requests = Arc::new(Mutex::new(crate::performance::Requests {native_control:Some(trace.clone()),..Default::default()}));
+            let mut lifecycle = NativeControlRequest {trace,requests:requests.clone(),outcome:"dropped",error:None};
             tracing::info!(request=id,%operation,"native control request received");
-            let result = crate::performance::REQUEST.scope(requests.clone(),native_lease(a,t,owner,operation,actors)).await;
-            tracing::info!(request=id,elapsed_ms=started.elapsed().as_secs_f64()*1000.,world_requests=%requests.lock().expect("request timings poisoned").snapshot(),error=?result.as_ref().err(),"native control request completed");
+            let result = crate::performance::REQUEST.scope(requests,native_lease(a,t,owner,operation,actors)).await;
+            lifecycle.outcome = if result.is_ok() {"ok"} else {"error"};
+            lifecycle.error = result.as_ref().err().map(|error|format!("{error:#}"));
             result
         },
         Command::Pause{native_paused,native_sessions} => {pause(a,&native_paused,&native_sessions).await?;Ok(json!({"paused":true,"native_paused":native_paused}))},
