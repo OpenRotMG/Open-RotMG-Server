@@ -91,6 +91,8 @@ fn guild_commands_match_native_help_and_preserve_spaced_names() {
 #[tokio::test]
 async fn guild_native_creation_invite_accept_rank_and_removal_use_committed_runtime_state() {
     let (dir, a) = super::super::account_actions::tests::fixture();
+    // Transaction-only clients do not ACK ticks; visibility must not depend on wall-time scheduling.
+    a.world.clock.set_paused(true);
     let alice = account(&a, "guild-native-alice", "Alice", 1000).await;
     let aa = alice.account;
     let bob = account(&a, "guild-native-bobby", "Bobby", 20).await;
@@ -99,19 +101,16 @@ async fn guild_native_creation_invite_accept_rank_and_removal_use_committed_runt
     let (alice, _ar) = enter(&a, alice).await;
     let (bob, mut br) = enter(&a, bob).await;
     let (carol, mut cr) = enter(&a, carol).await;
-    for _ in 0..40 {
-        if a.world
-            .for_player(alice)
-            .call(move |w| Ok(w.players[&alice].known.contains(&bob)))
-            .await
-            .unwrap()
-        {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    // These transaction-only clients do not ACK simulation output; wall time must not fill their queues.
-    a.world.clock.set_paused(true);
+    a.world
+        .in_world(-2)
+        .call(move |w| {
+            for id in [alice, bob, carol] {
+                w.updates(id, false)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
     let malformed = text("Alpha");
     let (tx, _rx) = mpsc::channel(16);
     let mut bytes = malformed.0;

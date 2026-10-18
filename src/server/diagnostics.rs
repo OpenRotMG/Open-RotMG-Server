@@ -161,8 +161,29 @@ impl Diagnostics {
 fn valid_id(id: &str) -> bool {
     id.len() == 24 && id.bytes().all(|b| b.is_ascii_hexdigit())
 }
+struct ConnectionId(u64);
+impl Default for ConnectionId {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+pub struct CommandSample {
+    pub packet: u8,
+    pub queued: std::time::Duration,
+    pub handling: std::time::Duration,
+    pub queue_before: usize,
+    pub queue_after: usize,
+    pub failed: bool,
+    pub requests: crate::performance::Requests,
+}
 #[derive(Default)]
 pub struct ConnectionDiagnostics {
+    connection_id: ConnectionId,
+    pub world: Option<i32>,
+    slow_commands: VecDeque<(Instant, Value)>,
+    slowest_handler: Option<(Instant, Value)>,
+    slowest_queue: Option<(Instant, Value)>,
     pub user_agent: Option<String>,
     pub browser: Option<Arc<Mutex<Browser>>>,
     pending: BTreeMap<i32, Instant>,
@@ -182,6 +203,34 @@ pub struct ConnectionDiagnostics {
     pub last_socket_send: Option<Instant>,
 }
 impl ConnectionDiagnostics {
+    pub fn handled(&mut self, sample: CommandSample) {
+        let queue_ms = sample.queued.as_secs_f64() * 1000.;
+        let handler_ms = sample.handling.as_secs_f64() * 1000.;
+        let max_handler = handler_ms > self.max_handler_ms;
+        let max_queue = queue_ms > self.max_input_queue_ms;
+        let slow = handler_ms >= 50. || queue_ms >= 50. || sample.failed;
+        self.max_handler_ms = self.max_handler_ms.max(handler_ms);
+        self.max_input_queue_ms = self.max_input_queue_ms.max(queue_ms);
+        if !slow && !max_handler && !max_queue {
+            return;
+        }
+        let at = Instant::now();
+        let event = json!({"completed_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("system clock predates Unix epoch").as_millis(),
+            "packet":sample.packet,"world_id":self.world,"queue_wait_ms":queue_ms,"handler_wall_ms":handler_ms,
+            "input_queue_before":sample.queue_before,"input_queue_after":sample.queue_after,"failed":sample.failed,"world_requests":sample.requests.snapshot()});
+        if max_handler {
+            self.slowest_handler = Some((at, event.clone()));
+        }
+        if max_queue {
+            self.slowest_queue = Some((at, event.clone()));
+        }
+        if slow {
+            self.slow_commands.push_back((at, event));
+            while self.slow_commands.len() > 8 {
+                self.slow_commands.pop_front();
+            }
+        }
+    }
     pub fn processed(&mut self, packet: u8) {
         let now = Instant::now();
         self.last_processed = Some((now, packet));
@@ -231,7 +280,11 @@ impl ConnectionDiagnostics {
                 .map(|(t, sample)| json!({"age_ms": t.elapsed().as_millis(), "sample": sample}))
                 .collect::<Vec<_>>()
         });
-        json!({"user_agent": self.user_agent, "browser_samples": browser, "rtt_samples": samples,
+        let observation = |(at, event): &(Instant, Value)| json!({"completed_age_ms":at.elapsed().as_secs_f64()*1000.,"event":event});
+        json!({"connection_id":self.connection_id.0,"process_id":std::process::id(),"world_id":self.world,
+            "slow_commands":self.slow_commands.iter().map(observation).collect::<Vec<_>>(),
+            "slowest_handler":self.slowest_handler.as_ref().map(observation),"slowest_input_queue":self.slowest_queue.as_ref().map(observation),
+            "user_agent": self.user_agent, "browser_samples": browser, "rtt_samples": samples,
             "last_move_received_age_ms":self.last_move.map(|at|at.elapsed().as_secs_f64()*1000.),
             "last_update_ack_received_age_ms":self.last_update_ack.map(|at|at.elapsed().as_secs_f64()*1000.),
             "last_processed_packet":self.last_processed.map(|(_,id)|id),
@@ -256,12 +309,23 @@ fn summary(values: impl Iterator<Item = f64>) -> Value {
     };
     json!({"samples": values.len(), "median": percentile(0.5), "p95": percentile(0.95), "max": values.last()})
 }
+fn command_observation(value: &Value) -> Value {
+    if value.is_null() {
+        return Value::Null;
+    }
+    let e = &value["event"];
+    let r = &e["world_requests"];
+    json!({"completed_age_ms":value["completed_age_ms"].as_f64(),"event":{
+        "completed_unix_ms":e["completed_unix_ms"].as_u64(),"packet":e["packet"].as_u64(),"world_id":e["world_id"].as_i64(),
+        "queue_wait_ms":e["queue_wait_ms"].as_f64(),"handler_wall_ms":e["handler_wall_ms"].as_f64(),
+        "input_queue_before":e["input_queue_before"].as_u64(),"input_queue_after":e["input_queue_after"].as_u64(),"failed":e["failed"].as_bool(),
+        "world_requests":{"calls":r["calls"].as_u64(),"completed":r["completed"].as_u64(),"send_wait_sum_ms":r["send_wait_sum_ms"].as_f64(),
+            "queue_wait_sum_ms":r["queue_wait_sum_ms"].as_f64(),"work_wall_sum_ms":r["work_wall_sum_ms"].as_f64(),"work_cpu_sum_ms":r["work_cpu_sum_ms"].as_f64(),"round_trip_sum_ms":r["round_trip_sum_ms"].as_f64()}}})
+}
 fn public_diagnostics(report: &Value) -> Value {
     let connection = &report["connection"];
     let rtt = connection["rtt_samples"].as_array().expect("RTT samples");
-    let ticks = report["context"]["recent_ticks"]
-        .as_array()
-        .expect("tick samples");
+    let ticks = report["context"]["recent_ticks"].as_array();
     let browser: Vec<_> = connection["browser_samples"]
         .as_array()
         .into_iter()
@@ -285,13 +349,13 @@ fn public_diagnostics(report: &Value) -> Value {
     let mut history = Vec::new();
     for bucket in 0..24 {
         let within = |v: &&Value| v["age_ms"].as_u64().is_some_and(|age| age / 5000 == bucket);
-        let tick_values: Vec<_> = ticks.iter().filter(within).collect();
+        let tick_values: Vec<_> = ticks.into_iter().flatten().filter(within).collect();
         let ping_values: Vec<_> = rtt.iter().filter(within).collect();
         if !tick_values.is_empty() || !ping_values.is_empty() {
             history.push(json!({"seconds_before_report": [bucket * 5, (bucket + 1) * 5],
                 "game_rtt_ms": summary(ping_values.iter().filter_map(|v| v["rtt_ms"].as_f64())),
-                "tick_ms": summary(tick_values.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0))),
-                "scheduling_delay_ms": summary(tick_values.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0)))}));
+                "tick_ms": ticks.map(|_|summary(tick_values.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0)))),
+                "scheduling_delay_ms": ticks.map(|_|summary(tick_values.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0))))}));
         }
     }
     let browser_history: Vec<_> = browser.iter().map(|v| {
@@ -330,15 +394,19 @@ fn public_diagnostics(report: &Value) -> Value {
             "website": revision("website", 40), "client": revision("client", 40), "runtime": revision("runtime", 16)},
         "environment": {"browser": browser_family, "os": os_family},
         "game_rtt_ms": summary(rtt.iter().filter_map(|v| v["rtt_ms"].as_f64())),
-        "tick_ms": summary(ticks.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0))),
-        "scheduling_delay_ms": summary(ticks.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0))),
+        "world_context_status":if ticks.is_some() {"available"}else if report["context"].is_null() {"unavailable"}else{"invalid"},
+        "tick_ms": ticks.map(|t|summary(t.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0)))),
+        "scheduling_delay_ms": ticks.map(|t|summary(t.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0)))),
         "visible_frame_gap_ms": summary(visible.iter().filter_map(|v| v["sample"]["max_frame_gap_ms"].as_f64())),
         "native_acknowledgements":{
             "weapon_tick_records":report["context"]["native_acknowledgements"]["weapon_tick_records"],"goto":report["context"]["native_acknowledgements"]["goto"],
             "shoot":report["context"]["native_acknowledgements"]["shoot"],"oldest_goto_ms":report["context"]["native_acknowledgements"]["oldest_goto_ms"],
             "oldest_shoot_ms":report["context"]["native_acknowledgements"]["oldest_shoot_ms"],"last_update_ack_received_age_ms":connection["last_update_ack_received_age_ms"]},
 
-        "connection": {"last_move_received_age_ms":connection["last_move_received_age_ms"],"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
+        "connection": {"connection_id":connection["connection_id"].as_u64(),"process_id":connection["process_id"].as_u64(),"world_id":connection["world_id"].as_i64(),
+            "slow_commands":connection["slow_commands"].as_array().map(|a|a.iter().rev().take(8).rev().map(command_observation).collect::<Vec<_>>()),
+            "slowest_handler":command_observation(&connection["slowest_handler"]),"slowest_input_queue":command_observation(&connection["slowest_input_queue"]),
+            "last_move_received_age_ms":connection["last_move_received_age_ms"],"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
             "last_queued_packet_send_age_ms":connection["last_queued_packet_send_age_ms"],"last_pong_age_ms":connection["last_pong_age_ms"],
             "max_socket_send_ms": connection["max_socket_send_ms_session"], "max_handler_ms": connection["max_handler_ms_session"],
             "max_input_queue_ms": connection["max_input_queue_ms_session"], "outgoing_queue_high_water": connection["observed_outgoing_queue_high_water_session"],
@@ -347,7 +415,7 @@ fn public_diagnostics(report: &Value) -> Value {
         "population": {"world_players": report["context"]["world_players"], "world_entities": report["context"]["world_entities"], "world_projectiles": report["context"]["world_projectiles"],
             "total_players": report["context"]["total_players"], "total_worlds": report["context"]["total_worlds"]},
         "history": history, "browser_history": browser_history,
-        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable."})
+        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable. Command handler times include awaits/descheduling; world-request sums may overlap and are not exclusive handler CPU."})
 }
 pub(super) async fn disconnect(
     a: &App,
@@ -608,6 +676,54 @@ pub async fn receipt(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn slow_commands_keep_packet_attribution_bounded_and_strictly_allowlisted() {
+        let mut d = ConnectionDiagnostics {
+            world: Some(17),
+            ..Default::default()
+        };
+        assert_ne!(
+            d.snapshot()["connection_id"],
+            ConnectionDiagnostics::default().snapshot()["connection_id"]
+        );
+        for packet in 0..20 {
+            d.handled(CommandSample {
+                packet,
+                queued: std::time::Duration::from_millis((20 - u64::from(packet)) * 100),
+                handling: std::time::Duration::from_millis(u64::from(packet) * 100),
+                queue_before: 1,
+                queue_after: 63,
+                failed: packet == 0,
+                requests: crate::performance::Requests {
+                    calls: 2,
+                    completed: 2,
+                    work: std::time::Duration::from_millis(1),
+                    cpu: Some(std::time::Duration::from_micros(500)),
+                    ..Default::default()
+                },
+            });
+        }
+        d.processed(38);
+        let mut snapshot = d.snapshot();
+        assert_eq!(snapshot["slow_commands"].as_array().unwrap().len(), 8);
+        assert_eq!(snapshot["slow_commands"][0]["event"]["packet"], 12);
+        assert_eq!(snapshot["slowest_handler"]["event"]["packet"], 19);
+        assert_eq!(snapshot["slowest_input_queue"]["event"]["packet"], 0);
+        assert_eq!(snapshot["last_processed_packet"], 38);
+        snapshot["slow_commands"][0]["event"]["PRIVATE_FIELD"] = json!("PRIVATE_BODY");
+        snapshot["slow_commands"][0]["event"]["world_requests"]["PRIVATE_FIELD"] =
+            json!("PRIVATE_BODY");
+        snapshot["slow_commands"][0]["event"]["packet"] = json!({"PRIVATE_FIELD":"PRIVATE_BODY"});
+        let report = public_diagnostics(&json!({"connection":snapshot}));
+        assert_eq!(
+            report["connection"]["slowest_handler"]["event"]["world_requests"]["work_cpu_sum_ms"],
+            0.5
+        );
+        assert!(report["connection"]["slow_commands"][0]["event"]["packet"].is_null());
+        assert!(!report.to_string().contains("PRIVATE_"));
+        assert_eq!(report["world_context_status"], "unavailable");
+        assert!(report["tick_ms"].is_null() && report["scheduling_delay_ms"].is_null());
+    }
     #[test]
     fn diagnostic_attachment_is_bounded_and_strictly_allowlisted() {
         let mut report = json!({"created_at_unix_ms": 123, "server_source_revision": "a".repeat(40), "server_binary_sha256": "b".repeat(64), "protocol_build": "123.5.1",

@@ -5,6 +5,40 @@ pub(super) struct Terrain {
     map: std::sync::Weak<Map>,
     content: std::sync::Weak<Content>,
     pub(super) tiles: Arc<Vec<Tile>>,
+    pub(super) rebuilds: u64,
+    pub(super) incremental_tiles: u64,
+    pub(super) cloned_snapshot_tiles: u64,
+}
+impl Terrain {
+    pub(super) fn discover(
+        &mut self,
+        map: &Arc<Map>,
+        content: &Arc<Content>,
+        points: &[(i16, i16, u8)],
+        known: usize,
+    ) {
+        if points.is_empty()
+            || !self.map.ptr_eq(&Arc::downgrade(map))
+            || !self.content.ptr_eq(&Arc::downgrade(content))
+            || self.tiles.len() + points.len() != known
+        {
+            return;
+        }
+        if Arc::strong_count(&self.tiles) > 1 {
+            self.cloned_snapshot_tiles += self.tiles.len() as u64;
+        }
+        let tiles = Arc::make_mut(&mut self.tiles);
+        // Bound each bot's retained payload instead of doubling a large explored snapshot's capacity.
+        tiles.reserve_exact(points.len());
+        tiles.extend(points.iter().map(|&(x, y, ground)| Tile {
+            x,
+            y,
+            ground,
+            ground_speed: content.grounds[&ground],
+        }));
+        tiles.sort_unstable_by_key(|t| (t.x, t.y));
+        self.incremental_tiles += points.len() as u64;
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -109,7 +143,7 @@ pub struct VisibleProjectile {
 
 impl Directory {
     pub fn player_view(&self, id: i32) -> Result<PlayerView> {
-        let started = Instant::now();
+        let started = crate::performance::Measure::start();
         let scope = self.location(id)?;
         let w = &self.worlds[&scope];
         let p = &w.players[&id];
@@ -166,6 +200,8 @@ impl Directory {
                 || !cache.map.ptr_eq(&map)
                 || !cache.content.ptr_eq(&content)
             {
+                let refreshing = crate::performance::Measure::start();
+                cache.rebuilds += 1;
                 cache.tiles = Arc::new(
                     p.tiles
                         .iter()
@@ -183,6 +219,9 @@ impl Directory {
                 );
                 cache.map = map;
                 cache.content = content;
+                w.performance
+                    .borrow_mut()
+                    .work("terrain_rebuild", refreshing);
             }
             cache.tiles.clone()
         };
@@ -209,10 +248,7 @@ impl Directory {
                 passes_cover: b.spec.passes_cover,
             })
             .collect();
-        w.performance
-            .borrow_mut()
-            .record("perception", started.elapsed());
-        Ok(PlayerView {
+        let view = PlayerView {
             session: Session {
                 world: scope,
                 player: id,
@@ -264,6 +300,8 @@ impl Directory {
             tiles,
             objects,
             projectiles,
-        })
+        };
+        w.performance.borrow_mut().work("perception", started);
+        Ok(view)
     }
 }

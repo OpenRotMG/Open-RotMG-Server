@@ -924,6 +924,7 @@ async fn handle(
                 })
                 .await?;
             *expected = character;
+            diagnostics.world = Some(destination);
             a.world = a.world.in_world(destination);
             let body = a.world.call(|w| Ok(w.map_info())).await?;
             enqueue_reply(
@@ -1641,8 +1642,12 @@ async fn connection_io<S, I>(
                         session.diagnostics.packets_in += 1;
                         session.diagnostics.processed(id);
                         let handling = std::time::Instant::now();
-                        session.diagnostics.max_input_queue_ms = session.diagnostics.max_input_queue_ms.max(a.world.clock.now().saturating_duration_since(received).as_secs_f64()*1000.0);
-                        if let Err(e)=handle(&mut a,packet,&mut session,&tx,&lost,received).await {
+                        let queued=a.world.clock.now().saturating_duration_since(received);
+                        let queue_before=incoming.len();
+                        let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
+                        let result=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packet,&mut session,&tx,&lost,received)).await;
+                        session.diagnostics.handled(diagnostics::CommandSample {packet:id,queued,handling:handling.elapsed(),queue_before,queue_after:incoming.len(),failed:result.is_err(),requests:requests.lock().expect("request timings poisoned").clone()});
+                        if let Err(e)=result {
                             tracing::error!(account=session.account.as_ref().map(|o|o.id),player=session.player,packet=id,error=%format_args!("{e:#}"),"game command rejected");
                             if e.is::<ReplyQueueError>() { close_reason="reply_queue_full";break 'connection; }
                             if matches!(id,1|21|37|57) && let Some(player) = session.player {
@@ -1661,7 +1666,6 @@ async fn connection_io<S, I>(
                             let _=wsout.send(Message::Binary(codec.frame(f.id,f.body).into())).await;
                             break 'connection;
                         }
-                        session.diagnostics.max_handler_ms = session.diagnostics.max_handler_ms.max(handling.elapsed().as_secs_f64()*1000.0);
                     }
                 },
                 Some(Incoming::Ping(bytes))=>{if wsout.send(Message::Pong(bytes)).await.is_err(){break}},
