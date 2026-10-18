@@ -17,6 +17,11 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Install pinned Rust
         run: rustup toolchain install 1.94.1 --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        env:
+          RUSTUP_TOOLCHAIN: 1.94.1
+        with:
+          shared-key: server
       - name: Verify staged full-size Realm constructors
         run: |
           cargo +1.94.1 build --locked --release

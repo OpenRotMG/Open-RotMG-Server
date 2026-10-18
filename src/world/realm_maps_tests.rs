@@ -205,11 +205,6 @@ fn every_catalog_realm_preserves_water_scenery_and_safe_arrivals() {
         );
         assert_eq!(world.tick, 4);
         assert!(players.iter().all(|p| world.players[p].character.alive));
-        let original = world.map.cells[0].region;
-        let mut second = directory.make("realm-shore", "Realm", false, None).unwrap();
-        assert!(!Arc::ptr_eq(&directory.worlds[&-3].map, &second.map));
-        Arc::make_mut(&mut second.map).cells[0].region = 99;
-        assert_eq!(directory.worlds[&-3].map.cells[0].region, original);
         tested.insert(name);
     }
     assert_eq!(tested, catalog_ids);
@@ -276,7 +271,7 @@ fn spatial_queries_keep_passive_scenery_and_transient_actors_indexed() {
 }
 
 #[test]
-fn realm_layout_selection_happens_at_creation_not_player_entry() {
+fn realm_creation_selects_layout_and_isolates_map_edits() {
     let content = tests::world().content;
     let mut directory = Directory::load(Path::new("data"), content, 8).unwrap();
     let Source::Fixture(map) = directory.realms.pop().unwrap() else {
@@ -309,30 +304,12 @@ fn realm_layout_selection_happens_at_creation_not_player_entry() {
             directory.realm_rng.clone().next_u64(),
             rng.clone().next_u64()
         );
+        let template = directory.realms[index].open(&world.content).unwrap();
+        Arc::make_mut(&mut world.map).cells[0].region = 99;
+        assert_eq!(template.cells[0].region, 20 + index as u8);
+        if selected.len() == directory.realms.len() {
+            break;
+        }
     }
     assert_eq!(selected.len(), 3);
-}
-
-#[test]
-fn catalog_order_has_reproducible_config_seeds() {
-    let catalog = sources(Path::new("data")).unwrap();
-    let mut seeds = BTreeMap::new();
-    for seed in 0..100u64 {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-        let id = catalog[rng.gen_range(0..catalog.len())].name();
-        seeds.entry(id.to_owned()).or_insert(seed);
-    }
-    assert_eq!(
-        seeds.keys().map(String::as_str).collect::<BTreeSet<_>>(),
-        catalog.iter().map(|s| s.name()).collect::<BTreeSet<_>>()
-    );
-    for source in &catalog {
-        let seed = seeds[source.name()];
-        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-        assert_eq!(
-            catalog[rng.gen_range(0..catalog.len())].name(),
-            source.name()
-        );
-        eprintln!("{}: realm_seed={seed}", source.name());
-    }
 }

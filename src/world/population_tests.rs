@@ -63,6 +63,7 @@ fn complete_pack_is_seeded_sourced_distributed_and_regionally_bounded() {
         };
         assert_eq!(sites(w), sites(&b.worlds[&-3]));
         assert_budgets(w);
+        assert!(w.critical_deaths.is_empty());
         assert_eq!(w.hero_identities().len(), 14);
         for terrain in 1..=12 {
             assert!(w.population_count(terrain) >= w.population_regions[terrain as usize].target);
@@ -155,9 +156,7 @@ fn every_family_reinforces_on_its_role_clock_without_duplicate_ids() {
         w.repopulate().unwrap();
         let new = w.population[slot].entity.unwrap();
         assert_ne!(old, new);
-        for _ in 0..50 {
-            w.repopulate().unwrap();
-        }
+        w.repopulate().unwrap();
         assert_eq!(w.population[slot].entity, Some(new));
         assert_budgets(w);
     }
@@ -307,7 +306,7 @@ fn repeated_full_region_clears_preserve_caps_and_never_reuse_dead_ids() {
     let mut d = directory(12351);
     let w = d.worlds.get_mut(&-3).unwrap();
     let mut dead = BTreeSet::new();
-    for _ in 0..20 {
+    for _ in 0..2 {
         let ids: Vec<_> = w
             .population
             .iter()

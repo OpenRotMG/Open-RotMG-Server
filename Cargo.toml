@@ -26,6 +26,11 @@ tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+# Keep test hot paths fast and backtraces useful without full debugger metadata.
+[profile.test]
+opt-level = 1
+debug = "line-tables-only"
+
 [dev-dependencies]
 delaunator = "=1.0.2"
 rusqlite = { version = "0.37", features = ["hooks"] }

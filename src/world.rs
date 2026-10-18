@@ -4956,9 +4956,13 @@ mod tests {
         assert_eq!(names, ["Nexus Portal"]);
     }
     pub(super) fn world() -> World {
-        let c = Arc::new(Content::load(Path::new("data")).unwrap());
-        let m = Arc::new(Map::load(Path::new("data/tutorial.wmap"), &c).unwrap());
-        World::new(c, m).unwrap()
+        static FIXTURE: std::sync::OnceLock<(Arc<Content>, Arc<Map>)> = std::sync::OnceLock::new();
+        let (content, map) = FIXTURE.get_or_init(|| {
+            let content = Arc::new(Content::load(Path::new("data")).unwrap());
+            let map = Arc::new(Map::load(Path::new("data/tutorial.wmap"), &content).unwrap());
+            (content, map)
+        });
+        World::new(content.clone(), map.clone()).unwrap()
     }
     pub(super) fn arena(terrain: u8) -> World {
         let mut w = world();
