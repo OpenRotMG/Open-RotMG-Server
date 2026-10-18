@@ -204,13 +204,19 @@ impl World {
             return Ok(());
         }
         let position = p.pos;
-        for q in self.players.values_mut().filter(|q| {
+        let mut healed = Vec::new();
+        for (id, q) in self.players.iter_mut().filter(|(_, q)| {
             ready(q)
                 && q.pos.distance(position) < range
                 && q.conditions(self.now) & crate::condition::bit(crate::condition::SICK) == 0
         }) {
             let cap = q.effective(&self.content, self.now)?[0];
+            let before = q.character.hp;
             q.character.hp = (q.character.hp + amount).min(cap);
+            healed.push((*id, q.character.hp - before));
+        }
+        for (target, amount) in healed {
+            self.consumable_restored(target, amount, 0xff00ff00);
         }
         for q in self
             .players

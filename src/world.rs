@@ -3091,6 +3091,12 @@ impl World {
                 .remove(&slot);
         }
         let mut o = Writer::new();
+        let potion_feedback = plan.stat_growth.as_ref().map(|(_, slot, _, amount)| {
+            format!(
+                "{} consumed (+{amount}).",
+                self.content.objects[&(slot.kind as u16)].name
+            )
+        });
         p.character.items = plan.items;
         p.character.revision = revision;
         if let Some((snapshot, _, index, amount)) = plan.stat_growth {
@@ -3159,6 +3165,10 @@ impl World {
         }
         tracing::info!(player = plan.player, revision, "inventory committed");
         let p = &self.players[&plan.player];
+        if let Some(text) = potion_feedback {
+            let packet = chat_info(&text);
+            send(p, packet.id, packet.body);
+        }
         if plan.purchase.is_some() {
             let packet = shop::reply(true, "Item purchased!");
             send(p, packet.id, packet.body);
