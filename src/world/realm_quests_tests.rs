@@ -154,7 +154,7 @@ fn named_quests_have_selected_profiles_and_finite_separate_habitat_budgets() {
             crate::loot::validate(&w.content, *kind).unwrap();
         }
         for terrain in 1..=12 {
-            assert!(w.population_count(terrain) <= if terrain >= 11 { 24 } else { 32 });
+            assert!(w.population_count(terrain) <= w.population_regions[terrain as usize].limit);
         }
     }
 }

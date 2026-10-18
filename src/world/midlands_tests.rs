@@ -44,21 +44,13 @@ fn all_members(w: &World, c: usize) -> Vec<i32> {
 }
 
 #[test]
-fn selected_pack_is_complete_but_fragmented_or_absent_biomes_never_get_fake_ground() {
-    let d = directory(12351);
-    let w = &d.worlds[&-3];
-    for kind in [0x6c6, 0x62c, 0x61f, 0x649, 0x640, 0x900, 0x645, 0x650] {
-        assert!(w.entities.values().any(|e| e.kind == kind), "{kind:#x}");
-    }
-    assert!(w.entities.values().any(|e| e.kind == 0x646));
-    for kind in [0x624, 0x625, 0x626] {
-        assert!(w.entities.values().any(|e| e.kind == kind));
-    }
-    for seed in [1, 42] {
+fn area_scaled_pack_never_adds_fake_ground_to_fragmented_or_absent_biomes() {
+    for seed in [1, 42, 12351] {
         let d = directory(seed);
         let w = &d.worlds[&-3];
         for terrain in 2..=7 {
-            assert!(w.population_count(terrain) <= 32);
+            let region = &w.population_regions[terrain as usize];
+            assert!((region.target..=region.limit).contains(&w.population_count(terrain)));
         }
         for s in w
             .population
@@ -70,12 +62,6 @@ fn selected_pack_is_complete_but_fragmented_or_absent_biomes_never_get_fake_grou
             assert!(cell.object.is_none());
             assert!(w.walkable(s.pos));
         }
-        if seed == 1 {
-            assert_eq!(
-                w.camps.iter().filter(|c| c.family.leader == 0x61f).count(),
-                1
-            );
-        }
         if seed == 42 {
             assert_eq!(w.population_count(4), 0);
         }
@@ -84,7 +70,7 @@ fn selected_pack_is_complete_but_fragmented_or_absent_biomes_never_get_fake_grou
 
 #[test]
 fn ordinary_seed_density_stays_within_real_body_budgets_and_preserves_closure() {
-    let mut w = tests::world();
+    let mut w = tests::arena(2);
     w.populate_solos(2, &[], &[0x646]).unwrap();
     assert!(w.population.is_empty());
     assert!(w.populate_solos(1, &[], &[0x651]).is_err());
@@ -94,7 +80,7 @@ fn ordinary_seed_density_stays_within_real_body_budgets_and_preserves_closure() 
         let w = &d.worlds[&-3];
         for terrain in 1..=12 {
             assert!(
-                w.population_count(terrain) <= if terrain >= 11 { 24 } else { 32 },
+                w.population_count(terrain) <= w.population_regions[terrain as usize].limit,
                 "seed{seed} terrain{terrain}"
             );
         }
@@ -246,8 +232,9 @@ fn shield_orc_commander_heals_its_group_but_only_the_key_fires_its_final_burst()
 #[test]
 fn lesser_gods_own_reinforcement_not_their_nonreproducing_kings() {
     for god_kind in [0x640, 0x650] {
-        let mut d = directory(12351);
-        let w = d.worlds.get_mut(&-3).unwrap();
+        let terrain = tests::world().content.objects[&god_kind].terrain;
+        let mut arena = population_tests::family_arena(terrain, &[god_kind]);
+        let w = &mut arena;
         let god = member(w, god_kind);
         let c = w.entities[&god].camp.unwrap();
         let kind = if god_kind == 0x640 { 0x63e } else { 0x64f };
@@ -306,8 +293,21 @@ fn nonreproducing_ogre_bands_keep_ranged_king_and_wizard_without_free_replacemen
 
 #[test]
 fn phases_prediction_and_zero_damage_conditions_stay_selected_and_use_the_shared_pipeline() {
-    let mut d = directory(12351);
-    let w = d.worlds.get_mut(&-3).unwrap();
+    let mut arena = population_density_tests::field(80, 7);
+    arena.encounter = true;
+    for (i, cell) in Arc::make_mut(&mut arena.map).cells.iter_mut().enumerate() {
+        if i % 80 >= 40 {
+            cell.terrain = 2;
+        }
+    }
+    arena.configure_population().unwrap();
+    arena
+        .populate_families(7, &[Pos { x: 20.5, y: 20.5 }], &[0x61f])
+        .unwrap();
+    arena
+        .populate_families(2, &[Pos { x: 60.5, y: 60.5 }], &[0x649])
+        .unwrap();
+    let w = &mut arena;
     let dwarf = member(w, 0x61f);
     let home = w.entities[&dwarf].pos;
     assert!(matches!(

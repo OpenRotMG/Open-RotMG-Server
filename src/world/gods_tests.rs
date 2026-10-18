@@ -22,7 +22,7 @@ fn player(w: &mut World, pos: Pos) -> i32 {
 }
 
 #[test]
-fn complete_godlands_counts_all_real_children_and_trio_inside_32_bodies() {
+fn area_scaled_godlands_count_real_children_and_bounded_construct_trios() {
     let mut d = directory();
     let w = d.worlds.get_mut(&-3).unwrap();
     for kind in gods::GODS
@@ -32,37 +32,27 @@ fn complete_godlands_counts_all_real_children_and_trio_inside_32_bodies() {
     {
         assert!(w.entities.values().any(|e| e.kind == *kind));
     }
-    assert_eq!(w.population_count(1), 28);
+    assert!(w.population_count(1) >= w.population_regions[1].target);
     assert!(!w.population.iter().any(|s| s.kind == 0x935));
-    let leaders: Vec<_> = w
-        .entities
-        .values()
-        .filter(|e| e.kind == 0x652)
-        .map(|e| (e.id, e.pos))
-        .collect();
-    for (_, pos) in &leaders {
-        player(w, *pos);
-    }
+    let id = enemy(w, 0x652);
+    player(w, w.entities[&id].pos);
     for time in [10000, 20000, 30000] {
         w.now = time;
         w.repopulate().unwrap();
-        assert!(w.population_count(1) <= 32);
+        assert!(w.population_count(1) <= w.population_regions[1].limit);
     }
-    assert_eq!(w.population_count(1), 32);
-    for (id, _) in leaders {
-        let camp = w.entities[&id].camp.unwrap();
-        let children: Vec<_> = w
-            .entities
-            .values()
-            .filter(|e| e.camp == Some(camp) && e.kind == 0x653)
-            .collect();
-        assert_eq!(children.len(), 5);
-        assert!(
-            children
-                .iter()
-                .all(|e| e.parent.is_none() && e.expires.is_none() && e.size == 75)
-        );
-    }
+    let camp = w.entities[&id].camp.unwrap();
+    let children: Vec<_> = w
+        .entities
+        .values()
+        .filter(|e| e.camp == Some(camp) && e.kind == 0x653)
+        .collect();
+    assert_eq!(children.len(), 5);
+    assert!(
+        children
+            .iter()
+            .all(|e| e.parent.is_none() && e.expires.is_none() && e.size == 75)
+    );
     assert_eq!(w.hero_identities().len(), 14);
 }
 
@@ -259,7 +249,7 @@ fn constructs_heal_only_their_own_partner_and_withdraw_without_fake_kill_rewards
     assert_eq!(w.players[&p].experience_queued, 0);
     w.now = 30000;
     w.repopulate().unwrap();
-    assert!(!w.entities.values().any(|e| e.kind == 0x906));
+    assert!(w.camp_member(rock, 0x906).unwrap().is_none());
 }
 
 #[test]

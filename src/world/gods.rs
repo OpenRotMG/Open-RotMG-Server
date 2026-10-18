@@ -9,22 +9,6 @@ pub(super) const GODS: &[u16] = &[
 pub(super) const CONSTRUCTS: &[u16] = &[0x905, 0x906, 0x907];
 
 impl World {
-    pub(super) fn populate_godlands(&mut self, candidates: &[Pos]) -> Result<()> {
-        self.populate_families(1, candidates, &[0x652, 0x652, 0x905])?;
-        self.populate_solos(
-            1,
-            candidates,
-            &[
-                0x651, 0x654, 0x655, 0x656, 0x657, 0x658, 0x659, 0x6d8, 0x651, 0x654, 0x655, 0x656,
-                0x657, 0x658, 0x659, 0x6d8, 0x91a,
-            ],
-        )?;
-        ensure!(
-            self.population_count(1) == 28,
-            "Godlands initial body budget changed"
-        );
-        Ok(())
-    }
     pub(super) fn god_movement(
         &self,
         id: i32,
