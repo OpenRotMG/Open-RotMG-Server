@@ -1,6 +1,7 @@
 pub mod abyss;
 pub mod snake;
 pub mod spider;
+pub mod sprite;
 pub mod trench;
 
 pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
@@ -20,7 +21,7 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
         0x651 => Some((0x71b, 0.17)),
         0x62c | 0x637 => Some((0x719, 0.1)),
         0x640 | 0x645 | 0x649 | 0x650 | 0x654 => Some((0x718, 0.17)),
-        0x653 => Some((0x70c, 0.11)),
+        0x653 => Some((0x70c, 0.25)),
         0x659 => Some((0x71a, 0.17)),
         _ => None,
     }
@@ -32,6 +33,7 @@ pub use snake::generate as snake_pit;
 pub(crate) mod tests {
     use super::*;
     use crate::content::{Content, Map};
+    use rand::SeedableRng;
     use std::{
         collections::{BTreeSet, VecDeque},
         path::Path,
@@ -76,6 +78,8 @@ pub(crate) mod tests {
                 spider::generate(&content, 12351).unwrap()
             } else if name == "snake-pit" {
                 snake_pit(&content, 12351).unwrap()
+            } else if name == "sprite-world" {
+                sprite::generate(&content, 12351).unwrap()
             } else {
                 Map::load(&Path::new("data").join(format!("{name}.wmap")), &content).unwrap()
             };
@@ -139,5 +143,56 @@ pub(crate) mod tests {
             }
             assert!(map.cells.iter().filter(|c| c.object == Some(0x173)).count() >= 16);
         }
+    }
+
+    #[test]
+    fn sprite_worlds_vary_by_seed_and_keep_the_documented_route() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let mut layouts = BTreeSet::new();
+        let mut gods = BTreeSet::new();
+        let (mut tiled, mut solid) = (0, 0);
+        for seed in 0..48 {
+            let map = sprite::generate(&content, seed).unwrap();
+            assert_eq!(
+                serde_json::to_vec(&map).unwrap(),
+                serde_json::to_vec(&sprite::generate(&content, seed).unwrap()).unwrap()
+            );
+            layouts.insert(serde_json::to_vec(&map).unwrap());
+            let reached = reachable(&map, &content);
+            let boss = map
+                .cells
+                .iter()
+                .position(|c| c.object == Some(0xd06))
+                .unwrap();
+            assert!(reached.contains(&boss), "disconnected boss for seed {seed}");
+            assert_eq!(map.spawns.len(), 1);
+            let entrance = map.spawns[0].1 as i32 * map.width + map.spawns[0].0 as i32;
+            assert!(reached.contains(&(entrance as usize)));
+            let god_count = map.cells.iter().filter(|c| c.object == Some(0xd05)).count();
+            assert!(god_count <= 5, "seed {seed}");
+            gods.insert(god_count);
+            let mut changes = 0;
+            let mut pairs = 0;
+            for y in 0..map.height - 1 {
+                for x in 0..map.width - 1 {
+                    let a = map.cells[(y * map.width + x) as usize].ground;
+                    let b = map.cells[(y * map.width + x + 1) as usize].ground;
+                    if (0xa0..=0xa4).contains(&a) && (0xa0..=0xa4).contains(&b) {
+                        pairs += 1;
+                        changes += usize::from(a != b);
+                    }
+                }
+            }
+            if changes * 4 > pairs {
+                tiled += 1;
+            } else {
+                solid += 1;
+            }
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            assert!(crate::loot::rewards(&content, 0xd06, &mut rng).contains(&0xa4c));
+        }
+        assert!(layouts.len() > 40, "seeds collapsed to one Sprite World");
+        assert!(gods.contains(&0) && gods.contains(&5), "god count {gods:?}");
+        assert!(tiled > 0 && solid > 0, "tiled={tiled} solid={solid}");
     }
 }

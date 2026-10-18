@@ -316,7 +316,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.3, Tier(8, ARMOR)),
         ],
         0xd06 => &[
-            (0.3, Item(0xa4c)),
+            (1., Item(0xa4c)),
             (0.01, Item(0xa4b)),
             (0.01, Item(0xc03)),
             (0.01, Item(0xa5a)),
