@@ -49,6 +49,18 @@ pub struct Requests {
     pub work: Duration,
     pub cpu: Option<Duration>,
     pub round_trip: Duration,
+    pub native_control: Option<std::sync::Arc<NativeControlTrace>>,
+}
+pub struct NativeControlTrace {
+    pub request: String,
+    pub operation: String,
+    pub started: Instant,
+}
+impl NativeControlTrace {
+    pub fn record(&self, call: u64, stage: &str, receiver_closed: bool) {
+        tracing::info!(request=%self.request,operation=%self.operation,call,stage,receiver_closed,
+            elapsed_ms=self.started.elapsed().as_secs_f64()*1000.,"native control world request");
+    }
 }
 impl Requests {
     pub fn snapshot(&self) -> Value {
@@ -191,7 +203,38 @@ pub fn memory() -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    #[derive(Clone, Default)]
+    pub struct Output(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Output {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            std::io::Write::write(&mut *self.0.lock().unwrap(), bytes)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    pub fn trace() -> (tracing::Dispatch, Output) {
+        let output = Output::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .json()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer({
+                let output = output.clone();
+                move || output.clone()
+            })
+            .finish();
+        (tracing::Dispatch::new(subscriber), output)
+    }
+    pub fn events(output: &Output) -> Vec<serde_json::Value> {
+        std::str::from_utf8(&output.0.lock().unwrap())
+            .unwrap()
+            .split('\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
     use super::*;
     #[test]
     fn cpu_wall_and_work_counters_remain_separate_and_reset_together() {

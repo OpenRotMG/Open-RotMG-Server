@@ -612,3 +612,190 @@ fn prepared_castle_is_full_strength_and_not_available_on_an_ordinary_directory()
             .any(|e| e.kind == 0xd7b)
     );
 }
+
+#[tokio::test]
+async fn native_control_request_outcomes_are_terminal_once() {
+    let (dispatch, output) = crate::performance::tests::trace();
+    let _logging = tracing::dispatcher::set_default(&dispatch);
+    let (dir, app) = fixture();
+    let ok = request(
+        &app,
+        "begin-ok",
+        json!({"op":"native_lease","owner":"owner","operation":"begin"}),
+    )
+    .await;
+    assert_eq!(ok["operation"], "begin");
+    let error = request(
+        &app,
+        "renew-error",
+        json!({"op":"native_lease","owner":"other","operation":"renew"}),
+    )
+    .await;
+    assert_eq!(error["status"], "failed");
+    native_lease(
+        &app,
+        app.testing.as_ref().unwrap(),
+        "owner".into(),
+        "end".into(),
+        vec![],
+    )
+    .await
+    .unwrap();
+    let events = crate::performance::tests::events(&output);
+    for (id, outcome) in [("begin-ok", "ok"), ("renew-error", "error")] {
+        let terminal = events
+            .iter()
+            .filter(|event| {
+                event["fields"]["request"] == id
+                    && matches!(
+                        event["fields"]["message"].as_str(),
+                        Some("native control request completed" | "native control request dropped")
+                    )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(terminal.len(), 1, "{events:?}");
+        assert_eq!(terminal[0]["fields"]["outcome"], outcome, "{events:?}");
+        assert_eq!(
+            terminal[0]["fields"]["operation"],
+            if outcome == "ok" { "begin" } else { "renew" }
+        );
+        let snapshot: Value =
+            serde_json::from_str(terminal[0]["fields"]["world_requests"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(snapshot["calls"], u64::from(outcome == "ok"));
+        assert_eq!(snapshot["completed"], snapshot["calls"]);
+        if outcome == "error" {
+            assert!(
+                terminal[0]["fields"]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("owner differs")
+            );
+        }
+        assert!(terminal[0]["fields"]["elapsed_ms"].as_f64().unwrap() >= 0.);
+    }
+    app.shutdown.send_replace(true);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn dropped_native_renewal_keeps_deadline_and_traces_late_read() {
+    let (dispatch, output) = crate::performance::tests::trace();
+    let _logging = tracing::dispatcher::set_default(&dispatch);
+    let (dir, app) = fixture();
+    let pos = app
+        .world
+        .in_world(-1)
+        .call(|w| {
+            let (x, y) = w.map.spawns[0];
+            Ok(Pos { x, y })
+        })
+        .await
+        .unwrap();
+    let mut spawn = spec(pos);
+    spawn["controller"] = "native".into();
+    let created = request(&app, "renewal-fixture", json!({"op":"spawn","spec":spawn})).await;
+    let actor = created["result"]["actor"].as_i64().unwrap() as i32;
+    let account = app.store.list("qa-interface-unit".into()).await.unwrap();
+    let ch = app.store.load(account.id, actor).await.unwrap();
+    let (tx, _packets) = tokio::sync::mpsc::channel(64);
+    let lost = tokio::sync::watch::channel(false).0;
+    app.world
+        .in_world(-1)
+        .call(move |w| {
+            let id = w.enter_at(
+                ch,
+                Some(crate::world::Output { packets: tx, lost }),
+                Some(pos),
+                crate::store::AccountPresentation {
+                    guild: None,
+                    credits: 100,
+                    fame: 0,
+                    best_fame: Default::default(),
+                },
+            )?;
+            w.players.get_mut(&id).unwrap().native_update_acked = true;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let begun = request(
+        &app,
+        "renewal-begin",
+        json!({"op":"native_lease","owner":"owner","operation":"begin","actors":[actor]}),
+    )
+    .await;
+    assert_eq!(begun["operation"], "begin");
+    let renewed = request(
+        &app,
+        "renewal-control",
+        json!({"op":"native_lease","owner":"owner","operation":"renew"}),
+    )
+    .await;
+    assert_eq!(renewed["operation"], "renew");
+    let testing = app.testing.as_ref().unwrap();
+    let deadline = testing.lease.lock().unwrap().as_ref().unwrap().expires;
+    let mut renewal = Box::pin(request(
+        &app,
+        "dropped-renew",
+        json!({"op":"native_lease","owner":"owner","operation":"renew"}),
+    ));
+    assert!(futures_util::poll!(renewal.as_mut()).is_pending());
+    drop(renewal);
+    app.world.directory(|_| Ok(())).await.unwrap();
+    assert_eq!(
+        testing.lease.lock().unwrap().as_ref().unwrap().expires,
+        deadline
+    );
+    assert!(testing.stopped.borrow().is_none());
+    native_lease(&app, testing, "owner".into(), "end".into(), vec![])
+        .await
+        .unwrap();
+    let events = crate::performance::tests::events(&output);
+    let events = events
+        .iter()
+        .filter(|event| event["fields"]["request"] == "dropped-renew")
+        .collect::<Vec<_>>();
+    let dropped = events
+        .iter()
+        .filter(|event| event["fields"]["message"] == "native control request dropped")
+        .collect::<Vec<_>>();
+    assert_eq!(dropped.len(), 1, "{events:?}");
+    assert_eq!(dropped[0]["fields"]["outcome"], "dropped");
+    let snapshot: Value =
+        serde_json::from_str(dropped[0]["fields"]["world_requests"].as_str().unwrap()).unwrap();
+    assert_eq!(snapshot["calls"], 1);
+    assert_eq!(snapshot["completed"], 0);
+    assert_eq!(snapshot["round_trip_sum_ms"], 0.);
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["fields"]["message"] == "native control request completed")
+    );
+    let stages = events
+        .iter()
+        .filter(|event| event["fields"]["message"] == "native control world request")
+        .map(|event| event["fields"]["stage"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        stages,
+        [
+            "capacity_wait",
+            "capacity_acquired",
+            "enqueued",
+            "started",
+            "completed",
+            "result_send"
+        ]
+    );
+    for stage in ["started", "completed", "result_send"] {
+        let event = events
+            .iter()
+            .find(|event| event["fields"]["stage"] == stage)
+            .unwrap();
+        assert_eq!(event["fields"]["call"], 1);
+        assert_eq!(event["fields"]["receiver_closed"], true);
+    }
+    app.shutdown.send_replace(true);
+    fs::remove_dir_all(dir).unwrap();
+}
