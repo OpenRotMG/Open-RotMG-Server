@@ -1008,6 +1008,11 @@ fn swarm_public_attempts_use_only_live_positive_contributors_and_the_current_cap
     ordinary_public_attempts_use_only_live_positive_contributors_and_the_current_cap(0x955, 6);
 }
 
+#[test]
+fn horned_drake_public_attempts_use_only_live_positive_contributors_and_the_current_cap() {
+    ordinary_public_attempts_use_only_live_positive_contributors_and_the_current_cap(0x945, 7);
+}
+
 fn ordinary_public_attempts_use_only_live_positive_contributors_and_the_current_cap(
     kind: u16,
     terrain: u8,
