@@ -7,10 +7,11 @@ impl World {
             "NPC audience contains nonfinite positions"
         );
         let all_global = self.npc_global_ids.len() == self.actor_ids.len();
-        let mut candidates: Vec<_> = self.npc_global_ids.iter().copied().collect();
+        let mut candidates = Vec::new();
         let (mut requested, mut cells) = (0, 0);
         // When every actor is global, a cell query would only repeat required work.
         if !all_global {
+            candidates.extend(self.npc_global_ids.iter().copied());
             let width = self.map.width as usize;
             let mut rows = Vec::new();
             for p in audience {
@@ -56,9 +57,13 @@ impl World {
             candidates.sort_unstable();
             candidates.dedup();
         }
-        let examined = candidates.len();
-        candidates.retain(|id| {
-            let e = self.entities.get(id).expect("NPC candidate entity missing");
+        let examined = if all_global {
+            self.actor_ids.len()
+        } else {
+            candidates.len()
+        };
+        let mut dormant = Vec::new();
+        let mut select = |e: &Entity| {
             if e.population_slot.is_some()
                 && e.activated.is_none()
                 && e.stage.is_none()
@@ -71,18 +76,27 @@ impl World {
                 && e.script.is_none()
                 && audience.iter().all(|p| e.pos.distance(*p) >= 20.)
             {
-                self.npc_global_ids.remove(id);
+                dormant.push(e.id);
                 return false;
             }
             let object = &self.content.objects[&e.kind];
-            let selected = object.class != "Wall"
+            object.class != "Wall"
                 && !matches!(e.kind, 0xd5f | 0xd60)
-                && (object.enemy || matches!(e.kind, 0x173 | 0xd7d));
-            if selected && !all_global {
-                self.npc_global_ids.insert(*id);
-            }
-            selected
-        });
+                && (object.enemy || matches!(e.kind, 0x173 | 0xd7d))
+        };
+        // Fully awake worlds need the fused traversal, not an extra materialized ID pass.
+        if all_global {
+            candidates = self.actors().filter(|e| select(e)).map(|e| e.id).collect();
+        } else {
+            candidates
+                .retain(|id| select(self.entities.get(id).expect("NPC candidate entity missing")));
+        }
+        for id in dormant {
+            self.npc_global_ids.remove(&id);
+        }
+        if !all_global {
+            self.npc_global_ids.extend(candidates.iter().copied());
+        }
         #[cfg(test)]
         npc_query_tests::COUNTS.set((examined, cells, requested, candidates.len()));
         let mut performance = self.performance.borrow_mut();
