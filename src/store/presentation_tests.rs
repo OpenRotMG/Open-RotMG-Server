@@ -33,7 +33,7 @@ fn class_record(xml: &str, class: u16) -> (i32, i32) {
 }
 
 #[test]
-fn target_stars_and_next_quest_use_class_maxima_not_wallet_or_current_fame() {
+fn target_stars_and_next_quest_use_class_maxima_not_wallet() {
     for (fame, stars, next) in [
         (0, 0, 20),
         (19, 0, 20),
@@ -80,7 +80,7 @@ fn target_stars_and_next_quest_use_class_maxima_not_wallet_or_current_fame() {
 }
 
 #[tokio::test]
-async fn presentation_and_xml_share_committed_class_bests_across_replacement_and_reopen() {
+async fn presentation_and_xml_share_living_and_dead_class_bests_across_reopen() {
     let (s, content, path) = store();
     let account = s.list("class-history".into()).await.unwrap().id;
     for fame in [19, 20, 149, 150, 400, 800, 2000] {
@@ -90,13 +90,17 @@ async fn presentation_and_xml_share_committed_class_bests_across_replacement_and
             .unwrap();
         ch.fame = fame;
         ch.level = 5;
+        let wallet = s.presentation(account).await.unwrap().fame;
         s.progress(ch.clone()).await.unwrap();
         let before = s.presentation(account).await.unwrap();
-        assert!(
-            before
-                .best_fame
-                .get(&WIZARD)
-                .is_none_or(|best| *best < fame)
+        assert_eq!(before.fame, wallet);
+        assert_eq!(before.best_fame[&WIZARD], fame);
+        assert_eq!(
+            class_record(
+                &s.list("class-history".into()).await.unwrap().xml("", 0.0),
+                WIZARD
+            ),
+            (5, fame)
         );
         ch.hp = 0;
         ch.alive = false;
@@ -137,7 +141,7 @@ async fn presentation_and_xml_share_committed_class_bests_across_replacement_and
     assert_eq!(expected.fame, 27);
     assert_eq!(
         expected.best_fame,
-        BTreeMap::from([(WIZARD, 2000), (PRIEST, 150)])
+        BTreeMap::from([(WIZARD, 3000), (PRIEST, 150)])
     );
     assert_eq!(expected.stars(), 7);
     let reopened = Store::open(&path, &content).unwrap();
@@ -155,7 +159,7 @@ async fn presentation_and_xml_share_committed_class_bests_across_replacement_and
     let listed = reopened.list("class-history".into()).await.unwrap();
     assert_eq!(listed.fame, 27);
     assert_eq!(listed.earned_fame, 3689);
-    assert_eq!(class_record(&listed.xml("", 0.0), WIZARD), (5, 2000));
+    assert_eq!(class_record(&listed.xml("", 0.0), WIZARD), (5, 3000));
     assert_eq!(class_record(&listed.xml("", 0.0), PRIEST), (1, 150));
     assert!(content.unlocked(PRIEST, &listed.best_levels).unwrap());
     let other = reopened.list("unrelated".into()).await.unwrap();
@@ -168,6 +172,47 @@ async fn presentation_and_xml_share_committed_class_bests_across_replacement_and
             best_fame: BTreeMap::new()
         }
     );
+}
+
+#[tokio::test]
+async fn living_class_star_requires_a_successful_progress_commit_not_a_death() {
+    let (s, content, _) = store();
+    let account = s.list("living-star".into()).await.unwrap().id;
+    let mut ch = s
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(s.presentation(account).await.unwrap().stars(), 0);
+    ch.level = 20;
+    ch.exp = 19_999;
+    ch.fame = 19;
+    s.progress(ch.clone()).await.unwrap();
+    s.call(|db| {
+        db.execute_batch("CREATE TRIGGER fail_progress BEFORE UPDATE OF stats ON characters BEGIN SELECT RAISE(ABORT,'injected progress failure'); END;")?;
+        Ok(())
+    }).await.unwrap();
+    ch.exp += 1;
+    ch.fame += 1;
+    assert!(s.progress(ch.clone()).await.is_err());
+    let before = s.presentation(account).await.unwrap();
+    assert_eq!(
+        (before.best_fame[&WIZARD], before.stars(), before.fame),
+        (19, 0, 0)
+    );
+    s.call(|db| {
+        db.execute_batch("DROP TRIGGER fail_progress")?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    s.progress(ch.clone()).await.unwrap();
+    let after = s.presentation(account).await.unwrap();
+    assert_eq!(
+        (after.best_fame[&WIZARD], after.stars(), after.fame),
+        (20, 1, 0)
+    );
+    assert!(s.load(account, ch.id).await.unwrap().alive);
+    assert!(s.fame(account, ch.id).await.is_err());
 }
 
 #[tokio::test]

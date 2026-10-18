@@ -282,14 +282,10 @@ async fn disconnect_during_resurrection_keeps_the_saved_character_without_issuin
     let saved = a.store.load(account, character).await.unwrap();
     assert!(saved.alive && saved.hp > 0);
     assert_eq!(saved.items[3], -1);
-    assert!(
-        a.store
-            .list("amulet-owner".into())
-            .await
-            .unwrap()
-            .best_fame
-            .is_empty()
-    );
+    let presentation = a.store.presentation(account).await.unwrap();
+    assert_eq!(presentation.best_fame[&saved.class], saved.fame);
+    assert_eq!(presentation.fame, 0);
+    assert!(a.store.fame(account, character).await.is_err());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
