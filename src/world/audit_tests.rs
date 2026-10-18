@@ -255,17 +255,49 @@ fn golem_satellites_use_real_budgets_owned_orbits_and_thirty_second_decay() {
 fn satellite_anchors_identify_the_nearby_member_not_the_first_matching_kind() {
     let mut w = arena(7);
     let pos = center(&w);
-    w.populate_families(7, &[pos], &[0x62d]).unwrap();
     let far = Pos {
         x: pos.x + 8.,
         ..pos
     };
-    let root = w.spawn_entity(0x62d, far, vec![]).unwrap();
-    let hub = w.spawn_entity(0x6d2, far, vec![]).unwrap();
-    let gray = w.spawn_entity(0x6d5, far, vec![]).unwrap();
-    for id in [root, hub, gray] {
-        w.entities.get_mut(&id).unwrap().camp = Some(0);
-    }
+    static FAMILY: population::Family = population::Family {
+        leader: 0x62d,
+        terrain: 7,
+        random_initial: false,
+        roles: &[
+            population::Role {
+                kind: 0x62d,
+                maximum: 1,
+                initial: 1,
+                interval: None,
+            },
+            population::Role {
+                kind: 0x6d2,
+                maximum: 2,
+                initial: 2,
+                interval: None,
+            },
+            population::Role {
+                kind: 0x6d5,
+                maximum: 2,
+                initial: 2,
+                interval: None,
+            },
+        ],
+    };
+    w.place_camp(&FAMILY, vec![pos, far, pos, far, pos, far])
+        .unwrap();
+    let at_far = |kinds: std::ops::RangeInclusive<u16>| {
+        w.entities
+            .values()
+            .find(|e| kinds.contains(&e.kind) && e.pos.distance(far) == 0.)
+            .unwrap()
+            .id
+    };
+    let (root, hub, gray) = (
+        at_far(0x62d..=0x62d),
+        at_far(0x6d2..=0x6d4),
+        at_far(0x6d5..=0x6d5),
+    );
     for (id, owner, radius) in [(hub, root, 3.), (gray, hub, 1.)] {
         let (motion, _) = w.golem_movement(id, 0).unwrap();
         assert_eq!(

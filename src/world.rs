@@ -38,6 +38,8 @@ mod gods;
 mod gods_tests;
 mod gold;
 mod golems;
+#[cfg(test)]
+mod golems_tests;
 mod ground;
 #[cfg(test)]
 mod ground_tests;
