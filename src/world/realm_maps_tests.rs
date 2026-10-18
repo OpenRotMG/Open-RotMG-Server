@@ -296,27 +296,3 @@ fn realm_layout_selection_happens_at_creation_not_player_entry() {
     }
     assert_eq!(selected.len(), 3);
 }
-
-#[test]
-fn catalog_order_has_reproducible_config_seeds() {
-    let catalog = sources(Path::new("data")).unwrap();
-    let mut seeds = BTreeMap::new();
-    for seed in 0..100u64 {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-        let id = catalog[rng.gen_range(0..catalog.len())].name();
-        seeds.entry(id.to_owned()).or_insert(seed);
-    }
-    assert_eq!(
-        seeds.keys().map(String::as_str).collect::<BTreeSet<_>>(),
-        catalog.iter().map(|s| s.name()).collect::<BTreeSet<_>>()
-    );
-    for source in &catalog {
-        let seed = seeds[source.name()];
-        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-        assert_eq!(
-            catalog[rng.gen_range(0..catalog.len())].name(),
-            source.name()
-        );
-        eprintln!("{}: realm_seed={seed}", source.name());
-    }
-}

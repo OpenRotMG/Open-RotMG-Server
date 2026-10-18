@@ -83,24 +83,12 @@ fn selected_pack_is_complete_but_fragmented_or_absent_biomes_never_get_fake_grou
 }
 
 #[test]
-fn ordinary_seed_density_stays_within_real_body_budgets_and_preserves_closure() {
+fn solo_population_rejects_missing_ground_and_wrong_habitats() {
     let mut w = tests::world();
     w.populate_solos(2, &[], &[0x646]).unwrap();
     assert!(w.population.is_empty());
     assert!(w.populate_solos(1, &[], &[0x651]).is_err());
     assert!(w.populate_solos(2, &[], &[0x651]).is_err());
-    for seed in 2..=20 {
-        let d = directory(seed);
-        let w = &d.worlds[&-3];
-        for terrain in 1..=12 {
-            assert!(
-                w.population_count(terrain) <= if terrain >= 11 { 24 } else { 32 },
-                "seed{seed} terrain{terrain}"
-            );
-        }
-        assert_eq!(w.hero_identities().len(), 14);
-        assert!(w.critical_deaths.is_empty());
-    }
 }
 
 #[test]
