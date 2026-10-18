@@ -78,6 +78,7 @@ async function connect(spec) {
   ws.onclose=()=>{const error=new Error('Native target connection closed');if(!closing){leaseError=error;holdState?.abort(error);}for(const item of pending.values()){clearTimeout(item.timer);item.reject(error);}pending.clear();};
   send = (method, params) => new Promise((resolve,reject) => {
     if(method.startsWith('Input.')&&['keyDown','mousePressed'].includes(params.type)){
+      if(leaseError){holdState?.abort(leaseError);reject(leaseError);return;}
       if(!holdState){reject(new Error('Native DOWN outside its bounded input'));return;}
       if(holdState.started&&Date.now()-holdState.started>=holdState.ms){reject(new Error('Native DOWN missed its release deadline'));return;}
       if(!holdState.started)holdState.start();
@@ -185,6 +186,7 @@ async function resumeAll() {
   const after=await states(true,undefined,before);
   await bind(after);
   for(const c of clients)await c.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');
+  if(leaseError)throw leaseError;
 }
 const bindings = {
   w:['KeyW',87],a:['KeyA',65],s:['KeyS',83],d:['KeyD',68],

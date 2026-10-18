@@ -26,10 +26,17 @@ async function fixture(t,transfer=false) {
     const request=JSON.parse(Buffer.concat(chunks));calls.push(request);
     const c=request.command;
     if(c.op==='native_state')return res.end(JSON.stringify({runtime:'fixture-runtime',paused,actors:[{actor:1,player:1,stage:activeFault==='loading'?'disconnected':'ready',world,world_name:world===-1?'Tutorial':'Nexus',client_time:++tick}]}));
-    if(c.op==='native_sync')return res.end(JSON.stringify({acknowledged:[{actor:1,player:1,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('000000090600000001','hex')).digest('hex')}]}));
+    if(c.op==='native_sync'){
+      if(activeFault==='binding-renew-timeout'&&!paused)await new Promise(resolve=>setTimeout(resolve,900));
+      return res.end(JSON.stringify({acknowledged:[{actor:1,player:1,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('000000090600000001','hex')).digest('hex')}]}));
+    }
+    if(c.op==='native_lease'&&c.operation==='renew'&&['binding-renew-timeout','layout-renew-timeout'].includes(activeFault)){
+      await new Promise(resolve=>setTimeout(resolve,1000));
+      return res.end(JSON.stringify({status:'failed',error:'fixture delayed renewal'}));
+    }
     if(c.op==='native_lease'&&c.operation==='renew'&&activeFault==='terminal'){paused=true;return res.end(JSON.stringify({status:'failed',error:'native participant is terminal during control'}));}
     if(c.op==='native_lease'){clearTimeout(lease);if(c.operation!=='end')lease=setTimeout(()=>{paused=true;},1500);}
-    if(c.op==='pause')paused=true;if(c.op==='resume'){paused=false;if(transfer)world=-2;}
+    if(c.op==='pause'||c.op==='native_lease'&&c.operation==='halt')paused=true;if(c.op==='resume'){paused=false;if(transfer)world=-2;}
     res.end(JSON.stringify(c.op==='observe'?view():c.op==='run'?{status:'succeeded',result:{goal_reached:true,state:view()}}:{status:'succeeded',paused}));
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -49,7 +56,7 @@ async function fixture(t,transfer=false) {
         if(row.method==='Runtime.evaluate'&&row.params.expression.includes('getBoundingClientRect'))value={x:0,y:0,width:800,height:600,viewportWidth:800,viewportHeight:600};
         if(process.env.FIXTURE_FAULT==='input'&&row.method==='Input.dispatchKeyEvent'&&row.params.type==='keyDown')error={message:'fixture keydown failure'};
         if(process.env.FIXTURE_FAULT==='pause'&&row.method==='Runtime.evaluate'&&row.params.expression.endsWith(')(true)'))error={message:'fixture native pause failure'};
-        setTimeout(()=>this.onmessage({data:JSON.stringify({id:row.id,...(error?{error}:{result:row.method==='Runtime.evaluate'?{result:{value}}:{}})})}),process.env.FIXTURE_FAULT==='slow-ack'&&row.method==='Input.dispatchKeyEvent'&&row.params.type==='keyDown'?1000:0);
+        setTimeout(()=>this.onmessage({data:JSON.stringify({id:row.id,...(error?{error}:{result:row.method==='Runtime.evaluate'?{result:{value}}:{}})})}),process.env.FIXTURE_FAULT==='slow-ack'&&row.method==='Input.dispatchKeyEvent'&&row.params.type==='keyDown'?1000:process.env.FIXTURE_FAULT==='layout-renew-timeout'&&row.method==='Runtime.evaluate'&&row.params.expression.includes('getBoundingClientRect')?900:0);
       }
       close(){this.onclose?.();}
     };
@@ -143,6 +150,27 @@ test('terminal cohort supervision releases an active hold before its duration ex
   assert.deepEqual(keys.map(e=>e.params.type),['keyDown','keyUp']);
   assert.ok(keys[1].at-keys[0].at<1000,JSON.stringify(keys));
   assert.equal(f.paused(),true);
+});
+for(const [name,input] of [['key',{keys:['d'],duration_ms:1}],['mouse',{keys:[],duration_ms:100,drag:{from:{x:634,y:528},to:{x:722,y:428}}}]])test(`failed renewal during binding cannot start a late ${name} DOWN`,async t=>{
+  const f=await fixture(t),result=await f.run('failed-binding-renew',{...move,input},'binding-renew-timeout');
+  assert.equal(result.code,1);assert.match(result.stderr,/TimeoutError/);
+  const down=(await f.events()).filter(e=>e.method.startsWith('Input.')&&['keyDown','mousePressed'].includes(e.params.type));
+  assert.deepEqual(down,[],'A timed-out lease must reject new input, even when its browser proof arrives later');
+  assert.ok(f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='halt'));
+  assert.ok(!f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='end'));
+  assert.equal(f.paused(),true);
+});
+test('failed renewal during binding cannot dispatch a server run',async t=>{
+  const f=await fixture(t),result=await f.run('failed-binding-run',{op:'run',actor:1,goal:{kind:'time',ms:100},max_game_ms:1000},'binding-renew-timeout');
+  assert.equal(result.code,1);assert.match(result.stderr,/TimeoutError/);
+  assert.ok(!f.calls.some(c=>c.command.op==='run'),'A late browser proof cannot authorize server work after heartbeat failure');
+  assert.ok(f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='halt'));
+});
+test('failed renewal during layout cannot dispatch a mouse DOWN',async t=>{
+  const f=await fixture(t),result=await f.run('failed-layout-renew',{...move,input:{keys:[],duration_ms:100,mouse:{x:450,y:300}}},'layout-renew-timeout');
+  assert.equal(result.code,1);assert.match(result.stderr,/TimeoutError/);
+  assert.ok(!(await f.events()).some(e=>e.method==='Input.dispatchMouseEvent'&&e.params.type==='mousePressed'));
+  assert.ok(f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='halt'));
 });
 test('native realtime work cannot outlive a successful standalone controller',async t=>{
   const f=await fixture(t);
