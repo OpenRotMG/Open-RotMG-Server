@@ -116,6 +116,46 @@ pub(crate) mod tests {
                 .position(|c| c.object == Some(snake::BOSS))
                 .unwrap();
             assert!(reached.contains(&boss), "disconnected boss for seed {seed}");
+            let mut floors: BTreeSet<_> = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, cell)| matches!(cell.ground, 0xca | 0x1e | 0x1f | 0x32))
+                .map(|(i, _)| i)
+                .collect();
+            while let Some(start) = floors.pop_first() {
+                let mut room = vec![start];
+                let mut queue = VecDeque::from([start]);
+                while let Some(i) = queue.pop_front() {
+                    for next in [i - 1, i + 1, i - map.width as usize, i + map.width as usize] {
+                        if floors.remove(&next) {
+                            room.push(next);
+                            queue.push_back(next);
+                        }
+                    }
+                }
+                let xs: Vec<_> = room.iter().map(|i| *i as i32 % map.width).collect();
+                let ys: Vec<_> = room.iter().map(|i| *i as i32 / map.width).collect();
+                let size = (
+                    xs.iter().max().unwrap() - xs.iter().min().unwrap() + 1,
+                    ys.iter().max().unwrap() - ys.iter().min().unwrap() + 1,
+                );
+                if room.contains(&boss) {
+                    assert_eq!(size, (33, 33), "boss arena for seed {seed}");
+                } else {
+                    assert!(
+                        (15..=19).contains(&size.0) && (15..=19).contains(&size.1),
+                        "oversized ordinary room {size:?} for seed {seed}"
+                    );
+                }
+            }
+            assert!(
+                map.cells.iter().all(|cell| {
+                    cell.object.is_none_or(|kind| !content.objects[&kind].enemy)
+                        || content.grounds[&cell.ground] > 0.
+                }),
+                "enemy outside room floor for seed {seed}"
+            );
             let (bx, by) = (
                 (boss as i32 % map.width) as f32 + 0.5,
                 (boss as i32 / map.width) as f32 + 0.5,
