@@ -48,6 +48,13 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Tier(1, RINGS)),
         ],
         // Current reconstruction from Trapped's older Midland table, not 123.5.1 rate fidelity.
+        0x945 => &[
+            (0.10, Tier(5, WEAPONS)),
+            (0.10, Tier(5, ARMOR)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.05, Tier(2, ABILITIES)),
+        ],
         0x955 => &[
             (0.15, Tier(3, WEAPONS)),
             (0.15, Tier(3, ARMOR)),
@@ -634,6 +641,46 @@ mod tests {
         for distinct in [0x919, 0x954] {
             assert!(table(distinct).is_empty());
         }
+    }
+    #[test]
+    fn horned_drake_uses_only_the_reconstructed_ordered_public_pool_without_a_minimum() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected = [
+            (0.10, vec![0xa06, 0xa16, 0xa1c, 0xa3b, 0xa9c]),
+            (0.10, vec![0xa10, 0xa80, 0xad0]),
+            (0.03, vec![0xa22]),
+            (0.02, vec![0xa23]),
+            (
+                0.05,
+                vec![
+                    0xa0a, 0xa2f, 0xa32, 0xa43, 0xa53, 0xa58, 0xa63, 0xa68, 0xaa5, 0xaac, 0xab3,
+                    0xb1d, 0xb2f,
+                ],
+            ),
+        ];
+        let actual: Vec<_> = table(0x945)
+            .iter()
+            .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+            .collect();
+        assert_eq!(actual, expected);
+        let catalogue = collectibles(&content);
+        for (_, items) in expected {
+            for item in items {
+                let object = content.get(item).unwrap();
+                assert_eq!(object.class, "Equipment");
+                assert!(!object.soulbound && object.bag_type == 0);
+                assert!(catalogue.contains(&item));
+            }
+        }
+        let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(rewards(&content, 0x945, &mut misses).is_empty());
+        let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+        let first = rewards(&content, 0x945, &mut hits);
+        assert_eq!(first.len(), 1);
+        assert!(candidates(&content, Pick::Tier(5, WEAPONS)).contains(&first[0]));
+        assert!(!private(0x945));
+        assert!(bonus(0x945).is_empty());
+        assert!(table(0x946).is_empty());
     }
     #[test]
     fn collection_catalogue_covers_every_encounter_reward() {
