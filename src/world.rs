@@ -12,7 +12,7 @@ use std::{
         Arc,
         atomic::{AtomicI32, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
@@ -1142,6 +1142,7 @@ impl Directory {
         self.grants.retain(|_, grant| grant.expires > self.tick);
         for (id, world) in &mut self.worlds {
             world.step();
+            world.report_performance(*id);
             if *id > 0 && *id != self.endgame.active {
                 if world.players.is_empty() {
                     self.idle.entry(*id).or_insert(self.tick);
@@ -1226,10 +1227,11 @@ impl Handle {
                     scheduled = timer.tick() => {
                         if directory.clock.paused() { continue; }
                         let late=scheduled.elapsed().as_micros() as u64;
+                        let measuring=crate::performance::Measure::start();
                         let start=Instant::now(); directory.step();
                         let us=start.elapsed().as_micros() as u64;
                         directory.max_tick_us=directory.max_tick_us.max(us);
-                        directory.performance.record("step", start.elapsed());
+                        directory.performance.work("step", measuring);
                         directory.performance.record("scheduling_lateness", std::time::Duration::from_micros(late));
                         directory.diagnostic_ticks.push_back((start, us, late));
                         while directory.diagnostic_ticks.front().is_some_and(|(t, _, _)| t.elapsed().as_secs() > 120) { directory.diagnostic_ticks.pop_front(); }
@@ -1273,18 +1275,44 @@ impl Handle {
         f: impl FnOnce(&mut Directory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
-        let queued = Instant::now();
-        self.tx
-            .send(Box::new(move |d| {
-                d.performance.record("job_wait", queued.elapsed());
-                let started = Instant::now();
-                let result = f(d);
-                d.performance.record("job", started.elapsed());
-                let _ = tx.send(result);
-            }))
+        let request = crate::performance::REQUEST.try_with(Arc::clone).ok();
+        if let Some(r) = &request {
+            r.lock().expect("request timings poisoned").calls += 1;
+        }
+        let start = Instant::now();
+        let permit = self
+            .tx
+            .reserve()
             .await
             .map_err(|_| anyhow::anyhow!("world directory stopped"))?;
-        rx.await.context("world directory worker failed")?
+        let send_wait = start.elapsed();
+        let queued = Instant::now();
+        let work_request = request.clone();
+        permit.send(Box::new(move |d| {
+            let queue_wait = queued.elapsed();
+            d.performance.record("job_send_wait", send_wait);
+            d.performance.record("job_wait", queue_wait);
+            let started = crate::performance::Measure::start();
+            let result = f(d);
+            let measurement = started.finish();
+            d.performance.completed("job", measurement);
+            if let Some(r) = work_request {
+                let mut r = r.lock().expect("request timings poisoned");
+                r.completed += 1;
+                r.send_wait += send_wait;
+                r.queued += queue_wait;
+                r.work += measurement.wall;
+                if let Some(cpu) = measurement.cpu {
+                    *r.cpu.get_or_insert(Duration::ZERO) += cpu;
+                }
+            }
+            let _ = tx.send(result);
+        }));
+        let result = rx.await.context("world directory worker failed");
+        if let Some(r) = request {
+            r.lock().expect("request timings poisoned").round_trip += start.elapsed();
+        }
+        result?
     }
     pub async fn collect<T: Send + 'static>(
         &self,
@@ -2101,7 +2129,7 @@ impl World {
             .collect()
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
-        let started = Instant::now();
+        let started = crate::performance::Measure::start();
         let mut visible = self.visible(id);
         // The native minimap tracks players across this world, including outside explored terrain.
         visible.extend(self.players.keys().copied());
@@ -2131,10 +2159,17 @@ impl World {
             let mut o = Writer::new();
             o.i16(i16::try_from(tiles.len())?);
             let p = self.players.get_mut(&id).unwrap();
-            for (x, y, ground) in tiles {
+            for &(x, y, ground) in &tiles {
                 p.tiles.insert((x, y));
                 p.character.tiles += 1;
                 o.i16(x).i16(y).u8(ground);
+            }
+            if !tiles.is_empty() {
+                let adding = crate::performance::Measure::start();
+                p.view_tiles
+                    .borrow_mut()
+                    .discover(&self.map, &self.content, &tiles, p.tiles.len());
+                self.performance.borrow_mut().work("terrain_update", adding);
             }
             o.i16(added.len() as i16);
             for entity in added {
@@ -2167,9 +2202,7 @@ impl World {
             send(p, 34, out.0);
             tracing::debug!(player = id, quest, "native quest target updated");
         }
-        self.performance
-            .borrow_mut()
-            .record("visibility", started.elapsed());
+        self.performance.borrow_mut().work("visibility", started);
         Ok(())
     }
     #[cfg(test)]
@@ -4450,7 +4483,7 @@ impl World {
         packets
     }
     pub fn step(&mut self) {
-        let started = Instant::now();
+        let started = crate::performance::Measure::start();
         self.now += 50;
         self.tick += 1;
         self.expire_consumable_boosts();
@@ -4564,13 +4597,13 @@ impl World {
                 }
             }
         }
-        let population_started = Instant::now();
+        let population_started = crate::performance::Measure::start();
         if let Err(error) = self.repopulate() {
             tracing::error!(%error,"Realm population replenishment failed");
         }
         self.performance
             .borrow_mut()
-            .record("population", population_started.elapsed());
+            .work("population", population_started);
         let expired: Vec<_> = self
             .bag_expiry
             .iter()
@@ -4587,7 +4620,7 @@ impl World {
             self.remove_entity(id);
             tracing::debug!(entity = id, "expired transient or empty container removed");
         }
-        let mechanics_started = Instant::now();
+        let mechanics_started = crate::performance::Measure::start();
         self.mechanic_expiry();
         self.abyss_step();
         self.ground_step();
@@ -4596,12 +4629,10 @@ impl World {
         self.ability_step();
         self.performance
             .borrow_mut()
-            .record("mechanics", mechanics_started.elapsed());
-        let npc_started = Instant::now();
+            .work("mechanics", mechanics_started);
+        let npc_started = crate::performance::Measure::start();
         let shots = self.npc_step();
-        self.performance
-            .borrow_mut()
-            .record("npc", npc_started.elapsed());
+        self.performance.borrow_mut().work("npc", npc_started);
         self.grenade_step();
         for id in &ids {
             if let Err(e) = self.updates(*id, false) {
@@ -4815,15 +4846,23 @@ impl World {
                 p.tick += 1;
             }
         }
-        let mut performance = self.performance.borrow_mut();
-        performance.record("step", started.elapsed());
-        if let Some(timings) = performance.report() {
-            tracing::info!(world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
+        self.performance.borrow_mut().work("step", started);
+    }
+    fn report_performance(&self, world_id: i32) {
+        if let Some(timings) = self.performance.borrow_mut().report() {
+            tracing::info!(world_id,world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
+                bullets=self.bullets.len(),spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
+                pending_shoot_acks=self.players.values().map(|p|p.shoot_acks.len()).sum::<usize>(),
+                weapon_tick_records=self.players.values().map(|p|p.weapon_ticks.len()).sum::<usize>(),
                 humans=self.players.values().filter(|p| p.controller==Controller::Human).count(),
                 bots=self.players.values().filter(|p| p.controller==Controller::Autonomous).count(),
                 qa_actors=self.players.values().filter(|p| p.controller==Controller::Qa).count(),
                 discovered_tiles=self.players.values().map(|p|p.tiles.len()).sum::<usize>(),
                 cached_view_tiles=self.players.values().map(|p|p.view_tiles.borrow().tiles.len()).sum::<usize>(),
+                cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.capacity()*std::mem::size_of::<view::Tile>()).sum::<usize>(),
+                terrain_rebuilds=self.players.values().map(|p|p.view_tiles.borrow().rebuilds).sum::<u64>(),
+                incremental_terrain_tiles=self.players.values().map(|p|p.view_tiles.borrow().incremental_tiles).sum::<u64>(),
+                cloned_snapshot_tiles=self.players.values().map(|p|p.view_tiles.borrow().cloned_snapshot_tiles).sum::<u64>(),
                 timings=%timings,"world performance");
         }
     }
@@ -4997,6 +5036,33 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn command_scope_measures_world_requests_without_charging_sleep_as_cpu() {
+        let handle = Handle::spawn(directory());
+        handle.clock.set_paused(true);
+        let requests = Arc::new(std::sync::Mutex::new(
+            crate::performance::Requests::default(),
+        ));
+        crate::performance::REQUEST
+            .scope(
+                requests.clone(),
+                handle.directory(|_| {
+                    std::thread::sleep(Duration::from_millis(30));
+                    Ok(())
+                }),
+            )
+            .await
+            .unwrap();
+        let r = requests.lock().unwrap();
+        assert_eq!((r.calls, r.completed), (1, 1));
+        assert!(r.work >= Duration::from_millis(30));
+        assert!(r.round_trip >= r.work + r.queued + r.send_wait);
+        if cfg!(target_os = "linux") {
+            assert!(r.cpu.unwrap() < r.work / 2);
+        } else {
+            assert!(r.cpu.is_none());
+        }
     }
     #[test]
     fn directory_routes_and_global_identities_do_not_alias() {
