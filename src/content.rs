@@ -706,6 +706,25 @@ impl Map {
 mod tests {
     use super::*;
     #[test]
+    fn selected_legacy_sounds_are_present() {
+        let xml = std::fs::read_to_string("data/objects.xml").unwrap();
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let sounds: std::collections::BTreeSet<_> = doc
+            .descendants()
+            .filter(|node| node.has_tag_name("OldSound"))
+            .filter_map(|node| node.text())
+            .collect();
+        assert!(!sounds.is_empty());
+        for sound in sounds {
+            let path = Path::new("data/sfx").join(format!("{sound}.mp3"));
+            let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+                panic!("missing selected sound {}: {error}", path.display())
+            });
+            assert!(!bytes.is_empty(), "empty selected sound {}", path.display());
+        }
+    }
+
+    #[test]
     fn client_data_identity() {
         let c = Content::load(Path::new("data")).unwrap();
         let w = c.get(WIZARD).unwrap();
