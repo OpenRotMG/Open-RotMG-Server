@@ -193,6 +193,9 @@ impl World {
         elapsed: u64,
     ) -> Result<()> {
         let target = target.into();
+        if self.entities[&id].kind == crate::dungeon::snake::BOSS {
+            return self.snake_mechanics(id, elapsed);
+        }
         if crate::dungeon::trench::ROSTER.contains(&self.entities[&id].kind) {
             return self.ocean_mechanics(id, target, elapsed);
         }
@@ -254,7 +257,6 @@ impl World {
             }
         }
         let shield = match kind {
-            0x917 => elapsed % 6000 >= 2000,
             0xd06 => {
                 elapsed % 43300 < 2000
                     || self.entities[&id].reaction_until > self.now
@@ -268,7 +270,7 @@ impl World {
         let phase_bits =
             condition::bit(condition::INVULNERABLE) | condition::bit(condition::ARMORED);
         let e = self.entities.get_mut(&id).unwrap();
-        if matches!(kind, 0x917 | 0xd06..=0xd0a | 0xd90) {
+        if matches!(kind, 0xd06..=0xd0a | 0xd90) {
             e.condition &= !phase_bits;
             if shield {
                 e.condition |= condition::bit(condition::INVULNERABLE);
@@ -299,7 +301,6 @@ impl World {
                     }
                     tracing::debug!(entity = id, "Goblin horde commanded by wounded mage");
                 }
-                0x917 if stage == 1 => self.spawn_children(id, 0x919, 8, 3.)?,
                 0xd06 if stage % 5 == 3 => {
                     for radius in [9.5, 14.] {
                         for (kind, degrees) in
@@ -346,7 +347,6 @@ impl World {
             + match kind {
                 0x173 | 0xdae => 5000,
                 0x654 => 3000,
-                0x917 => 500,
                 _ => 1000,
             };
         match kind {
@@ -356,9 +356,6 @@ impl World {
             }
             0x654 if target.is_some_and(|p| pos.distance(p) < 8.) => {
                 self.throw_grenade(id, target.unwrap(), 4., 150)?
-            }
-            0x917 if stage == 2 && target.is_some_and(|p| pos.distance(p) <= 10.) => {
-                self.throw_grenade(id, target.unwrap(), 5., 100)?
             }
             0xd06 if stage % 5 == 4 => {
                 self.spawn_children(id, 0x625, 1, 2.)?;

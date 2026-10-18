@@ -43,12 +43,30 @@ fn snake_pit_native_move_rejects_full_occupy_floor_margin() {
     let map = Arc::new(crate::dungeon::snake_pit(&content, 1).unwrap());
     let mut w = World::new(content, map).unwrap();
     let id = w.enter(ch(&w), None).unwrap();
-    let gap = Pos { x: 10.25, y: 75.5 };
-    assert_eq!(w.map.cell(9., 75.).unwrap().object, Some(0x1ed));
+    let (start, gap) = w
+        .entities
+        .values()
+        .filter(|e| w.content.objects[&e.kind].full_occupy)
+        .find_map(|e| {
+            let start = Pos {
+                x: e.pos.x + 1.,
+                y: e.pos.y,
+            };
+            let gap = Pos {
+                x: start.x - 0.25,
+                y: start.y,
+            };
+            (w.player_position_valid(None, start)
+                && w.walkable(gap)
+                && !w.player_position_valid(None, gap))
+            .then_some((start, gap))
+        })
+        .expect("generated Snake Pit must have a full-occupy wall margin");
+    w.players.get_mut(&id).unwrap().pos = start;
     assert!(w.walkable(gap));
     let received = w.attack_epoch + Duration::from_millis(100);
     assert!(w.native_move_received(id, gap, (100, received)).is_err());
-    assert_eq!(w.players[&id].pos.x, 15.5);
+    assert_eq!(w.players[&id].pos.x, start.x);
 }
 
 fn open_world() -> World {

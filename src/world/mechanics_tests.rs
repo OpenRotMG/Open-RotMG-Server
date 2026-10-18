@@ -60,21 +60,22 @@ fn selected_boss_shields_summons_corners_and_cleanup_are_bounded() {
     let mut w = arena();
     let pos = center(&w);
     let stheno = w.spawn_entity(0x917, pos, vec![]).unwrap();
-    w.encounter_mechanics(stheno, pos, 2000).unwrap();
+    w.encounter_mechanics(stheno, pos, 1000).unwrap();
     assert_ne!(
         w.entities[&stheno].conditions(w.now)
             & crate::condition::bit(crate::condition::INVULNERABLE),
         0
     );
-    w.encounter_mechanics(stheno, pos, 6000).unwrap();
+    w.encounter_mechanics(stheno, pos, 2000).unwrap();
     assert_eq!(
         w.entities[&stheno].conditions(w.now)
             & crate::condition::bit(crate::condition::INVULNERABLE),
         0
     );
-    w.entities.get_mut(&stheno).unwrap().hp = 5000;
-    w.encounter_mechanics(stheno, pos, 6100).unwrap();
-    w.encounter_mechanics(stheno, pos, 6150).unwrap();
+    for elapsed in (8000..14000).step_by(750) {
+        w.now = elapsed;
+        w.encounter_mechanics(stheno, pos, elapsed).unwrap();
+    }
     assert_eq!(
         w.entities
             .values()
@@ -86,6 +87,8 @@ fn selected_boss_shields_summons_corners_and_cleanup_are_bounded() {
     w.mechanic_expiry();
     assert!(w.entities.is_empty());
 
+    let mut w = arena();
+    let pos = center(&w);
     let limon = w.spawn_entity(0xd06, pos, vec![]).unwrap();
     w.encounter_mechanics(limon, pos, 12300).unwrap();
     assert_eq!(

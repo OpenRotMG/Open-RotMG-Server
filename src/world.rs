@@ -115,6 +115,9 @@ mod reconciliation;
 #[cfg(test)]
 mod reconciliation_tests;
 mod resurrection;
+mod snake;
+#[cfg(test)]
+mod snake_tests;
 pub use reconciliation::{NativeInput, RejectedNativeShot};
 mod progression;
 #[cfg(test)]
@@ -781,7 +784,10 @@ impl Directory {
                 };
                 Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
             } else if template == "snake-pit" {
-                Arc::new(crate::dungeon::snake_pit(&self.content, rand::random())?)
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::snake_pit(&self.content, seed)?)
             } else {
                 self.templates
                     .get(template)
@@ -973,6 +979,7 @@ impl Directory {
         };
         let destination = match kind {
             0x712 if origin == -2 && portal == Some(self.realm_portal) => self.initial(-3)?,
+            0x703 if world.name == "Snake Pit" => self.initial(-3)?,
             0x703 | 0x70d | 0x712 | 0x71d => -2,
             0x704 | 0x70e | 0x71c => self.initial(-3)?,
             0x720 => self.instance("vault", Some(account))?,
@@ -1342,6 +1349,7 @@ impl World {
                         size: o.size,
                         condition: crate::dungeon::abyss::initial_condition(kind)
                             | crate::dungeon::spider::initial_condition(kind)
+                            | crate::dungeon::snake::initial_condition(kind)
                             | if o.stasis_immune {
                                 crate::condition::bit(crate::condition::STASIS_IMMUNE)
                             } else {
@@ -1566,6 +1574,7 @@ impl World {
                 size: definition.size,
                 condition: crate::dungeon::abyss::initial_condition(kind)
                     | crate::dungeon::spider::initial_condition(kind)
+                    | crate::dungeon::snake::initial_condition(kind)
                     | (if kind == 0x91a {
                         crate::condition::bit(crate::condition::INVULNERABLE)
                     } else {
@@ -3638,6 +3647,8 @@ impl World {
             if self.clear_exit.is_none() {
                 let kind = if defeated.kind == crate::dungeon::abyss::MALPHAS {
                     0x71c
+                } else if defeated.kind == crate::dungeon::snake::BOSS {
+                    0x704
                 } else {
                     0x71d
                 };
@@ -4310,7 +4321,6 @@ impl World {
             };
             let interval = match kind {
                 0x633 if elapsed % 10000 >= 5000 => 500,
-                0x917 if !(1875..3750).contains(&self.entities[&id].hp) => 1000,
                 0xd06 if elapsed % 43300 >= 32300 => 1300,
                 0xd06 if elapsed % 43300 >= 12300 => 500,
                 0xd90 if (elapsed / 13000) % 4 == 1 => 2000,

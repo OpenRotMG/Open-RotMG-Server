@@ -319,13 +319,20 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
         }
         0x906 | 0x907 if hp < 400 => vec![ring(0, 8, 50, 0.).fixed(0.)],
         0x917 => {
-            state = super::stage(kind, hp, elapsed);
-            match state {
-                1 => vec![],
-                2 => vec![ring(1, 8, 500, 10.)],
-                _ => (0..4)
-                    .map(|i| fan(0, 2, 10., 1000, 0.).fixed(i as f32 * std::f32::consts::FRAC_PI_2))
-                    .collect(),
+            (state, age) = crate::dungeon::snake::phase(elapsed);
+            match state % 3 {
+                0 => vec![
+                    fan(0, 2, 10., 1000, 10.).offset(45.),
+                    fan(0, 1, 0., 1000, 10.).offset(135.),
+                    fan(0, 1, 0., 1000, 10.).offset(225.),
+                    fan(0, 2, 10., 1000, 10.).offset(315.),
+                ],
+                1 => vec![
+                    fan(0, 1, 0., 1000, 10.).enabled(age < 16000),
+                    fan(0, 1, 0., 1000, 10.).offset(90.).enabled(age < 16000),
+                    fan(0, 1, 0., 1000, 10.).offset(270.).enabled(age < 16000),
+                ],
+                _ => vec![ring(1, 6, 500, 10.), Attack::grenade(2.5, 100, 1000, 10.)],
             }
         }
         0xd06 => {
