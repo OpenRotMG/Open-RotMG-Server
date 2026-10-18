@@ -63,6 +63,7 @@ fn complete_pack_is_seeded_sourced_distributed_and_regionally_bounded() {
         };
         assert_eq!(sites(w), sites(&b.worlds[&-3]));
         assert_budgets(w);
+        assert!(w.critical_deaths.is_empty());
         assert_eq!(w.hero_identities().len(), 14);
         for terrain in 1..=12 {
             assert!(w.population_count(terrain) >= w.population_regions[terrain as usize].target);
@@ -157,6 +158,7 @@ fn every_family_reinforces_on_its_role_clock_without_duplicate_ids() {
         assert_ne!(old, new);
         w.repopulate().unwrap();
         assert_eq!(w.population[slot].entity, Some(new));
+        assert_budgets(w);
     }
 }
 
