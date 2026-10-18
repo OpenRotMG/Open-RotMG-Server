@@ -3912,6 +3912,15 @@ impl World {
         Ok(())
     }
     fn move_entity(&mut self, id: i32, goal: Pos, distance: f32) -> Result<()> {
+        self.move_entity_colliding(id, goal, distance, false)
+    }
+    fn move_entity_colliding(
+        &mut self,
+        id: i32,
+        goal: Pos,
+        distance: f32,
+        slide: bool,
+    ) -> Result<()> {
         let old = self.entities[&id].pos;
         let length = old.distance(goal);
         if length <= 0.001 {
@@ -3924,17 +3933,64 @@ impl World {
             y: old.y + (goal.y - old.y) / length * distance,
         };
         let samples = (distance / 0.1).ceil().max(1.) as usize;
-        ensure!(
-            (1..=samples).all(|i| self.ocean_walkable(
-                self.entities[&id].kind,
+        let step = Pos {
+            x: (pos.x - old.x) / samples as f32,
+            y: (pos.y - old.y) / samples as f32,
+        };
+        let kind = self.entities[&id].kind;
+        let mut resolved = old;
+        for i in 1..=samples {
+            let next = if slide {
                 Pos {
-                    x: old.x + (pos.x - old.x) * i as f32 / samples as f32,
-                    y: old.y + (pos.y - old.y) * i as f32 / samples as f32
+                    x: resolved.x + step.x,
+                    y: resolved.y + step.y,
                 }
-            )),
-            "NPC movement crosses a blocked tile"
+            } else {
+                Pos {
+                    x: old.x + step.x * i as f32,
+                    y: old.y + step.y * i as f32,
+                }
+            };
+            let horizontal = Pos {
+                x: next.x,
+                y: resolved.y,
+            };
+            let vertical = Pos {
+                x: resolved.x,
+                y: next.y,
+            };
+            let x_clear = self.ocean_walkable(kind, horizontal);
+            let y_clear = self.ocean_walkable(kind, vertical);
+            if self.ocean_walkable(kind, next) && (!slide || x_clear || y_clear) {
+                resolved = next;
+            } else if slide {
+                // Wall contact removes the blocked component, not the entire movement step.
+                resolved = if x_clear && (!y_clear || step.x.abs() >= step.y.abs()) {
+                    horizontal
+                } else if y_clear {
+                    vertical
+                } else {
+                    break;
+                };
+            } else {
+                bail!("NPC movement crosses a blocked tile");
+            }
+        }
+        ensure!(
+            distance == 0. || resolved.distance(old) > 0.,
+            "NPC movement blocked on both axes"
         );
-        self.position_entity(id, pos)
+        if slide && resolved.distance(pos) > 0.001 {
+            tracing::debug!(
+                entity = id,
+                kind,
+                ?old,
+                ?pos,
+                ?resolved,
+                "NPC movement projected along obstacle"
+            );
+        }
+        self.position_entity(id, resolved)
     }
     fn position_entity(&mut self, id: i32, pos: Pos) -> Result<()> {
         ensure!(
@@ -4445,7 +4501,12 @@ impl World {
             } else {
                 speed / 1.5 * 0.05
             };
-            if let Err(error) = self.move_entity(id, goal, distance) {
+            if let Err(error) = self.move_entity_colliding(
+                id,
+                goal,
+                distance,
+                !matches!(motion, Motion::Charge { .. } | Motion::StrictOrbit { .. }),
+            ) {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.goal = None;
                 e.last_step = Pos { x: 0., y: 0. };
