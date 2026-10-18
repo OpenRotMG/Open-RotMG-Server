@@ -105,7 +105,14 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                 } else {
                     assert_eq!(saved.items, before.items);
                 }
-                let mut other = tests::ch(&w);
+                // XP witnesses belong in a shared world, not the source account's private Vault.
+                let mut reward_world = tests::world();
+                let id = reward_world
+                    .enter(w.players[&id].character.clone(), None)
+                    .unwrap();
+                let w = &mut reward_world;
+                let pos = w.players[&id].pos;
+                let mut other = tests::ch(w);
                 other.account = account + 1;
                 other.id = before.id + 1;
                 let witness = w
