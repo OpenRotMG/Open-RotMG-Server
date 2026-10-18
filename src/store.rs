@@ -979,21 +979,25 @@ fn read_presentation(
         "invalid account fame wallet"
     );
     let mut best_fame = BTreeMap::<u16, i32>::new();
-    let mut q = db.prepare("SELECT d.character,d.snapshot FROM deaths d JOIN characters c ON c.id=d.character WHERE c.account=?1")?;
+    // SQL owns live identities; a committed death's immutable snapshot remains authoritative.
+    let mut q = db.prepare("SELECT c.id,CASE WHEN d.character IS NULL THEN json_set(c.stats,'$.id',c.id,'$.account',c.account) ELSE d.snapshot END,d.character IS NOT NULL FROM characters c LEFT JOIN deaths d ON d.character=c.id WHERE c.account=?1")?;
     for row in q.query_map([account], |r| {
-        Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?))
+        Ok((
+            r.get::<_, i32>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, bool>(2)?,
+        ))
     })? {
-        let (id, raw) = row?;
+        let (id, raw, committed_death) = row?;
         let ch = decode_character(&raw, legacy_base)
-            .with_context(|| format!("decode committed death {id}"))?;
+            .with_context(|| format!("decode saved class record {id}"))?;
         let class = classes
             .get(&ch.class)
-            .with_context(|| format!("unknown class in committed death {id}"))?;
+            .with_context(|| format!("unknown class in saved class record {id}"))?;
         ensure!(
             ch.id == id
                 && ch.account == account
-                && !ch.alive
-                && ch.hp == 0
+                && (!committed_death || (!ch.alive && ch.hp == 0))
                 && ch.fame >= 0
                 && (1..=20).contains(&ch.level)
                 && ch.items.len() == 12
@@ -1002,7 +1006,7 @@ fn read_presentation(
                     .iter()
                     .zip(class.caps)
                     .all(|(value, cap)| *value >= 0 && *value <= cap),
-            "invalid committed death {id}"
+            "invalid saved class record {id}"
         );
         let best = best_fame.entry(ch.class).or_default();
         *best = (*best).max(ch.fame);

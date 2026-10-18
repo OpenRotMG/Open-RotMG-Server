@@ -1,6 +1,6 @@
 # Recovered data
 
-Selected `objects.xml`/`grounds.xml` and map assets remain third-party material; the backend license does not relicense them. `sfx/music/sorc.mp3` is the selected client's requested track, recovered unchanged from moistosaurus/realm-src `1855c017eab870d13f0b61b1cf0b9e66a01922ff`, `common/resources/web/music/sorc.mp3` (see `REALM-SRC-LICENSE`); The four legacy weapon clips in `sfx/` are unchanged files from that pin's `common/resources/web/sfx/`. No separate audio-rights grant is claimed.
+Selected `objects.xml`/`grounds.xml` and map assets remain third-party material; the backend license does not relicense them. `sfx/music/sorc.mp3` is the selected client's requested track, recovered unchanged from moistosaurus/realm-src `1855c017eab870d13f0b61b1cf0b9e66a01922ff`, `common/resources/web/music/sorc.mp3` (see `REALM-SRC-LICENSE`); The non-music MP3 clips in `sfx/` are unchanged files from that pin's `common/resources/web/sfx/`. No separate audio-rights grant is claimed.
 
 **Map candidates, not authenticated official 123.5.1 layouts:**
 - Tutorial, Nexus, Limbo and Vault: trapped/rotmg_svr at `593e490803fe0ad168ead408cacd5287d778acfe`. The old 96×96 shore crop remains a reference. Live Realms select a prepared 2048×2048 layout from `realm-catalog.json` per creation; see `FSOD-NOTICE` and `realms/NOTICE`. The procedural island is now only a unit-test fixture.

@@ -835,7 +835,14 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::Resume => {resume(a,t).await?;Ok(json!({"paused":false}))},
         Command::NativeSync{actors} => native_sync(a,t,actors).await,
         Command::NativeState{actors} => native_state(a,t,actors).await,
-        Command::NativeLease{owner,operation,actors} => native_lease(a,t,owner,operation,actors).await,
+        Command::NativeLease{owner,operation,actors} => {
+            let started = Instant::now();
+            let requests = Arc::new(Mutex::new(crate::performance::Requests::default()));
+            tracing::info!(request=id,%operation,"native control request received");
+            let result = crate::performance::REQUEST.scope(requests.clone(),native_lease(a,t,owner,operation,actors)).await;
+            tracing::info!(request=id,elapsed_ms=started.elapsed().as_secs_f64()*1000.,world_requests=%requests.lock().expect("request timings poisoned").snapshot(),error=?result.as_ref().err(),"native control request completed");
+            result
+        },
         Command::Pause{native_paused,native_sessions} => {pause(a,&native_paused,&native_sessions).await?;Ok(json!({"paused":true,"native_paused":native_paused}))},
         Command::Act{actor,action,duration_ms,pause_after} => {
             let spec=t.registration(actor)?;

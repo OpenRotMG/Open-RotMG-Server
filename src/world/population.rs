@@ -173,6 +173,25 @@ fn member_positions(center: Pos, terrain: u8) -> Vec<Pos> {
         .collect()
 }
 impl World {
+    pub(super) fn camp_members(&self, camp: usize) -> impl Iterator<Item = &Entity> {
+        let c = self.camps.get(camp).expect("ordinary camp index missing");
+        self.population[c.start..c.start + c.family.size()]
+            .iter()
+            .enumerate()
+            .filter_map(move |(offset, slot)| {
+                assert_eq!(slot.camp, Some(camp), "population camp range changed");
+                slot.entity.map(|id| {
+                    let e = self.entities.get(&id).expect("live camp member missing");
+                    assert_eq!(e.camp, Some(camp), "entity camp ownership changed");
+                    assert_eq!(
+                        e.population_slot,
+                        Some(c.start + offset),
+                        "entity population slot changed"
+                    );
+                    e
+                })
+            })
+    }
     pub(super) fn camp_member(&self, id: i32, kind: u16) -> Result<Option<i32>> {
         let e = self
             .entities
