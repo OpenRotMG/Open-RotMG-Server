@@ -463,6 +463,7 @@ async fn guild_overflow_rolls_back_the_death_and_missing_current_state_fails_clo
             .to_string()
             .contains("restore reviewed guild state")
     );
+    crate::store::vaults::legacy_fixture(&db).unwrap();
     db.execute_batch("DROP TABLE guilds; PRAGMA user_version=8;")
         .unwrap();
     let migrated = Store::open(&path, &c).unwrap();
@@ -471,7 +472,7 @@ async fn guild_overflow_rolls_back_the_death_and_missing_current_state_fails_clo
     let version: i32 = db
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
     drop(migrated);
     drop(db);
     std::fs::remove_file(path).unwrap();

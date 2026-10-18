@@ -417,7 +417,7 @@ mod tests {
                     revision: plan.revision,
                     items: plan.items.clone(),
                 }],
-                None,
+                Vec::new(),
             )
             .await
             .unwrap()[0];
@@ -551,7 +551,7 @@ mod tests {
             .unwrap();
         assert!(ids.iter().all(|id| w.players[id].pending));
         assert_eq!(w.players[&ids[0]].character.items[4], 0xa22);
-        let revisions = store.exchange(writes(&plan), None).await.unwrap();
+        let revisions = store.exchange(writes(&plan), Vec::new()).await.unwrap();
         w.finish_trade(plan, Ok(revisions)).unwrap();
         assert!(w.trade_key(ids[0]).is_none());
         assert_eq!(w.players[&ids[0]].character.items[4], 0xa97);
@@ -576,7 +576,7 @@ mod tests {
         p.character.hp = 0;
         p.death_pending = true;
         assert!(w.pending_deaths().is_empty());
-        let revisions = store.exchange(writes(&plan), None).await.unwrap();
+        let revisions = store.exchange(writes(&plan), Vec::new()).await.unwrap();
         w.finish_trade(plan, Ok(revisions)).unwrap();
         let departed = w.begin_departure(ids[0]).unwrap().unwrap();
         assert_eq!(departed.items[4], 0xa97);
@@ -622,11 +622,11 @@ mod tests {
                     revision: second.revision,
                     items: w.players[&second.player].character.items.clone(),
                 }],
-                None,
+                Vec::new(),
             )
             .await
             .unwrap();
-        let result = store.exchange(writes(&plan), None).await;
+        let result = store.exchange(writes(&plan), Vec::new()).await;
         assert!(result.is_err());
         assert!(w.finish_trade(plan, result).is_err());
         for id in ids {
@@ -646,7 +646,7 @@ mod tests {
             .accept_trade(ids[1], offers[1], offers[0])
             .unwrap()
             .unwrap();
-        let revisions = store.exchange(writes(&plan), None).await.unwrap();
+        let revisions = store.exchange(writes(&plan), Vec::new()).await.unwrap();
         let missing = plan.plans[0].player;
         let survivor = plan.plans[1].player;
         w.players.remove(&missing);

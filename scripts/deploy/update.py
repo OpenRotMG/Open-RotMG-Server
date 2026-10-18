@@ -95,7 +95,15 @@ def rows(path):
 
 
 def verify_migration(before, after):
-    # The release backup contract validates additions; existing cells must stay exact.
+    # Only old lazy Vaults gain intentionally provisioned rows; current paid state is never repaired.
+    if 'vaults' in before and all('vault_mask' not in row for row in before.get('accounts', [])):
+        existing = {row['account'] for row in before['vaults']}
+        expected = [{**row, 'chest': 0} for row in before['vaults']]
+        expected += [{'account': row['id'], 'chest': 0, 'items': '[-1,-1,-1,-1,-1,-1,-1,-1]', 'revision': 0}
+                     for row in before.get('accounts', []) if row['id'] not in existing]
+        require(sorted(after.get('vaults', []), key=lambda row: row['account'])
+                == sorted(expected, key=lambda row: row['account']), 'Vault migration changed stored items or ownership')
+        before = {**before, 'vaults': sorted(expected, key=lambda row: row['account'])}
     require(all(table in after and len(data) == len(after[table])
                 and all(a.items() <= b.items() for a, b in zip(data, after[table]))
                 for table, data in before.items()), 'Migration changed existing records')

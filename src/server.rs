@@ -615,6 +615,26 @@ fn slot(r: &mut Reader<'_>) -> Result<Slot> {
     })
 }
 pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
+    if let Some(purchase) = &plan.vault_purchase {
+        let _gold = a.gold_updates.lock().await;
+        let result = a
+            .store
+            .purchase_vault(
+                InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                },
+                purchase.chest,
+            )
+            .await;
+        return a
+            .world
+            .for_player(plan.player)
+            .call(move |w| w.finish_vault_purchase(plan, result))
+            .await;
+    }
     if let Some((_, purchase)) = &plan.purchase {
         let _gold = a.gold_updates.lock().await;
         let result = a
@@ -662,7 +682,7 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                     items: plan.items.clone(),
                 },
                 (slot.object == plan.player).then_some(slot.slot),
-                plan.vault.clone(),
+                plan.vaults.clone(),
             )
             .await
     } else if let Some((slot, tex1, tex2)) = plan.appearance {
@@ -686,7 +706,7 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 (slot.object == plan.player).then_some(slot.slot),
                 *index,
                 *amount,
-                plan.vault.clone(),
+                plan.vaults.clone(),
             )
             .await
     } else {
@@ -698,7 +718,7 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                     revision: plan.revision,
                     items: plan.items.clone(),
                 }],
-                plan.vault.clone(),
+                plan.vaults.clone(),
                 plan.collected,
             )
             .await
@@ -763,7 +783,7 @@ async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
             items: p.items.clone(),
         })
         .collect();
-    let result = a.store.exchange(writes, None).await;
+    let result = a.store.exchange(writes, Vec::new()).await;
     a.world
         .for_player(id)
         .call(move |w| w.finish_trade(plan, result))
@@ -970,7 +990,7 @@ async fn handle(
                 lost: lost.clone(),
             };
             let vault = if a.world.call(|w| Ok(w.name == "Vault")).await? {
-                Some(a.store.vault(account).await?)
+                Some(a.store.vaults(account).await?)
             } else {
                 None
             };
@@ -986,7 +1006,7 @@ async fn handle(
                 a.world
                     .call(move |w| {
                         if let Some(vault) = vault {
-                            w.load_vault(vault)?;
+                            w.load_vaults(vault)?;
                         }
                         let id = w.enter_at(
                             ch,

@@ -933,12 +933,12 @@ async fn giant_crab_defeat_pickup_is_committed_once_and_survives_reopen() {
         items: plan.items.clone(),
     };
     let revisions = store
-        .exchange_collected(vec![write.clone()], None, plan.collected)
+        .exchange_collected(vec![write.clone()], Vec::new(), plan.collected)
         .await
         .unwrap();
     assert!(
         store
-            .exchange_collected(vec![write], None, plan.collected)
+            .exchange_collected(vec![write], Vec::new(), plan.collected)
             .await
             .is_err()
     );

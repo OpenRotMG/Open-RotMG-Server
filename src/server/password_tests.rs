@@ -122,7 +122,7 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
         .unwrap();
     character.exp = 7;
     app.store.progress(character.clone()).await.unwrap();
-    app.store.vault(account).await.unwrap();
+    app.store.vault(account, 0).await.unwrap();
     app.store.compete(account).await.unwrap();
     let token = recovery(&app, account).await;
     app.store.issue_recovery_code(account).await.unwrap();

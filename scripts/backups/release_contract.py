@@ -29,6 +29,12 @@ def check(binary, data, directory, revision):
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
     if backup.snapshot(restored / 'game.db', backup.RELOADED_GAME) != bundle['game']:
         raise RuntimeError('Release loading changed restored gameplay records')
+    result = subprocess.run([str(binary), '--backup-exercise-vault', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError('Release restored vault exercise failed: ' + result.stderr.strip())
+    if json.loads(result.stdout) != {'exercised_vault_chests': 2, 'transfers': 1, 'withdrawals': 1, 'deposits': 1, 'items_conserved': True}:
+        raise RuntimeError('Release restored vault exercise returned an invalid receipt')
+    subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
     print(json.dumps({'event': 'release_backup_contract_passed', 'revision': revision}))
 
 

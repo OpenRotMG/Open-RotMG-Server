@@ -210,7 +210,7 @@ async fn xp_booster_shop_loads_real_stock_and_commits_only_funded_current_purcha
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    None,
+                    Vec::new(),
                 )
                 .await
                 .unwrap()[0];
@@ -254,7 +254,7 @@ async fn xp_booster_shop_loads_real_stock_and_commits_only_funded_current_purcha
                             revision: before.revision,
                             items: before.items.clone(),
                         }],
-                        None,
+                        Vec::new(),
                     )
                     .await
                     .unwrap();
@@ -353,5 +353,106 @@ async fn xp_booster_shop_loads_real_stock_and_commits_only_funded_current_purcha
             depart(&a, id).await.unwrap();
         }
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn closed_vault_buy_packet_commits_paid_storage_before_native_success() {
+    let (dir, mut a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let account = a
+        .store
+        .register(
+            "vault-packet-buyer".into(),
+            "vault-packet@example.test".into(),
+            "test-password".into(),
+        )
+        .await
+        .unwrap();
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    db.execute("UPDATE accounts SET credits=1000 WHERE id=?1", [account])
+        .unwrap();
+    let ch = a
+        .store
+        .create(account, a.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let character = ch.id;
+    let world = a
+        .world
+        .directory(move |d| d.instance("vault", Some(account)))
+        .await
+        .unwrap();
+    a.world = a.world.in_world(world);
+    let vault = a.store.vault(account, 0).await.unwrap();
+    let presentation = a.store.presentation(account).await.unwrap();
+    let (tx, mut rx) = mpsc::channel(128);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let output = crate::world::Output {
+        packets: tx.clone(),
+        lost: lost.clone(),
+    };
+    let (id, seller) = a
+        .world
+        .call(move |w| {
+            w.load_vaults(vec![vault])?;
+            assert_eq!(w.entities.values().filter(|e| e.kind == 0x504).count(), 1);
+            assert_eq!(
+                w.entities.values().filter(|e| e.kind == 0x505).count(),
+                19,
+                "nineteen native closed chests must be offered"
+            );
+            let seller = w.entities.values().find(|e| e.kind == 0x505).unwrap();
+            let (seller, pos) = (seller.id, seller.pos);
+            let id = w.enter_at(ch, Some(output), Some(pos), presentation)?;
+            w.players.get_mut(&id).unwrap().known.insert(seller);
+            Ok((id, seller))
+        })
+        .await
+        .unwrap();
+    let mut owner = a.claim(account).unwrap();
+    owner.registered = true;
+    let mut session = Session {
+        account: Some(owner),
+        player: Some(id),
+        ..Default::default()
+    };
+    for (target, success) in [(seller, true), (seller, false), (-1, false)] {
+        let mut body = Writer::new();
+        body.i32(target);
+        handle(
+            &mut a,
+            Packet {
+                id: 50,
+                body: body.0,
+            },
+            &mut session,
+            &tx,
+            &lost,
+            std::time::Instant::now(),
+        )
+        .await
+        .unwrap();
+        let packet = std::iter::from_fn(|| rx.try_recv().ok())
+            .find(|p| p.id == 27)
+            .unwrap();
+        assert_eq!(
+            Reader::new(&packet.body).i32().unwrap(),
+            i32::from(!success)
+        );
+        assert_eq!(a.store.presentation(account).await.unwrap().credits, 500);
+        assert_eq!(a.store.load(account, character).await.unwrap().revision, 1);
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM vaults WHERE account=?1",
+                [account],
+                |r| r.get::<_, i32>(0)
+            )
+            .unwrap(),
+            2
+        );
+    }
+    assert!(!*lost.borrow());
+    session.account.take().unwrap().release();
     std::fs::remove_dir_all(dir).unwrap();
 }

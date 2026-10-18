@@ -25,7 +25,7 @@ async fn enter(
         .call(|w| Ok(w.name == "Vault"))
         .await?
     {
-        Some(app.store.vault(character.account).await?)
+        Some(app.store.vaults(character.account).await?)
     } else {
         None
     };
@@ -41,7 +41,7 @@ async fn enter(
         .in_world(world)
         .call(move |w| {
             if let Some(vault) = vault {
-                w.load_vault(vault)?;
+                w.load_vaults(vault)?;
             }
             let id = w.enter_at(
                 character,

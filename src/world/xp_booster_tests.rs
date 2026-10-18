@@ -18,7 +18,7 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                 .unwrap();
             ch.items[4..].fill(0xa22);
             let vault = if source == 2 {
-                let mut vault = store.vault(account).await.unwrap();
+                let mut vault = store.vault(account, 0).await.unwrap();
                 vault.items[0] = 0xc42;
                 Some(vault)
             } else {
@@ -35,7 +35,7 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    vault,
+                    vault.into_iter().collect(),
                 )
                 .await
                 .unwrap()[0];
@@ -58,7 +58,9 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                     .extra_stats
                     .push((54, account));
                 if source == 2 {
-                    w.vault = Some((bag, store.vault(account).await.unwrap()));
+                    w.entities.get_mut(&bag).unwrap().kind = 0x504;
+                    w.owner = Some(account);
+                    w.vaults.insert(bag, store.vault(account, 0).await.unwrap());
                 }
                 Slot {
                     object: bag,
@@ -70,7 +72,7 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
             assert!(!w.players[&id].character.xp_boost.active);
             if fail {
                 if source == 2 {
-                    plan.vault.as_mut().unwrap().revision += 1;
+                    plan.vaults[0].revision += 1;
                 } else {
                     rusqlite::Connection::open(&path).unwrap().execute_batch("CREATE TRIGGER fail_xp BEFORE UPDATE OF items ON characters BEGIN SELECT RAISE(ABORT,'injected XP booster save failure'); END;").unwrap();
                 }
@@ -84,7 +86,7 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                         items: plan.items.clone(),
                     },
                     (source == 0).then_some(5),
-                    plan.vault.clone(),
+                    plan.vaults.clone(),
                 )
                 .await;
             assert_eq!(result.is_err(), fail);
@@ -103,7 +105,14 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                 } else {
                     assert_eq!(saved.items, before.items);
                 }
-                let mut other = tests::ch(&w);
+                // XP witnesses belong in a shared world, not the source account's private Vault.
+                let mut reward_world = tests::world();
+                let id = reward_world
+                    .enter(w.players[&id].character.clone(), None)
+                    .unwrap();
+                let w = &mut reward_world;
+                let pos = w.players[&id].pos;
+                let mut other = tests::ch(w);
                 other.account = account + 1;
                 other.id = before.id + 1;
                 let witness = w
@@ -144,7 +153,7 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
             }
             if source == 2 {
                 assert_eq!(
-                    store.vault(account).await.unwrap().items[0],
+                    store.vault(account, 0).await.unwrap().items[0],
                     if fail { 0xc42 } else { -1 }
                 );
             }

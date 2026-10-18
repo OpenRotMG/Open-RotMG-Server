@@ -78,6 +78,7 @@ fn guest(db: &Connection, guid: &str, create: bool, authentication: bool) -> Res
     }
     db.execute("INSERT INTO accounts(guid,name) VALUES(?1,'Guest')", [guid])?;
     let id = i32::try_from(db.last_insert_rowid())?;
+    vaults::provision(db, id)?;
     db.execute(
         "INSERT INTO account_fame(account,balance,earned) VALUES(?1,0,0)",
         [id],
@@ -236,7 +237,7 @@ mod tests {
         let a = s.list("native-guest".into()).await.unwrap();
         s.rename(a.id, "Restorer".into()).await.unwrap();
         let ch = s.create(a.id, c.get(WIZARD).unwrap()).await.unwrap();
-        let vault = s.vault(a.id).await.unwrap();
+        let vault = s.vault(a.id, 0).await.unwrap();
         assert_eq!(
             s.register(
                 "native-guest".into(),
@@ -298,7 +299,7 @@ mod tests {
             (a.id, "Restorer", ch.id)
         );
         assert_eq!(loaded.characters[0].items, ch.items);
-        assert_eq!(reopened.vault(a.id).await.unwrap().items, vault.items);
+        assert_eq!(reopened.vault(a.id, 0).await.unwrap().items, vault.items);
         let db = Connection::open(path).unwrap();
         let verifier: String = db
             .query_row("SELECT password_hash FROM credentials", [], |r| r.get(0))

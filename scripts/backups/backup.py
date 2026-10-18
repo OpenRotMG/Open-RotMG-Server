@@ -25,7 +25,8 @@ GOLD_GAME = {**UPDATES_GAME, 'accounts': (*GAME['accounts'], 'credits')}
 GUILDS_GAME = {**GOLD_GAME, 'guilds': ('id', 'name', 'level', 'fame', 'earned', 'board'), 'guild_members': ('account', 'guild', 'rank', 'fame')}
 REWARDS_GAME = {**GUILDS_GAME, 'gold_rewards': ('account', 'reward', 'awarded_at', 'notified_at')}
 SLOTS_GAME = {**REWARDS_GAME, 'accounts': (*GOLD_GAME['accounts'], 'character_slots'), 'character_slot_purchases': ('account', 'timer', 'slots')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME}
+VAULTS_GAME = {**SLOTS_GAME, 'accounts': (*SLOTS_GAME['accounts'], 'vault_mask'), 'vaults': ('account', 'chest', 'items', 'revision')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -36,7 +37,8 @@ AUTH_UPDATES_GAME = {**AUTH_SOCIAL_GAME, 'update_feed': UPDATES_GAME['update_fee
 AUTH_GOLD_GAME = {**AUTH_UPDATES_GAME, 'accounts': GOLD_GAME['accounts']}
 AUTH_GUILDS_GAME = {**AUTH_GOLD_GAME, 'guilds': GUILDS_GAME['guilds'], 'guild_members': GUILDS_GAME['guild_members']}
 AUTH_REWARDS_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewards']}
-RELOADED_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'character_slot_purchases': SLOTS_GAME['character_slot_purchases']}
+AUTH_SLOTS_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'character_slot_purchases': SLOTS_GAME['character_slot_purchases']}
+RELOADED_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vaults': VAULTS_GAME['vaults']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -74,11 +76,26 @@ def snapshot(path, schema, *, include_schema=False):
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
         schemas = schema if isinstance(schema, list) else [schema]
         matched = [candidate for candidate in schemas if tables == set(candidate) and all(
-            tuple(r[1] for r in db.execute('PRAGMA table_info(' + table + ')')) == columns
+            tuple(r[1] for r in db.execute('PRAGMA table_xinfo(' + table + ')')) == columns
             for table, columns in candidate.items())]
         if not matched or any(candidate != matched[0] for candidate in matched):
             raise ValueError('Unsupported database tables or columns; update and test the export schema before backing up')
         schema = matched[0]
+        if 'vaults' in schema:
+            references = db.execute('SELECT "table","from","to",seq,on_update,on_delete FROM pragma_foreign_key_list(\'vaults\') ORDER BY id,seq').fetchall()
+            if references != [('accounts', 'account', 'id', 0, 'NO ACTION', 'NO ACTION')]:
+                raise ValueError('Unsupported source Vault account foreign key')
+            if schema['vaults'] == VAULTS_GAME['vaults']:
+                for table, column, kind, default, key in [
+                    ('vaults', 'account', 'INTEGER', None, 1),
+                    ('vaults', 'chest', 'INTEGER', None, 2),
+                    ('vaults', 'items', 'TEXT', None, 0),
+                    ('vaults', 'revision', 'INTEGER', '0', 0),
+                    ('accounts', 'vault_mask', 'INTEGER', '1', 0),
+                ]:
+                    actual = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone()
+                    if actual != (kind, 1, default, key, 0):
+                        raise ValueError('Unsupported canonical Vault metadata: ' + table + '.' + column)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
@@ -146,6 +163,25 @@ def validate_slots(game):
     for account, capacity in capacities.items():
         if sorted(purchases[account]) != list(range(2, capacity + 1)) or living[account] > capacity:
             raise ValueError('Inconsistent character slot purchase history or living capacity')
+
+
+def validate_vaults(game):
+    owners = {}
+    for row in game['accounts']:
+        account, mask = row['id'], row['vault_mask']
+        if (type(account) is not int or not 0 < account <= 2147483647 or account in owners
+                or type(mask) is not int or not 1 <= mask < (1 << 20) or not mask & 1):
+            raise ValueError('Invalid vault ownership')
+        owners[account] = mask
+    found = {account: 0 for account in owners}
+    for row in game['vaults']:
+        account, chest, revision = row['account'], row['chest'], row['revision']
+        if (type(account) is not int or account not in owners or type(chest) is not int or not 0 <= chest < 20
+                or type(revision) is not int or not 0 <= revision <= 2147483647 or found[account] & (1 << chest)):
+            raise ValueError('Invalid or duplicate vault chest identity/revision')
+        found[account] |= 1 << chest
+    if found != owners:
+        raise ValueError('Vault ownership/count/rows disagree')
 
 
 def validate(bundle):
@@ -229,13 +265,16 @@ def validate(bundle):
     validate_guilds(bundle['game'], accounts)
     if bundle['schema'] >= 12:
         validate_slots(bundle['game'])
+    if bundle['schema'] >= 13:
+        validate_vaults(bundle['game'])
     return bundle
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
-    if stored_version > max(GAME_SCHEMAS) or ((stored_version == 12) != (12 in versions)):
+    if (stored_version > max(GAME_SCHEMAS) or (max(versions) >= 12 and stored_version != max(versions))
+            or (stored_version >= 12 and stored_version not in versions)):
         raise ValueError('Unsupported database schema version')
     if len(versions) > 1 and stored_version not in versions:
         raise ValueError('Unsupported gold reward schema version')
@@ -267,7 +306,7 @@ CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1;
 CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL);""",
         'discord': """CREATE TABLE levels(guild_id TEXT NOT NULL,user_id TEXT NOT NULL,username TEXT NOT NULL,xp INTEGER NOT NULL CHECK(xp>=0 AND xp<=9007199254740991),last_xp_at INTEGER NOT NULL,last_message_id TEXT NOT NULL,PRIMARY KEY(guild_id,user_id)) STRICT;""",
     }
-    if bundle['schema'] >= 2:
+    if 2 <= bundle['schema'] < 13:
         definitions['game'] += '\nCREATE TABLE vaults(account INTEGER PRIMARY KEY REFERENCES accounts(id),items TEXT NOT NULL CHECK(json_array_length(items)=8),revision INTEGER NOT NULL DEFAULT 0);'
     if bundle['schema'] >= 3:
         definitions['game'] += '\nCREATE TABLE shore_bots(name TEXT PRIMARY KEY,account INTEGER NOT NULL UNIQUE REFERENCES accounts(id));'
@@ -305,6 +344,10 @@ CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1;
 CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
 CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
 CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END;'''
+    if bundle['schema'] >= 13:
+        definitions['game'] += """
+ALTER TABLE accounts ADD COLUMN vault_mask INTEGER NOT NULL DEFAULT 1 CHECK(typeof(vault_mask)='integer' AND vault_mask BETWEEN 1 AND 1048575 AND (vault_mask & 1)=1);
+CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEGER NOT NULL CHECK(typeof(chest)='integer' AND chest BETWEEN 0 AND 19),items TEXT NOT NULL CHECK(json_array_length(items)=8),revision INTEGER NOT NULL DEFAULT 0 CHECK(typeof(revision)='integer' AND revision BETWEEN 0 AND 2147483647),PRIMARY KEY(account,chest));"""
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

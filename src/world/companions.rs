@@ -687,7 +687,7 @@ mod tests {
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    None,
+                    Vec::new(),
                 )
                 .await
                 .unwrap()[0];

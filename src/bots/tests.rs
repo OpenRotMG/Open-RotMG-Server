@@ -1352,7 +1352,7 @@ async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
                 revision: character.revision,
                 items: character.items.clone(),
             }],
-            None,
+            Vec::new(),
         )
         .await
         .unwrap()[0];
@@ -1366,7 +1366,7 @@ async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
     .unwrap();
     let scope = directory.instance("vault", Some(account.id)).unwrap();
     let w = directory.worlds.get_mut(&scope).unwrap();
-    w.load_vault(store.vault(account.id).await.unwrap())
+    w.load_vaults(store.vaults(account.id).await.unwrap())
         .unwrap();
     let chest = w.entities.values().find(|e| e.kind == 0x504).unwrap();
     let position = chest.pos;
@@ -1388,7 +1388,7 @@ async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
         .unwrap();
     assert!(
         store
-            .vault(account.id)
+            .vault(account.id, 0)
             .await
             .unwrap()
             .items
@@ -1407,7 +1407,7 @@ async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
                 revision: plan.revision,
                 items: plan.items.clone(),
             }],
-            plan.vault.clone(),
+            plan.vaults.clone(),
         )
         .await
         .unwrap()[0];
@@ -1417,7 +1417,7 @@ async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
         .unwrap()
         .finish_inventory(plan, Ok(revision))
         .unwrap();
-    assert_eq!(store.vault(account.id).await.unwrap().items[0], 0xa21);
+    assert_eq!(store.vault(account.id, 0).await.unwrap().items[0], 0xa21);
     assert_eq!(
         store.load(account.id, character.id).await.unwrap().items[4],
         -1
@@ -1436,7 +1436,7 @@ async fn prepared_bot_banks_through_normal_durable_inventory_and_death_rules() {
         .unwrap();
     assert_ne!(fresh.id, character.id);
     assert_eq!(fresh.items, c.get(WIZARD).unwrap().equipment);
-    assert_eq!(store.vault(account.id).await.unwrap().items[0], 0xa21);
+    assert_eq!(store.vault(account.id, 0).await.unwrap().items[0], 0xa21);
 }
 
 #[test]

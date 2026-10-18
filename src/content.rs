@@ -697,7 +697,7 @@ impl Map {
         ensure!(count > 0, "empty map dictionary");
         let mut dict = Vec::new();
         for _ in 0..count {
-            let ground = u8::try_from(r.short()?)?;
+            let ground = u8::try_from(r.short()?).context("map ground out of range")?;
             ensure!(
                 content.grounds.contains_key(&ground),
                 "unknown map ground {ground:#x}"
@@ -734,7 +734,7 @@ impl Map {
         let mut spawns = Vec::new();
         for y in 0..height {
             for x in 0..width {
-                let i = usize::try_from(r.short()?)?;
+                let i = usize::try_from(r.short()?).context("map dictionary index out of range")?;
                 let c = dict.get(i).context("invalid map dictionary index")?.clone();
                 if c.region == 1 {
                     spawns.push((x as f32 + 0.5, y as f32 + 0.5));

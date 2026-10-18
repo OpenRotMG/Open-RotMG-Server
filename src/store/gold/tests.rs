@@ -46,7 +46,7 @@ async fn collection_rewards_use_competitive_ties_once_and_only_after_new_progres
     let mut ch = s.create(c, content.get(WIZARD).unwrap()).await.unwrap();
     for (item, balance) in [(0xa22, 100), (0xa23, 200), (0xa24, 200)] {
         ch.revision = s
-            .exchange_collected(vec![write(&ch)], None, Some(item))
+            .exchange_collected(vec![write(&ch)], Vec::new(), Some(item))
             .await
             .unwrap()[0];
         assert_eq!(s.gold(c).await.unwrap().balance, balance);
@@ -59,7 +59,7 @@ async fn collection_rewards_use_competitive_ties_once_and_only_after_new_progres
     let mut stale = write(&ch);
     stale.revision -= 1;
     assert!(
-        s.exchange_collected(vec![stale], None, Some(0xa25))
+        s.exchange_collected(vec![stale], Vec::new(), Some(0xa25))
             .await
             .is_err()
     );
@@ -81,10 +81,10 @@ async fn gold_and_collection_roll_back_with_inventory_and_vault_conflicts() {
     let s = Store::open(Path::new(":memory:"), &content).unwrap();
     let a = registered(&s, "rollback").await;
     let ch = s.create(a, content.get(WIZARD).unwrap()).await.unwrap();
-    let mut vault = s.vault(a).await.unwrap();
+    let mut vault = s.vault(a, 0).await.unwrap();
     vault.revision += 1;
     assert!(
-        s.exchange_collected(vec![write(&ch)], Some(vault), Some(0xa22))
+        s.exchange_collected(vec![write(&ch)], vec![vault], Some(0xa22))
             .await
             .is_err()
     );
@@ -104,7 +104,7 @@ async fn gold_and_collection_roll_back_with_inventory_and_vault_conflicts() {
     .await
     .unwrap();
     assert!(
-        s.exchange_collected(vec![write(&ch)], None, Some(0xa22))
+        s.exchange_collected(vec![write(&ch)], Vec::new(), Some(0xa22))
             .await
             .is_err()
     );
@@ -135,7 +135,7 @@ async fn guests_and_bots_never_receive_collection_rewards() {
             .create(account, content.get(WIZARD).unwrap())
             .await
             .unwrap();
-        s.exchange_collected(vec![write(&ch)], None, Some(0xa22))
+        s.exchange_collected(vec![write(&ch)], Vec::new(), Some(0xa22))
             .await
             .unwrap();
         assert_eq!(s.gold(account).await.unwrap().balance, 100);
@@ -191,6 +191,7 @@ async fn migration_does_not_backfill_and_reopen_preserves_claims_and_notificatio
             "INSERT INTO discord_links VALUES(?1,'12345678901234567')",
             [old],
         )?;
+        crate::store::vaults::legacy_fixture(db)?;
         db.execute_batch("DROP TABLE gold_rewards; PRAGMA user_version=9")?;
         Ok(())
     })
@@ -239,6 +240,7 @@ async fn bug_reward_preserves_v10_claims_and_is_once_across_concurrency_and_rest
         tx.execute("UPDATE gold_rewards SET notified_at=unixepoch() WHERE reward=?1", [DISCORD])?;
         tx.execute_batch("ALTER TABLE gold_rewards RENAME TO copied_rewards")?;
         tx.execute_batch(&SCHEMA.replace(",'first_bug_report'", ""))?;
+        crate::store::vaults::legacy_fixture(&tx)?;
         tx.execute_batch("INSERT INTO gold_rewards SELECT * FROM copied_rewards; DROP TABLE copied_rewards; PRAGMA user_version=10")?;
         tx.commit()?;
         Ok(())

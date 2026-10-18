@@ -414,13 +414,14 @@ pub struct InventoryPlan {
     pub revision: i32,
     pub account: i32,
     pub character: i32,
-    pub bag: Option<(i32, Vec<i32>)>,
+    pub bags: Vec<(i32, Vec<i32>)>,
     pub effects: Vec<crate::content::ConsumableEffect>,
     pub stat_growth: Option<(Character, Slot, usize, i32)>,
     pub appearance: Option<(Slot, u32, u32)>,
     pub xp_boost: Option<Slot>,
     pub(crate) companion: Option<companions::Plan>,
-    pub vault: Option<Vault>,
+    pub vaults: Vec<Vault>,
+    pub(crate) vault_purchase: Option<shop::VaultPurchase>,
     pub dropped: Option<i32>,
     pub unlock: Option<PortalPlan>,
     pub collected: Option<u16>,
@@ -491,7 +492,8 @@ pub struct World {
     bag_expiry: BTreeMap<i32, u64>,
     cleared: bool,
     clear_exit: Option<i32>,
-    vault: Option<(i32, Vault)>,
+    vaults: BTreeMap<i32, Vault>,
+    closed_vaults: BTreeMap<i32, i32>,
     trades: BTreeMap<i32, trade::Trade>,
     trade_requests: BTreeMap<i32, (i32, u64)>,
 }
@@ -1351,7 +1353,11 @@ impl World {
     pub fn new(content: Arc<Content>, map: Arc<Map>) -> Result<Self> {
         Self::with_ids(content, map, Arc::new(AtomicI32::new(1000)))
     }
-    fn with_ids(content: Arc<Content>, map: Arc<Map>, ids: Arc<AtomicI32>) -> Result<Self> {
+    pub(crate) fn with_ids(
+        content: Arc<Content>,
+        map: Arc<Map>,
+        ids: Arc<AtomicI32>,
+    ) -> Result<Self> {
         let mut entities = BTreeMap::new();
         let mut actor_ids = BTreeSet::new();
         let mut quest_ids = BTreeSet::new();
@@ -1515,7 +1521,8 @@ impl World {
             bag_expiry: BTreeMap::new(),
             cleared: false,
             clear_exit: None,
-            vault: None,
+            vaults: BTreeMap::new(),
+            closed_vaults: BTreeMap::new(),
             trades: BTreeMap::new(),
             trade_requests: BTreeMap::new(),
         })
@@ -1536,25 +1543,43 @@ impl World {
                 && !p.departing
         }))
     }
-    pub fn load_vault(&mut self, vault: Vault) -> Result<()> {
+    pub fn load_vaults(&mut self, vaults: Vec<Vault>) -> Result<()> {
+        let account = self.owner.context("Vault world has no owner")?;
         ensure!(
-            self.name == "Vault" && self.owner == Some(vault.account),
-            "vault world owner mismatch"
+            self.name == "Vault"
+                && !vaults.is_empty()
+                && vaults.len() <= crate::store::VAULT_CHESTS as usize
+                && vaults.iter().all(|v| v.account == account
+                    && (0..crate::store::VAULT_CHESTS).contains(&v.chest)
+                    && v.items.len() == 8
+                    && v.items.iter().all(|i| (-1..=65535).contains(i))
+                    && v.revision >= 0),
+            "invalid private vault state"
         );
+        let count = vaults.len();
+        let by_chest: BTreeMap<_, _> = vaults.into_iter().map(|v| (v.chest, v)).collect();
         ensure!(
-            vault.items.len() == 8,
-            "vault must contain exactly eight slots"
+            by_chest.len() == count && by_chest.contains_key(&0),
+            "duplicate or missing initial vault chest"
         );
-        if let Some((id, loaded)) = &self.vault {
+        if !self.vaults.is_empty() {
             ensure!(
-                loaded.revision == vault.revision && self.entities[id].items == vault.items,
-                "loaded vault disagrees with durable revision"
+                self.vaults.len() == by_chest.len()
+                    && self.vaults.iter().all(|(id, v)| {
+                        by_chest.get(&v.chest).is_some_and(|saved| {
+                            saved.account == v.account
+                                && saved.revision == v.revision
+                                && saved.items == v.items
+                                && self.entities[id].items == saved.items
+                        })
+                    }),
+                "loaded vault disagrees with durable identity or revision"
             );
             return Ok(());
         }
         let (x, y) = self.map.spawns[0];
         let spawn = Pos { x, y };
-        let pos = self
+        let mut cells = self
             .map
             .cells
             .iter()
@@ -1564,21 +1589,66 @@ impl World {
                 x: (i % self.map.width as usize) as f32 + 0.5,
                 y: (i / self.map.width as usize) as f32 + 0.5,
             })
-            .min_by(|a, b| a.distance(spawn).total_cmp(&b.distance(spawn)))
-            .context("sourced Vault has no chest region")?;
-        let id = self.spawn_entity(0x504, pos, vault.items.clone())?;
-        self.entities
-            .get_mut(&id)
-            .unwrap()
-            .extra_stats
-            .push((54, vault.account));
-        tracing::info!(
-            entity = id,
-            account = vault.account,
-            revision = vault.revision,
-            "private eight-slot chest loaded"
+            .collect::<Vec<_>>();
+        // Stable current identities; the period evidence does not establish equal-distance ordering.
+        cells.sort_by(|a, b| {
+            a.distance(spawn)
+                .total_cmp(&b.distance(spawn))
+                .then(a.y.total_cmp(&b.y))
+                .then(a.x.total_cmp(&b.x))
+        });
+        ensure!(
+            cells.len() == crate::store::VAULT_CHESTS as usize,
+            "Vault map must have exactly twenty chest cells"
         );
-        self.vault = Some((id, vault));
+        for (chest, pos) in cells.into_iter().enumerate() {
+            let chest = chest as i32;
+            if let Some(vault) = by_chest.get(&chest) {
+                let id = self.spawn_entity(0x504, pos, vault.items.clone())?;
+                self.entities
+                    .get_mut(&id)
+                    .unwrap()
+                    .extra_stats
+                    .push((54, account));
+                self.vaults.insert(id, vault.clone());
+            } else {
+                let id = self.spawn_entity(0x505, pos, Vec::new())?;
+                // Native stat 54 casts to Container; sellers are owned by this private world's identity map.
+                self.entities.get_mut(&id).unwrap().extra_stats.extend([
+                    (36, crate::store::VAULT_PRICE),
+                    (40, 0),
+                    (45, 0),
+                ]);
+                self.closed_vaults.insert(id, chest);
+            }
+        }
+        tracing::info!(
+            account,
+            owned = self.vaults.len(),
+            closed = self.closed_vaults.len(),
+            "private vault loaded"
+        );
+        Ok(())
+    }
+    fn bind_vaults(&self, plan: &mut InventoryPlan) -> Result<()> {
+        for (id, items) in &plan.bags {
+            let e = self.entities.get(id).context("vault source disappeared")?;
+            if let Some(vault) = self.vaults.get(id) {
+                ensure!(
+                    e.kind == 0x504
+                        && self.owner == Some(plan.account)
+                        && vault.account == plan.account
+                        && vault.items == e.items
+                        && e.extra_stats.contains(&(54, plan.account)),
+                    "vault source ownership or contents changed"
+                );
+                let mut vault = vault.clone();
+                vault.items = items.clone();
+                plan.vaults.push(vault);
+            } else {
+                ensure!(e.kind != 0x504, "container has no durable chest identity");
+            }
+        }
         Ok(())
     }
     pub fn spawn_entity(&mut self, kind: u16, pos: Pos, items: Vec<i32>) -> Result<i32> {
@@ -2808,7 +2878,7 @@ impl World {
                 !p.progress_queued(),
                 "character progress is awaiting commit"
             );
-            let mut plan = self.consumable_plan(id, slot, -1);
+            let mut plan = self.consumable_plan(id, slot, -1)?;
             plan.xp_boost = Some(slot);
             return Ok(Some(plan));
         }
@@ -2842,7 +2912,7 @@ impl World {
                 if let Some(value) = item.textures[1] {
                     tex2 = value;
                 }
-                let mut plan = self.consumable_plan(id, slot, -1);
+                let mut plan = self.consumable_plan(id, slot, -1)?;
                 plan.appearance = Some((slot, tex1, tex2));
                 Ok(Some(plan))
             }
@@ -2870,7 +2940,7 @@ impl World {
                 );
                 let amount = amount.min(remaining);
                 let snapshot = p.character.clone();
-                let mut plan = self.consumable_plan(id, slot, -1);
+                let mut plan = self.consumable_plan(id, slot, -1)?;
                 plan.stat_growth = Some((snapshot, slot, index, amount));
                 Ok(Some(plan))
             }
@@ -2880,7 +2950,7 @@ impl World {
             _ => self.begin_consumable(id, slot, &item).map(Some),
         }
     }
-    fn consumable_plan(&mut self, id: i32, slot: Slot, next: i32) -> InventoryPlan {
+    fn consumable_plan(&mut self, id: i32, slot: Slot, next: i32) -> Result<InventoryPlan> {
         let mut plan = self.plan(id, self.players[&id].character.items.clone(), None);
         if slot.object == id {
             plan.items[slot.slot] = next;
@@ -2888,19 +2958,15 @@ impl World {
             let bag = self.entities.get_mut(&slot.object).unwrap();
             let mut items = bag.items.clone();
             items[slot.slot] = next;
-            bag.reserved = true;
-            if let Some((container, vault)) = &self.vault
-                && *container == slot.object
-            {
-                let mut vault = vault.clone();
-                vault.items = items.clone();
-                plan.vault = Some(vault);
-            }
-            plan.bag = Some((slot.object, items));
+            plan.bags.push((slot.object, items));
             plan.loot_slot = Some((slot.object, slot.slot));
         }
+        self.bind_vaults(&mut plan)?;
+        for (bag, _) in &plan.bags {
+            self.entities.get_mut(bag).unwrap().reserved = true;
+        }
         self.players.get_mut(&id).unwrap().pending = true;
-        plan
+        Ok(plan)
     }
     fn plan(&self, id: i32, items: Vec<i32>, bag: Option<(i32, Vec<i32>)>) -> InventoryPlan {
         let p = &self.players[&id];
@@ -2910,13 +2976,14 @@ impl World {
             revision: p.character.revision,
             account: p.character.account,
             character: p.character.id,
-            bag,
+            bags: bag.into_iter().collect(),
             effects: Vec::new(),
             stat_growth: None,
             appearance: None,
             xp_boost: None,
             companion: None,
-            vault: None,
+            vaults: Vec::new(),
+            vault_purchase: None,
             dropped: None,
             unlock: None,
             collected: None,
@@ -2959,19 +3026,13 @@ impl World {
             "empty or stale drop slot"
         );
         inventory[slot.slot] = -1;
+        let mut plan = self.plan(id, items, source);
+        self.bind_vaults(&mut plan)?;
         let dropped = self.reserve_drop(pos, account, slot.kind, false)?;
-        if let Some((source, _)) = &source {
+        for (source, _) in &plan.bags {
             self.entities.get_mut(source).unwrap().reserved = true;
         }
         self.players.get_mut(&id).unwrap().pending = true;
-        let mut plan = self.plan(id, items, source);
-        if let (Some((container, vault)), Some((source, items))) = (&self.vault, &plan.bag)
-            && container == source
-        {
-            let mut vault = vault.clone();
-            vault.items = items.clone();
-            plan.vault = Some(vault);
-        }
         if slot.object != id {
             plan.loot_slot = Some((slot.object, slot.slot));
         }
@@ -2997,22 +3058,16 @@ impl World {
         ensure!(
             from.object == id
                 || to.object == id
-                || self
-                    .vault
-                    .as_ref()
-                    .is_some_and(|(chest, _)| { from.object == *chest && to.object == *chest }),
-            "swap must involve own inventory or the vault chest"
+                || (self.vaults.contains_key(&from.object) && self.vaults.contains_key(&to.object)),
+            "swap must involve own inventory or owned vault chests"
         );
         let mut items = p.character.items.clone();
-        let bag_id = if from.object != id {
-            Some(from.object)
-        } else if to.object != id {
-            Some(to.object)
-        } else {
-            None
-        };
-        let mut bag = if let Some(b) = bag_id {
-            let e = self.entities.get(&b).context("container missing")?;
+        let mut bags = BTreeMap::new();
+        for object in [from.object, to.object]
+            .into_iter()
+            .filter(|object| *object != id)
+        {
+            let e = self.entities.get(&object).context("container missing")?;
             ensure!(
                 !e.reserved
                     && e.accessible(p.character.account)
@@ -3020,13 +3075,15 @@ impl World {
                     && self.content.get(e.kind)?.class == "Container",
                 "container inaccessible"
             );
-            e.items.clone()
-        } else {
-            Vec::new()
-        };
+            bags.insert(object, e.items.clone());
+        }
         let get = |s: &Slot| -> Result<i32> {
-            let a = if s.object == id { &items } else { &bag };
-            Ok(*a.get(s.slot).context("invalid inventory slot")?)
+            let inventory = if s.object == id {
+                &items
+            } else {
+                bags.get(&s.object).context("unbound swap source")?
+            };
+            Ok(*inventory.get(s.slot).context("invalid inventory slot")?)
         };
         let a = get(&from)?;
         let b = get(&to)?;
@@ -3066,17 +3123,17 @@ impl World {
         if from.object == id {
             items[from.slot] = b
         } else {
-            bag[from.slot] = b
+            bags.get_mut(&from.object).unwrap()[from.slot] = b
         }
         if to.object == id {
             items[to.slot] = a
         } else {
-            bag[to.slot] = a
+            bags.get_mut(&to.object).unwrap()[to.slot] = a
         }
         let dropped = if let Some(kind) = replacement {
             // A swap must not put Soulbound gear in public loot or violate the source bag's put flags.
             let source = if from.object == id { to } else { from };
-            bag[source.slot] = -1;
+            bags.get_mut(&source.object).unwrap()[source.slot] = -1;
             let private = self.entities[&source.object]
                 .extra_stats
                 .contains(&(54, p.character.account));
@@ -3084,30 +3141,31 @@ impl World {
         } else {
             None
         };
-        if let Some(b) = bag_id {
-            self.entities.get_mut(&b).unwrap().reserved = true;
-        }
-        self.players.get_mut(&id).unwrap().pending = true;
-        let mut plan = self.plan(id, items, bag_id.map(|b| (b, bag)));
+        let mut plan = self.plan(id, items, None);
+        plan.bags = bags.into_iter().collect();
+        self.bind_vaults(&mut plan)?;
         plan.dropped = dropped;
-        if let Some(container) = bag_id {
-            let source = if from.object == container { &from } else { &to };
-            plan.loot_slot = Some((container, source.slot));
-            if source.kind >= 0
-                && self.entities[&container].drop_slots.contains(&source.slot)
-                && self.players[&id].controller == Controller::Human
-                && self.content.get(source.kind as u16)?.class == "Equipment"
-            {
-                plan.collected = Some(source.kind as u16);
+        for (container, _) in &plan.bags {
+            let source = if from.object == *container {
+                &from
+            } else {
+                &to
+            };
+            if plan.bags.len() == 1 {
+                plan.loot_slot = Some((*container, source.slot));
+                if source.kind >= 0
+                    && self.entities[container].drop_slots.contains(&source.slot)
+                    && self.players[&id].controller == Controller::Human
+                    && self.content.get(source.kind as u16)?.class == "Equipment"
+                {
+                    plan.collected = Some(source.kind as u16);
+                }
             }
         }
-        if let (Some((container, vault)), Some((bag, items))) = (&self.vault, &plan.bag)
-            && container == bag
-        {
-            let mut updated = vault.clone();
-            updated.items = items.clone();
-            plan.vault = Some(updated);
+        for (container, _) in &plan.bags {
+            self.entities.get_mut(container).unwrap().reserved = true;
         }
+        self.players.get_mut(&id).unwrap().pending = true;
         Ok(plan)
     }
     pub fn committed<T>(&mut self, id: i32, result: Result<T>) -> Result<T> {
@@ -3160,7 +3218,7 @@ impl World {
             "inventory completion owner, reservation or revision changed"
         );
         p.pending = false;
-        if let Some((id, _)) = &plan.bag {
+        for (id, _) in &plan.bags {
             ensure!(
                 self.entities
                     .get(id)
@@ -3241,13 +3299,29 @@ impl World {
                 .context("committed loot identity missing")?;
             tracing::info!(player=plan.player,character=p.character.id,bag,slot,item=*item,world=%self.name,"loot slot committed");
         }
-        if let Some(mut vault) = plan.vault {
+        for mut vault in plan.vaults {
+            let (id, loaded) = self
+                .vaults
+                .iter_mut()
+                .find(|(_, v)| v.chest == vault.chest && v.account == vault.account)
+                .context("committed chest missing")?;
+            ensure!(
+                loaded.revision == vault.revision
+                    && self.entities[id].kind == 0x504
+                    && self.entities[id].items == loaded.items
+                    && self.entities[id].extra_stats.contains(&(54, plan.account))
+                    && plan
+                        .bags
+                        .iter()
+                        .any(|(bag, items)| bag == id && items == &vault.items),
+                "committed chest identity, ownership or revision changed"
+            );
             vault.revision += 1;
-            self.vault.as_mut().context("committed chest missing")?.1 = vault;
+            *loaded = vault;
         }
         self.finish_consumable(plan.player, (plan.character, plan.revision), plan.effects)?;
         self.finish_companion(plan.player, plan.companion)?;
-        if let Some((id, items)) = plan.bag {
+        for (id, items) in plan.bags {
             let bag = self.entities.get_mut(&id).unwrap();
             bag.items = items;
             bag.reserved = false;
@@ -5621,6 +5695,28 @@ mod tests {
             .is_err()
         );
         w.entities.get_mut(&private).unwrap().kind = 0x504;
+        assert!(
+            w.swap(
+                id,
+                from,
+                Slot {
+                    object: private,
+                    slot: 1,
+                    kind: -1
+                }
+            )
+            .is_err()
+        );
+        w.owner = Some(1);
+        w.vaults.insert(
+            private,
+            Vault {
+                account: 1,
+                chest: 0,
+                items: w.entities[&private].items.clone(),
+                revision: 0,
+            },
+        );
         let plan = w
             .swap(
                 id,
@@ -5636,6 +5732,24 @@ mod tests {
         w.finish_inventory(plan, Ok(1)).unwrap();
         assert_eq!(w.players[&id].character.items[5], -1);
         assert_eq!(w.entities[&private].items[1], i32::from(soulbound));
+        w.entities.get_mut(&private).unwrap().kind = 0x503;
+        assert!(
+            w.swap(
+                id,
+                Slot {
+                    object: private,
+                    slot: 1,
+                    kind: i32::from(soulbound)
+                },
+                Slot {
+                    object: id,
+                    slot: 5,
+                    kind: -1
+                }
+            )
+            .is_err()
+        );
+        assert!(!w.players[&id].pending && !w.entities[&private].reserved);
     }
     #[test]
     fn late_heal_cannot_revive() {
@@ -5728,13 +5842,13 @@ mod tests {
         w.name = "Vault".into();
         w.owner = Some(account.id);
         w.safe = true;
-        let original = store.vault(account.id).await.unwrap();
+        let original = store.vault(account.id, 0).await.unwrap();
         let mut foreign = original.clone();
         foreign.account += 1;
-        assert!(w.load_vault(foreign).is_err());
-        w.load_vault(original.clone()).unwrap();
+        assert!(w.load_vaults(vec![foreign]).is_err());
+        w.load_vaults(vec![original.clone()]).unwrap();
         let player = w.enter(ch, None).unwrap();
-        let chest = w.vault.as_ref().unwrap().0;
+        let chest = *w.vaults.keys().next().unwrap();
         w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
         let plan = w
             .swap(
@@ -5752,7 +5866,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(w.entities[&chest].items[0], -1);
-        assert_eq!(store.vault(account.id).await.unwrap().items[0], -1);
+        assert_eq!(store.vault(account.id, 0).await.unwrap().items[0], -1);
         let revisions = store
             .exchange(
                 vec![InventoryWrite {
@@ -5761,18 +5875,18 @@ mod tests {
                     revision: plan.revision,
                     items: plan.items.clone(),
                 }],
-                plan.vault.clone(),
+                plan.vaults.clone(),
             )
             .await
             .unwrap();
         w.finish_inventory(plan, Ok(revisions[0])).unwrap();
         assert_eq!(w.players[&player].character.items[4], -1);
         assert_eq!(w.entities[&chest].items[0], 0xa22);
-        let saved = store.vault(account.id).await.unwrap();
+        let saved = store.vault(account.id, 0).await.unwrap();
         assert_eq!(saved.items[0], 0xa22);
         assert_eq!(saved.revision, 1);
-        assert!(w.load_vault(original).is_err());
-        w.load_vault(saved).unwrap();
+        assert!(w.load_vaults(vec![original]).is_err());
+        w.load_vaults(vec![saved]).unwrap();
         for (from, to) in [
             ((player, 0), (chest, 1)),
             ((chest, 0), (chest, 2)),
@@ -5819,7 +5933,7 @@ mod tests {
                         revision: plan.revision,
                         items: plan.items.clone(),
                     }],
-                    plan.vault.clone(),
+                    plan.vaults.clone(),
                 )
                 .await
                 .unwrap();
@@ -5827,7 +5941,7 @@ mod tests {
             w.finish_inventory(plan, Ok(revisions[0])).unwrap();
             assert_eq!(
                 w.entities[&chest].items,
-                store.vault(account.id).await.unwrap().items
+                store.vault(account.id, 0).await.unwrap().items
             );
         }
         let expected = vec![-1, 0xa22, 0xa97, -1, -1, -1, -1, -1];
@@ -5884,7 +5998,7 @@ mod tests {
         assert!(w.swap(player, from, to).is_err());
         w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
         let plan = w.swap(player, from, to).unwrap();
-        let mut stale = plan.vault.clone().unwrap();
+        let mut stale = plan.vaults[0].clone();
         stale.revision += 1;
         let failed = store
             .exchange(
@@ -5894,7 +6008,7 @@ mod tests {
                     revision: plan.revision,
                     items: plan.items.clone(),
                 }],
-                Some(stale),
+                vec![stale],
             )
             .await
             .unwrap_err();
@@ -5903,7 +6017,7 @@ mod tests {
         assert_eq!(w.entities[&chest].items, expected);
         drop(store);
         let reopened = Store::open(&path, &w.content).unwrap();
-        let vault = reopened.vault(account.id).await.unwrap();
+        let vault = reopened.vault(account.id, 0).await.unwrap();
         assert_eq!((vault.revision, vault.items), (4, expected));
         let character = reopened
             .load(account.id, w.players[&player].character.id)

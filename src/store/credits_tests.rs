@@ -93,6 +93,7 @@ async fn legacy_accounts_receive_starting_gold_once_and_missing_gold_state_is_an
     let s = Store::open(&path, &content).unwrap();
     let account = s.list("legacy-gold".into()).await.unwrap().id;
     s.call(|db| {
+        crate::store::vaults::legacy_fixture(db)?;
         db.execute_batch("DROP TABLE guild_members; DROP TABLE guilds; ALTER TABLE accounts DROP COLUMN credits; PRAGMA user_version=7")?;
         Ok(())
     })

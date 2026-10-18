@@ -114,6 +114,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 store.progress(character.clone()).await?;
                 let mut items = character.items.clone();
                 items[4] = 0xa22;
+                items[5] = 0xa23;
                 store
                     .exchange(
                         vec![store::InventoryWrite {
@@ -122,14 +123,44 @@ pub async fn run(args: &[String]) -> Result<bool> {
                             revision: character.revision,
                             items,
                         }],
-                        None,
+                        Vec::new(),
                     )
                     .await?;
                 character = store.load(account.id, character.id).await?;
                 if alive {
                     rusqlite::Connection::open(directory.join("game.db"))?
-                        .execute("UPDATE accounts SET credits=600 WHERE id=?1", [account.id])?;
+                        .execute("UPDATE accounts SET credits=1100 WHERE id=?1", [account.id])?;
                     store.purchase_character_slot(account.id, i32::MIN).await?;
+                    character.revision = store
+                        .purchase_vault(
+                            store::InventoryWrite {
+                                id: character.id,
+                                account: account.id,
+                                revision: character.revision,
+                                items: character.items.clone(),
+                            },
+                            1,
+                        )
+                        .await?
+                        .context("funded backup chest purchase declined")?
+                        .0;
+                    let mut first = store.vault(account.id, 0).await?;
+                    let mut second = store.vault(account.id, 1).await?;
+                    first.items[0] = character.items[4];
+                    second.items[0] = character.items[5];
+                    character.items[4] = -1;
+                    character.items[5] = -1;
+                    store
+                        .exchange(
+                            vec![store::InventoryWrite {
+                                id: character.id,
+                                account: account.id,
+                                revision: character.revision,
+                                items: character.items.clone(),
+                            }],
+                            vec![first, second],
+                        )
+                        .await?;
                     store
                         .create(account.id, content.get(content::WIZARD)?)
                         .await?;
@@ -200,6 +231,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
             };
             store.updates().await?;
             for (account, id) in &rows {
+                store.vaults(*account).await?;
                 store.load(*account, *id).await?.effective(&content)?;
             }
             println!(
@@ -207,10 +239,113 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 serde_json::json!({"loaded_living_characters": rows.len()})
             );
         }
+        ["--backup-exercise-vault", database, data] => {
+            exercise_vault(Path::new(database), Path::new(data)).await?;
+        }
         [command, ..] if command.starts_with("--backup-") => {
             anyhow::bail!("Invalid backup command arguments")
         }
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+async fn exercise_vault(database: &Path, data: &Path) -> Result<()> {
+    use crate::world::{Pos, Slot, World};
+    use std::sync::Arc;
+    let content = Arc::new(content::Content::load(data)?);
+    let store = store::Store::open(database, &content)?;
+    let (account,id): (i32,i32) = rusqlite::Connection::open(database)?.query_row(
+        "SELECT a.id,c.id FROM accounts a JOIN characters c ON c.account=a.id WHERE a.vault_mask=3 AND c.alive=1 ORDER BY c.id LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+    let ch = store.load(account, id).await?;
+    let original = store.vaults(account).await?;
+    let mut inventory = ch.items.clone();
+    for v in &original {
+        inventory.extend(&v.items);
+    }
+    inventory.sort();
+    let mut world = World::with_ids(
+        content.clone(),
+        Arc::new(content::Map::load(&data.join("vault.wmap"), &content)?),
+        Arc::new(std::sync::atomic::AtomicI32::new(1000)),
+    )?;
+    world.name = "Vault".into();
+    world.owner = Some(account);
+    world.load_vaults(original)?;
+    let first = world
+        .entities
+        .values()
+        .find(|e| e.kind == 0x504 && e.items[0] == 0xa22)
+        .context("first restored fixture chest missing potion")?
+        .id;
+    let second = world
+        .entities
+        .values()
+        .find(|e| e.kind == 0x504 && e.items[0] == 0xa23)
+        .context("second restored fixture chest missing potion")?
+        .id;
+    let pos = world.entities[&first].pos;
+    let other = world.entities[&second].pos;
+    ensure!(
+        pos.distance(other) < 3.,
+        "fixture chest transfer exceeds native reach"
+    );
+    let player = world.enter_at(ch, None, Some(pos), store.presentation(account).await?)?;
+    for ((from, source), (to, target)) in [
+        ((first, 0), (second, 0)),
+        ((second, 0), (player, 4)),
+        ((player, 4), (first, 1)),
+    ] {
+        world.players.get_mut(&player).unwrap().pos = Pos {
+            x: (pos.x + other.x) / 2.,
+            y: (pos.y + other.y) / 2.,
+        };
+        let slot = |object, slot| Slot {
+            object,
+            slot,
+            kind: if object == player {
+                world.players[&player].character.items[slot]
+            } else {
+                world.entities[&object].items[slot]
+            },
+        };
+        let plan = world.swap(player, slot(from, source), slot(to, target))?;
+        let revisions = store
+            .exchange(
+                vec![store::InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                }],
+                plan.vaults.clone(),
+            )
+            .await?;
+        world.finish_inventory(plan, Ok(revisions[0]))?;
+    }
+    let saved = store.vaults(account).await?;
+    let mut after = store.load(account, id).await?.items;
+    for v in &saved {
+        after.extend(&v.items);
+    }
+    after.sort();
+    ensure!(
+        inventory == after,
+        "restored vault exercise lost or duplicated items"
+    );
+    ensure!(
+        saved[0].items[..2] == [0xa23, 0xa22] && saved[1].items == vec![-1; 8],
+        "restored transfer/deposit/withdraw outcome mismatch"
+    );
+    drop(store);
+    let reopened = store::Store::open(database, &content)?;
+    ensure!(
+        serde_json::to_value(reopened.vaults(account).await?)? == serde_json::to_value(saved)?,
+        "restored chest state changed on reopen"
+    );
+    println!(
+        "{}",
+        serde_json::json!({"exercised_vault_chests":2,"transfers":1,"withdrawals":1,"deposits":1,"items_conserved":true})
+    );
+    Ok(())
 }

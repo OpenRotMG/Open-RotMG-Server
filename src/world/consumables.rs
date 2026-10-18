@@ -128,7 +128,7 @@ impl World {
         for (target, boost) in reservations {
             self.players.get_mut(&target).unwrap().boosts.push(boost);
         }
-        let mut plan = self.consumable_plan(id, slot, next);
+        let mut plan = self.consumable_plan(id, slot, next)?;
         plan.effects = item.consumable_effects.clone();
         Ok(plan)
     }

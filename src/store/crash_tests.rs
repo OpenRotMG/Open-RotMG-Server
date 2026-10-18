@@ -131,7 +131,7 @@ impl Operation {
             Self::Exchange(vec![write(&left), write(&right)], None)
         } else {
             assert!(matches!(operation, "deposit" | "withdraw"));
-            let mut vault = store.vault(1).await.unwrap();
+            let mut vault = store.vault(1, 0).await.unwrap();
             let slot = if operation == "withdraw" { 5 } else { 4 };
             std::mem::swap(&mut left.items[slot], &mut vault.items[0]);
             Self::Exchange(vec![write(&left)], Some(vault))
@@ -139,7 +139,10 @@ impl Operation {
     }
     async fn apply(self, store: &Store) -> Result<()> {
         match self {
-            Self::Exchange(writes, vault) => store.exchange(writes, vault).await.map(|_| ()),
+            Self::Exchange(writes, vault) => store
+                .exchange(writes, vault.into_iter().collect())
+                .await
+                .map(|_| ()),
             Self::Death(ch) => store.death(ch, "item-safety fixture".into()).await,
         }
     }
@@ -159,11 +162,14 @@ async fn fixture(path: &Path, content: &Content) -> Store {
     store.progress(left.clone()).await.unwrap();
     let mut right = store.load(2, 2).await.unwrap();
     right.items[4] = 0xa97;
-    store.exchange(vec![write(&right)], None).await.unwrap();
-    let mut vault = store.vault(1).await.unwrap();
+    store
+        .exchange(vec![write(&right)], Vec::new())
+        .await
+        .unwrap();
+    let mut vault = store.vault(1, 0).await.unwrap();
     vault.items[0] = 0xa4f;
     store
-        .exchange(vec![write(&left)], Some(vault))
+        .exchange(vec![write(&left)], vec![vault])
         .await
         .unwrap();
     store
