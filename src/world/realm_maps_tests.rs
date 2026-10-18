@@ -307,6 +307,9 @@ fn realm_creation_selects_layout_and_isolates_map_edits() {
         let template = directory.realms[index].open(&world.content).unwrap();
         Arc::make_mut(&mut world.map).cells[0].region = 99;
         assert_eq!(template.cells[0].region, 20 + index as u8);
+        if selected.len() == directory.realms.len() {
+            break;
+        }
     }
     assert_eq!(selected.len(), 3);
 }
