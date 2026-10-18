@@ -50,6 +50,66 @@ fn enemy(w: &mut World, x: f32, y: f32) -> i32 {
 }
 
 #[test]
+fn wizard_spells_continue_during_progress_without_losing_mana_or_unlocking_inventory() {
+    let (mut w, id) = fixture(crate::content::WIZARD, 0xb24);
+    let potion = Slot {
+        object: id,
+        slot: 4,
+        kind: 0xa22,
+    };
+    w.players.get_mut(&id).unwrap().character.items[4] = potion.kind;
+    let target = enemy(&mut w, 14., 12.);
+    w.entities.get_mut(&target).unwrap().hp = 10;
+    w.damage_enemy(id, target, 25, false, &[], None).unwrap();
+    assert!(w.players[&id].experience_queued > 0);
+    let (owner, snapshot) = w.pending_progress().pop().unwrap();
+    assert_eq!(owner, id);
+    let mana = w.players[&id].character.mp;
+    let pos = Pos { x: 14., y: 12. };
+    assert!(cast(&mut w, id, pos).unwrap().is_none());
+    let spent = mana - w.content.get(0xb24).unwrap().mana_cost;
+    assert_eq!(w.players[&id].character.mp, spent);
+    assert_eq!(w.bullets.len(), 20);
+    assert!(w.players[&id].pending && w.players[&id].progress_started);
+    assert!(cast(&mut w, id, pos).is_err(), "cooldown still applies");
+    assert!(w.use_item(id, potion, pos).is_err());
+    assert_eq!(w.players[&id].character.items[4], potion.kind);
+    w.finish_progress(id, snapshot).unwrap();
+    assert_eq!(
+        w.players[&id].character.mp, spent,
+        "progress must not refund spell mana"
+    );
+    assert!(!w.players[&id].pending);
+}
+
+#[test]
+fn progress_does_not_bypass_ability_lifecycle_or_inventory_reservations() {
+    for state in 0..7 {
+        let (mut w, id) = fixture(crate::content::WIZARD, 0xb24);
+        w.players.get_mut(&id).unwrap().experience_queued = 1;
+        w.pending_progress();
+        let p = w.players.get_mut(&id).unwrap();
+        match state {
+            0 => p.progress_started = false,
+            1 => p.death_pending = true,
+            2 => p.departing = true,
+            3 => p.persistence_failure = Some("failed progress save".into()),
+            4 => p.paused = true,
+            5 => p.character.hp = 0,
+            6 => p.character.mp = 0,
+            _ => unreachable!(),
+        }
+        let mana = w.players[&id].character.mp;
+        assert!(
+            cast(&mut w, id, Pos { x: 14., y: 12. }).is_err(),
+            "state {state}"
+        );
+        assert_eq!(w.players[&id].character.mp, mana);
+        assert!(w.bullets.is_empty());
+    }
+}
+
+#[test]
 fn every_recovered_class_ability_item_executes_all_activations_for_one_mana_charge() {
     let content = tests::world().content;
     let items: Vec<_> = content
