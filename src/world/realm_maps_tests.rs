@@ -43,6 +43,23 @@ fn all_three_full_realms_preserve_water_scenery_and_safe_arrivals() {
         assert_eq!(hermits.len(), 1, "{name}: one original Hermit");
         assert!(world.walkable(world.ocean_reward_position(hermits[0]).unwrap()));
         assert_eq!(world.hero_identities().len(), 14);
+        for terrain in 1..=12 {
+            let count = world
+                .population
+                .iter()
+                .filter(|s| s.entity.is_some() && world.population_terrain(s) == terrain)
+                .count();
+            assert_eq!(count, world.population_count(terrain));
+            assert!(
+                (world.population_regions[terrain as usize].target
+                    ..=world.population_regions[terrain as usize].limit)
+                    .contains(&count)
+            );
+        }
+        if name == "realm-fsod-2" {
+            assert_eq!(world.population_regions[2].target, 0);
+            assert_eq!(world.population_count(2), 0);
+        }
         assert_eq!(
             world
                 .actors()

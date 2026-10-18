@@ -30,8 +30,6 @@ fn named_setpieces_are_accessible_and_preserve_templates_camps_and_closure() {
         let original = Arc::new(crate::terrain::generate(&content, seed, 512).unwrap());
         let mut w = World::new(content.clone(), original.clone()).unwrap();
         w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-        w.populate_shore().unwrap();
-        w.populate_inland().unwrap();
         w.populate_realm_heroes().unwrap();
         let protected: Vec<_> = w
             .entities
@@ -42,8 +40,9 @@ fn named_setpieces_are_accessible_and_preserve_templates_camps_and_closure() {
             })
             .map(|e| (e.id, e.kind, e.pos, e.hp))
             .collect();
-        let slots: Vec<_> = w.population.iter().map(|s| s.pos).collect();
         w.populate_named_quests().unwrap();
+        w.populate_realm_population().unwrap();
+        let slots: Vec<_> = w.population.iter().map(|s| s.pos).collect();
         assert!(!Arc::ptr_eq(&w.map, &original));
         for (id, kind, pos, hp) in protected {
             let e = &w.entities[&id];

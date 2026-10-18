@@ -37,7 +37,7 @@ impl World {
     }
     pub(super) fn quest_members(&self, id: i32, kinds: &[u16]) -> Vec<i32> {
         let tag = self.entities[&id].quest.expect("named quest membership");
-        self.actors()
+        self.non_population_actors()
             .filter(|e| e.quest == Some(tag) && kinds.contains(&e.kind))
             .map(|e| e.id)
             .collect()

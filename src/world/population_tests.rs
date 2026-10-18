@@ -5,6 +5,17 @@ fn directory(seed: u64) -> Directory {
     Directory::test_prepared(Path::new("data"), tests::world().content, 16, seed)
         .unwrap_or_else(|error| panic!("seed {seed}: {error}"))
 }
+pub(super) fn family_arena(terrain: u8, leaders: &[u16]) -> World {
+    let mut w = population_density_tests::field(80, terrain);
+    w.encounter = true;
+    w.populate_families(
+        terrain,
+        &[Pos { x: 20.5, y: 20.5 }, Pos { x: 50.5, y: 50.5 }],
+        leaders,
+    )
+    .unwrap();
+    w
+}
 fn camp(w: &World, leader: u16) -> usize {
     w.camps
         .iter()
@@ -34,9 +45,8 @@ fn player(w: &mut World, pos: Pos) -> i32 {
 }
 fn assert_budgets(w: &World) {
     for terrain in 1..=12 {
-        assert!(w.population_count(terrain) <= if terrain >= 11 { 24 } else { 32 });
+        assert!(w.population_count(terrain) <= w.population_regions[terrain as usize].limit);
     }
-    assert_eq!(w.hero_identities().len(), 14);
 }
 
 #[test]
@@ -53,11 +63,9 @@ fn complete_pack_is_seeded_sourced_distributed_and_regionally_bounded() {
         };
         assert_eq!(sites(w), sites(&b.worlds[&-3]));
         assert_budgets(w);
-        assert_eq!(w.population_count(11), 24);
-        for family in population::FAMILIES {
-            if seed == 12351 || !(2..=7).contains(&family.terrain) {
-                assert!(w.camps.iter().any(|c| c.family.leader == family.leader));
-            }
+        assert_eq!(w.hero_identities().len(), 14);
+        for terrain in 1..=12 {
+            assert!(w.population_count(terrain) >= w.population_regions[terrain as usize].target);
         }
         for (index, c) in w.camps.iter().enumerate() {
             let minimum = 1 + c.family.roles.iter().map(|r| r.initial).sum::<usize>();
@@ -100,15 +108,12 @@ fn complete_pack_is_seeded_sourced_distributed_and_regionally_bounded() {
             x: w.map.spawns[0].0,
             y: w.map.spawns[0].1,
         };
+        assert!(w.population.iter().all(|s| s.pos.distance(arrival) >= 12.));
         assert!(
             w.population
                 .iter()
-                .any(|s| s.kind == 0x600 && s.pos.distance(arrival) < 60.)
-        );
-        assert!(
-            w.population
-                .iter()
-                .any(|s| matches!(s.kind, 0x953 | 0x604) && s.pos.distance(arrival) > 64.)
+                .filter(|s| matches!(s.kind, 0x953 | 0x604))
+                .all(|s| s.pos.distance(arrival) >= 64.)
         );
     }
     let ordinary =
@@ -122,30 +127,12 @@ fn every_family_reinforces_on_its_role_clock_without_duplicate_ids() {
         .iter()
         .filter(|family| family.roles[0].interval.is_some())
     {
-        let mut d = directory(12351);
-        let w = d.worlds.get_mut(&-3).unwrap();
-        let c = camp(w, family.leader);
+        let mut arena = family_arena(family.terrain, &[family.leader]);
+        let home = arena.population[0].pos;
+        let w = &mut arena;
+        let c = 0;
         let start = w.camps[c].start;
-        let home = w.population[start].pos;
         player(w, home);
-        let other: Vec<_> = w
-            .population
-            .iter()
-            .filter(|s| s.camp != Some(c))
-            .filter_map(|s| s.entity)
-            .collect();
-        for id in other {
-            w.remove_entity(id);
-        }
-        w.repopulate().unwrap();
-        for s in w.population.iter_mut().filter(|s| s.camp != Some(c)) {
-            s.ready = u64::MAX;
-        }
-        for (index, camp) in w.camps.iter_mut().enumerate() {
-            if index != c {
-                camp.ready = u64::MAX;
-            }
-        }
         if family.leader == 0x206 {
             let egg = w.population[start].entity.unwrap();
             w.transform_fauna(egg, 0x209).unwrap();
@@ -177,45 +164,52 @@ fn every_family_reinforces_on_its_role_clock_without_duplicate_ids() {
 }
 
 #[test]
-fn orphans_survive_and_cleared_groups_wait_for_player_clearance() {
-    let mut d = directory(12351);
-    let w = d.worlds.get_mut(&-3).unwrap();
-    let c = camp(w, 0x609);
-    let s = w.camps[c].start;
-    let home = w.population[s].pos;
-    let p = player(w, home);
-    let old = members(w, c);
+fn orphans_survive_regional_refills_and_replacements_do_not_spawn_on_players() {
+    let mut w = family_arena(10, &[0x609]);
+    let home = w.population[0].pos;
+    player(&mut w, home);
+    let old = members(&w, 0);
     w.remove_entity(old[0]);
     w.repopulate().unwrap();
     w.mechanic_expiry();
-    assert_eq!(members(w, c).len(), 7);
+    assert_eq!(members(&w, 0).len(), 7);
     assert!(matches!(
         w.family_movement(old[1], home, 0).unwrap().0,
         Motion::Wander
     ));
+    w.population_next = 0;
     w.now = 60000;
     w.repopulate().unwrap();
-    assert!(w.population[s].entity.is_none());
-    for id in &old[1..] {
+    assert!(old[1..].iter().all(|id| w.entities.contains_key(id)));
+    assert!(w.population_count(10) >= w.population_regions[10].target);
+    assert!(
+        w.population
+            .iter()
+            .filter_map(|s| s.entity)
+            .filter(|id| !old.contains(id))
+            .all(|id| w.entities[&id].pos.distance(home) >= 12.)
+    );
+    let dead: BTreeSet<_> = w.population.iter().filter_map(|s| s.entity).collect();
+    for id in &dead {
         w.remove_entity(*id);
     }
+    w.now += 60000;
     w.repopulate().unwrap();
-    w.now = 120000;
-    w.repopulate().unwrap();
-    assert!(members(w, c).is_empty());
-    w.players.get_mut(&p).unwrap().pos = Pos { x: 0.5, y: 0.5 };
-    w.now = 121000;
-    w.repopulate().unwrap();
-    assert_eq!(members(w, c).len(), 8);
-    assert!(old.iter().all(|id| !w.entities.contains_key(id)));
+    assert!(w.population_count(10) >= w.population_regions[10].target);
+    assert!(
+        w.population
+            .iter()
+            .filter_map(|s| s.entity)
+            .all(|id| !dead.contains(&id) && w.entities[&id].pos.distance(home) >= 12.)
+    );
     assert!(w.critical_deaths.is_empty());
-    assert_budgets(w);
+    assert_budgets(&w);
 }
 
 #[test]
 fn distinct_leader_phases_and_independent_projectile_clocks_are_real() {
-    let mut d = directory(12351);
-    let w = d.worlds.get_mut(&-3).unwrap();
+    let mut arena = family_arena(10, &[0x614, 0x609]);
+    let w = &mut arena;
     let c = camp(w, 0x614);
     let s = w.camps[c].start;
     let mage = w.population[s].entity.unwrap();
@@ -234,11 +228,11 @@ fn distinct_leader_phases_and_independent_projectile_clocks_are_real() {
         w.family_movement(rogue, target, 2700).unwrap().0,
         Motion::Chase { stop: 1.5, .. }
     ));
-    let b = camp(w, 0x953);
-    let id = w.population[w.camps[b].start].entity.unwrap();
-    w.entities.get_mut(&id).unwrap().hp = 80;
+    let mut bandit = family_arena(11, &[0x953]);
+    let id = bandit.population[0].entity.unwrap();
+    bandit.entities.get_mut(&id).unwrap().hp = 80;
     assert!(matches!(
-        w.family_movement(id, target, 0).unwrap().0,
+        bandit.family_movement(id, target, 0).unwrap().0,
         Motion::Retreat { .. }
     ));
     assert!(crate::encounter::phased_attacks(0x604, 100, 0., 0).is_empty());
@@ -287,9 +281,9 @@ fn family_conditions_share_the_existing_movement_and_shot_pipeline() {
         Some(crate::condition::PARALYZED),
         Some(crate::condition::STUNNED),
     ] {
-        let mut d = directory(12351);
-        let w = d.worlds.get_mut(&-3).unwrap();
-        let c = camp(w, 0x609);
+        let mut arena = family_arena(10, &[0x609]);
+        let w = &mut arena;
+        let c = 0;
         let s = w.camps[c].start;
         let id = w.population[s + 1].entity.unwrap();
         let pos = w.entities[&id].pos;
@@ -327,7 +321,7 @@ fn repeated_full_region_clears_preserve_caps_and_never_reuse_dead_ids() {
         w.now += 60000;
         w.repopulate().unwrap();
         assert_budgets(w);
-        assert_eq!(w.population_count(11), 24);
+        assert!(w.population_count(11) >= w.population_regions[11].target);
         assert!(w.critical_deaths.is_empty());
     }
 }
