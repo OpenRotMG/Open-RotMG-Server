@@ -314,9 +314,76 @@ async fn vault_second_chest_stat_and_xp_consumption_bind_the_exact_revision() {
 }
 
 #[tokio::test]
+async fn vault_schema_unknown_legacy_columns_reject_without_rewriting_saved_data() {
+    for mutation in [
+        "ALTER TABLE vaults ADD COLUMN unknown_saved_record TEXT NOT NULL DEFAULT 'must-not-discard'",
+        "ALTER TABLE vaults ADD COLUMN unknown_saved_record TEXT GENERATED ALWAYS AS ('must-not-discard') VIRTUAL",
+    ] {
+        let (path, content, store, ch) = fixture().await;
+        drop(store);
+        let db = Connection::open(&path).unwrap();
+        legacy_fixture(&db).unwrap();
+        db.execute_batch("PRAGMA user_version=12").unwrap();
+        db.execute_batch(mutation).unwrap();
+        db.execute(
+            "UPDATE vaults SET items='[2594,2595,-1,-1,-1,-1,-1,-1]',revision=37",
+            [],
+        )
+        .unwrap();
+        let snapshot = || -> (String, String, i32, String, i32, String) {
+            db.query_row("SELECT (SELECT sql FROM sqlite_schema WHERE name='vaults'),(SELECT sql FROM sqlite_schema WHERE name='accounts'),(SELECT user_version FROM pragma_user_version),items,revision,unknown_saved_record FROM vaults WHERE account=?1", [ch.account], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).unwrap()
+        };
+        let before = snapshot();
+        assert!(Store::open(&path, &content).is_err(), "{mutation}");
+        assert_eq!(snapshot(), before);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn vault_schema_current_column_key_and_foreign_key_metadata_are_required() {
+    for (original, changed) in [
+        ("REFERENCES accounts(id)", ""),
+        ("PRIMARY KEY(account,chest)", "PRIMARY KEY(account)"),
+        ("items TEXT NOT NULL", "items BLOB NOT NULL"),
+        ("items TEXT NOT NULL", "items TEXT"),
+        ("DEFAULT 0", ""),
+    ] {
+        let (path, content, store, ch) = fixture().await;
+        drop(store);
+        let db = Connection::open(&path).unwrap();
+        let sql: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='vaults'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let malformed = sql.replace(original, changed);
+        assert_ne!(malformed, sql);
+        db.execute_batch(&format!("PRAGMA foreign_keys=OFF; ALTER TABLE vaults RENAME TO preserved_vaults; {malformed}; INSERT INTO vaults SELECT * FROM preserved_vaults; DROP TABLE preserved_vaults;")).unwrap();
+        let snapshot = || -> (String, i32, i32, String, i32) {
+            db.query_row("SELECT (SELECT sql FROM sqlite_schema WHERE name='vaults'),(SELECT user_version FROM pragma_user_version),chest,items,revision FROM vaults WHERE account=?1", [ch.account], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap()
+        };
+        let before = snapshot();
+        assert!(
+            Store::open(&path, &content).is_err(),
+            "{original} → {changed}"
+        );
+        assert_eq!(snapshot(), before);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[tokio::test]
 async fn vault_current_schema_rejects_missing_unknown_or_malformed_state() {
     for mutation in [
         "PRAGMA user_version=14",
+        "PRAGMA user_version=-1",
+        "ALTER TABLE vaults ADD COLUMN hidden_saved_record TEXT GENERATED ALWAYS AS ('saved') VIRTUAL",
+        "ALTER TABLE accounts DROP COLUMN vault_mask; ALTER TABLE accounts ADD COLUMN vault_mask BLOB NOT NULL DEFAULT 1",
+        "ALTER TABLE accounts DROP COLUMN vault_mask; ALTER TABLE accounts ADD COLUMN vault_mask INTEGER DEFAULT 1",
+        "ALTER TABLE accounts DROP COLUMN vault_mask; ALTER TABLE accounts ADD COLUMN vault_mask INTEGER NOT NULL DEFAULT 0; UPDATE accounts SET vault_mask=1",
         "DROP TABLE vaults",
         "ALTER TABLE accounts DROP COLUMN vault_mask",
         "ALTER TABLE vaults DROP COLUMN items",

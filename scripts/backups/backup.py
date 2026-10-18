@@ -76,11 +76,26 @@ def snapshot(path, schema, *, include_schema=False):
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
         schemas = schema if isinstance(schema, list) else [schema]
         matched = [candidate for candidate in schemas if tables == set(candidate) and all(
-            tuple(r[1] for r in db.execute('PRAGMA table_info(' + table + ')')) == columns
+            tuple(r[1] for r in db.execute('PRAGMA table_xinfo(' + table + ')')) == columns
             for table, columns in candidate.items())]
         if not matched or any(candidate != matched[0] for candidate in matched):
             raise ValueError('Unsupported database tables or columns; update and test the export schema before backing up')
         schema = matched[0]
+        if 'vaults' in schema:
+            references = db.execute('SELECT "table","from","to",seq,on_update,on_delete FROM pragma_foreign_key_list(\'vaults\') ORDER BY id,seq').fetchall()
+            if references != [('accounts', 'account', 'id', 0, 'NO ACTION', 'NO ACTION')]:
+                raise ValueError('Unsupported source Vault account foreign key')
+            if schema['vaults'] == VAULTS_GAME['vaults']:
+                for table, column, kind, default, key in [
+                    ('vaults', 'account', 'INTEGER', None, 1),
+                    ('vaults', 'chest', 'INTEGER', None, 2),
+                    ('vaults', 'items', 'TEXT', None, 0),
+                    ('vaults', 'revision', 'INTEGER', '0', 0),
+                    ('accounts', 'vault_mask', 'INTEGER', '1', 0),
+                ]:
+                    actual = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone()
+                    if actual != (kind, 1, default, key, 0):
+                        raise ValueError('Unsupported canonical Vault metadata: ' + table + '.' + column)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:

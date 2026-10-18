@@ -519,6 +519,16 @@ CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),g
                     self.export()
                 self.assertFalse(self.output.exists())
 
+    def test_generated_vault_column_fails_before_export_without_changing_source(self):
+        self.add_latest_state()
+        with closing(sqlite3.connect(self.game)) as db, db:
+            db.execute("ALTER TABLE vaults ADD COLUMN unknown_saved_record TEXT GENERATED ALWAYS AS ('must-not-discard') VIRTUAL")
+        before = self.game.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'columns'):
+            self.export()
+        self.assertEqual(self.game.read_bytes(), before)
+        self.assertFalse(self.output.exists())
+
     def test_vault_invalid_inventory_and_credential_column_fail_closed(self):
         self.add_latest_state()
         with closing(sqlite3.connect(self.game)) as db, db:

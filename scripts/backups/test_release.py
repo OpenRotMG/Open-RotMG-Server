@@ -88,6 +88,25 @@ class ReleaseContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'character slot'):
                 backup.validate(malformed)
             revision = Path(temporary) / 'contract/REVISION'
+            for original, changed in [
+                ('REFERENCES accounts(id)', ''),
+                ('PRIMARY KEY(account,chest)', 'PRIMARY KEY(chest,account)'),
+                ('items TEXT NOT NULL', 'items BLOB NOT NULL'),
+                ('items TEXT NOT NULL', 'items TEXT'),
+                ('DEFAULT 0', ''),
+            ]:
+                malformed_db = Path(temporary) / 'malformed-metadata.db'
+                with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(malformed_db)) as target:
+                    source.backup(target)
+                    sql = target.execute("SELECT sql FROM sqlite_schema WHERE name='vaults'").fetchone()[0]
+                    changed_sql = sql.replace(original, changed)
+                    self.assertNotEqual(sql, changed_sql)
+                    target.executescript('PRAGMA foreign_keys=OFF; ALTER TABLE vaults RENAME TO preserved_vaults; ' + changed_sql + '; INSERT INTO vaults SELECT * FROM preserved_vaults; DROP TABLE preserved_vaults;')
+                before = malformed_db.read_bytes()
+                with self.subTest(metadata=original), self.assertRaisesRegex(ValueError, 'metadata|foreign key'):
+                    backup.export(malformed_db, Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'malformed.gz', revision, revision, revision)
+                self.assertEqual(malformed_db.read_bytes(), before)
+                self.assertFalse((Path(temporary) / 'malformed.gz').exists())
             for version in [0, 11, 12, 14]:
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)

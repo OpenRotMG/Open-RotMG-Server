@@ -83,19 +83,35 @@ pub(super) fn save(db: &Connection, vault: &Vault) -> Result<()> {
 
 pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
     let mask: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='vault_mask')",
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_xinfo('accounts') WHERE name='vault_mask')",
         [],
         |r| r.get(0),
     )?;
-    let chest: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('vaults') WHERE name='chest')",
-        [],
-        |r| r.get(0),
-    )?;
+    // table_info omits generated columns, which must not disappear during migration.
+    let columns = {
+        let mut q = db.prepare("SELECT name FROM pragma_table_xinfo('vaults') ORDER BY cid")?;
+        q.query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let expected: &[&str] = if version == 13 {
+        &["account", "chest", "items", "revision"]
+    } else {
+        &["account", "items", "revision"]
+    };
     ensure!(
-        mask == (version == 13) && chest == (version == 13),
-        "vault schema/version disagreement; restore reviewed state"
+        (0..=13).contains(&version)
+            && mask == (version == 13)
+            && columns
+                .iter()
+                .map(String::as_str)
+                .eq(expected.iter().copied()),
+        "vault schema/version/column disagreement; restore reviewed state"
     );
+    let account_reference: bool = db.query_row(
+        r#"SELECT count(*)=1 AND count(*) FILTER(WHERE "table"='accounts' AND "from"='account' AND "to"='id' AND seq=0 AND on_update='NO ACTION' AND on_delete='NO ACTION')=1 FROM pragma_foreign_key_list('vaults')"#,
+        [], |r| r.get(0),
+    )?;
+    ensure!(account_reference, "unsupported vault account foreign key");
     if version < 13 {
         db.execute_batch("ALTER TABLE accounts ADD COLUMN vault_mask INTEGER NOT NULL DEFAULT 1 CHECK(typeof(vault_mask)='integer' AND vault_mask BETWEEN 1 AND 1048575 AND (vault_mask & 1)=1);
 ALTER TABLE vaults RENAME TO legacy_vaults;
@@ -104,15 +120,26 @@ INSERT INTO vaults(account,chest,items,revision) SELECT account,0,items,revision
 INSERT INTO vaults(account,chest,items,revision) SELECT id,0,'[-1,-1,-1,-1,-1,-1,-1,-1]',0 FROM accounts WHERE id NOT IN(SELECT account FROM legacy_vaults);
 DROP TABLE legacy_vaults;")?;
     }
-    let columns = {
-        let mut q = db.prepare("SELECT name FROM pragma_table_info('vaults') ORDER BY cid")?;
-        q.query_map([], |r| r.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    ensure!(
-        columns == ["account", "chest", "items", "revision"],
-        "unsupported vault columns"
-    );
+    for (table, column, expected_type, expected_default, expected_key) in [
+        ("vaults", "account", "INTEGER", None, 1),
+        ("vaults", "chest", "INTEGER", None, 2),
+        ("vaults", "items", "TEXT", None, 0),
+        ("vaults", "revision", "INTEGER", Some("0"), 0),
+        ("accounts", "vault_mask", "INTEGER", Some("1"), 0),
+    ] {
+        let (kind, not_null, default, key, hidden): (String, bool, Option<String>, i32, i32) = db.query_row(
+            r#"SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?1) WHERE name=?2"#,
+            params![table, column], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
+        )?;
+        ensure!(
+            kind == expected_type
+                && not_null
+                && default.as_deref() == expected_default
+                && key == expected_key
+                && hidden == 0,
+            "unsupported canonical vault metadata: {table}.{column}"
+        );
+    }
     let accounts = {
         let mut q = db.prepare("SELECT id FROM accounts")?;
         q.query_map([], |r| r.get::<_, i32>(0))?
