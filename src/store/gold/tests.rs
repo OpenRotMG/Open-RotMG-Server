@@ -191,7 +191,7 @@ async fn migration_does_not_backfill_and_reopen_preserves_claims_and_notificatio
             "INSERT INTO discord_links VALUES(?1,'12345678901234567')",
             [old],
         )?;
-        crate::store::vaults::legacy_fixture(&db)?;
+        crate::store::vaults::legacy_fixture(db)?;
         db.execute_batch("DROP TABLE gold_rewards; PRAGMA user_version=9")?;
         Ok(())
     })

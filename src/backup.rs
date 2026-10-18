@@ -114,6 +114,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 store.progress(character.clone()).await?;
                 let mut items = character.items.clone();
                 items[4] = 0xa22;
+                items[5] = 0xa23;
                 store
                     .exchange(
                         vec![store::InventoryWrite {
