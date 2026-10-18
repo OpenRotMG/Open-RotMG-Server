@@ -19,7 +19,9 @@ fn enemy(w: &World, kind: u16) -> i32 {
 
 #[test]
 fn realm_orbits_use_the_reference_radius_speed_and_owned_anchor() {
-    let mut w = realm();
+    let mut w = population_tests::family_arena(1, &[0x905]);
+    w.populate_solos(1, &[Pos { x: 50.5, y: 50.5 }], &[0x6d8])
+        .unwrap();
     let rock = enemy(&w, 0x905);
     let target = w.entities[&rock].pos;
     assert!(matches!(
@@ -46,8 +48,10 @@ fn realm_orbits_use_the_reference_radius_speed_and_owned_anchor() {
         ));
     }
     for (kind, radius, speed) in [(0x605, 6., 5.), (0x612, 2., 8.), (0x613, 2., 8.)] {
-        let id = enemy(&w, kind);
-        let (motion, actual_speed) = w.family_movement(id, target, 2700).unwrap();
+        let leader = if kind == 0x605 { 0x609 } else { 0x614 };
+        let mut family = population_tests::family_arena(10, &[leader]);
+        let id = enemy(&family, kind);
+        let (motion, actual_speed) = family.family_movement(id, target, 2700).unwrap();
         assert!(
             matches!(motion, Motion::Orbit {anchor: Anchor::CampLeader, radius: r} if r == radius)
         );
@@ -68,8 +72,10 @@ fn realm_orbits_use_the_reference_radius_speed_and_owned_anchor() {
 
 #[test]
 fn realm_followers_do_not_replace_chase_or_wander_priorities_with_a_freeze() {
-    let mut w = realm();
-    for (kind, stop, speed) in [(0x607, 6., 6.), (0x954, 3., 8.)] {
+    for (kind, stop, speed, terrain, leader) in
+        [(0x607, 6., 6., 10, 0x609), (0x954, 3., 8., 11, 0x953)]
+    {
+        let mut w = population_tests::family_arena(terrain, &[leader]);
         let id = enemy(&w, kind);
         let camp = w.entities[&id].camp.unwrap();
         let leader = w.population[w.camps[camp].start].entity.unwrap();

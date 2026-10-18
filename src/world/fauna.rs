@@ -5,7 +5,7 @@ impl World {
     pub(super) fn transform_fauna(&mut self, id: i32, kind: u16) -> Result<i32> {
         crate::encounter::validate(&self.content, kind)?;
         let old = &self.entities[&id];
-        let slot = self.population.iter().position(|s| s.entity == Some(id));
+        let slot = old.population_slot;
         ensure!(
             old.camp.is_none() || slot.is_some(),
             "transforming family member lacks reserved slot"
@@ -22,6 +22,7 @@ impl World {
         e.activated = Some(self.now);
         if let Some(slot) = slot {
             self.population[slot].entity = Some(new);
+            self.mark_population(new, slot)?;
         }
         tracing::debug!(
             entity = id,
@@ -64,10 +65,7 @@ impl World {
         match dead.kind {
             0x6c8 | 0x206 => {
                 let kind = if dead.kind == 0x6c8 { 0x6c9 } else { 0x207 };
-                let slot = self
-                    .population
-                    .iter()
-                    .position(|s| s.entity == Some(dead.id));
+                let slot = dead.population_slot;
                 ensure!(
                     dead.camp.is_none() || slot.is_some(),
                     "death transformation lacks reserved population slot"
@@ -82,6 +80,7 @@ impl World {
                 e.activated = Some(self.now);
                 if let Some(slot) = slot {
                     self.population[slot].entity = Some(id);
+                    self.mark_population(id, slot)?;
                 }
                 tracing::debug!(
                     entity = dead.id,
@@ -106,7 +105,7 @@ impl World {
                         self.population[slot].entity.is_none(),
                         "Green Slime split slot already occupied"
                     );
-                    if !self.family_space(6, 1)? {
+                    if !self.population_space(6, 1)? {
                         break;
                     }
                     self.place_member(camp, slot, dead.pos)?;
