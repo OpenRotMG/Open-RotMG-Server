@@ -3486,6 +3486,12 @@ impl World {
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
         p.character.fame = snapshot.fame;
+        let best = p
+            .presentation
+            .best_fame
+            .entry(p.character.class)
+            .or_default();
+        *best = (*best).max(snapshot.fame);
         p.character.level = snapshot.level;
         p.character.base = snapshot.base;
         p.character.pirate_caves = snapshot.pirate_caves;
@@ -3506,6 +3512,8 @@ impl World {
             player = id,
             level = p.character.level,
             experience = p.character.exp,
+            fame = p.character.fame,
+            stars = p.presentation.stars(),
             bonus_experience = p.character.xp_boost.bonus_exp,
             xp_boost = p.character.xp_boost.active,
             "progress committed"

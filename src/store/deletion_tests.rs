@@ -49,6 +49,8 @@ async fn deletion_retires_inventory_without_rewards_and_preserves_account_histor
     let vault = serde_json::to_value(s.vault(account, 0).await.unwrap()).unwrap();
     let before = s.list("delete-history".into()).await.unwrap();
     let presentation = s.presentation(account).await.unwrap();
+    assert_eq!(presentation.best_fame[&WIZARD], 999);
+    assert_eq!(presentation.stars(), 4);
     s.delete_character(account, ch.id).await.unwrap();
     assert!(s.delete_character(account, ch.id).await.is_err());
     assert!(s.delete_character(account, dead.id).await.is_err());
