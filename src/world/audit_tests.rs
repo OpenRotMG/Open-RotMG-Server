@@ -36,6 +36,93 @@ fn members(w: &World, camp: usize) -> Vec<i32> {
 }
 
 #[test]
+fn lair_mummies_slide_along_the_room_wall_without_crossing_it() {
+    for kind in [0xd96, 0xd97, 0xd98] {
+        let content = arena(0).content;
+        let map =
+            Arc::new(Map::load(std::path::Path::new("data/undead-lair.wmap"), &content).unwrap());
+        let mut w = World::new(content, map).unwrap();
+        w.encounter = true;
+        for id in w
+            .entities
+            .values()
+            .filter(|e| w.content.objects[&e.kind].enemy)
+            .map(|e| e.id)
+            .collect::<Vec<_>>()
+        {
+            w.remove_entity(id);
+        }
+        let target = Pos { x: 30.5, y: 17.5 };
+        player(&mut w, target);
+        let id = w
+            .spawn_entity(kind, Pos { x: 25.5, y: 9.5 }, vec![])
+            .unwrap();
+        let mut moved_along_wall = false;
+        for ms in (0..3000).step_by(50) {
+            w.now = ms;
+            let old = w.entities[&id].pos;
+            w.npc_step();
+            let e = &w.entities[&id];
+            assert!(e.pos.distance(old) <= 0.30001);
+            assert!(w.walkable(e.pos));
+            assert_eq!(w.entities_at(e.pos).filter(|e| e.id == id).count(), 1);
+            if old.y > 10.7 && e.pos.x > old.x + 0.01 {
+                moved_along_wall = true;
+            }
+        }
+        assert!(
+            moved_along_wall,
+            "{kind:#x} lost its unblocked movement component"
+        );
+        assert!(
+            w.entities[&id].pos.distance(target) <= 7.1,
+            "{kind:#x} stuck at {:?}",
+            w.entities[&id].pos
+        );
+    }
+}
+
+#[test]
+fn npc_wall_projection_preserves_axes_budgets_and_strict_movement() {
+    for swap in [false, true] {
+        for direction in [-1., 1.] {
+            let point = |x, y| {
+                if swap {
+                    Pos { x: y, y: x }
+                } else {
+                    Pos { x, y }
+                }
+            };
+            let mut w = arena(0);
+            let old = point(11. - direction * 0.05, 10.2);
+            let goal = point(11. + direction * 4.5, 12.5);
+            w.spawn_entity(0x163, point(11. + direction * 0.5, 10.5), vec![])
+                .unwrap();
+            let id = w.spawn_entity(0xd96, old, vec![]).unwrap();
+            assert!(w.move_entity(id, goal, 0.3).is_err());
+            assert_eq!(w.entities[&id].pos.distance(old), 0.);
+            w.move_entity_colliding(id, goal, 0.3, true).unwrap();
+            let pos = w.entities[&id].pos;
+            assert!(pos.distance(old) <= 0.30001);
+            assert!((if swap { pos.x - old.x } else { pos.y - old.y }) > 0.1);
+            assert!(w.walkable(pos));
+            assert_eq!(w.cells.iter().filter(|cell| cell.contains(&id)).count(), 1);
+        }
+    }
+    let mut w = arena(0);
+    let old = Pos { x: 10.95, y: 10.95 };
+    let id = w.spawn_entity(0xd96, old, vec![]).unwrap();
+    for pos in [Pos { x: 11.5, y: 10.5 }, Pos { x: 10.5, y: 11.5 }] {
+        w.spawn_entity(0x163, pos, vec![]).unwrap();
+    }
+    assert!(
+        w.move_entity_colliding(id, Pos { x: 12., y: 12. }, 0.3, true)
+            .is_err()
+    );
+    assert_eq!(w.entities[&id].pos.distance(old), 0.);
+}
+
+#[test]
 fn target_relative_rings_and_leviathan_fans_rotate_with_the_target() {
     for (kind, hp, ms) in [
         (0x610, 70, 0),
