@@ -56,10 +56,15 @@ CREATE TABLE account_fame(account INTEGER PRIMARY KEY REFERENCES accounts(id),ba
 CREATE TABLE discord_recovery(account INTEGER PRIMARY KEY REFERENCES discord_links(account),enabled_at INTEGER NOT NULL,last_issued_at INTEGER NOT NULL);
 CREATE TABLE recovery_codes(account INTEGER PRIMARY KEY REFERENCES accounts(id),hash TEXT NOT NULL UNIQUE,issued_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
 CREATE TABLE password_resets(account INTEGER PRIMARY KEY REFERENCES accounts(id),hash TEXT NOT NULL UNIQUE,issued_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
-INSERT INTO account_fame SELECT id,27,40 FROM accounts;
+INSERT INTO account_fame SELECT id,CASE WHEN id IN (1,2) THEN 27 ELSE 0 END,CASE WHEN id IN (1,2) THEN 40 ELSE 0 END FROM accounts;
 INSERT INTO discord_recovery VALUES(1,123,124);
 INSERT INTO recovery_codes VALUES(1,'NEVER_EXPORT_RECOVERY_CODE_HASH',100,400);
 INSERT INTO password_resets VALUES(1,'NEVER_EXPORT_RESET_TOKEN_HASH',100,1000);""")
+            self.stats['fame'] = 40
+            for character, raw in db.execute('SELECT character,snapshot FROM deaths').fetchall():
+                snapshot = dict(json.loads(raw), fame=40)
+                db.execute('UPDATE characters SET stats=? WHERE id=?', (json.dumps(snapshot), character))
+                db.execute('UPDATE deaths SET snapshot=? WHERE character=?', (json.dumps(snapshot), character))
 
     def add_social(self):
         self.add_actions()
@@ -240,6 +245,12 @@ INSERT INTO account_lists VALUES(1,0,2),(1,1,2),(2,0,1),(1,0,3);''')
 CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild INTEGER REFERENCES guilds(id),rank INTEGER,fame INTEGER);''')
             db.execute('INSERT INTO guilds VALUES(7,?,2,2500,12500,?)', ('Backup Guild', 'Welcome & prepare!\n日本語 🧙'))
             db.executemany('INSERT INTO guild_members VALUES(?,7,?,?)', [(1, 40, 5000), (2, 10, 7500)])
+            for character, fame in [(1, 5000), (2, 7500)]:
+                snapshot = json.loads(db.execute('SELECT snapshot FROM deaths WHERE character=?', (character,)).fetchone()[0])
+                snapshot['fame'] = fame
+                db.execute('UPDATE characters SET stats=? WHERE id=?', (json.dumps(snapshot), character))
+                db.execute('UPDATE deaths SET snapshot=? WHERE character=?', (json.dumps(snapshot), character))
+                db.execute('UPDATE account_fame SET earned=? WHERE account=?', (fame, character))
 
     def test_guild_roundtrip_preserves_bank_board_ranks_contributions_and_ids(self):
         self.add_guilds()
@@ -619,7 +630,7 @@ CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),g
             del malformed['game'][table]
             with self.subTest(missing=table), self.assertRaisesRegex(ValueError, 'tables'):
                 backup.validate(malformed)
-        for version in [14, True, '3']:
+        for version in [15, True, '3']:
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'envelope'):
                 backup.validate(dict(before, schema=version))
 

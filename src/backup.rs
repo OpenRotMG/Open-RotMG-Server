@@ -184,6 +184,19 @@ pub async fn run(args: &[String]) -> Result<bool> {
                             store::GuildAction::Create("Backup Guild".into()),
                         )
                         .await?;
+                    funding.items[0] = 0xaa2;
+                    funding.items[3] = 0xabf;
+                    funding.revision = store
+                        .exchange(
+                            vec![store::InventoryWrite {
+                                id: funding.id,
+                                account: funding.account,
+                                revision: funding.revision,
+                                items: funding.items.clone(),
+                            }],
+                            vec![],
+                        )
+                        .await?[0];
                     funding.fame = 12500;
                     funding.hp = 0;
                     funding.alive = false;
@@ -241,6 +254,9 @@ pub async fn run(args: &[String]) -> Result<bool> {
         }
         ["--backup-exercise-vault", database, data] => {
             exercise_vault(Path::new(database), Path::new(data)).await?;
+        }
+        ["--backup-exercise-death", database, data] => {
+            exercise_death(Path::new(database), Path::new(data)).await?;
         }
         [command, ..] if command.starts_with("--backup-") => {
             anyhow::bail!("Invalid backup command arguments")
@@ -346,6 +362,111 @@ async fn exercise_vault(database: &Path, data: &Path) -> Result<()> {
     println!(
         "{}",
         serde_json::json!({"exercised_vault_chests":2,"transfers":1,"withdrawals":1,"deposits":1,"items_conserved":true})
+    );
+    Ok(())
+}
+
+async fn exercise_death(database: &Path, data: &Path) -> Result<()> {
+    let content = content::Content::load(data)?;
+    let store = store::Store::open(database, &content)?;
+    let db = rusqlite::Connection::open(database)?;
+    let account: i32 =
+        db.query_row("SELECT account FROM guild_members WHERE rank=40", [], |r| {
+            r.get(0)
+        })?;
+    let before = store.presentation(account).await?;
+    let earned: i32 = db.query_row(
+        "SELECT earned FROM account_fame WHERE account=?1",
+        [account],
+        |r| r.get(0),
+    )?;
+    let guild = store.guild(account).await?;
+    let contribution: i32 = db.query_row(
+        "SELECT fame FROM guild_members WHERE account=?1",
+        [account],
+        |r| r.get(0),
+    )?;
+    let mut ch = store.create(account, content.get(content::WIZARD)?).await?;
+    ch.items[0] = 0xaa2;
+    ch.items[3] = 0xabf;
+    ch.revision = store
+        .exchange(
+            vec![store::InventoryWrite {
+                id: ch.id,
+                account,
+                revision: ch.revision,
+                items: ch.items.clone(),
+            }],
+            vec![],
+        )
+        .await?[0];
+    ch.fame = 19;
+    ch.hp = 0;
+    ch.alive = false;
+    store
+        .death(ch.clone(), "Restored backup contract".into())
+        .await?;
+    drop(store);
+    let reopened = store::Store::open(database, &content)?;
+    let archived: (String, i32, i64) = db.query_row(
+        "SELECT snapshot,equipment_fame,died_at FROM deaths WHERE character=?1",
+        [ch.id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    ensure!(
+        archived.0 == serde_json::to_string(&ch)? && archived.1 == 1 && archived.2 > 0,
+        "restored death archive mismatch"
+    );
+    let after = reopened.presentation(account).await?;
+    let after_earned: i32 = db.query_row(
+        "SELECT earned FROM account_fame WHERE account=?1",
+        [account],
+        |r| r.get(0),
+    )?;
+    let after_guild = reopened.guild(account).await?;
+    let after_contribution: i32 = db.query_row(
+        "SELECT fame FROM guild_members WHERE account=?1",
+        [account],
+        |r| r.get(0),
+    )?;
+    ensure!(
+        after_earned == earned + 20
+            && after.fame == before.fame + 20
+            && after_guild.fame == guild.fame + 20
+            && after_guild.earned == guild.earned + 20
+            && after_contribution == contribution + 20,
+        "restored death payout ledger mismatch"
+    );
+    let cleared: (bool, String) = db.query_row(
+        "SELECT alive,items FROM characters WHERE id=?1",
+        [ch.id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    ensure!(
+        !cleared.0 && serde_json::from_str::<Vec<i32>>(&cleared.1)? == vec![-1; 12],
+        "restored death inventory not cleared"
+    );
+    let detail = reopened.fame(account, ch.id).await?;
+    ensure!(
+        detail.contains("<BaseFame>19</BaseFame>")
+            && detail.contains("<TotalFame>20</TotalFame>")
+            && detail
+                .contains("<Bonus id=\"Well Equipped\" desc=\"Bonus for equipment\">1</Bonus>"),
+        "restored death detail mismatch"
+    );
+    let legends = reopened.legends("all".into(), account, ch.id).await?;
+    let doc = roxmltree::Document::parse(&legends)?;
+    ensure!(
+        doc.descendants().any(
+            |n| n.attribute("charId") == Some(ch.id.to_string().as_str())
+                && n.children()
+                    .any(|c| c.has_tag_name("TotalFame") && c.text() == Some("20"))
+        ),
+        "restored death Legends mismatch"
+    );
+    println!(
+        "{}",
+        serde_json::json!({"exercised_death": ch.id, "base_fame":19,"equipment_fame":1,"total_fame":20})
     );
     Ok(())
 }

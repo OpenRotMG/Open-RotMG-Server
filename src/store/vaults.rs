@@ -93,14 +93,14 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
         q.query_map([], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    let expected: &[&str] = if version == 13 {
+    let expected: &[&str] = if version >= 13 {
         &["account", "chest", "items", "revision"]
     } else {
         &["account", "items", "revision"]
     };
     ensure!(
-        (0..=13).contains(&version)
-            && mask == (version == 13)
+        (0..=14).contains(&version)
+            && mask == (version >= 13)
             && columns
                 .iter()
                 .map(String::as_str)
@@ -213,6 +213,15 @@ mod tests;
 
 #[cfg(test)]
 pub(super) fn legacy_fixture(db: &Connection) -> Result<()> {
+    ensure!(
+        !db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM deaths WHERE equipment_fame<>0)",
+            [],
+            |r| r.get::<_, bool>(0)
+        )?,
+        "legacy fixture cannot discard paid death awards"
+    );
+    db.execute_batch("ALTER TABLE deaths DROP COLUMN equipment_fame")?;
     let current: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('vaults') WHERE name='chest')",
         [],
