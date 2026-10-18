@@ -58,6 +58,7 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                     .extra_stats
                     .push((54, account));
                 if source == 2 {
+                    w.entities.get_mut(&bag).unwrap().kind = 0x504;
                     w.owner = Some(account);
                     w.vaults.insert(bag, store.vault(account, 0).await.unwrap());
                 }

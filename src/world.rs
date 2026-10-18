@@ -1587,13 +1587,10 @@ impl World {
     fn bind_vaults(&self, plan: &mut InventoryPlan) -> Result<()> {
         for (id, items) in &plan.bags {
             let e = self.entities.get(id).context("vault source disappeared")?;
-            if e.kind == 0x504 {
-                let vault = self
-                    .vaults
-                    .get(id)
-                    .context("container has no durable chest identity")?;
+            if let Some(vault) = self.vaults.get(id) {
                 ensure!(
-                    self.owner == Some(plan.account)
+                    e.kind == 0x504
+                        && self.owner == Some(plan.account)
                         && vault.account == plan.account
                         && vault.items == e.items
                         && e.extra_stats.contains(&(54, plan.account)),
@@ -1602,6 +1599,8 @@ impl World {
                 let mut vault = vault.clone();
                 vault.items = items.clone();
                 plan.vaults.push(vault);
+            } else {
+                ensure!(e.kind != 0x504, "container has no durable chest identity");
             }
         }
         Ok(())
@@ -3231,6 +3230,7 @@ impl World {
                 .context("committed chest missing")?;
             ensure!(
                 loaded.revision == vault.revision
+                    && self.entities[id].kind == 0x504
                     && self.entities[id].items == loaded.items
                     && self.entities[id].extra_stats.contains(&(54, plan.account))
                     && plan
@@ -5578,6 +5578,28 @@ mod tests {
             .is_err()
         );
         w.entities.get_mut(&private).unwrap().kind = 0x504;
+        assert!(
+            w.swap(
+                id,
+                from,
+                Slot {
+                    object: private,
+                    slot: 1,
+                    kind: -1
+                }
+            )
+            .is_err()
+        );
+        w.owner = Some(1);
+        w.vaults.insert(
+            private,
+            Vault {
+                account: 1,
+                chest: 0,
+                items: w.entities[&private].items.clone(),
+                revision: 0,
+            },
+        );
         let plan = w
             .swap(
                 id,
@@ -5593,6 +5615,24 @@ mod tests {
         w.finish_inventory(plan, Ok(1)).unwrap();
         assert_eq!(w.players[&id].character.items[5], -1);
         assert_eq!(w.entities[&private].items[1], i32::from(soulbound));
+        w.entities.get_mut(&private).unwrap().kind = 0x503;
+        assert!(
+            w.swap(
+                id,
+                Slot {
+                    object: private,
+                    slot: 1,
+                    kind: i32::from(soulbound)
+                },
+                Slot {
+                    object: id,
+                    slot: 5,
+                    kind: -1
+                }
+            )
+            .is_err()
+        );
+        assert!(!w.players[&id].pending && !w.entities[&private].reserved);
     }
     #[test]
     fn late_heal_cannot_revive() {

@@ -184,6 +184,20 @@ async fn vault_two_chest_cas_is_atomic_and_missing_paid_storage_is_never_recreat
         .await
         .unwrap();
     assert_eq!(store.vault(ch.account, 3).await.unwrap().items[0], 0xa22);
+    let mut dead = store.load(ch.account, ch.id).await.unwrap();
+    dead.hp = 0;
+    dead.alive = false;
+    store
+        .death(dead, "paid storage survival test".into())
+        .await
+        .unwrap();
+    store
+        .create(ch.account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(store.vault(ch.account, 3).await.unwrap().items[0], 0xa22);
+    let other = store.list("private-vault-witness".into()).await.unwrap();
+    assert!(store.vault(other.id, 3).await.is_err());
     db.execute(
         "DELETE FROM vaults WHERE account=?1 AND chest=3",
         [ch.account],
