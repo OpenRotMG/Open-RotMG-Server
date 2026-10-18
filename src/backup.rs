@@ -184,6 +184,19 @@ pub async fn run(args: &[String]) -> Result<bool> {
                             store::GuildAction::Create("Backup Guild".into()),
                         )
                         .await?;
+                    funding.items[0] = 0xaa2;
+                    funding.items[3] = 0xabf;
+                    funding.revision = store
+                        .exchange(
+                            vec![store::InventoryWrite {
+                                id: funding.id,
+                                account: funding.account,
+                                revision: funding.revision,
+                                items: funding.items.clone(),
+                            }],
+                            vec![],
+                        )
+                        .await?[0];
                     funding.fame = 12500;
                     funding.hp = 0;
                     funding.alive = false;

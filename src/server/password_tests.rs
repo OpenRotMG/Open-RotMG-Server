@@ -115,6 +115,18 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
         )
         .await
         .unwrap();
+    let mut funding = app
+        .store
+        .create(account, app.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    funding.fame = 5000;
+    funding.hp = 0;
+    funding.alive = false;
+    app.store
+        .death(funding, "prepared password fixture funding".into())
+        .await
+        .unwrap();
     let mut character = app
         .store
         .create(account, app.content.get(WIZARD).unwrap())
@@ -128,11 +140,6 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
     app.store.issue_recovery_code(account).await.unwrap();
     let foreign_code = app.store.issue_discord_code(foreign).await.unwrap();
     let db = Connection::open(dir.join("game.db")).unwrap();
-    db.execute(
-        "UPDATE account_fame SET balance=5000,earned=5000 WHERE account=?1",
-        [account],
-    )
-    .unwrap();
     db.execute("UPDATE accounts SET credits=1200 WHERE id=?1", [account])
         .unwrap();
     db.execute(

@@ -2293,3 +2293,6 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod equipment_fame_tests;
