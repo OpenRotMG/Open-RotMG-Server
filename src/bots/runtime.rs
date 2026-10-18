@@ -409,11 +409,11 @@ async fn launch(
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();
                     brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
-                    let deciding = std::time::Instant::now();
+                    let deciding = crate::performance::Measure::start();
                     let decision = brain.decide(&view, &app.content)?;
-                    brain.performance.record("decision", deciding.elapsed());
-                    if let Some(timings)=brain.performance.report() {
-                        tracing::info!(name=profile.name,world=%view.map.name,known_tiles=view.tiles.len(),
+                    let timings={let mut p=brain.performance.lock().expect("bot timings poisoned");p.work("decision",deciding);p.report()};
+                    if let Some(timings)=timings {
+                        tracing::info!(name=profile.name,world=%view.map.name,world_id=view.session.world,player=view.session.player,known_tiles=view.tiles.len(),
                             cover_tiles=brain.cover.len(),visited_tiles=brain.visits.len(),
                             blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),contacts=brain.contacts.len(),
                             navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
