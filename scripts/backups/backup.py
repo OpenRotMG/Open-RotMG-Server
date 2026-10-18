@@ -102,9 +102,16 @@ def snapshot(path, schema, *, include_schema=False):
             references = db.execute('SELECT "table","from","to",seq,on_update,on_delete FROM pragma_foreign_key_list(\'deaths\') ORDER BY id,seq').fetchall()
             if references != [('characters', 'character', 'id', 0, 'NO ACTION', 'NO ACTION')]:
                 raise ValueError('Unsupported death character foreign key')
-            metadata = db.execute('SELECT type,"notnull",dflt_value,hidden FROM pragma_table_xinfo(\'deaths\') WHERE name=\'equipment_fame\'').fetchone()
-            if metadata != ('INTEGER', 1, None, 0):
-                raise ValueError('Unsupported canonical death award metadata')
+            for column, kind, not_null, default, key in [
+                ('character', 'INTEGER', 0, None, 1),
+                ('snapshot', 'TEXT', 1, None, 0),
+                ('killed_by', 'TEXT', 1, None, 0),
+                ('died_at', 'INTEGER', 1, 'unixepoch()', 0),
+                ('equipment_fame', 'INTEGER', 1, None, 0),
+            ]:
+                metadata = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(\'deaths\') WHERE name=?', (column,)).fetchone()
+                if metadata != (kind, not_null, default, key, 0):
+                    raise ValueError('Unsupported canonical death metadata: ' + column)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
@@ -346,9 +353,9 @@ def restore(archive, directory):
     # NULL identities cannot authenticate; ownership must be reverified separately after a disaster.
     definitions = {
         'game': """CREATE TABLE accounts(id INTEGER PRIMARY KEY,guid TEXT UNIQUE,name TEXT NOT NULL);
-CREATE TABLE characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL,alive INTEGER NOT NULL);
+CREATE TABLE characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,alive INTEGER NOT NULL DEFAULT 1);
 CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1;
-CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL);""",
+CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()));""",
         'discord': """CREATE TABLE levels(guild_id TEXT NOT NULL,user_id TEXT NOT NULL,username TEXT NOT NULL,xp INTEGER NOT NULL CHECK(xp>=0 AND xp<=9007199254740991),last_xp_at INTEGER NOT NULL,last_message_id TEXT NOT NULL,PRIMARY KEY(guild_id,user_id)) STRICT;""",
     }
     if 2 <= bundle['schema'] < 13:

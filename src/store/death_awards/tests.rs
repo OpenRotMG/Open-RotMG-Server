@@ -296,3 +296,103 @@ async fn equipment_death_legacy_migration_preserves_snapshots_wallet_and_paid_va
         "current award cannot default silently"
     );
 }
+
+#[tokio::test]
+async fn death_schema_rejects_noncanonical_current_metadata_before_any_write() {
+    for (old, new) in [
+        ("character INTEGER PRIMARY KEY", "character INTEGER"),
+        (
+            "character INTEGER PRIMARY KEY",
+            "character TEXT PRIMARY KEY",
+        ),
+        (
+            "character INTEGER PRIMARY KEY",
+            "character INTEGER NOT NULL PRIMARY KEY",
+        ),
+        (
+            "character INTEGER PRIMARY KEY",
+            "character INTEGER PRIMARY KEY DEFAULT 0",
+        ),
+        ("snapshot TEXT NOT NULL", "snapshot BLOB NOT NULL"),
+        ("snapshot TEXT NOT NULL", "snapshot TEXT"),
+        (
+            "snapshot TEXT NOT NULL",
+            "snapshot TEXT NOT NULL DEFAULT '{}'",
+        ),
+        ("killed_by TEXT NOT NULL", "killed_by BLOB NOT NULL"),
+        ("killed_by TEXT NOT NULL", "killed_by TEXT"),
+        (
+            "killed_by TEXT NOT NULL",
+            "killed_by TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "died_at INTEGER NOT NULL DEFAULT(unixepoch())",
+            "died_at TEXT NOT NULL DEFAULT(unixepoch())",
+        ),
+        (
+            "died_at INTEGER NOT NULL DEFAULT(unixepoch())",
+            "died_at INTEGER DEFAULT(unixepoch())",
+        ),
+        (
+            "died_at INTEGER NOT NULL DEFAULT(unixepoch())",
+            "died_at INTEGER NOT NULL",
+        ),
+        (
+            "died_at INTEGER NOT NULL DEFAULT(unixepoch())",
+            "died_at INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "equipment_fame INTEGER NOT NULL",
+            "equipment_fame TEXT NOT NULL",
+        ),
+        ("equipment_fame INTEGER NOT NULL", "equipment_fame INTEGER"),
+        (
+            "equipment_fame INTEGER NOT NULL",
+            "equipment_fame INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "equipment_fame INTEGER NOT NULL",
+            "equipment_fame INTEGER NOT NULL GENERATED ALWAYS AS (0) STORED",
+        ),
+    ] {
+        let (path, content, store, mut ch) = setup().await;
+        fatal(&mut ch, 19);
+        store.death(ch, "preserved death".into()).await.unwrap();
+        drop(store);
+        let db = Connection::open(&path).unwrap();
+        let sql: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='deaths'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let mut changed = sql.replace(old, new);
+        if new == "equipment_fame TEXT NOT NULL" {
+            changed = changed.replace(" CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647)", "");
+        }
+        assert_ne!(sql, changed);
+        let columns = if new.contains("GENERATED") {
+            "character,snapshot,killed_by,died_at"
+        } else {
+            "character,snapshot,killed_by,died_at,equipment_fame"
+        };
+        db.execute_batch(&format!("ALTER TABLE deaths RENAME TO preserved_deaths; {changed}; INSERT INTO deaths({columns}) SELECT {columns} FROM preserved_deaths; DROP TABLE preserved_deaths; CREATE INDEX deaths_by_time ON deaths(died_at);")).unwrap();
+        if new == "character INTEGER" {
+            db.execute_batch("INSERT INTO deaths SELECT * FROM deaths; UPDATE account_fame SET balance=38,earned=38;").unwrap();
+        }
+        drop(db);
+        let before = std::fs::read(&path).unwrap();
+        let error = Store::open(&path, &content).err().expect(new);
+        assert!(
+            error.to_string().contains("death") && error.to_string().contains("metadata"),
+            "{new}: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "schema/version/data changed for {new}"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}

@@ -24,14 +24,17 @@ class ReleaseContract(unittest.TestCase):
             self.assertEqual(value['abysses'], 5)
             with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as db:
                 self.assertEqual(db.execute('SELECT name,level,fame,earned,board FROM guilds').fetchone(),
-                                 ('Backup Guild', 2, 3250, 13250, 'Welcome & prepare!\n日本語 🧙'))
-                self.assertEqual(db.execute('SELECT rank,fame FROM guild_members').fetchone(), (40, 13250))
+                                 ('Backup Guild', 2, 3270, 13270, 'Welcome & prepare!\n日本語 🧙'))
+                self.assertEqual(db.execute('SELECT rank,fame FROM guild_members').fetchone(), (40, 13270))
                 rewards = db.execute('SELECT reward,notified_at FROM gold_rewards ORDER BY account,reward').fetchall()
                 self.assertEqual([row[0] for row in rewards], ['discord_link', 'first_bug_report', 'discord_link'])
                 self.assertIsNone(rewards[0][1])
                 self.assertIsNone(rewards[1][1])
                 self.assertGreater(rewards[2][1], 0)
                 self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
+                for table, column, default in [('characters', 'revision', '0'), ('characters', 'alive', '1'), ('deaths', 'died_at', 'unixepoch()')]:
+                    with self.subTest(default=table + '.' + column):
+                        self.assertEqual(db.execute('SELECT dflt_value FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone(), (default,))
                 buyer = db.execute('SELECT account FROM character_slot_purchases').fetchone()[0]
                 self.assertEqual(db.execute('SELECT character_slots,credits FROM accounts WHERE id=?', (buyer,)).fetchone(), (2, 0))
                 self.assertEqual(db.execute('SELECT count(*) FROM characters WHERE account=? AND alive=1', (buyer,)).fetchone()[0], 2)

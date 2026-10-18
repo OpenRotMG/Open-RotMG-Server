@@ -28,13 +28,21 @@ pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
     if version >= 14 {
         let reference: bool = db.query_row("SELECT count(*)=1 AND count(*) FILTER(WHERE \"table\"='characters' AND \"from\"='character' AND \"to\"='id' AND seq=0 AND on_update='NO ACTION' AND on_delete='NO ACTION')=1 FROM pragma_foreign_key_list('deaths')",[],|r|r.get(0))?;
         ensure!(reference, "unsupported death character foreign key");
-        let metadata: (String, bool, Option<String>, i32) = db.query_row(
-            "SELECT type,\"notnull\",dflt_value,hidden FROM pragma_table_xinfo('deaths') WHERE name='equipment_fame'", [],
-            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
-        ensure!(
-            metadata == ("INTEGER".into(), true, None, 0),
-            "unsupported canonical death award metadata"
-        );
+        for (column, kind, not_null, default, key) in [
+            ("character", "INTEGER", false, None, 1),
+            ("snapshot", "TEXT", true, None, 0),
+            ("killed_by", "TEXT", true, None, 0),
+            ("died_at", "INTEGER", true, Some("unixepoch()"), 0),
+            ("equipment_fame", "INTEGER", true, None, 0),
+        ] {
+            let metadata: (String, bool, Option<String>, i32, i32) = db.query_row(
+                "SELECT type,\"notnull\",dflt_value,pk,hidden FROM pragma_table_xinfo('deaths') WHERE name=?1", [column],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
+            ensure!(
+                metadata == (kind.into(), not_null, default.map(str::to_owned), key, 0),
+                "unsupported canonical death metadata: {column}"
+            );
+        }
     }
     Ok(())
 }
