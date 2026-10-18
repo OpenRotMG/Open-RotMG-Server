@@ -245,12 +245,12 @@ async fn gallery_pages_filters_canonical_identity_and_owner_delete_share_storage
             .unwrap()),
         vec![saved[24], saved[18], saved[12], saved[6], saved[0]]
     );
-    assert_eq!(
+    assert!(
         ids(&store
             .picture_list(query(None, None, "dark", 0))
             .await
-            .unwrap()),
-        vec![]
+            .unwrap())
+        .is_empty()
     );
     assert!(
         ids(&store
