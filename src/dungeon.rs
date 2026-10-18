@@ -1,8 +1,5 @@
-use crate::content::{Cell, Content, Map};
-use anyhow::{Result, ensure};
-use rand::{Rng, SeedableRng};
-
 pub mod abyss;
+pub mod snake;
 pub mod spider;
 pub mod trench;
 
@@ -29,128 +26,12 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
     }
 }
 
-pub fn snake_pit(content: &Content, seed: u64) -> Result<Map> {
-    let size = 90;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let mut map = Map {
-        width: size,
-        height: size,
-        cells: vec![
-            Cell {
-                ground: 0xff,
-                object: None,
-                config: String::new(),
-                terrain: 0,
-                region: 0
-            };
-            (size * size) as usize
-        ],
-        spawns: vec![(15.5, 75.5)],
-    };
-    let rooms = [
-        (15, 75),
-        (15, 55),
-        (35, 55),
-        (35, 35),
-        (55, 35),
-        (55, 15),
-        (75, 15),
-    ];
-    let floor = |map: &mut Map, x: i32, y: i32| {
-        map.cells[(y * size + x) as usize].ground = 0x16;
-    };
-    for (i, (cx, cy)) in rooms.iter().enumerate() {
-        let radius = if i == rooms.len() - 1 { 11 } else { 5 };
-        for y in cy - radius..=cy + radius {
-            for x in cx - radius..=cx + radius {
-                floor(&mut map, x, y);
-            }
-        }
-    }
-    for pair in rooms.windows(2) {
-        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
-        for y in y0.min(y1) - 1..=y0.max(y1) + 1 {
-            for x in x0.min(x1) - 1..=x0.max(x1) + 1 {
-                floor(&mut map, x, y);
-            }
-        }
-    }
-    let mut walls = Vec::new();
-    for y in 1..size - 1 {
-        for x in 1..size - 1 {
-            if map.cells[(y * size + x) as usize].ground == 0xff
-                && [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-                    .iter()
-                    .any(|(x, y)| map.cells[(y * size + x) as usize].ground == 0x16)
-            {
-                walls.push((x, y));
-            }
-        }
-    }
-    for (x, y) in walls {
-        map.cells[(y * size + x) as usize].object = Some(0x1ed);
-    }
-    for (i, (cx, cy)) in rooms.iter().enumerate().skip(1).take(rooms.len() - 2) {
-        for (j, (dx, dy)) in [(-2, -2), (2, -2), (-2, 2), (2, 2)].iter().enumerate() {
-            let kind = [0x223, 0x224, 0x225, 0x226, 0x227, 0x228, 0x229]
-                [(i + j + rng.gen_range(0..7)) % 7];
-            map.cells[((cy + dy) * size + cx + dx) as usize].object = Some(kind);
-        }
-        map.cells[((cy + 3) * size + cx) as usize].object = Some(0x173);
-    }
-    for pair in rooms.windows(2) {
-        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
-        let (mx, my) = ((x0 + x1) / 2, (y0 + y1) / 2);
-        let thickness = if pair[1] == rooms[rooms.len() - 1] {
-            1
-        } else {
-            0
-        };
-        for t in -thickness..=thickness {
-            for side in -1..=1 {
-                let (x, y) = if x0 == x1 {
-                    (mx + side, my + t)
-                } else {
-                    (mx + t, my + side)
-                };
-                map.cells[(y * size + x) as usize].object = Some(0x172);
-            }
-        }
-    }
-    for (dx, dy) in [(-6, 0), (6, 0), (0, -6), (0, 6)] {
-        for side in -1..=1 {
-            let (x, y) = if dx == 0 {
-                (75 + side, 15 + dy)
-            } else {
-                (75 + dx, 15 + side)
-            };
-            map.cells[(y * size + x) as usize].object = Some(0x172);
-        }
-    }
-    map.cells[(15 * size + 75) as usize].object = Some(0x917);
-    let spawn = &mut map.cells[(75 * size + 15) as usize];
-    spawn.region = 1;
-    spawn.object = Some(0x703);
-    for cell in &map.cells {
-        ensure!(
-            content.grounds.contains_key(&cell.ground),
-            "unknown Snake Pit ground"
-        );
-        if let Some(kind) = cell.object {
-            content.get(kind)?;
-        }
-    }
-    tracing::info!(
-        seed,
-        rooms = rooms.len(),
-        "generated reconstructed Snake Pit layout"
-    );
-    Ok(map)
-}
+pub use snake::generate as snake_pit;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::content::{Content, Map};
     use std::{
         collections::{BTreeSet, VecDeque},
         path::Path,
@@ -219,27 +100,44 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn snake_generation_is_seeded_and_includes_grates_walls_and_four_cover_walls() {
+    fn snake_generation_is_seeded_connected_and_uses_the_selected_tiles() {
         let content = Content::load(Path::new("data")).unwrap();
         let map = snake_pit(&content, 7).unwrap();
         assert_eq!(
             serde_json::to_vec(&map).unwrap(),
             serde_json::to_vec(&snake_pit(&content, 7).unwrap()).unwrap()
         );
-        assert_ne!(
-            serde_json::to_vec(&map).unwrap(),
-            serde_json::to_vec(&snake_pit(&content, 8).unwrap()).unwrap()
-        );
-        assert_eq!(
-            map.cells.iter().filter(|c| c.object == Some(0x173)).count(),
-            5
-        );
-        assert_eq!(
-            map.cells.iter().filter(|c| c.object == Some(0x172)).count(),
-            36
-        );
-        for (x, y) in [(69, 15), (81, 15), (75, 9), (75, 21)] {
-            assert_eq!(map.cells[(y * map.width + x) as usize].object, Some(0x172));
+        for seed in 0..64 {
+            let map = snake_pit(&content, seed).unwrap();
+            let reached = reachable(&map, &content);
+            let boss = map
+                .cells
+                .iter()
+                .position(|c| c.object == Some(snake::BOSS))
+                .unwrap();
+            assert!(reached.contains(&boss), "disconnected boss for seed {seed}");
+            let (bx, by) = (
+                (boss as i32 % map.width) as f32 + 0.5,
+                (boss as i32 / map.width) as f32 + 0.5,
+            );
+            for i in 0..64 {
+                let angle = i as f32 * std::f32::consts::TAU / 64.;
+                let (x, y) = (
+                    (bx + 10. * angle.cos()) as i32,
+                    (by + 10. * angle.sin()) as i32,
+                );
+                let cell = &map.cells[(y * map.width + x) as usize];
+                assert!(
+                    content.grounds[&cell.ground] > 0.
+                        && cell.object.is_none_or(|k| !content.objects[&k].blocks),
+                    "guardian orbit blocked for seed {seed}"
+                );
+            }
+            assert!(map.cells.iter().filter(|c| c.object == Some(0x172)).count() > 100);
+            for ground in [0xca, 0x1e, 0x1f, 0x16, 0x32] {
+                assert!(map.cells.iter().any(|c| c.ground == ground));
+            }
+            assert!(map.cells.iter().filter(|c| c.object == Some(0x173)).count() >= 16);
         }
     }
 }

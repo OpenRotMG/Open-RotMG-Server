@@ -254,12 +254,12 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0x917 => (Stationary, 0., 500, 15.),
         0x918 => (
             Orbit {
-                anchor: Anchor::Kind(0x917),
-                radius: 20.,
+                anchor: Anchor::Parent,
+                radius: 10.,
             },
-            10.,
+            nr_speed(7.5),
             1000,
-            20.,
+            25.,
         ),
         0x919 => (
             Protect {
@@ -319,17 +319,7 @@ pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
         0x91a => u64::from(elapsed % 3750 >= 2500),
         0x6d8 => (elapsed / 1500) % 3 + 3 * ((elapsed / 2000) % 3),
         0x906 | 0x907 => u64::from(hp < 400),
-        0x917 => {
-            if hp >= 5625 {
-                0
-            } else if hp >= 3750 {
-                1
-            } else if hp >= 1875 {
-                2
-            } else {
-                3
-            }
-        }
+        0x917 => crate::dungeon::snake::phase(elapsed).0,
         0xd06 => {
             elapsed / 43300 * 5
                 + match elapsed % 43300 {
@@ -353,7 +343,17 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
     }
     let p = profile(kind).expect("validated encounter motion");
     match kind {
-        0x917 if (3750..5625).contains(&hp) => (Motion::Wander, 3.),
+        0x917 => match stage(kind, hp, elapsed) % 3 {
+            1 => (Motion::WanderHome { radius: 2. }, nr_speed(0.4)),
+            2 => (
+                Motion::Protect {
+                    anchor: Anchor::Home,
+                    distance: 0.1,
+                },
+                nr_speed(0.3),
+            ),
+            _ => (Motion::Stationary, 0.),
+        },
         0xd90 if elapsed % 13000 >= 3000 && (elapsed / 13000).is_multiple_of(4) => {
             (Motion::Stationary, 0.)
         }

@@ -118,6 +118,9 @@ mod reconciliation;
 #[cfg(test)]
 mod reconciliation_tests;
 mod resurrection;
+mod snake;
+#[cfg(test)]
+mod snake_tests;
 pub use reconciliation::{NativeInput, RejectedNativeShot};
 mod progression;
 #[cfg(test)]
@@ -444,7 +447,7 @@ struct Spawn {
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
-    pub(crate) realm_layout: Option<&'static str>,
+    pub(crate) realm_layout: Option<String>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: BTreeMap<i32, Entity>,
     actor_ids: BTreeSet<i32>,
@@ -790,7 +793,10 @@ impl Directory {
                 };
                 Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
             } else if template == "snake-pit" {
-                Arc::new(crate::dungeon::snake_pit(&self.content, rand::random())?)
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::snake_pit(&self.content, seed)?)
             } else {
                 self.templates
                     .get(template)
@@ -799,7 +805,7 @@ impl Directory {
             },
             self.ids.clone(),
         )?;
-        world.realm_layout = layout.map(|index| self.realms[index].name());
+        world.realm_layout = layout.map(|index| self.realms[index].name().to_owned());
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
         if let Some(seed) = self.prepared_seed {
@@ -818,6 +824,7 @@ impl Directory {
                 .chain(crate::endgame::DUNGEONS)
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
+            let started = Instant::now();
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
@@ -827,6 +834,7 @@ impl Directory {
                 layout = world.realm_layout,
                 entities = world.entities.len(),
                 actors = world.actor_ids.len(),
+                elapsed_ms = started.elapsed().as_millis(),
                 "Realm simulation populated"
             );
         }
@@ -981,6 +989,7 @@ impl Directory {
         };
         let destination = match kind {
             0x712 if origin == -2 && portal == Some(self.realm_portal) => self.initial(-3)?,
+            0x703 if world.name == "Snake Pit" => self.initial(-3)?,
             0x703 | 0x70d | 0x712 | 0x71d => -2,
             0x704 | 0x70e | 0x71c => self.initial(-3)?,
             0x720 => self.instance("vault", Some(account))?,
@@ -1351,6 +1360,7 @@ impl World {
                         size: o.size,
                         condition: crate::dungeon::abyss::initial_condition(kind)
                             | crate::dungeon::spider::initial_condition(kind)
+                            | crate::dungeon::snake::initial_condition(kind)
                             | if o.stasis_immune {
                                 crate::condition::bit(crate::condition::STASIS_IMMUNE)
                             } else {
@@ -1584,6 +1594,7 @@ impl World {
                 size: definition.size,
                 condition: crate::dungeon::abyss::initial_condition(kind)
                     | crate::dungeon::spider::initial_condition(kind)
+                    | crate::dungeon::snake::initial_condition(kind)
                     | (if kind == 0x91a {
                         crate::condition::bit(crate::condition::INVULNERABLE)
                     } else {
@@ -2040,17 +2051,19 @@ impl World {
                 if !definition.quest || e.hp <= 0 || !e.accessible(player.character.account) {
                     return None;
                 }
-                let (min, max) = match e.kind {
-                    0x617 => (3, 8),
-                    0x609 | 0x60d => (4, 9),
-                    0x61f => (5, 10),
-                    _ => (definition.quest_level?, 20),
+                let max = match e.kind {
+                    0x617 => 8,
+                    0x609 | 0x60d => 9,
+                    0x61f => 10,
+                    _ => 20,
                 };
-                (min <= player.character.level && player.character.level <= max).then_some((e, min))
+                // XML Level recommends a quest, rather than setting a minimum character level.
+                (player.character.level <= max)
+                    .then_some((e, definition.quest_level?.abs_diff(player.character.level)))
             })
             .min_by(|(a, a_level), (b, b_level)| {
-                b_level
-                    .cmp(a_level)
+                a_level
+                    .cmp(b_level)
                     .then_with(|| {
                         a.pos
                             .distance(player.pos)
@@ -2949,8 +2962,13 @@ impl World {
             "player busy, departing or dead"
         );
         ensure!(
-            from.object == id || to.object == id,
-            "swap must involve own inventory"
+            from.object == id
+                || to.object == id
+                || self
+                    .vault
+                    .as_ref()
+                    .is_some_and(|(chest, _)| { from.object == *chest && to.object == *chest }),
+            "swap must involve own inventory or the vault chest"
         );
         let mut items = p.character.items.clone();
         let bag_id = if from.object != id {
@@ -3135,6 +3153,12 @@ impl World {
                 .remove(&slot);
         }
         let mut o = Writer::new();
+        let potion_feedback = plan.stat_growth.as_ref().map(|(_, slot, _, amount)| {
+            format!(
+                "{} consumed (+{amount}).",
+                self.content.objects[&(slot.kind as u16)].name
+            )
+        });
         p.character.items = plan.items;
         p.character.revision = revision;
         if let Some((snapshot, _, index, amount)) = plan.stat_growth {
@@ -3203,6 +3227,10 @@ impl World {
         }
         tracing::info!(player = plan.player, revision, "inventory committed");
         let p = &self.players[&plan.player];
+        if let Some(text) = potion_feedback {
+            let packet = chat_info(&text);
+            send(p, packet.id, packet.body);
+        }
         if plan.purchase.is_some() {
             let packet = shop::reply(true, "Item purchased!");
             send(p, packet.id, packet.body);
@@ -3682,6 +3710,8 @@ impl World {
             if self.clear_exit.is_none() {
                 let kind = if defeated.kind == crate::dungeon::abyss::MALPHAS {
                     0x71c
+                } else if defeated.kind == crate::dungeon::snake::BOSS {
+                    0x704
                 } else {
                     0x71d
                 };
@@ -4347,7 +4377,6 @@ impl World {
             };
             let interval = match kind {
                 0x633 if elapsed % 10000 >= 5000 => 500,
-                0x917 if !(1875..3750).contains(&self.entities[&id].hp) => 1000,
                 0xd06 if elapsed % 43300 >= 32300 => 1300,
                 0xd06 if elapsed % 43300 >= 12300 => 500,
                 0xd90 if (elapsed / 13000) % 4 == 1 => 2000,
@@ -5614,7 +5643,11 @@ mod tests {
     async fn sourced_private_chest_publishes_only_atomic_character_vault_commit() {
         use crate::store::{InventoryWrite, Store};
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "vault-rearrangement-{:016x}.db",
+            rand::random::<u64>()
+        ));
+        let store = Store::open(&path, &content).unwrap();
         let account = store.list("vault-actor".into()).await.unwrap();
         let ch = store
             .create(account.id, content.get(crate::content::WIZARD).unwrap())
@@ -5670,6 +5703,146 @@ mod tests {
         assert_eq!(saved.revision, 1);
         assert!(w.load_vault(original).is_err());
         w.load_vault(saved).unwrap();
+        for (from, to) in [
+            ((player, 0), (chest, 1)),
+            ((chest, 0), (chest, 2)),
+            ((chest, 2), (chest, 1)),
+        ] {
+            let slot = |(object, slot)| Slot {
+                object,
+                slot,
+                kind: if object == player {
+                    w.players[&player].character.items[slot]
+                } else {
+                    w.entities[&chest].items[slot]
+                },
+            };
+            let before = w.entities[&chest].items.clone();
+            let inventory = w.players[&player].character.items.clone();
+            let plan = w.swap(player, slot(from), slot(to)).unwrap();
+            if from.0 == chest {
+                assert_eq!(plan.items, inventory);
+            }
+            assert!(plan.collected.is_none() && plan.dropped.is_none());
+            assert!(w.players[&player].pending && w.entities[&chest].reserved);
+            assert!(
+                w.swap(
+                    player,
+                    Slot {
+                        object: chest,
+                        slot: 0,
+                        kind: before[0]
+                    },
+                    Slot {
+                        object: chest,
+                        slot: 1,
+                        kind: before[1]
+                    }
+                )
+                .is_err()
+            );
+            let revisions = store
+                .exchange(
+                    vec![InventoryWrite {
+                        id: plan.character,
+                        account: plan.account,
+                        revision: plan.revision,
+                        items: plan.items.clone(),
+                    }],
+                    plan.vault.clone(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(w.entities[&chest].items, before);
+            w.finish_inventory(plan, Ok(revisions[0])).unwrap();
+            assert_eq!(
+                w.entities[&chest].items,
+                store.vault(account.id).await.unwrap().items
+            );
+        }
+        let expected = vec![-1, 0xa22, 0xa97, -1, -1, -1, -1, -1];
+        assert_eq!(w.entities[&chest].items, expected);
+        assert_eq!(w.players[&player].character.revision, 4);
+        let from = Slot {
+            object: chest,
+            slot: 1,
+            kind: 0xa22,
+        };
+        let to = Slot {
+            object: chest,
+            slot: 2,
+            kind: 0xa97,
+        };
+        let other = w
+            .spawn_entity(0x504, w.entities[&chest].pos, vec![-1; 8])
+            .unwrap();
+        for (a, b) in [
+            (
+                from,
+                Slot {
+                    object: other,
+                    slot: 0,
+                    kind: -1,
+                },
+            ),
+            (
+                Slot {
+                    object: other,
+                    slot: 0,
+                    kind: -1,
+                },
+                Slot {
+                    object: other,
+                    slot: 1,
+                    kind: -1,
+                },
+            ),
+            (Slot { kind: -1, ..from }, to),
+            (from, Slot { kind: -1, ..to }),
+            (Slot { slot: 8, ..from }, to),
+            (from, Slot { slot: 8, ..to }),
+        ] {
+            assert!(w.swap(player, a, b).is_err());
+            assert!(!w.players[&player].pending && !w.entities[&chest].reserved);
+            assert_eq!(w.entities[&chest].items, expected);
+        }
+        let ownership = w.entities[&chest].extra_stats.clone();
+        w.entities.get_mut(&chest).unwrap().extra_stats = vec![(54, account.id + 1)];
+        assert!(w.swap(player, from, to).is_err());
+        w.entities.get_mut(&chest).unwrap().extra_stats = ownership;
+        w.players.get_mut(&player).unwrap().pos.x += 2.0;
+        assert!(w.swap(player, from, to).is_err());
+        w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
+        let plan = w.swap(player, from, to).unwrap();
+        let mut stale = plan.vault.clone().unwrap();
+        stale.revision += 1;
+        let failed = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                }],
+                Some(stale),
+            )
+            .await
+            .unwrap_err();
+        assert!(w.finish_inventory(plan, Err(failed)).is_err());
+        assert!(w.players[&player].persistence_failure.is_some() && w.entities[&chest].reserved);
+        assert_eq!(w.entities[&chest].items, expected);
+        drop(store);
+        let reopened = Store::open(&path, &w.content).unwrap();
+        let vault = reopened.vault(account.id).await.unwrap();
+        assert_eq!((vault.revision, vault.items), (4, expected));
+        let character = reopened
+            .load(account.id, w.players[&player].character.id)
+            .await
+            .unwrap();
+        assert_eq!(character.revision, 4);
+        assert_eq!(character.items, w.players[&player].character.items);
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn ground_drop_is_hidden_until_commit_and_quarantines_uncertain_failure() {

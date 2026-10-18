@@ -467,3 +467,219 @@ async fn life_and_mana_potions_commit_five_or_the_remaining_cap_without_extra_he
         assert_eq!(saved.items[5], -1);
     }
 }
+
+fn feedback_player(w: &mut World, account: i32) -> (i32, mpsc::Receiver<Packet>) {
+    let mut ch = tests::ch(w);
+    ch.id = account;
+    ch.account = account;
+    let (packets, rx) = mpsc::channel(256);
+    let (lost, _) = watch::channel(false);
+    let id = w.enter(ch, Some(Output { packets, lost })).unwrap();
+    (id, rx)
+}
+fn feedback(rx: &mut mpsc::Receiver<Packet>) -> Vec<Packet> {
+    std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|p| matches!(p.id, wire::TEXT | wire::NOTIFICATION | wire::SHOW_EFFECT))
+        .collect()
+}
+
+#[test]
+fn permanent_potion_feedback_is_private_commit_gated_and_reports_actual_growth() {
+    let mut w = tests::world();
+    let (id, mut rx) = feedback_player(&mut w, 1);
+    let (peer, mut other) = feedback_player(&mut w, 2);
+    w.players.get_mut(&peer).unwrap().known.insert(id);
+    feedback(&mut rx);
+    feedback(&mut other);
+    let items: Vec<_> = w
+        .content
+        .objects
+        .values()
+        .filter(|o| o.activate == "IncrementStat")
+        .cloned()
+        .collect();
+    assert_eq!(items.len(), 8);
+    for item in items {
+        let (stat, requested) = item.stat_increase.unwrap();
+        let index = crate::content::STATS
+            .iter()
+            .position(|(id, _)| *id == stat)
+            .unwrap();
+        let gain = requested.min(3);
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.base[index] = w.content.classes[&p.character.class].caps[index] - gain;
+        p.character.items[5] = i32::from(item.kind);
+        let plan = staged(&mut w, id);
+        let replay = plan.clone();
+        assert!(feedback(&mut rx).is_empty());
+        finish(&mut w, plan);
+        let messages = feedback(&mut rx);
+        assert_eq!(messages.len(), 1);
+        let expected = chat_info(&format!("{} consumed (+{gain}).", item.name));
+        assert_eq!(messages[0].id, expected.id);
+        assert_eq!(messages[0].body, expected.body);
+        assert!(feedback(&mut other).is_empty());
+        w.players.get_mut(&id).unwrap().character.items[5] = i32::from(item.kind);
+        assert!(
+            w.use_item(
+                id,
+                Slot {
+                    object: id,
+                    slot: 5,
+                    kind: i32::from(item.kind)
+                },
+                w.players[&id].pos
+            )
+            .is_err()
+        );
+        assert_eq!(w.players[&id].character.items[5], i32::from(item.kind));
+        assert!(feedback(&mut rx).is_empty());
+        if item.kind == 0xaea {
+            assert!(
+                w.finish_inventory(replay, Ok(w.players[&id].character.revision))
+                    .is_err()
+            );
+            assert!(feedback(&mut rx).is_empty());
+        }
+    }
+}
+
+#[test]
+fn rejected_consumable_commits_never_publish_success_feedback() {
+    for kind in [
+        0xa1f, 0xa20, 0xa21, 0xa34, 0xa35, 0xa4c, 0xae9, 0xaea, 0xa22, 0xa23, 0xb0c, 0xb10, 0xa50,
+        0xc21,
+    ] {
+        for wrong_revision in [false, true] {
+            let mut w = tests::world();
+            let (id, mut rx) = feedback_player(&mut w, 1);
+            w.players.get_mut(&id).unwrap().character.items[5] = kind;
+            feedback(&mut rx);
+            let plan = staged(&mut w, id);
+            assert!(feedback(&mut rx).is_empty());
+            let result = if wrong_revision {
+                Ok(plan.revision + 2)
+            } else {
+                Err(anyhow::anyhow!("injected save failure"))
+            };
+            assert!(w.finish_inventory(plan, result).is_err());
+            assert!(feedback(&mut rx).is_empty());
+            assert_eq!(w.players[&id].character.items[5], kind);
+        }
+    }
+}
+
+#[test]
+fn restoration_feedback_uses_actual_gains_and_known_targets_without_false_healing() {
+    for (name, mana, area) in [
+        ("Health Potion", false, false),
+        ("Magic Potion", true, false),
+        ("Snake Oil", false, true),
+        ("Pollen Powder", true, true),
+    ] {
+        for state in ["restored", "full", "blocked"] {
+            let mut w = tests::world();
+            let kind = i32::from(w.content.named(name).unwrap().kind);
+            let (id, mut rx) = feedback_player(&mut w, 1);
+            let (peer, mut other) = feedback_player(&mut w, 2);
+            let (hidden, mut unseen) = feedback_player(&mut w, 3);
+            w.players.get_mut(&id).unwrap().known.insert(peer);
+            w.players.get_mut(&peer).unwrap().known.insert(id);
+            let p = w.players.get_mut(&hidden).unwrap();
+            p.pos.x += 20.;
+            p.known.remove(&id);
+            p.known.remove(&peer);
+            for target in [id, peer] {
+                let p = w.players.get_mut(&target).unwrap();
+                let cap = p.effective(&w.content, w.now).unwrap()[usize::from(mana)];
+                let value = if mana {
+                    &mut p.character.mp
+                } else {
+                    &mut p.character.hp
+                };
+                *value = cap - if state == "full" { 0 } else { 7 };
+                if state == "blocked" {
+                    w.apply_condition(
+                        target,
+                        if mana {
+                            crate::condition::QUIET
+                        } else {
+                            crate::condition::SICK
+                        },
+                        10000,
+                    )
+                    .unwrap();
+                }
+            }
+            w.players.get_mut(&id).unwrap().character.items[5] = kind;
+            feedback(&mut rx);
+            feedback(&mut other);
+            feedback(&mut unseen);
+            let plan = staged(&mut w, id);
+            assert!(feedback(&mut rx).is_empty());
+            finish(&mut w, plan);
+            let packets = feedback(&mut rx);
+            let notices: Vec<_> = packets
+                .iter()
+                .filter(|p| p.id == wire::NOTIFICATION)
+                .collect();
+            assert_eq!(
+                notices.len(),
+                if state == "restored" {
+                    if area { 2 } else { 1 }
+                } else {
+                    0
+                },
+                "{name} {state}"
+            );
+            for packet in notices {
+                let mut r = crate::wire::Reader::new(&packet.body);
+                assert!([id, peer].contains(&r.i32().unwrap()));
+                assert_eq!(r.utf().unwrap(), "+7");
+                assert_eq!(
+                    r.i32().unwrap() as u32,
+                    if mana { 0xff9000ff } else { 0xff00ff00 }
+                );
+                r.done().unwrap();
+            }
+            assert_eq!(
+                packets.iter().filter(|p| p.id == wire::SHOW_EFFECT).count(),
+                usize::from(area)
+                    + if state == "restored" {
+                        if area { 2 } else { 1 }
+                    } else {
+                        0
+                    }
+            );
+            assert_eq!(feedback(&mut other).len(), packets.len());
+            assert!(feedback(&mut unseen).is_empty());
+        }
+    }
+}
+
+#[test]
+fn non_restoring_consumables_publish_their_activation_visual_only_after_commit() {
+    for (kind, effect, radius) in [
+        (0xb0c, 1, 0.),
+        (0xb10, 5, 6.),
+        (0xa50, 5, 1.),
+        (0xc21, 5, 1.),
+    ] {
+        let mut w = tests::world();
+        let (id, mut rx) = feedback_player(&mut w, 1);
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.hp = p.effective(&w.content, w.now).unwrap()[0];
+        p.character.items[5] = kind;
+        feedback(&mut rx);
+        let plan = staged(&mut w, id);
+        assert!(feedback(&mut rx).is_empty());
+        finish(&mut w, plan);
+        let packets = feedback(&mut rx);
+        assert_eq!(packets.len(), 1, "{kind:x}");
+        assert_eq!(packets[0].id, wire::SHOW_EFFECT);
+        assert_eq!(
+            packets[0].body,
+            cooperative::effect(effect, id, Pos { x: radius, y: 0. })
+        );
+    }
+}
