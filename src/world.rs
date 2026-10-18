@@ -1280,20 +1280,33 @@ impl Handle {
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
         let request = crate::performance::REQUEST.try_with(Arc::clone).ok();
-        if let Some(r) = &request {
-            r.lock().expect("request timings poisoned").calls += 1;
-        }
+        let trace = request.as_ref().and_then(|r| {
+            let mut r = r.lock().expect("request timings poisoned");
+            r.calls += 1;
+            r.native_control
+                .as_ref()
+                .map(|trace| (trace.clone(), r.calls))
+        });
+        let record = move |stage, receiver_closed| {
+            if let Some((trace, call)) = &trace {
+                trace.record(*call, stage, receiver_closed);
+            }
+        };
         let start = Instant::now();
+        record("capacity_wait", tx.is_closed());
         let permit = self
             .tx
             .reserve()
             .await
             .map_err(|_| anyhow::anyhow!("world directory stopped"))?;
         let send_wait = start.elapsed();
+        record("capacity_acquired", tx.is_closed());
         let queued = Instant::now();
         let work_request = request.clone();
+        let work_record = record.clone();
         permit.send(Box::new(move |d| {
             let queue_wait = queued.elapsed();
+            work_record("started", tx.is_closed());
             d.performance.record("job_send_wait", send_wait);
             d.performance.record("job_wait", queue_wait);
             let started = crate::performance::Measure::start();
@@ -1310,8 +1323,12 @@ impl Handle {
                     *r.cpu.get_or_insert(Duration::ZERO) += cpu;
                 }
             }
-            let _ = tx.send(result);
+            work_record("completed", tx.is_closed());
+            let receiver_closed = tx.send(result).is_err();
+            work_record("result_send", receiver_closed);
         }));
+        // The receiver cannot be dropped until this poll yields.
+        record("enqueued", false);
         let result = rx.await.context("world directory worker failed");
         if let Some(r) = request {
             r.lock().expect("request timings poisoned").round_trip += start.elapsed();
@@ -5124,6 +5141,136 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+    #[test]
+    fn native_control_directory_trace_distinguishes_cancelled_call_stages() {
+        type PendingCall =
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + Send>>;
+        let (dispatch, output) = crate::performance::tests::trace();
+        let _logging = tracing::dispatcher::set_default(&dispatch);
+        let mut directory = directory();
+        for cancel_at in ["capacity_wait", "enqueued", "started", "resumed"] {
+            let (tx, mut rx) = mpsc::channel::<Job>(1);
+            let handle = Handle {
+                tx,
+                target: Target::World(-1),
+                clock: directory.clock.clone(),
+            };
+            if cancel_at == "capacity_wait" {
+                assert!(handle.tx.try_send(Box::new(|_| {})).is_ok());
+            }
+            let requests = Arc::new(std::sync::Mutex::new(crate::performance::Requests {
+                native_control: Some(Arc::new(crate::performance::NativeControlTrace {
+                    request: cancel_at.into(),
+                    operation: "renew".into(),
+                    started: Instant::now(),
+                })),
+                ..Default::default()
+            }));
+            let pending: Arc<std::sync::Mutex<Option<PendingCall>>> = Arc::default();
+            let drop_from_job = pending.clone();
+            let scope = requests.clone();
+            let cancel_in_job = cancel_at == "started";
+            *pending.lock().unwrap() = Some(Box::pin(async move {
+                crate::performance::REQUEST
+                    .scope(
+                        scope,
+                        handle.directory(move |d| {
+                            if cancel_in_job {
+                                drop(drop_from_job.lock().unwrap().take());
+                            }
+                            Ok(d.worlds.len())
+                        }),
+                    )
+                    .await
+            }));
+            let mut cx = std::task::Context::from_waker(futures_util::task::noop_waker_ref());
+            assert!(
+                pending
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .as_mut()
+                    .poll(&mut cx)
+                    .is_pending()
+            );
+            if matches!(cancel_at, "capacity_wait" | "enqueued") {
+                drop(pending.lock().unwrap().take());
+            }
+            rx.try_recv().unwrap()(&mut directory);
+            assert!(matches!(
+                rx.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+            ));
+            if cancel_at == "resumed" {
+                assert!(
+                    matches!(pending.lock().unwrap().as_mut().unwrap().as_mut().poll(&mut cx), std::task::Poll::Ready(Ok(count)) if count > 0)
+                );
+                drop(pending.lock().unwrap().take());
+            }
+            assert!(pending.lock().unwrap().is_none());
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.calls, 1);
+            assert_eq!(requests.completed, u64::from(cancel_at != "capacity_wait"));
+            assert_eq!(requests.round_trip.is_zero(), cancel_at != "resumed");
+            let events = crate::performance::tests::events(&output);
+            let events = events
+                .iter()
+                .filter(|event| event["fields"]["request"] == cancel_at)
+                .collect::<Vec<_>>();
+            let stages = events
+                .iter()
+                .map(|event| event["fields"]["stage"].as_str().unwrap())
+                .collect::<Vec<_>>();
+            if cancel_at == "capacity_wait" {
+                assert_eq!(stages, ["capacity_wait"]);
+            } else {
+                assert_eq!(
+                    stages,
+                    [
+                        "capacity_wait",
+                        "capacity_acquired",
+                        "enqueued",
+                        "started",
+                        "completed",
+                        "result_send"
+                    ]
+                );
+                for stage in ["started", "completed", "result_send"] {
+                    let event = events
+                        .iter()
+                        .find(|event| event["fields"]["stage"] == stage)
+                        .unwrap();
+                    let closed =
+                        cancel_at == "enqueued" || cancel_at == "started" && stage != "started";
+                    assert_eq!(event["fields"]["receiver_closed"], closed);
+                }
+            }
+            assert!(events.iter().all(|event| event["fields"]["call"] == 1
+                && event["fields"]["operation"] == "renew"
+                && event["fields"]["elapsed_ms"].as_f64().unwrap() >= 0.));
+        }
+    }
+    #[tokio::test]
+    async fn ordinary_world_requests_do_not_emit_native_control_trace() {
+        let (dispatch, output) = crate::performance::tests::trace();
+        let _logging = tracing::dispatcher::set_default(&dispatch);
+        let handle = Handle::spawn(directory());
+        handle.clock.set_paused(true);
+        let requests = Arc::new(std::sync::Mutex::new(
+            crate::performance::Requests::default(),
+        ));
+        crate::performance::REQUEST
+            .scope(requests.clone(), handle.directory(|_| Ok(())))
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().unwrap().calls, 1);
+        assert!(
+            !crate::performance::tests::events(&output)
+                .iter()
+                .any(|event| event["fields"]["message"] == "native control world request")
+        );
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn command_scope_measures_world_requests_without_charging_sleep_as_cpu() {
