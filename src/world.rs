@@ -939,6 +939,7 @@ impl Directory {
     fn reclaimable_world(&self, id: i32) -> bool {
         id > 0
             && self.worlds[&id].players.is_empty()
+            && self.worlds[&id].bag_expiry.is_empty()
             && !self.endgame.references_world(id)
             && !self.grants.values().any(|g| g.destination == id)
             && !self
@@ -5512,6 +5513,14 @@ mod tests {
         assert!(error.to_string().contains("world instance limit reached"));
         assert_eq!(d.worlds.len(), 12);
         d.grants.retain(|_, g| g.destination != ids[4]);
+        let w = d.worlds.get_mut(&ids[4]).unwrap();
+        let (x, y) = w.map.spawns[0];
+        let bag = w
+            .loot_bag(Pos { x, y }, None, vec![ch(w).items[0]])
+            .unwrap();
+        assert!(d.instance("vault", Some(2)).is_err());
+        assert!(d.worlds[&ids[4]].entities.contains_key(&bag));
+        d.worlds.get_mut(&ids[4]).unwrap().remove_entity(bag);
         assert!(d.reserve_worlds(2, &[]).is_err());
         assert!(d.reserve_worlds(1, &[ids[4]]).is_err());
         assert!(ids.iter().all(|id| d.worlds.contains_key(id)));
