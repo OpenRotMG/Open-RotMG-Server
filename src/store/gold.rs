@@ -1,9 +1,35 @@
 use super::*;
 
-pub(crate) const SCHEMA: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
+pub(crate) const SCHEMA: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half','first_bug_report')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
 pub(crate) const DISCORD: &str = "discord_link";
 const COLLECTION: &str = "collection_top_half";
 pub(crate) const AMOUNT: i32 = 100;
+const BUG: &str = "first_bug_report";
+
+pub(super) fn migrate(db: &Connection, version: i32, exists: bool) -> Result<()> {
+    if version == 10 {
+        db.execute_batch("ALTER TABLE gold_rewards RENAME TO old_gold_rewards;")?;
+        db.execute_batch(SCHEMA)?;
+        db.execute_batch(
+            "INSERT INTO gold_rewards SELECT * FROM old_gold_rewards; DROP TABLE old_gold_rewards;",
+        )?;
+    } else if !exists {
+        db.execute_batch(SCHEMA)?;
+    }
+    Ok(())
+}
+
+fn details(reward: &str) -> Result<(i32, &'static str)> {
+    Ok(match reward {
+        DISCORD => (AMOUNT, "linking your Discord account"),
+        COLLECTION => (
+            AMOUNT,
+            "reaching the top 50% of the Collection Log hiscores",
+        ),
+        BUG => (50, "submitting your first bug report"),
+        _ => anyhow::bail!("unknown gold reward {reward}"),
+    })
+}
 
 pub(crate) struct Gold {
     pub balance: i32,
@@ -11,28 +37,29 @@ pub(crate) struct Gold {
 }
 impl Gold {
     pub fn message(&self) -> Result<String> {
-        let reasons = self
+        let rewards = self
             .rewards
             .iter()
-            .map(|reward| match reward.as_str() {
-                DISCORD => Ok("linking your Discord account"),
-                COLLECTION => Ok("reaching the top 50% of the Collection Log hiscores"),
-                _ => anyhow::bail!("unknown gold reward {reward}"),
-            })
+            .map(|r| details(r))
             .collect::<Result<Vec<_>>>()?;
         Ok(format!(
             "You received {} Gold for {}!",
-            AMOUNT * i32::try_from(reasons.len())?,
-            reasons.join(" and ")
+            rewards.iter().map(|r| r.0).sum::<i32>(),
+            rewards
+                .iter()
+                .map(|r| r.1)
+                .collect::<Vec<_>>()
+                .join(" and ")
         ))
     }
 }
 
 pub(super) fn grant(db: &Connection, account: i32, reward: &str) -> Result<bool> {
+    let (amount, _) = details(reward)?;
     if db.execute("INSERT INTO gold_rewards(account,reward,awarded_at) VALUES(?1,?2,unixepoch()) ON CONFLICT(account,reward) DO NOTHING", params![account,reward])? == 0 {
         return Ok(false);
     }
-    ensure!(db.execute("UPDATE accounts SET credits=credits+?2 WHERE id=?1 AND credits BETWEEN 0 AND 2147483647-?2", params![account,AMOUNT])? == 1, "gold reward wallet missing, invalid or overflowing for account {account}");
+    ensure!(db.execute("UPDATE accounts SET credits=credits+?2 WHERE id=?1 AND credits BETWEEN 0 AND 2147483647-?2", params![account,amount])? == 1, "gold reward wallet missing, invalid or overflowing for account {account}");
     Ok(true)
 }
 
@@ -51,6 +78,17 @@ AND EXISTS(SELECT 1 FROM credentials WHERE account=?1)", [account], |r| r.get(0)
 }
 
 impl Store {
+    pub(crate) async fn reward_first_bug(&self, account: i32) -> Result<()> {
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let human: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=?1)", [account], |r| r.get(0))?;
+            ensure!(human, "bug report reward requires a human game account");
+            let granted = grant(&tx, account, BUG)?;
+            tx.commit()?;
+            tracing::info!(account, granted, "first bug report gold reward committed");
+            Ok(())
+        }).await
+    }
     pub(crate) async fn gold(&self, account: i32) -> Result<Gold> {
         self.call(move |db| {
             let tx = db.transaction()?;

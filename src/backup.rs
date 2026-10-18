@@ -96,7 +96,9 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 store
                     .redeem_discord_code(code, format!("1234567890123456{}", i32::from(alive)))
                     .await?;
-                if !alive {
+                if alive {
+                    store.reward_first_bug(account.id).await?;
+                } else {
                     store
                         .gold_notified(account.id, vec![store::gold::DISCORD.into()])
                         .await?;
@@ -124,7 +126,14 @@ pub async fn run(args: &[String]) -> Result<bool> {
                     )
                     .await?;
                 character = store.load(account.id, character.id).await?;
-                if !alive {
+                if alive {
+                    rusqlite::Connection::open(directory.join("game.db"))?
+                        .execute("UPDATE accounts SET credits=600 WHERE id=?1", [account.id])?;
+                    store.purchase_character_slot(account.id, i32::MIN).await?;
+                    store
+                        .create(account.id, content.get(content::WIZARD)?)
+                        .await?;
+                } else {
                     character.fame = 11000;
                     character.alive = false;
                     character.hp = 0;
@@ -169,7 +178,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                     }],
                 })
                 .await?;
-            println!("{}", serde_json::json!({"fixture_characters": 3}));
+            println!("{}", serde_json::json!({"fixture_characters": 4}));
         }
         ["--backup-load", database, data] => {
             ensure!(

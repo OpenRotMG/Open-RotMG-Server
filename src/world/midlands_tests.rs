@@ -396,5 +396,5 @@ fn phases_prediction_and_zero_damage_conditions_stay_selected_and_use_the_shared
     for kind in [0x640, 0x645, 0x649, 0x650] {
         assert_eq!(crate::dungeon::portal_drop(kind), Some((0x718, 0.17)));
     }
-    assert!(crate::dungeon::portal_drop(0x62c).is_none());
+    assert_eq!(crate::dungeon::portal_drop(0x62c), Some((0x719, 0.1)));
 }

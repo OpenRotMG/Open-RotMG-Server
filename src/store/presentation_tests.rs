@@ -102,7 +102,7 @@ async fn presentation_and_xml_share_committed_class_bests_across_replacement_and
         ch.alive = false;
         s.death(ch, "prepared threshold".into()).await.unwrap();
         let listed = s.list("class-history".into()).await.unwrap();
-        assert_eq!(class_record(&listed.xml(""), WIZARD), (5, fame));
+        assert_eq!(class_record(&listed.xml("", 0.0), WIZARD), (5, fame));
         let p = s.presentation(account).await.unwrap();
         assert_eq!(p.best_fame, listed.best_fame);
         assert_eq!(p.best_fame[&WIZARD], fame);
@@ -155,8 +155,8 @@ async fn presentation_and_xml_share_committed_class_bests_across_replacement_and
     let listed = reopened.list("class-history".into()).await.unwrap();
     assert_eq!(listed.fame, 27);
     assert_eq!(listed.earned_fame, 3689);
-    assert_eq!(class_record(&listed.xml(""), WIZARD), (5, 2000));
-    assert_eq!(class_record(&listed.xml(""), PRIEST), (1, 150));
+    assert_eq!(class_record(&listed.xml("", 0.0), WIZARD), (5, 2000));
+    assert_eq!(class_record(&listed.xml("", 0.0), PRIEST), (1, 150));
     assert!(content.unlocked(PRIEST, &listed.best_levels).unwrap());
     let other = reopened.list("unrelated".into()).await.unwrap();
     assert_eq!(
@@ -199,7 +199,7 @@ async fn presentation_decodes_legacy_committed_snapshots_without_birth_metadata(
     assert_eq!(p.stars(), 1);
     assert_eq!(
         class_record(
-            &s.list("legacy-history".into()).await.unwrap().xml(""),
+            &s.list("legacy-history".into()).await.unwrap().xml("", 0.0),
             WIZARD
         ),
         (1, 40)

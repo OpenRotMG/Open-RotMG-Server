@@ -1,12 +1,24 @@
 #[cfg(test)]
+mod character_slot_tests;
+#[cfg(test)]
 mod client_contract_tests;
 mod input;
+#[cfg(test)]
+mod name_choice_boundaries_tests;
+#[cfg(test)]
+mod name_choice_tests;
+#[cfg(test)]
+mod password_tests;
 #[cfg(test)]
 mod purchase_tests;
 #[cfg(test)]
 mod queue_tests;
 #[cfg(test)]
 mod resurrection_tests;
+#[cfg(test)]
+mod usage_tests;
+#[cfg(test)]
+mod xp_booster_tests;
 use crate::{
     content::{Content, WIZARD},
     crypto::Keys,
@@ -74,6 +86,32 @@ impl Drop for Owner {
     }
 }
 impl App {
+    fn server_usage(&self) -> Result<f64> {
+        ensure!(
+            (1..=85).contains(&self.max_players),
+            "invalid server capacity: {}",
+            self.max_players
+        );
+        // Admission includes claims before avatars exist and retains them through failed saves.
+        let occupied = self
+            .owners
+            .lock()
+            .map_err(|_| anyhow::anyhow!("ownership registry poisoned"))?
+            .len();
+        ensure!(
+            occupied <= self.max_players,
+            "ownership exceeds capacity: {occupied}/{}",
+            self.max_players
+        );
+        let usage = occupied as f64 / self.max_players as f64;
+        tracing::debug!(
+            occupied,
+            capacity = self.max_players,
+            usage,
+            "advertised admission usage"
+        );
+        Ok(usage)
+    }
     pub(crate) fn claim(&self, id: i32) -> Result<Owner> {
         let mut owners = self.owners.lock().expect("ownership registry poisoned");
         ensure!(owners.len() < self.max_players, "development world full");
@@ -257,7 +295,7 @@ async fn chars(
         let _authentication = a.authentication.read().await;
         let account = a.store.characters(guid, password).await?;
         let feed = a.store.updates().await?;
-        Ok(account.xml(&feed.news_xml(&a.origin)))
+        Ok(account.xml(&feed.news_xml(&a.origin), a.server_usage()?))
     }
     .await;
     match result {
@@ -336,9 +374,31 @@ async fn account_request(
         Ok(false) => return limited(),
         Err(e) => return error(e),
     }
-    let result: Result<String> = async {
-        let _authentication = a.authentication.read().await;
+    let result: Result<i32> = async {
         let guid = form.get("guid").context("guid required")?.clone();
+        if operation == "changePassword" {
+            ensure!(
+                form.get("secret").is_none_or(|s| s.is_empty()),
+                "external platform authentication is not implemented"
+            );
+            let password = form.get("password").context("password required")?.clone();
+            ensure!(!password.is_empty(), crate::store::InvalidCredentials);
+            let verifier = a
+                .store
+                .prepare_password(
+                    form.get("newPassword")
+                        .context("newPassword required")?
+                        .clone(),
+                )
+                .await?;
+            // Fence the current verifier through ownership and commit, without upgrading a read lock.
+            let _authentication = a.authentication.write().await;
+            let id = a.store.authenticate(guid, password).await?;
+            let _claim = a.claim(id)?;
+            a.store.change_password(id, verifier).await?;
+            return Ok(id);
+        }
+        let _authentication = a.authentication.read().await;
         let id = match operation.as_str() {
             "register" => {
                 a.store
@@ -370,17 +430,44 @@ async fn account_request(
                     .await?;
                 id
             }
+            "purchaseCharSlot" => {
+                ensure!(
+                    form.get("secret").is_none_or(|s| s.is_empty()),
+                    "external platform authentication is not implemented"
+                );
+                let timer: i32 = form
+                    .get("ignore")
+                    .context("ignore timer required")?
+                    .parse()
+                    .context("invalid signed-32-bit ignore timer")?;
+                let password = form.get("password").context("password required")?.clone();
+                ensure!(
+                    !password.is_empty(),
+                    "Register an account before buying character slots."
+                );
+                let id = a.store.authenticate(guid, password).await?;
+                let _claim = a.claim(id)?;
+                a.store.purchase_character_slot(id, timer).await?;
+                id
+            }
             _ => bail!("account operation not implemented"),
         };
-        tracing::info!(account = id, operation, "account request completed");
-        Ok("<Success/>".into())
+        Ok(id)
     }
     .await;
     let xml = match result {
-        Ok(xml) => xml,
+        Ok(id) => {
+            tracing::info!(account = id, operation, "account request completed");
+            "<Success/>".into()
+        }
         Err(e) => {
             tracing::warn!(error=%e, operation, "account request rejected");
-            format!("<Error>{}</Error>", xml_escape(&e.to_string()))
+            let tag = if e.is::<crate::store::SlotReplay>() {
+                "FatalError"
+            } else {
+                "Error"
+            };
+            format!("<{tag}>{}</{tag}>", xml_escape(&e.to_string()))
         }
     };
     // The original account service carries semantic failures in XML, not HTTP error pages.
@@ -563,6 +650,19 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 u16::try_from(pet.source.kind)?,
                 pet.selected,
                 a.content.clone(),
+            )
+            .await
+    } else if let Some(slot) = plan.xp_boost {
+        a.store
+            .consume_xp_booster(
+                InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                },
+                (slot.object == plan.player).then_some(slot.slot),
+                plan.vault.clone(),
             )
             .await
     } else if let Some((slot, tex1, tex2)) = plan.appearance {
@@ -1330,28 +1430,47 @@ async fn handle(
             let name = r.utf()?;
             r.done()?;
             let account = account.as_ref().context("name before HELLO")?.id;
-            if let Err(e) = a.store.choose_name(account, name.clone()).await {
-                tracing::warn!(account, error=%e, "name choice rejected");
-                let mut o = Writer::new();
-                o.u8(0).utf(&e.to_string());
-                enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
-                return Ok(());
-            }
-            if let Some(id) = player {
-                let id = *id;
+            let _gold = a.gold_updates.lock().await;
+            let reservation = if let Some(id) = *player {
+                match a
+                    .world
+                    .for_player(id)
+                    .call(move |w| w.begin_name_choice(id, account))
+                    .await?
+                {
+                    Ok(plan) => Some((id, plan)),
+                    Err(reason) => {
+                        tracing::info!(account, reason, "name choice rejected before reservation");
+                        let mut o = Writer::new();
+                        o.u8(0).utf(reason);
+                        enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
+                        return Ok(());
+                    }
+                }
+            } else {
+                None
+            };
+            let result = a
+                .store
+                .name_choice(account, name.clone(), reservation.is_some())
+                .await;
+            let rejection = if let Some((id, plan)) = reservation {
                 a.world
-                    .call(move |w| {
-                        w.players
-                            .get_mut(&id)
-                            .context("player missing")?
-                            .character
-                            .name = name;
-                        Ok(())
-                    })
-                    .await?;
+                    .for_player(id)
+                    .call(move |w| w.finish_name_choice(plan, name, result))
+                    .await?
+            } else {
+                match result? {
+                    crate::store::NameChoice::Rejected(reason) => Some(reason),
+                    crate::store::NameChoice::Committed { .. } => None,
+                }
+            };
+            if let Some(reason) = rejection {
+                tracing::info!(account, reason, "name choice rejected without charge");
             }
             let mut o = Writer::new();
-            o.u8(1).utf("");
+            o.u8(u8::from(rejection.is_none()))
+                .utf(rejection.unwrap_or(""));
             enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
         }
         42 | 3 => {
@@ -1484,7 +1603,7 @@ async fn connection_io<S, I>(
     let (tx, mut rx) = mpsc::channel::<Packet>(64);
     let (lost, mut lost_rx) = tokio::sync::watch::channel(false);
     // Actor work and output backpressure must not manufacture late, clustered input receipts.
-    let (mut incoming, _input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
+    let (mut incoming, input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
     let mut shutdown = a.shutdown.subscribe();
     let deadline = tokio::time::sleep(std::time::Duration::from_secs(10));
     tokio::pin!(deadline);
@@ -1498,6 +1617,7 @@ async fn connection_io<S, I>(
     let mut transfers = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut testing_stop = a.testing.as_ref().map(|t| t.stopped.subscribe());
     let mut terminal_drain = false;
+    let mut close_reason = "transport_ended";
     'connection: loop {
         tokio::select! {
             _=async { match testing_stop.as_mut() { Some(stop) => { if stop.borrow().is_none() { let _ = stop.changed().await; } }, None => std::future::pending::<()>().await } } => {
@@ -1519,11 +1639,12 @@ async fn connection_io<S, I>(
                     if !session.reconnecting {
                         let id=packet.id;
                         session.diagnostics.packets_in += 1;
+                        session.diagnostics.processed(id);
                         let handling = std::time::Instant::now();
                         session.diagnostics.max_input_queue_ms = session.diagnostics.max_input_queue_ms.max(a.world.clock.now().saturating_duration_since(received).as_secs_f64()*1000.0);
                         if let Err(e)=handle(&mut a,packet,&mut session,&tx,&lost,received).await {
                             tracing::error!(account=session.account.as_ref().map(|o|o.id),player=session.player,packet=id,error=%format_args!("{e:#}"),"game command rejected");
-                            if e.is::<ReplyQueueError>() { break 'connection; }
+                            if e.is::<ReplyQueueError>() { close_reason="reply_queue_full";break 'connection; }
                             if matches!(id,1|21|37|57) && let Some(player) = session.player {
                                 let reason = e.to_string();
                                 let closed = a.world.for_player(player).call(move |w| Ok(w.cancel_trade(player, &reason))).await;
@@ -1535,6 +1656,7 @@ async fn connection_io<S, I>(
                                 if wsout.send(Message::Binary(codec.frame(4,o.0).into())).await.is_err(){break 'connection;}
                                 continue;
                             }
+                            close_reason="command_rejected";
                             let f=fail(&e.to_string());
                             let _=wsout.send(Message::Binary(codec.frame(f.id,f.body).into())).await;
                             break 'connection;
@@ -1578,9 +1700,9 @@ async fn connection_io<S, I>(
                     None => std::future::pending::<()>().await,
                 }
             }=>{tracing::info!(account=session.account.as_ref().map(|o|o.id),"closing requested game session");break;},
-            _=shutdown.changed()=>break,
-            _=lost_rx.changed()=>{tracing::warn!(player=session.player,"closing slow game connection before its state diverges");break;},
-            _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
+            _=shutdown.changed()=>{close_reason="shutdown";break;},
+            _=lost_rx.changed()=>{close_reason="lag_or_protocol_guard";tracing::warn!(player=session.player,"closing slow game connection before its state diverges");break;},
+            _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{close_reason="connection_deadline";tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
             outgoing=rx.recv()=>{
                 let Some(packet)=outgoing else {break};
                 let reconnect=packet.id==39;
@@ -1591,6 +1713,7 @@ async fn connection_io<S, I>(
                 let sending = std::time::Instant::now();
                 if wsout.send(Message::Binary(frame.into())).await.is_err(){break;}
                 session.diagnostics.packets_out += 1;
+                session.diagnostics.last_socket_send=Some(std::time::Instant::now());
                 session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
                 // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
                 if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
@@ -1599,6 +1722,11 @@ async fn connection_io<S, I>(
                 session.diagnostics.sent(serial);
                 if wsout.send(Message::Binary(codec.frame(wire::PING,o.0).into())).await.is_err(){break;}}}
         }
+    }
+    input_task.abort();
+    if let Some(id) = session.player {
+        diagnostics::disconnect(&a,id,&session.diagnostics,serde_json::json!({"reason":close_reason,
+            "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()})).await;
     }
     if let Some(id) = session.player
         && let Err(e) = depart(&a, id).await

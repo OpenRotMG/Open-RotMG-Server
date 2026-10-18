@@ -69,7 +69,7 @@ async fn guild_creation_is_atomic_named_unique_and_spends_only_wallet_fame() {
     assert_eq!(listed.earned_fame, 1000);
     assert!(
         listed
-            .xml("")
+            .xml("", 0.0)
             .contains("<Guild id=\"1\"><Name>Guild One</Name><Rank>40</Rank></Guild>")
     );
     let (b, _) = account(&s, &c, 1, 1000).await;
@@ -471,7 +471,7 @@ async fn guild_overflow_rolls_back_the_death_and_missing_current_state_fails_clo
     let version: i32 = db
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 12);
     drop(migrated);
     drop(db);
     std::fs::remove_file(path).unwrap();

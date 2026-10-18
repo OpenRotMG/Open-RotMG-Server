@@ -225,3 +225,93 @@ async fn migration_does_not_backfill_and_reopen_preserves_claims_and_notificatio
     assert!(Store::open(&path, &content).is_err());
     std::fs::remove_file(path).unwrap();
 }
+
+#[tokio::test]
+async fn bug_reward_preserves_v10_claims_and_is_once_across_concurrency_and_restart() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let path = std::env::temp_dir().join(format!("bug-gold-{}.db", rand::random::<u64>()));
+    let s = Store::open(&path, &content).unwrap();
+    let account = s.list("reporter".into()).await.unwrap().id;
+    s.call(move |db| {
+        let tx = db.transaction()?;
+        grant(&tx, account, DISCORD)?;
+        grant(&tx, account, COLLECTION)?;
+        tx.execute("UPDATE gold_rewards SET notified_at=unixepoch() WHERE reward=?1", [DISCORD])?;
+        tx.execute_batch("ALTER TABLE gold_rewards RENAME TO copied_rewards")?;
+        tx.execute_batch(&SCHEMA.replace(",'first_bug_report'", ""))?;
+        tx.execute_batch("INSERT INTO gold_rewards SELECT * FROM copied_rewards; DROP TABLE copied_rewards; PRAGMA user_version=10")?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let before = s.gold(account).await.unwrap();
+    assert_eq!(before.balance, 300);
+    assert_eq!(before.rewards, [COLLECTION]);
+    drop(s);
+    let s = Store::open(&path, &content).unwrap();
+    assert_eq!(s.gold(account).await.unwrap().balance, before.balance);
+    assert_eq!(s.gold(account).await.unwrap().rewards, before.rewards);
+    let (one, two) = tokio::join!(s.reward_first_bug(account), s.reward_first_bug(account));
+    one.unwrap();
+    two.unwrap();
+    let gold = s.gold(account).await.unwrap();
+    assert_eq!(gold.balance, 350);
+    assert_eq!(gold.rewards.len(), 2);
+    assert!(
+        gold.message()
+            .unwrap()
+            .starts_with("You received 150 Gold for ")
+    );
+    s.gold_notified(account, gold.rewards).await.unwrap();
+    drop(s);
+    let s = Store::open(&path, &content).unwrap();
+    s.reward_first_bug(account).await.unwrap();
+    assert_eq!(s.gold(account).await.unwrap().balance, 350);
+    assert!(s.gold(account).await.unwrap().rewards.is_empty());
+    drop(s);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn failed_bug_rewards_roll_back_and_guests_keep_claims_after_registration() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let s = Store::open(Path::new(":memory:"), &content).unwrap();
+    let account = s.list("reporter".into()).await.unwrap().id;
+    assert!(s.reward_first_bug(-1).await.is_err());
+    s.call(move |db| {
+        db.execute(
+            "UPDATE accounts SET credits=2147483647 WHERE id=?1",
+            [account],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert!(s.reward_first_bug(account).await.is_err());
+    assert!(s.gold(account).await.unwrap().rewards.is_empty());
+    s.call(move |db| {
+        db.execute("UPDATE accounts SET credits=100 WHERE id=?1", [account])?;
+        db.execute("INSERT INTO shore_bots VALUES('reporter',?1)", [account])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert!(s.reward_first_bug(account).await.is_err());
+    assert_eq!(s.gold(account).await.unwrap().balance, 100);
+    s.call(move |db| {
+        db.execute("DELETE FROM shore_bots WHERE account=?1", [account])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    s.reward_first_bug(account).await.unwrap();
+    s.register(
+        "reporter".into(),
+        "reporter@example.invalid".into(),
+        "password123".into(),
+    )
+    .await
+    .unwrap();
+    s.reward_first_bug(account).await.unwrap();
+    assert_eq!(s.gold(account).await.unwrap().balance, 150);
+    assert_eq!(s.gold(account).await.unwrap().rewards, [BUG]);
+}

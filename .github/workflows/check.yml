@@ -1,0 +1,7 @@
+name: Check
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  check:
+    uses: OpenRotMG/.github/.github/workflows/check.yml@main

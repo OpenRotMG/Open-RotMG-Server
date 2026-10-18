@@ -132,6 +132,7 @@ pub struct Object {
     pub successor: Option<String>,
     pub doses: Option<u8>,
     pub consumable_effects: Vec<ConsumableEffect>,
+    pub xp_boost: bool,
     pub companion: Option<Companion>,
     pub heal_range: f32,
     pub activations: usize,
@@ -367,6 +368,7 @@ impl Content {
                     .transpose()?,
                 dungeon_name: child(n, "DungeonName").map(|_| text(n, "DungeonName")),
                 consumable: child(n, "Consumable").is_some(),
+                xp_boost: child(n, "XpBoost").is_some(),
                 resurrects: child(n, "Resurrects").is_some(),
                 textures: [texture(n, "Tex1")?, texture(n, "Tex2")?],
                 successor: child(n, "SuccessorId").map(|_| text(n, "SuccessorId")),
@@ -780,6 +782,25 @@ mod tests {
         for bytes in [&b"not zlib"[..], &b"\x78\x9c\xff\xff\xff\xff"[..]] {
             assert!(Map::decode_cells(bytes, &content).is_err());
             assert!(Map::decode(bytes, &content).is_err());
+        }
+    }
+
+    #[test]
+    fn selected_legacy_sounds_are_present() {
+        let xml = std::fs::read_to_string("data/objects.xml").unwrap();
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let sounds: std::collections::BTreeSet<_> = doc
+            .descendants()
+            .filter(|node| node.has_tag_name("OldSound"))
+            .filter_map(|node| node.text())
+            .collect();
+        assert!(!sounds.is_empty());
+        for sound in sounds {
+            let path = Path::new("data/sfx").join(format!("{sound}.mp3"));
+            let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+                panic!("missing selected sound {}: {error}", path.display())
+            });
+            assert!(!bytes.is_empty(), "empty selected sound {}", path.display());
         }
     }
 

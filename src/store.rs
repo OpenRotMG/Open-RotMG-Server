@@ -9,7 +9,11 @@ use tokio::sync::oneshot;
 
 mod account_actions;
 mod accounts;
+mod character_slots;
 mod consumables;
+#[cfg(test)]
+mod name_choice_tests;
+pub(crate) use character_slots::SlotReplay;
 #[cfg(all(test, unix))]
 mod crash_tests;
 #[cfg(test)]
@@ -32,6 +36,12 @@ pub use purchases::Purchase;
 mod updates;
 pub use social::AccountLists;
 pub use updates::{UpdateFeed, UpdatePost, UpdateSnapshot};
+
+#[derive(Debug)]
+pub(crate) enum NameChoice {
+    Rejected(&'static str),
+    Committed { balance: i32 },
+}
 
 #[derive(Debug)]
 pub struct InvalidCredentials;
@@ -78,6 +88,12 @@ impl AccountPresentation {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct XpBoost {
+    pub active: bool,
+    pub bonus_exp: i32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Character {
     pub schema: u8,
@@ -94,6 +110,9 @@ pub struct Character {
     pub name: String,
     pub level: i32,
     pub exp: i32,
+    // Pre-booster schema-one writers had no boost metadata; present metadata must be complete.
+    #[serde(default)]
+    pub xp_boost: XpBoost,
     pub fame: i32,
     pub hp: i32,
     pub mp: i32,
@@ -121,6 +140,8 @@ pub struct Character {
     pub abysses: u64,
     #[serde(default)]
     pub trenches: u64,
+    #[serde(default)]
+    pub spider_dens: u64,
 }
 pub fn level_start(level: i32) -> Result<i32> {
     ensure!((1..=20).contains(&level), "invalid character level {level}");
@@ -140,11 +161,23 @@ impl Character {
         self.effective(content)?;
         ensure!(amount >= 0, "negative experience reward");
         let mut next = self.clone();
+        let bonus = if next.xp_boost.active { amount } else { 0 };
         next.exp = next
             .exp
             .checked_add(amount)
+            .and_then(|exp| exp.checked_add(bonus))
             .context("experience overflow")?;
-        next.fame = next.exp / 1000;
+        next.xp_boost.bonus_exp = next
+            .xp_boost
+            .bonus_exp
+            .checked_add(bonus)
+            .context("bonus experience overflow")?;
+        // Expired boost XP must never turn into Fame on a later award.
+        next.fame = next
+            .exp
+            .checked_sub(next.xp_boost.bonus_exp)
+            .context("invalid bonus experience")?
+            / 1000;
         let class = &content.classes[&next.class];
         let previous = next.level;
         while next.level < 20 && next.exp >= level_start(next.level + 1)? {
@@ -155,6 +188,9 @@ impl Character {
                     .context("growth overflow")?
                     .min(class.caps[i]);
             }
+        }
+        if next.level == 20 {
+            next.xp_boost.active = false;
         }
         if next.level > previous {
             let effective = next.effective(content)?;
@@ -170,6 +206,15 @@ impl Character {
             .get(&self.class)
             .context("unknown character class")?;
         level_start(self.level)?;
+        ensure!(
+            (0..=self.exp).contains(&self.xp_boost.bonus_exp)
+                && (!self.xp_boost.active || self.level < 20),
+            "invalid XP boost state: level={}, experience={}, bonus={}, active={}",
+            self.level,
+            self.exp,
+            self.xp_boost.bonus_exp,
+            self.xp_boost.active
+        );
         ensure!(
             self.schema == 1 && self.items.len() == 12,
             "invalid character schema or inventory"
@@ -212,6 +257,8 @@ pub struct Account {
     pub id: i32,
     pub name: String,
     pub next_id: i32,
+    pub character_slots: i32,
+    pub next_slot_price: i32,
     pub guild: Option<GuildMembership>,
     pub credits: i32,
     pub fame: i64,
@@ -278,7 +325,7 @@ impl Store {
         let mut c = Connection::open(path)?;
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10),
+            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12),
             "unsupported game database schema {version}"
         );
         let rewards_exist: bool = c.query_row(
@@ -288,7 +335,7 @@ impl Store {
         )?;
         ensure!(
             version < 10 || rewards_exist,
-            "schema-10 gold rewards missing; restore reviewed state instead of allowing duplicate grants"
+            "gold reward history missing; restore reviewed state instead of allowing duplicate grants"
         );
         let credits_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
@@ -327,7 +374,6 @@ impl Store {
 CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY,guid TEXT NOT NULL UNIQUE,name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS shore_bots(name TEXT PRIMARY KEY,account INTEGER NOT NULL UNIQUE REFERENCES accounts(id));
 CREATE TABLE IF NOT EXISTS characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,alive INTEGER NOT NULL DEFAULT 1);
-CREATE UNIQUE INDEX IF NOT EXISTS one_living_character ON characters(account) WHERE alive=1;
 CREATE TABLE IF NOT EXISTS deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()));
 CREATE TABLE IF NOT EXISTS vaults(account INTEGER PRIMARY KEY REFERENCES accounts(id),items TEXT NOT NULL CHECK(json_array_length(items)=8),revision INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS credentials(account INTEGER PRIMARY KEY REFERENCES accounts(id),email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL);
@@ -355,12 +401,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         tracing::info!(%journal, synchronous, "account store durability configured");
         let migration = c.transaction()?;
         guilds::migrate(&migration, version)?;
-        if !rewards_exist {
-            migration.execute_batch(gold::SCHEMA)?;
-        }
+        gold::migrate(&migration, version, rewards_exist)?;
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
         }
+        character_slots::migrate(&migration, version)?;
         let records = {
             let mut q = migration.prepare("SELECT id,stats FROM characters ORDER BY id")?;
             q.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))?
@@ -432,7 +477,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "account fame wallet missing; restore reviewed state instead of recreating balances"
             );
         }
-        migration.pragma_update(None, "user_version", 10)?;
+        migration.pragma_update(None, "user_version", 12)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -507,9 +552,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         let classes = self.classes.clone();
         let account = self.call(move|c|{let tx=c.transaction()?;
             let name:String=tx.query_row("SELECT name FROM accounts WHERE id=?1",[id],|r|r.get(0))?;
+            let character_slots=character_slots::read(&tx,id)?;
+            let next_slot_price=character_slots::price(character_slots)?;
             let mut characters=Vec::new();{let mut q=tx.prepare("SELECT id,stats,items,revision,alive FROM characters WHERE account=?1 AND alive=1 ORDER BY id")?;let rows=q.query_map([id],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i32>(3)?,r.get::<_,bool>(4)?)))?;
             for row in rows{let(cid,stats,items,rev,alive)=row?;let mut ch:Character=serde_json::from_str(&stats)?;ch.id=cid;ch.account=id;ch.name=name.clone();ch.items=serde_json::from_str(&items)?;ch.revision=rev;ch.alive=alive;characters.push(ch);}}
-            let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = read_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,guild:presentation.guild,credits:presentation.credits,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
+            let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = read_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,character_slots,next_slot_price,guild:presentation.guild,credits:presentation.credits,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
         self.vault(account.id).await?;
         Ok(account)
     }
@@ -613,7 +660,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         let mp = class.mp;
         let items = class.equipment.clone();
         self.call(move |c| {
-            let tx = c.transaction()?;
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            character_slots::read(&tx, account)?;
             let (requirements, prepared_name) = match creation {
                 Creation::Normal(requirements) => (requirements, None),
                 Creation::Prepared(name) => {
@@ -648,6 +696,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 name,
                 level: 1,
                 exp: 0,
+                xp_boost: XpBoost::default(),
                 fame: 0,
                 hp,
                 mp,
@@ -666,6 +715,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 dungeons: [0; 3],
                 abysses: 0,
                 trenches: 0,
+                spider_dens: 0,
             };
             tx.execute(
                 "INSERT INTO characters(account,stats,items) VALUES(?1,?2,?3)",
@@ -855,7 +905,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let saved: Character = serde_json::from_str(&raw)?;
             ensure!(saved.schema == ch.schema && saved.class == ch.class && saved.base == ch.base
                 && saved.level == ch.level && saved.exp == ch.exp && saved.fame == ch.fame
-                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches
+                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "permanent potion reservation changed");
             ch.base[index] += amount;
@@ -897,7 +947,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             Ok(())
         }).await
     }
-    pub async fn death(&self, ch: Character, killed_by: String) -> Result<()> {
+    pub async fn death(&self, mut ch: Character, killed_by: String) -> Result<()> {
+        ch.xp_boost.active = false;
         ensure!(
             !ch.alive && ch.hp == 0 && ch.fame >= 0,
             "death snapshot must be dead with nonnegative fame"
@@ -907,7 +958,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     pub async fn fame(&self, account: i32, id: i32) -> Result<String> {
         let legacy_base = self.legacy_base;
         // The legacy field is called CreatedOn, but the client labels it as the death date.
-        self.call(move|db|{let (snapshot,killer,died_at):(String,String,u64)=db.query_row("SELECT snapshot,killed_by,died_at FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>0</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame></Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),c.fame,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.dungeons[1],c.fame))}).await
+        self.call(move|db|{let (snapshot,killer,died_at):(String,String,u64)=db.query_row("SELECT snapshot,killed_by,died_at FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame></Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),c.fame,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],c.fame))}).await
     }
     #[cfg(test)]
     pub async fn rename(&self, account: i32, name: String) -> Result<()> {
@@ -995,7 +1046,7 @@ pub fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 impl Account {
-    pub fn xml(&self, news: &str) -> String {
+    pub fn xml(&self, news: &str, usage: f64) -> String {
         let mut chars = String::new();
         for c in &self.characters {
             chars += &format!(
@@ -1046,13 +1097,15 @@ impl Account {
             format!("<ClassStats objectType=\"{class}\"><BestLevel>{level}</BestLevel><BestFame>{fame}</BestFame></ClassStats>")
         }).collect();
         format!(
-            "<Chars nextCharId=\"{}\" maxNumChars=\"1\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>{}</Credits><NextCharSlotPrice>600</NextCharSlotPrice>{guild}</Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0</Usage></Server></Servers><News>{news}</News></Chars>",
+            "<Chars nextCharId=\"{}\" maxNumChars=\"{}\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>{}</Credits><NextCharSlotPrice>{}</NextCharSlotPrice>{guild}</Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>{usage}</Usage></Server></Servers><News>{news}</News></Chars>",
             self.next_id,
+            self.character_slots,
             self.id,
             xml_escape(&self.name),
             self.fame,
             self.earned_fame,
-            self.credits
+            self.credits,
+            self.next_slot_price
         )
     }
 }
@@ -1388,6 +1441,7 @@ mod tests {
             ch.pirate_caves = 1;
             ch.dungeons = [1, 2, 3];
             ch.abysses = 4;
+            ch.spider_dens = 5;
             characters.push(ch);
         }
         characters[1].revision = 1;
@@ -1398,6 +1452,7 @@ mod tests {
             assert_eq!(saved.pirate_caves, 0);
             assert_eq!(saved.dungeons, [0; 3]);
             assert_eq!(saved.abysses, 0);
+            assert_eq!(saved.spider_dens, 0);
         }
         characters[1].revision = 0;
         s.progress_batch(characters.clone()).await.unwrap();
@@ -1407,6 +1462,7 @@ mod tests {
             assert_eq!(saved.pirate_caves, 1);
             assert_eq!(saved.dungeons, [1, 2, 3]);
             assert_eq!(saved.abysses, 4);
+            assert_eq!(saved.spider_dens, 5);
             saved.alive = false;
             saved.hp = 0;
             saved.items.fill(-1);
@@ -1418,6 +1474,7 @@ mod tests {
                 "<SpriteWorldsCompleted>2</SpriteWorldsCompleted>",
                 "<UndeadLairsCompleted>3</UndeadLairsCompleted>",
                 "<AbyssOfDemonsCompleted>4</AbyssOfDemonsCompleted>",
+                "<SpiderDensCompleted>5</SpiderDensCompleted>",
             ] {
                 assert!(fame.contains(counter));
             }
@@ -1561,7 +1618,7 @@ mod tests {
         assert!(content.unlocked(0x0310, &account.best_levels).unwrap());
         assert!(!content.unlocked(0x0300, &account.best_levels).unwrap());
         assert!(!content.unlocked(0x031f, &account.best_levels).unwrap());
-        let xml = account.xml("");
+        let xml = account.xml("", 0.0);
         let parsed = roxmltree::Document::parse(&xml).unwrap();
         let record = parsed
             .descendants()

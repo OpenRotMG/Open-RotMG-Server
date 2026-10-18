@@ -225,3 +225,215 @@ fn occupied_ground_swaps_drop_incompatible_replacements_without_exposing_soulbou
         }
     }
 }
+
+#[tokio::test]
+async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reopen() {
+    use crate::store::{InventoryWrite, Store};
+    use rand::{SeedableRng, rngs::StdRng};
+    let mut drops = 0;
+    let mut nondrops = 0;
+    for seed in 0..16 {
+        let mut w = tests::arena(5);
+        Arc::make_mut(&mut w.map).spawns = vec![(12.5, 12.5)];
+        let path = std::env::temp_dir().join(format!(
+            "werewolf-loot-{}-{}-{seed}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let db = path.join("game.db");
+        let store = Store::open(&db, &w.content).unwrap();
+        let account = store.list("werewolf-combat-fixture".into()).await.unwrap();
+        let mut ch = store
+            .create(account.id, w.content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        ch.gain_experience(
+            &w.content,
+            crate::store::level_start(20).unwrap(),
+            &mut StdRng::seed_from_u64(12351),
+        )
+        .unwrap();
+        ch.items = vec![0xb08, 0xa2e, 0xa96, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+        ch.revision = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: ch.id,
+                    account: ch.account,
+                    revision: ch.revision,
+                    items: ch.items.clone(),
+                }],
+                None,
+            )
+            .await
+            .unwrap()[0];
+        ch.hp = ch.effective(&w.content).unwrap()[0];
+        store.progress(ch.clone()).await.unwrap();
+        let player = w.enter(ch.clone(), None).unwrap();
+        let origin = w.players[&player].pos;
+        let enemy = w
+            .spawn_entity(
+                0x623,
+                Pos {
+                    x: origin.x + 2.,
+                    y: origin.y,
+                },
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(w.entities[&enemy].hp, 320);
+        w.rng = StdRng::seed_from_u64(seed);
+        for _ in 0..200 {
+            let Some(e) = w.entities.get(&enemy) else {
+                break;
+            };
+            let p = w.players[&player].pos;
+            let angle = (e.pos.y - p.y).atan2(e.pos.x - p.x);
+            w.action(player, Action::Shoot { angle }).unwrap();
+            w.step();
+        }
+        w.action(player, Action::Stop).unwrap();
+        assert!(
+            !w.entities.contains_key(&enemy),
+            "real projectile defeat seed {seed}"
+        );
+        let p = &w.players[&player];
+        assert!(p.character.shots > 0 && p.character.hits > 0);
+        assert_eq!((p.character.kills, p.character.quests), (1, 1));
+        let earned = p.experience_queued;
+        assert!(earned > 0);
+        assert_eq!(
+            w.damage_enemy(player, enemy, 1000, false, &[], Some(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(w.players[&player].experience_queued, earned);
+        for (id, snapshot) in w.pending_progress() {
+            store.progress(snapshot.clone()).await.unwrap();
+            w.finish_progress(id, snapshot).unwrap();
+        }
+        let bags: Vec<_> = w.bag_expiry.keys().copied().collect();
+        assert!(bags.len() <= 1);
+        if let Some(&bag) = bags.first() {
+            drops += 1;
+            assert!(!crate::loot::private(0x623));
+            assert_eq!(w.entities[&bag].kind, 0x500);
+            assert!(
+                !w.entities[&bag]
+                    .extra_stats
+                    .iter()
+                    .any(|(stat, _)| *stat == 54)
+            );
+            let item = w.entities[&bag].items[0];
+            let object = w.content.get(item as u16).unwrap();
+            assert!(matches!(
+                (object.tier.unwrap(), object.slot_type),
+                (3 | 4, 1 | 2 | 3 | 8 | 17 | 6 | 7 | 14)
+                    | (
+                        1,
+                        4 | 5 | 11 | 12 | 13 | 15 | 16 | 18 | 19 | 20 | 21 | 22 | 23 | 9
+                    )
+            ));
+            assert!(!object.soulbound);
+            let from = Slot {
+                object: bag,
+                slot: 0,
+                kind: item,
+            };
+            let to = Slot {
+                object: player,
+                slot: 4,
+                kind: -1,
+            };
+            let destination = w.entities[&bag].pos;
+            for _ in 0..200 {
+                if w.players[&player].pos.distance(destination) < 1. {
+                    break;
+                }
+                w.action(
+                    player,
+                    Action::Move {
+                        x: destination.x,
+                        y: destination.y,
+                    },
+                )
+                .unwrap();
+                w.step();
+            }
+            w.action(player, Action::Stop).unwrap();
+            assert!(w.players[&player].pos.distance(destination) < 1.);
+            // Collection accounting belongs to native sessions, not scripted combat actors.
+            w.players.get_mut(&player).unwrap().controller = Controller::Human;
+            assert!(
+                w.swap(
+                    player,
+                    Slot {
+                        kind: item + 1,
+                        ..from
+                    },
+                    to
+                )
+                .is_err()
+            );
+            let before = store.load(account.id, ch.id).await.unwrap();
+            let plan = w.swap(player, from, to).unwrap();
+            assert_eq!(plan.collected, Some(item as u16));
+            assert!(w.players[&player].pending && w.entities[&bag].reserved);
+            assert!(w.swap(player, from, to).is_err());
+            let mut write = InventoryWrite {
+                id: plan.character,
+                account: plan.account,
+                revision: plan.revision + 1,
+                items: plan.items.clone(),
+            };
+            assert!(
+                store
+                    .exchange_collected(vec![write.clone()], None, plan.collected)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                store.load(account.id, ch.id).await.unwrap().items,
+                before.items
+            );
+            assert_eq!(w.entities[&bag].items[0], item);
+            write.revision = plan.revision;
+            let revision = store
+                .exchange_collected(vec![write], None, plan.collected)
+                .await
+                .unwrap()[0];
+            w.finish_inventory(plan, Ok(revision)).unwrap();
+            assert_eq!(w.players[&player].character.items[4], item);
+            assert_eq!(w.entities[&bag].items[0], -1);
+            assert!(!w.entities[&bag].reserved && !w.players[&player].pending);
+            assert!(w.swap(player, from, to).is_err());
+            drop(store);
+            let reopened = Store::open(&db, &w.content).unwrap();
+            let saved = reopened.load(account.id, ch.id).await.unwrap();
+            assert_eq!(saved.items[4], item);
+            assert_eq!(saved.revision, revision);
+            assert_eq!(
+                (saved.exp, saved.fame, saved.kills, saved.quests),
+                (before.exp, before.fame, before.kills, before.quests)
+            );
+            drop(reopened);
+        } else {
+            nondrops += 1;
+            assert!(
+                w.players[&player].character.items[4..]
+                    .iter()
+                    .all(|k| *k == -1)
+            );
+            drop(store);
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    assert!(
+        drops > 0,
+        "defeated Desert Werewolves never produced an item drop"
+    );
+    assert!(nondrops > 0, "loot must not have a guaranteed minimum");
+}

@@ -60,6 +60,8 @@ fn player_status_distinguishes_name_boosts_wallet_character_fame_and_history() {
         .unwrap();
     let owner = numbers(&w, id, id);
     let peer = numbers(&w, id, 999);
+    assert_eq!(owner[&65], 0);
+    assert!(!peer.contains_key(&65));
     assert_eq!(owner[&35], 73);
     assert!(!peer.contains_key(&35));
     assert_eq!(owner[&39], 27);
@@ -80,8 +82,10 @@ fn player_status_distinguishes_name_boosts_wallet_character_fame_and_history() {
     let p = w.players.get_mut(&id).unwrap();
     p.character.name = "Named".into();
     p.character.items.swap(3, 7);
+    p.character.xp_boost.active = true;
     let removed = numbers(&w, id, id);
     assert_eq!(removed[&56], 1);
+    assert_eq!(removed[&65], 1);
     for k in [46, 47, 48, 49, 50, 53, 51, 52] {
         assert_eq!(removed[&k], 0);
     }

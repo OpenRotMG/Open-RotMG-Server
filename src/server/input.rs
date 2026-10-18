@@ -1,7 +1,11 @@
 use crate::wire::{Codec, MAX_FRAME, Packet};
 use axum::{body::Bytes, extract::ws::Message};
 use futures_util::{Stream, StreamExt};
-use std::{fmt::Display, sync::Arc, time::Instant};
+use std::{
+    fmt::Display,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch},
     task::JoinHandle,
@@ -11,10 +15,24 @@ pub(super) enum Incoming {
     Command(Packet, Instant, OwnedSemaphorePermit),
     Ping(Bytes),
 }
-pub(super) struct InputTask(JoinHandle<()>);
+pub(super) struct InputTask {
+    task: JoinHandle<()>,
+    last_frame: Arc<Mutex<Option<Instant>>>,
+}
+impl InputTask {
+    pub fn abort(&self) {
+        self.task.abort();
+    }
+    pub fn last_frame_age_ms(&self) -> Option<f64> {
+        self.last_frame
+            .lock()
+            .expect("input diagnostics poisoned")
+            .map(|at| at.elapsed().as_secs_f64() * 1000.)
+    }
+}
 impl Drop for InputTask {
     fn drop(&mut self) {
-        self.0.abort();
+        self.abort();
     }
 }
 pub(super) fn receive<S, E>(
@@ -27,6 +45,8 @@ where
     E: Display + Send + 'static,
 {
     let (tx, rx) = mpsc::channel(64);
+    let last_frame = Arc::new(Mutex::new(None));
+    let received_frame = last_frame.clone();
     let task = tokio::spawn(async move {
         let mut codec = Codec::server();
         let bytes = Arc::new(Semaphore::new(MAX_FRAME));
@@ -34,6 +54,7 @@ where
         let mut count = 0usize;
         let mut dispatched = 0;
         while let Some(message) = stream.next().await {
+            *received_frame.lock().expect("input diagnostics poisoned") = Some(Instant::now());
             let received = clock.now();
             let inputs = match message {
                 Ok(Message::Binary(frame)) => {
@@ -100,7 +121,7 @@ where
             }
         }
     });
-    (rx, InputTask(task))
+    (rx, InputTask { task, last_frame })
 }
 
 #[cfg(test)]

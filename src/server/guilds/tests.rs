@@ -110,6 +110,8 @@ async fn guild_native_creation_invite_accept_rank_and_removal_use_committed_runt
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+    // These transaction-only clients do not ACK simulation output; wall time must not fill their queues.
+    a.world.clock.set_paused(true);
     let malformed = text("Alpha");
     let (tx, _rx) = mpsc::channel(16);
     let mut bytes = malformed.0;

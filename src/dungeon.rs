@@ -3,15 +3,17 @@ use anyhow::{Result, ensure};
 use rand::{Rng, SeedableRng};
 
 pub mod abyss;
+pub mod spider;
 pub mod trench;
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 6] = [
+pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
     (0x71a, "undead-lair", "Undead Lair", 0xd90),
     (0x71b, "abyss-of-demons", "Abyss of Demons", abyss::MALPHAS),
     (0x730, "ocean-trench", "Ocean Trench", trench::THESSAL),
+    (0x719, "spider-den", "Spider Den", spider::BOSS),
 ];
 
 pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
@@ -19,6 +21,7 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
         trench::HERMIT => Some((0x730, 1.)),
         0x60e..=0x610 => Some((0x717, 0.01)),
         0x651 => Some((0x71b, 0.17)),
+        0x62c | 0x637 => Some((0x719, 0.1)),
         0x640 | 0x645 | 0x649 | 0x650 | 0x654 => Some((0x718, 0.17)),
         0x653 => Some((0x70c, 0.11)),
         0x659 => Some((0x71a, 0.17)),
@@ -146,14 +149,14 @@ pub fn snake_pit(content: &Content, seed: u64) -> Result<Map> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         collections::{BTreeSet, VecDeque},
         path::Path,
     };
 
-    fn reachable(map: &Map, content: &Content) -> BTreeSet<usize> {
+    pub(crate) fn reachable(map: &Map, content: &Content) -> BTreeSet<usize> {
         let (x, y) = map.spawns[0];
         let start = (y as i32 * map.width + x as i32) as usize;
         let mut seen = BTreeSet::from([start]);
@@ -188,6 +191,8 @@ mod tests {
                 abyss::generate(&content, 12351).unwrap()
             } else if name == "ocean-trench" {
                 trench::generate(&content, 12351).unwrap()
+            } else if name == "spider-den" {
+                spider::generate(&content, 12351).unwrap()
             } else if name == "snake-pit" {
                 snake_pit(&content, 12351).unwrap()
             } else {

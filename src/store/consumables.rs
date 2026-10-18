@@ -1,6 +1,52 @@
 use super::*;
 
 impl Store {
+    pub async fn consume_xp_booster(
+        &self,
+        write: InventoryWrite,
+        slot: Option<usize>,
+        vault: Option<Vault>,
+    ) -> Result<i32> {
+        ensure!(
+            write.items.len() == 12
+                && write.items.iter().all(|item| (-1..=65535).contains(item))
+                && slot.is_none_or(|slot| write.items.get(slot) == Some(&-1))
+                && (0..i32::MAX).contains(&write.revision)
+                && vault
+                    .as_ref()
+                    .is_none_or(|v| slot.is_none() && v.account == write.account),
+            "invalid XP booster reservation"
+        );
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let (raw, items): (String, String) = tx.query_row(
+                "SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
+                params![write.id, write.account, write.revision], |r| Ok((r.get(0)?, r.get(1)?)))
+                .context("XP booster conflict: dead, foreign or stale character")?;
+            let saved: Character = serde_json::from_str(&raw)?;
+            ensure!((1..20).contains(&saved.level) && !saved.xp_boost.active
+                && (0..=saved.exp).contains(&saved.xp_boost.bonus_exp), "invalid or already active XP boost state");
+            let mut previous: Vec<i32> = serde_json::from_str(&items)?;
+            ensure!(previous.len() == 12, "invalid XP booster inventory");
+            if let Some(slot) = slot {
+                ensure!(previous[slot] == 0xc42, "XP booster item reservation changed");
+                previous[slot] = -1;
+            }
+            ensure!(previous == write.items, "XP booster may only consume its reserved slot");
+            let boost = XpBoost { active: true, ..saved.xp_boost };
+            let n = tx.execute("UPDATE characters SET stats=json_set(stats,'$.xp_boost',json(?5)),items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
+                params![write.id, write.account, write.revision, serde_json::to_string(&write.items)?, serde_json::to_string(&boost)?])?;
+            ensure!(n == 1, "XP booster commit lost its reservation");
+            if let Some(vault) = vault {
+                let n = tx.execute("UPDATE vaults SET items=?3,revision=revision+1 WHERE account=?1 AND revision=?2",
+                    params![vault.account, vault.revision, serde_json::to_string(&vault.items)?])?;
+                ensure!(n == 1, "XP booster vault conflict");
+            }
+            tx.commit()?;
+            Ok(write.revision + 1)
+        }).await
+    }
+
     pub async fn consume_dye(
         &self,
         write: InventoryWrite,

@@ -13,6 +13,19 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        0x6c4 => &[
+            (0.10, Tier(2, WEAPONS)),
+            (0.10, Tier(2, ARMOR)),
+            (0.10, Tier(1, RINGS)),
+            (0.10, Tier(1, ABILITIES)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+        ],
+        crate::dungeon::spider::BOSS => {
+            &[(0.2, Item(0xa16)), (0.2, Item(0x708)), (0.2, Item(0x709))]
+        }
+        0x21d..=0x220 => &[(0.2, Item(0x707))],
+        0x21b | 0x21c | 0x937..=0x93f => &[],
         crate::dungeon::trench::HERMIT => {
             &[(0.1, Item(0xa34)), (0.1, Item(0xa4c)), (0.004, Item(0xc08))]
         }
@@ -26,6 +39,14 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.04, Item(0xc13)),
         ],
         0xd63..=0xd65 | 0x1700..=0x1704 | 0x1707..=0x170e => &[],
+        0x623 => &[
+            (0.1, Tier(3, WEAPONS)),
+            (0.05, Tier(4, WEAPONS)),
+            (0.1, Tier(3, ARMOR)),
+            (0.05, Tier(4, ARMOR)),
+            (0.05, Tier(1, ABILITIES)),
+            (0.05, Tier(1, RINGS)),
+        ],
         // Behavior coverage alone does not establish new drop probabilities.
         kind if crate::encounter::fauna::ROSTER.contains(&kind)
             || crate::encounter::landmarks::ROSTER.contains(&kind) =>
@@ -430,6 +451,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | 0xd90
                 | 0xd78
                 | 0xd79
+                | crate::dungeon::spider::BOSS
                 | crate::dungeon::abyss::MALPHAS
                 | crate::dungeon::abyss::IDOL
                 | crate::endgame::ORYX
@@ -519,6 +541,54 @@ mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
     #[test]
+    fn desert_werewolf_uses_only_existing_ordered_public_tiers_without_a_minimum() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected = [
+            (0.1, 3, WEAPONS),
+            (0.05, 4, WEAPONS),
+            (0.1, 3, ARMOR),
+            (0.05, 4, ARMOR),
+            (0.05, 1, ABILITIES),
+            (0.05, 1, RINGS),
+        ];
+        assert_eq!(table(0x623).len(), expected.len());
+        let existing: std::collections::BTreeSet<_> = [0x614, 0x62c]
+            .into_iter()
+            .flat_map(|kind| {
+                table(kind)
+                    .iter()
+                    .flat_map(|(_, pick)| candidates(&content, *pick))
+            })
+            .collect();
+        for ((chance, pick), (expected_chance, tier, slots)) in table(0x623).iter().zip(expected) {
+            let Pick::Tier(actual_tier, actual_slots) = pick else {
+                panic!("ordinary selected tier")
+            };
+            assert_eq!(
+                (*chance, *actual_tier, *actual_slots),
+                (expected_chance, tier, slots)
+            );
+            for item in candidates(&content, *pick) {
+                assert!(existing.contains(&item));
+                let item = content.get(item).unwrap();
+                assert_eq!(item.class, "Equipment");
+                assert!(!item.soulbound && item.bag_type == 0);
+            }
+        }
+        let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(rewards(&content, 0x623, &mut misses).is_empty());
+        let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+        let first = rewards(&content, 0x623, &mut hits);
+        assert_eq!(first.len(), 1);
+        let first = content.get(first[0]).unwrap();
+        assert_eq!(first.tier, Some(3));
+        assert!(WEAPONS.contains(&first.slot_type));
+        for kind in [0x620, 0x622, 0x205] {
+            assert!(rewards(&content, kind, &mut hits).is_empty());
+        }
+        assert!(!private(0x623));
+    }
+    #[test]
     fn collection_catalogue_covers_every_encounter_reward() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let catalogue = collectibles(&content);
@@ -556,6 +626,50 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn giant_crab_uses_only_the_approved_ordered_normal_pool() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected = [
+            (0.10, vec![0xa1b, 0xa6d, 0xa70, 0xa72, 0xa99]),
+            (0.10, vec![0xa0d, 0xa0f, 0xa7e]),
+            (
+                0.10,
+                vec![0xa24, 0xa25, 0xa26, 0xa27, 0xa28, 0xa36, 0xa37, 0xa4d],
+            ),
+            (
+                0.10,
+                vec![
+                    0xa09, 0xa42, 0xa57, 0xa62, 0xa67, 0xaa4, 0xaab, 0xab2, 0xad4, 0xad7, 0xad9,
+                    0xb1c, 0xb2e,
+                ],
+            ),
+            (0.03, vec![0xa22]),
+            (0.02, vec![0xa23]),
+        ];
+        let actual: Vec<_> = table(0x6c4)
+            .iter()
+            .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+            .collect();
+        assert_eq!(
+            actual, expected,
+            "ordinary Giant Crab has no approved item table"
+        );
+        assert!(!private(0x6c4));
+        assert!(bonus(0x6c4).is_empty());
+        for (_, items) in expected {
+            for item in items {
+                let object = content.get(item).unwrap();
+                assert_eq!(object.class, "Equipment");
+                assert_eq!(object.bag_type, 0);
+                assert!(!object.soulbound);
+                assert!(collectibles(&content).contains(&item));
+            }
+        }
+        for neighbor in [0x6c7, 0x6c8] {
+            assert!(table(neighbor).is_empty());
+        }
+        assert_eq!(table(crate::dungeon::trench::HERMIT).len(), 3);
     }
     #[test]
     fn every_candidate_loot_tier_resolves_and_rolls_selected_items() {

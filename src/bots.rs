@@ -8,7 +8,13 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng};
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 pub(crate) mod adventures;
 mod combat;
@@ -150,6 +156,10 @@ struct Brain {
     contacts: BTreeMap<i32, (Pos, u64)>,
     hunting: Option<Pos>,
     last_encounter: u64,
+    navigation: Option<Arc<Grid>>,
+    navigation_rebuilds: u64,
+    navigation_reuses: u64,
+    performance: crate::performance::Window,
 }
 impl Brain {
     fn new(profile: Profile, view: &PlayerView) -> Self {
@@ -199,6 +209,10 @@ impl Brain {
             contacts: BTreeMap::new(),
             hunting: None,
             last_encounter: view.time_ms,
+            navigation: None,
+            navigation_rebuilds: 0,
+            navigation_reuses: 0,
+            performance: crate::performance::Window::default(),
         }
     }
     fn receive(
@@ -455,6 +469,23 @@ impl Brain {
                     .retain(|point| center(*point).distance(enemy.position) >= 8.);
             }
         }
+        // Cover, failed routes and dangerous enemies must invalidate navigation before reuse.
+        let grid = match &self.navigation {
+            Some(old)
+                if old.walkable == grid.walkable
+                    && old.known == grid.known
+                    && old.dimensions == grid.dimensions =>
+            {
+                self.navigation_reuses += 1;
+                old.clone()
+            }
+            _ => {
+                self.navigation_rebuilds += 1;
+                let grid = Arc::new(grid);
+                self.navigation = Some(grid.clone());
+                grid
+            }
+        };
         if retreat || threatened {
             decision.goal = if retreat { Goal::Recover } else { Goal::Dodge };
             let held_heal = v
@@ -1169,10 +1200,18 @@ fn useful(content: &Content, v: &PlayerView, kind: i32) -> Result<bool> {
         None => Ok(false),
     }
 }
+type TilePoint = (i16, i16);
+#[derive(Default)]
 struct Grid {
-    walkable: BTreeSet<(i16, i16)>,
-    known: BTreeSet<(i16, i16)>,
+    walkable: BTreeSet<TilePoint>,
+    known: BTreeSet<TilePoint>,
     dimensions: (i32, i32),
+    reached: Mutex<Option<(TilePoint, Arc<BTreeSet<TilePoint>>)>>,
+    frontiers: Mutex<BTreeMap<TilePoint, bool>>,
+    searches: AtomicU64,
+    cache_hits: AtomicU64,
+    reachable_nodes: AtomicU64,
+    route_nodes: AtomicU64,
 }
 impl Grid {
     fn new(v: &PlayerView) -> Self {
@@ -1189,6 +1228,7 @@ impl Grid {
             walkable,
             known: v.tiles.iter().map(|t| (t.x, t.y)).collect(),
             dimensions: (v.map.width, v.map.height),
+            ..Self::default()
         }
     }
     fn towards(&self, from: Pos, target: Pos) -> Option<Pos> {
@@ -1209,28 +1249,62 @@ impl Grid {
             })?;
         self.next(from, center(*next))
     }
-    fn reachable(&self, from: Pos) -> BTreeSet<(i16, i16)> {
+    fn reachable(&self, from: Pos) -> Arc<BTreeSet<TilePoint>> {
         let start = tile(from);
+        let mut cache = self.reached.lock().expect("navigation cache poisoned");
+        if let Some((origin, reached)) = &*cache
+            && (*origin == start
+                || (self.walkable.contains(origin)
+                    && self.walkable.contains(&start)
+                    && reached.contains(&start)))
+        {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            return reached.clone();
+        }
         let mut queue = VecDeque::from([start]);
-        let mut reached = BTreeSet::from([start]);
+        let mut unvisited: HashSet<_> = self.walkable.iter().copied().collect();
+        unvisited.remove(&start);
+        let mut reached = vec![start];
         while let Some((x, y)) = queue.pop_front() {
             for next in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)] {
-                if self.walkable.contains(&next) && reached.insert(next) {
+                if unvisited.remove(&next) {
+                    reached.push(next);
                     queue.push_back(next);
                 }
             }
         }
+        let reached: Arc<BTreeSet<TilePoint>> = Arc::new(reached.into_iter().collect());
+        *cache = Some((start, reached.clone()));
+        self.searches.fetch_add(1, Ordering::Relaxed);
+        self.reachable_nodes
+            .fetch_add(reached.len() as u64, Ordering::Relaxed);
         reached
     }
-    fn frontier(&self, (x, y): (i16, i16), width: i32, height: i32) -> bool {
-        [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-            .iter()
-            .any(|n| {
-                n.0 >= 0
-                    && n.1 >= 0
-                    && i32::from(n.0) < width
-                    && i32::from(n.1) < height
-                    && !self.known.contains(n)
+    fn frontier(&self, (x, y): TilePoint, width: i32, height: i32) -> bool {
+        assert_eq!(
+            (width, height),
+            self.dimensions,
+            "frontier dimensions changed"
+        );
+        assert!(
+            x >= 0 && y >= 0 && i32::from(x) < width && i32::from(y) < height,
+            "frontier outside map"
+        );
+        *self
+            .frontiers
+            .lock()
+            .expect("frontier cache poisoned")
+            .entry((x, y))
+            .or_insert_with(|| {
+                [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+                    .iter()
+                    .any(|n| {
+                        n.0 >= 0
+                            && n.1 >= 0
+                            && i32::from(n.0) < width
+                            && i32::from(n.1) < height
+                            && !self.known.contains(n)
+                    })
             })
     }
     fn segment(&self, from: Pos, to: Pos) -> bool {
@@ -1243,6 +1317,14 @@ impl Grid {
                     y: from.y + (to.y - from.y) * f,
                 }))
             })
+    }
+    fn metrics(&self) -> serde_json::Value {
+        let reached = self.reached.lock().expect("navigation cache poisoned");
+        serde_json::json!({"known_tiles":self.known.len(),"walkable_tiles":self.walkable.len(),
+            "reachable_tiles":reached.as_ref().map_or(0, |(_,r)|r.len()),
+            "frontier_entries":self.frontiers.lock().expect("frontier cache poisoned").len(),
+            "searches":self.searches.load(Ordering::Relaxed),"cache_hits":self.cache_hits.load(Ordering::Relaxed),
+            "reachable_nodes_visited":self.reachable_nodes.load(Ordering::Relaxed),"route_nodes_visited":self.route_nodes.load(Ordering::Relaxed)})
     }
     fn next(&self, from: Pos, to: Pos) -> Option<Pos> {
         let start = tile(from);
@@ -1264,7 +1346,9 @@ impl Grid {
         }
         let mut queue = VecDeque::from([start]);
         let mut parent = HashMap::from([(start, start)]);
+        let mut visited = 0;
         while let Some((x, y)) = queue.pop_front() {
+            visited += 1;
             if (x, y) == finish {
                 break;
             }
@@ -1275,6 +1359,7 @@ impl Grid {
                 }
             }
         }
+        self.route_nodes.fetch_add(visited, Ordering::Relaxed);
         let mut next = finish;
         while *parent.get(&next)? != start {
             next = *parent.get(&next)?;
@@ -1288,6 +1373,8 @@ impl Grid {
     }
 }
 
+#[cfg(test)]
+mod performance_tests;
 #[cfg(test)]
 mod tests;
 

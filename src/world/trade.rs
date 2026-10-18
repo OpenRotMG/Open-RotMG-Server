@@ -70,7 +70,7 @@ impl World {
         }
         Ok(None)
     }
-    fn trade_key(&self, id: i32) -> Option<i32> {
+    pub(super) fn trade_key(&self, id: i32) -> Option<i32> {
         self.trades
             .iter()
             .find(|(_, trade)| trade.players.contains(&id))
