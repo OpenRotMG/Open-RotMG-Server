@@ -216,9 +216,7 @@ fn unsupported_stale_foreign_paused_and_dead_key_uses_do_not_consume_or_publish(
 #[test]
 fn key_instance_limit_releases_reservation_without_consuming_or_quarantining() {
     let (mut d, a, _) = fixture();
-    while d.worlds.len() < 12 {
-        d.instance("pirate-cave", None).unwrap();
-    }
+    tests::fill_world_capacity(&mut d);
     let plan = key(d.worlds.get_mut(&-2).unwrap(), a).unwrap();
     let opened = plan.unlock.unwrap().opened;
     assert!(d.stage_unlock(plan).is_err());

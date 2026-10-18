@@ -521,6 +521,7 @@ struct Grant {
     destination: i32,
     key_time: i32,
     expires: u64,
+    consumed: bool,
 }
 struct Portal {
     origin: i32,
@@ -891,7 +892,9 @@ impl Directory {
         }
     }
     pub(crate) fn character_transferring(&self, character: i32) -> bool {
-        self.grants.values().any(|g| g.character == character)
+        self.grants
+            .values()
+            .any(|g| g.character == character && !g.consumed)
     }
     pub fn location(&self, player: i32) -> Result<i32> {
         self.worlds
@@ -923,7 +926,7 @@ impl Directory {
         if template != crate::endgame::CASTLE {
             return self.instance(template, None);
         }
-        ensure!(self.worlds.len() < 12, "world instance limit reached");
+        self.reserve_worlds(1, &[])?;
         let world = self.make(template, "Oryx's Castle", false, None)?;
         let id = self.next_world;
         self.next_world = id
@@ -932,6 +935,47 @@ impl Directory {
         self.worlds.insert(id, world);
         self.idle.insert(id, self.tick);
         Ok(id)
+    }
+    fn reclaimable_world(&self, id: i32) -> bool {
+        id > 0
+            && self.worlds[&id].players.is_empty()
+            && !self.endgame.references_world(id)
+            && !self.grants.values().any(|g| g.destination == id)
+            && !self
+                .portals
+                .values()
+                .any(|p| p.origin == id || p.destination == Some(id))
+    }
+    fn reserve_worlds(&mut self, slots: usize, keep: &[i32]) -> Result<()> {
+        let needed = (self.worlds.len() + slots).saturating_sub(12);
+        if needed == 0 {
+            return Ok(());
+        }
+        // Empty caches must not deny entry, but live portals and transfers still own their worlds.
+        let retired: Vec<_> = self
+            .worlds
+            .keys()
+            .copied()
+            .filter(|id| !keep.contains(id) && self.reclaimable_world(*id))
+            .take(needed)
+            .collect();
+        ensure!(
+            retired.len() == needed,
+            "world instance limit reached: {} worlds, {slots} requested, {} reclaimable",
+            self.worlds.len(),
+            retired.len()
+        );
+        for id in retired {
+            let world = self.worlds.remove(&id).unwrap();
+            self.idle.remove(&id);
+            tracing::info!(
+                world = id,
+                name = world.name,
+                owner = world.owner,
+                "empty world reclaimed for capacity"
+            );
+        }
+        Ok(())
     }
     pub fn instance(&mut self, template: &str, account: Option<i32>) -> Result<i32> {
         ensure!(
@@ -948,7 +992,7 @@ impl Directory {
         {
             return Ok(*id);
         }
-        ensure!(self.worlds.len() < 12, "world instance limit reached");
+        self.reserve_worlds(1, &[])?;
         let world = self.make(
             template,
             if template == "vault" {
@@ -1060,6 +1104,7 @@ impl Directory {
                 destination,
                 key_time,
                 expires: self.tick + 2400,
+                consumed: false,
             },
         );
         tracing::info!(
@@ -1082,6 +1127,7 @@ impl Directory {
             .grants
             .get(&key)
             .context("unknown or already used transfer grant")?;
+        ensure!(!grant.consumed, "transfer grant already used");
         ensure!(grant.expires > self.tick, "transfer grant expired");
         ensure!(
             grant.account == account
@@ -1095,7 +1141,8 @@ impl Directory {
         );
         ensure!(self.worlds[&destination].admission_open, "Realm is closed");
         let character = grant.character;
-        self.grants.remove(&key);
+        // HELLO consumes the key before LOAD enters the world; keep its capacity reservation until then.
+        self.grants.get_mut(&key).unwrap().consumed = true;
         if destination > 0 {
             self.idle.insert(destination, self.tick);
         }
@@ -1142,7 +1189,14 @@ impl Directory {
     fn step(&mut self) {
         self.tick += 1;
         self.sync_realm_portal();
-        self.grants.retain(|_, grant| grant.expires > self.tick);
+        self.grants.retain(|_, g| {
+            g.expires > self.tick
+                && !(g.consumed
+                    && self.worlds[&g.destination]
+                        .players
+                        .values()
+                        .any(|p| p.character.account == g.account && p.character.id == g.character))
+        });
         for (id, world) in &mut self.worlds {
             world.step();
             world.report_performance(*id);
@@ -1193,14 +1247,7 @@ impl Directory {
         let expired: Vec<_> = self
             .idle
             .iter()
-            .filter(|(id, since)| {
-                self.tick - **since > 6000
-                    && !self.grants.values().any(|grant| grant.destination == **id)
-                    && !self
-                        .portals
-                        .values()
-                        .any(|portal| portal.destination == Some(**id))
-            })
+            .filter(|(id, since)| self.tick - **since > 6000 && self.reclaimable_world(**id))
             .map(|(id, _)| *id)
             .collect();
         for id in expired {
@@ -5226,15 +5273,117 @@ mod tests {
         assert_eq!(ids.load(Ordering::Relaxed), i32::MAX);
     }
     #[test]
+    fn vault_entry_reclaims_unreferenced_world_at_capacity() {
+        let mut d = directory();
+        let pos = Pos {
+            x: d.worlds[&-3].map.spawns[0].0,
+            y: d.worlds[&-3].map.spawns[0].1,
+        };
+        for _ in 0..8 {
+            d.drop_portal(-3, pos).unwrap();
+        }
+        d.tick = 600;
+        d.step();
+        assert!(d.portals.is_empty());
+        assert_eq!(d.worlds.len(), 12);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        let portal = w.entities.values().find(|e| e.kind == 0x720).unwrap();
+        let (portal, pos) = (portal.id, portal.pos);
+        let player = w.enter(ch(w), None).unwrap();
+        w.players.get_mut(&player).unwrap().pos = pos;
+        let (account, character, destination) = d
+            .destination(player, Some(portal))
+            .expect("Vault entry must reclaim an empty unreferenced instance");
+        let (time, key, _) = d.issue(account, character, destination).unwrap();
+        assert_eq!(
+            d.consume(account, destination, time, key).unwrap(),
+            character
+        );
+        let ch = d.worlds.get_mut(&-2).unwrap().leave(player).unwrap();
+        assert!(
+            d.worlds
+                .get_mut(&destination)
+                .unwrap()
+                .enter(ch, None)
+                .is_ok()
+        );
+        assert_eq!(d.worlds[&destination].owner, Some(1));
+        assert_eq!(d.worlds.len(), 12);
+    }
+    pub(super) fn fill_world_capacity(d: &mut Directory) {
+        while d.worlds.len() < 12 {
+            let world = d.instance("pirate-cave", None).unwrap();
+            d.issue(1, world, world).unwrap();
+        }
+    }
+    #[test]
     fn directory_instances_are_bounded_and_idle_instances_are_collected() {
         let mut d = directory();
-        for _ in 0..8 {
-            d.instance("pirate-cave", None).unwrap();
-        }
+        fill_world_capacity(&mut d);
         assert!(d.instance("pirate-cave", None).is_err());
         d.tick = 6001;
         d.step();
         assert_eq!(d.worlds.len(), 4);
+    }
+    #[test]
+    fn capacity_reclamation_preserves_players_portals_and_connecting_transfers() {
+        let mut d = directory();
+        fill_world_capacity(&mut d);
+        let ids: Vec<_> = d.worlds.keys().copied().filter(|id| *id > 0).collect();
+        d.grants.retain(|_, g| !ids[..3].contains(&g.destination));
+        let w = d.worlds.get_mut(&ids[0]).unwrap();
+        w.enter(ch(w), None).unwrap();
+        let portal = d.realm_portal;
+        d.portals.insert(
+            portal,
+            Portal {
+                origin: -2,
+                destination: Some(ids[1]),
+                expires: 600,
+            },
+        );
+        d.portals.insert(
+            -1,
+            Portal {
+                origin: ids[2],
+                destination: Some(-2),
+                expires: 600,
+            },
+        );
+        let (key, time) = d
+            .grants
+            .iter()
+            .find(|(_, g)| g.destination == ids[3])
+            .map(|(key, g)| (key.clone(), g.key_time))
+            .unwrap();
+        assert_eq!(d.consume(1, ids[3], time, key.clone()).unwrap(), ids[3]);
+        assert!(d.consume(1, ids[3], time, key.clone()).is_err());
+        assert!(!d.character_transferring(ids[3]));
+        d.step();
+        assert!(d.grants.contains_key(&key));
+        let error = d.instance("vault", Some(2)).unwrap_err();
+        assert!(error.to_string().contains("world instance limit reached"));
+        assert_eq!(d.worlds.len(), 12);
+        d.grants.retain(|_, g| g.destination != ids[4]);
+        assert!(d.reserve_worlds(2, &[]).is_err());
+        assert!(d.reserve_worlds(1, &[ids[4]]).is_err());
+        assert!(ids.iter().all(|id| d.worlds.contains_key(id)));
+        let vault = d.instance("vault", Some(2)).unwrap();
+        assert!(!d.worlds.contains_key(&ids[4]));
+        assert_eq!(d.instance("vault", Some(2)).unwrap(), vault);
+        let w = d.worlds.get_mut(&ids[3]).unwrap();
+        let mut character = ch(w);
+        character.id = ids[3];
+        let player = w.enter(character, None).unwrap();
+        d.step();
+        assert!(!d.grants.contains_key(&key));
+        assert!(!d.reclaimable_world(ids[3]));
+        d.worlds.get_mut(&ids[3]).unwrap().leave(player).unwrap();
+        d.instance("vault", Some(3)).unwrap();
+        assert!(!d.worlds.contains_key(&ids[3]));
+        assert!(d.worlds.contains_key(&ids[0]) && d.worlds.contains_key(&ids[1]));
+        assert!(d.worlds.contains_key(&ids[2]));
+        assert_eq!(d.worlds.len(), 12);
     }
     #[test]
     fn sourced_worlds_preserve_connected_wall_and_merchant_config_stats() {
