@@ -25,7 +25,7 @@ async fn xp_booster_commits_use_progress_reconnect_and_death_without_bonus_fame(
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            None,
+            Vec::new(),
         )
         .await
         .unwrap()[0];

@@ -181,3 +181,131 @@ fn shop_failed_storage_quarantines_without_publishing_or_releasing_uncertain_sto
     );
     assert!(!w.players[&id].pending && !w.entities[&merchant].reserved);
 }
+
+fn vault_fixture() -> (World, i32, i32) {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = Arc::new(Map::load(std::path::Path::new("data/vault.wmap"), &content).unwrap());
+    let mut w = World::new(content, map).unwrap();
+    w.name = "Vault".into();
+    w.owner = Some(1);
+    w.load_vaults(vec![Vault {
+        account: 1,
+        chest: 0,
+        items: vec![-1; 8],
+        revision: 0,
+    }])
+    .unwrap();
+    let seller = *w.closed_vaults.keys().next().unwrap();
+    let pos = w.entities[&seller].pos;
+    let id = w.enter(super::super::tests::ch(&w), None).unwrap();
+    let p = w.players.get_mut(&id).unwrap();
+    p.pos = pos;
+    p.known.insert(seller);
+    (w, id, seller)
+}
+
+#[test]
+fn closed_vault_purchase_rejects_foreign_stale_unknown_busy_or_invalid_world_without_reservations()
+{
+    for case in 0..13 {
+        let (mut w, id, seller) = vault_fixture();
+        match case {
+            0 => w.players.get_mut(&id).unwrap().pos.x += 3.,
+            1 => {
+                w.players.get_mut(&id).unwrap().known.remove(&seller);
+            }
+            2 => w.entities.get_mut(&seller).unwrap().reserved = true,
+            3 => w.owner = Some(2),
+            4 => {
+                w.entities.get_mut(&seller).unwrap().extra_stats =
+                    vec![(54, 2), (36, 500), (40, 0), (45, 0)]
+            }
+            5 => w.name = "Nexus".into(),
+            6 => w.players.get_mut(&id).unwrap().pending = true,
+            7 => w.players.get_mut(&id).unwrap().death_pending = true,
+            8 => w.players.get_mut(&id).unwrap().departing = true,
+            9 => {
+                w.players.get_mut(&id).unwrap().persistence_failure =
+                    Some("injected quarantine".into())
+            }
+            10 => w.players.get_mut(&id).unwrap().paused = true,
+            11 => {
+                w.entities
+                    .get_mut(&seller)
+                    .unwrap()
+                    .extra_stats
+                    .retain(|(id, _)| *id != 45);
+                w.entities
+                    .get_mut(&seller)
+                    .unwrap()
+                    .extra_stats
+                    .push((45, 99));
+            }
+            12 => {
+                w.closed_vaults.remove(&seller);
+            }
+            _ => unreachable!(),
+        }
+        let count = w.entities.len();
+        assert!(w.buy(id, seller).is_err(), "case {case}");
+        assert_eq!(w.entities.len(), count);
+        assert_eq!(w.vaults.len(), 1);
+        assert!(w.buy(id, -1).is_err());
+    }
+}
+
+#[test]
+fn closed_vault_publication_requires_exact_committed_identity_and_retains_failed_reservations() {
+    for case in 0..7 {
+        let (mut w, id, seller) = vault_fixture();
+        let plan = w.buy(id, seller).unwrap();
+        let purchase = plan.vault_purchase.clone().unwrap();
+        assert!(!w.entities[&purchase.opened].published);
+        assert!(w.begin_departure(id).unwrap().is_none());
+        assert!(w.buy(id, seller).is_err());
+        let mut vault = Vault {
+            account: 1,
+            chest: purchase.chest,
+            items: vec![-1; 8],
+            revision: 0,
+        };
+        match case {
+            0 => vault.chest = 0,
+            1 => vault.account = 2,
+            2 => w.players.get_mut(&id).unwrap().character.revision += 1,
+            3 => {
+                w.entities.get_mut(&seller).unwrap().extra_stats = vec![(54, 2), (36, 500), (40, 0)]
+            }
+            4 => w.entities.get_mut(&purchase.opened).unwrap().reserved = false,
+            _ => {}
+        }
+        let result = if case == 5 {
+            Err(anyhow::anyhow!("injected storage failure"))
+        } else {
+            Ok(Some((1, 500, vault)))
+        };
+        let result = w.finish_vault_purchase(plan, result);
+        if case == 6 {
+            result.unwrap();
+            assert!(!w.entities.contains_key(&seller));
+            assert!(w.entities[&purchase.opened].published);
+            assert_eq!(w.vaults.len(), 2);
+            assert!(w.buy(id, seller).is_err());
+            assert_eq!(w.players[&id].presentation.credits, 500);
+        } else {
+            assert!(result.is_err());
+            assert!(w.players[&id].persistence_failure.is_some());
+            assert!(!w.entities[&purchase.opened].published);
+            assert_eq!(w.vaults.len(), 1);
+        }
+    }
+    let (mut w, id, seller) = vault_fixture();
+    let plan = w.buy(id, seller).unwrap();
+    let opened = plan.vault_purchase.as_ref().unwrap().opened;
+    w.finish_vault_purchase(plan, Ok(None)).unwrap();
+    assert!(
+        !w.entities.contains_key(&opened)
+            && !w.entities[&seller].reserved
+            && !w.players[&id].pending
+    );
+}

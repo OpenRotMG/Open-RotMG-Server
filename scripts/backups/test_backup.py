@@ -609,7 +609,7 @@ CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),g
             del malformed['game'][table]
             with self.subTest(missing=table), self.assertRaisesRegex(ValueError, 'tables'):
                 backup.validate(malformed)
-        for version in [13, True, '3']:
+        for version in [14, True, '3']:
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'envelope'):
                 backup.validate(dict(before, schema=version))
 

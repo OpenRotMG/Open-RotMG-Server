@@ -81,7 +81,7 @@ async fn paid_names_preserve_free_policy_and_all_saves_across_restart() {
         .unwrap();
     store.purchase_character_slot(a, 7).await.unwrap();
     let second = store.create(a, content.get(WIZARD).unwrap()).await.unwrap();
-    store.vault(a).await.unwrap();
+    store.vault(a, 0).await.unwrap();
     let unchanged = unrelated(&db);
     assert!(store.choose_name(a, "HttpPaid".into()).await.is_err());
     assert!(matches!(

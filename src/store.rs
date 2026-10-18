@@ -10,6 +10,8 @@ use tokio::sync::oneshot;
 mod account_actions;
 mod accounts;
 mod character_slots;
+mod vaults;
+pub use vaults::{VAULT_CHESTS, VAULT_PRICE};
 mod consumables;
 #[cfg(test)]
 mod name_choice_tests;
@@ -270,6 +272,7 @@ pub struct Account {
 #[derive(Clone, Debug, Serialize)]
 pub struct Vault {
     pub account: i32,
+    pub chest: i32,
     pub items: Vec<i32>,
     pub revision: i32,
 }
@@ -325,7 +328,7 @@ impl Store {
         let mut c = Connection::open(path)?;
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12),
+            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13),
             "unsupported game database schema {version}"
         );
         let rewards_exist: bool = c.query_row(
@@ -406,6 +409,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
         }
         character_slots::migrate(&migration, version)?;
+        vaults::migrate(&migration, version)?;
         let records = {
             let mut q = migration.prepare("SELECT id,stats FROM characters ORDER BY id")?;
             q.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))?
@@ -477,7 +481,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "account fame wallet missing; restore reviewed state instead of recreating balances"
             );
         }
-        migration.pragma_update(None, "user_version", 12)?;
+        migration.pragma_update(None, "user_version", 13)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -557,7 +561,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let mut characters=Vec::new();{let mut q=tx.prepare("SELECT id,stats,items,revision,alive FROM characters WHERE account=?1 AND alive=1 ORDER BY id")?;let rows=q.query_map([id],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i32>(3)?,r.get::<_,bool>(4)?)))?;
             for row in rows{let(cid,stats,items,rev,alive)=row?;let mut ch:Character=serde_json::from_str(&stats)?;ch.id=cid;ch.account=id;ch.name=name.clone();ch.items=serde_json::from_str(&items)?;ch.revision=rev;ch.alive=alive;characters.push(ch);}}
             let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = read_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,character_slots,next_slot_price,guild:presentation.guild,credits:presentation.credits,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
-        self.vault(account.id).await?;
+        self.vaults(account.id).await?;
         Ok(account)
     }
     pub async fn shore_character(
@@ -584,6 +588,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                     let guid = format!("shore-{:032x}", rand::random::<u128>());
                     tx.execute("INSERT INTO accounts(guid,name) VALUES(?1,?2)", params![guid,name])?;
                     let account = tx.last_insert_rowid();
+                    vaults::provision(&tx, i32::try_from(account)?)?;
                     tx.execute("INSERT INTO account_fame(account,balance,earned) VALUES(?1,0,0)", [account])?;
                     tx.execute("INSERT INTO shore_bots(name,account) VALUES(?1,?2)", params![identity,account])?;
                     guid
@@ -755,38 +760,17 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         );
         Ok(())
     }
-    pub async fn vault(&self, account: i32) -> Result<Vault> {
-        self.call(move |c| {
-            let tx = c.transaction()?;
-            tx.execute(
-                "INSERT OR IGNORE INTO vaults(account,items) VALUES(?1,?2)",
-                params![account, serde_json::to_string(&vec![-1; 8])?],
-            )?;
-            let (items, revision): (String, i32) = tx.query_row(
-                "SELECT items,revision FROM vaults WHERE account=?1",
-                [account],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            tx.commit()?;
-            Ok(Vault {
-                account,
-                items: serde_json::from_str(&items)?,
-                revision,
-            })
-        })
-        .await
-    }
     pub async fn exchange(
         &self,
         writes: Vec<InventoryWrite>,
-        vault: Option<Vault>,
+        vaults: Vec<Vault>,
     ) -> Result<Vec<i32>> {
-        self.exchange_collected(writes, vault, None).await
+        self.exchange_collected(writes, vaults, None).await
     }
     pub async fn exchange_collected(
         &self,
         writes: Vec<InventoryWrite>,
-        vault: Option<Vault>,
+        vaults: Vec<Vault>,
         collected: Option<u16>,
     ) -> Result<Vec<i32>> {
         ensure!(
@@ -798,7 +782,10 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             (1..=2).contains(&writes.len()),
             "exchange must contain one or two characters"
         );
-        if let Some(vault) = &vault {
+        let mut chests = std::collections::BTreeSet::new();
+        ensure!(vaults.len() <= 2, "too many vault exchange sources");
+        for vault in &vaults {
+            ensure!(chests.insert(vault.chest), "exchange repeats a chest");
             ensure!(
                 writes.len() == 1 && writes[0].account == vault.account,
                 "vault exchange must use its owner's character"
@@ -836,10 +823,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 tx.execute("INSERT OR IGNORE INTO collections(account,item,found_at) VALUES(?1,?2,unixepoch())", params![collector,item])? > 0
                     && gold::collection(&tx, collector)?
             } else { false };
-            if let Some(vault) = vault {
-                let n = tx.execute("UPDATE vaults SET items=?3,revision=revision+1 WHERE account=?1 AND revision=?2", params![vault.account, vault.revision, serde_json::to_string(&vault.items)?])?;
-                ensure!(n == 1, "vault conflict: account {}, expected revision {}", vault.account, vault.revision);
-            }
+            for vault in vaults { vaults::save(&tx, &vault)?; }
             tx.commit()?;
             if rewarded {
                 tracing::info!(account=collector, amount=gold::AMOUNT, reward="collection_top_half", "gold reward committed");
@@ -853,7 +837,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         slot: Option<usize>,
         index: usize,
         amount: i32,
-        vault: Option<Vault>,
+        vaults: Vec<Vault>,
     ) -> Result<i32> {
         let (kind, step) = match index {
             0 => (0xae9, 5),
@@ -891,9 +875,10 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             "invalid potion revision"
         );
         ensure!(
-            vault
-                .as_ref()
-                .is_none_or(|v| slot.is_none() && v.account == ch.account),
+            vaults.len() <= 1
+                && vaults
+                    .iter()
+                    .all(|v| slot.is_none() && v.account == ch.account),
             "potion vault owner mismatch"
         );
         self.call(move |db| {
@@ -916,10 +901,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let n = tx.execute("UPDATE characters SET stats=?4,items=?5,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![ch.id, ch.account, ch.revision - 1, serde_json::to_string(&ch)?, serde_json::to_string(&ch.items)?])?;
             ensure!(n == 1, "permanent potion commit lost its reservation");
-            if let Some(vault) = vault {
-                let n = tx.execute("UPDATE vaults SET items=?3,revision=revision+1 WHERE account=?1 AND revision=?2", params![vault.account, vault.revision, serde_json::to_string(&vault.items)?])?;
-                ensure!(n == 1, "permanent potion vault conflict");
-            }
+            for vault in vaults { vaults::save(&tx, &vault)?; }
             tx.commit()?;
             Ok(ch.revision)
         }).await
@@ -1121,7 +1103,7 @@ mod tests {
             .create(account.id, content.get(WIZARD).unwrap())
             .await
             .unwrap();
-        let mut vault = s.vault(account.id).await.unwrap();
+        let mut vault = s.vault(account.id, 0).await.unwrap();
         vault.items[0] = 0xa1f;
         ch.revision = s
             .exchange(
@@ -1131,29 +1113,29 @@ mod tests {
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                Some(vault),
+                vec![vault],
             )
             .await
             .unwrap()[0];
-        let source = s.vault(account.id).await.unwrap();
+        let source = s.vault(account.id, 0).await.unwrap();
         let mut consumed = source.clone();
         consumed.items[0] = -1;
         let mut stale = consumed.clone();
         stale.revision += 1;
         assert!(
-            s.consume_stat(ch.clone(), None, 2, 1, Some(stale))
+            s.consume_stat(ch.clone(), None, 2, 1, vec![stale])
                 .await
                 .is_err()
         );
         let saved = s.load(account.id, ch.id).await.unwrap();
         assert_eq!((saved.base, saved.revision), (ch.base, ch.revision));
-        assert_eq!(s.vault(account.id).await.unwrap().items, source.items);
+        assert_eq!(s.vault(account.id, 0).await.unwrap().items, source.items);
         let revision = s
-            .consume_stat(ch.clone(), None, 2, 1, Some(consumed.clone()))
+            .consume_stat(ch.clone(), None, 2, 1, vec![consumed.clone()])
             .await
             .unwrap();
         assert!(
-            s.consume_stat(ch.clone(), None, 2, 1, Some(consumed))
+            s.consume_stat(ch.clone(), None, 2, 1, vec![consumed])
                 .await
                 .is_err()
         );
@@ -1161,10 +1143,10 @@ mod tests {
         assert_eq!(saved.items, ch.items);
         assert_eq!(saved.base[2], ch.base[2] + 1);
         assert_eq!(saved.revision, revision);
-        let after = s.vault(account.id).await.unwrap();
+        let after = s.vault(account.id, 0).await.unwrap();
         assert_eq!(after.items[0], -1);
         assert_eq!(after.revision, source.revision + 1);
-        s.consume_stat(saved.clone(), None, 2, 1, None)
+        s.consume_stat(saved.clone(), None, 2, 1, Vec::new())
             .await
             .unwrap();
         let ground = s.load(account.id, ch.id).await.unwrap();
@@ -1197,24 +1179,24 @@ mod tests {
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    None,
+                    Vec::new(),
                 )
                 .await
                 .unwrap()[0];
             let before = ch.base;
             let revision = s
-                .consume_stat(ch.clone(), Some(slot), index, 1, None)
+                .consume_stat(ch.clone(), Some(slot), index, 1, Vec::new())
                 .await
                 .unwrap();
             assert!(
-                s.consume_stat(ch.clone(), Some(slot), index, 1, None)
+                s.consume_stat(ch.clone(), Some(slot), index, 1, Vec::new())
                     .await
                     .is_err()
             );
             let mut foreign = ch.clone();
             foreign.account += 1;
             assert!(
-                s.consume_stat(foreign, Some(slot), index, 1, None)
+                s.consume_stat(foreign, Some(slot), index, 1, Vec::new())
                     .await
                     .is_err()
             );
@@ -1237,17 +1219,17 @@ mod tests {
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                Vec::new(),
             )
             .await
             .unwrap()[0];
         assert!(
-            s.consume_stat(ch.clone(), Some(4), 4, 1, None)
+            s.consume_stat(ch.clone(), Some(4), 4, 1, Vec::new())
                 .await
                 .is_err()
         );
         assert!(
-            s.consume_stat(ch.clone(), Some(4), 4, 2, None)
+            s.consume_stat(ch.clone(), Some(4), 4, 2, Vec::new())
                 .await
                 .is_err()
         );
@@ -1260,7 +1242,7 @@ mod tests {
         dead.alive = false;
         dead.hp = 0;
         s.death(dead, "potion regression".into()).await.unwrap();
-        assert!(s.consume_stat(ch, Some(4), 4, 1, None).await.is_err());
+        assert!(s.consume_stat(ch, Some(4), 4, 1, Vec::new()).await.is_err());
     }
     #[tokio::test]
     async fn permanent_potion_conflicts_with_trade_and_vault_without_duplication() {
@@ -1289,7 +1271,7 @@ mod tests {
                                 revision: source.revision,
                                 items: source.items.clone(),
                             }],
-                            None,
+                            Vec::new(),
                         )
                         .await
                         .unwrap()[0];
@@ -1302,7 +1284,7 @@ mod tests {
                         items: remaining,
                     }];
                     let vault = if vault_exchange {
-                        let mut vault = s.vault(owner.id).await.unwrap();
+                        let mut vault = s.vault(owner.id, 0).await.unwrap();
                         vault.items[0] = kind;
                         Some(vault)
                     } else {
@@ -1317,21 +1299,27 @@ mod tests {
                         None
                     };
                     if potion_first {
-                        s.consume_stat(source.clone(), Some(4), index, 1, None)
+                        s.consume_stat(source.clone(), Some(4), index, 1, Vec::new())
                             .await
                             .unwrap();
-                        assert!(s.exchange(writes, vault).await.is_err());
-                    } else {
-                        s.exchange(writes, vault).await.unwrap();
                         assert!(
-                            s.consume_stat(source.clone(), Some(4), index, 1, None)
+                            s.exchange(writes, vault.into_iter().collect())
+                                .await
+                                .is_err()
+                        );
+                    } else {
+                        s.exchange(writes, vault.into_iter().collect())
+                            .await
+                            .unwrap();
+                        assert!(
+                            s.consume_stat(source.clone(), Some(4), index, 1, Vec::new())
                                 .await
                                 .is_err()
                         );
                     }
                     let saved = s.load(owner.id, source.id).await.unwrap();
                     let other = s.load(recipient.id, target.id).await.unwrap();
-                    let chest = s.vault(owner.id).await.unwrap();
+                    let chest = s.vault(owner.id, 0).await.unwrap();
                     assert_eq!(
                         saved.base[index],
                         source.base[index] + i32::from(potion_first)
@@ -1540,7 +1528,7 @@ mod tests {
             .create(owner.id, content.get(WIZARD).unwrap())
             .await
             .unwrap();
-        let mut chest = s.vault(owner.id).await.unwrap();
+        let mut chest = s.vault(owner.id, 0).await.unwrap();
         assert_eq!(chest.items, vec![-1; 8]);
         let original = ch.items.clone();
         chest.items[0] = ch.items[4];
@@ -1553,28 +1541,28 @@ mod tests {
         write.items[4] = -1;
         chest.revision = 1;
         assert!(
-            s.exchange(vec![write.clone()], Some(chest.clone()))
+            s.exchange(vec![write.clone()], vec![chest.clone()])
                 .await
                 .is_err()
         );
         assert_eq!(s.load(owner.id, ch.id).await.unwrap().items, original);
-        assert_eq!(s.vault(owner.id).await.unwrap().items, vec![-1; 8]);
+        assert_eq!(s.vault(owner.id, 0).await.unwrap().items, vec![-1; 8]);
         chest.revision = 0;
         let mut foreign = chest.clone();
         foreign.account = other.id;
         assert!(
-            s.exchange(vec![write.clone()], Some(foreign))
+            s.exchange(vec![write.clone()], vec![foreign])
                 .await
                 .is_err()
         );
         assert_eq!(
-            s.exchange(vec![write], Some(chest.clone())).await.unwrap(),
+            s.exchange(vec![write], vec![chest.clone()]).await.unwrap(),
             vec![1]
         );
         ch = s.load(owner.id, ch.id).await.unwrap();
         assert_eq!(ch.items[4], -1);
-        assert_eq!(s.vault(owner.id).await.unwrap().items[0], original[4]);
-        assert_eq!(s.vault(other.id).await.unwrap().items, vec![-1; 8]);
+        assert_eq!(s.vault(owner.id, 0).await.unwrap().items[0], original[4]);
+        assert_eq!(s.vault(other.id, 0).await.unwrap().items, vec![-1; 8]);
         ch.hp = 0;
         ch.alive = false;
         let dead_id = ch.id;
@@ -1584,8 +1572,8 @@ mod tests {
             .await
             .unwrap();
         assert_ne!(replacement.id, dead_id);
-        assert_eq!(s.vault(owner.id).await.unwrap().items[0], original[4]);
-        let mut invalid = s.vault(owner.id).await.unwrap();
+        assert_eq!(s.vault(owner.id, 0).await.unwrap().items[0], original[4]);
+        let mut invalid = s.vault(owner.id, 0).await.unwrap();
         invalid.items.push(-1);
         let write = InventoryWrite {
             id: replacement.id,
@@ -1593,7 +1581,7 @@ mod tests {
             revision: 0,
             items: replacement.items,
         };
-        assert!(s.exchange(vec![write], Some(invalid)).await.is_err());
+        assert!(s.exchange(vec![write], vec![invalid]).await.is_err());
     }
     #[tokio::test]
     async fn qualifying_class_records_survive_death_and_match_unlock_requirements() {
@@ -2043,7 +2031,7 @@ mod tests {
         writes[0].items[4] = -1;
         writes[1].items[5] = characters[0].items[4];
         writes[1].revision = 1;
-        assert!(s.exchange(writes.clone(), None).await.is_err());
+        assert!(s.exchange(writes.clone(), Vec::new()).await.is_err());
         for ch in &characters {
             let loaded = s.load(ch.account, ch.id).await.unwrap();
             assert_eq!(loaded.items, ch.items);
@@ -2052,14 +2040,17 @@ mod tests {
         writes[1].revision = 0;
         let mut foreign = writes.clone();
         foreign[1].id = characters[0].id;
-        assert!(s.exchange(foreign, None).await.is_err());
-        assert_eq!(s.exchange(writes.clone(), None).await.unwrap(), vec![1, 1]);
+        assert!(s.exchange(foreign, Vec::new()).await.is_err());
+        assert_eq!(
+            s.exchange(writes.clone(), Vec::new()).await.unwrap(),
+            vec![1, 1]
+        );
         for (ch, write) in characters.iter().zip(&writes) {
             let loaded = s.load(ch.account, ch.id).await.unwrap();
             assert_eq!(loaded.items, write.items);
             assert_eq!(loaded.revision, 1);
         }
-        assert!(s.exchange(writes, None).await.is_err());
+        assert!(s.exchange(writes, Vec::new()).await.is_err());
         assert!(s.progress(characters[0].clone()).await.is_err());
         let mut current = s
             .load(characters[0].account, characters[0].id)
@@ -2086,8 +2077,8 @@ mod tests {
             revision: 0,
             items: inv.clone(),
         };
-        ch.revision = s.exchange(vec![write.clone()], None).await.unwrap()[0];
-        assert!(s.exchange(vec![write], None).await.is_err());
+        ch.revision = s.exchange(vec![write.clone()], Vec::new()).await.unwrap()[0];
+        assert!(s.exchange(vec![write], Vec::new()).await.is_err());
         ch.items = inv;
         ch.hp = 0;
         ch.alive = false;

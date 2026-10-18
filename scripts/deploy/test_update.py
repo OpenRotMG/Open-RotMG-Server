@@ -37,6 +37,20 @@ class UpdateTest(unittest.TestCase):
                 with self.subTest(changed=changed), self.assertRaisesRegex(RuntimeError, 'Migration changed existing records'):
                     update.verify_migration(before, changed)
 
+    def test_vault_migration_preserves_legacy_rows_and_only_provisions_unread_accounts(self):
+        before = {'accounts': [{'id': 1}, {'id': 2}], 'vaults': [
+            {'account': 1, 'items': '[2594,-1,-1,-1,-1,-1,-1,-1]', 'revision': 37}]}
+        after = {'accounts': [{'id': 1, 'vault_mask': 1}, {'id': 2, 'vault_mask': 1}], 'vaults': [
+            {**before['vaults'][0], 'chest': 0},
+            {'account': 2, 'chest': 0, 'items': '[-1,-1,-1,-1,-1,-1,-1,-1]', 'revision': 0}]}
+        update.verify_migration(before, after)
+        for rows in [[], after['vaults'][:1], after['vaults'] * 2,
+                     [{**row, 'revision': 0} for row in after['vaults']]]:
+            with self.subTest(rows=rows), self.assertRaisesRegex(RuntimeError, 'Vault migration'):
+                update.verify_migration(before, {**after, 'vaults': rows})
+        with self.assertRaisesRegex(RuntimeError, 'Migration changed existing records'):
+            update.verify_migration(after, {**after, 'vaults': after['vaults'][:1]})
+
     def test_unpack_accepts_exact_files_and_rejects_hash_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

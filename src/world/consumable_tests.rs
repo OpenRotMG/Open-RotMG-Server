@@ -70,7 +70,7 @@ async fn dye_consumption_and_portrait_persist_together_and_failed_writes_publish
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                Vec::new(),
             )
             .await
             .unwrap()[0];
@@ -359,7 +359,7 @@ async fn vault_life_and_mana_clamp_atomically_without_consuming_a_backpack_slot(
         let cap = content.classes[&ch.class].caps[index];
         ch.base[index] = cap - 3;
         store.progress(ch.clone()).await.unwrap();
-        let mut vault = store.vault(account).await.unwrap();
+        let mut vault = store.vault(account, 0).await.unwrap();
         vault.items[0] = kind;
         ch.revision = store
             .exchange(
@@ -369,18 +369,18 @@ async fn vault_life_and_mana_clamp_atomically_without_consuming_a_backpack_slot(
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                Some(vault),
+                vec![vault],
             )
             .await
             .unwrap()[0];
-        let before = store.vault(account).await.unwrap();
+        let before = store.vault(account, 0).await.unwrap();
         let mut consumed = before.clone();
         consumed.items[0] = -1;
         let mut stale = consumed.clone();
         stale.revision += 1;
         assert!(
             store
-                .consume_stat(ch.clone(), None, index, 3, Some(stale))
+                .consume_stat(ch.clone(), None, index, 3, vec![stale])
                 .await
                 .is_err()
         );
@@ -388,9 +388,9 @@ async fn vault_life_and_mana_clamp_atomically_without_consuming_a_backpack_slot(
             store.load(account, ch.id).await.unwrap().base[index],
             cap - 3
         );
-        assert_eq!(store.vault(account).await.unwrap().items, before.items);
+        assert_eq!(store.vault(account, 0).await.unwrap().items, before.items);
         let revision = store
-            .consume_stat(ch.clone(), None, index, 3, Some(consumed.clone()))
+            .consume_stat(ch.clone(), None, index, 3, vec![consumed.clone()])
             .await
             .unwrap();
         let saved = store.load(account, ch.id).await.unwrap();
@@ -400,11 +400,11 @@ async fn vault_life_and_mana_clamp_atomically_without_consuming_a_backpack_slot(
             (saved.hp, saved.mp, saved.revision),
             (ch.hp, ch.mp, revision)
         );
-        let vault = store.vault(account).await.unwrap();
+        let vault = store.vault(account, 0).await.unwrap();
         assert_eq!((vault.items[0], vault.revision), (-1, before.revision + 1));
         assert!(
             store
-                .consume_stat(ch.clone(), None, index, 3, Some(consumed))
+                .consume_stat(ch.clone(), None, index, 3, vec![consumed])
                 .await
                 .is_err()
         );
@@ -435,7 +435,7 @@ async fn life_and_mana_potions_commit_five_or_the_remaining_cap_without_extra_he
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                Vec::new(),
             )
             .await
             .unwrap()[0];
@@ -445,7 +445,7 @@ async fn life_and_mana_potions_commit_five_or_the_remaining_cap_without_extra_he
         assert_eq!(plan.stat_growth.as_ref().unwrap().3, 3);
         let (snapshot, slot, stat, amount) = plan.stat_growth.clone().unwrap();
         let result = store
-            .consume_stat(snapshot.clone(), Some(slot.slot), stat, amount, None)
+            .consume_stat(snapshot.clone(), Some(slot.slot), stat, amount, Vec::new())
             .await;
         w.finish_inventory(plan, result).unwrap();
         assert_eq!(w.players[&id].character.base[index], cap);
@@ -455,7 +455,7 @@ async fn life_and_mana_potions_commit_five_or_the_remaining_cap_without_extra_he
         );
         assert!(
             store
-                .consume_stat(snapshot, Some(slot.slot), stat, amount, None)
+                .consume_stat(snapshot, Some(slot.slot), stat, amount, Vec::new())
                 .await
                 .is_err()
         );

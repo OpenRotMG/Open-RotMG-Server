@@ -268,6 +268,7 @@ async fn character_slots_migrate_legacy_without_rewriting_saves_and_keep_replays
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap();
+    crate::store::vaults::legacy_fixture(&db).unwrap();
     db.execute_batch("DROP TRIGGER character_slot_insert; DROP TRIGGER character_slot_update; DROP TRIGGER character_slot_capacity; DROP INDEX living_characters_by_account; DROP TABLE character_slot_purchases; ALTER TABLE accounts DROP COLUMN character_slots; CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1; PRAGMA user_version=11;").unwrap();
     let migrated = Store::open(&dir.join("game.db"), &content).unwrap();
     assert_eq!(read(&db, account).unwrap(), 1);

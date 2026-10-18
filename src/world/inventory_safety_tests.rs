@@ -150,7 +150,7 @@ async fn failed_pickup_publication_keeps_the_source_reserved() {
                 revision: plan.revision,
                 items: plan.items.clone(),
             }],
-            None,
+            Vec::new(),
         )
         .await
         .unwrap();
@@ -197,14 +197,14 @@ async fn committed_vault_transfer_recovers_after_publication_failure() {
     w.name = "Vault".into();
     w.owner = Some(account.id);
     w.safe = true;
-    w.load_vault(store.vault(account.id).await.unwrap())
+    w.load_vaults(store.vaults(account.id).await.unwrap())
         .unwrap();
     let (tx, mut rx) = mpsc::channel(64);
     let (lost, _) = watch::channel(false);
     let player = w
         .enter(ch.clone(), Some(Output { packets: tx, lost }))
         .unwrap();
-    let chest = w.vault.as_ref().unwrap().0;
+    let chest = *w.vaults.keys().next().unwrap();
     w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
     let plan = w
         .swap(
@@ -230,7 +230,7 @@ async fn committed_vault_transfer_recovers_after_publication_failure() {
                 revision: plan.revision,
                 items: plan.items.clone(),
             }],
-            plan.vault.clone(),
+            plan.vaults.clone(),
         )
         .await
         .unwrap();
@@ -247,7 +247,7 @@ async fn committed_vault_transfer_recovers_after_publication_failure() {
     let reopened = Store::open(&path, &content).unwrap();
     let saved = reopened.load(account.id, ch.id).await.unwrap();
     assert_eq!((saved.revision, saved.items[4]), (1, -1));
-    let vault = reopened.vault(account.id).await.unwrap();
+    let vault = reopened.vault(account.id, 0).await.unwrap();
     assert_eq!((vault.revision, vault.items[0]), (1, 0xa22));
     drop(reopened);
     std::fs::remove_file(path).unwrap();

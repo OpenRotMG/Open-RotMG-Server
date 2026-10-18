@@ -37,7 +37,7 @@ fn ground_potions_reserve_the_source_and_leave_full_backpacks_unchanged() {
         let plan = w.use_item(id, slot, w.players[&id].pos).unwrap().unwrap();
         assert!(w.entities[&bag].reserved && w.players[&id].pending);
         assert_eq!(plan.items, before.items);
-        assert_eq!(plan.bag.as_ref().unwrap().1[0], next);
+        assert_eq!(plan.bags.first().unwrap().1[0], next);
         assert_eq!(w.entities[&bag].items[0], kind);
         assert!(w.use_item(id, slot, w.players[&id].pos).is_err());
         let mut other = tests::ch(&w);
@@ -204,7 +204,7 @@ fn occupied_ground_swaps_drop_incompatible_replacements_without_exposing_soulbou
             .unwrap();
             let dropped = plan.dropped.unwrap();
             assert_eq!(plan.items[4], incoming);
-            assert_eq!(plan.bag.as_ref().unwrap().1[0], -1);
+            assert_eq!(plan.bags.first().unwrap().1[0], -1);
             assert_eq!(w.entities[&dropped].items[0], outgoing);
             assert!(!w.entities[&dropped].published && w.entities[&dropped].reserved);
             assert!(w.entities[&bag].reserved);
@@ -266,7 +266,7 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                Vec::new(),
             )
             .await
             .unwrap()[0];
@@ -391,7 +391,7 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
             };
             assert!(
                 store
-                    .exchange_collected(vec![write.clone()], None, plan.collected)
+                    .exchange_collected(vec![write.clone()], Vec::new(), plan.collected)
                     .await
                     .is_err()
             );
@@ -402,7 +402,7 @@ async fn desert_werewolf_combat_drops_collect_once_and_survive_inventory_cas_reo
             assert_eq!(w.entities[&bag].items[0], item);
             write.revision = plan.revision;
             let revision = store
-                .exchange_collected(vec![write], None, plan.collected)
+                .exchange_collected(vec![write], Vec::new(), plan.collected)
                 .await
                 .unwrap()[0];
             w.finish_inventory(plan, Ok(revision)).unwrap();

@@ -112,6 +112,7 @@ mod tests {
         assert!(Store::open(&path, &content).is_err());
         db.execute_batch("DROP TABLE guild_members; DROP TABLE guilds;")
             .unwrap();
+        crate::store::vaults::legacy_fixture(&db).unwrap();
         db.pragma_update(None, "user_version", 5).unwrap();
         assert_eq!(
             Store::open(&path, &content)

@@ -741,7 +741,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            None,
+            Vec::new(),
         )
         .await?[0];
     a.store.progress(ch.clone()).await?;
@@ -892,7 +892,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
                 change=>{
                     match change {
                         Cheat::Stats{values}=>{ch.base=values;let stats=ch.effective(&a.content)?;ch.hp=ch.hp.min(stats[0]);ch.mp=ch.mp.min(stats[1]);},
-                        Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],None).await?[0];},
+                        Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],Vec::new()).await?[0];},
                         Cheat::Teleport{..}=>unreachable!(),
                     }
                     let stats = ch.effective(&a.content)?;

@@ -31,7 +31,7 @@ async fn deletion_retires_inventory_without_rewards_and_preserves_account_histor
     .unwrap();
     ch.fame = 999;
     s.progress(ch.clone()).await.unwrap();
-    let mut vault = s.vault(account).await.unwrap();
+    let mut vault = s.vault(account, 0).await.unwrap();
     vault.items[0] = ch.items[4];
     ch.items[4] = -1;
     ch.revision = s
@@ -42,11 +42,11 @@ async fn deletion_retires_inventory_without_rewards_and_preserves_account_histor
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            Some(vault),
+            vec![vault],
         )
         .await
         .unwrap()[0];
-    let vault = serde_json::to_value(s.vault(account).await.unwrap()).unwrap();
+    let vault = serde_json::to_value(s.vault(account, 0).await.unwrap()).unwrap();
     let before = s.list("delete-history".into()).await.unwrap();
     let presentation = s.presentation(account).await.unwrap();
     s.delete_character(account, ch.id).await.unwrap();
@@ -62,7 +62,7 @@ async fn deletion_retires_inventory_without_rewards_and_preserves_account_histor
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            None
+            Vec::new()
         )
         .await
         .is_err()
@@ -83,7 +83,7 @@ async fn deletion_retires_inventory_without_rewards_and_preserves_account_histor
     assert_eq!(s.fame(account, dead.id).await.unwrap(), death);
     assert!(s.fame(account, ch.id).await.is_err());
     assert_eq!(
-        serde_json::to_value(s.vault(account).await.unwrap()).unwrap(),
+        serde_json::to_value(s.vault(account, 0).await.unwrap()).unwrap(),
         vault
     );
     let db = Connection::open(&path).unwrap();

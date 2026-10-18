@@ -245,11 +245,11 @@ mod tests {
         );
         c.items[4] = 0xa22;
         let revision = s
-            .exchange_collected(vec![write(&c)], None, Some(0xa22))
+            .exchange_collected(vec![write(&c)], Vec::new(), Some(0xa22))
             .await
             .unwrap()[0];
         assert!(
-            s.exchange_collected(vec![write(&c)], None, Some(0xa23))
+            s.exchange_collected(vec![write(&c)], Vec::new(), Some(0xa23))
                 .await
                 .is_err()
         );
@@ -262,7 +262,7 @@ mod tests {
         );
         c.revision = revision;
         c.revision = s
-            .exchange_collected(vec![write(&c)], None, Some(0xa22))
+            .exchange_collected(vec![write(&c)], Vec::new(), Some(0xa22))
             .await
             .unwrap()[0];
         assert_eq!(

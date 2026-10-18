@@ -288,7 +288,7 @@ async fn bought_key_consumption_is_durable_and_failed_save_removes_the_unpublish
                     revision: plan.revision,
                     items: plan.items.clone(),
                 }],
-                None,
+                Vec::new(),
             )
             .await
             .map(|r| r[0]);
