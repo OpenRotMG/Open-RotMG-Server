@@ -3,7 +3,7 @@ use super::*;
 pub(super) struct Birth {
     owner: i32,
     pub(super) camp: usize,
-    slot: usize,
+    pub(super) slot: usize,
     kind: u16,
     previous: Option<i32>,
     position: Pos,
@@ -137,7 +137,7 @@ impl World {
             if self.population[slot]
                 .entity
                 .is_none_or(|id| !self.entities.contains_key(&id))
-                && !self.family_space(family.terrain, 1)?
+                && !self.population_space(family.terrain, 1)?
             {
                 break;
             }

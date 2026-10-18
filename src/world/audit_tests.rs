@@ -211,6 +211,7 @@ fn golem_satellites_use_real_budgets_owned_orbits_and_thirty_second_decay() {
         for c in &mut Arc::make_mut(&mut w.map).cells {
             c.terrain = terrain;
         }
+        w.configure_population().unwrap();
         let pos = center(&w);
         w.populate_families(terrain, &[pos], &[kind]).unwrap();
         let ids = members(&w, 0);
@@ -295,6 +296,7 @@ fn secondary_leaders_replenish_only_their_own_bounded_followers_after_top_slot_d
         for c in &mut Arc::make_mut(&mut w.map).cells {
             c.terrain = terrain;
         }
+        w.configure_population().unwrap();
         let pos = center(&w);
         w.populate_families(terrain, &[pos], &[root_kind]).unwrap();
         let root = w
@@ -1194,18 +1196,20 @@ fn admitted_sludgets_land_after_owner_death_without_exceeding_their_owned_slots(
 #[test]
 fn pending_fauna_reserves_regional_capacity_before_the_throw_lands() {
     let mut w = arena(6);
+    w.population_regions[6].limit = 32;
     let pos = center(&w);
     w.populate_families(6, &[pos], &[0x950]).unwrap();
     let root = w.population[0].entity.unwrap();
     for _ in 0..27 {
         let id = w.spawn_entity(0x624, pos, vec![]).unwrap();
+        let slot = w.population.len();
         w.population.push(Spawn {
             kind: 0x624,
             pos,
             entity: Some(id),
-            ready: 0,
             camp: None,
         });
+        w.mark_population(id, slot).unwrap();
     }
     w.fauna_wave_mechanics(root, None).unwrap();
     assert_eq!(w.population_count(6), 28);
@@ -1303,7 +1307,6 @@ fn airborne_fauna_reservations_prevent_camp_replacement_until_landing() {
     w.remove_entity(root);
     w.population[0].entity = None;
     w.now = 1000;
-    w.camps[0].ready = 1000;
     w.repopulate_families().unwrap();
     assert!(w.entities.is_empty());
     assert_eq!(w.pending_fauna_count(6), 5);

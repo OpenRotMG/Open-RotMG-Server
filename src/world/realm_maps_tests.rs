@@ -85,7 +85,10 @@ fn every_catalog_realm_preserves_water_scenery_and_safe_arrivals() {
         assert_eq!(world.realm_layout.as_deref(), Some(name.as_str()));
         assert_eq!((world.map.width, world.map.height), (2048, 2048));
         assert_eq!(world.map.spawns.len(), 4);
-        assert!(world.actor_ids.len() < 5000, "{name}: bounded actors");
+        assert!(
+            world.non_population_ids.len() < 5000,
+            "{name}: bounded scripted actors"
+        );
         let hermits: Vec<_> = world
             .actors()
             .filter(|e| e.kind == crate::dungeon::trench::HERMIT)
@@ -93,6 +96,19 @@ fn every_catalog_realm_preserves_water_scenery_and_safe_arrivals() {
         assert_eq!(hermits.len(), 1, "{name}: one original Hermit");
         assert!(world.walkable(world.ocean_reward_position(hermits[0]).unwrap()));
         assert_eq!(world.hero_identities().len(), 14);
+        for terrain in 1..=12 {
+            let count = world
+                .population
+                .iter()
+                .filter(|s| s.entity.is_some() && world.population_terrain(s) == terrain)
+                .count();
+            assert_eq!(count, world.population_count(terrain));
+            assert!(
+                (world.population_regions[terrain as usize].target
+                    ..=world.population_regions[terrain as usize].limit)
+                    .contains(&count)
+            );
+        }
         for kind in crate::quest::ROOTS.into_iter().chain(crate::quest::EVENTS) {
             let roots: Vec<_> = world.actors().filter(|e| e.kind == kind).collect();
             assert_eq!(roots.len(), 1, "{name}: required encounter {kind:#x}");

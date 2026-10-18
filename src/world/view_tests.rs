@@ -4,6 +4,47 @@ use crate::content::WIZARD;
 use crate::wire::Reader;
 
 #[test]
+fn incremental_discovery_preserves_sorted_snapshots_and_invalidates_weak_cache_keys() {
+    let mut d = super::tests::directory();
+    let (id, _rx) = receive(&mut d, -2, 1, WIZARD);
+    let first = d.player_view(id).unwrap().tiles;
+    let first_json = serde_json::to_value(&first).unwrap();
+    {
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.players.get_mut(&id).unwrap().pos.x += 3.;
+        w.updates(id, false).unwrap();
+    }
+    let updated = d.player_view(id).unwrap().tiles;
+    assert!(!Arc::ptr_eq(&first, &updated));
+    assert_eq!(serde_json::to_value(&first).unwrap(), first_json);
+    assert!(
+        updated
+            .windows(2)
+            .all(|p| (p[0].x, p[0].y) < (p[1].x, p[1].y))
+    );
+    let w = &d.worlds[&-2];
+    let p = &w.players[&id];
+    let cache = p.view_tiles.borrow();
+    assert_eq!(cache.rebuilds, 1);
+    assert!(cache.incremental_tiles > 0);
+    assert_eq!(cache.cloned_snapshot_tiles, first.len() as u64);
+    assert_eq!(updated.len(), p.tiles.len());
+    for t in updated.iter() {
+        let ground = w.map.cells[t.y as usize * w.map.width as usize + t.x as usize].ground;
+        assert_eq!(t.ground, ground);
+        assert_eq!(t.ground_speed, w.content.grounds[&ground]);
+    }
+    drop(cache);
+    let weak = Arc::downgrade(&updated);
+    drop(updated);
+    let w = d.worlds.get_mut(&-2).unwrap();
+    w.players.get_mut(&id).unwrap().pos.x += 3.;
+    w.updates(id, false).unwrap();
+    assert!(weak.upgrade().is_none());
+    assert_eq!(d.worlds[&-2].players[&id].view_tiles.borrow().rebuilds, 1);
+}
+
+#[test]
 fn terrain_views_reuse_storage_but_invalidate_discovery_map_and_content() {
     let mut d = super::tests::directory();
     let (id, _rx) = receive(&mut d, -2, 1, WIZARD);

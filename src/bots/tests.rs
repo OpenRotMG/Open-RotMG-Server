@@ -407,8 +407,8 @@ fn projectile_dodge_uses_observed_trajectory_and_only_known_routes() {
     assert!(Grid::new(&v).segment(v.position, movement));
     assert!(movement.distance(v.position) > 1.);
     let grid = Grid {
-        walkable: BTreeSet::from([(0, 0), (0, 1), (1, 1), (2, 1)]),
-        known: BTreeSet::from([(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)]),
+        walkable: HashSet::from([(0, 0), (0, 1), (1, 1), (2, 1)]),
+        known: HashSet::from([(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)]),
         dimensions: (3, 2),
         ..Grid::default()
     };

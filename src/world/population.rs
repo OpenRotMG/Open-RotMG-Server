@@ -24,7 +24,7 @@ impl Family {
     pub(super) fn size(&self) -> usize {
         1 + self.roles.iter().map(|r| r.maximum).sum::<usize>()
     }
-    fn initial(&self) -> usize {
+    pub(super) fn initial(&self) -> usize {
         1 + self
             .roles
             .iter()
@@ -138,17 +138,9 @@ pub(super) const FAMILIES: &[Family] = &[
 pub(super) struct Camp {
     pub start: usize,
     pub family: &'static Family,
-    pub(super) ready: u64,
     next: Vec<Option<u64>>,
 }
 
-fn region(terrain: u8) -> u8 {
-    if matches!(terrain, 11 | 12) {
-        11
-    } else {
-        terrain
-    }
-}
 fn formation(center: Pos, size: usize) -> Vec<Pos> {
     (0..size)
         .map(|i| {
@@ -203,6 +195,7 @@ impl World {
                     .total_cmp(&self.entities[b].pos.distance(e.pos))
             }))
     }
+    #[cfg(test)]
     pub(super) fn populate_solos(
         &mut self,
         terrain: u8,
@@ -237,30 +230,25 @@ impl World {
                 continue;
             };
             let entity = self.spawn_entity(kind, pos, vec![])?;
+            let slot = self.population.len();
             self.population.push(Spawn {
                 kind,
                 pos,
                 entity: Some(entity),
-                ready: 0,
                 camp: None,
             });
+            self.mark_population(entity, slot)?;
         }
         Ok(())
     }
-    fn population_terrain(&self, slot: &Spawn) -> u8 {
+    pub(super) fn population_terrain(&self, slot: &Spawn) -> u8 {
         match slot.camp {
             Some(camp) => self.camps[camp].family.terrain,
             None => self.content.objects[&slot.kind].terrain,
         }
     }
     pub(super) fn population_count(&self, terrain: u8) -> usize {
-        self.population
-            .iter()
-            .filter(|s| {
-                region(self.population_terrain(s)) == region(terrain)
-                    && s.entity.is_some_and(|id| self.entities.contains_key(&id))
-            })
-            .count()
+        self.population_counts[terrain as usize]
     }
     pub(super) fn population_space(&self, terrain: u8, count: usize) -> Result<bool> {
         ensure!(
@@ -269,28 +257,18 @@ impl World {
         );
         Ok(
             self.population_count(terrain) + self.pending_fauna_count(terrain) + count
-                <= if terrain >= 11 { 24 } else { 32 },
+                <= self.population_regions[terrain as usize].limit,
         )
     }
-    pub(super) fn family_space(&self, terrain: u8, count: usize) -> Result<bool> {
-        // Reinforcements cannot consume a solo encounter's reserved respawn capacity.
-        let reserved = self
-            .population
-            .iter()
-            .filter(|s| {
-                s.camp.is_none()
-                    && region(self.content.objects[&s.kind].terrain) == region(terrain)
-                    && s.entity.is_none_or(|id| !self.entities.contains_key(&id))
-            })
-            .count();
-        self.population_space(terrain, count + reserved)
-    }
-    fn family_ground(&self, pos: Pos, terrain: u8) -> bool {
+    pub(super) fn family_ground(&self, pos: Pos, terrain: u8) -> bool {
         self.map
             .cell(pos.x, pos.y)
             .is_some_and(|c| c.terrain == terrain && c.object.is_none())
             && self.walkable(pos)
             && self.outside_setpieces(pos)
+            && self
+                .entities_near(pos, 0.75)
+                .all(|e| e.population_slot.is_none())
     }
     pub(super) fn place_member(&mut self, camp: usize, slot: usize, pos: Pos) -> Result<()> {
         let kind = if matches!(self.population[slot].kind, 0x6d2..=0x6d4) {
@@ -300,7 +278,7 @@ impl World {
         };
         self.population[slot].kind = kind;
         ensure!(
-            self.family_space(self.camps[camp].family.terrain, 1)?,
+            self.population_space(self.camps[camp].family.terrain, 1)?,
             "family birth exceeds regional budget"
         );
         let id = self.spawn_entity(kind, pos, vec![])?;
@@ -310,10 +288,11 @@ impl World {
         e.camp = Some(camp);
         e.home = home;
         self.population[slot].entity = Some(id);
+        self.mark_population(id, slot)?;
         tracing::debug!(camp, entity = id, kind, "family member created");
         Ok(())
     }
-    fn validate_family(&self, family: &Family) -> Result<()> {
+    pub(super) fn validate_family(&self, family: &Family) -> Result<()> {
         for kind in std::iter::once(family.leader).chain(family.roles.iter().map(|r| r.kind)) {
             ensure!(
                 self.content.get(kind)?.terrain == family.terrain
@@ -332,15 +311,23 @@ impl World {
                 .all(|r| r.initial <= r.maximum && r.interval.is_none_or(|interval| interval > 0)),
             "invalid family role bounds"
         );
-        ensure!(family.size() <= 32, "family exceeds regional capacity");
+        ensure!(family.size() <= 32, "family exceeds bounded slot count");
         Ok(())
     }
-    fn family_layout(&self, center: Pos, family: &Family, occupied: &[Pos]) -> Option<Vec<Pos>> {
+    pub(super) fn family_layout(
+        &self,
+        center: Pos,
+        family: &Family,
+        occupied: &[Pos],
+    ) -> Option<Vec<Pos>> {
         if !(2..=7).contains(&family.terrain) {
             let positions = formation(center, family.size());
             return positions
                 .iter()
-                .all(|p| self.family_ground(*p, family.terrain))
+                .all(|p| {
+                    self.family_ground(*p, family.terrain)
+                        && occupied.iter().all(|q| p.distance(*q) >= 0.75)
+                })
                 .then_some(positions);
         }
         // Thin, wooded inland habitats need a contour-aware footprint rather than a mandatory empty circle.
@@ -358,13 +345,17 @@ impl World {
         }
         None
     }
-    fn place_camp(&mut self, family: &'static Family, positions: Vec<Pos>) -> Result<()> {
+    pub(super) fn place_camp(
+        &mut self,
+        family: &'static Family,
+        positions: Vec<Pos>,
+    ) -> Result<()> {
         ensure!(
             positions.len() == family.size(),
             "family footprint does not match reserved capacity"
         );
         ensure!(
-            self.family_space(family.terrain, family.initial())?,
+            self.population_space(family.terrain, family.initial())?,
             "initial family exceeds regional budget"
         );
         let initials = family.roll_initial(&mut self.rng);
@@ -374,7 +365,6 @@ impl World {
         self.camps.push(Camp {
             start,
             family,
-            ready: 0,
             next: family
                 .roles
                 .iter()
@@ -396,14 +386,13 @@ impl World {
                 kind,
                 pos,
                 entity: None,
-                ready: 0,
                 camp: Some(camp),
             });
             if initial {
                 self.place_member(camp, slot, pos)?;
             }
         }
-        tracing::info!(
+        tracing::debug!(
             camp,
             leader = family.leader,
             terrain = family.terrain,
@@ -413,6 +402,7 @@ impl World {
         );
         Ok(())
     }
+    #[cfg(test)]
     pub(super) fn populate_families(
         &mut self,
         terrain: u8,
@@ -469,124 +459,23 @@ impl World {
         }
         Ok(())
     }
-    pub(super) fn populate_shore_population(&mut self) -> Result<()> {
-        let &(x, y) = self.map.spawns.first().context("shore has no arrival")?;
-        let arrival = Pos { x, y };
-        let mut candidates: Vec<_> = self
-            .map
-            .cells
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| {
-                let pos = Pos {
-                    x: (i % self.map.width as usize) as f32 + 0.5,
-                    y: (i / self.map.width as usize) as f32 + 0.5,
-                };
-                (matches!(c.terrain, 11 | 12)
-                    && self.family_ground(pos, c.terrain)
-                    && pos.distance(arrival) >= 12.)
-                    .then_some(pos)
-            })
-            .collect();
-        candidates.shuffle(&mut self.rng);
-        let mut arrival_sites = candidates.clone();
-        arrival_sites.sort_by(|a, b| a.distance(arrival).total_cmp(&b.distance(arrival)));
-        self.populate_families(11, &arrival_sites, &[0x601])?;
-        self.populate_families(11, &candidates, &[0x604, 0x953])?;
-        for (i, kind) in [
-            0x602, 0x602, 0x60e, 0x60f, 0x610, 0x60e, 0x60f, 0x610, 0x60e, 0x60f, 0x610,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let terrain = self.content.get(kind)?.terrain;
-            let sites = if i == 0 || (2..5).contains(&i) {
-                &arrival_sites
-            } else {
-                &candidates
-            };
-            let pos = sites
-                .iter()
-                .copied()
-                .find(|p| {
-                    self.family_ground(*p, terrain)
-                        && self.population.iter().all(|s| s.pos.distance(*p) >= 6.)
-                })
-                .context("shore cannot place its bounded solo roster")?;
-            let entity = self.spawn_entity(kind, pos, vec![])?;
-            self.population.push(Spawn {
-                kind,
-                pos,
-                entity: Some(entity),
-                ready: 0,
-                camp: None,
-            });
-        }
-        ensure!(
-            self.population_count(11) == 24,
-            "shore live population must start at24"
-        );
-        Ok(())
-    }
     pub(super) fn repopulate_families(&mut self) -> Result<()> {
-        for camp in 0..self.camps.len() {
+        // Only player-near owners reproduce; querying occupied cells avoids scanning dormant camps.
+        let active: BTreeSet<_> = self
+            .players
+            .values()
+            .filter(|p| p.character.alive && !p.death_pending && !p.departing && !p.paused)
+            .flat_map(|p| self.entities_near(p.pos, 20.))
+            .filter(|e| e.population_slot.is_some())
+            .filter_map(|e| e.camp)
+            .collect();
+        for camp in active {
             if self.fauna_births.iter().any(|birth| birth.camp == camp) {
                 continue;
             }
             let start = self.camps[camp].start;
             let family = self.camps[camp].family;
             let slots = start..start + family.size();
-            if slots.clone().all(|i| self.population[i].entity.is_none()) {
-                if self.camps[camp].ready == 0 {
-                    self.camps[camp].ready = self.now + 60000;
-                    tracing::debug!(
-                        camp,
-                        deadline = self.camps[camp].ready,
-                        "family cleared; replacement scheduled"
-                    );
-                }
-                if self.now < self.camps[camp].ready {
-                    continue;
-                }
-                if !self.family_space(family.terrain, family.initial())?
-                    || !slots.clone().all(|i| {
-                        self.family_ground(self.population[i].pos, family.terrain)
-                            && self
-                                .players
-                                .values()
-                                .all(|p| p.pos.distance(self.population[i].pos) >= 12.)
-                    })
-                {
-                    self.camps[camp].ready = self.now + 1000;
-                    tracing::debug!(
-                        camp,
-                        "family replacement refused: budget, terrain or nearby player"
-                    );
-                    continue;
-                }
-                let initials = family.roll_initial(&mut self.rng);
-                for slot in slots {
-                    let offset = slot - start;
-                    let mut end = 1;
-                    let mut initial = offset == 0;
-                    for (role, count) in family.roles.iter().zip(&initials) {
-                        if (end..end + count).contains(&offset) {
-                            initial = true;
-                        }
-                        end += role.maximum;
-                    }
-                    if initial {
-                        self.place_member(camp, slot, self.population[slot].pos)?;
-                    }
-                }
-                self.camps[camp].ready = 0;
-                self.camps[camp].next = family
-                    .roles
-                    .iter()
-                    .map(|r| r.interval.map(|interval| self.now + interval))
-                    .collect();
-                continue;
-            }
             let mut from = start + 1;
             for (role, r) in family.roles.iter().enumerate() {
                 let to = from + r.maximum;
@@ -627,7 +516,7 @@ impl World {
                 if self.now >= deadline {
                     self.camps[camp].next[role] = Some(self.now + interval);
                     if let Some(slot) = (from..to).find(|i| self.population[*i].entity.is_none()) {
-                        if !self.family_space(family.terrain, 1)? {
+                        if !self.population_space(family.terrain, 1)? {
                             tracing::debug!(camp, role, "reinforcement refused: regional budget");
                             from = to;
                             continue;

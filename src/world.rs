@@ -12,7 +12,7 @@ use std::{
         Arc,
         atomic::{AtomicI32, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
@@ -63,6 +63,9 @@ mod ocean_tests;
 #[cfg(test)]
 mod player_position_tests;
 mod population;
+mod population_density;
+#[cfg(test)]
+mod population_density_tests;
 #[cfg(test)]
 mod population_tests;
 mod realm_events;
@@ -188,6 +191,8 @@ pub struct Entity {
     stage: Option<u64>,
     parent: Option<i32>,
     camp: Option<usize>,
+    #[serde(skip)]
+    population_slot: Option<usize>,
     quest: Option<i32>,
     expires: Option<u64>,
     next_aux: u64,
@@ -438,7 +443,6 @@ struct Spawn {
     kind: u16,
     pos: Pos,
     entity: Option<i32>,
-    ready: u64,
     camp: Option<usize>,
 }
 pub struct World {
@@ -448,6 +452,8 @@ pub struct World {
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: BTreeMap<i32, Entity>,
     actor_ids: BTreeSet<i32>,
+    non_population_ids: BTreeSet<i32>,
+    quest_ids: BTreeSet<i32>,
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
@@ -476,6 +482,9 @@ pub struct World {
     encounter: bool,
     population: Vec<Spawn>,
     camps: Vec<population::Camp>,
+    population_regions: [population_density::Region; 13],
+    population_counts: [usize; 13],
+    population_next: u64,
     setpieces: Vec<realm_setpieces::Area>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
@@ -818,12 +827,11 @@ impl Directory {
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
             let started = Instant::now();
-            world.populate_shore()?;
-            world.populate_inland()?;
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
             world.populate_hermit()?;
+            world.populate_realm_population()?;
             tracing::info!(
                 layout = world.realm_layout,
                 entities = world.entities.len(),
@@ -1136,6 +1144,7 @@ impl Directory {
         self.grants.retain(|_, grant| grant.expires > self.tick);
         for (id, world) in &mut self.worlds {
             world.step();
+            world.report_performance(*id);
             if *id > 0 && *id != self.endgame.active {
                 if world.players.is_empty() {
                     self.idle.entry(*id).or_insert(self.tick);
@@ -1220,10 +1229,11 @@ impl Handle {
                     scheduled = timer.tick() => {
                         if directory.clock.paused() { continue; }
                         let late=scheduled.elapsed().as_micros() as u64;
+                        let measuring=crate::performance::Measure::start();
                         let start=Instant::now(); directory.step();
                         let us=start.elapsed().as_micros() as u64;
                         directory.max_tick_us=directory.max_tick_us.max(us);
-                        directory.performance.record("step", start.elapsed());
+                        directory.performance.work("step", measuring);
                         directory.performance.record("scheduling_lateness", std::time::Duration::from_micros(late));
                         directory.diagnostic_ticks.push_back((start, us, late));
                         while directory.diagnostic_ticks.front().is_some_and(|(t, _, _)| t.elapsed().as_secs() > 120) { directory.diagnostic_ticks.pop_front(); }
@@ -1267,18 +1277,44 @@ impl Handle {
         f: impl FnOnce(&mut Directory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
-        let queued = Instant::now();
-        self.tx
-            .send(Box::new(move |d| {
-                d.performance.record("job_wait", queued.elapsed());
-                let started = Instant::now();
-                let result = f(d);
-                d.performance.record("job", started.elapsed());
-                let _ = tx.send(result);
-            }))
+        let request = crate::performance::REQUEST.try_with(Arc::clone).ok();
+        if let Some(r) = &request {
+            r.lock().expect("request timings poisoned").calls += 1;
+        }
+        let start = Instant::now();
+        let permit = self
+            .tx
+            .reserve()
             .await
             .map_err(|_| anyhow::anyhow!("world directory stopped"))?;
-        rx.await.context("world directory worker failed")?
+        let send_wait = start.elapsed();
+        let queued = Instant::now();
+        let work_request = request.clone();
+        permit.send(Box::new(move |d| {
+            let queue_wait = queued.elapsed();
+            d.performance.record("job_send_wait", send_wait);
+            d.performance.record("job_wait", queue_wait);
+            let started = crate::performance::Measure::start();
+            let result = f(d);
+            let measurement = started.finish();
+            d.performance.completed("job", measurement);
+            if let Some(r) = work_request {
+                let mut r = r.lock().expect("request timings poisoned");
+                r.completed += 1;
+                r.send_wait += send_wait;
+                r.queued += queue_wait;
+                r.work += measurement.wall;
+                if let Some(cpu) = measurement.cpu {
+                    *r.cpu.get_or_insert(Duration::ZERO) += cpu;
+                }
+            }
+            let _ = tx.send(result);
+        }));
+        let result = rx.await.context("world directory worker failed");
+        if let Some(r) = request {
+            r.lock().expect("request timings poisoned").round_trip += start.elapsed();
+        }
+        result?
     }
     pub async fn collect<T: Send + 'static>(
         &self,
@@ -1324,6 +1360,7 @@ impl World {
     ) -> Result<Self> {
         let mut entities = BTreeMap::new();
         let mut actor_ids = BTreeSet::new();
+        let mut quest_ids = BTreeSet::new();
         let mut fountains = Vec::new();
         let mut cells = vec![BTreeSet::new(); map.cells.len()];
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
@@ -1380,6 +1417,7 @@ impl World {
                         stage: None,
                         parent: None,
                         camp: None,
+                        population_slot: None,
                         quest: None,
                         expires: None,
                         next_aux: 0,
@@ -1429,6 +1467,9 @@ impl World {
                     {
                         actor_ids.insert(id);
                     }
+                    if o.quest {
+                        quest_ids.insert(id);
+                    }
                     entities.insert(id, e);
                 }
             }
@@ -1438,7 +1479,9 @@ impl World {
             map,
             realm_layout: None,
             entities,
+            non_population_ids: actor_ids.clone(),
             actor_ids,
+            quest_ids,
             players: BTreeMap::new(),
             guild: None,
             bullets: Vec::new(),
@@ -1468,6 +1511,9 @@ impl World {
             encounter: false,
             population: vec![],
             camps: vec![],
+            population_regions: std::array::from_fn(|_| population_density::Region::default()),
+            population_counts: [0; 13],
+            population_next: 10000,
             setpieces: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
@@ -1671,6 +1717,7 @@ impl World {
                 stage: None,
                 parent: None,
                 camp: None,
+                population_slot: None,
                 quest: None,
                 expires: None,
                 next_aux: 0,
@@ -1681,6 +1728,10 @@ impl World {
         );
         self.cells[cell].insert(id);
         self.actor_ids.insert(id);
+        self.non_population_ids.insert(id);
+        if definition.quest {
+            self.quest_ids.insert(id);
+        }
         Ok(id)
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
@@ -1711,8 +1762,22 @@ impl World {
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
         self.actor_ids.remove(&id);
+        self.non_population_ids.remove(&id);
+        self.quest_ids.remove(&id);
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
+        if let Some(slot) = entity.population_slot {
+            let terrain = self.population_terrain(&self.population[slot]) as usize;
+            assert_eq!(
+                self.population[slot].entity,
+                Some(id),
+                "population slot ownership changed"
+            );
+            self.population[slot].entity = None;
+            self.population_counts[terrain] = self.population_counts[terrain]
+                .checked_sub(1)
+                .expect("population count underflow");
+        }
         self.orphan_satellites(&entity);
         assert!(!entity.reserved, "cannot remove a reserved container");
         self.bag_expiry.remove(&id);
@@ -2076,7 +2141,9 @@ impl World {
             return None;
         }
         let player = &self.players[&id];
-        self.actors()
+        self.quest_ids
+            .iter()
+            .map(|id| self.entities.get(id).expect("indexed quest missing"))
             .filter_map(|e| {
                 let definition = &self.content.objects[&e.kind];
                 if !definition.quest || e.hp <= 0 || !e.accessible(player.character.account) {
@@ -2132,7 +2199,7 @@ impl World {
             .collect()
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
-        let started = Instant::now();
+        let started = crate::performance::Measure::start();
         let mut visible = self.visible(id);
         // The native minimap tracks players across this world, including outside explored terrain.
         visible.extend(self.players.keys().copied());
@@ -2162,10 +2229,17 @@ impl World {
             let mut o = Writer::new();
             o.i16(i16::try_from(tiles.len())?);
             let p = self.players.get_mut(&id).unwrap();
-            for (x, y, ground) in tiles {
+            for &(x, y, ground) in &tiles {
                 p.tiles.insert((x, y));
                 p.character.tiles += 1;
                 o.i16(x).i16(y).u8(ground);
+            }
+            if !tiles.is_empty() {
+                let adding = crate::performance::Measure::start();
+                p.view_tiles
+                    .borrow_mut()
+                    .discover(&self.map, &self.content, &tiles, p.tiles.len());
+                self.performance.borrow_mut().work("terrain_update", adding);
             }
             o.i16(added.len() as i16);
             for entity in added {
@@ -2198,9 +2272,7 @@ impl World {
             send(p, 34, out.0);
             tracing::debug!(player = id, quest, "native quest target updated");
         }
-        self.performance
-            .borrow_mut()
-            .record("visibility", started.elapsed());
+        self.performance.borrow_mut().work("visibility", started);
         Ok(())
     }
     #[cfg(test)]
@@ -2450,6 +2522,11 @@ impl World {
                 .get(id)
                 .expect("simulated entity missing from storage")
         })
+    }
+    fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
+        self.non_population_ids
+            .iter()
+            .map(|id| self.entities.get(id).expect("scripted actor missing"))
     }
     fn entities_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
         self.near_entities(
@@ -3824,35 +3901,6 @@ impl World {
         }
         Ok(())
     }
-    fn populate_shore(&mut self) -> Result<()> {
-        self.populate_shore_population()
-    }
-    fn repopulate(&mut self) -> Result<()> {
-        for s in &mut self.population {
-            if s.entity.is_some_and(|id| !self.entities.contains_key(&id)) {
-                s.entity = None;
-                s.ready = self.now + 60_000;
-            }
-        }
-        for i in 0..self.population.len() {
-            let s = &self.population[i];
-            if s.camp.is_none()
-                && s.entity.is_none()
-                && self.now >= s.ready
-                && self.population_space(self.content.objects[&s.kind].terrain, 1)?
-                && self.players.values().all(|p| p.pos.distance(s.pos) >= 12.)
-            {
-                let id = self.spawn_entity(s.kind, s.pos, vec![])?;
-                self.population[i].entity = Some(id);
-                tracing::debug!(
-                    entity = id,
-                    kind = self.population[i].kind,
-                    "ordinary population member replenished"
-                );
-            }
-        }
-        self.repopulate_families()
-    }
     fn move_entity(&mut self, id: i32, goal: Pos, distance: f32) -> Result<()> {
         let old = self.entities[&id].pos;
         let length = old.distance(goal);
@@ -3906,9 +3954,31 @@ impl World {
         }
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
+        let audience: Vec<_> = self
+            .players
+            .values()
+            .filter(|p| p.character.alive && !p.death_pending && !p.departing && !p.paused)
+            .map(|p| p.pos)
+            .chain(self.decoy_positions())
+            .collect();
         let ids: Vec<_> = self
             .actors()
             .filter(|e| {
+                // Unstarted ordinary AI has no running clocks to suspend; keep distant births dormant.
+                if e.population_slot.is_some()
+                    && e.activated.is_none()
+                    && e.stage.is_none()
+                    && e.expires.is_none()
+                    && e.next_shot <= self.now
+                    && e.next_aux == 0
+                    && e.reaction_until == 0
+                    && e.blocked_since.is_none()
+                    && e.charge.is_none()
+                    && e.script.is_none()
+                    && audience.iter().all(|p| e.pos.distance(*p) >= 20.)
+                {
+                    return false;
+                }
                 let object = &self.content.objects[&e.kind];
                 // Breakable scenery takes damage but has no movement/attack state machine.
                 object.class != "Wall"
@@ -4487,7 +4557,7 @@ impl World {
         packets
     }
     pub fn step(&mut self) {
-        let started = Instant::now();
+        let started = crate::performance::Measure::start();
         self.now += 50;
         self.tick += 1;
         self.expire_consumable_boosts();
@@ -4601,9 +4671,13 @@ impl World {
                 }
             }
         }
+        let population_started = crate::performance::Measure::start();
         if let Err(error) = self.repopulate() {
             tracing::error!(%error,"Realm population replenishment failed");
         }
+        self.performance
+            .borrow_mut()
+            .work("population", population_started);
         let expired: Vec<_> = self
             .bag_expiry
             .iter()
@@ -4620,17 +4694,19 @@ impl World {
             self.remove_entity(id);
             tracing::debug!(entity = id, "expired transient or empty container removed");
         }
+        let mechanics_started = crate::performance::Measure::start();
         self.mechanic_expiry();
         self.abyss_step();
         self.ground_step();
         self.ocean_step();
         self.event_step();
         self.ability_step();
-        let npc_started = Instant::now();
-        let shots = self.npc_step();
         self.performance
             .borrow_mut()
-            .record("npc", npc_started.elapsed());
+            .work("mechanics", mechanics_started);
+        let npc_started = crate::performance::Measure::start();
+        let shots = self.npc_step();
+        self.performance.borrow_mut().work("npc", npc_started);
         self.grenade_step();
         for id in &ids {
             if let Err(e) = self.updates(*id, false) {
@@ -4844,15 +4920,23 @@ impl World {
                 p.tick += 1;
             }
         }
-        let mut performance = self.performance.borrow_mut();
-        performance.record("step", started.elapsed());
-        if let Some(timings) = performance.report() {
-            tracing::info!(world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
+        self.performance.borrow_mut().work("step", started);
+    }
+    fn report_performance(&self, world_id: i32) {
+        if let Some(timings) = self.performance.borrow_mut().report() {
+            tracing::info!(world_id,world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
+                bullets=self.bullets.len(),spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
+                pending_shoot_acks=self.players.values().map(|p|p.shoot_acks.len()).sum::<usize>(),
+                weapon_tick_records=self.players.values().map(|p|p.weapon_ticks.len()).sum::<usize>(),
                 humans=self.players.values().filter(|p| p.controller==Controller::Human).count(),
                 bots=self.players.values().filter(|p| p.controller==Controller::Autonomous).count(),
                 qa_actors=self.players.values().filter(|p| p.controller==Controller::Qa).count(),
                 discovered_tiles=self.players.values().map(|p|p.tiles.len()).sum::<usize>(),
                 cached_view_tiles=self.players.values().map(|p|p.view_tiles.borrow().tiles.len()).sum::<usize>(),
+                cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.capacity()*std::mem::size_of::<view::Tile>()).sum::<usize>(),
+                terrain_rebuilds=self.players.values().map(|p|p.view_tiles.borrow().rebuilds).sum::<u64>(),
+                incremental_terrain_tiles=self.players.values().map(|p|p.view_tiles.borrow().incremental_tiles).sum::<u64>(),
+                cloned_snapshot_tiles=self.players.values().map(|p|p.view_tiles.borrow().cloned_snapshot_tiles).sum::<u64>(),
                 timings=%timings,"world performance");
         }
     }
@@ -4963,6 +5047,8 @@ mod tests {
             cell.terrain = terrain;
             cell.object = None;
         }
+        w.configure_population().unwrap();
+        w.population_next = u64::MAX;
         w
     }
     pub(super) fn ch(w: &World) -> Character {
@@ -5024,6 +5110,33 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn command_scope_measures_world_requests_without_charging_sleep_as_cpu() {
+        let handle = Handle::spawn(directory());
+        handle.clock.set_paused(true);
+        let requests = Arc::new(std::sync::Mutex::new(
+            crate::performance::Requests::default(),
+        ));
+        crate::performance::REQUEST
+            .scope(
+                requests.clone(),
+                handle.directory(|_| {
+                    std::thread::sleep(Duration::from_millis(30));
+                    Ok(())
+                }),
+            )
+            .await
+            .unwrap();
+        let r = requests.lock().unwrap();
+        assert_eq!((r.calls, r.completed), (1, 1));
+        assert!(r.work >= Duration::from_millis(30));
+        assert!(r.round_trip >= r.work + r.queued + r.send_wait);
+        if cfg!(target_os = "linux") {
+            assert!(r.cpu.unwrap() < r.work / 2);
+        } else {
+            assert!(r.cpu.is_none());
+        }
     }
     #[test]
     fn directory_routes_and_global_identities_do_not_alias() {
@@ -6540,7 +6653,8 @@ mod tests {
     fn sprite_world_portal_stays_usable_for_fifteen_seconds_then_expires() {
         let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
         let w = d.worlds.get_mut(&-3).unwrap();
-        let pos = w.population[0].pos;
+        let (x, y) = w.map.spawns[0];
+        let pos = Pos { x, y };
         let player = w.enter(ch(w), None).unwrap();
         w.players.get_mut(&player).unwrap().pos = pos;
         d.tick = 1234;
@@ -6563,7 +6677,7 @@ mod tests {
     fn shore_population_is_bounded_sourced_and_cannot_respawn_on_players() {
         let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
         let w = d.worlds.get_mut(&-3).unwrap();
-        assert_eq!(w.population_count(11), 24);
+        assert!(w.population_count(11) >= w.population_regions[11].target);
         for spawn in w
             .population
             .iter()
@@ -6575,20 +6689,31 @@ mod tests {
             );
             assert!(w.walkable(spawn.pos));
         }
-        let slot = w.population.iter().position(|s| s.kind == 0x602).unwrap();
-        let pos = w.population[slot].pos;
-        let old = w.population[slot].entity.unwrap();
-        w.remove_entity(old);
-        w.repopulate().unwrap();
+        let pos = w.population.iter().find(|s| s.kind == 0x602).unwrap().pos;
+        let old: BTreeSet<_> = w
+            .population
+            .iter()
+            .filter(|s| w.population_terrain(s) == 11)
+            .filter_map(|s| s.entity)
+            .collect();
+        for id in &old {
+            w.remove_entity(*id);
+        }
         let player = w.enter(ch(w), None).unwrap();
         w.players.get_mut(&player).unwrap().pos = pos;
-        w.now = 60_000;
+        w.now = 60000;
         w.repopulate().unwrap();
-        assert!(w.population[slot].entity.is_none());
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 0.5, y: 0.5 };
-        w.repopulate().unwrap();
-        assert_ne!(w.population[slot].entity.unwrap(), old);
-        assert_eq!(w.entities_at(pos).filter(|e| e.kind == 0x602).count(), 1);
+        assert!(w.population_count(11) >= w.population_regions[11].target);
+        for member in w
+            .population
+            .iter()
+            .filter(|s| w.population_terrain(s) == 11)
+        {
+            if let Some(id) = member.entity {
+                assert!(!old.contains(&id));
+                assert!(w.entities[&id].pos.distance(pos) >= 12.);
+            }
+        }
         assert_eq!(
             w.entities
                 .values()
@@ -6605,7 +6730,7 @@ mod tests {
                 .count()
                 + w.hero_identities().len()
         );
-        assert!(w.population_count(11) <= 24);
+        assert!(w.population_count(11) <= w.population_regions[11].limit);
         assert_eq!(w.hero_identities().len(), 14);
         assert!(
             w.population

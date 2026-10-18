@@ -91,6 +91,35 @@ impl Projectile {
         )
     }
 }
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct SpawnGroup {
+    pub mean: usize,
+    pub deviation: usize,
+    pub min: usize,
+    pub max: usize,
+}
+impl SpawnGroup {
+    fn parse(n: Node<'_, '_>) -> Result<Self> {
+        let value = |tag| -> Result<usize> {
+            Ok(child(n, tag)
+                .and_then(|v| v.text())
+                .context("incomplete spawn group")?
+                .trim()
+                .parse()?)
+        };
+        let group = Self {
+            mean: value("Mean")?,
+            deviation: value("StdDev")?,
+            min: value("Min")?,
+            max: value("Max")?,
+        };
+        ensure!(
+            group.min > 0 && group.min <= group.mean && group.mean <= group.max && group.max <= 32,
+            "invalid spawn group bounds"
+        );
+        Ok(group)
+    }
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct Object {
     pub kind: u16,
@@ -141,6 +170,9 @@ pub struct Object {
     pub enemy: bool,
     pub stasis_immune: bool,
     pub terrain: u8,
+    pub spawn_weight: Option<f32>,
+    pub spawn_group: Option<SpawnGroup>,
+    pub per_realm_max: Option<usize>,
     pub quest: bool,
     pub quest_level: Option<i32>,
     pub xp_multiplier: f32,
@@ -412,6 +444,26 @@ impl Content {
                     "ShorePlains" => 12,
                     terrain => bail!("unknown selected terrain {terrain}"),
                 },
+                spawn_weight: child(n, "SpawnProb")
+                    .map(|v| -> Result<f32> {
+                        let weight: f32 =
+                            v.text().context("SpawnProb has no value")?.trim().parse()?;
+                        ensure!(
+                            weight.is_finite() && (0.0..=1.0).contains(&weight),
+                            "invalid SpawnProb"
+                        );
+                        Ok(weight)
+                    })
+                    .transpose()?,
+                spawn_group: child(n, "Spawn").map(SpawnGroup::parse).transpose()?,
+                per_realm_max: child(n, "PerRealmMax")
+                    .map(|v| -> Result<usize> {
+                        Ok(v.text()
+                            .context("PerRealmMax has no value")?
+                            .trim()
+                            .parse()?)
+                    })
+                    .transpose()?,
                 quest: child(n, "Quest").is_some(),
                 quest_level: child(n, "Level")
                     .map(|_| text(n, "Level").parse())

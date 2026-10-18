@@ -134,7 +134,9 @@ fn inland_population_respects_xml_biomes_caps_and_validated_attack_contracts() {
         .iter()
         .filter(|s| s.entity.is_some_and(|id| w.entities.contains_key(&id)))
         .count();
-    assert!(alive > 250 && alive <= 344);
+    let target: usize = w.population_regions.iter().map(|r| r.target).sum();
+    let limit: usize = w.population_regions.iter().map(|r| r.limit).sum();
+    assert!((target..=limit).contains(&alive));
     for (terrain, roster) in progression::REALM_ROSTER {
         for kind in *roster {
             crate::encounter::validate(&w.content, *kind).unwrap();
@@ -146,7 +148,10 @@ fn inland_population_respects_xml_biomes_caps_and_validated_attack_contracts() {
                 roster.contains(&s.kind) && s.entity.is_some_and(|id| w.entities.contains_key(&id))
             })
             .collect();
-        assert!(!spawns.is_empty() && spawns.len() <= 32);
+        assert!(spawns.len() <= w.population_regions[*terrain as usize].limit);
+        if w.population_regions[*terrain as usize].target > 0 {
+            assert!(!spawns.is_empty());
+        }
         for spawn in spawns {
             assert_eq!(w.content.objects[&spawn.kind].terrain, *terrain);
             assert_eq!(

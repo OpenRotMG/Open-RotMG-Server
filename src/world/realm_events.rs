@@ -250,7 +250,7 @@ impl World {
     }
     pub(super) fn event_step(&mut self) {
         let roots: Vec<_> = self
-            .actors()
+            .non_population_actors()
             .filter(|e| e.kind == 0xd5f && e.quest == Some(e.id))
             .map(|e| e.id)
             .collect();
