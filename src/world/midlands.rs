@@ -223,6 +223,7 @@ impl World {
             for member in self.shield_members(id)? {
                 self.flash_inland(member, 0xffff0000, 0.5, 2.);
                 self.entities.get_mut(&member).unwrap().stage = Some(2);
+                self.npc_global_ids.insert(member);
             }
             tracing::debug!(
                 entity = id,

@@ -1,0 +1,100 @@
+use super::*;
+
+impl World {
+    pub(super) fn npc_candidates(&mut self, audience: &[Pos]) -> Vec<i32> {
+        assert!(
+            audience.iter().all(|p| p.x.is_finite() && p.y.is_finite()),
+            "NPC audience contains nonfinite positions"
+        );
+        let all_global = self.npc_global_ids.len() == self.actor_ids.len();
+        let mut candidates: Vec<_> = self.npc_global_ids.iter().copied().collect();
+        let (mut requested, mut cells) = (0, 0);
+        // When every actor is global, a cell query would only repeat required work.
+        if !all_global {
+            let width = self.map.width as usize;
+            let mut rows = Vec::new();
+            for p in audience {
+                let x0 = ((p.x - 20.) as i32).saturating_sub(1).max(0);
+                let y0 = ((p.y - 20.) as i32).saturating_sub(1).max(0);
+                let x1 = ((p.x + 20.) as i32)
+                    .saturating_add(1)
+                    .min(self.map.width - 1);
+                let y1 = ((p.y + 20.) as i32)
+                    .saturating_add(1)
+                    .min(self.map.height - 1);
+                if x0 > x1 || y0 > y1 {
+                    continue;
+                }
+                for y in y0..=y1 {
+                    let start = y as usize * width + x0 as usize;
+                    let end = y as usize * width + x1 as usize + 1;
+                    requested += end - start;
+                    rows.push((start, end));
+                }
+            }
+            rows.sort_unstable();
+            let mut merged: Vec<(usize, usize)> = Vec::new();
+            for (start, end) in rows {
+                if let Some(last) = merged.last_mut()
+                    && start <= last.1
+                {
+                    last.1 = last.1.max(end);
+                } else {
+                    merged.push((start, end));
+                }
+            }
+            for (start, end) in merged {
+                cells += end - start;
+                for cell in &self.cells[start..end] {
+                    candidates.extend(
+                        cell.iter()
+                            .filter(|id| self.actor_ids.contains(id))
+                            .copied(),
+                    );
+                }
+            }
+            candidates.sort_unstable();
+            candidates.dedup();
+        }
+        let examined = candidates.len();
+        candidates.retain(|id| {
+            let e = self.entities.get(id).expect("NPC candidate entity missing");
+            if e.population_slot.is_some()
+                && e.activated.is_none()
+                && e.stage.is_none()
+                && e.expires.is_none()
+                && e.next_shot <= self.now
+                && e.next_aux == 0
+                && e.reaction_until == 0
+                && e.blocked_since.is_none()
+                && e.charge.is_none()
+                && e.script.is_none()
+                && audience.iter().all(|p| e.pos.distance(*p) >= 20.)
+            {
+                self.npc_global_ids.remove(id);
+                return false;
+            }
+            let object = &self.content.objects[&e.kind];
+            let selected = object.class != "Wall"
+                && !matches!(e.kind, 0xd5f | 0xd60)
+                && (object.enemy || matches!(e.kind, 0x173 | 0xd7d));
+            if selected && !all_global {
+                self.npc_global_ids.insert(*id);
+            }
+            selected
+        });
+        #[cfg(test)]
+        npc_query_tests::COUNTS.set((examined, cells, requested, candidates.len()));
+        let mut performance = self.performance.borrow_mut();
+        for (name, amount) in [
+            ("npc_queries", 1),
+            ("npc_query_candidates", examined),
+            ("npc_query_cells", cells),
+            ("npc_query_requested_cells", requested),
+            ("npc_selected", candidates.len()),
+        ] {
+            performance.count(name, amount as u64);
+        }
+        candidates
+    }
+}

@@ -114,6 +114,9 @@ mod native_hits;
 #[cfg(test)]
 mod native_hits_tests;
 mod npc_attacks;
+mod npc_queries;
+#[cfg(test)]
+mod npc_query_tests;
 #[cfg(test)]
 mod quiver_tests;
 mod reconciliation;
@@ -454,6 +457,8 @@ pub struct World {
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: BTreeMap<i32, Entity>,
     actor_ids: BTreeSet<i32>,
+    // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
+    npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
     quest_ids: BTreeSet<i32>,
     pub players: BTreeMap<i32, Player>,
@@ -1482,6 +1487,7 @@ impl World {
             realm_layout: None,
             entities,
             non_population_ids: actor_ids.clone(),
+            npc_global_ids: actor_ids.clone(),
             actor_ids,
             quest_ids,
             players: BTreeMap::new(),
@@ -1730,6 +1736,7 @@ impl World {
         );
         self.cells[cell].insert(id);
         self.actor_ids.insert(id);
+        self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
         if definition.quest {
             self.quest_ids.insert(id);
@@ -1764,6 +1771,7 @@ impl World {
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
         self.actor_ids.remove(&id);
+        self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
         self.quest_ids.remove(&id);
         self.ability_state.objects.remove(&id);
@@ -3971,32 +3979,7 @@ impl World {
             .map(|p| p.pos)
             .chain(self.decoy_positions())
             .collect();
-        let ids: Vec<_> = self
-            .actors()
-            .filter(|e| {
-                // Unstarted ordinary AI has no running clocks to suspend; keep distant births dormant.
-                if e.population_slot.is_some()
-                    && e.activated.is_none()
-                    && e.stage.is_none()
-                    && e.expires.is_none()
-                    && e.next_shot <= self.now
-                    && e.next_aux == 0
-                    && e.reaction_until == 0
-                    && e.blocked_since.is_none()
-                    && e.charge.is_none()
-                    && e.script.is_none()
-                    && audience.iter().all(|p| e.pos.distance(*p) >= 20.)
-                {
-                    return false;
-                }
-                let object = &self.content.objects[&e.kind];
-                // Breakable scenery takes damage but has no movement/attack state machine.
-                object.class != "Wall"
-                    && !matches!(e.kind, 0xd5f | 0xd60)
-                    && (object.enemy || matches!(e.kind, 0x173 | 0xd7d))
-            })
-            .map(|e| e.id)
-            .collect();
+        let ids = self.npc_candidates(&audience);
         for id in ids {
             let Some(entity) = self.entities.get(&id) else {
                 continue;
