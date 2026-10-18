@@ -145,6 +145,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         dialogue,
         society: Arc::default(),
         requests: Arc::default(),
+        picture_reads: Arc::default(),
         connections: Arc::new(tokio::sync::Semaphore::new(config.max_players * 2)),
         control,
         discord_link_token: match std::env::var("DISCORD_LINK_TOKEN_FILE") {

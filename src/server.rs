@@ -9,6 +9,7 @@ mod name_choice_boundaries_tests;
 mod name_choice_tests;
 #[cfg(test)]
 mod password_tests;
+mod pictures;
 #[cfg(test)]
 mod purchase_tests;
 #[cfg(test)]
@@ -205,6 +206,7 @@ pub struct App {
     pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
     pub society: Arc<Mutex<crate::bots::adventures::Society>>,
     pub requests: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
+    pub picture_reads: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
@@ -225,7 +227,7 @@ fn error(e: anyhow::Error) -> Response {
     )
         .into_response()
 }
-fn admit(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<bool> {
+fn request_ip(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<IpAddr> {
     if let Some(origin) = headers.get("origin") {
         ensure!(
             origin.to_str()? == a.origin,
@@ -244,6 +246,10 @@ fn admit(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<bool> {
     } else {
         peer.ip()
     };
+    Ok(ip)
+}
+fn admit(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<bool> {
+    let ip = request_ip(a, headers, peer)?;
     Ok(rate_allow(
         &mut a.requests.lock().expect("request registry poisoned"),
         ip,
@@ -2081,6 +2087,18 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         crate::bots::start(&a).await?;
     }
     let app = Router::new()
+        .route(
+            "/legacy-api/picture/save",
+            post(pictures::save).layer(DefaultBodyLimit::max(24 * 1024)),
+        )
+        .route(
+            "/legacy-api/picture/get",
+            post(pictures::get_picture).layer(DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/legacy-api/picture/{operation}",
+            post(pictures::request).layer(DefaultBodyLimit::max(2048)),
+        )
         .route("/legacy-api/char/list", post(chars))
         .route("/legacy-api/char/fame", post(fame))
         .route("/legacy-api/char/delete", post(delete_character))
