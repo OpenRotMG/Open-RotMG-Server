@@ -26,9 +26,10 @@ tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-# Unoptimized map construction and password hashing dominate test runtime.
+# Optimize CPU-heavy tests while keeping their large executable cheap to compile.
 [profile.dev]
 opt-level = 1
+codegen-units = 256
 
 [dev-dependencies]
 delaunator = "=1.0.2"
