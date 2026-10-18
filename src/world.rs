@@ -2001,8 +2001,15 @@ impl World {
                 if !definition.quest || e.hp <= 0 || !e.accessible(player.character.account) {
                     return None;
                 }
+                let max = match e.kind {
+                    0x617 => 8,
+                    0x609 | 0x60d => 9,
+                    0x61f => 10,
+                    _ => 20,
+                };
                 // XML Level recommends a quest, rather than setting a minimum character level.
-                Some((e, definition.quest_level?.abs_diff(player.character.level)))
+                (player.character.level <= max)
+                    .then_some((e, definition.quest_level?.abs_diff(player.character.level)))
             })
             .min_by(|(a, a_level), (b, b_level)| {
                 a_level
