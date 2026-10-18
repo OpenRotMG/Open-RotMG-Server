@@ -26,7 +26,8 @@ GUILDS_GAME = {**GOLD_GAME, 'guilds': ('id', 'name', 'level', 'fame', 'earned', 
 REWARDS_GAME = {**GUILDS_GAME, 'gold_rewards': ('account', 'reward', 'awarded_at', 'notified_at')}
 SLOTS_GAME = {**REWARDS_GAME, 'accounts': (*GOLD_GAME['accounts'], 'character_slots'), 'character_slot_purchases': ('account', 'timer', 'slots')}
 VAULTS_GAME = {**SLOTS_GAME, 'accounts': (*SLOTS_GAME['accounts'], 'vault_mask'), 'vaults': ('account', 'chest', 'items', 'revision')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME}
+FAME_GAME = {**VAULTS_GAME, 'deaths': (*LEGACY_GAME['deaths'], 'equipment_fame')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -38,7 +39,8 @@ AUTH_GOLD_GAME = {**AUTH_UPDATES_GAME, 'accounts': GOLD_GAME['accounts']}
 AUTH_GUILDS_GAME = {**AUTH_GOLD_GAME, 'guilds': GUILDS_GAME['guilds'], 'guild_members': GUILDS_GAME['guild_members']}
 AUTH_REWARDS_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewards']}
 AUTH_SLOTS_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'character_slot_purchases': SLOTS_GAME['character_slot_purchases']}
-RELOADED_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vaults': VAULTS_GAME['vaults']}
+AUTH_VAULTS_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vaults': VAULTS_GAME['vaults']}
+RELOADED_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -96,6 +98,20 @@ def snapshot(path, schema, *, include_schema=False):
                     actual = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone()
                     if actual != (kind, 1, default, key, 0):
                         raise ValueError('Unsupported canonical Vault metadata: ' + table + '.' + column)
+        if schema.get('deaths') == FAME_GAME['deaths']:
+            references = db.execute('SELECT "table","from","to",seq,on_update,on_delete FROM pragma_foreign_key_list(\'deaths\') ORDER BY id,seq').fetchall()
+            if references != [('characters', 'character', 'id', 0, 'NO ACTION', 'NO ACTION')]:
+                raise ValueError('Unsupported death character foreign key')
+            for column, kind, not_null, default, key in [
+                ('character', 'INTEGER', 0, None, 1),
+                ('snapshot', 'TEXT', 1, None, 0),
+                ('killed_by', 'TEXT', 1, None, 0),
+                ('died_at', 'INTEGER', 1, 'unixepoch()', 0),
+                ('equipment_fame', 'INTEGER', 1, None, 0),
+            ]:
+                metadata = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(\'deaths\') WHERE name=?', (column,)).fetchone()
+                if metadata != (kind, not_null, default, key, 0):
+                    raise ValueError('Unsupported canonical death metadata: ' + column)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
@@ -184,6 +200,41 @@ def validate_vaults(game):
         raise ValueError('Vault ownership/count/rows disagree')
 
 
+def validate_deaths(game, version):
+    accounts = {row['id'] for row in game['accounts']}
+    saved = {row['id']: row for row in game['characters']}
+    if len(saved) != len(game['characters']):
+        raise ValueError('Duplicate character identity')
+    for row in saved.values():
+        payload = json.loads(row['stats'])
+        # Creation serializes stats before SQLite assigns the canonical character row ID.
+        if (type(row['id']) is not int or row['id'] <= 0 or row['account'] not in accounts
+                or payload['id'] not in (0, row['id']) or payload['account'] != row['account']):
+            raise ValueError('Invalid character ownership')
+    seen, earned = set(), {account: 0 for account in accounts}
+    for row in game['deaths']:
+        character = row['character']
+        snapshot = json.loads(row['snapshot'])
+        bonus = row['equipment_fame'] if version >= 14 else 0
+        if (type(character) is not int or character not in saved or character in seen
+                or saved[character]['alive'] != 0 or snapshot['id'] != character
+                or snapshot['account'] != saved[character]['account'] or snapshot['alive'] is not False
+                or snapshot['hp'] != 0 or type(snapshot['fame']) is not int or snapshot['fame'] < 0
+                or type(bonus) is not int or bonus < 0 or snapshot['fame'] + bonus > 2147483647):
+            raise ValueError('Invalid archived death award or ownership')
+        seen.add(character)
+        earned[snapshot['account']] += snapshot['fame'] + bonus
+    if version >= 5:
+        for row in game['account_fame']:
+            if earned[row['account']] != row['earned']:
+                raise ValueError('Death awards disagree with account earned fame')
+    if version >= 9:
+        wallets = {row['account']: row['earned'] for row in game['account_fame']}
+        if (any(row['fame'] > wallets[row['account']] for row in game['guild_members'])
+                or sum(row['earned'] for row in game['guilds']) > sum(wallets.values())):
+            raise ValueError('Guild contribution or earnings exceed account earned fame')
+
+
 def validate(bundle):
     if set(bundle) != {'schema', 'created_at', 'revisions', 'game', 'discord'} or type(bundle['schema']) is not int or bundle['schema'] not in GAME_SCHEMAS:
         raise ValueError('Unsupported backup envelope')
@@ -267,11 +318,12 @@ def validate(bundle):
         validate_slots(bundle['game'])
     if bundle['schema'] >= 13:
         validate_vaults(bundle['game'])
+    validate_deaths(bundle['game'], bundle['schema'])
     return bundle
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if (stored_version > max(GAME_SCHEMAS) or (max(versions) >= 12 and stored_version != max(versions))
             or (stored_version >= 12 and stored_version not in versions)):
@@ -301,9 +353,9 @@ def restore(archive, directory):
     # NULL identities cannot authenticate; ownership must be reverified separately after a disaster.
     definitions = {
         'game': """CREATE TABLE accounts(id INTEGER PRIMARY KEY,guid TEXT UNIQUE,name TEXT NOT NULL);
-CREATE TABLE characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL,alive INTEGER NOT NULL);
+CREATE TABLE characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,alive INTEGER NOT NULL DEFAULT 1);
 CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1;
-CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL);""",
+CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()));""",
         'discord': """CREATE TABLE levels(guild_id TEXT NOT NULL,user_id TEXT NOT NULL,username TEXT NOT NULL,xp INTEGER NOT NULL CHECK(xp>=0 AND xp<=9007199254740991),last_xp_at INTEGER NOT NULL,last_message_id TEXT NOT NULL,PRIMARY KEY(guild_id,user_id)) STRICT;""",
     }
     if 2 <= bundle['schema'] < 13:
@@ -348,6 +400,8 @@ CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accou
         definitions['game'] += """
 ALTER TABLE accounts ADD COLUMN vault_mask INTEGER NOT NULL DEFAULT 1 CHECK(typeof(vault_mask)='integer' AND vault_mask BETWEEN 1 AND 1048575 AND (vault_mask & 1)=1);
 CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEGER NOT NULL CHECK(typeof(chest)='integer' AND chest BETWEEN 0 AND 19),items TEXT NOT NULL CHECK(json_array_length(items)=8),revision INTEGER NOT NULL DEFAULT 0 CHECK(typeof(revision)='integer' AND revision BETWEEN 0 AND 2147483647),PRIMARY KEY(account,chest));"""
+    if bundle['schema'] >= 14:
+        definitions['game'] += "\nALTER TABLE deaths ADD COLUMN equipment_fame INTEGER NOT NULL CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647);"
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

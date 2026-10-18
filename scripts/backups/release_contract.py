@@ -1,4 +1,5 @@
 from contextlib import closing
+from copy import deepcopy
 import gzip
 import json
 import os
@@ -35,6 +36,30 @@ def check(binary, data, directory, revision):
     if json.loads(result.stdout) != {'exercised_vault_chests': 2, 'transfers': 1, 'withdrawals': 1, 'deposits': 1, 'items_conserved': True}:
         raise RuntimeError('Release restored vault exercise returned an invalid receipt')
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
+    before_death = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    result = subprocess.run([str(binary), '--backup-exercise-death', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError('Release restored death exercise failed: ' + result.stderr.strip())
+    receipt = json.loads(result.stdout)
+    character = receipt.pop('exercised_death', None)
+    if type(character) is not int or receipt != {'base_fame': 19, 'equipment_fame': 1, 'total_fame': 20}:
+        raise RuntimeError('Release restored death exercise returned an invalid receipt')
+    subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
+    paid = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    backup.validate(dict(bundle, game=paid))
+    expected = deepcopy(before_death)
+    created = next(row for row in paid['characters'] if row['id'] == character)
+    expected['characters'].append(created)
+    expected['deaths'].append(next(row for row in paid['deaths'] if row['character'] == character))
+    account = created['account']
+    member = next(row for row in expected['guild_members'] if row['account'] == account)
+    wallet = next(row for row in expected['account_fame'] if row['account'] == account)
+    guild = next(row for row in expected['guilds'] if row['id'] == member['guild'])
+    for row, fields in [(wallet, ['balance', 'earned']), (guild, ['fame', 'earned']), (member, ['fame'])]:
+        for field in fields:
+            row[field] += 20
+    if paid != expected:
+        raise RuntimeError('Release restored death changed unrelated records or historical payouts')
     print(json.dumps({'event': 'release_backup_contract_passed', 'revision': revision}))
 
 

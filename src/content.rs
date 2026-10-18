@@ -137,6 +137,7 @@ pub struct Object {
     pub equipment: Vec<i32>,
     pub slots: Vec<i32>,
     pub slot_type: i32,
+    pub fame_bonus: u32,
     pub tier: Option<u8>,
     pub soulbound: bool,
     pub bag_type: u8,
@@ -256,6 +257,29 @@ fn kind(s: &str) -> Result<u16> {
         Ok(s.parse()?)
     }
 }
+fn fame_bonus(n: Node<'_, '_>) -> Result<u32> {
+    let mut fields = n.children().filter(|c| c.has_tag_name("FameBonus"));
+    let Some(field) = fields.next() else {
+        return Ok(0);
+    };
+    ensure!(
+        fields.next().is_none(),
+        "duplicate FameBonus on {:?}",
+        n.attribute("id")
+    );
+    ensure!(
+        !field.children().any(|c| c.is_element()),
+        "nested FameBonus on {:?}",
+        n.attribute("id")
+    );
+    field
+        .text()
+        .context("empty FameBonus")?
+        .trim()
+        .parse()
+        .with_context(|| format!("invalid FameBonus on {:?}", n.attribute("id")))
+}
+
 impl Content {
     pub fn load(dir: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(dir.join("objects.xml"))?;
@@ -324,6 +348,7 @@ impl Content {
                 equipment: list(n, "Equipment")?,
                 slots: list(n, "SlotTypes")?,
                 slot_type: number(n, "SlotType", 0.)? as i32,
+                fame_bonus: fame_bonus(n)?,
                 tier: child(n, "Tier")
                     .map(|_| text(n, "Tier").parse::<u8>())
                     .transpose()?,
@@ -1028,3 +1053,6 @@ mod tests {
         assert!(m.cells.iter().any(|c| c.object == Some(0x071e)));
     }
 }
+
+#[cfg(test)]
+mod fame_bonus_tests;

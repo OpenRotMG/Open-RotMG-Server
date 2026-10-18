@@ -298,11 +298,12 @@ async fn backpack_amulet_cannot_avoid_death_and_committed_death_cannot_be_resurr
     assert!(a.store.load(account, character).await.is_err());
     assert!(automatic_transfer(&a, id).await.unwrap().is_none());
     std::fs::remove_dir_all(dir).unwrap();
-    let (dir, a, _id, fatal, _rx, _) = fixture(3).await;
+    let (dir, a, _id, mut fatal, _rx, _) = fixture(4).await;
     a.store
         .death(fatal.clone(), "normal committed death".into())
         .await
         .unwrap();
+    fatal.items[3] = 0xb3e;
     assert!(
         a.store
             .resurrect(fatal.clone(), 3, a.content.clone())

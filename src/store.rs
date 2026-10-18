@@ -20,6 +20,7 @@ pub(crate) use character_slots::SlotReplay;
 mod crash_tests;
 #[cfg(test)]
 mod credits_tests;
+mod death_awards;
 #[cfg(test)]
 mod death_date_tests;
 #[cfg(test)]
@@ -293,6 +294,7 @@ pub struct Store {
     tx: mpsc::Sender<Job>,
     legacy_base: [i32; 8],
     classes: std::sync::Arc<std::collections::BTreeMap<u16, Class>>,
+    content: std::sync::Arc<Content>,
     hashes: std::sync::Arc<tokio::sync::Semaphore>,
     dummy_hash: String,
     dyes: std::sync::Arc<BTreeMap<u16, [Option<u32>; 2]>>,
@@ -328,9 +330,10 @@ impl Store {
         let mut c = Connection::open(path)?;
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13),
+            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14),
             "unsupported game database schema {version}"
         );
+        death_awards::check_schema(&c, version)?;
         let rewards_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gold_rewards')",
             [],
@@ -410,6 +413,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         character_slots::migrate(&migration, version)?;
         vaults::migrate(&migration, version)?;
+        death_awards::migrate(&migration, version, legacy_base)?;
         let records = {
             let mut q = migration.prepare("SELECT id,stats FROM characters ORDER BY id")?;
             q.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))?
@@ -481,7 +485,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "account fame wallet missing; restore reviewed state instead of recreating balances"
             );
         }
-        migration.pragma_update(None, "user_version", 13)?;
+        death_awards::validate_wallets(&migration)?;
+        migration.pragma_update(None, "user_version", 14)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -504,6 +509,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             tx,
             legacy_base,
             classes: std::sync::Arc::new(content.classes.clone()),
+            content: std::sync::Arc::new(content.clone()),
             hashes: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
             dummy_hash: accounts::hash("unknown-account")?,
             dyes: std::sync::Arc::new(
@@ -932,15 +938,41 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     pub async fn death(&self, mut ch: Character, killed_by: String) -> Result<()> {
         ch.xp_boost.active = false;
         ensure!(
-            !ch.alive && ch.hp == 0 && ch.fame >= 0,
-            "death snapshot must be dead with nonnegative fame"
+            !ch.alive && ch.hp == 0 && ch.fame >= 0 && ch.revision >= 0 && ch.revision < i32::MAX,
+            "death snapshot must be dead with nonnegative fame and a valid revision"
         );
-        self.call(move|c|{let tx=c.transaction()?;let n=tx.execute("UPDATE characters SET alive=0,stats=?3,items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND alive=1 AND revision=?5",params![ch.id,ch.account,serde_json::to_string(&ch)?,serde_json::to_string(&vec![-1;12])?,ch.revision])?;ensure!(n==1,"death already recorded or inventory conflict");tx.execute("INSERT INTO deaths(character,snapshot,killed_by) VALUES(?1,?2,?3)",params![ch.id,serde_json::to_string(&ch)?,killed_by])?;ensure!(tx.execute("UPDATE account_fame SET balance=balance+?2,earned=earned+?2 WHERE account=?1",params![ch.account,ch.fame])?==1,"account fame wallet missing");guilds::credit_death(&tx,ch.account,ch.fame)?;tx.commit()?;Ok(())}).await
+        let content = self.content.clone();
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let (raw, items): (String, String) = tx.query_row(
+                "SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND alive=1 AND revision=?3",
+                params![ch.id, ch.account, ch.revision], |r| Ok((r.get(0)?, r.get(1)?)))
+                .context("death conflict: duplicate, foreign or stale character")?;
+            let saved: Character = serde_json::from_str(&raw)?;
+            ensure!(saved.class == ch.class && saved.schema == ch.schema && ch.exp >= saved.exp
+                && ch.fame >= saved.fame && ch.xp_boost.bonus_exp >= saved.xp_boost.bonus_exp
+                && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
+                "death snapshot lost committed progress or equipment");
+            let bonus = death_awards::equipment(&ch, &content)?;
+            let total = death_awards::total(&ch, bonus)?;
+            let snapshot = serde_json::to_string(&ch)?;
+            let n = tx.execute("UPDATE characters SET alive=0,stats=?3,items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND alive=1 AND revision=?5",
+                params![ch.id,ch.account,snapshot,serde_json::to_string(&[-1;12])?,ch.revision])?;
+            ensure!(n == 1, "death lost its reservation");
+            tx.execute("INSERT INTO deaths(character,snapshot,killed_by,equipment_fame) VALUES(?1,?2,?3,?4)",
+                params![ch.id,snapshot,killed_by,bonus])?;
+            ensure!(tx.execute("UPDATE account_fame SET balance=balance+?2,earned=earned+?2 WHERE account=?1",params![ch.account,total])? == 1,
+                "account fame wallet missing");
+            guilds::credit_death(&tx,ch.account,total)?;
+            tx.commit()?;
+            tracing::info!(account=ch.account, character=ch.id, base_fame=ch.fame, equipment_fame=bonus, total_fame=total, "permanent death award committed");
+            Ok(())
+        }).await
     }
     pub async fn fame(&self, account: i32, id: i32) -> Result<String> {
         let legacy_base = self.legacy_base;
         // The legacy field is called CreatedOn, but the client labels it as the death date.
-        self.call(move|db|{let (snapshot,killer,died_at):(String,String,u64)=db.query_row("SELECT snapshot,killed_by,died_at FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame></Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),c.fame,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],c.fame))}).await
+        self.call(move|db|{let (snapshot,killer,died_at,bonus):(String,String,u64,i32)=db.query_row("SELECT snapshot,killed_by,died_at,equipment_fame FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(c.id==id && c.account==account && !c.alive && c.hp==0 && c.items.len()==12,"invalid archived death snapshot");let total=death_awards::total(&c,bonus)?;let equipment=if bonus>0 {format!("<Bonus id=\"Well Equipped\" desc=\"Bonus for equipment\">{bonus}</Bonus>")}else{String::new()};ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame>{}</Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),total,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],c.fame,equipment))}).await
     }
     #[cfg(test)]
     pub async fn rename(&self, account: i32, name: String) -> Result<()> {
@@ -1457,7 +1489,6 @@ mod tests {
             assert_eq!(saved.spider_dens, 5);
             saved.alive = false;
             saved.hp = 0;
-            saved.items.fill(-1);
             s.death(saved, "test clear snapshot".into()).await.unwrap();
             let fame = s.fame(ch.account, ch.id).await.unwrap();
             for counter in [
@@ -2112,3 +2143,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod equipment_fame_tests;
