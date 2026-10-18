@@ -444,7 +444,7 @@ struct Spawn {
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
-    pub(crate) realm_layout: Option<&'static str>,
+    pub(crate) realm_layout: Option<String>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: BTreeMap<i32, Entity>,
     actor_ids: BTreeSet<i32>,
@@ -798,7 +798,7 @@ impl Directory {
             },
             self.ids.clone(),
         )?;
-        world.realm_layout = layout.map(|index| self.realms[index].name());
+        world.realm_layout = layout.map(|index| self.realms[index].name().to_owned());
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
         if let Some(seed) = self.prepared_seed {
@@ -817,6 +817,7 @@ impl Directory {
                 .chain(crate::endgame::DUNGEONS)
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
+            let started = Instant::now();
             world.populate_shore()?;
             world.populate_inland()?;
             world.populate_realm_heroes()?;
@@ -827,6 +828,7 @@ impl Directory {
                 layout = world.realm_layout,
                 entities = world.entities.len(),
                 actors = world.actor_ids.len(),
+                elapsed_ms = started.elapsed().as_millis(),
                 "Realm simulation populated"
             );
         }
@@ -3166,6 +3168,12 @@ impl World {
                 .remove(&slot);
         }
         let mut o = Writer::new();
+        let potion_feedback = plan.stat_growth.as_ref().map(|(_, slot, _, amount)| {
+            format!(
+                "{} consumed (+{amount}).",
+                self.content.objects[&(slot.kind as u16)].name
+            )
+        });
         p.character.items = plan.items;
         p.character.revision = revision;
         if let Some((snapshot, _, index, amount)) = plan.stat_growth {
@@ -3249,6 +3257,10 @@ impl World {
         }
         tracing::info!(player = plan.player, revision, "inventory committed");
         let p = &self.players[&plan.player];
+        if let Some(text) = potion_feedback {
+            let packet = chat_info(&text);
+            send(p, packet.id, packet.body);
+        }
         if plan.purchase.is_some() {
             let packet = shop::reply(true, "Item purchased!");
             send(p, packet.id, packet.body);

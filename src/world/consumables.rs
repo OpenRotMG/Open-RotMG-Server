@@ -137,6 +137,35 @@ impl World {
             p.boosts.retain(|b| b.until.is_some() || b.source != source);
         }
     }
+    pub(super) fn consumable_feedback(
+        &self,
+        target: i32,
+        notification: Option<Vec<u8>>,
+        range: Option<f32>,
+    ) {
+        let (kind, radius) = match range {
+            Some(range) => (5, range),
+            None => (1, 0.),
+        };
+        let visual = cooperative::effect(kind, target, Pos { x: radius, y: 0. });
+        for p in self
+            .players
+            .values()
+            .filter(|p| p.active() && p.character.hp > 0 && !p.pending && p.known.contains(&target))
+        {
+            if let Some(body) = &notification {
+                send(p, wire::NOTIFICATION, body.clone());
+            }
+            send(p, wire::SHOW_EFFECT, visual.clone());
+        }
+    }
+    pub(super) fn consumable_restored(&self, target: i32, amount: i32, color: u32) {
+        if amount > 0 {
+            let mut out = Writer::new();
+            out.i32(target).utf(&format!("+{amount}")).u32(color);
+            self.consumable_feedback(target, Some(out.0), None);
+        }
+    }
     pub(super) fn finish_consumable(
         &mut self,
         player: i32,
@@ -144,7 +173,10 @@ impl World {
         effects: Vec<ConsumableEffect>,
     ) -> Result<()> {
         for (activation, effect) in effects.iter().enumerate() {
-            if let ConsumableEffect::Boost { duration, .. } = effect {
+            if let ConsumableEffect::Boost {
+                duration, range, ..
+            } = effect
+            {
                 for p in self.players.values_mut() {
                     if p.active() && p.character.hp > 0 {
                         for boost in p.boosts.iter_mut().filter(|b| {
@@ -157,6 +189,9 @@ impl World {
                             );
                         }
                     }
+                }
+                if self.players[&player].active() && self.players[&player].character.hp > 0 {
+                    self.consumable_feedback(player, None, *range);
                 }
                 continue;
             }
@@ -174,8 +209,11 @@ impl World {
                 } => {
                     let p = self.players.get_mut(&player).unwrap();
                     if p.conditions(self.now) & crate::condition::bit(crate::condition::SICK) == 0 {
+                        let before = p.character.hp;
                         p.character.hp =
                             (p.character.hp + amount).min(p.effective(&self.content, self.now)?[0]);
+                        let restored = p.character.hp - before;
+                        self.consumable_restored(player, restored, 0xff00ff00);
                     }
                 }
                 ConsumableEffect::Mana { amount, range } => {
@@ -184,13 +222,20 @@ impl World {
                         if p.conditions(self.now) & crate::condition::bit(crate::condition::QUIET)
                             == 0
                         {
+                            let before = p.character.mp;
                             p.character.mp = (p.character.mp + amount)
                                 .min(p.effective(&self.content, self.now)?[1]);
+                            let restored = p.character.mp - before;
+                            self.consumable_restored(target, restored, 0xff9000ff);
                         }
+                    }
+                    if let Some(range) = range {
+                        self.consumable_feedback(player, None, Some(range));
                     }
                 }
                 ConsumableEffect::Condition { effect, duration } => {
-                    self.apply_condition(player, effect, duration)?
+                    self.apply_condition(player, effect, duration)?;
+                    self.consumable_feedback(player, None, Some(1.));
                 }
                 ConsumableEffect::Clear { effect, check } => {
                     let p = self.players.get_mut(&player).unwrap();
@@ -199,12 +244,14 @@ impl World {
                         p.statuses.remove(&effect);
                     }
                 }
-                ConsumableEffect::Cleanse => self
-                    .players
-                    .get_mut(&player)
-                    .unwrap()
-                    .statuses
-                    .retain(|effect, _| !matches!(effect, 2..=11 | 14 | 16 | 27 | 28)),
+                ConsumableEffect::Cleanse => {
+                    self.players
+                        .get_mut(&player)
+                        .unwrap()
+                        .statuses
+                        .retain(|effect, _| !matches!(effect, 2..=11 | 14 | 16 | 27 | 28));
+                    self.consumable_feedback(player, None, Some(1.));
+                }
                 ConsumableEffect::Boost { .. } => unreachable!(),
                 ConsumableEffect::Unsupported(ref name) => {
                     bail!("unvalidated committed consumable effect: {name}")
