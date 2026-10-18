@@ -56,6 +56,7 @@ class ReleaseContract(unittest.TestCase):
             for version in [13, 14]:
                 malformed = deepcopy(bundle)
                 malformed['schema'] = version
+                del malformed['game']['pictures'], malformed['game']['picture_sequence']
                 del malformed['game']['deaths'][1]['equipment_fame']
                 with self.subTest(missing_award_version=version), self.assertRaisesRegex(ValueError, 'fields'):
                     backup.validate(malformed)
@@ -96,6 +97,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.validate(malformed)
             malformed = deepcopy(bundle)
             malformed['schema'] = 12
+            del malformed['game']['pictures'], malformed['game']['picture_sequence']
             with self.assertRaisesRegex(ValueError, 'fields'):
                 backup.validate(malformed)
             for field, values in [('character_slots', [True, 0, 15, '2'])]:

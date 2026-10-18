@@ -89,7 +89,7 @@ class PicturesBackup(unittest.TestCase):
             'DROP TABLE pictures', 'DROP TABLE picture_sequence', 'DELETE FROM picture_sequence',
             'UPDATE picture_sequence SET next_id=1',
             'ALTER TABLE pictures ADD COLUMN hidden TEXT GENERATED ALWAYS AS (name) VIRTUAL',
-            'PRAGMA foreign_keys=OFF; UPDATE pictures SET account=99999',
+            'PRAGMA foreign_keys=OFF; UPDATE pictures SET account=99999 WHERE id=(SELECT min(id) FROM pictures)',
             "UPDATE pictures SET png=x'00'",
             "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql,'png BLOB NOT NULL','png BLOB') WHERE name='pictures'; PRAGMA writable_schema=OFF;",
             "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql,'REFERENCES accounts(id)','') WHERE name='pictures'; PRAGMA writable_schema=OFF;",

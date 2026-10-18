@@ -622,7 +622,7 @@ CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),g
     def test_shore_schema_version_must_match_exact_tables(self):
         self.add_shore_state()
         before = self.export()
-        for version in [1, 2, 10, 11, 12]:
+        for version in [1, 2, 10, 11, 12, 15]:
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'tables'):
                 backup.validate(dict(before, schema=version))
         for table in ['shore_bots', 'vaults']:
@@ -630,7 +630,7 @@ CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),g
             del malformed['game'][table]
             with self.subTest(missing=table), self.assertRaisesRegex(ValueError, 'tables'):
                 backup.validate(malformed)
-        for version in [15, True, '3']:
+        for version in [16, True, '3']:
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'envelope'):
                 backup.validate(dict(before, schema=version))
 
