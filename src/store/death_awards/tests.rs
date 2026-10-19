@@ -256,7 +256,7 @@ async fn equipment_death_legacy_migration_preserves_snapshots_wallet_and_paid_va
         .unwrap();
     let vaults = store.vaults(ch.account).await.unwrap();
     drop(store);
-    db.execute_batch("ALTER TABLE deaths DROP COLUMN equipment_fame; PRAGMA user_version=13;")
+    db.execute_batch("ALTER TABLE deaths DROP COLUMN equipment_fame; DROP TABLE pictures; DROP TABLE picture_sequence; PRAGMA user_version=13;")
         .unwrap();
     let store = Store::open(&path, &content).unwrap();
     assert_eq!(

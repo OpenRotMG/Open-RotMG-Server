@@ -30,6 +30,7 @@ pub(crate) fn fixture() -> (PathBuf, App) {
         shore_bots: false,
         dialogue: None,
         requests: Arc::default(),
+        picture_reads: Arc::default(),
         connections: Arc::new(tokio::sync::Semaphore::new(32)),
         control: None,
         discord_link_token: Some("a".repeat(64)),

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 from contextlib import closing
 import datetime
 import gzip
@@ -27,7 +28,10 @@ REWARDS_GAME = {**GUILDS_GAME, 'gold_rewards': ('account', 'reward', 'awarded_at
 SLOTS_GAME = {**REWARDS_GAME, 'accounts': (*GOLD_GAME['accounts'], 'character_slots'), 'character_slot_purchases': ('account', 'timer', 'slots')}
 VAULTS_GAME = {**SLOTS_GAME, 'accounts': (*SLOTS_GAME['accounts'], 'vault_mask'), 'vaults': ('account', 'chest', 'items', 'revision')}
 FAME_GAME = {**VAULTS_GAME, 'deaths': (*LEGACY_GAME['deaths'], 'equipment_fame')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME}
+PICTURES_GAME = {**FAME_GAME, 'pictures': ('id', 'account', 'name', 'data_type', 'tags', 'png'), 'picture_sequence': ('id', 'next_id')}
+PICTURES_SQL = "CREATE TABLE pictures(id INTEGER PRIMARY KEY CHECK(id BETWEEN 1 AND 2147483647),account INTEGER NOT NULL REFERENCES accounts(id),name TEXT NOT NULL,data_type INTEGER NOT NULL CHECK(data_type BETWEEN 1 AND 7),tags TEXT NOT NULL,png BLOB NOT NULL CHECK(typeof(png)='blob' AND length(png)<=16384),UNIQUE(account,name))"
+PICTURE_SEQUENCE_SQL = "CREATE TABLE picture_sequence(id INTEGER PRIMARY KEY CHECK(id=1),next_id INTEGER NOT NULL CHECK(typeof(next_id)='integer' AND next_id BETWEEN 1 AND 2147483648))"
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -40,7 +44,8 @@ AUTH_GUILDS_GAME = {**AUTH_GOLD_GAME, 'guilds': GUILDS_GAME['guilds'], 'guild_me
 AUTH_REWARDS_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewards']}
 AUTH_SLOTS_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'character_slot_purchases': SLOTS_GAME['character_slot_purchases']}
 AUTH_VAULTS_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vaults': VAULTS_GAME['vaults']}
-RELOADED_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
+RELOADED_FAME_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
+RELOADED_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -66,6 +71,39 @@ def update_snapshot(raw):
         raise ValueError('Release update validation failed: ' + result.stderr.strip())
     if json.loads(result.stdout) != {'validated_updates': True}:
         raise ValueError('Release update validator returned an invalid receipt')
+
+
+def validate_pictures(game):
+    accounts = {row['id'] for row in game['accounts']}
+    ids, names = set(), set()
+    for row in game['pictures']:
+        if (type(row['id']) is not int or not 0 < row['id'] <= 2147483647 or row['id'] in ids
+                or type(row['account']) is not int or row['account'] not in accounts
+                or type(row['name']) is not str or (row['account'], row['name']) in names
+                or type(row['data_type']) is not int or not 1 <= row['data_type'] <= 7
+                or type(row['tags']) is not str or type(row['png']) is not str or len(row['png']) > 21848):
+            raise ValueError('Invalid picture identity, ownership, metadata or size')
+        ids.add(row['id'])
+        names.add((row['account'], row['name']))
+        try:
+            png = base64.b64decode(row['png'], validate=True)
+        except ValueError as error:
+            raise ValueError('Invalid picture base64') from error
+        if base64.b64encode(png).decode() != row['png']:
+            raise ValueError('Noncanonical picture base64')
+    sequence = game['picture_sequence']
+    if (len(sequence) != 1 or type(sequence[0]['id']) is not int or sequence[0]['id'] != 1
+            or type(sequence[0]['next_id']) is not int or not max(ids, default=0) < sequence[0]['next_id'] <= 2147483648):
+        raise ValueError('Invalid picture sequence high-water mark')
+    binary = os.environ.get('OPENROTMG_BACKUP_BINARY')
+    if not binary:
+        raise RuntimeError('OPENROTMG_BACKUP_BINARY must name the matching release binary')
+    result = subprocess.run([binary, '--backup-validate-pictures'], input=json.dumps(game['pictures']),
+                            text=True, capture_output=True, timeout=30)
+    if result.returncode:
+        raise ValueError('Release picture validation failed: ' + result.stderr.strip())
+    if json.loads(result.stdout) != {'validated_pictures': len(ids)}:
+        raise ValueError('Release picture validator returned an invalid receipt')
 
 
 def snapshot(path, schema, *, include_schema=False):
@@ -112,6 +150,10 @@ def snapshot(path, schema, *, include_schema=False):
                 metadata = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(\'deaths\') WHERE name=?', (column,)).fetchone()
                 if metadata != (kind, not_null, default, key, 0):
                     raise ValueError('Unsupported canonical death metadata: ' + column)
+        if 'pictures' in schema:
+            for table, expected in [('pictures', PICTURES_SQL), ('picture_sequence', PICTURE_SEQUENCE_SQL)]:
+                if db.execute("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() != (expected,):
+                    raise ValueError('Unsupported canonical picture metadata: ' + table)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
@@ -119,6 +161,11 @@ def snapshot(path, schema, *, include_schema=False):
             selected = tuple(c for c in columns if c != 'guid')
             rows = db.execute('SELECT ' + ','.join(selected) + ' FROM ' + table + ' ORDER BY ' + ','.join(selected[:2])).fetchall()
             result[table] = [dict(zip(selected, row)) for row in rows]
+            if table == 'pictures':
+                for row in result[table]:
+                    if type(row['png']) is not bytes:
+                        raise ValueError('Invalid stored picture PNG type')
+                    row['png'] = base64.b64encode(row['png']).decode()
         return (result, schema, db.execute('PRAGMA user_version').fetchone()[0]) if include_schema else result
 
 
@@ -318,12 +365,14 @@ def validate(bundle):
         validate_slots(bundle['game'])
     if bundle['schema'] >= 13:
         validate_vaults(bundle['game'])
+    if bundle['schema'] >= 15:
+        validate_pictures(bundle['game'])
     validate_deaths(bundle['game'], bundle['schema'])
     return bundle
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if (stored_version > max(GAME_SCHEMAS) or (max(versions) >= 12 and stored_version != max(versions))
             or (stored_version >= 12 and stored_version not in versions)):
@@ -402,6 +451,8 @@ ALTER TABLE accounts ADD COLUMN vault_mask INTEGER NOT NULL DEFAULT 1 CHECK(type
 CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEGER NOT NULL CHECK(typeof(chest)='integer' AND chest BETWEEN 0 AND 19),items TEXT NOT NULL CHECK(json_array_length(items)=8),revision INTEGER NOT NULL DEFAULT 0 CHECK(typeof(revision)='integer' AND revision BETWEEN 0 AND 2147483647),PRIMARY KEY(account,chest));"""
     if bundle['schema'] >= 14:
         definitions['game'] += "\nALTER TABLE deaths ADD COLUMN equipment_fame INTEGER NOT NULL CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647);"
+    if bundle['schema'] >= 15:
+        definitions['game'] += '\n' + PICTURES_SQL + ';\n' + PICTURE_SEQUENCE_SQL + ';'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')
@@ -411,7 +462,7 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
             for table, fields in (GAME_SCHEMAS[bundle['schema']] if name == 'game' else DISCORD).items():
                 rows = bundle[name][table]
                 columns = tuple(c for c in fields if c != 'guid')
-                db.executemany('INSERT INTO ' + table + '(' + ','.join(columns) + ') VALUES(' + ','.join('?' for _ in columns) + ')', [tuple(row[c] for c in columns) for row in rows])
+                db.executemany('INSERT INTO ' + table + '(' + ','.join(columns) + ') VALUES(' + ','.join('?' for _ in columns) + ')', [tuple(base64.b64decode(row[c], validate=True) if table == 'pictures' and c == 'png' else row[c] for c in columns) for row in rows])
             db.commit()
             if db.execute('PRAGMA foreign_key_check').fetchall() or db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ValueError('Restored database integrity failed')

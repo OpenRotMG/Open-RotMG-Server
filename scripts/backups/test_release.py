@@ -31,7 +31,7 @@ class ReleaseContract(unittest.TestCase):
                 self.assertIsNone(rewards[0][1])
                 self.assertIsNone(rewards[1][1])
                 self.assertGreater(rewards[2][1], 0)
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 15)
                 for table, column, default in [('characters', 'revision', '0'), ('characters', 'alive', '1'), ('deaths', 'died_at', 'unixepoch()')]:
                     with self.subTest(default=table + '.' + column):
                         self.assertEqual(db.execute('SELECT dflt_value FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone(), (default,))
@@ -46,7 +46,7 @@ class ReleaseContract(unittest.TestCase):
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
             bundle = json.loads(gzip.decompress((Path(temporary) / 'contract/state.json.gz').read_bytes()))
-            self.assertEqual(bundle['schema'], 14)
+            self.assertEqual(bundle['schema'], 15)
             self.assertEqual([r['equipment_fame'] for r in bundle['game']['deaths']], [0, 750])
             for award in [None, True, -1, 1.5, '750', 2147483648, 751]:
                 malformed = deepcopy(bundle)
@@ -56,11 +56,13 @@ class ReleaseContract(unittest.TestCase):
             for version in [13, 14]:
                 malformed = deepcopy(bundle)
                 malformed['schema'] = version
+                del malformed['game']['pictures'], malformed['game']['picture_sequence']
                 del malformed['game']['deaths'][1]['equipment_fame']
                 with self.subTest(missing_award_version=version), self.assertRaisesRegex(ValueError, 'fields'):
                     backup.validate(malformed)
             disguised = deepcopy(bundle)
             disguised['schema'] = 13
+            del disguised['game']['pictures'], disguised['game']['picture_sequence']
             for row in disguised['game']['deaths']:
                 del row['equipment_fame']
             with self.assertRaisesRegex(ValueError, 'earned fame'):
@@ -95,6 +97,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.validate(malformed)
             malformed = deepcopy(bundle)
             malformed['schema'] = 12
+            del malformed['game']['pictures'], malformed['game']['picture_sequence']
             with self.assertRaisesRegex(ValueError, 'fields'):
                 backup.validate(malformed)
             for field, values in [('character_slots', [True, 0, 15, '2'])]:
@@ -149,7 +152,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.export(malformed_db, Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'malformed-death.gz', revision, revision, revision)
                 self.assertEqual(malformed_db.read_bytes(), original)
                 self.assertFalse((Path(temporary) / 'malformed-death.gz').exists())
-            for version in [0, 11, 12, 13, 15]:
+            for version in [0, 11, 12, 13, 14, 16]:
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')
@@ -157,6 +160,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.export(Path(temporary) / 'future.db', Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'future.gz', revision, revision, revision)
                 self.assertFalse((Path(temporary) / 'future.gz').exists())
             legacy = deepcopy(bundle)
+            del legacy['game']['pictures'], legacy['game']['picture_sequence']
             paid = sum(row.pop('equipment_fame') for row in legacy['game']['deaths'])
             self.assertEqual(paid, 750)
             owner = legacy['game']['guild_members'][0]['account']
@@ -173,6 +177,8 @@ class ReleaseContract(unittest.TestCase):
             backup.restore(archive13, restored13)
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored13 / 'game.db'), str(root / 'data')], check=True)
             migrated13 = backup.snapshot(restored13 / 'game.db', backup.RELOADED_GAME)
+            self.assertEqual(migrated13.pop('pictures'), [])
+            self.assertEqual(migrated13.pop('picture_sequence'), [{'id': 1, 'next_id': 1}])
             for row in migrated13['deaths']:
                 self.assertEqual(row.pop('equipment_fame'), 0)
             self.assertEqual(migrated13, legacy['game'])
@@ -198,6 +204,8 @@ class ReleaseContract(unittest.TestCase):
             backup.restore(archive12, restored12)
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored12 / 'game.db'), str(root / 'data')], check=True)
             migrated12 = backup.snapshot(restored12 / 'game.db', backup.RELOADED_GAME)
+            self.assertEqual(migrated12.pop('pictures'), [])
+            self.assertEqual(migrated12.pop('picture_sequence'), [{'id': 1, 'next_id': 1}])
             for row in migrated12['deaths']:
                 self.assertEqual(row.pop('equipment_fame'), 0)
             for row in migrated12['accounts']:
@@ -224,6 +232,8 @@ class ReleaseContract(unittest.TestCase):
             self.assertEqual(reexported11['game'], legacy11['game'])
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored11 / 'game.db'), str(root / 'data')], check=True)
             migrated = backup.snapshot(restored11 / 'game.db', backup.RELOADED_GAME)
+            self.assertEqual(migrated.pop('pictures'), [])
+            self.assertEqual(migrated.pop('picture_sequence'), [{'id': 1, 'next_id': 1}])
             for row in migrated['deaths']:
                 self.assertEqual(row.pop('equipment_fame'), 0)
             self.assertEqual(migrated.pop('character_slot_purchases'), [])
