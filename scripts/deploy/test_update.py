@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import urllib.error
-from contextlib import closing
+from contextlib import closing, contextmanager
 
 spec = importlib.util.spec_from_file_location('update', Path(__file__).with_name('update.py'))
 update = importlib.util.module_from_spec(spec)
@@ -120,6 +120,135 @@ class UpdateTest(unittest.TestCase):
                 archive.addfile(entry, io.BytesIO(data))
         return output.getvalue(), metadata
 
+    @contextmanager
+    def deployment(self, current='b' * 40):
+        raw, metadata = self.delivery()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            live = root / 'server'
+            live.mkdir()
+            (live / 'REVISION').write_text(current + '\n')
+            (live / 'openrotmg').write_bytes(b'binary')
+            work = root / 'attempts'
+            (work / 'incident').mkdir(parents=True)
+            (work / 'incident/frozen.db').write_bytes(b'preserve incident')
+            config = root / 'config.json'
+            config.write_text(json.dumps({'bind': '127.0.0.1:18923', 'state': str(root)}))
+            (root / 'backup.lock').touch()
+            (root / 'receipt.json').write_text('{"restored":true}')
+            with patch.multiple(update, ROOT=work, LIVE=live, CONFIG=config, LAST_BACKUP=root / 'receipt.json'), \
+                    patch.object(update, 'main_revision', return_value='a' * 40):
+                yield raw, metadata, live, work
+            self.assertEqual((work / 'incident/frozen.db').read_bytes(), b'preserve incident')
+
+    def test_repeated_verified_noops_do_not_create_workspaces(self):
+        with self.deployment('a' * 40) as (raw, metadata, live, work):
+            digest = update.digest
+            with patch.object(update, 'digest', side_effect=lambda p: metadata['binary_sha256'] if str(p).startswith('/proc/') else digest(p)), \
+                    patch.object(update.subprocess, 'check_output', return_value='123'), \
+                    patch.object(update, 'ready') as ready, patch.object(update, 'verify_backup') as backup, \
+                    patch.object(update, 'unpack') as unpack, patch.object(update, 'deploy') as deploy:
+                for _ in range(10):
+                    update.main('a' * 40, raw)
+            self.assertEqual(ready.call_count, 10)
+            self.assertEqual(backup.call_count, 10)
+            unpack.assert_not_called()
+            deploy.assert_not_called()
+            self.assertEqual(sorted(p.name for p in work.iterdir()), ['incident', 'status.json'])
+
+    def test_low_disk_guard_still_blocks_before_any_attempt_workspace(self):
+        with self.deployment() as (raw, metadata, live, work):
+            with patch.object(update.shutil, 'disk_usage') as usage, patch.object(update, 'deploy') as deploy:
+                usage.return_value.free = 2 * 1024**3 - 1
+                with self.assertRaisesRegex(RuntimeError, 'Less than 2 GiB'):
+                    update.main('a' * 40, raw)
+                deploy.assert_not_called()
+            self.assertEqual([p.name for p in work.iterdir()], ['incident'])
+
+    def test_noop_verification_failures_still_reject_without_creating_workspaces(self):
+        for failure in ['manifest', 'process', 'backup']:
+            with self.subTest(failure=failure), self.deployment('a' * 40) as (raw, metadata, live, work):
+                digest = update.digest
+                def process_digest(path):
+                    if str(path).startswith('/proc/'):
+                        return 'bad' if failure == 'process' else metadata['binary_sha256']
+                    return digest(path)
+                if failure == 'manifest':
+                    (live / 'openrotmg').write_bytes(b'tampered')
+                with patch.object(update, 'digest', side_effect=process_digest), \
+                        patch.object(update.subprocess, 'check_output', return_value='123'), \
+                        patch.object(update, 'ready'), patch.object(update, 'verify_backup',
+                            side_effect=RuntimeError('backup rejected') if failure == 'backup' else None):
+                    with self.assertRaises(RuntimeError):
+                        update.main('a' * 40, raw)
+                self.assertEqual(sorted(p.name for p in work.iterdir()), ['incident', 'status.json'])
+                status = json.loads((work / 'status.json').read_text())
+                self.assertEqual(status['state'], 'activated_unverified')
+                self.assertIsNone(status['recovery_directory'])
+
+    def test_nonexecutable_verified_candidate_is_removed_before_rehearsal(self):
+        with self.deployment() as (raw, metadata, live, work):
+            with patch.object(update, 'run', side_effect=RuntimeError('not executable')), patch.object(update, 'rehearse') as rehearse:
+                with self.assertRaisesRegex(RuntimeError, 'not executable'):
+                    update.main('a' * 40, raw)
+                rehearse.assert_not_called()
+            self.assertEqual(list(live.parent.glob('server-stage-*')), [])
+            self.assertEqual(len(list(work.glob('a' * 40 + '-*/server.tar.gz'))), 1)
+
+    def test_rehearsal_failure_retains_active_or_changed_candidates(self):
+        for reason in ['running', 'changed']:
+            with self.subTest(reason=reason), self.deployment() as (raw, metadata, live, work):
+                def fail(stage, attempt, config):
+                    (attempt / 'shadow.log').write_text('original failure')
+                    if reason == 'running':
+                        (attempt / 'rehearsal-running').touch()
+                    else:
+                        (stage / 'openrotmg').write_bytes(b'changed evidence')
+                    raise RuntimeError('rehearsal failed')
+                with patch.object(update, 'run'), patch.object(update, 'rehearse', side_effect=fail):
+                    with self.assertRaisesRegex(RuntimeError, 'rehearsal failed'):
+                        update.main('a' * 40, raw)
+                self.assertEqual(len(list(live.parent.glob('server-stage-*'))), 1)
+                self.assertEqual((live / 'REVISION').read_text().strip(), 'b' * 40)
+
+    def test_shutdown_failure_preserves_candidate_and_incident_state(self):
+        with self.deployment() as (raw, metadata, live, work):
+            with patch.object(update, 'run'), patch.object(update, 'rehearse'), patch.object(update, 'install_backups'), \
+                    patch.object(update, 'warn_restart'), patch.object(update.subprocess, 'check_output', return_value='failed'), \
+                    patch.object(update.ctypes, 'CDLL') as exchange:
+                with self.assertRaisesRegex(RuntimeError, 'Shutdown save failed'):
+                    update.main('a' * 40, raw)
+                exchange.assert_not_called()
+            self.assertEqual(len(list(live.parent.glob('server-stage-*'))), 1)
+            self.assertEqual((live / 'REVISION').read_text().strip(), 'b' * 40)
+
+    def test_post_exchange_failure_preserves_previous_tree_and_frozen_state(self):
+        with self.deployment() as (raw, metadata, live, work):
+            (live.parent / 'server.pem').write_bytes(b'fixture key')
+            def exchange(_a, old, _b, candidate, flags):
+                old, candidate = Path(old.decode()), Path(candidate.decode())
+                temporary = old.with_name('exchange')
+                old.rename(temporary)
+                candidate.rename(old)
+                temporary.rename(candidate)
+                return 0
+            with patch.object(update, 'run'), patch.object(update, 'rehearse'), patch.object(update, 'install_backups'), \
+                    patch.object(update, 'warn_restart'), patch.object(update.subprocess, 'check_output', return_value='success'), \
+                    patch.object(update, 'copy_db', side_effect=lambda source, target: target.write_bytes(b'frozen db')), \
+                    patch.object(update, 'ready', side_effect=RuntimeError('new service unavailable')), \
+                    patch.object(update.ctypes, 'CDLL') as libc:
+                libc.return_value.renameat2.side_effect = exchange
+                with self.assertRaisesRegex(RuntimeError, 'new service unavailable'):
+                    update.main('a' * 40, raw)
+            previous = next(live.parent.glob('server-stage-*'))
+            self.assertEqual((previous / 'REVISION').read_text().strip(), 'b' * 40)
+            self.assertEqual((live / 'REVISION').read_text().strip(), 'a' * 40)
+            attempt = next(work.glob('a' * 40 + '-*'))
+            self.assertEqual((attempt / 'cutover/game.db').read_bytes(), b'frozen db')
+            self.assertEqual((attempt / 'cutover/server.pem').read_bytes(), b'fixture key')
+            self.assertEqual((attempt / 'previous-server-path').read_text().strip(), str(previous))
+            self.assertEqual(json.loads((work / 'status.json').read_text())['state'], 'activated_unverified')
+
     def test_delivery_rejects_stale_main_unsafe_paths_corruption_and_limits(self):
         raw, _ = self.delivery()
         with patch.object(update, 'main_revision', return_value='b' * 40), patch.object(update, 'deploy') as deploy:
@@ -146,6 +275,7 @@ class UpdateTest(unittest.TestCase):
 
     def test_up_to_date_requires_matching_artifact_process_and_health(self):
         raw, metadata = self.delivery()
+        digest = update.digest
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'REVISION').write_text('a' * 40)
@@ -154,7 +284,7 @@ class UpdateTest(unittest.TestCase):
             with patch.object(update, 'ROOT', root / 'state'), patch.object(update, 'LIVE', root), \
                     patch.object(update, 'CONFIG', config), patch.object(update, 'main_revision', return_value='a' * 40), \
                     patch.object(update, 'files', return_value=metadata['manifest']), \
-                    patch.object(update, 'digest', side_effect=[metadata['archive_sha256'], metadata['binary_sha256']]), \
+                    patch.object(update, 'digest', side_effect=lambda p: metadata['binary_sha256'] if str(p).startswith('/proc/') else digest(p)), \
                     patch.object(update.subprocess, 'check_output', return_value='123'), \
                     patch.object(update, 'ready', side_effect=RuntimeError('dead process')):
                 with self.assertRaisesRegex(RuntimeError, 'dead process'):
@@ -243,11 +373,45 @@ class UpdateTest(unittest.TestCase):
                     update.rehearse(stage, root, config)
 
     def test_failed_write_rehearsal_cannot_install_tools_or_stop_production(self):
-        with patch.object(update, 'run') as run, patch.object(update, 'rehearse', side_effect=RuntimeError('write contract failed')), patch.object(update, 'install_backups') as install:
-            with self.assertRaisesRegex(RuntimeError, 'write contract failed'):
-                update.deploy(Path('/stage'), Path('/work'), {}, {})
-            install.assert_not_called()
-            self.assertEqual(len(run.call_args_list), 1)
+        with self.deployment() as (raw, metadata, live, work):
+            def fail(stage, attempt, config):
+                (attempt / 'shadow.log').write_text('write contract failed')
+                raise RuntimeError('write contract failed')
+            with patch.object(update, 'run') as run, patch.object(update, 'rehearse', side_effect=fail), patch.object(update, 'install_backups') as install:
+                with self.assertRaisesRegex(RuntimeError, 'write contract failed'):
+                    update.main('a' * 40, raw)
+                install.assert_not_called()
+                self.assertEqual(len(run.call_args_list), 1)
+            self.assertEqual(list(live.parent.glob('server-stage-*')), [])
+            attempts = list(work.glob('a' * 40 + '-*'))
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual((attempts[0] / 'shadow.log').read_text(), 'write contract failed')
+            self.assertEqual(update.digest(attempts[0] / 'server.tar.gz'), metadata['archive_sha256'])
+            self.assertEqual((live / 'REVISION').read_text().strip(), 'b' * 40)
+
+    def test_rehearsal_marker_only_clears_after_child_exit_is_confirmed(self):
+        for stuck in [False, True]:
+            with self.subTest(stuck=stuck), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                stage = root / 'stage'
+                stage.mkdir()
+                (stage / 'REVISION').write_text('a' * 40)
+                with patch.object(update, 'run'), patch.object(update, 'copy_db'), patch.object(update, 'rows', return_value={}), \
+                        patch.object(update.shutil, 'copyfile', side_effect=lambda source, target: Path(target).touch()), \
+                        patch.object(update.subprocess, 'Popen') as spawn, \
+                        patch.object(update, 'ready', side_effect=RuntimeError('health failed')):
+                    process = spawn.return_value
+                    process.poll.return_value = None
+                    def wait(timeout):
+                        self.assertTrue((root / 'rehearsal-running').exists())
+                        self.assertEqual(timeout, 20)
+                        if stuck:
+                            raise update.subprocess.TimeoutExpired('shadow', timeout)
+                    process.wait.side_effect = wait
+                    error = update.subprocess.TimeoutExpired if stuck else RuntimeError
+                    with self.assertRaises(error):
+                        update.rehearse(stage, root, {'state': str(root / 'live')})
+                    self.assertEqual((root / 'rehearsal-running').exists(), stuck)
 
     def test_uploaded_backup_requires_fresh_restore_and_actual_running_revision(self):
         with tempfile.TemporaryDirectory() as tmp:
