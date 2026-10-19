@@ -30,6 +30,7 @@ mod endgame;
 mod endgame_ai;
 mod enemy_damage;
 mod enemy_shots;
+mod entity_store;
 mod families;
 mod fauna;
 mod fauna_births;
@@ -166,12 +167,17 @@ enum Following {
     Acquired,
     Resting,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone)]
 pub struct Entity {
     pub id: i32,
     pub kind: u16,
-    pub name: String,
     pub pos: Pos,
+    home: Pos,
+    state: entity_store::EntityState,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct EntityData {
+    pub name: String,
     pub hp: i32,
     pub size: i32,
     pub condition: i32,
@@ -183,7 +189,6 @@ pub struct Entity {
     pub reserved: bool,
     published: bool,
     damage: BTreeMap<i32, i32>,
-    home: Pos,
     goal: Option<Pos>,
     #[serde(skip)]
     motion: Option<crate::encounter::Motion>,
@@ -211,6 +216,87 @@ pub struct Entity {
     blocked_since: Option<u64>,
     reaction_until: u64,
     bullet: u8,
+}
+impl std::fmt::Debug for Entity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut out = f.debug_struct("Entity");
+        out.field("id", &self.id);
+        out.field("kind", &self.kind);
+        out.field("name", &self.name);
+        out.field("pos", &self.pos);
+        out.field("hp", &self.hp);
+        out.field("size", &self.size);
+        out.field("condition", &self.condition);
+        out.field("statuses", &self.statuses);
+        out.field("items", &self.items);
+        out.field("drop_slots", &self.drop_slots);
+        out.field("extra_stats", &self.extra_stats);
+        out.field("reserved", &self.reserved);
+        out.field("published", &self.published);
+        out.field("damage", &self.damage);
+        out.field("home", &self.home);
+        out.field("goal", &self.goal);
+        out.field("motion", &self.motion);
+        out.field("following", &self.following);
+        out.field("charge", &self.charge);
+        out.field("script", &self.script);
+        out.field("last_step", &self.last_step);
+        out.field("phase", &self.phase);
+        out.field("orbit", &self.orbit);
+        out.field("next_shot", &self.next_shot);
+        out.field("attacks", &self.attacks);
+        out.field("activated", &self.activated);
+        out.field("stage", &self.stage);
+        out.field("parent", &self.parent);
+        out.field("camp", &self.camp);
+        out.field("population_slot", &self.population_slot);
+        out.field("quest", &self.quest);
+        out.field("expires", &self.expires);
+        out.field("next_aux", &self.next_aux);
+        out.field("blocked_since", &self.blocked_since);
+        out.field("reaction_until", &self.reaction_until);
+        out.field("bullet", &self.bullet);
+        out.finish()
+    }
+}
+impl Serialize for Entity {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut out = serializer.serialize_struct("Entity", 29)?;
+        out.serialize_field("id", &self.id)?;
+        out.serialize_field("kind", &self.kind)?;
+        out.serialize_field("name", &self.name)?;
+        out.serialize_field("pos", &self.pos)?;
+        out.serialize_field("hp", &self.hp)?;
+        out.serialize_field("size", &self.size)?;
+        out.serialize_field("condition", &self.condition)?;
+        out.serialize_field("statuses", &self.statuses)?;
+        out.serialize_field("items", &self.items)?;
+        out.serialize_field("extra_stats", &self.extra_stats)?;
+        out.serialize_field("reserved", &self.reserved)?;
+        out.serialize_field("published", &self.published)?;
+        out.serialize_field("damage", &self.damage)?;
+        out.serialize_field("home", &self.home)?;
+        out.serialize_field("goal", &self.goal)?;
+        out.serialize_field("last_step", &self.last_step)?;
+        out.serialize_field("phase", &self.phase)?;
+        out.serialize_field("orbit", &self.orbit)?;
+        out.serialize_field("next_shot", &self.next_shot)?;
+        out.serialize_field("activated", &self.activated)?;
+        out.serialize_field("stage", &self.stage)?;
+        out.serialize_field("parent", &self.parent)?;
+        out.serialize_field("camp", &self.camp)?;
+        out.serialize_field("quest", &self.quest)?;
+        out.serialize_field("expires", &self.expires)?;
+        out.serialize_field("next_aux", &self.next_aux)?;
+        out.serialize_field("blocked_since", &self.blocked_since)?;
+        out.serialize_field("reaction_until", &self.reaction_until)?;
+        out.serialize_field("bullet", &self.bullet)?;
+        out.end()
+    }
 }
 impl Entity {
     fn conditions(&self, now: u64) -> i32 {
@@ -478,7 +564,7 @@ pub struct World {
     pub map: Arc<Map>,
     pub(crate) realm_layout: Option<String>,
     performance: std::cell::RefCell<crate::performance::Window>,
-    pub entities: BTreeMap<i32, Entity>,
+    pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
     // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
     timed_ids: BTreeSet<i32>,
@@ -1592,7 +1678,8 @@ impl World {
         map: Arc<Map>,
         ids: Arc<AtomicI32>,
     ) -> Result<Self> {
-        let mut entities = BTreeMap::new();
+        let mut entities = entity_store::Entities::default();
+        let mut scenery_templates = BTreeMap::new();
         let mut actor_ids = BTreeSet::new();
         let mut quests_by_level: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         let mut fountains = Vec::new();
@@ -1609,55 +1696,57 @@ impl World {
                     let mut e = Entity {
                         id,
                         kind,
-                        name: if o.class == "Portal" {
-                            o.name.clone()
-                        } else {
-                            String::new()
-                        },
                         pos,
                         home: pos,
-                        goal: None,
-                        motion: None,
-                        following: Following::Unknown,
-                        charge: None,
-                        script: None,
-                        last_step: Pos { x: 0., y: 0. },
-                        phase: 0.,
-                        orbit: None,
-                        hp: o.hp,
-                        size: o.size,
-                        condition: crate::dungeon::abyss::initial_condition(kind)
-                            | crate::dungeon::spider::initial_condition(kind)
-                            | crate::dungeon::snake::initial_condition(kind)
-                            | if o.stasis_immune {
-                                crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                        state: entity_store::EntityState::Owned(Box::new(EntityData {
+                            name: if o.class == "Portal" {
+                                o.name.clone()
                             } else {
-                                0
+                                String::new()
                             },
-                        statuses: BTreeMap::new(),
-                        items: o.equipment.clone(),
-                        drop_slots: BTreeSet::new(),
-                        extra_stats: if o.class == "Portal" {
-                            vec![(37, 1)]
-                        } else {
-                            vec![]
-                        },
-                        reserved: false,
-                        published: true,
-                        damage: BTreeMap::new(),
-                        next_shot: 0,
-                        attacks: Default::default(),
-                        activated: None,
-                        stage: None,
-                        parent: Default::default(),
-                        camp: None,
-                        population_slot: None,
-                        quest: None,
-                        expires: Default::default(),
-                        next_aux: 0,
-                        blocked_since: None,
-                        reaction_until: 0,
-                        bullet: 0,
+                            goal: None,
+                            motion: None,
+                            following: Following::Unknown,
+                            charge: None,
+                            script: None,
+                            last_step: Pos { x: 0., y: 0. },
+                            phase: 0.,
+                            orbit: None,
+                            hp: o.hp,
+                            size: o.size,
+                            condition: crate::dungeon::abyss::initial_condition(kind)
+                                | crate::dungeon::spider::initial_condition(kind)
+                                | crate::dungeon::snake::initial_condition(kind)
+                                | if o.stasis_immune {
+                                    crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                                } else {
+                                    0
+                                },
+                            statuses: BTreeMap::new(),
+                            items: o.equipment.clone(),
+                            drop_slots: BTreeSet::new(),
+                            extra_stats: if o.class == "Portal" {
+                                vec![(37, 1)]
+                            } else {
+                                vec![]
+                            },
+                            reserved: false,
+                            published: true,
+                            damage: BTreeMap::new(),
+                            next_shot: 0,
+                            attacks: Default::default(),
+                            activated: None,
+                            stage: None,
+                            parent: Default::default(),
+                            camp: None,
+                            population_slot: None,
+                            quest: None,
+                            expires: Default::default(),
+                            next_aux: 0,
+                            blocked_since: None,
+                            reaction_until: 0,
+                            bullet: 0,
+                        })),
                     };
                     for setting in c.config.split(';').filter(|s| !s.is_empty()) {
                         let (k, v) = setting.split_once(':').context("malformed map setting")?;
@@ -1703,6 +1792,13 @@ impl World {
                     }
                     if let Some(level) = o.quest_level.filter(|_| o.quest) {
                         quests_by_level.entry(level).or_default().insert(id);
+                    }
+                    if !actor
+                        && !o.destructible
+                        && o.class == "GameObject"
+                        && o.name != "White Fountain"
+                    {
+                        e.share(&mut scenery_templates, &c.config);
                     }
                     entities.insert(id, e);
                 }
@@ -1921,57 +2017,59 @@ impl World {
             Entity {
                 id,
                 kind,
-                name: if definition.class == "Portal" {
-                    definition.name.clone()
-                } else {
-                    String::new()
-                },
                 pos,
                 home: pos,
-                goal: None,
-                motion: None,
-                following: Following::Unknown,
-                charge: None,
-                script: None,
-                last_step: Pos { x: 0., y: 0. },
-                phase: 0.,
-                orbit: None,
-                hp: definition.hp,
-                size: definition.size,
-                condition: crate::dungeon::abyss::initial_condition(kind)
-                    | crate::dungeon::spider::initial_condition(kind)
-                    | crate::dungeon::snake::initial_condition(kind)
-                    | (if kind == 0x91a {
-                        crate::condition::bit(crate::condition::INVULNERABLE)
+                state: entity_store::EntityState::Owned(Box::new(EntityData {
+                    name: if definition.class == "Portal" {
+                        definition.name.clone()
                     } else {
-                        0
-                    })
-                    | (if definition.stasis_immune {
-                        crate::condition::bit(crate::condition::STASIS_IMMUNE)
-                    } else {
-                        0
-                    }),
+                        String::new()
+                    },
+                    goal: None,
+                    motion: None,
+                    following: Following::Unknown,
+                    charge: None,
+                    script: None,
+                    last_step: Pos { x: 0., y: 0. },
+                    phase: 0.,
+                    orbit: None,
+                    hp: definition.hp,
+                    size: definition.size,
+                    condition: crate::dungeon::abyss::initial_condition(kind)
+                        | crate::dungeon::spider::initial_condition(kind)
+                        | crate::dungeon::snake::initial_condition(kind)
+                        | (if kind == 0x91a {
+                            crate::condition::bit(crate::condition::INVULNERABLE)
+                        } else {
+                            0
+                        })
+                        | (if definition.stasis_immune {
+                            crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                        } else {
+                            0
+                        }),
 
-                statuses: BTreeMap::new(),
-                items,
-                drop_slots: BTreeSet::new(),
-                extra_stats,
-                reserved: false,
-                published: true,
-                damage: BTreeMap::new(),
-                next_shot: 0,
-                attacks: Default::default(),
-                activated: None,
-                stage: None,
-                parent: Default::default(),
-                camp: None,
-                population_slot: None,
-                quest: None,
-                expires: Default::default(),
-                next_aux: 0,
-                blocked_since: None,
-                reaction_until: 0,
-                bullet: 0,
+                    statuses: BTreeMap::new(),
+                    items,
+                    drop_slots: BTreeSet::new(),
+                    extra_stats,
+                    reserved: false,
+                    published: true,
+                    damage: BTreeMap::new(),
+                    next_shot: 0,
+                    attacks: Default::default(),
+                    activated: None,
+                    stage: None,
+                    parent: Default::default(),
+                    camp: None,
+                    population_slot: None,
+                    quest: None,
+                    expires: Default::default(),
+                    next_aux: 0,
+                    blocked_since: None,
+                    reaction_until: 0,
+                    bullet: 0,
+                })),
             },
         );
         self.cells.insert(cell, id, true);
@@ -5346,7 +5444,7 @@ impl World {
     fn report_performance(&self, world_id: i32) {
         if let Some(timings) = self.performance.borrow_mut().report() {
             tracing::info!(world_id,world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
-                bullets=self.bullets.len(),spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
+                bullets=self.bullets.len(),compact_entities=self.entities.shared(),scenery_promotions=self.entities.promotions,spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
                 pending_shoot_acks=self.players.values().map(|p|p.shoot_acks.len()).sum::<usize>(),
                 weapon_tick_records=self.players.values().map(|p|p.weapon_ticks.len()).sum::<usize>(),
                 humans=self.players.values().filter(|p| p.controller==Controller::Human).count(),

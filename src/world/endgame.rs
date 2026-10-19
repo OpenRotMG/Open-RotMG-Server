@@ -548,7 +548,7 @@ impl World {
     }
     pub(super) fn prepare_endgame(&mut self) -> Result<()> {
         if self.name == "Oryx's Castle" {
-            for e in self.entities.values_mut().filter(|e| e.kind == 0xd7d) {
+            for e in self.entities.matching_mut(|e| e.kind == 0xd7d) {
                 e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
                 e.published = false;
             }
@@ -585,7 +585,7 @@ impl World {
                 self.entities.values().filter(|e| e.kind == boss).count() == 1,
                 "endgame room requires one selected boss"
             );
-            for e in self.entities.values_mut().filter(|e| e.kind == 0x71d) {
+            for e in self.entities.matching_mut(|e| e.kind == 0x71d) {
                 e.published = false;
             }
         }

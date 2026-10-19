@@ -66,13 +66,12 @@ impl World {
             "endgame wave requires a bounded lifetime"
         );
         self.spawn_children(parent, wave.kind, wave.count, wave.radius)?;
-        for e in self
-            .entities
-            .values_mut()
-            .filter(|e| e.parent == Some(parent) && e.kind == wave.kind && e.expires.is_none())
-        {
+        for e in self.entities.matching_mut(|e| {
+            e.parent == Some(parent) && e.kind == wave.kind && e.expires.is_none()
+        }) {
+            let id = e.id;
             e.expires
-                .set(Some(self.now + wave.lifetime), e.id, &mut self.timed_ids);
+                .set(Some(self.now + wave.lifetime), id, &mut self.timed_ids);
             e.activated.get_or_insert(self.now);
             if matches!(e.kind, 0x174a | 0x174b | 0x944) {
                 let rate = match e.kind {
@@ -534,7 +533,7 @@ impl World {
             } else {
                 self.spawn_exit(0x712, defeated.pos)?;
             }
-            for e in self.entities.values_mut().filter(|e| e.kind == 0x71d) {
+            for e in self.entities.matching_mut(|e| e.kind == 0x71d) {
                 e.published = true;
             }
             tracing::info!(

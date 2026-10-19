@@ -202,11 +202,11 @@ impl World {
         let old = &self.entities[&id];
         ensure!(old.quest.is_some(), "quest transformation lacks ownership");
         let new = self.spawn_entity(kind, old.pos, vec![])?;
-        let old = self.remove_entity(id);
+        let mut old = self.remove_entity(id);
         let e = self.entities.get_mut(&new).unwrap();
         e.quest = old.quest;
         e.home = old.home;
-        e.damage = old.damage;
+        e.damage = std::mem::take(&mut old.damage);
         e.stage = None;
         e.activated = Some(self.now);
         let expires = match kind {

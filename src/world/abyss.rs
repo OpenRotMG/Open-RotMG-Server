@@ -184,15 +184,14 @@ impl World {
             self.spawn_children(id, 0x908, 3, 9.)?;
             if stage == 0 && elapsed % 1800 < 500 {
                 self.spawn_children(id, 0x909, 4, 1.)?;
-                for child in self
-                    .entities
-                    .values_mut()
-                    .filter(|e| e.parent == Some(id) && e.kind == 0x909 && e.activated.is_none())
-                {
+                for child in self.entities.matching_mut(|e| {
+                    e.parent == Some(id) && e.kind == 0x909 && e.activated.is_none()
+                }) {
+                    let child_id = child.id;
                     child.activated = Some(self.now);
                     child
                         .expires
-                        .set(Some(self.now + 5650), child.id, &mut self.timed_ids);
+                        .set(Some(self.now + 5650), child_id, &mut self.timed_ids);
                 }
             }
             self.entities.get_mut(&id).unwrap().next_aux = self.now + 500;

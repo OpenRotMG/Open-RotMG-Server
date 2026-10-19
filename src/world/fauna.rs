@@ -11,13 +11,13 @@ impl World {
             "transforming family member lacks reserved slot"
         );
         let new = self.spawn_entity(kind, old.pos, vec![])?;
-        let old = self.remove_entity(id);
+        let mut old = self.remove_entity(id);
         let e = self.entities.get_mut(&new).unwrap();
         e.home = old.home;
         e.camp = old.camp;
         e.parent.set(*old.parent, new, &mut self.timed_ids);
         e.quest = old.quest;
-        e.damage = old.damage;
+        e.damage = std::mem::take(&mut old.damage);
         e.expires.set(*old.expires, new, &mut self.timed_ids);
         e.activated = Some(self.now);
         if let Some(slot) = slot {
