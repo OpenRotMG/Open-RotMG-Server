@@ -564,3 +564,43 @@ fn capped_potion_is_retained_and_failed_commit_quarantines_without_stat_gain() {
     assert_eq!(w.players[&id].character.items[4], 0xa4c);
     assert!(w.players[&id].persistence_failure.is_some());
 }
+
+#[test]
+fn undead_lair_instances_have_distinct_reproducible_layouts() {
+    let content = tests::world().content;
+    let mut first = Directory::test_with_seed(Path::new("data"), content.clone(), 16, 222).unwrap();
+    first.prepared_seed = Some(222);
+    let a = first.instance("undead-lair", None).unwrap();
+    let b = first.instance("undead-lair", None).unwrap();
+    let geometry = |map: &Map| {
+        (
+            map.width,
+            map.height,
+            map.cells
+                .iter()
+                .map(|c| c.ground != 0xfe)
+                .collect::<Vec<_>>(),
+        )
+    };
+    assert_ne!(
+        geometry(&first.worlds[&a].map),
+        geometry(&first.worlds[&b].map),
+        "new portals reuse one Undead Lair layout"
+    );
+    let mut repeated = Directory::test_with_seed(Path::new("data"), content, 16, 222).unwrap();
+    repeated.prepared_seed = Some(222);
+    let c = repeated.instance("undead-lair", None).unwrap();
+    assert_eq!(
+        serde_json::to_vec(&first.worlds[&a].map).unwrap(),
+        serde_json::to_vec(&repeated.worlds[&c].map).unwrap()
+    );
+    assert_eq!(first.worlds[&a].name, "Undead Lair");
+    assert_eq!(
+        first.worlds[&a]
+            .entities
+            .values()
+            .filter(|e| e.kind == 0xd90)
+            .count(),
+        1
+    );
+}

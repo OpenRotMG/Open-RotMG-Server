@@ -3,6 +3,7 @@ pub mod snake;
 pub mod spider;
 pub mod sprite;
 pub mod trench;
+pub mod undead;
 
 pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
@@ -80,6 +81,8 @@ pub(crate) mod tests {
                 snake_pit(&content, 12351).unwrap()
             } else if name == "sprite-world" {
                 sprite::generate(&content, 12351).unwrap()
+            } else if name == "undead-lair" {
+                undead::generate(&content, 12351).unwrap()
             } else {
                 Map::load(&Path::new("data").join(format!("{name}.wmap")), &content).unwrap()
             };

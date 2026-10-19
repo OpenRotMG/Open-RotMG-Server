@@ -709,7 +709,6 @@ impl Directory {
             crate::endgame::CASTLE,
             crate::endgame::CHAMBER,
             crate::endgame::CELLAR,
-            "undead-lair",
             "guild-hall-1",
             "guild-hall-2",
             "guild-hall-3",
@@ -813,6 +812,11 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
+            } else if template == "undead-lair" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::undead::generate(&self.content, seed)?)
             } else {
                 self.templates
                     .get(template)
