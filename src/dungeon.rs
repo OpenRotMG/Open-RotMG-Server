@@ -18,7 +18,6 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
     match enemy {
         trench::HERMIT => Some((0x730, 1.)),
         0x60e..=0x610 => Some((0x717, 0.01)),
-        0x651 => Some((0x71b, 0.17)),
         0x62c | 0x637 => Some((0x719, 0.1)),
         0x640 | 0x645 | 0x649 | 0x650 | 0x654 => Some((0x718, 0.17)),
         0x653 => Some((0x70c, 0.25)),
