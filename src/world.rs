@@ -575,7 +575,7 @@ impl Directory {
             "world_players": world.players.len(), "world_entities": world.entities.len(), "world_projectiles": world.bullets.len(),
             "native_acknowledgements": {"weapon_tick_records":p.weapon_ticks.len(),"goto":p.goto_acks.len(),"shoot":p.shoot_acks.len(),
                 "oldest_goto_ms":p.goto_acks.front().map(|(_,at)|at.elapsed().as_millis()),
-                "oldest_shoot_ms":p.shoot_acks.front().map(|(at,_)|at.elapsed().as_millis())},
+                "oldest_shoot_pause_excluding_ms":p.shoot_acks.front().map(|(at,_)|world.clock.now().duration_since(*at).as_millis())},
             "tick_interval_ms": 50, "recent_ticks": ticks, "tick": self.tick,
             "total_worlds": self.worlds.len(), "total_players": self.worlds.values().map(|w| w.players.len()).sum::<usize>(),
             "total_entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),

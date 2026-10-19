@@ -91,7 +91,8 @@ fn fifo_ack_separates_reused_bullet_ids_and_owner_nova_acknowledgements() {
     let (mut w, id, _rx, _loss) = native();
     assert!(native_hits::expect_shoot_ack(
         w.players.get_mut(&id).unwrap(),
-        vec![]
+        vec![],
+        &w.clock
     ));
     let owner = offer(&mut w, id, None, 3, 20);
     let hp = w.players[&id].character.hp;
@@ -140,9 +141,9 @@ fn native_shoot_ack_bounds_both_empty_entries_and_wide_snapshot_vectors() {
     let (mut w, id, _rx, loss) = native();
     let p = w.players.get_mut(&id).unwrap();
     for _ in 0..limit {
-        assert!(native_hits::expect_shoot_ack(p, vec![]));
+        assert!(native_hits::expect_shoot_ack(p, vec![], &w.clock));
     }
-    assert!(!native_hits::expect_shoot_ack(p, vec![]));
+    assert!(!native_hits::expect_shoot_ack(p, vec![], &w.clock));
     assert!(*loss.borrow());
     assert_eq!(p.shoot_acks.len(), limit);
 
@@ -151,9 +152,13 @@ fn native_shoot_ack_bounds_both_empty_entries_and_wide_snapshot_vectors() {
     let shot = w.bullets.last().unwrap().clone();
     let p = w.players.get_mut(&id).unwrap();
     p.shoot_acks.clear();
-    assert!(native_hits::expect_shoot_ack(p, vec![shot; limit - 1]));
+    assert!(native_hits::expect_shoot_ack(
+        p,
+        vec![shot; limit - 1],
+        &w.clock
+    ));
     assert!(!*loss.borrow());
-    assert!(!native_hits::expect_shoot_ack(p, vec![]));
+    assert!(!native_hits::expect_shoot_ack(p, vec![], &w.clock));
     assert!(*loss.borrow());
     assert_eq!(p.shoot_acks.len(), 1);
 }
@@ -167,7 +172,8 @@ fn dense_native_backlog_drains_and_retains_exactly_once_hit_authority() {
     for _ in 0..450 {
         assert!(native_hits::expect_shoot_ack(
             w.players.get_mut(&id).unwrap(),
-            vec![shot.clone(); 3]
+            vec![shot.clone(); 3],
+            &w.clock
         ));
     }
     assert!(!*loss.borrow());
@@ -186,6 +192,85 @@ fn dense_native_backlog_drains_and_retains_exactly_once_hit_authority() {
 }
 
 #[test]
+fn native_shoot_ack_survives_repeated_global_pauses_without_world_ticks() {
+    let (mut w, id, _rx, loss) = native();
+    let owner = offer(&mut w, id, None, 3, 20);
+    let sent = w.players[&id].shoot_acks.front().unwrap().0;
+    let simulation = (w.now, w.tick);
+    for bullet in [4, 5] {
+        w.clock.set_paused(true);
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        w.expire_native_projectiles();
+        assert!(!*loss.borrow(), "a global pause consumed the SHOOT budget");
+        assert!(!w.players[&id].departing);
+        w.clock.set_paused(false);
+        assert_eq!(w.players[&id].shoot_acks.front().unwrap().0, sent);
+        offer(&mut w, id, Some(owner), bullet, 20);
+    }
+    w.expire_native_projectiles();
+    assert!(!*loss.borrow());
+    assert_eq!(w.players[&id].shoot_acks.len(), 3);
+    assert_eq!((w.now, w.tick), simulation);
+    for _ in 0..3 {
+        w.acknowledge_shoot(id, 100).unwrap();
+    }
+    assert!(w.players[&id].shoot_acks.is_empty());
+    let hp = w.players[&id].character.hp;
+    w.native_player_hit(id, owner, 3).unwrap();
+    w.native_player_hit(id, owner, 3).unwrap();
+    assert_eq!(w.players[&id].character.hp, hp - 20);
+}
+
+#[test]
+fn native_shoot_ack_counts_unpaused_stalls_across_pauses_without_world_ticks() {
+    let (mut w, id, _rx, loss) = native();
+    let owner = offer(&mut w, id, None, 3, 20);
+    offer(&mut w, id, Some(owner), 4, 20);
+    let sent = w.players[&id].shoot_acks.front().unwrap().0;
+    let simulation = (w.now, w.tick);
+    for _ in 0..2 {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        w.clock.set_paused(true);
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        w.clock.set_paused(false);
+        assert_eq!(w.players[&id].shoot_acks.front().unwrap().0, sent);
+        assert_eq!(w.players[&id].shoot_acks.len(), 2);
+    }
+    assert_eq!((w.now, w.tick), simulation);
+    let error = w.acknowledge_shoot(id, 100).unwrap_err();
+    assert_eq!(error.to_string(), "SHOOT acknowledgement timed out");
+    assert!(!*loss.borrow());
+    w.expire_native_projectiles();
+    assert!(*loss.borrow());
+    assert!(w.players[&id].departing);
+    assert_eq!(w.players[&id].shoot_acks.len(), 1);
+}
+
+#[test]
+fn native_shoot_ack_bug_context_labels_and_freezes_pause_excluding_age() {
+    let mut d = super::tests::directory();
+    d.clock.set_paused(true);
+    std::thread::sleep(std::time::Duration::from_millis(25));
+    d.clock.set_paused(false);
+    let w = d.worlds.get_mut(&-1).unwrap();
+    let (packets, _rx) = mpsc::channel(4096);
+    let (lost, _loss) = watch::channel(false);
+    let id = w.enter(ch(w), Some(Output { packets, lost })).unwrap();
+    offer(w, id, None, 3, 20);
+    d.clock.set_paused(true);
+    let before = d.bug_context(id).unwrap()["native_acknowledgements"].clone();
+    std::thread::sleep(std::time::Duration::from_millis(25));
+    let after = d.bug_context(id).unwrap()["native_acknowledgements"].clone();
+    assert!(before["oldest_shoot_pause_excluding_ms"].is_u64());
+    assert!(before.get("oldest_shoot_ms").is_none());
+    assert_eq!(
+        before["oldest_shoot_pause_excluding_ms"],
+        after["oldest_shoot_pause_excluding_ms"]
+    );
+    d.clock.set_paused(false);
+}
+
+#[test]
 fn native_shoot_ack_five_second_timeout_remains_fail_closed() {
     let (mut w, id, _rx, loss) = native();
     offer(&mut w, id, None, 3, 20);
@@ -195,7 +280,7 @@ fn native_shoot_ack_five_second_timeout_remains_fail_closed() {
         .shoot_acks
         .front_mut()
         .unwrap()
-        .0 = Instant::now() - std::time::Duration::from_secs(6);
+        .0 = w.clock.now() - std::time::Duration::from_secs(6);
     assert!(!*loss.borrow());
     w.expire_native_projectiles();
     assert!(*loss.borrow());
