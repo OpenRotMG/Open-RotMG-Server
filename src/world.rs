@@ -467,7 +467,7 @@ pub struct World {
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
-    quest_ids: BTreeSet<i32>,
+    quests_by_level: BTreeMap<i32, BTreeSet<i32>>,
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
@@ -1445,7 +1445,7 @@ impl World {
     ) -> Result<Self> {
         let mut entities = BTreeMap::new();
         let mut actor_ids = BTreeSet::new();
-        let mut quest_ids = BTreeSet::new();
+        let mut quests_by_level: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         let mut fountains = Vec::new();
         let mut cells = vec![BTreeSet::new(); map.cells.len()];
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
@@ -1552,8 +1552,8 @@ impl World {
                     {
                         actor_ids.insert(id);
                     }
-                    if o.quest {
-                        quest_ids.insert(id);
+                    if let Some(level) = o.quest_level.filter(|_| o.quest) {
+                        quests_by_level.entry(level).or_default().insert(id);
                     }
                     entities.insert(id, e);
                 }
@@ -1579,7 +1579,7 @@ impl World {
             non_population_ids: actor_ids.clone(),
             npc_global_ids: actor_ids.clone(),
             actor_ids,
-            quest_ids,
+            quests_by_level,
             players: BTreeMap::new(),
             guild: None,
             bullets: Vec::new(),
@@ -1835,8 +1835,8 @@ impl World {
         }
         self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
-        if definition.quest {
-            self.quest_ids.insert(id);
+        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
+            self.quests_by_level.entry(level).or_default().insert(id);
         }
         Ok(id)
     }
@@ -1873,9 +1873,19 @@ impl World {
         self.pentaract_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
-        self.quest_ids.remove(&id);
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
+        let definition = &self.content.objects[&entity.kind];
+        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
+            let ids = self
+                .quests_by_level
+                .get_mut(&level)
+                .expect("quest level missing");
+            assert!(ids.remove(&id), "indexed quest missing");
+            if ids.is_empty() {
+                self.quests_by_level.remove(&level);
+            }
+        }
         if let Some(slot) = entity.population_slot {
             let terrain = self.population_terrain(&self.population[slot]) as usize;
             assert_eq!(
@@ -2251,35 +2261,48 @@ impl World {
             return None;
         }
         let player = &self.players[&id];
-        self.quest_ids
-            .iter()
-            .map(|id| self.entities.get(id).expect("indexed quest missing"))
-            .filter_map(|e| {
-                let definition = &self.content.objects[&e.kind];
-                if !definition.quest || e.hp <= 0 || !e.accessible(player.character.account) {
-                    return None;
-                }
+        let level = player.character.level;
+        let mut lower = self.quests_by_level.range(..=level).rev().peekable();
+        let mut upper = self
+            .quests_by_level
+            .range((std::ops::Bound::Excluded(level), std::ops::Bound::Unbounded))
+            .peekable();
+        let levels = std::iter::from_fn(|| match (lower.peek(), upper.peek()) {
+            (Some((a, _)), Some((b, _))) if a.abs_diff(level) <= b.abs_diff(level) => lower.next(),
+            (Some(_), None) => lower.next(),
+            _ => upper.next(),
+        });
+        let mut best: Option<&Entity> = None;
+        let mut difference = u32::MAX;
+        for (&quest_level, ids) in levels {
+            if quest_level.abs_diff(level) > difference {
+                break;
+            }
+            // Equally suitable levels on both sides must compete on distance, not iteration order.
+            for id in ids {
+                let e = self.entities.get(id).expect("indexed quest missing");
                 let max = match e.kind {
                     0x617 => 8,
                     0x609 | 0x60d => 9,
                     0x61f => 10,
                     _ => 20,
                 };
-                // XML Level recommends a quest, rather than setting a minimum character level.
-                (player.character.level <= max)
-                    .then_some((e, definition.quest_level?.abs_diff(player.character.level)))
-            })
-            .min_by(|(a, a_level), (b, b_level)| {
-                a_level
-                    .cmp(b_level)
-                    .then_with(|| {
-                        a.pos
-                            .distance(player.pos)
-                            .total_cmp(&b.pos.distance(player.pos))
-                    })
-                    .then_with(|| a.id.cmp(&b.id))
-            })
-            .map(|(e, _)| e.id)
+                if e.hp <= 0 || !e.accessible(player.character.account) || level > max {
+                    continue;
+                }
+                if best.is_none_or(|b| {
+                    e.pos
+                        .distance(player.pos)
+                        .total_cmp(&b.pos.distance(player.pos))
+                        .then_with(|| e.id.cmp(&b.id))
+                        .is_lt()
+                }) {
+                    best = Some(e);
+                    difference = quest_level.abs_diff(level);
+                }
+            }
+        }
+        best.map(|e| e.id)
     }
     fn broadcast_text(&self, name: &str, text: &str) -> usize {
         let packet = chat::text_packet(name, -1, 0, text);
