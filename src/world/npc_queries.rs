@@ -14,6 +14,7 @@ impl World {
             candidates.extend(self.npc_global_ids.iter().copied());
             let width = self.map.width as usize;
             let mut rows = Vec::new();
+            let mut rects = Vec::new();
             for p in audience {
                 let x0 = ((p.x - 20.) as i32).saturating_sub(1).max(0);
                 let y0 = ((p.y - 20.) as i32).saturating_sub(1).max(0);
@@ -26,6 +27,7 @@ impl World {
                 if x0 > x1 || y0 > y1 {
                     continue;
                 }
+                rects.push((x0 as usize, y0 as usize, x1 as usize, y1 as usize));
                 for y in y0..=y1 {
                     let start = y as usize * width + x0 as usize;
                     let end = y as usize * width + x1 as usize + 1;
@@ -44,14 +46,16 @@ impl World {
                     merged.push((start, end));
                 }
             }
-            for (start, end) in merged {
-                cells += end - start;
-                for cell in &self.cells[start..end] {
-                    candidates.extend(
-                        cell.iter()
-                            .filter(|id| self.actor_ids.contains(id))
-                            .copied(),
-                    );
+            cells += merged.iter().map(|(start, end)| end - start).sum::<usize>();
+            // Actor sections never contain scenery; the exact row intervals still decide membership.
+            for &(x0, y0, x1, y1) in &rects {
+                for id in self.cells.actors_in(x0, y0, x1, y1) {
+                    let pos = self.entities[&id].pos;
+                    let cell = pos.y as usize * width + pos.x as usize;
+                    let i = merged.partition_point(|(start, _)| *start <= cell);
+                    if i > 0 && cell < merged[i - 1].1 {
+                        candidates.push(id);
+                    }
                 }
             }
             candidates.sort_unstable();

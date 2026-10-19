@@ -154,7 +154,7 @@ fn realm_construct_path_stays_at_home_and_paralysis_freezes_the_orbit_clock() {
         w.players.get_mut(&p).unwrap().pos.y = home.y + if tick < 40 { 3. } else { -3. };
         w.npc_step();
         assert!(w.entities[&id].pos.distance(home) <= 2.01);
-        assert_eq!(w.cells.iter().filter(|c| c.contains(&id)).count(), 1);
+        assert_eq!(w.cells.count(id), 1);
     }
     let (pos, phase) = (w.entities[&id].pos, w.entities[&id].phase);
     w.apply_condition(id, crate::condition::PARALYZED, 1000)

@@ -106,7 +106,7 @@ fn npc_wall_projection_preserves_axes_budgets_and_strict_movement() {
             assert!(pos.distance(old) <= 0.30001);
             assert!((if swap { pos.x - old.x } else { pos.y - old.y }) > 0.1);
             assert!(w.walkable(pos));
-            assert_eq!(w.cells.iter().filter(|cell| cell.contains(&id)).count(), 1);
+            assert_eq!(w.cells.count(id), 1);
         }
     }
     let mut w = arena(0);

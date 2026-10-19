@@ -35,7 +35,9 @@ impl World {
             .collect();
         ensure!(!bridges.is_empty(), "Idol treasure room has no bridge");
         for i in bridges {
-            let existing = self.cells[i]
+            let existing = self
+                .cells
+                .ids(i)
                 .iter()
                 .find(|id| self.entities[id].kind == BRIDGE)
                 .copied();
