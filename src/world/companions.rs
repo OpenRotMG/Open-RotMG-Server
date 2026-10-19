@@ -58,7 +58,9 @@ impl World {
                         && pos.y.is_finite()
                         && self.map.cell(pos.x - 20., pos.y - 20.).is_some()
                         && self.map.cell(pos.x + 10., pos.y + 10.).is_some(),
-                    "Firecrackers need at least 20 tiles from the left/top and more than 10 from the right/bottom world boundary."
+                    controller(
+                        "Firecrackers need at least 20 tiles from the left/top and more than 10 from the right/bottom world boundary."
+                    )
                 );
             }
             ensure!(
@@ -674,6 +676,11 @@ mod tests {
                     )
                     .err()
                     .unwrap();
+                assert_eq!(
+                    error.downcast_ref::<CloseReason>(),
+                    Some(&CloseReason::Controller)
+                );
+                assert!(crate::server::lifecycle::rule_rejection(&error));
                 assert!(error.to_string().contains("world boundary"));
                 assert_eq!(w.players[&id].character.items[5], item);
                 assert_eq!(w.players[&id].character.revision, revision);
