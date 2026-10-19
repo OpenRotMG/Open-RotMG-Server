@@ -32,7 +32,9 @@ impl World {
             1 => e.size = (e.size + 10).min(130),
             2 => e.size = (e.size - 10).max(70),
             3 => {
-                e.expires.get_or_insert(self.now + 50);
+                if e.expires.is_none() {
+                    e.expires.set(Some(self.now + 50), id, &mut self.timed_ids);
+                }
             }
             0 => {}
             _ => bail!("invalid Flamer phase"),

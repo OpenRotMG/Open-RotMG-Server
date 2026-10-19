@@ -176,14 +176,13 @@ impl World {
             e.home = home;
             e.stage = Some(0);
             e.activated = Some(self.now);
-            e.expires = Some(
-                self.now
-                    + match kind {
-                        0x91d => 130000,
-                        0x92a..=0x92c => 160000,
-                        _ => 90000,
-                    },
-            );
+            let lifetime = match kind {
+                0x91d => 130000,
+                0x92a..=0x92c => 160000,
+                _ => 90000,
+            };
+            e.expires
+                .set(Some(self.now + lifetime), child, &mut self.timed_ids);
             e.size = self.content.objects[&kind].size;
             if matches!(kind, 0x91e | 0x923 | 0x929..=0x92c) {
                 e.condition |= condition::bit(condition::INVULNERABLE);
@@ -210,15 +209,14 @@ impl World {
         e.damage = old.damage;
         e.stage = None;
         e.activated = Some(self.now);
-        e.expires = match kind {
+        let expires = match kind {
+            _ if quest::final_root(kind) || kind == 0x6c2 => None,
             0x924 => Some(self.now + 60000),
             0x92b | 0x92c => Some(self.now + 160000),
-            _ => old.expires,
+            _ => *old.expires,
         };
+        e.expires.set(expires, new, &mut self.timed_ids);
         e.size = self.content.objects[&kind].size;
-        if quest::final_root(kind) || kind == 0x6c2 {
-            e.expires = None;
-        }
         if matches!(kind, 0x920 | 0x6c2 | 0x92b | 0x92c) {
             e.condition |= condition::bit(condition::INVULNERABLE);
         }

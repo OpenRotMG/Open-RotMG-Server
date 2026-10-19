@@ -87,6 +87,7 @@ mod realm_setpieces_tests;
 mod spider;
 #[cfg(test)]
 mod spider_tests;
+mod tracked;
 #[cfg(test)]
 mod xp_booster_tests;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
@@ -196,12 +197,12 @@ pub struct Entity {
     attacks: crate::encounter::attacks::Clocks,
     activated: Option<u64>,
     stage: Option<u64>,
-    parent: Option<i32>,
+    parent: tracked::Tracked<i32>,
     camp: Option<usize>,
     #[serde(skip)]
     population_slot: Option<usize>,
     quest: Option<i32>,
-    expires: Option<u64>,
+    expires: tracked::Tracked<u64>,
     next_aux: u64,
     blocked_since: Option<u64>,
     reaction_until: u64,
@@ -257,6 +258,7 @@ pub struct Player {
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
+    tile_scan: Option<(i32, i32)>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
     killer: String,
@@ -458,6 +460,10 @@ pub struct World {
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: BTreeMap<i32, Entity>,
     actor_ids: BTreeSet<i32>,
+    // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
+    timed_ids: BTreeSet<i32>,
+    gun_ids: BTreeSet<i32>,
+    pentaract_ids: BTreeSet<i32>,
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
@@ -1494,11 +1500,11 @@ impl World {
                         attacks: Default::default(),
                         activated: None,
                         stage: None,
-                        parent: None,
+                        parent: Default::default(),
                         camp: None,
                         population_slot: None,
                         quest: None,
-                        expires: None,
+                        expires: Default::default(),
                         next_aux: 0,
                         blocked_since: None,
                         reaction_until: 0,
@@ -1553,10 +1559,22 @@ impl World {
                 }
             }
         }
+        let gun_ids = actor_ids
+            .iter()
+            .copied()
+            .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
+            .collect();
         Ok(Self {
             content,
             map,
             realm_layout: None,
+            timed_ids: BTreeSet::new(),
+            gun_ids,
+            pentaract_ids: entities
+                .values()
+                .filter(|e| e.kind == 0xd5f)
+                .map(|e| e.id)
+                .collect(),
             entities,
             non_population_ids: actor_ids.clone(),
             npc_global_ids: actor_ids.clone(),
@@ -1796,11 +1814,11 @@ impl World {
                 attacks: Default::default(),
                 activated: None,
                 stage: None,
-                parent: None,
+                parent: Default::default(),
                 camp: None,
                 population_slot: None,
                 quest: None,
-                expires: None,
+                expires: Default::default(),
                 next_aux: 0,
                 blocked_since: None,
                 reaction_until: 0,
@@ -1809,6 +1827,12 @@ impl World {
         );
         self.cells[cell].insert(id);
         self.actor_ids.insert(id);
+        if (0x802..=0x805).contains(&kind) {
+            self.gun_ids.insert(id);
+        }
+        if kind == 0xd5f {
+            self.pentaract_ids.insert(id);
+        }
         self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
         if definition.quest {
@@ -1844,6 +1868,9 @@ impl World {
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
         self.actor_ids.remove(&id);
+        self.timed_ids.remove(&id);
+        self.gun_ids.remove(&id);
+        self.pentaract_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
         self.quest_ids.remove(&id);
@@ -1985,6 +2012,7 @@ impl World {
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
+                tile_scan: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
                 killer: String::new(),
@@ -2267,11 +2295,14 @@ impl World {
         recipients
     }
     fn visible(&self, id: i32) -> BTreeSet<i32> {
+        self.visible_with(id, self.quest_target(id))
+    }
+    fn visible_with(&self, id: i32, quest: Option<i32>) -> BTreeSet<i32> {
         let pos = self.players[&id].pos;
         self.entities_near(pos, 20.)
             .filter(|e| e.accessible(self.players[&id].character.account))
             .map(|e| e.id)
-            .chain(self.quest_target(id))
+            .chain(quest)
             .chain(
                 self.players
                     .iter()
@@ -2282,7 +2313,9 @@ impl World {
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
         let started = crate::performance::Measure::start();
-        let mut visible = self.visible(id);
+        // Nothing below changes quest eligibility, so one evaluation serves visibility and the quest arrow.
+        let quest = self.quest_target(id);
+        let mut visible = self.visible_with(id, quest);
         // The native minimap tracks players across this world, including outside explored terrain.
         visible.extend(self.players.keys().copied());
         let previous = &self.players[&id].known;
@@ -2292,11 +2325,15 @@ impl World {
         let dropped: Vec<i32> = previous.difference(&visible).copied().collect();
         let pos = self.players[&id].pos;
         let mut tiles = Vec::new();
+        let center = (pos.x as i32, pos.y as i32);
+        // Discovered tiles only grow, so rescanning the same centre cannot find anything new.
+        let rescan = initial || self.players[&id].tile_scan != Some(center);
         for y in ((pos.y as i32 - 20).max(0))..=(pos.y as i32 + 20).min(self.map.height - 1) {
             for x in ((pos.x as i32 - 20).max(0))..=(pos.x as i32 + 20).min(self.map.width - 1) {
                 let dx = x - pos.x as i32;
                 let dy = y - pos.y as i32;
-                if dx * dx + dy * dy <= 20 * 20
+                if rescan
+                    && dx * dx + dy * dy <= 20 * 20
                     && !self.players[&id].tiles.contains(&(x as i16, y as i16))
                 {
                     tiles.push((
@@ -2307,6 +2344,7 @@ impl World {
                 }
             }
         }
+        self.players.get_mut(&id).unwrap().tile_scan = Some(center);
         if initial || !tiles.is_empty() || !added.is_empty() || !dropped.is_empty() {
             let mut o = Writer::new();
             o.i16(i16::try_from(tiles.len())?);
@@ -2345,7 +2383,6 @@ impl World {
             p.known_since.entry(*entity).or_insert(self.now);
         }
         p.known = visible;
-        let quest = self.quest_target(id);
         let p = self.players.get_mut(&id).unwrap();
         if initial || p.quest != quest {
             p.quest = quest;
@@ -3664,7 +3701,9 @@ impl World {
         let grave = self.insert_entity(kind, pos, vec![])?;
         let entity = self.entities.get_mut(&grave).unwrap();
         entity.name = name;
-        entity.expires = lifetime.map(|ms| self.now + ms);
+        entity
+            .expires
+            .set(lifetime.map(|ms| self.now + ms), grave, &mut self.timed_ids);
         tracing::info!(player=id, grave, kind, maxed, expires=?entity.expires, "gravestone created");
         let p = self.players.get_mut(&id).unwrap();
         p.character.alive = false;
@@ -4853,9 +4892,10 @@ impl World {
             self.send_enemy_shot(owner, shot);
         }
         let guns: Vec<_> = self
-            .actors()
-            .filter(|e| (0x0802..=0x0805).contains(&e.kind) && self.now >= e.next_shot)
-            .map(|e| e.id)
+            .gun_ids
+            .iter()
+            .filter(|id| self.now >= self.entities[id].next_shot)
+            .copied()
             .collect();
         for id in guns {
             let e = self.entities.get_mut(&id).unwrap();
