@@ -169,16 +169,27 @@ fn djinn_has_real_shields_telegraph_final_burst_and_once_only_normal_rewards() {
     w.now = 100;
     let char_id = w.players[&p].character.id;
     let e = w.entities.get_mut(&id).unwrap();
+    e.hp = 400;
+    w.god_mechanics(id, 2700).unwrap();
+    assert_eq!(w.entities[&id].expires, None);
+    let e = w.entities.get_mut(&id).unwrap();
     e.hp = 399;
     e.damage.insert(char_id, 601);
     w.god_mechanics(id, 2700).unwrap();
-    assert_eq!(w.entities[&id].expires, Some(3100));
+    assert_eq!(w.entities[&id].expires, Some(1100));
+    w.now = 600;
+    w.god_mechanics(id, 3200).unwrap();
+    assert_eq!(w.entities[&id].expires, Some(1100));
+    assert_ne!(
+        w.entities[&id].conditions(w.now) & condition::bit(condition::INVULNERABLE),
+        0
+    );
     assert!(
         w.god_shots(id, w.players[&p].pos, 0., 2700)
             .unwrap()
             .is_empty()
     );
-    w.now = 3050;
+    w.now = 1050;
     w.players.get_mut(&p).unwrap().paused = true;
     w.apply_condition(id, condition::STUNNED, 1000).unwrap();
     let packets = w.npc_step();
@@ -188,7 +199,7 @@ fn djinn_has_real_shields_telegraph_final_burst_and_once_only_normal_rewards() {
     w.npc_step();
     assert_eq!(w.bullets.iter().filter(|b| b.owner == id).count(), 12);
     w.players.get_mut(&p).unwrap().paused = false;
-    w.now = 3100;
+    w.now = 1100;
     w.mechanic_expiry();
     assert!(!w.entities.contains_key(&id));
     let earned = w.players[&p].experience_queued;

@@ -213,7 +213,7 @@ impl Directory {
         {
             return Ok(*id);
         }
-        ensure!(self.worlds.len() < 12, "World instance limit reached.");
+        self.reserve_worlds(1, &[])?;
         let mut world = self.make(
             &format!("guild-hall-{}", guild.level),
             "Guild Hall",

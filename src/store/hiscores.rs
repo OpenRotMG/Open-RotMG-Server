@@ -88,16 +88,19 @@ impl Store {
             }
             let mut characters = std::collections::BTreeMap::new();
             {
-                let mut q=tx.prepare("SELECT stats FROM characters WHERE alive=1 UNION ALL SELECT snapshot FROM deaths")?;
-                for raw in q.query_map([],|r|r.get::<_,String>(0))? {
-                    let c=decode_character(&raw?,base)?; characters.insert(c.id,c);
+                // Tombstones prevent stale world snapshots from restoring dead or deleted scores.
+                let mut q=tx.prepare("SELECT id,alive,stats FROM characters")?;
+                for row in q.query_map([],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,bool>(1)?,r.get::<_,String>(2)?)))? {
+                    let (id,alive,raw)=row?;
+                    let mut c=decode_character(&raw,base)?; c.id=id; c.alive=alive;
+                    characters.insert(id,c);
                 }
             }
             for c in living {
                 if characters.get(&c.id).is_some_and(|saved| !saved.alive) { continue; }
                 characters.insert(c.id,c);
             }
-            for c in characters.values() {
+            for c in characters.values().filter(|c| c.alive) {
                 if let Some(row)=records.get_mut(&c.account) {
                     ensure!(c.fame >= 0, "negative persisted fame for character {}", c.id);
                     let best=row["base_fame"].as_i64().context("invalid best fame")?;
@@ -213,7 +216,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[tokio::test]
-    async fn collection_and_inventory_commit_together_and_fame_deduplicates_deaths() {
+    async fn collection_is_atomic_and_living_fame_excludes_dead_and_deleted_characters() {
         let content = Content::load(Path::new("data")).unwrap();
         let dir = std::env::temp_dir().join(format!("hiscores-progress-{}", rand::random::<u64>()));
         std::fs::create_dir(&dir).unwrap();
@@ -285,14 +288,57 @@ mod tests {
         c.hp = 0;
         s.death(c, "test enemy".into()).await.unwrap();
         let scores = s.hiscores(vec![live]).await.unwrap();
-        assert_eq!(scores["players"][0]["base_fame"], 50);
+        assert_eq!(scores["players"][0]["base_fame"], 0);
         assert_eq!(scores["players"][0]["total_fame"], 50);
         let mut replacement = s.create(a.id, content.get(WIZARD).unwrap()).await.unwrap();
         replacement.fame = 80;
-        let scores = s.hiscores(vec![replacement]).await.unwrap();
+        s.progress(replacement.clone()).await.unwrap();
+        s.call(move |db| {
+            db.execute("UPDATE accounts SET credits=600 WHERE id=?1", [a.id])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        s.purchase_character_slot(a.id, 1).await.unwrap();
+        let mut other = s.create(a.id, content.get(WIZARD).unwrap()).await.unwrap();
+        other.fame = 30;
+        s.progress(other.clone()).await.unwrap();
+        let scores = s.hiscores(vec![]).await.unwrap();
         assert_eq!(scores["players"][0]["base_fame"], 80);
+        replacement.fame = 90;
+        let scores = s
+            .hiscores(vec![replacement.clone(), other.clone()])
+            .await
+            .unwrap();
+        assert_eq!(scores["players"][0]["base_fame"], 90);
         assert_eq!(scores["players"][0]["total_fame"], 50);
         assert_eq!(scores["players"][0]["collection"], 1);
+        let stale = replacement.clone();
+        replacement.alive = false;
+        replacement.hp = 0;
+        s.death(replacement.clone(), "test enemy".into())
+            .await
+            .unwrap();
+        let scores = s.hiscores(vec![stale, replacement]).await.unwrap();
+        assert_eq!(scores["players"][0]["base_fame"], 30);
+        assert_eq!(scores["players"][0]["total_fame"], 140);
+        s.delete_character(a.id, other.id).await.unwrap();
+        let scores = s.hiscores(vec![other]).await.unwrap();
+        assert_eq!(scores["players"][0]["base_fame"], 0);
+        assert_eq!(scores["players"][0]["total_fame"], 140);
+        assert_eq!(scores["players"][0]["collection"], 1);
+        let mut unsaved = s.create(a.id, content.get(WIZARD).unwrap()).await.unwrap();
+        unsaved.fame = 100;
+        s.delete_character(a.id, unsaved.id).await.unwrap();
+        assert_eq!(
+            s.hiscores(vec![unsaved]).await.unwrap()["players"],
+            scores["players"]
+        );
+        let restarted = Store::open(&dir.join("game.db"), &content).unwrap();
+        assert_eq!(
+            restarted.hiscores(vec![]).await.unwrap()["players"],
+            scores["players"]
+        );
         s.call(move |db| {
             db.execute(
                 "INSERT INTO shore_bots(name,account) VALUES('test-bot',?1)",

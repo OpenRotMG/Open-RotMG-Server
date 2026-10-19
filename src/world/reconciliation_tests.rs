@@ -118,139 +118,110 @@ fn unacknowledged_weapon_ticks_are_bounded_and_do_not_disconnect_bots() {
 }
 
 #[test]
-fn restrictive_native_condition_queues_real_stat29_before_one_owned_goto() {
-    let (mut w, id, mut rx, loss) = native();
-    w.safe = true;
-    while rx.try_recv().is_ok() {}
-    w.apply_condition(id, crate::condition::SLOWED, 2000)
-        .unwrap();
-    let authority = {
-        let p = &w.players[&id];
-        (
-            p.seed,
-            p.next_bullet,
-            p.attack_credit,
-            p.movement_credit,
-            p.character.shots,
-            p.last_move,
-        )
-    };
-    w.step();
-    w.step();
-    let mut packets = vec![];
-    while let Ok(packet) = rx.try_recv() {
-        packets.push(packet);
-    }
-    assert_eq!(packets.iter().filter(|p| p.id == wire::GOTO).count(), 1);
-    let tick = packets.iter().position(|p| p.id == wire::NEW_TICK).unwrap();
-    let go = packets.iter().position(|p| p.id == wire::GOTO).unwrap();
-    assert!(tick < go);
-    let mut r = crate::wire::Reader::new(&packets[tick].body);
-    r.i32().unwrap();
-    assert_eq!(r.i32().unwrap(), 100);
-    let count = r.i16().unwrap();
-    let mut mask = None;
-    for _ in 0..count {
-        let entity = r.i32().unwrap();
-        r.f32().unwrap();
-        r.f32().unwrap();
-        let stats = r.i16().unwrap();
-        for _ in 0..stats {
-            let kind = r.u8().unwrap();
-            if matches!(kind, 31 | 62) {
-                r.utf().unwrap();
+fn native_movement_conditions_update_stats_without_rewinding_position() {
+    for effect in [crate::condition::SLOWED, crate::condition::PARALYZED, 15] {
+        let (mut w, id, mut rx, loss) = native();
+        w.safe = true;
+        while rx.try_recv().is_ok() {}
+        let normal_speed = w.players[&id].speed(&w.content, w.now).unwrap();
+        for phase in 0..3 {
+            if phase < 2 {
+                w.apply_condition(id, effect, 200).unwrap();
             } else {
-                let value = r.i32().unwrap();
-                if entity == id && kind == 29 {
-                    mask = Some(value);
+                w.now += 201;
+            }
+            let p = &w.players[&id];
+            let authority = (
+                p.seed,
+                p.next_bullet,
+                p.attack_credit,
+                p.movement_credit,
+                p.character.shots,
+                p.last_move,
+            );
+            let pos = p.pos;
+            w.step();
+            w.step();
+            let mut packets = vec![];
+            while let Ok(packet) = rx.try_recv() {
+                packets.push(packet);
+            }
+            assert!(
+                packets.iter().all(|p| p.id != wire::GOTO),
+                "condition {effect}, phase {phase} must not rewind native movement"
+            );
+            let tick = packets.iter().find(|p| p.id == wire::NEW_TICK).unwrap();
+            let mut r = crate::wire::Reader::new(&tick.body);
+            r.i32().unwrap();
+            assert_eq!(r.i32().unwrap(), 100);
+            let count = r.i16().unwrap();
+            let mut mask = None;
+            for _ in 0..count {
+                let entity = r.i32().unwrap();
+                r.f32().unwrap();
+                r.f32().unwrap();
+                let stats = r.i16().unwrap();
+                for _ in 0..stats {
+                    let kind = r.u8().unwrap();
+                    if matches!(kind, 31 | 62) {
+                        r.utf().unwrap();
+                    } else {
+                        let value = r.i32().unwrap();
+                        if entity == id && kind == 29 {
+                            mask = Some(value);
+                        }
+                    }
                 }
             }
+            r.done().unwrap();
+            let expected_mask = if phase < 2 {
+                crate::condition::bit(effect)
+            } else {
+                0
+            };
+            assert_eq!(mask, Some(expected_mask));
+            let p = &w.players[&id];
+            assert_eq!(
+                (
+                    p.seed,
+                    p.next_bullet,
+                    p.attack_credit,
+                    p.movement_credit,
+                    p.character.shots,
+                    p.last_move,
+                ),
+                authority
+            );
+            assert_eq!(p.pos.distance(pos), 0.);
+            assert!(!p.correcting().unwrap());
+            assert!(!*loss.borrow());
+            let expected_speed = match (phase, effect) {
+                (2, _) => normal_speed,
+                (_, crate::condition::SLOWED) => 0.004,
+                (_, crate::condition::PARALYZED) => 0.,
+                (_, 15) => normal_speed * 1.5,
+                _ => unreachable!(),
+            };
+            assert_eq!(p.speed(&w.content, w.now).unwrap(), expected_speed);
+            // MOVE is sent before the client applies NEW_TICK's conditions.
+            assert_eq!(
+                w.native_move_received(
+                    id,
+                    Pos {
+                        x: pos.x + 0.1,
+                        y: pos.y,
+                    },
+                    (
+                        1100 + phase * 100,
+                        w.attack_epoch + Duration::from_millis(100 + phase as u64 * 100),
+                    ),
+                )
+                .unwrap(),
+                NativeInput::Applied
+            );
+            assert_eq!(w.players[&id].pos.x, pos.x + 0.1);
         }
     }
-    r.done().unwrap();
-    assert_eq!(
-        mask.unwrap() & crate::condition::bit(crate::condition::SLOWED),
-        crate::condition::bit(crate::condition::SLOWED)
-    );
-    let p = &w.players[&id];
-    assert_eq!(
-        (
-            p.seed,
-            p.next_bullet,
-            p.attack_credit,
-            p.movement_credit,
-            p.character.shots,
-            p.last_move
-        ),
-        authority
-    );
-    assert!(p.correcting().unwrap());
-    assert!(!*loss.borrow());
-    w.acknowledge_goto(id, 1100).unwrap();
-    w.apply_condition(id, crate::condition::SLOWED, 2000)
-        .unwrap();
-    w.step();
-    w.step();
-    while let Ok(packet) = rx.try_recv() {
-        assert_ne!(packet.id, wire::GOTO, "refresh must not reanchor again");
-    }
-    w.now = 2500;
-    w.step();
-    w.step();
-    while let Ok(packet) = rx.try_recv() {
-        assert_ne!(
-            packet.id,
-            wire::GOTO,
-            "expiry only raises the admitted movement coefficient"
-        );
-    }
-    w.players
-        .get_mut(&id)
-        .unwrap()
-        .statuses
-        .insert(crate::condition::PARALYZED, (w.now, w.now + 1000));
-    w.step();
-    w.step();
-    let mut gotos = 0;
-    while let Ok(packet) = rx.try_recv() {
-        gotos += usize::from(packet.id == wire::GOTO);
-    }
-    assert_eq!(gotos, 1);
-    w.acknowledge_goto(id, 1200).unwrap();
-    w.apply_condition(id, crate::condition::SLOWED, 2000)
-        .unwrap();
-    w.step();
-    w.step();
-    while let Ok(packet) = rx.try_recv() {
-        assert_ne!(
-            packet.id,
-            wire::GOTO,
-            "Slowed cannot lower an already Paralyzed motor"
-        );
-    }
-}
-#[test]
-fn speedy_expiry_synchronizes_the_lower_native_coefficient_after_real_stat29() {
-    let (mut w, id, mut rx, _loss) = native();
-    w.safe = true;
-    while rx.try_recv().is_ok() {}
-    w.apply_condition(id, 15, 200).unwrap();
-    w.step();
-    w.step();
-    while let Ok(p) = rx.try_recv() {
-        assert_ne!(p.id, wire::GOTO, "Speedy only raises the coefficient");
-    }
-    w.step();
-    w.step();
-    let mut ids = vec![];
-    while let Ok(p) = rx.try_recv() {
-        ids.push(p.id);
-    }
-    let tick = ids.iter().position(|id| *id == wire::NEW_TICK).unwrap();
-    let go = ids.iter().position(|id| *id == wire::GOTO).unwrap();
-    assert!(tick < go);
-    assert_eq!(ids.iter().filter(|id| **id == wire::GOTO).count(), 1);
-    assert!(w.players[&id].correcting().unwrap());
 }
 #[test]
 fn native_dazed_and_goto_discards_conserve_rng_without_authorizing_bullets() {

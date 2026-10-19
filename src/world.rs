@@ -118,6 +118,8 @@ mod npc_queries;
 #[cfg(test)]
 mod npc_query_tests;
 #[cfg(test)]
+mod quest_completion_tests;
+#[cfg(test)]
 mod quiver_tests;
 mod reconciliation;
 #[cfg(test)]
@@ -248,7 +250,6 @@ pub struct Player {
     pub known: BTreeSet<i32>,
     quest: Option<i32>,
     statuses: BTreeMap<u8, (u64, u64)>,
-    native_motion_condition: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32)>,
@@ -527,6 +528,7 @@ struct Grant {
     destination: i32,
     key_time: i32,
     expires: u64,
+    consumed: bool,
 }
 struct Portal {
     origin: i32,
@@ -706,7 +708,6 @@ impl Directory {
             crate::endgame::CASTLE,
             crate::endgame::CHAMBER,
             crate::endgame::CELLAR,
-            "sprite-world",
             "undead-lair",
             "guild-hall-1",
             "guild-hall-2",
@@ -806,6 +807,11 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::snake_pit(&self.content, seed)?)
+            } else if template == "sprite-world" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
             } else {
                 self.templates
                     .get(template)
@@ -897,7 +903,9 @@ impl Directory {
         }
     }
     pub(crate) fn character_transferring(&self, character: i32) -> bool {
-        self.grants.values().any(|g| g.character == character)
+        self.grants
+            .values()
+            .any(|g| g.character == character && !g.consumed)
     }
     pub fn location(&self, player: i32) -> Result<i32> {
         self.worlds
@@ -929,7 +937,7 @@ impl Directory {
         if template != crate::endgame::CASTLE {
             return self.instance(template, None);
         }
-        ensure!(self.worlds.len() < 12, "world instance limit reached");
+        self.reserve_worlds(1, &[])?;
         let world = self.make(template, "Oryx's Castle", false, None)?;
         let id = self.next_world;
         self.next_world = id
@@ -938,6 +946,48 @@ impl Directory {
         self.worlds.insert(id, world);
         self.idle.insert(id, self.tick);
         Ok(id)
+    }
+    fn reclaimable_world(&self, id: i32) -> bool {
+        id > 0
+            && self.worlds[&id].players.is_empty()
+            && self.worlds[&id].bag_expiry.is_empty()
+            && !self.endgame.references_world(id)
+            && !self.grants.values().any(|g| g.destination == id)
+            && !self
+                .portals
+                .values()
+                .any(|p| p.origin == id || p.destination == Some(id))
+    }
+    fn reserve_worlds(&mut self, slots: usize, keep: &[i32]) -> Result<()> {
+        let needed = (self.worlds.len() + slots).saturating_sub(12);
+        if needed == 0 {
+            return Ok(());
+        }
+        // Empty caches must not deny entry, but live portals and transfers still own their worlds.
+        let retired: Vec<_> = self
+            .worlds
+            .keys()
+            .copied()
+            .filter(|id| !keep.contains(id) && self.reclaimable_world(*id))
+            .take(needed)
+            .collect();
+        ensure!(
+            retired.len() == needed,
+            "world instance limit reached: {} worlds, {slots} requested, {} reclaimable",
+            self.worlds.len(),
+            retired.len()
+        );
+        for id in retired {
+            let world = self.worlds.remove(&id).unwrap();
+            self.idle.remove(&id);
+            tracing::info!(
+                world = id,
+                name = world.name,
+                owner = world.owner,
+                "empty world reclaimed for capacity"
+            );
+        }
+        Ok(())
     }
     pub fn instance(&mut self, template: &str, account: Option<i32>) -> Result<i32> {
         ensure!(
@@ -954,7 +1004,7 @@ impl Directory {
         {
             return Ok(*id);
         }
-        ensure!(self.worlds.len() < 12, "world instance limit reached");
+        self.reserve_worlds(1, &[])?;
         let world = self.make(
             template,
             if template == "vault" {
@@ -1066,6 +1116,7 @@ impl Directory {
                 destination,
                 key_time,
                 expires: self.tick + 2400,
+                consumed: false,
             },
         );
         tracing::info!(
@@ -1088,6 +1139,7 @@ impl Directory {
             .grants
             .get(&key)
             .context("unknown or already used transfer grant")?;
+        ensure!(!grant.consumed, "transfer grant already used");
         ensure!(grant.expires > self.tick, "transfer grant expired");
         ensure!(
             grant.account == account
@@ -1101,7 +1153,8 @@ impl Directory {
         );
         ensure!(self.worlds[&destination].admission_open, "Realm is closed");
         let character = grant.character;
-        self.grants.remove(&key);
+        // HELLO consumes the key before LOAD enters the world; keep its capacity reservation until then.
+        self.grants.get_mut(&key).unwrap().consumed = true;
         if destination > 0 {
             self.idle.insert(destination, self.tick);
         }
@@ -1148,7 +1201,14 @@ impl Directory {
     fn step(&mut self) {
         self.tick += 1;
         self.sync_realm_portal();
-        self.grants.retain(|_, grant| grant.expires > self.tick);
+        self.grants.retain(|_, g| {
+            g.expires > self.tick
+                && !(g.consumed
+                    && self.worlds[&g.destination]
+                        .players
+                        .values()
+                        .any(|p| p.character.account == g.account && p.character.id == g.character))
+        });
         for (id, world) in &mut self.worlds {
             world.step();
             world.report_performance(*id);
@@ -1199,14 +1259,7 @@ impl Directory {
         let expired: Vec<_> = self
             .idle
             .iter()
-            .filter(|(id, since)| {
-                self.tick - **since > 6000
-                    && !self.grants.values().any(|grant| grant.destination == **id)
-                    && !self
-                        .portals
-                        .values()
-                        .any(|portal| portal.destination == Some(**id))
-            })
+            .filter(|(id, since)| self.tick - **since > 6000 && self.reclaimable_world(**id))
             .map(|(id, _)| *id)
             .collect();
         for id in expired {
@@ -1285,20 +1338,33 @@ impl Handle {
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
         let request = crate::performance::REQUEST.try_with(Arc::clone).ok();
-        if let Some(r) = &request {
-            r.lock().expect("request timings poisoned").calls += 1;
-        }
+        let trace = request.as_ref().and_then(|r| {
+            let mut r = r.lock().expect("request timings poisoned");
+            r.calls += 1;
+            r.native_control
+                .as_ref()
+                .map(|trace| (trace.clone(), r.calls))
+        });
+        let record = move |stage, receiver_closed| {
+            if let Some((trace, call)) = &trace {
+                trace.record(*call, stage, receiver_closed);
+            }
+        };
         let start = Instant::now();
+        record("capacity_wait", tx.is_closed());
         let permit = self
             .tx
             .reserve()
             .await
             .map_err(|_| anyhow::anyhow!("world directory stopped"))?;
         let send_wait = start.elapsed();
+        record("capacity_acquired", tx.is_closed());
         let queued = Instant::now();
         let work_request = request.clone();
+        let work_record = record.clone();
         permit.send(Box::new(move |d| {
             let queue_wait = queued.elapsed();
+            work_record("started", tx.is_closed());
             d.performance.record("job_send_wait", send_wait);
             d.performance.record("job_wait", queue_wait);
             let started = crate::performance::Measure::start();
@@ -1315,8 +1381,12 @@ impl Handle {
                     *r.cpu.get_or_insert(Duration::ZERO) += cpu;
                 }
             }
-            let _ = tx.send(result);
+            work_record("completed", tx.is_closed());
+            let receiver_closed = tx.send(result).is_err();
+            work_record("result_send", receiver_closed);
         }));
+        // The receiver cannot be dropped until this poll yields.
+        record("enqueued", false);
         let result = rx.await.context("world directory worker failed");
         if let Some(r) = request {
             r.lock().expect("request timings poisoned").round_trip += start.elapsed();
@@ -1906,7 +1976,6 @@ impl World {
                 known: BTreeSet::new(),
                 quest: None,
                 statuses: BTreeMap::new(),
-                native_motion_condition: 0,
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
@@ -2848,10 +2917,6 @@ impl World {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("player missing")?;
         ensure!(!p.paused, "Cannot use items while paused.");
-        ensure!(
-            p.active() && !p.pending && p.character.hp > 0,
-            "player is busy, departing, quarantined or dead"
-        );
         let source = if slot.object == id {
             &p.character.items
         } else {
@@ -2874,6 +2939,13 @@ impl World {
         );
         ensure!(slot.kind >= 0, "empty item slot");
         let item = self.content.get(slot.kind as u16)?.clone();
+        // Saving earned XP must not freeze abilities; inventory mutations remain serialized.
+        ensure!(
+            p.active()
+                && p.character.hp > 0
+                && (!p.pending || p.progress_started && !item.abilities.is_empty()),
+            "player is busy, departing, quarantined or dead"
+        );
         if item.xp_boost {
             ensure!(
                 item.kind == 0xc42 && item.consumable && item.activations == 0,
@@ -3750,6 +3822,13 @@ impl World {
                 if amount > 0 {
                     tracing::debug!(player = id, enemy = e.kind, amount, "experience queued");
                 }
+                if p.quest == Some(e.id) {
+                    // This exact notification also starts the native client's quest-arrow completion delay.
+                    let mut out = Writer::new();
+                    out.i32(*id).utf("Quest Complete!").u32(0xff00ff00);
+                    send(p, wire::NOTIFICATION, out.0);
+                    tracing::debug!(player = id, enemy = e.id, "native quest completed");
+                }
             }
         }
         if self.name == "Realm"
@@ -3920,6 +3999,15 @@ impl World {
         Ok(())
     }
     fn move_entity(&mut self, id: i32, goal: Pos, distance: f32) -> Result<()> {
+        self.move_entity_colliding(id, goal, distance, false)
+    }
+    fn move_entity_colliding(
+        &mut self,
+        id: i32,
+        goal: Pos,
+        distance: f32,
+        slide: bool,
+    ) -> Result<()> {
         let old = self.entities[&id].pos;
         let length = old.distance(goal);
         if length <= 0.001 {
@@ -3932,17 +4020,64 @@ impl World {
             y: old.y + (goal.y - old.y) / length * distance,
         };
         let samples = (distance / 0.1).ceil().max(1.) as usize;
-        ensure!(
-            (1..=samples).all(|i| self.ocean_walkable(
-                self.entities[&id].kind,
+        let step = Pos {
+            x: (pos.x - old.x) / samples as f32,
+            y: (pos.y - old.y) / samples as f32,
+        };
+        let kind = self.entities[&id].kind;
+        let mut resolved = old;
+        for i in 1..=samples {
+            let next = if slide {
                 Pos {
-                    x: old.x + (pos.x - old.x) * i as f32 / samples as f32,
-                    y: old.y + (pos.y - old.y) * i as f32 / samples as f32
+                    x: resolved.x + step.x,
+                    y: resolved.y + step.y,
                 }
-            )),
-            "NPC movement crosses a blocked tile"
+            } else {
+                Pos {
+                    x: old.x + step.x * i as f32,
+                    y: old.y + step.y * i as f32,
+                }
+            };
+            let horizontal = Pos {
+                x: next.x,
+                y: resolved.y,
+            };
+            let vertical = Pos {
+                x: resolved.x,
+                y: next.y,
+            };
+            let x_clear = self.ocean_walkable(kind, horizontal);
+            let y_clear = self.ocean_walkable(kind, vertical);
+            if self.ocean_walkable(kind, next) && (!slide || x_clear || y_clear) {
+                resolved = next;
+            } else if slide {
+                // Wall contact removes the blocked component, not the entire movement step.
+                resolved = if x_clear && (!y_clear || step.x.abs() >= step.y.abs()) {
+                    horizontal
+                } else if y_clear {
+                    vertical
+                } else {
+                    break;
+                };
+            } else {
+                bail!("NPC movement crosses a blocked tile");
+            }
+        }
+        ensure!(
+            distance == 0. || resolved.distance(old) > 0.,
+            "NPC movement blocked on both axes"
         );
-        self.position_entity(id, pos)
+        if slide && resolved.distance(pos) > 0.001 {
+            tracing::debug!(
+                entity = id,
+                kind,
+                ?old,
+                ?pos,
+                ?resolved,
+                "NPC movement projected along obstacle"
+            );
+        }
+        self.position_entity(id, resolved)
     }
     fn position_entity(&mut self, id: i32, pos: Pos) -> Result<()> {
         ensure!(
@@ -4428,7 +4563,12 @@ impl World {
             } else {
                 speed / 1.5 * 0.05
             };
-            if let Err(error) = self.move_entity(id, goal, distance) {
+            if let Err(error) = self.move_entity_colliding(
+                id,
+                goal,
+                distance,
+                !matches!(motion, Motion::Charge { .. } | Motion::StrictOrbit { .. }),
+            ) {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.goal = None;
                 e.last_step = Pos { x: 0., y: 0. };
@@ -4879,37 +5019,6 @@ impl World {
                 send(p, wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
                 p.remember_weapon_tick();
-                let slow = crate::condition::bit(crate::condition::SLOWED);
-                let paralyzed = crate::condition::bit(crate::condition::PARALYZED);
-                let motion_condition = p.conditions(self.now) & (slow | paralyzed | SPEEDY);
-                let base = 0.004
-                    + 0.0056
-                        * p.effective(&self.content, self.now)
-                            .expect("valid player equipment")[4] as f32
-                        / 75.;
-                let speed = |flags: i32| {
-                    if flags & paralyzed != 0 {
-                        0.
-                    } else if flags & slow != 0 {
-                        0.004
-                    } else {
-                        base * if flags & SPEEDY != 0 { 1.5 } else { 1. }
-                    }
-                };
-                let restricts_motion = speed(motion_condition) < speed(p.native_motion_condition);
-                if p.controller == Controller::Human && p.active() && restricts_motion {
-                    // The client must consume its real stat29 before acknowledging the new motor baseline.
-                    let mut out = Writer::new();
-                    out.i32(id).f32(p.pos.x).f32(p.pos.y);
-                    reconciliation::goto(p, true, out.0);
-                    tracing::info!(
-                        player = id,
-                        previous = p.native_motion_condition,
-                        current = motion_condition,
-                        "native movement condition synchronized"
-                    );
-                }
-                p.native_motion_condition = motion_condition;
                 p.tick += 1;
             }
         }
@@ -5108,6 +5217,136 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn native_control_directory_trace_distinguishes_cancelled_call_stages() {
+        type PendingCall =
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + Send>>;
+        let (dispatch, output) = crate::performance::tests::trace();
+        let _logging = tracing::dispatcher::set_default(&dispatch);
+        let mut directory = directory();
+        for cancel_at in ["capacity_wait", "enqueued", "started", "resumed"] {
+            let (tx, mut rx) = mpsc::channel::<Job>(1);
+            let handle = Handle {
+                tx,
+                target: Target::World(-1),
+                clock: directory.clock.clone(),
+            };
+            if cancel_at == "capacity_wait" {
+                assert!(handle.tx.try_send(Box::new(|_| {})).is_ok());
+            }
+            let requests = Arc::new(std::sync::Mutex::new(crate::performance::Requests {
+                native_control: Some(Arc::new(crate::performance::NativeControlTrace {
+                    request: cancel_at.into(),
+                    operation: "renew".into(),
+                    started: Instant::now(),
+                })),
+                ..Default::default()
+            }));
+            let pending: Arc<std::sync::Mutex<Option<PendingCall>>> = Arc::default();
+            let drop_from_job = pending.clone();
+            let scope = requests.clone();
+            let cancel_in_job = cancel_at == "started";
+            *pending.lock().unwrap() = Some(Box::pin(async move {
+                crate::performance::REQUEST
+                    .scope(
+                        scope,
+                        handle.directory(move |d| {
+                            if cancel_in_job {
+                                drop(drop_from_job.lock().unwrap().take());
+                            }
+                            Ok(d.worlds.len())
+                        }),
+                    )
+                    .await
+            }));
+            let mut cx = std::task::Context::from_waker(futures_util::task::noop_waker_ref());
+            assert!(
+                pending
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .as_mut()
+                    .poll(&mut cx)
+                    .is_pending()
+            );
+            if matches!(cancel_at, "capacity_wait" | "enqueued") {
+                drop(pending.lock().unwrap().take());
+            }
+            rx.try_recv().unwrap()(&mut directory);
+            assert!(matches!(
+                rx.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+            ));
+            if cancel_at == "resumed" {
+                assert!(
+                    matches!(pending.lock().unwrap().as_mut().unwrap().as_mut().poll(&mut cx), std::task::Poll::Ready(Ok(count)) if count > 0)
+                );
+                drop(pending.lock().unwrap().take());
+            }
+            assert!(pending.lock().unwrap().is_none());
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.calls, 1);
+            assert_eq!(requests.completed, u64::from(cancel_at != "capacity_wait"));
+            assert_eq!(requests.round_trip.is_zero(), cancel_at != "resumed");
+            let events = crate::performance::tests::events(&output);
+            let events = events
+                .iter()
+                .filter(|event| event["fields"]["request"] == cancel_at)
+                .collect::<Vec<_>>();
+            let stages = events
+                .iter()
+                .map(|event| event["fields"]["stage"].as_str().unwrap())
+                .collect::<Vec<_>>();
+            if cancel_at == "capacity_wait" {
+                assert_eq!(stages, ["capacity_wait"]);
+            } else {
+                assert_eq!(
+                    stages,
+                    [
+                        "capacity_wait",
+                        "capacity_acquired",
+                        "enqueued",
+                        "started",
+                        "completed",
+                        "result_send"
+                    ]
+                );
+                for stage in ["started", "completed", "result_send"] {
+                    let event = events
+                        .iter()
+                        .find(|event| event["fields"]["stage"] == stage)
+                        .unwrap();
+                    let closed =
+                        cancel_at == "enqueued" || cancel_at == "started" && stage != "started";
+                    assert_eq!(event["fields"]["receiver_closed"], closed);
+                }
+            }
+            assert!(events.iter().all(|event| event["fields"]["call"] == 1
+                && event["fields"]["operation"] == "renew"
+                && event["fields"]["elapsed_ms"].as_f64().unwrap() >= 0.));
+        }
+    }
+    #[tokio::test]
+    async fn ordinary_world_requests_do_not_emit_native_control_trace() {
+        let (dispatch, output) = crate::performance::tests::trace();
+        let _logging = tracing::dispatcher::set_default(&dispatch);
+        let handle = Handle::spawn(directory());
+        handle.clock.set_paused(true);
+        let requests = Arc::new(std::sync::Mutex::new(
+            crate::performance::Requests::default(),
+        ));
+        crate::performance::REQUEST
+            .scope(requests.clone(), handle.directory(|_| Ok(())))
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().unwrap().calls, 1);
+        assert!(
+            !crate::performance::tests::events(&output)
+                .iter()
+                .any(|event| event["fields"]["message"] == "native control world request")
+        );
+    }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn command_scope_measures_world_requests_without_charging_sleep_as_cpu() {
         let handle = Handle::spawn(directory());
@@ -5181,15 +5420,125 @@ mod tests {
         assert_eq!(ids.load(Ordering::Relaxed), i32::MAX);
     }
     #[test]
+    fn vault_entry_reclaims_unreferenced_world_at_capacity() {
+        let mut d = directory();
+        let pos = Pos {
+            x: d.worlds[&-3].map.spawns[0].0,
+            y: d.worlds[&-3].map.spawns[0].1,
+        };
+        for _ in 0..8 {
+            d.drop_portal(-3, pos).unwrap();
+        }
+        d.tick = 600;
+        d.step();
+        assert!(d.portals.is_empty());
+        assert_eq!(d.worlds.len(), 12);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        let portal = w.entities.values().find(|e| e.kind == 0x720).unwrap();
+        let (portal, pos) = (portal.id, portal.pos);
+        let player = w.enter(ch(w), None).unwrap();
+        w.players.get_mut(&player).unwrap().pos = pos;
+        let (account, character, destination) = d
+            .destination(player, Some(portal))
+            .expect("Vault entry must reclaim an empty unreferenced instance");
+        let (time, key, _) = d.issue(account, character, destination).unwrap();
+        assert_eq!(
+            d.consume(account, destination, time, key).unwrap(),
+            character
+        );
+        let ch = d.worlds.get_mut(&-2).unwrap().leave(player).unwrap();
+        assert!(
+            d.worlds
+                .get_mut(&destination)
+                .unwrap()
+                .enter(ch, None)
+                .is_ok()
+        );
+        assert_eq!(d.worlds[&destination].owner, Some(1));
+        assert_eq!(d.worlds.len(), 12);
+    }
+    pub(super) fn fill_world_capacity(d: &mut Directory) {
+        while d.worlds.len() < 12 {
+            let world = d.instance("pirate-cave", None).unwrap();
+            d.issue(1, world, world).unwrap();
+        }
+    }
+    #[test]
     fn directory_instances_are_bounded_and_idle_instances_are_collected() {
         let mut d = directory();
-        for _ in 0..8 {
-            d.instance("pirate-cave", None).unwrap();
-        }
+        fill_world_capacity(&mut d);
         assert!(d.instance("pirate-cave", None).is_err());
         d.tick = 6001;
         d.step();
         assert_eq!(d.worlds.len(), 4);
+    }
+    #[test]
+    fn capacity_reclamation_preserves_players_portals_and_connecting_transfers() {
+        let mut d = directory();
+        fill_world_capacity(&mut d);
+        let ids: Vec<_> = d.worlds.keys().copied().filter(|id| *id > 0).collect();
+        d.grants.retain(|_, g| !ids[..3].contains(&g.destination));
+        let w = d.worlds.get_mut(&ids[0]).unwrap();
+        w.enter(ch(w), None).unwrap();
+        let portal = d.realm_portal;
+        d.portals.insert(
+            portal,
+            Portal {
+                origin: -2,
+                destination: Some(ids[1]),
+                expires: 600,
+            },
+        );
+        d.portals.insert(
+            -1,
+            Portal {
+                origin: ids[2],
+                destination: Some(-2),
+                expires: 600,
+            },
+        );
+        let (key, time) = d
+            .grants
+            .iter()
+            .find(|(_, g)| g.destination == ids[3])
+            .map(|(key, g)| (key.clone(), g.key_time))
+            .unwrap();
+        assert_eq!(d.consume(1, ids[3], time, key.clone()).unwrap(), ids[3]);
+        assert!(d.consume(1, ids[3], time, key.clone()).is_err());
+        assert!(!d.character_transferring(ids[3]));
+        d.step();
+        assert!(d.grants.contains_key(&key));
+        let error = d.instance("vault", Some(2)).unwrap_err();
+        assert!(error.to_string().contains("world instance limit reached"));
+        assert_eq!(d.worlds.len(), 12);
+        d.grants.retain(|_, g| g.destination != ids[4]);
+        let w = d.worlds.get_mut(&ids[4]).unwrap();
+        let (x, y) = w.map.spawns[0];
+        let bag = w
+            .loot_bag(Pos { x, y }, None, vec![ch(w).items[0]])
+            .unwrap();
+        assert!(d.instance("vault", Some(2)).is_err());
+        assert!(d.worlds[&ids[4]].entities.contains_key(&bag));
+        d.worlds.get_mut(&ids[4]).unwrap().remove_entity(bag);
+        assert!(d.reserve_worlds(2, &[]).is_err());
+        assert!(d.reserve_worlds(1, &[ids[4]]).is_err());
+        assert!(ids.iter().all(|id| d.worlds.contains_key(id)));
+        let vault = d.instance("vault", Some(2)).unwrap();
+        assert!(!d.worlds.contains_key(&ids[4]));
+        assert_eq!(d.instance("vault", Some(2)).unwrap(), vault);
+        let w = d.worlds.get_mut(&ids[3]).unwrap();
+        let mut character = ch(w);
+        character.id = ids[3];
+        let player = w.enter(character, None).unwrap();
+        d.step();
+        assert!(!d.grants.contains_key(&key));
+        assert!(!d.reclaimable_world(ids[3]));
+        d.worlds.get_mut(&ids[3]).unwrap().leave(player).unwrap();
+        d.instance("vault", Some(3)).unwrap();
+        assert!(!d.worlds.contains_key(&ids[3]));
+        assert!(d.worlds.contains_key(&ids[0]) && d.worlds.contains_key(&ids[1]));
+        assert!(d.worlds.contains_key(&ids[2]));
+        assert_eq!(d.worlds.len(), 12);
     }
     #[test]
     fn sourced_worlds_preserve_connected_wall_and_merchant_config_stats() {
@@ -6669,6 +7018,30 @@ mod tests {
         assert!(!d.portals.contains_key(&portal));
         assert!(!d.worlds[&-3].entities.contains_key(&portal));
         assert!(d.destination(player, Some(portal)).is_err());
+    }
+    #[test]
+    fn successive_sprite_worlds_are_not_the_same_map() {
+        let content = Arc::new(Content::load(Path::new("data")).unwrap());
+        let mut d = Directory::test_prepared(Path::new("data"), content, 16, 12351).unwrap();
+        let first = d.prepared_instance("sprite-world").unwrap();
+        let second = d.prepared_instance("sprite-world").unwrap();
+        let grounds = |id| {
+            d.worlds[&id]
+                .map
+                .cells
+                .iter()
+                .map(|c| (c.ground, c.object))
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(grounds(first), grounds(second));
+        assert_eq!(
+            d.worlds[&first]
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x70e && e.published)
+                .count(),
+            0
+        );
     }
     #[test]
     fn shore_population_is_bounded_sourced_and_cannot_respawn_on_players() {
