@@ -52,7 +52,13 @@ async fn serve(args: Vec<String>) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
     }
-    for file in ["index.html", "vendor/ruffle.js"] {
+    for file in [
+        "index.html",
+        "launcher.js",
+        "draw.html",
+        "native-texture-editor.swf",
+        "vendor/ruffle.js",
+    ] {
         ensure!(
             client.join(file).is_file(),
             "missing client asset {file}; run ./run.sh to download and prepare the local client"

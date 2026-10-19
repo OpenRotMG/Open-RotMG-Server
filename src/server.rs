@@ -2037,6 +2037,29 @@ async fn bot_leave(
         Err(e) => error(e),
     }
 }
+fn client_assets(client: &std::path::Path) -> Router<App> {
+    let mut router = Router::new();
+    for (route, file) in [
+        ("/", "index.html"),
+        ("/index.html", "index.html"),
+        ("/launcher.js", "launcher.js"),
+        ("/draw.html", "draw.html"),
+        ("/native-texture-editor.swf", "native-texture-editor.swf"),
+    ] {
+        router = router.route_service(
+            route,
+            tower_http::services::ServeFile::new(client.join(file)),
+        );
+    }
+    router.nest_service(
+        "/vendor",
+        tower_http::services::ServeDir::new(client.join("vendor")),
+    )
+}
+
+#[cfg(test)]
+mod client_assets_tests;
+
 pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
     let deaths = a.clone();
     tokio::spawn(async move {
@@ -2140,18 +2163,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         .route("/dev/map", get(map))
         .route("/dev/observe", post(observe))
         .route("/dev/leave", post(bot_leave))
-        .route_service(
-            "/",
-            tower_http::services::ServeFile::new(client.join("index.html")),
-        )
-        .route_service(
-            "/index.html",
-            tower_http::services::ServeFile::new(client.join("index.html")),
-        )
-        .nest_service(
-            "/vendor",
-            tower_http::services::ServeDir::new(client.join("vendor")),
-        )
+        .merge(client_assets(&client))
         .layer(DefaultBodyLimit::max(1_048_576))
         .with_state(a.clone());
     tracing::info!(address=%bind,origin=%a.origin,max_players=a.max_players,behind_proxy=a.behind_proxy,"game frontdoor listening");
