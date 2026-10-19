@@ -549,9 +549,9 @@ def deploy(stage, work, metadata, config):
     require(main_revision() == metadata['revision'], 'Main advanced during rehearsal; no cutover performed')
     with LAST_BACKUP.with_name('backup.lock').open('rb') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        outcome(work, 'cutover', stage)
         warn_restart(config)
         require(main_revision() == metadata['revision'], 'Main advanced during restart warning; no cutover performed')
+        outcome(work, 'cutover', stage)
         stop_prepared(config, work)
         cutover = 'shutdown_result'
         try:
