@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import importlib.util
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,8 @@ BACKUPS = Path('/opt/openrotmg-backup')
 CONFIG = Path('/etc/openrotmg/config.json')
 ANNOUNCE_TOKEN = Path('/etc/openrotmg/discord-link-token')
 RESTART_NOTICE_SECONDS = 20
+DRAIN_TIMEOUT = 20
+DRAIN_HTTP_TIMEOUT = 3
 LAST_BACKUP = Path('/var/lib/openrotmg-backup/last-success.json')
 LOCK = Path('/run/lock/openrotmg-deploy.lock')
 LIMIT = 64 * 1024 * 1024
@@ -213,6 +216,143 @@ def warn_restart(config):
     return True
 
 
+def drain_process(config):
+    pid = int(subprocess.check_output(
+        ['systemctl', 'show', 'openrotmg', '-p', 'MainPID', '--value'], text=True))
+    require(pid > 0, 'Drain requires the running Phase 3-capable backend first')
+    stat = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    require(stat[0] != 'Z', 'Drain process has exited')
+    host, port = config['bind'].rsplit(':', 1)
+    address = ipaddress.ip_address(host.strip('[]'))
+    require(address.is_loopback and 0 < int(port) < 65536, 'Drain endpoint must be a literal loopback address')
+    family = 'tcp' if address.version == 4 else 'tcp6'
+    inodes = [row[9] for line in Path(f'/proc/net/{family}').read_text().splitlines()[1:]
+              if (row := line.split())[3] == '0A' and int(row[1].rsplit(':', 1)[1], 16) == int(port)]
+    require(len(inodes) == 1, 'Drain requires one unambiguous configured listener')
+    owned = False
+    for fd in Path(f'/proc/{pid}/fd').iterdir():
+        try:
+            owned = str(fd.readlink()) == f'socket:[{inodes[0]}]'
+        except FileNotFoundError:
+            continue  # Unrelated worker descriptors can close during enumeration.
+        if owned:
+            break
+    require(owned, 'Drain endpoint is not owned by the running service process')
+    return {'pid': pid, 'start_ticks': int(stat[19]), 'binary_sha256': digest(f'/proc/{pid}/exe'),
+            'listener_inode': inodes[0]}
+
+
+def drain_request(config, operation, receipt=None):
+    host, port = config['bind'].rsplit(':', 1)
+    require(ipaddress.ip_address(host.strip('[]')).is_loopback and 0 < int(port) < 65536,
+            'Drain endpoint must be a literal loopback address')
+    token = ANNOUNCE_TOKEN.read_text().strip()
+    require(bool(token), 'Drain authorization token is empty')
+    request = urllib.request.Request(
+        f'http://{host}:{int(port)}/internal/lifecycle/{operation}',
+        data=json.dumps(receipt).encode() if receipt is not None else b'',
+        headers={'authorization': 'Bearer ' + token, 'content-type': 'application/json'})
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            fp.close()
+            raise RuntimeError('Drain endpoint redirected; refusing readiness')
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    try:
+        with opener.open(request, timeout=DRAIN_HTTP_TIMEOUT) as response:
+            value = json.load(response)
+    except urllib.error.HTTPError as error:
+        with error:
+            detail = error.read(4096).decode(errors='replace')
+        raise RuntimeError(f'Drain {operation} rejected: HTTP {error.code}: {detail}') from error
+    require(isinstance(value, dict) and set(value) == {'receipt', 'state', 'errors'}, 'Invalid drain response')
+    returned = value['receipt']
+    require(isinstance(returned, dict) and set(returned) == {'instance', 'generation'}
+            and isinstance(returned['instance'], str) and re.fullmatch('[0-9a-f]{64}', returned['instance'])
+            and type(returned['generation']) is int and returned['generation'] > 0, 'Invalid drain receipt')
+    require(value['state'] in {'preparing', 'ready', 'failed', 'cancelled'}
+            and isinstance(value['errors'], list) and all(isinstance(e, str) for e in value['errors']),
+            'Invalid drain status')
+    require(receipt is None or returned == receipt, 'Stale drain receipt returned')
+    require(value['state'] != 'ready' or not value['errors'], 'Ready drain returned errors')
+    return value
+
+
+def write_drain_receipt(work, evidence):
+    path = work / 'drain-receipt.json'
+    temporary = path.with_suffix('.json.new')
+    with temporary.open('w') as output:
+        json.dump(evidence, output, indent=2)
+        output.write('\n')
+        output.flush()
+        os.fsync(output.fileno())
+    temporary.replace(path)
+
+
+def checked_drain_request(config, process, operation, receipt=None):
+    require(drain_process(config) == process, 'Drain process replaced; refusing stop/cancel')
+    value = drain_request(config, operation, receipt)
+    require(drain_process(config) == process, 'Drain process replaced during request; refusing stop/cancel')
+    return value
+
+
+def settle_drain(config, evidence):
+    deadline = time.monotonic() + DRAIN_TIMEOUT
+    while evidence['drain']['state'] == 'preparing':
+        require(time.monotonic() < deadline, 'Drain readiness timed out')
+        time.sleep(.1)
+        evidence['drain'] = checked_drain_request(
+            config, evidence['process'], 'status', evidence['drain']['receipt'])
+    return evidence['drain']
+
+
+def cancel_drain(config, work, evidence):
+    # Repeat prepare only to recover a lost first reply on the exact same process, never to deploy.
+    if 'drain' not in evidence:
+        evidence['drain'] = checked_drain_request(config, evidence['process'], 'prepare')
+    settle_drain(config, evidence)
+    receipt = evidence['drain']['receipt']
+    evidence['drain'] = checked_drain_request(config, evidence['process'], 'cancel', receipt)
+    require(evidence['drain']['state'] == 'cancelled', 'Drain cancellation was not acknowledged')
+    evidence['stage'] = 'cancelled_after_failure'
+    write_drain_receipt(work, evidence)
+
+
+def stop_prepared(config, work):
+    """Called under the deploy then backup locks; owns only readiness and the service stop."""
+    evidence = {'stage': 'preparing', 'process': drain_process(config)}
+    write_drain_receipt(work, evidence)
+    try:
+        evidence['drain'] = checked_drain_request(config, evidence['process'], 'prepare')
+        write_drain_receipt(work, evidence)
+        result = settle_drain(config, evidence)
+        require(result['state'] == 'ready', 'Drain preparation failed: ' + '; '.join(result['errors']))
+        evidence['stage'] = 'validating_before_stop'
+        evidence['drain'] = checked_drain_request(config, evidence['process'], 'status', result['receipt'])
+        require(evidence['drain']['state'] == 'ready', 'Drain readiness is no longer current: ' + '; '.join(evidence['drain']['errors']))
+        evidence['stage'] = 'stopping'
+        write_drain_receipt(work, evidence)
+        require(drain_process(config) == evidence['process'], 'Drain process replaced before stop')
+        run('systemctl', 'stop', 'openrotmg.service')
+    except BaseException as error:
+        evidence['original_error'] = str(error)
+        try:
+            cancel_drain(config, work, evidence)
+        except BaseException as cancellation:
+            evidence['cancellation_error'] = str(cancellation)
+            failure = f'{error}; drain cancellation failed: {cancellation}; recovery: {work}'
+            try:
+                write_drain_receipt(work, evidence)
+            except BaseException as journal:
+                failure += f'; recovery receipt write failed: {journal}'
+            raise RuntimeError(failure) from error
+        raise
+    evidence['stage'] = 'stopped'
+    write_drain_receipt(work, evidence)
+    return evidence
+
+
 def rehearse(stage, work, config):
     run(sys.executable, '-B', str(stage / 'scripts/backups/release_contract.py'),
         str(stage / 'openrotmg'), str(stage / 'data'), str(work / 'writer-contract'),
@@ -275,25 +415,41 @@ def deploy(stage, work, metadata, config):
     with LAST_BACKUP.with_name('backup.lock').open('rb') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         warn_restart(config)
-        run('systemctl', 'stop', 'openrotmg.service')
-        require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
-        frozen = work / 'cutover'
-        frozen.mkdir(mode=0o700)
-        copy_db(Path(config['state']) / 'game.db', frozen / 'game.db')
-        shutil.copyfile(Path(config['state']) / 'server.pem', frozen / 'server.pem')
-        (frozen / 'server.pem').chmod(0o600)
-        libc = ctypes.CDLL(None, use_errno=True)
-        require(libc.renameat2(-100, os.fsencode(LIVE), -100, os.fsencode(stage), 2) == 0,
-                'Atomic source exchange failed; frozen recovery state retained')
-        (work / 'previous-server-path').write_text(str(stage) + '\n')
-        run('runuser', '-u', 'openrotmg', '--', 'test', '-x', str(LIVE / 'openrotmg'))
-        run('systemctl', 'start', 'openrotmg.service')
-        ready(int(config['bind'].rsplit(':', 1)[1]))
-        require((LIVE / 'REVISION').read_text().strip() == metadata['revision'], 'Activated revision mismatch')
-        require(digest(LIVE / 'openrotmg') == metadata['binary_sha256'], 'Activated binary mismatch')
-        pid = int(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'MainPID', '--value'], text=True))
-        require(pid > 0 and digest(f'/proc/{pid}/exe') == metadata['binary_sha256'], 'Running process binary mismatch')
-    start_backup()
+        require(main_revision() == metadata['revision'], 'Main advanced during restart warning; no cutover performed')
+        stop_prepared(config, work)
+        cutover = 'shutdown_result'
+        try:
+            require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
+            cutover = 'freeze_recovery'
+            frozen = work / 'cutover'
+            frozen.mkdir(mode=0o700)
+            copy_db(Path(config['state']) / 'game.db', frozen / 'game.db')
+            shutil.copyfile(Path(config['state']) / 'server.pem', frozen / 'server.pem')
+            (frozen / 'server.pem').chmod(0o600)
+            cutover = 'source_exchange'
+            libc = ctypes.CDLL(None, use_errno=True)
+            require(libc.renameat2(-100, os.fsencode(LIVE), -100, os.fsencode(stage), 2) == 0,
+                    'Atomic source exchange failed; frozen recovery state retained')
+            (work / 'previous-server-path').write_text(str(stage) + '\n')
+            cutover = 'start'
+            run('runuser', '-u', 'openrotmg', '--', 'test', '-x', str(LIVE / 'openrotmg'))
+            run('systemctl', 'start', 'openrotmg.service')
+            cutover = 'verify_running'
+            ready(int(config['bind'].rsplit(':', 1)[1]))
+            require((LIVE / 'REVISION').read_text().strip() == metadata['revision'], 'Activated revision mismatch')
+            require(digest(LIVE / 'openrotmg') == metadata['binary_sha256'], 'Activated binary mismatch')
+            pid = int(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'MainPID', '--value'], text=True))
+            require(pid > 0 and digest(f'/proc/{pid}/exe') == metadata['binary_sha256'], 'Running process binary mismatch')
+        except BaseException as error:
+            failure = {'stage': cutover, 'error': str(error), 'recovery': str(work), 'previous_server': str(stage)}
+            (work / 'post-stop-failure.json').write_text(json.dumps(failure, indent=2) + '\n')
+            raise RuntimeError(f'Post-stop {cutover} failed: {error}; recovery: {work}') from error
+    try:
+        start_backup()
+    except BaseException as error:
+        (work / 'post-stop-failure.json').write_text(json.dumps(
+            {'stage': 'backup_after_start', 'error': str(error), 'recovery': str(work), 'previous_server': str(stage)}, indent=2) + '\n')
+        raise RuntimeError(f'Post-stop backup_after_start failed: {error}; recovery: {work}') from error
 
 
 def main_revision():

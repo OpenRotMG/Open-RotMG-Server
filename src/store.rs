@@ -47,6 +47,15 @@ pub(crate) enum NameChoice {
 }
 
 #[derive(Debug)]
+pub(crate) struct Rejected(pub &'static str);
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for Rejected {}
+
+#[derive(Debug)]
 pub struct InvalidCredentials;
 impl std::fmt::Display for InvalidCredentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -285,12 +294,21 @@ pub struct InventoryWrite {
     pub items: Vec<i32>,
 }
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
+#[cfg(test)]
+type LifecycleReplyGate =
+    std::sync::Arc<std::sync::Mutex<Option<(oneshot::Sender<()>, mpsc::Receiver<()>)>>>;
 enum Creation {
     Normal(Vec<(u16, i32)>),
     Prepared(Option<String>),
 }
 #[derive(Clone)]
 pub struct Store {
+    #[cfg(test)]
+    lifecycle_lost_reply: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    lifecycle_jobs: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    lifecycle_reply_gate: LifecycleReplyGate,
     tx: mpsc::Sender<Job>,
     legacy_base: [i32; 8],
     classes: std::sync::Arc<std::collections::BTreeMap<u16, Class>>,
@@ -506,6 +524,12 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 }
             })?;
         Ok(Self {
+            #[cfg(test)]
+            lifecycle_lost_reply: Default::default(),
+            #[cfg(test)]
+            lifecycle_jobs: Default::default(),
+            #[cfg(test)]
+            lifecycle_reply_gate: Default::default(),
             tx,
             legacy_base,
             classes: std::sync::Arc::new(content.classes.clone()),
@@ -522,14 +546,72 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             ),
         })
     }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_pause_reply(&self) -> (oneshot::Receiver<()>, mpsc::Sender<()>) {
+        let (entered, ready) = oneshot::channel();
+        let (release, wait) = mpsc::channel();
+        assert!(
+            self.lifecycle_reply_gate
+                .lock()
+                .unwrap()
+                .replace((entered, wait))
+                .is_none()
+        );
+        (ready, release)
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_lose_reply(&self) {
+        assert!(
+            !self
+                .lifecycle_lost_reply
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        );
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_jobs(&self) -> usize {
+        self.lifecycle_jobs
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(test)]
+    pub(crate) async fn lifecycle_test_job<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.call(f).await
+    }
     async fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
+        #[cfg(test)]
+        let lost = self
+            .lifecycle_lost_reply
+            .swap(false, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(test)]
+        let jobs = self.lifecycle_jobs.clone();
+        #[cfg(test)]
+        let gate = self.lifecycle_reply_gate.lock().unwrap().take();
+        #[cfg(test)]
+        jobs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.tx
             .send(Box::new(move |c| {
-                let _ = tx.send(f(c));
+                let result = f(c);
+                #[cfg(test)]
+                if let Some((entered, wait)) = gate {
+                    let _ = entered.send(());
+                    if wait.recv().is_err() {
+                        let _ = tx.send(Err(anyhow::anyhow!("lifecycle Store gate abandoned")));
+                        return;
+                    }
+                }
+                #[cfg(test)]
+                jobs.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                #[cfg(test)]
+                if lost {
+                    return;
+                }
+                let _ = tx.send(result);
             }))
             .map_err(|_| anyhow::anyhow!("account store stopped"))?;
         rx.await.context("account worker failed")?
@@ -672,7 +754,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         let items = class.equipment.clone();
         self.call(move |c| {
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            character_slots::read(&tx, account)?;
+            let slots = character_slots::read(&tx, account)?;
+            let normal = matches!(&creation, Creation::Normal(_));
             let (requirements, prepared_name) = match creation {
                 Creation::Normal(requirements) => (requirements, None),
                 Creation::Prepared(name) => {
@@ -686,7 +769,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                     "SELECT max(json_extract(stats,\'$.level\')) FROM characters WHERE account=?1 AND json_extract(stats,\'$.class\')=?2",
                     params![account, required_class], |r| r.get(0),
                 )?;
-                ensure!(best.is_some_and(|level| level >= required_level), "class {kind:#x} is locked: requires {required_class:#x} level {required_level}");
+                ensure!(best.is_some_and(|level| level >= required_level), anyhow::anyhow!(Rejected("class is locked")).context(format!("class {kind:#x} is locked: requires {required_class:#x} level {required_level}")));
+            }
+            if normal {
+                let living: i32 = tx.query_row("SELECT count(*) FROM characters WHERE account=?1 AND alive=1", [account], |r| r.get(0))?;
+                ensure!(living < slots, Rejected("No free character slots."));
             }
             if let Some(name) = prepared_name {
                 tx.execute("UPDATE accounts SET name=?1 WHERE id=?2", params![name,account])?;
@@ -755,7 +842,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "UPDATE characters SET alive=0,items=?3,revision=revision+1,stats=json_set(stats,'$.alive',json('false'),'$.hp',0,'$.items',json(?3),'$.revision',revision+1) WHERE id=?1 AND account=?2 AND alive=1",
                 params![id, account, serde_json::to_string(&vec![-1; 12])?],
             )?;
-            ensure!(n == 1, "character does not belong to this account or is no longer alive");
+            ensure!(n == 1, Rejected("character does not belong to this account or is no longer alive"));
             Ok(())
         })
         .await?;

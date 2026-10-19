@@ -37,11 +37,11 @@ impl Store {
         self.call(move |db| {
             let tx = db.transaction()?;
             let registered: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM credentials WHERE account=?1)", [account], |r| r.get(0))?;
-            ensure!(registered, "register and sign in before linking Discord");
+            ensure!(registered, Rejected("register and sign in before linking Discord"));
             let linked: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM discord_links WHERE account=?1)", [account], |r| r.get(0))?;
-            ensure!(!linked, "this game account is already linked");
+            ensure!(!linked, Rejected("this game account is already linked"));
             let previous: Option<i64> = tx.query_row("SELECT issued_at FROM discord_codes WHERE account=?1", [account], |r| r.get(0)).optional()?;
-            ensure!(previous.is_none_or(|t| time-t >= 60), "wait one minute before requesting another link code");
+            ensure!(previous.is_none_or(|t| time-t >= 60), Rejected("wait one minute before requesting another link code"));
             tx.execute("DELETE FROM discord_codes WHERE expires_at<=?1", [time])?;
             tx.execute("INSERT INTO discord_codes(account,hash,issued_at,expires_at) VALUES(?1,?2,?3,?4) ON CONFLICT(account) DO UPDATE SET hash=excluded.hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at", params![account,hash,time,time+300])?;
             tx.commit()?;

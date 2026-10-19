@@ -160,10 +160,12 @@ async fn serve(args: Vec<String>) -> Result<()> {
             Err(error) => return Err(error.into()),
         },
         owners: Arc::default(),
+        admission: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),
         bots: Arc::default(),
+        #[cfg(test)]
         quarantined: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
     };

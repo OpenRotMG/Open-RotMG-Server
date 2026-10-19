@@ -1,4 +1,6 @@
 use super::*;
+#[path = "finalize_tests.rs"]
+mod finalize_tests;
 
 fn fixture() -> (PathBuf, App) {
     let (dir, mut app) = crate::server::account_actions::tests::fixture();

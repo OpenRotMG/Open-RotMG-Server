@@ -34,6 +34,7 @@ pub(crate) fn fixture() -> (PathBuf, App) {
         control: None,
         discord_link_token: Some("a".repeat(64)),
         owners: Arc::default(),
+        admission: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),

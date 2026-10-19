@@ -45,7 +45,7 @@ impl World {
     ) -> Result<i32> {
         ensure!(
             self.companions.active.len() < 128,
-            "companion population limit reached"
+            controller("companion population limit reached")
         );
         if !permanent {
             duration(kind)?;
@@ -56,7 +56,7 @@ impl World {
                     .filter(|p| p.owner == owner && !p.permanent)
                     .count()
                     < 8,
-                "at most eight temporary companions may be active"
+                controller("at most eight temporary companions may be active")
             );
         }
         let entity = self.spawn_entity(kind, pos, vec![])?;
@@ -140,7 +140,7 @@ impl World {
             ensure!(
                 p.last_companion
                     .is_none_or(|last| self.now >= last + metadata.cooldown),
-                "companion generator cooldown"
+                controller("companion generator cooldown")
             );
         } else {
             ensure!(item.consumable, "temporary companion must consume its egg");

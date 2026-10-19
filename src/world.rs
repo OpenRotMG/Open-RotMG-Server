@@ -1,3 +1,4 @@
+use crate::server::lifecycle::{CloseReason, controller, protocol};
 use crate::{
     content::{Content, Map, PARALYZED, Projectile, SLOWED, SPEEDY, STUNNED},
     store::{AccountLists, AccountPresentation, Character, Vault},
@@ -52,6 +53,8 @@ mod lair;
 mod landmark_ai;
 #[cfg(test)]
 mod landmark_tests;
+#[cfg(test)]
+mod lifecycle_departure_tests;
 mod lost_lands;
 mod midlands;
 #[cfg(test)]
@@ -316,13 +319,29 @@ impl Player {
         };
     }
     fn quarantine(&mut self, id: i32, error: String) {
-        tracing::error!(player=id,account=self.character.account,%error,"character quarantined; avatar and reservations retained");
         self.persistence_failure = Some(error);
         self.pending = true;
         self.bot_goal = None;
         self.bot_aim = None;
         if let Some(output) = &self.tx {
             let _ = output.lost.send(true);
+        }
+        // Quarantine remains authoritative even when its diagnostic sink fails.
+        let error = self
+            .persistence_failure
+            .as_ref()
+            .expect("recorded persistence failure");
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tracing::error!(player=id,account=self.character.account,%error,"character quarantined; avatar and reservations retained");
+        }))
+        .is_err()
+        {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr(),
+                "quarantine diagnostic sink panicked; player={id} account={} error={error}",
+                self.character.account
+            );
         }
     }
     fn progress_queued(&self) -> bool {
@@ -922,13 +941,19 @@ impl Directory {
             -1 => -1,
             -3 => self.endgame.active,
             -4 => -4,
-            _ => bail!("world entry {game} requires a transfer grant"),
+            _ => {
+                return Err(anyhow::anyhow!(CloseReason::Protocol)
+                    .context(format!("world entry {game} requires a transfer grant")));
+            }
         };
         ensure!(
             self.worlds.contains_key(&destination),
             "entry world missing"
         );
-        ensure!(self.worlds[&destination].admission_open, "Realm is closed");
+        ensure!(
+            self.worlds[&destination].admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         Ok(destination)
     }
     pub(crate) fn prepared_instance(&mut self, template: &str) -> Result<i32> {
@@ -1037,13 +1062,16 @@ impl Directory {
         let p = &world.players[&player];
         ensure!(
             p.character.alive && p.character.hp > 0 && !p.death_pending && !p.departing,
-            "character cannot transfer"
+            protocol("character cannot transfer")
         );
         let (account, character) = (p.character.account, p.character.id);
         let kind = if let Some(id) = portal {
-            let e = world.entities.get(&id).context("portal missing")?;
-            ensure!(e.published, "portal not published");
-            ensure!(p.pos.distance(e.pos) <= 2., "portal out of reach");
+            let e = world
+                .entities
+                .get(&id)
+                .ok_or_else(|| protocol("portal missing"))?;
+            ensure!(e.published, protocol("portal not published"));
+            ensure!(p.pos.distance(e.pos) <= 2., protocol("portal out of reach"));
             e.kind
         } else {
             0x712
@@ -1059,7 +1087,7 @@ impl Directory {
                     .presentation
                     .guild
                     .as_ref()
-                    .context("You are not in a guild.")?
+                    .ok_or_else(|| protocol("You are not in a guild."))?
                     .id;
                 *self
                     .worlds
@@ -1075,15 +1103,21 @@ impl Directory {
                     .context("dropped portal has no live instance binding")?;
                 ensure!(
                     binding.origin == origin && binding.expires > self.tick,
-                    "dungeon portal binding expired or belongs to another world"
+                    protocol("dungeon portal binding expired or belongs to another world")
                 );
                 binding
                     .destination
-                    .context("This dungeon is not implemented yet.")?
+                    .ok_or_else(|| protocol("This dungeon is not implemented yet."))?
             }
-            _ => bail!("unsupported portal destination {kind:#x}"),
+            _ => {
+                return Err(anyhow::anyhow!(CloseReason::Protocol)
+                    .context(format!("unsupported portal destination {kind:#x}")));
+            }
         };
-        ensure!(destination != origin, "already in destination world");
+        ensure!(
+            destination != origin,
+            protocol("already in destination world")
+        );
         Ok((account, character, destination))
     }
     pub fn issue(
@@ -1092,7 +1126,10 @@ impl Directory {
         character: i32,
         destination: i32,
     ) -> Result<(i32, Vec<u8>, String)> {
-        ensure!(self.grants.len() < 64, "transfer grant limit reached");
+        ensure!(
+            self.grants.len() < 64,
+            anyhow::anyhow!(CloseReason::Controller).context("transfer grant limit reached")
+        );
         let world = self
             .worlds
             .get(&destination)
@@ -1101,7 +1138,10 @@ impl Directory {
             world.owner.is_none_or(|owner| owner == account),
             "private destination belongs to another account"
         );
-        ensure!(world.admission_open, "Realm is closed");
+        ensure!(
+            world.admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         let name = world.name.clone();
         let mut key = vec![0; 16];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
@@ -1140,20 +1180,23 @@ impl Directory {
         let grant = self
             .grants
             .get(&key)
-            .context("unknown or already used transfer grant")?;
-        ensure!(!grant.consumed, "transfer grant already used");
-        ensure!(grant.expires > self.tick, "transfer grant expired");
+            .ok_or_else(|| protocol("unknown or already used transfer grant"))?;
+        ensure!(!grant.consumed, protocol("transfer grant already used"));
+        ensure!(grant.expires > self.tick, protocol("transfer grant expired"));
         ensure!(
             grant.account == account
                 && grant.destination == destination
                 && grant.key_time == key_time,
-            "transfer grant binding mismatch"
+            protocol("transfer grant binding mismatch")
         );
         ensure!(
             self.worlds.contains_key(&destination),
-            "transfer destination expired"
+            protocol("transfer destination expired")
         );
-        ensure!(self.worlds[&destination].admission_open, "Realm is closed");
+        ensure!(
+            self.worlds[&destination].admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         let character = grant.character;
         // HELLO consumes the key before LOAD enters the world; keep its capacity reservation until then.
         self.grants.get_mut(&key).unwrap().consumed = true;
@@ -1272,8 +1315,24 @@ impl Directory {
     }
 }
 type Job = Box<dyn FnOnce(&mut Directory) + Send>;
+#[cfg(test)]
+type LifecycleJobGate = Arc<
+    std::sync::Mutex<
+        Option<(
+            usize,
+            bool,
+            bool,
+            oneshot::Sender<()>,
+            std::sync::mpsc::Receiver<()>,
+        )>,
+    >,
+>;
 #[derive(Clone)]
 pub struct Handle {
+    #[cfg(test)]
+    lifecycle_lost_reply: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    lifecycle_job_gate: LifecycleJobGate,
     tx: mpsc::Sender<Job>,
     target: Target,
     pub clock: crate::clock::Clock,
@@ -1315,6 +1374,10 @@ impl Handle {
             }
         });
         Self {
+            #[cfg(test)]
+            lifecycle_lost_reply: Default::default(),
+            #[cfg(test)]
+            lifecycle_job_gate: Default::default(),
             tx,
             target: Target::World(-1),
             clock,
@@ -1322,6 +1385,10 @@ impl Handle {
     }
     pub fn in_world(&self, id: i32) -> Self {
         Self {
+            #[cfg(test)]
+            lifecycle_lost_reply: self.lifecycle_lost_reply.clone(),
+            #[cfg(test)]
+            lifecycle_job_gate: self.lifecycle_job_gate.clone(),
             tx: self.tx.clone(),
             target: Target::World(id),
             clock: self.clock.clone(),
@@ -1329,10 +1396,53 @@ impl Handle {
     }
     pub fn for_player(&self, id: i32) -> Self {
         Self {
+            #[cfg(test)]
+            lifecycle_lost_reply: self.lifecycle_lost_reply.clone(),
+            #[cfg(test)]
+            lifecycle_job_gate: self.lifecycle_job_gate.clone(),
             tx: self.tx.clone(),
             target: Target::Player(id),
             clock: self.clock.clone(),
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_pause_job(
+        &self,
+        call: usize,
+        before: bool,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        self.lifecycle_test_gate(call, before, false)
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_pause_request_job(
+        &self,
+        call: usize,
+        before: bool,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        self.lifecycle_test_gate(call, before, true)
+    }
+    #[cfg(test)]
+    fn lifecycle_test_gate(
+        &self,
+        call: usize,
+        before: bool,
+        request_only: bool,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        assert!(call > 0);
+        let (entered, ready) = oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        assert!(
+            self.lifecycle_job_gate
+                .lock()
+                .unwrap()
+                .replace((call, before, request_only, entered, wait))
+                .is_none()
+        );
+        (ready, release)
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_lose_reply(&self) {
+        assert!(!self.lifecycle_lost_reply.swap(true, Ordering::SeqCst));
     }
     pub async fn directory<T: Send + 'static>(
         &self,
@@ -1364,13 +1474,47 @@ impl Handle {
         let queued = Instant::now();
         let work_request = request.clone();
         let work_record = record.clone();
+        #[cfg(test)]
+        let lost = self.lifecycle_lost_reply.clone();
+        #[cfg(test)]
+        let mut gate = {
+            let mut gate = self.lifecycle_job_gate.lock().unwrap();
+            if let Some((count, _, request_only, _, _)) = gate.as_mut()
+                && (!*request_only || request.is_some())
+            {
+                *count -= 1;
+            }
+            if gate.as_ref().is_some_and(|(count, _, _, _, _)| *count == 0) {
+                gate.take()
+            } else {
+                None
+            }
+        };
         permit.send(Box::new(move |d| {
             let queue_wait = queued.elapsed();
             work_record("started", tx.is_closed());
             d.performance.record("job_send_wait", send_wait);
             d.performance.record("job_wait", queue_wait);
             let started = crate::performance::Measure::start();
+            #[cfg(test)]
+            if gate.as_ref().is_some_and(|(_, before, _, _, _)| *before) {
+                let (_, _, _, entered, wait) = gate.take().unwrap();
+                let _ = entered.send(());
+                if wait.recv().is_err() {
+                    let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                    return;
+                }
+            }
             let result = f(d);
+            #[cfg(test)]
+            if let Some((_, _, _, entered, wait)) = gate {
+                let _ = entered.send(());
+                if wait.recv().is_err() {
+                    let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                    return;
+                }
+            }
+
             let measurement = started.finish();
             d.performance.completed("job", measurement);
             if let Some(r) = work_request {
@@ -1384,6 +1528,10 @@ impl Handle {
                 }
             }
             work_record("completed", tx.is_closed());
+            #[cfg(test)]
+            if lost.swap(false, Ordering::SeqCst) {
+                return;
+            }
             let receiver_closed = tx.send(result).is_err();
             work_record("result_send", receiver_closed);
         }));
@@ -1394,13 +1542,6 @@ impl Handle {
             r.lock().expect("request timings poisoned").round_trip += start.elapsed();
         }
         result?
-    }
-    pub async fn collect<T: Send + 'static>(
-        &self,
-        mut f: impl FnMut(&mut World) -> Vec<T> + Send + 'static,
-    ) -> Result<Vec<T>> {
-        self.directory(move |d| Ok(d.worlds.values_mut().flat_map(&mut f).collect()))
-            .await
     }
     pub async fn call<T: Send + 'static>(
         &self,
@@ -1921,7 +2062,10 @@ impl World {
                 "prepared position is blocked or outside the world"
             );
         }
-        ensure!(self.admission_open, "Realm is closed");
+        ensure!(
+            self.admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         ensure!(ch.alive && ch.hp > 0, "dead character");
         ch.effective(&self.content)?;
         ensure!(
@@ -2485,7 +2629,10 @@ impl World {
             self.validate_native_position(id, pos, time)?;
         }
         let p = self.players.get_mut(&id).context("native player missing")?;
-        ensure!(time >= p.last_move, "native movement clock regressed");
+        ensure!(
+            time >= p.last_move,
+            controller("native movement clock regressed")
+        );
         ensure!(received >= p.last_move_at, "native ingress clock regressed");
         let speed = p.speed(&self.content, self.now)? * 1000.;
         p.record_motion(if sentinel { p.pos } else { pos }, time, self.now, speed);
@@ -2702,15 +2849,19 @@ impl World {
         start: Pos,
         angle: f32,
     ) -> Result<NativeInput> {
-        ensure!(angle.is_finite(), "invalid shot angle");
+        ensure!(angle.is_finite(), protocol("invalid shot angle"));
         ensure!(
             start.x.is_finite() && start.y.is_finite(),
-            "non-finite shot origin"
+            protocol("non-finite shot origin")
         );
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
-            p.active(),
+            p.persistence_failure.is_none(),
             "dead, departing or quarantined player cannot shoot"
+        );
+        ensure!(
+            p.active(),
+            protocol("dead, departing or quarantined player cannot shoot")
         );
 
         let ability =
@@ -2720,7 +2871,7 @@ impl World {
             p.character.items[0] == kind as i32
                 || native && p.advertised_weapon(kind)
                 || ability && p.character.items[1] == kind as i32,
-            "weapon does not match equipped item"
+            protocol("weapon does not match equipped item")
         );
         let item = self.content.get(kind)?;
         ensure!(item.shots > 0, "weapon projectile count is zero");
@@ -2786,12 +2937,21 @@ impl World {
             };
         let admission = if native { normal_cooldown } else { cooldown };
         let p = self.players.get_mut(&id).unwrap();
-        ensure!(time >= 0, "negative shot time");
-        ensure!(shot_index < item.shots, "too many projectiles in attack");
-        ensure!(bullet == p.next_bullet, "unexpected player bullet counter");
+        ensure!(time >= 0, protocol("negative shot time"));
+        ensure!(
+            shot_index < item.shots,
+            protocol("too many projectiles in attack")
+        );
+        ensure!(
+            bullet == p.next_bullet,
+            protocol("unexpected player bullet counter")
+        );
         if !ability && time != p.last_attack {
             let attack_elapsed = i64::from(time) - i64::from(p.last_attack);
-            ensure!(attack_elapsed >= admission as i64 - 2, "attack too fast");
+            ensure!(
+                attack_elapsed >= admission as i64 - 2,
+                protocol("attack too fast")
+            );
             let elapsed = received
                 .checked_sub(p.last_attack_at)
                 .context("attack receive clock regressed")?;
@@ -2903,7 +3063,7 @@ impl World {
                 .get(&id)
                 .is_some_and(|p| p.character.items[1] == slot.kind)
             && self.content.get(slot.kind as u16)?.activate == "Shoot";
-        ensure!(!ability || time >= 0, "negative ability time");
+        ensure!(!ability || time >= 0, controller("negative ability time"));
         ensure!(
             !ability || (1..=5).contains(&self.content.get(slot.kind as u16)?.shots),
             "unsupported native ability projectile count"
@@ -2919,35 +3079,39 @@ impl World {
     pub fn use_item(&mut self, id: i32, slot: Slot, pos: Pos) -> Result<Option<InventoryPlan>> {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("player missing")?;
-        ensure!(!p.paused, "Cannot use items while paused.");
+        ensure!(!p.paused, controller("Cannot use items while paused."));
+        ensure!(
+            p.persistence_failure.is_none(),
+            "player is busy, departing, quarantined or dead"
+        );
         let source = if slot.object == id {
             &p.character.items
         } else {
             let bag = self
                 .entities
                 .get(&slot.object)
-                .context("item ownership mismatch")?;
+                .ok_or_else(|| controller("item ownership mismatch"))?;
             ensure!(
                 !bag.reserved
                     && bag.accessible(p.character.account)
                     && p.pos.distance(bag.pos) < 1.5
                     && self.content.get(bag.kind)?.class == "Container",
-                "item container inaccessible"
+                controller("item container inaccessible")
             );
             &bag.items
         };
         ensure!(
             source.get(slot.slot) == Some(&slot.kind),
-            "item ownership mismatch"
+            controller("item ownership mismatch")
         );
-        ensure!(slot.kind >= 0, "empty item slot");
+        ensure!(slot.kind >= 0, controller("empty item slot"));
         let item = self.content.get(slot.kind as u16)?.clone();
         // Saving earned XP must not freeze abilities; inventory mutations remain serialized.
         ensure!(
             p.active()
                 && p.character.hp > 0
                 && (!p.pending || p.progress_started && !item.abilities.is_empty()),
-            "player is busy, departing, quarantined or dead"
+            controller("player is busy, departing, quarantined or dead")
         );
         if item.xp_boost {
             ensure!(
@@ -2956,19 +3120,22 @@ impl World {
             );
             ensure!(
                 p.character.level < 20,
-                "XP boost requires a character below level 20"
+                controller("XP boost requires a character below level 20")
             );
-            ensure!(!p.character.xp_boost.active, "XP boost is already active");
+            ensure!(
+                !p.character.xp_boost.active,
+                controller("XP boost is already active")
+            );
             ensure!(
                 !p.progress_queued(),
-                "character progress is awaiting commit"
+                controller("character progress is awaiting commit")
             );
             let mut plan = self.consumable_plan(id, slot, -1)?;
             plan.xp_boost = Some(slot);
             return Ok(Some(plan));
         }
         if !item.abilities.is_empty() {
-            ensure!(slot.object == id, "ability must be equipped");
+            ensure!(slot.object == id, controller("ability must be equipped"));
             self.activate_ability(id, slot, &item, pos)?;
             return Ok(None);
         }
@@ -2978,7 +3145,7 @@ impl World {
         ) {
             ensure!(
                 slot.object == id,
-                "item activation requires owned inventory"
+                controller("item activation requires owned inventory")
             );
         }
         match item.activate.as_str() {
@@ -3019,9 +3186,10 @@ impl World {
                     .context("unsupported permanent potion stat")?;
                 let remaining =
                     self.content.classes[&p.character.class].caps[index] - p.character.base[index];
+                ensure!(amount > 0, "stat is already at its class cap");
                 ensure!(
-                    amount > 0 && remaining > 0,
-                    "stat is already at its class cap"
+                    remaining > 0,
+                    controller("stat is already at its class cap")
                 );
                 let amount = amount.min(remaining);
                 let snapshot = p.character.clone();
@@ -3080,8 +3248,12 @@ impl World {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("drop owner missing")?;
         ensure!(
-            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            p.persistence_failure.is_none(),
             "player busy, departing or dead"
+        );
+        ensure!(
+            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            controller("player busy, departing or dead")
         );
         let pos = p.pos;
         let account = p.character.account;
@@ -3092,13 +3264,13 @@ impl World {
             let e = self
                 .entities
                 .get(&slot.object)
-                .context("drop container missing")?;
+                .ok_or_else(|| controller("drop container missing"))?;
             ensure!(
                 !e.reserved
                     && e.accessible(account)
                     && pos.distance(e.pos) < 1.5
                     && self.content.get(e.kind)?.class == "Container",
-                "drop container inaccessible"
+                controller("drop container inaccessible")
             );
             Some((slot.object, e.items.clone()))
         };
@@ -3108,7 +3280,7 @@ impl World {
         };
         ensure!(
             slot.kind >= 0 && inventory.get(slot.slot) == Some(&slot.kind),
-            "empty or stale drop slot"
+            controller("empty or stale drop slot")
         );
         inventory[slot.slot] = -1;
         let mut plan = self.plan(id, items, source);
@@ -3137,14 +3309,18 @@ impl World {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
-            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            p.persistence_failure.is_none(),
             "player busy, departing or dead"
+        );
+        ensure!(
+            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            controller("player busy, departing or dead")
         );
         ensure!(
             from.object == id
                 || to.object == id
                 || (self.vaults.contains_key(&from.object) && self.vaults.contains_key(&to.object)),
-            "swap must involve own inventory or owned vault chests"
+            controller("swap must involve own inventory or owned vault chests")
         );
         let mut items = p.character.items.clone();
         let mut bags = BTreeMap::new();
@@ -3152,13 +3328,16 @@ impl World {
             .into_iter()
             .filter(|object| *object != id)
         {
-            let e = self.entities.get(&object).context("container missing")?;
+            let e = self
+                .entities
+                .get(&object)
+                .ok_or_else(|| controller("container missing"))?;
             ensure!(
                 !e.reserved
                     && e.accessible(p.character.account)
                     && p.pos.distance(e.pos) < 1.5
                     && self.content.get(e.kind)?.class == "Container",
-                "container inaccessible"
+                controller("container inaccessible")
             );
             bags.insert(object, e.items.clone());
         }
@@ -3168,11 +3347,16 @@ impl World {
             } else {
                 bags.get(&s.object).context("unbound swap source")?
             };
-            Ok(*inventory.get(s.slot).context("invalid inventory slot")?)
+            Ok(*inventory
+                .get(s.slot)
+                .ok_or_else(|| controller("invalid inventory slot"))?)
         };
         let a = get(&from)?;
         let b = get(&to)?;
-        ensure!(a == from.kind && b == to.kind, "stale inventory offer");
+        ensure!(
+            a == from.kind && b == to.kind,
+            controller("stale inventory offer")
+        );
         let mut replacement = None;
         for (s, k) in [(&from, b), (&to, a)] {
             if s.object != id && k >= 0 {
@@ -3188,7 +3372,7 @@ impl World {
                 if !accepts {
                     ensure!(
                         a >= 0 && b >= 0 && self.bag_expiry.contains_key(&s.object),
-                        "container rejects this normal or Soulbound item"
+                        controller("container rejects this normal or Soulbound item")
                     );
                     replacement = Some(k);
                 }
@@ -3197,11 +3381,11 @@ impl World {
                 let obj = self.content.get(k as u16)?;
                 ensure!(
                     !obj.unsupported_equipment,
-                    "equipment effect not implemented"
+                    controller("equipment effect not implemented")
                 );
                 ensure!(
                     obj.slot_type == self.content.get(p.character.class)?.slots[s.slot],
-                    "incompatible equipment slot"
+                    controller("incompatible equipment slot")
                 );
             }
         }
@@ -3436,7 +3620,7 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             p.controller == Controller::Qa,
-            "script actions require a QA-owned player"
+            controller("script actions require a QA-owned player")
         );
         self.controlled_action(id, a)
     }
@@ -3450,14 +3634,18 @@ impl World {
     fn controlled_action(&mut self, id: i32, a: Action) -> Result<Option<InventoryPlan>> {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
-            p.active(),
+            p.persistence_failure.is_none(),
             "dead, departing or quarantined player cannot act"
+        );
+        ensure!(
+            p.active(),
+            controller("dead, departing or quarantined player cannot act")
         );
         match a {
             Action::Move { x, y } => {
                 ensure!(
                     self.player_position_valid(Some(p.pos), Pos { x, y }),
-                    "goal outside map or blocked"
+                    controller("goal outside map or blocked")
                 );
                 self.players
                     .get_mut(&id)
@@ -3466,7 +3654,7 @@ impl World {
                 Ok(None)
             }
             Action::Shoot { angle } => {
-                ensure!(angle.is_finite(), "invalid aim");
+                ensure!(angle.is_finite(), controller("invalid aim"));
                 self.players.get_mut(&id).context("player missing")?.bot_aim = Some(angle);
                 Ok(None)
             }
@@ -3484,7 +3672,7 @@ impl World {
                     .character
                     .items
                     .get(slot)
-                    .context("invalid slot")?;
+                    .ok_or_else(|| controller("invalid slot"))?;
                 self.use_item(
                     id,
                     Slot {
@@ -3515,10 +3703,20 @@ impl World {
         );
         Ok(())
     }
+    #[cfg(test)]
     pub fn pending_progress(&mut self) -> Vec<(i32, Character)> {
+        self.pending_progress_where(|_, _| true)
+    }
+    pub(crate) fn pending_progress_where(
+        &mut self,
+        mut accept: impl FnMut(i32, i32) -> bool,
+    ) -> Vec<(i32, Character)> {
         let mut plans = Vec::new();
         for (id, p) in &mut self.players {
             if !p.progress_queued() || p.pending || p.death_started {
+                continue;
+            }
+            if !accept(*id, p.character.account) {
                 continue;
             }
             let mut snapshot = p.character.clone();
@@ -3616,7 +3814,14 @@ impl World {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn pending_deaths(&mut self) -> Vec<(i32, Character, String)> {
+        self.pending_deaths_where(|_, _| true)
+    }
+    pub(crate) fn pending_deaths_where(
+        &mut self,
+        mut accept: impl FnMut(i32, i32) -> bool,
+    ) -> Vec<(i32, Character, String)> {
         let dying: Vec<_> = self
             .players
             .iter()
@@ -3629,6 +3834,9 @@ impl World {
                 self.cancel_trade(id, "Trade cancelled by permanent death.");
                 let p = self.players.get_mut(&id).unwrap();
                 if p.pending || p.progress_queued() || p.death_started {
+                    return None;
+                }
+                if !accept(id, p.character.account) {
                     return None;
                 }
                 p.death_started = true;
@@ -3681,6 +3889,17 @@ impl World {
         self.clear_companions(id);
         Ok(())
     }
+    pub(crate) fn stop_controller(&mut self, id: i32) -> Result<()> {
+        let p = self
+            .players
+            .get_mut(&id)
+            .context("stopping controller missing")?;
+        p.departing = true;
+        p.tx = None;
+        p.bot_goal = None;
+        p.bot_aim = None;
+        Ok(())
+    }
     pub fn begin_departure(&mut self, id: i32) -> Result<Option<Character>> {
         self.cancel_trade(id, "Trade cancelled by departure.");
         let p = self
@@ -3692,10 +3911,11 @@ impl World {
             "quarantined persistence failure: {:?}",
             p.persistence_failure
         );
-        p.departing = true;
-        p.tx = None;
-        p.bot_goal = None;
-        p.bot_aim = None;
+        self.stop_controller(id)?;
+        let p = self
+            .players
+            .get_mut(&id)
+            .context("departing player missing")?;
         if p.pending || p.death_pending || p.progress_queued() {
             return Ok(None);
         };

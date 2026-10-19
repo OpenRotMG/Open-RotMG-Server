@@ -79,8 +79,12 @@ impl World {
     fn trade_ready(&self, id: i32) -> Result<()> {
         let p = self.players.get(&id).context("trade player missing")?;
         ensure!(
-            p.active() && !p.pending,
+            p.persistence_failure.is_none(),
             "trade player busy, dead, departing or quarantined"
+        );
+        ensure!(
+            p.active() && !p.pending,
+            controller("trade player busy, dead, departing or quarantined")
         );
         Ok(())
     }
@@ -107,10 +111,10 @@ impl World {
     pub fn request_trade(&mut self, id: i32, name: String) -> Result<()> {
         ensure!(
             !name.is_empty() && name.len() <= 16,
-            "invalid trade target name"
+            controller("invalid trade target name")
         );
         self.trade_ready(id)?;
-        ensure!(self.trade_key(id).is_none(), "already trading");
+        ensure!(self.trade_key(id).is_none(), controller("already trading"));
         let targets: Vec<_> = self
             .players
             .iter()
@@ -119,14 +123,17 @@ impl World {
             .collect();
         ensure!(
             targets.len() == 1 && targets[0] != id,
-            "trade target missing, ambiguous or self"
+            controller("trade target missing, ambiguous or self")
         );
         let target = targets[0];
         self.trade_ready(target)?;
-        ensure!(self.trade_key(target).is_none(), "target already trading");
+        ensure!(
+            self.trade_key(target).is_none(),
+            controller("target already trading")
+        );
         ensure!(
             self.players[&id].pos.distance(self.players[&target].pos) < 2.,
-            "trade target out of range"
+            controller("trade target out of range")
         );
         if self
             .trade_requests
@@ -192,7 +199,9 @@ impl World {
         true
     }
     pub fn change_trade(&mut self, id: i32, values: [bool; 12]) -> Result<()> {
-        let key = self.trade_key(id).context("no active trade")?;
+        let key = self
+            .trade_key(id)
+            .ok_or_else(|| controller("no active trade"))?;
         ensure!(!self.trades[&key].pending, "trade commit pending");
         self.trade_ready(id)?;
         let side = self.trades[&key]
@@ -203,7 +212,7 @@ impl World {
         for (slot, selected) in values.iter().enumerate() {
             ensure!(
                 !selected || self.tradeable(id, slot)?,
-                "empty, equipped or Soulbound trade offer"
+                controller("empty, equipped or Soulbound trade offer")
             );
         }
         let trade = self.trades.get_mut(&key).unwrap();
@@ -226,16 +235,19 @@ impl World {
         mine: [bool; 12],
         theirs: [bool; 12],
     ) -> Result<Option<TradePlan>> {
-        let key = self.trade_key(id).context("no active trade")?;
+        let key = self
+            .trade_key(id)
+            .ok_or_else(|| controller("no active trade"))?;
         let trade = &self.trades[&key];
+        ensure!(!trade.pending, "trade commit pending or offer settling");
         ensure!(
-            !trade.pending && self.now >= trade.ready,
-            "trade commit pending or offer settling"
+            self.now >= trade.ready,
+            controller("trade commit pending or offer settling")
         );
         let side = trade.players.iter().position(|p| *p == id).unwrap();
         ensure!(
             mine == trade.offers[side] && theirs == trade.offers[1 - side],
-            "stale trade acceptance"
+            controller("stale trade acceptance")
         );
         for (index, player) in trade.players.iter().enumerate() {
             self.trade_ready(*player)?;
@@ -249,7 +261,7 @@ impl World {
                 .pos
                 .distance(self.players[&trade.players[1]].pos)
                 < 2.,
-            "trade participants out of range"
+            controller("trade participants out of range")
         );
         let trade = self.trades.get_mut(&key).unwrap();
         trade.accepted[side] = true;
@@ -278,7 +290,7 @@ impl World {
                     let destination = inventories[side][4..]
                         .iter()
                         .position(|item| *item == -1)
-                        .context("trade recipient inventory is full")?
+                        .ok_or_else(|| controller("trade recipient inventory is full"))?
                         + 4;
                     inventories[side][destination] = originals[1 - side][slot];
                 }

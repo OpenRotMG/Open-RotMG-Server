@@ -93,7 +93,7 @@ impl Store {
     pub async fn choose_name(&self, account: i32, name: String) -> Result<()> {
         match self.name_choice(account, name, false).await? {
             NameChoice::Committed { .. } => Ok(()),
-            NameChoice::Rejected(reason) => anyhow::bail!(reason),
+            NameChoice::Rejected(reason) => Err(Rejected(reason).into()),
         }
     }
     pub(crate) async fn name_choice(

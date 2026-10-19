@@ -280,9 +280,18 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
         snapshot(&db) == before_failure,
         "failed change touched unrelated durable state"
     );
-    assert!(app.owners.lock().unwrap().is_empty());
+    assert_eq!(app.owners.lock().unwrap().len(), 1);
+    assert!(app.owners.lock().unwrap().contains_key(&account));
+    assert!(
+        app.claim(account).is_err(),
+        "SQL uncertainty must retain its account claim"
+    );
     db.execute_batch("DROP TRIGGER reject_password_revocation")
         .unwrap();
+    assert!(
+        app.claim(account).is_err(),
+        "repairing the SQL trigger must not clear the fence"
+    );
     server.abort();
     std::fs::remove_dir_all(dir).unwrap();
 }

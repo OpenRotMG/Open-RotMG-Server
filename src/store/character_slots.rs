@@ -122,16 +122,16 @@ impl Store {
         let (before, cost) = self.call(move |db| {
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let registered: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM credentials WHERE account=?1)", [account], |r| r.get(0))?;
-            ensure!(registered, "Register an account before buying character slots.");
+            ensure!(registered, Rejected("Register an account before buying character slots."));
             let slots = read(&tx, account)?;
             let replay: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM character_slot_purchases WHERE account=?1 AND timer=?2)", params![account, timer], |r| r.get(0))?;
             if replay { return Err(SlotReplay.into()); }
-            ensure!(slots < 14, "Character slot limit of 14 reached.");
+            ensure!(slots < 14, Rejected("Character slot limit of 14 reached."));
             // The native request has no quote; distinct timers buy at the current durable price.
             let cost = price(slots)?;
             let next = slots.checked_add(1).context("character slot capacity overflow")?;
             let changed = tx.execute("UPDATE accounts SET credits=credits-?2,character_slots=?3 WHERE id=?1 AND credits>=?2 AND character_slots=?4", params![account, cost, next, slots])?;
-            ensure!(changed == 1, "Not enough Gold for the current character slot price.");
+            ensure!(changed == 1, Rejected("Not enough Gold for the current character slot price."));
             tx.execute("INSERT INTO character_slot_purchases(account,timer,slots) VALUES(?1,?2,?3)", params![account, timer, next])?;
             read(&tx, account)?;
             tx.commit()?;

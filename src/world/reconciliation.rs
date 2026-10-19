@@ -54,6 +54,10 @@ pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
 }
 
 impl Player {
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_goto_acks(&self) -> usize {
+        self.goto_acks.len()
+    }
     pub(super) fn advertised_weapon(&self, kind: u16) -> bool {
         self.weapon_ticks.iter().any(|(_, k)| *k == i32::from(kind))
     }
@@ -79,7 +83,7 @@ impl Player {
         if let Some((_, sent)) = self.goto_acks.iter().find(|(own, _)| *own) {
             ensure!(
                 sent.elapsed() <= ACK_TIMEOUT,
-                "GOTO acknowledgement timed out"
+                crate::server::lifecycle::protocol("GOTO acknowledgement timed out")
             );
             return Ok(true);
         }
@@ -106,7 +110,7 @@ impl World {
             .context("tick ACK player missing")?;
         ensure!(
             tick >= 0 && tick < p.tick,
-            "unsolicited tick acknowledgement"
+            crate::server::lifecycle::protocol("unsolicited tick acknowledgement")
         );
         // NEW_TICK queues MOVE before applying inventory; earlier SHOOTs still use the old weapon.
         p.weapon_ticks.retain(|(sent, _)| *sent >= tick);
@@ -114,18 +118,22 @@ impl World {
     }
     pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
         let p = self.players.get(&id).context("native player missing")?;
-        ensure!(p.active(), "inactive native character");
+        ensure!(p.persistence_failure.is_none(), "inactive native character");
+        ensure!(
+            p.active(),
+            crate::server::lifecycle::controller("inactive native character")
+        );
         ensure!(
             time >= 0 && time >= p.last_move,
-            "native position clock regressed"
+            crate::server::lifecycle::controller("native position clock regressed")
         );
         ensure!(
             pos.x.is_finite() && pos.y.is_finite(),
-            "non-finite native position"
+            crate::server::lifecycle::controller("non-finite native position")
         );
         ensure!(
             self.player_step_valid(p.pos, pos),
-            "native position is outside walkable terrain"
+            crate::server::lifecycle::controller("native position is outside walkable terrain")
         );
         Ok(())
     }
@@ -152,17 +160,22 @@ impl World {
             .players
             .get_mut(&id)
             .context("GOTO ACK player missing")?;
-        let (own, sent) = *p
-            .goto_acks
-            .front()
-            .context("unsolicited GOTO acknowledgement")?;
-        ensure!(time >= 0, "negative GOTO acknowledgement time");
+        let (own, sent) = *p.goto_acks.front().ok_or_else(|| {
+            crate::server::lifecycle::protocol("unsolicited GOTO acknowledgement")
+        })?;
+        ensure!(
+            time >= 0,
+            crate::server::lifecycle::protocol("negative GOTO acknowledgement time")
+        );
         ensure!(
             sent.elapsed() <= ACK_TIMEOUT,
-            "GOTO acknowledgement timed out"
+            crate::server::lifecycle::protocol("GOTO acknowledgement timed out")
         );
         if own {
-            ensure!(time >= p.last_move, "GOTO acknowledgement clock regressed");
+            ensure!(
+                time >= p.last_move,
+                crate::server::lifecycle::protocol("GOTO acknowledgement clock regressed")
+            );
             // The native client ACKs with lastUpdate_, then moves to the supplied position.
             p.last_move = time;
         }
@@ -175,17 +188,23 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             time >= 0 && time >= p.last_attack,
-            "invalid correcting SHOOT time"
+            crate::server::lifecycle::protocol("invalid correcting SHOOT time")
         );
         ensure!(
             p.character.items[0] == i32::from(kind) || p.advertised_weapon(kind),
-            "weapon does not match equipped item"
+            crate::server::lifecycle::protocol("weapon does not match equipped item")
         );
-        ensure!(bullet == p.next_bullet, "unexpected player bullet counter");
+        ensure!(
+            bullet == p.next_bullet,
+            crate::server::lifecycle::protocol("unexpected player bullet counter")
+        );
         let (last, count) = p
             .discarded_attack
             .unwrap_or((p.last_attack, p.attack_count));
-        ensure!(time >= last, "discarded attack clock regressed");
+        ensure!(
+            time >= last,
+            crate::server::lifecycle::protocol("discarded attack clock regressed")
+        );
         let item = self.content.get(kind)?;
         let count = if time == last { count } else { 0 };
         if time != last {
@@ -193,12 +212,12 @@ impl World {
             let cooldown = (1. / (rate * f64::from(item.rate))).floor() as f32;
             ensure!(
                 i64::from(time) - i64::from(last) >= cooldown as i64 - 2,
-                "discarded attack too fast"
+                crate::server::lifecycle::protocol("discarded attack too fast")
             );
         }
         ensure!(
             count < item.shots,
-            "too many discarded projectiles in attack"
+            crate::server::lifecycle::protocol("too many discarded projectiles in attack")
         );
         Ok(count)
     }
@@ -240,7 +259,7 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             time >= 0 && pos.x.is_finite() && pos.y.is_finite(),
-            "invalid correcting MOVE"
+            crate::server::lifecycle::protocol("invalid correcting MOVE")
         );
         let correcting = p.correcting()?;
         if correcting {
@@ -266,14 +285,17 @@ impl World {
         let correcting = p.correcting()?;
         let continuing = p.discarded_attack.is_some_and(|(last, _)| time == last);
         if let Some((last, _)) = p.discarded_attack {
-            ensure!(time >= last, "discarded attack clock regressed");
+            ensure!(
+                time >= last,
+                crate::server::lifecycle::protocol("discarded attack clock regressed")
+            );
         }
         if !correcting && !continuing {
             return Ok(false);
         }
         ensure!(
             start.x.is_finite() && start.y.is_finite() && angle.is_finite(),
-            "invalid correcting SHOOT"
+            crate::server::lifecycle::protocol("invalid correcting SHOOT")
         );
         let count = self.validate_discarded_shot(id, time, bullet, kind)?;
         self.consume_native_discard(id, time, bullet, kind, count)?;
@@ -297,5 +319,167 @@ impl World {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_finalize_tests {
+    use super::*;
+    use crate::server::{
+        self,
+        lifecycle::{self, CloseReason, Stage},
+    };
+
+    async fn swap(a: &server::App, id: i32) {
+        lifecycle::account(
+            a,
+            vec![
+                a.world
+                    .for_player(id)
+                    .call(move |w| Ok(w.players[&id].character.account))
+                    .await
+                    .unwrap(),
+            ],
+            "finalize_ack_inventory",
+            move |a| async move {
+                lifecycle::stage(Stage::Reservation);
+                let plan = a
+                    .world
+                    .for_player(id)
+                    .call(move |w| {
+                        let items = &w.players[&id].character.items;
+                        w.swap(
+                            id,
+                            Slot {
+                                object: id,
+                                slot: 4,
+                                kind: items[4],
+                            },
+                            Slot {
+                                object: id,
+                                slot: 5,
+                                kind: items[5],
+                            },
+                        )
+                    })
+                    .await?;
+                lifecycle::stage(Stage::Store);
+                let result = a
+                    .store
+                    .exchange(
+                        vec![crate::store::InventoryWrite {
+                            id: plan.character,
+                            account: plan.account,
+                            revision: plan.revision,
+                            items: plan.items.clone(),
+                        }],
+                        vec![],
+                    )
+                    .await
+                    .and_then(|v| v.into_iter().next().context("missing committed revision"));
+                lifecycle::stage(Stage::Publication);
+                a.world
+                    .for_player(id)
+                    .call(move |w| w.finish_inventory(plan, result))
+                    .await?;
+                lifecycle::stage(Stage::Settled);
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn lifecycle_finalize_autonomous_expired_goto_preserves_commit_peer_and_exclusive_reentry()
+     {
+        let (dir, a) = server::lifecycle_test_fixture();
+        let mut actors = vec![];
+        let mut outputs = vec![];
+        for name in ["finalize-ack-bot", "finalize-ack-peer"] {
+            let account = a.store.list(name.into()).await.unwrap().id;
+            let ch = a
+                .store
+                .create(account, a.content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap();
+            let saved = ch.clone();
+            let owner = a.claim(account).unwrap();
+            let bind = lifecycle::binding(&a, account).unwrap();
+            let (packets, rx) = mpsc::channel(4096);
+            outputs.push(rx);
+            let (lost, _) = watch::channel(false);
+            let id = a
+                .world
+                .call(move |w| {
+                    let id = w.enter_autonomous(ch, Output { packets, lost })?;
+                    bind(id)?;
+                    Ok(id)
+                })
+                .await
+                .unwrap();
+            actors.push((owner, id, saved));
+        }
+        let (owner, id, ch) = actors.remove(0);
+        let (peer_owner, peer, peer_ch) = actors.remove(0);
+        swap(&a, id).await;
+        let mut expected = ch.items.clone();
+        expected.swap(4, 5);
+        a.world
+            .for_player(id)
+            .call(move |w| {
+                let p = w.players.get_mut(&id).unwrap();
+                p.goto_acks
+                    .push_back((true, Instant::now() - Duration::from_secs(6)));
+                let error = w.acknowledge_autonomous_goto(id).unwrap_err();
+                assert_eq!(
+                    error.downcast_ref::<CloseReason>(),
+                    Some(&CloseReason::Protocol)
+                );
+                w.expire_goto_acks();
+                assert!(w.players[&id].departing);
+                assert!(w.players[&id].persistence_failure.is_none());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        server::depart(&a, id).await.unwrap();
+        assert!(
+            a.claim(ch.account).is_err(),
+            "bot transfer must retain its exclusive account lease"
+        );
+        swap(&a, peer).await;
+        server::depart(&a, peer).await.unwrap();
+        drop(peer_owner);
+        let saved = a.store.load(ch.account, ch.id).await.unwrap();
+        assert_eq!(
+            (saved.revision, saved.items.clone()),
+            (ch.revision + 1, expected)
+        );
+        assert_eq!(
+            a.store
+                .load(peer_ch.account, peer_ch.id)
+                .await
+                .unwrap()
+                .revision,
+            peer_ch.revision + 1
+        );
+        let bind = lifecycle::binding(&a, ch.account).unwrap();
+        let replacement = a
+            .world
+            .call(move |w| {
+                let replacement = w.enter(saved, None)?;
+                bind(replacement)?;
+                Ok(replacement)
+            })
+            .await
+            .unwrap();
+        assert_ne!(id, replacement);
+        assert!(lifecycle::finalize(&a, id, CloseReason::Controller).is_err());
+        assert!(a.claim(ch.account).is_err());
+        server::depart(&a, replacement).await.unwrap();
+        drop(owner);
+        assert!(a.owners.lock().unwrap().is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

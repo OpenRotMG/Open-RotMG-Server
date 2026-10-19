@@ -30,7 +30,17 @@ async fn xp_booster_commits_use_progress_reconnect_and_death_without_bonus_fame(
         .await
         .unwrap()[0];
     let character = ch.id;
-    let id = a.world.call(move |w| w.enter(ch, None)).await.unwrap();
+    let _owner = a.claim(account).unwrap();
+    let bind = lifecycle::binding(&a, account).unwrap();
+    let id = a
+        .world
+        .call(move |w| {
+            let id = w.enter(ch, None)?;
+            bind(id)?;
+            Ok(id)
+        })
+        .await
+        .unwrap();
     let plan = a
         .world
         .call(move |w| {
@@ -100,10 +110,12 @@ async fn xp_booster_commits_use_progress_reconnect_and_death_without_bonus_fame(
         (loaded.exp, loaded.xp_boost.bonus_exp, loaded.fame),
         (2001, 3, 1)
     );
+    let bind = lifecycle::binding(&a, account).unwrap();
     let (id, fatal) = a
         .world
         .call(move |w| {
             let id = w.enter(loaded, None)?;
+            bind(id)?;
             let p = w.players.get_mut(&id).unwrap();
             p.character.hp = 0;
             p.death_pending = true;

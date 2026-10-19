@@ -611,7 +611,7 @@ impl World {
         );
         ensure!(
             self.name == "Oryx's Chamber" && self.cleared,
-            "Wine Cellar requires a defeated Oryx"
+            controller("Wine Cellar requires a defeated Oryx")
         );
         let p = &self.players[&id];
         let locked = self
@@ -619,10 +619,10 @@ impl World {
             .values()
             .filter(|e| e.kind == LOCKED_CELLAR && e.published && p.pos.distance(e.pos) <= 3.)
             .min_by(|a, b| p.pos.distance(a.pos).total_cmp(&p.pos.distance(b.pos)))
-            .context("no locked Wine Cellar portal nearby")?;
+            .ok_or_else(|| controller("no locked Wine Cellar portal nearby"))?;
         ensure!(
             !locked.reserved,
-            "another Incantation already reserves this portal"
+            controller("another Incantation already reserves this portal")
         );
         let (locked, pos) = (locked.id, locked.pos);
         self.reserve_portal(id, slot, 0x700, Some(locked), pos, dungeon.clone())
@@ -1069,5 +1069,124 @@ mod tests {
         assert_eq!(transfers.len(), 1);
         assert_eq!(transfers[0].player, pending);
         assert!(d.forced_transfer_candidates().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_finalize_tests {
+    use super::*;
+    use crate::server::{
+        self,
+        lifecycle::{self, CloseReason},
+    };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn lifecycle_finalize_native_incantation_missing_or_distant_portal_is_rule_denial() {
+        let (dir, mut a) = server::lifecycle_test_fixture();
+        a.world.clock.set_paused(true);
+        for distant in [false, true] {
+            let account = a
+                .store
+                .list(format!("finalize-incantation-{distant}"))
+                .await
+                .unwrap()
+                .id;
+            let mut ch = a
+                .store
+                .create(account, a.content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap();
+            ch.items[4] = i32::from(INCANTATION);
+            ch.revision = a
+                .store
+                .exchange(
+                    vec![crate::store::InventoryWrite {
+                        id: ch.id,
+                        account,
+                        revision: ch.revision,
+                        items: ch.items.clone(),
+                    }],
+                    vec![],
+                )
+                .await
+                .unwrap()[0];
+            let initial = ch.clone();
+            let world = a
+                .world
+                .directory(|d| d.instance(crate::endgame::CHAMBER, None))
+                .await
+                .unwrap();
+            a.world = a.world.in_world(world);
+            let owner = a.claim(account).unwrap();
+            let bind = lifecycle::binding(&a, account).unwrap();
+            let (id, pos) = a
+                .world
+                .call(move |w| {
+                    let id = w.enter(ch, None)?;
+                    bind(id)?;
+                    w.cleared = true;
+                    let pos = w.players[&id].pos;
+                    if distant {
+                        let far = (0..w.map.height)
+                            .flat_map(|y| {
+                                (0..w.map.width).map(move |x| Pos {
+                                    x: x as f32 + 0.5,
+                                    y: y as f32 + 0.5,
+                                })
+                            })
+                            .find(|target| target.distance(pos) > 5. && w.walkable(*target))
+                            .context("Chamber fixture lacks a distant walkable portal tile")?;
+                        w.spawn_entity(LOCKED_CELLAR, far, vec![])?;
+                    }
+                    Ok((id, pos))
+                })
+                .await
+                .unwrap();
+            let error = server::inventory(&a, id, move |w| {
+                w.native_use_item(
+                    id,
+                    0,
+                    Slot {
+                        object: id,
+                        slot: 4,
+                        kind: i32::from(INCANTATION),
+                    },
+                    pos,
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<CloseReason>(),
+                Some(&CloseReason::Controller)
+            );
+            assert_eq!(
+                a.store.load(account, initial.id).await.unwrap().items,
+                initial.items
+            );
+            a.world
+                .for_player(id)
+                .call(move |w| {
+                    assert!(!w.players[&id].pending);
+                    assert!(w.entities.values().all(|e| !e.reserved));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            owner
+                .close(&a, CloseReason::Controller)
+                .unwrap()
+                .unwrap()
+                .wait()
+                .await
+                .unwrap();
+            assert_eq!(
+                a.store.load(account, initial.id).await.unwrap().revision,
+                initial.revision
+            );
+            assert!(a.claim(account).is_ok());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

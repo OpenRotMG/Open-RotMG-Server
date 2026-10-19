@@ -39,22 +39,29 @@ fn text_to(name: &str, object: i32, bubble: u8, recipient: &str, text: &str, sta
 }
 
 pub(crate) fn validate(text: &str) -> Result<()> {
-    ensure!(!text.trim().is_empty(), "Chat message is empty.");
+    ensure!(
+        !text.trim().is_empty(),
+        controller("Chat message is empty.")
+    );
     ensure!(
         text.encode_utf16().count() <= 128,
-        "Chat messages are limited to 128 characters."
+        controller("Chat messages are limited to 128 characters.")
     );
     ensure!(
         !text
             .chars()
             .any(|c| c.is_control()
                 || matches!(c, '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')),
-        "Chat message contains control characters."
+        controller("Chat message contains control characters.")
     );
     Ok(())
 }
 
 impl Player {
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_account_lists(&self) -> AccountLists {
+        self.account_lists.clone()
+    }
     fn can_chat(&self) -> bool {
         self.character.alive
             && self.character.hp > 0
@@ -99,13 +106,20 @@ impl World {
     }
     pub fn account_list_target(&self, id: i32, target: i32) -> Result<i32> {
         let sender = self.players.get(&id).context("player missing")?;
-        let target_player = self.players.get(&target).context("player not found")?;
+        let target_player = self
+            .players
+            .get(&target)
+            .ok_or_else(|| controller("player not found"))?;
+        ensure!(
+            sender.persistence_failure.is_none(),
+            "account list sender is quarantined"
+        );
         ensure!(
             sender.can_chat()
                 && target_player.can_chat()
                 && id != target
                 && sender.known.contains(&target),
-            "account list target is not an available nearby player"
+            controller("account list target is not an available nearby player")
         );
         Ok(target_player.character.account)
     }
@@ -131,8 +145,12 @@ impl Directory {
     pub fn chat_permit(&mut self, id: i32, now: Instant) -> Result<()> {
         let sender = &self.resolve(Target::Player(id))?.players[&id];
         ensure!(
-            sender.can_chat(),
+            sender.persistence_failure.is_none(),
             "Dead, departing or quarantined players cannot chat."
+        );
+        ensure!(
+            sender.can_chat(),
+            controller("Dead, departing or quarantined players cannot chat.")
         );
         let account = sender.character.account;
         // Account budgets survive world transfers and reconnects without touching durable game saves.
@@ -140,7 +158,7 @@ impl Directory {
             .retain(|_, b| now.saturating_duration_since(b.updated).as_secs() < 3);
         ensure!(
             self.chat_budgets.len() < 4096 || self.chat_budgets.contains_key(&account),
-            "Chat rate registry is full."
+            controller("Chat rate registry is full.")
         );
         let budget = self.chat_budgets.entry(account).or_insert(ChatBudget {
             updated: now,
@@ -153,7 +171,7 @@ impl Directory {
         budget.updated = now;
         ensure!(
             budget.tokens >= 1.,
-            "Chat rate limit: wait one second before sending again."
+            controller("Chat rate limit: wait one second before sending again.")
         );
         budget.tokens -= 1.;
         Ok(())
@@ -183,13 +201,17 @@ impl Directory {
                 || yell
                 || guild_chat
                 || trimmed.eq_ignore_ascii_case("/pause"),
-            "Unknown chat command."
+            controller("Unknown chat command.")
         );
         let world = self.resolve(Target::Player(id))?;
         let sender = &world.players[&id];
         ensure!(
-            sender.can_chat(),
+            sender.persistence_failure.is_none(),
             "Dead, departing or quarantined players cannot chat."
+        );
+        ensure!(
+            sender.can_chat(),
+            controller("Dead, departing or quarantined players cannot chat.")
         );
         if text.trim().eq_ignore_ascii_case("/pause") {
             ensure!(
@@ -197,7 +219,7 @@ impl Directory {
                     || !world.entities.values().any(|e| e.hp > 0
                         && world.content.objects[&e.kind].enemy
                         && sender.pos.distance(e.pos) <= 8.),
-                "Not safe enough to pause!"
+                controller("Not safe enough to pause!")
             );
             let p = world.players.get_mut(&id).unwrap();
             p.paused = !p.paused;
@@ -213,11 +235,11 @@ impl Directory {
         let stars = sender.presentation.stars();
         ensure!(
             !tell || crate::store::name_chosen(account, &name),
-            "Choose a name before using /tell."
+            controller("Choose a name before using /tell.")
         );
         self.chat_permit(id, now)?;
         if server {
-            ensure!(rest.trim().is_empty(), "Usage: /server");
+            ensure!(rest.trim().is_empty(), controller("Usage: /server"));
             let world = self.resolve(Target::Player(id))?;
             let packet = chat_info(&format!("Current world: {}", world.name));
             send(&world.players[&id], packet.id, packet.body);
@@ -228,7 +250,7 @@ impl Directory {
             let name = rest.trim();
             ensure!(
                 !name.is_empty() && !name.contains(char::is_whitespace),
-                "Usage: /trade <player name>"
+                controller("Usage: /trade <player name>")
             );
             return self
                 .resolve(Target::Player(id))?
@@ -238,7 +260,7 @@ impl Directory {
             let name = rest.trim();
             ensure!(
                 !name.is_empty() && !name.contains(char::is_whitespace),
-                "Usage: /teleport <player name>"
+                controller("Usage: /teleport <player name>")
             );
             let target = self
                 .resolve(Target::Player(id))?
@@ -246,12 +268,12 @@ impl Directory {
                 .iter()
                 .find(|(_, p)| p.character.name.eq_ignore_ascii_case(name))
                 .map(|(id, _)| *id)
-                .context("Player not found in this world.")?;
+                .ok_or_else(|| controller("Player not found in this world."))?;
             self.teleport(id, target, now)?;
             return Ok(());
         }
         if who {
-            ensure!(rest.trim().is_empty(), "Usage: /who");
+            ensure!(rest.trim().is_empty(), controller("Usage: /who"));
             // Period /who lists the current realm, not the cross-world tell/guild audience.
             let world = self.resolve(Target::Player(id))?;
             let names: Vec<_> = world
@@ -266,9 +288,9 @@ impl Directory {
             return Ok(());
         }
         if guild_chat {
-            let guild = guild.context("You are not in a guild.")?;
+            let guild = guild.ok_or_else(|| controller("You are not in a guild."))?;
             let message = rest.trim();
-            ensure!(!message.is_empty(), "Usage: /g <message>");
+            ensure!(!message.is_empty(), controller("Usage: /g <message>"));
             let packet = text_to(&name, -1, 0, "*Guild*", message, stars);
             let mut recipients = 0;
             for p in self
@@ -302,16 +324,16 @@ impl Directory {
                 .trim_start()
                 .split_once(char::is_whitespace)
                 .filter(|(_, message)| !message.trim().is_empty())
-                .context("Usage: /tell <player> <message>")?;
+                .ok_or_else(|| controller("Usage: /tell <player> <message>"))?;
             let target = self
                 .worlds
                 .values()
                 .flat_map(|w| w.players.values())
                 .find(|p| p.can_chat() && p.character.name.eq_ignore_ascii_case(recipient))
-                .context("Player not found.")?;
+                .ok_or_else(|| controller("Player not found."))?;
             ensure!(
                 target.character.account != account,
-                "You cannot tell yourself."
+                controller("You cannot tell yourself.")
             );
             let packet = text_to(&name, -1, 0, &target.character.name, message.trim(), 0);
             let ignored = target.account_lists[1].contains(&account);
@@ -333,10 +355,10 @@ impl Directory {
             // Period sources establish the Nexus audience, not a cross-world relay.
             ensure!(
                 self.resolve(Target::World(-2))?.players.contains_key(&id),
-                "You can only /yell in the Nexus."
+                controller("You can only /yell in the Nexus.")
             );
             let message = rest.trim();
-            ensure!(!message.is_empty(), "Usage: /yell <message>");
+            ensure!(!message.is_empty(), controller("Usage: /yell <message>"));
             message
         } else {
             &text

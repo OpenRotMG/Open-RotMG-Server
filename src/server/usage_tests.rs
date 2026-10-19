@@ -178,7 +178,11 @@ async fn advertised_usage_tracks_existing_ownership_over_real_http() {
     assert!(a.bots.lock().unwrap().is_empty());
     snapshot(&client, &url, 1.0 / 3.0, &original).await;
     a.quarantined.lock().unwrap().clear();
-    snapshot(&client, &url, 0.0, &original).await;
+    snapshot(&client, &url, 1.0 / 3.0, &original).await;
+    assert!(
+        a.claim(accounts[2].0).is_err(),
+        "dropping an Owner must not clear a real SQL fence"
+    );
 
     let bad = client
         .post(format!("{url}/legacy-api/char/list"))
@@ -205,7 +209,8 @@ async fn advertised_usage_tracks_existing_ownership_over_real_http() {
         malformed.text().await.unwrap(),
         "<Error>password required</Error>"
     );
-    assert!(a.owners.lock().unwrap().is_empty());
+    assert_eq!(a.owners.lock().unwrap().len(), 1);
+    assert!(a.owners.lock().unwrap().contains_key(&accounts[2].0));
     server.abort();
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -217,9 +222,13 @@ async fn advertised_usage_rejects_invalid_capacity_and_overfull_registry() {
     for capacity in [0, 86, 3] {
         a.max_players = capacity;
         if capacity == 3 {
-            for id in 1..=4 {
-                a.owners.lock().unwrap().insert(id, None);
+            a.max_players = 4;
+            let claims: Vec<_> = (1..=4).map(|id| a.claim(id).unwrap()).collect();
+            for claim in &claims {
+                claim.failed("overfull registry fixture".into());
             }
+            drop(claims);
+            a.max_players = 3;
         }
         let (url, server) = endpoint(a.clone()).await;
         let (status, xml) = list(&client, &url).await;

@@ -166,7 +166,11 @@ async fn rejected_replies(closed: bool) {
         if matches!(case, "reconnect" | "tutorial") {
             assert!(session.player.is_none());
             assert!(!session.reconnecting);
-            assert!(session.account.is_some());
+            assert!(session.account.is_none());
+            assert!(
+                a.owners.lock().unwrap().is_empty(),
+                "retired transfer admission must not depend on output success"
+            );
             assert!(
                 !a.world
                     .call(move |w| Ok(w.players.contains_key(&departing.unwrap())))
@@ -329,13 +333,15 @@ async fn connection_fifo_and_departure(termination: Termination) {
     }
     let mut trade = Writer::new();
     trade.utf("NobodyHere");
+    let mut empty_drop = Writer::new();
+    empty_drop.i32(player).u8(5).i16(-1);
     send_commands(
         &input,
         &mut codec,
         [
             Packet {
                 id: 35,
-                body: vec![],
+                body: empty_drop.0,
             },
             Packet {
                 id: 21,
@@ -404,8 +410,18 @@ async fn connection_fifo_and_departure(termination: Termination) {
     let saved = a.store.load(account, character).await.unwrap();
     assert_eq!(saved.hp, hp);
     assert_eq!(saved.revision, revision);
-    let owner = a.claim(account).unwrap();
-    owner.release();
+    if matches!(termination, Termination::Shutdown) {
+        let error = a.claim(account).err().expect("shutdown reopened admission");
+        assert_eq!(
+            error.downcast_ref::<CloseReason>(),
+            Some(&CloseReason::Controller)
+        );
+        assert_eq!(error.to_string(), "server admission is frozen");
+        assert!(lifecycle::state(&a, account).is_none());
+    } else {
+        let owner = a.claim(account).unwrap();
+        owner.release();
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }
 

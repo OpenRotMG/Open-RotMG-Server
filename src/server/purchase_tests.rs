@@ -217,6 +217,8 @@ async fn xp_booster_shop_loads_real_stock_and_commits_only_funded_current_purcha
         }
         let character = ch.id;
         let before = ch.clone();
+        let _owner = a.claim(account).unwrap();
+        let bind = lifecycle::binding(&a, account).unwrap();
         let presentation = a.store.presentation(account).await.unwrap();
         let (id, stock) = a
             .world
@@ -229,6 +231,7 @@ async fn xp_booster_shop_loads_real_stock_and_commits_only_funded_current_purcha
                 };
                 assert!(w.walkable(pos));
                 let id = w.enter_at(ch, None, Some(pos), presentation)?;
+                bind(id)?;
                 w.players.get_mut(&id).unwrap().known.insert(merchant);
                 Ok((id, stock))
             })

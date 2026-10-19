@@ -661,7 +661,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         !spec.guid.is_empty() && !spec.guid.contains('@') && spec.guid.len() <= 128,
         "use an explicit disposable guest GUID, not a registered account"
     );
-    let class = a.content.get(spec.class)?;
+    a.content.get(spec.class)?;
     ensure!(
         a.content.classes.contains_key(&spec.class),
         "unknown playable class"
@@ -742,7 +742,12 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         account.characters.is_empty(),
         "GUID already has a living character; no implicit replacement or reset"
     );
-    let mut ch = a.store.create_prepared(account.id, class, name).await?;
+    let mut owner = a.claim(account.id)?;
+    let t = t.clone();
+    super::lifecycle::account(a, vec![account.id], "qa_spawn", move |a| async move {
+    owner.arm_cleanup(&a, tokio::runtime::Handle::current());
+    super::lifecycle::stage(Stage::Store);
+    let mut ch = a.store.create_prepared(account.id, a.content.get(spec.class)?, name).await?;
     ch.base = preview.base;
     ch.level = preview.level;
     ch.exp = preview.exp;
@@ -767,32 +772,38 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
     let actor = ch.id;
     write_json(&t.path(&format!("actor-{actor}"), "spawn"), &spec)?;
     match spec.controller {
-        Controller::Native => write_json(
-            &t.path(&format!("account-{}", ch.account), "native"),
-            &(world, pos),
-        )?,
+        Controller::Native => {
+            write_json(&t.path(&format!("account-{}", ch.account), "native"), &(world, pos))?;
+            owner.release();
+        },
         Controller::Direct => {
-            let owner = a.claim(ch.account)?;
             let presentation = a.store.presentation(ch.account).await?;
+            let bind = super::lifecycle::binding(&a, ch.account)?;
+            super::lifecycle::stage(Stage::Publication);
             let id = a
                 .world
                 .in_world(world)
-                .call(move |w| w.enter_at(ch, None, Some(pos), presentation))
+                .call(move |w| {
+                    let id = w.enter_at(ch, None, Some(pos), presentation)?;
+                    bind(id)?;
+                    Ok(id)
+                })
                 .await?;
-            a.bots
-                .lock()
-                .expect("ownership registry poisoned")
-                .insert(id, owner);
+            let mut bots = a.bots.lock().expect("ownership registry poisoned");
+            ensure!(!bots.contains_key(&id), "QA avatar already has a controller owner");
+            owner.publish_script(id)?;
+            bots.insert(id, owner);
         }
         Controller::GameBot => {
             crate::bots::start_test(
-                a,
+                &a,
                 ch,
                 world,
                 pos,
                 spec.profile
                     .as_deref()
                     .context("gameplay profile missing")?,
+                owner,
             )
             .await?
         }
@@ -800,6 +811,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
     Ok(
         json!({"actor":actor,"account":account.id,"world":world,"controller":spec.controller,"provenance":"prepared","connected":spec.controller!=Controller::Native}),
     )
+    }).await
 }
 async fn resume(a: &App, t: &Testing) -> Result<()> {
     ensure!(
@@ -874,7 +886,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
             resume(a,t).await?;
             let result: Result<Value> = async {
                 let player=resolve(a,actor).await?;
-                if let Some(plan)=a.world.for_player(player).call(move |w|w.action(player,action)).await? {persist(a,plan).await?;}
+                super::inventory(a,player,move |w|w.action(player,action)).await??;
                 tokio::time::sleep(Duration::from_millis(duration_ms)).await;
                 a.world.for_player(player).call(move |w|w.action(player,Action::Stop)).await?;
                 snapshot(a,actor,false).await
@@ -914,10 +926,13 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
             t.registration(actor)?;
             ensure!(a.world.clock.paused(),"cheats require an explicitly paused test session");
             let player=resolve(a,actor).await?;
+            super::lifecycle::player(a,player,"qa_cheat",move |a| async move {
+            super::lifecycle::stage(Stage::Reservation);
             let mut ch=a.world.for_player(player).call(move |w| {let p=w.players.get(&player).context("player missing")?;ensure!(p.character.alive&&!p.pending&&!p.progress_started&&!p.death_pending&&!p.departing,"actor has pending gameplay or persistence");Ok(p.character.clone())}).await?;
             match change {
                 Cheat::Teleport{position}=>{a.world.for_player(player).call(move |w| {ensure!(position.x.is_finite()&&position.y.is_finite()&&w.walkable(position),"teleport position invalid");let p=w.players.get_mut(&player).context("player missing")?;ensure!(p.controller!=crate::world::Controller::Human,"native teleport requires a verified client correction, not a server-only edit");p.pos=position;p.bot_goal=None;w.updates(player,true)}).await?;},
                 change=>{
+                    super::lifecycle::stage(Stage::Store);
                     match change {
                         Cheat::Stats{values}=>{ch.base=values;let stats=ch.effective(&a.content)?;ch.hp=ch.hp.min(stats[0]);ch.mp=ch.mp.min(stats[1]);},
                         Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],Vec::new()).await?[0];},
@@ -929,6 +944,8 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
                     a.world.for_player(player).call(move |w|{w.players.get_mut(&player).context("player missing")?.character=ch;w.updates(player,true)}).await?;
                 }
             }
+            Ok(())
+            }).await?;
             snapshot(a,actor,false).await
         },
         Command::Result{request}=>{valid_id(&request)?;let saved:Value=serde_json::from_slice(&fs::read(t.path(&request,"receipt"))?)?;if saved["status"]=="running" {Ok(json!({"status":"incomplete","error":"request has no confirmed result; inspect trace, do not replay effects"}))}else{Ok(saved.get("receipt").context("stored receipt missing")?.clone())}},
@@ -943,7 +960,12 @@ pub async fn command(State(a): State<App>, headers: HeaderMap, Json(raw): Json<V
         let t=a.testing.as_ref().context("testing interface requires an exclusively created --test-state directory")?;
         let request:Request=serde_json::from_value(raw.clone())?;valid_id(&request.id)?;
         if matches!(request.command,Command::Observe{..}|Command::Inspect{..}|Command::Catalog{..}|Command::WorldInfo{..}|Command::Result{..}|Command::Trace{..}|Command::Capabilities|Command::Cancel{..}|Command::NativeState{..}|Command::NativeSync{..}|Command::NativeLease{..}) {return execute(&a,t,&request.id,request.command).await;}
-        let _guard=t.gate.lock().await;
+        let entry=super::lifecycle::drain::entry(&a)?;
+        let guard=t.gate.clone().lock_owned().await;
+        let a = a.clone();
+        tokio::spawn(entry.scope(async move {
+        let _guard = guard;
+        let t=a.testing.as_ref().context("accepted QA request lost testing state")?;
         let path=t.path(&request.id,"receipt");
         if path.exists() {
             let previous:Value=serde_json::from_slice(&fs::read(path)?)?;
@@ -966,6 +988,7 @@ pub async fn command(State(a): State<App>, headers: HeaderMap, Json(raw): Json<V
         let durable=json!({"request":raw,"receipt":receipt});
         write_json(&path,&durable)?;
         Ok(receipt)
+        })).await.context("accepted QA completion task panicked")?
     }.await;
     match result {
         Ok(v) => Json(v).into_response(),

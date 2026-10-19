@@ -82,8 +82,12 @@ impl World {
     pub fn buy(&mut self, id: i32, merchant: i32) -> Result<InventoryPlan> {
         let p = self.players.get(&id).context("purchase owner missing")?;
         ensure!(
-            p.active() && !p.pending && !p.paused && p.character.hp > 0,
+            p.persistence_failure.is_none(),
             "Cannot buy while busy, paused or dead."
+        );
+        ensure!(
+            p.active() && !p.pending && !p.paused && p.character.hp > 0,
+            controller("Cannot buy while busy, paused or dead.")
         );
         if self.closed_vaults.contains_key(&merchant) {
             return self.buy_vault(id, merchant);
@@ -91,19 +95,22 @@ impl World {
         let e = self
             .entities
             .get(&merchant)
-            .context("Merchant no longer exists.")?;
+            .ok_or_else(|| controller("Merchant no longer exists."))?;
         ensure!(
             self.content.get(e.kind)?.class == "Merchant"
                 && e.accessible(p.character.account)
                 && p.known.contains(&merchant)
                 && p.pos.distance(e.pos) < 1.5,
-            "Move closer to the merchant."
+            controller("Move closer to the merchant.")
         );
-        ensure!(!e.reserved, "This merchant is processing another purchase.");
-        ensure!(value(e, 42)? > 0, "This merchant is sold out.");
+        ensure!(
+            !e.reserved,
+            controller("This merchant is processing another purchase.")
+        );
+        ensure!(value(e, 42)? > 0, controller("This merchant is sold out."));
         ensure!(
             p.presentation.stars() >= value(e, 45)?,
-            "Insufficient star rank."
+            controller("Insufficient star rank.")
         );
         let item = u16::try_from(value(e, 34)?)?;
         let price = value(e, 36).context("This item has no configured shop price.")?;
@@ -114,7 +121,7 @@ impl World {
         );
         let slot = (4..12)
             .find(|slot| p.character.items[*slot] == -1)
-            .context("Not enough inventory space.")?;
+            .ok_or_else(|| controller("Not enough inventory space."))?;
         let mut items = p.character.items.clone();
         items[slot] = i32::from(item);
         self.cancel_trade(id, "Trade cancelled by purchase.");
@@ -148,22 +155,26 @@ impl World {
             self.name == "Vault"
                 && self.owner == Some(account)
                 && e.kind == 0x505
-                && e.accessible(account)
-                && p.known.contains(&seller)
-                && p.pos.distance(e.pos) < 1.5,
+                && e.accessible(account),
             "Move closer to your closed Vault chest."
+        );
+        ensure!(
+            p.known.contains(&seller) && p.pos.distance(e.pos) < 1.5,
+            controller("Move closer to your closed Vault chest.")
         );
         ensure!(
             !e.reserved
                 && self.vaults.len() < crate::store::VAULT_CHESTS as usize
                 && !self.vaults.values().any(|v| v.chest == chest),
-            "Chest is already owned or reserved."
+            controller("Chest is already owned or reserved.")
         );
         ensure!(
-            value(e, 36)? == crate::store::VAULT_PRICE
-                && value(e, 40)? == 0
-                && p.presentation.stars() >= value(e, 45)?,
+            value(e, 36)? == crate::store::VAULT_PRICE && value(e, 40)? == 0,
             "Invalid chest sale or insufficient star rank."
+        );
+        ensure!(
+            p.presentation.stars() >= value(e, 45)?,
+            controller("Invalid chest sale or insufficient star rank.")
         );
         let pos = e.pos;
         let items = p.character.items.clone();
