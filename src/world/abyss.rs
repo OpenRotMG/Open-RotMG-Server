@@ -117,7 +117,7 @@ impl World {
                 e.stage = Some(1);
                 e.next_aux = self.now + 600;
                 e.next_shot = self.now + 600;
-                e.expires = Some(self.now + 650);
+                e.expires.set(Some(self.now + 650), id, &mut self.timed_ids);
                 self.abyss_flash(id, 0xffffffff, 0.1, 0.6);
             }
             return Ok(());
@@ -188,7 +188,9 @@ impl World {
                     .filter(|e| e.parent == Some(id) && e.kind == 0x909 && e.activated.is_none())
                 {
                     child.activated = Some(self.now);
-                    child.expires = Some(self.now + 5650);
+                    child
+                        .expires
+                        .set(Some(self.now + 5650), child.id, &mut self.timed_ids);
                 }
             }
             self.entities.get_mut(&id).unwrap().next_aux = self.now + 500;

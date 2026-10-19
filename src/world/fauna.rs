@@ -15,10 +15,10 @@ impl World {
         let e = self.entities.get_mut(&new).unwrap();
         e.home = old.home;
         e.camp = old.camp;
-        e.parent = old.parent;
+        e.parent.set(*old.parent, new, &mut self.timed_ids);
         e.quest = old.quest;
         e.damage = old.damage;
-        e.expires = old.expires;
+        e.expires.set(*old.expires, new, &mut self.timed_ids);
         e.activated = Some(self.now);
         if let Some(slot) = slot {
             self.population[slot].entity = Some(new);
@@ -74,9 +74,9 @@ impl World {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.home = dead.home;
                 e.camp = dead.camp;
-                e.parent = dead.parent;
+                e.parent.set(*dead.parent, id, &mut self.timed_ids);
                 e.quest = dead.quest;
-                e.expires = dead.expires;
+                e.expires.set(*dead.expires, id, &mut self.timed_ids);
                 e.activated = Some(self.now);
                 if let Some(slot) = slot {
                     self.population[slot].entity = Some(id);
@@ -143,7 +143,10 @@ impl World {
         if matches!(kind, 0x958 | 0x959 | 0x960 | 0x961) {
             let e = self.entities.get_mut(&id).unwrap();
             e.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
-            e.expires.get_or_insert(self.now + 10000);
+            if e.expires.is_none() {
+                e.expires
+                    .set(Some(self.now + 10000), id, &mut self.timed_ids);
+            }
             return Ok(());
         }
         let e = &self.entities[&id];
@@ -172,7 +175,7 @@ impl World {
             0x20d if e.stage != Some(1) && target.is_some_and(|p| e.pos.distance(p) < 2.) => {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.stage = Some(1);
-                e.expires = Some(self.now + 50);
+                e.expires.set(Some(self.now + 50), id, &mut self.timed_ids);
                 tracing::debug!(
                     entity = id,
                     "Gray Blob armed its once-only proximity ring and withdrawal"

@@ -113,7 +113,11 @@ fn hermit_shield_depends_only_on_owned_tentacles_and_returns_after_attack_window
                 vec![],
             )
             .unwrap();
-        w.entities.get_mut(&id).unwrap().parent = Some(root);
+        w.entities
+            .get_mut(&id)
+            .unwrap()
+            .parent
+            .set(Some(root), id, &mut w.timed_ids);
     }
     let target = w.players[&p].pos;
     w.ocean_mechanics(root, target, 0).unwrap();
@@ -349,13 +353,21 @@ fn a_refused_hermit_wave_cannot_leave_partial_children_to_duplicate_on_retry() {
                 vec![],
             )
             .unwrap();
-        w.entities.get_mut(&id).unwrap().parent = Some(root);
+        w.entities
+            .get_mut(&id)
+            .unwrap()
+            .parent
+            .set(Some(root), id, &mut w.timed_ids);
     }
     for _ in 0..240 {
         let id = w
             .spawn_entity(0x170b, Pos { x: 20.5, y: 20.5 }, vec![])
             .unwrap();
-        w.entities.get_mut(&id).unwrap().parent = Some(root);
+        w.entities
+            .get_mut(&id)
+            .unwrap()
+            .parent
+            .set(Some(root), id, &mut w.timed_ids);
     }
     for reserved in [false, true] {
         if reserved {

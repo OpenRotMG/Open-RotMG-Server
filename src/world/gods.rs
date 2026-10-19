@@ -115,7 +115,8 @@ impl World {
             let dying = hp < 400;
             if dying && expiry.is_none() {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.expires = Some(self.now + 1000);
+                e.expires
+                    .set(Some(self.now + 1000), id, &mut self.timed_ids);
                 e.next_shot = self.now;
                 let mut out = Writer::new();
                 out.u8(15)
@@ -148,7 +149,7 @@ impl World {
         if CONSTRUCTS.contains(&kind) {
             if kind != 0x905 && hp < 400 && self.entities[&id].expires.is_none() {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.expires = Some(self.now + 50);
+                e.expires.set(Some(self.now + 50), id, &mut self.timed_ids);
                 e.next_shot = self.now;
                 tracing::debug!(entity = id, "wounded construct bursts and withdraws");
             }

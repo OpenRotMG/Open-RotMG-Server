@@ -180,7 +180,7 @@ impl World {
                         let born = self.landmark_birth(id, 0xe3d, 4, 1, 1.)?;
                         for child in born {
                             let e = self.entities.get_mut(&child).unwrap();
-                            e.parent = Some(id);
+                            e.parent.set(Some(id), child, &mut self.timed_ids);
                             e.script
                                 .get_or_insert_with(landmark_ai::Script::default)
                                 .no_experience = true;
@@ -227,7 +227,10 @@ impl World {
             }
             0xe4f => {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.expires.get_or_insert(self.now + 10000);
+                if e.expires.is_none() {
+                    e.expires
+                        .set(Some(self.now + 10000), id, &mut self.timed_ids);
+                }
                 if e.stage == Some(0)
                     && (owner.is_none() || target.is_some_and(|p| e.pos.distance(p) < 3.))
                 {

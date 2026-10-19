@@ -101,8 +101,10 @@ impl World {
     }
     pub(super) fn landmark_fade(&mut self, id: i32, delay: u64) {
         let e = self.entities.get_mut(&id).unwrap();
-        let deadline = e.expires.get_or_insert(self.now + delay);
-        *deadline = (*deadline).min(self.now + delay);
+        let deadline = e
+            .expires
+            .map_or(self.now + delay, |d| d.min(self.now + delay));
+        e.expires.set(Some(deadline), id, &mut self.timed_ids);
     }
     pub(super) fn landmark_circle(&self, id: i32, radius: f32, count: usize) -> Vec<Pos> {
         let p = self.entities[&id].pos;

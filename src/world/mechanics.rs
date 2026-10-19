@@ -48,7 +48,7 @@ impl World {
         kind: u16,
     ) -> Result<Option<(i32, encounter::Anchor)>> {
         let e = self.entities.get(&id).context("escort entity missing")?;
-        if let Some(parent) = e.parent {
+        if let Some(parent) = *e.parent {
             let boss = self
                 .entities
                 .get(&parent)
@@ -174,7 +174,11 @@ impl World {
         );
         for i in 0..missing {
             let id = self.spawn_entity(kind, positions[i * positions.len() / missing], vec![])?;
-            self.entities.get_mut(&id).unwrap().parent = Some(parent);
+            self.entities
+                .get_mut(&id)
+                .unwrap()
+                .parent
+                .set(Some(parent), id, &mut self.timed_ids);
         }
         tracing::info!(
             parent,
@@ -313,9 +317,10 @@ impl World {
                             };
                             let child = self.spawn_entity(kind, corner, vec![])?;
                             let e = self.entities.get_mut(&child).unwrap();
-                            e.parent = Some(id);
+                            e.parent.set(Some(id), child, &mut self.timed_ids);
                             e.activated = Some(self.now);
-                            e.expires = Some(self.now + 20000);
+                            e.expires
+                                .set(Some(self.now + 20000), child, &mut self.timed_ids);
                             e.condition = condition::bit(condition::INVULNERABLE);
                         }
                     }
@@ -367,7 +372,11 @@ impl World {
                 }
             }
             0xda2 | 0xda3 if target.is_some_and(|p| pos.distance(p) < 3.) => {
-                self.entities.get_mut(&id).unwrap().expires = Some(self.now + 50);
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
             }
             0xdae => {
                 self.escort_anchor(id, 0xd90)?;
@@ -493,14 +502,16 @@ impl World {
     pub(super) fn mechanic_expiry(&mut self) {
         self.fauna_birth_step();
         self.named_birth_step();
+        let due = |e: &Entity| {
+            e.expires.is_some_and(|deadline| deadline <= self.now)
+                || e.parent
+                    .is_some_and(|parent| !self.entities.contains_key(&parent))
+        };
         let expired: Vec<_> = self
-            .actors()
-            .filter(|e| {
-                e.expires.is_some_and(|deadline| deadline <= self.now)
-                    || e.parent
-                        .is_some_and(|parent| !self.entities.contains_key(&parent))
-            })
-            .map(|e| e.id)
+            .timed_ids
+            .iter()
+            .filter(|id| self.actor_ids.contains(id) && due(&self.entities[id]))
+            .copied()
             .collect();
         for id in expired {
             if matches!(self.entities[&id].kind, 0x91a | 0xd50)
