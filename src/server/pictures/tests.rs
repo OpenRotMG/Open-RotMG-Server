@@ -345,3 +345,120 @@ async fn native_delete_authentication_cannot_be_spoofed_by_gallery_presentation_
     );
     task.abort();
 }
+
+fn native_multipart_body(fields: &[(&str, &str)], png: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (name, value) in fields {
+        body.extend(b"--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n");
+        if *name == "data" {
+            body.extend(b"Content-Disposition: form-data; name=\"data\"; filename=\"Foo.png\"\r\nContent-Type: application/octet-stream\r\n\r\n");
+            body.extend(png);
+        } else {
+            body.extend(
+                format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}")
+                    .as_bytes(),
+            );
+        }
+        body.extend(b"\r\n");
+    }
+    body.extend(b"--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--");
+    body
+}
+
+#[tokio::test]
+async fn native_transport_metadata_exact_values_duplicates_unknowns_and_overwrite_are_atomic() {
+    let (dir, a, url, task) = fixture().await;
+    a.store.list("native-transport".into()).await.unwrap();
+    let fields = vec![
+        ("guid", "native-transport"),
+        ("password", ""),
+        ("secret", ""),
+        ("name", "Native Wire"),
+        ("dataType", "2"),
+        ("tags", "native, wire"),
+        ("overwrite", "on"),
+        ("Filename", "Foo.png"),
+        ("data", ""),
+        ("Upload", "Submit Query"),
+    ];
+    let http = reqwest::Client::new();
+    let send = |fields: Vec<(&str, &str)>, png: Vec<u8>| {
+        http.post(format!("{url}/legacy-api/picture/save"))
+            .header(
+                "Content-Type",
+                "multipart/form-data; boundary=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .body(native_multipart_body(&fields, &png))
+            .send()
+    };
+    let mut identity = None;
+    let replacement = test_png(16, 8);
+    for png in [test_png(8, 8), replacement.clone()] {
+        let response = send(fields.clone(), png.clone()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = response.text().await.unwrap();
+        let doc = roxmltree::Document::parse(&text).unwrap();
+        let id: i32 = doc
+            .descendants()
+            .find(|n| n.has_tag_name("Id"))
+            .unwrap()
+            .text()
+            .unwrap()
+            .parse()
+            .unwrap();
+        if let Some(previous) = identity {
+            assert_eq!(id, previous);
+        }
+        identity = Some(id);
+        assert_eq!(a.store.picture(id).await.unwrap(), png);
+    }
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    let before: (i64, i64) = db
+        .query_row(
+            "SELECT (SELECT count(*) FROM pictures),next_id FROM picture_sequence",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let oversized = "x".repeat(257);
+    for (name, value, duplicate, expected) in [
+        ("Filename", "../evil.png", false, "invalid picture Filename"),
+        ("Upload", "Upload", false, "invalid picture Upload"),
+        ("Filename", "Foo.png", true, "duplicate picture metadata"),
+        ("Upload", "Submit Query", true, "duplicate picture metadata"),
+        ("unexpected", "", true, "unsupported picture field"),
+        (
+            "Upload",
+            oversized.as_str(),
+            false,
+            "picture metadata exceeds 256 bytes",
+        ),
+    ] {
+        let mut malformed = fields.clone();
+        if !duplicate {
+            malformed.retain(|(key, _)| *key != name);
+        }
+        malformed.push((name, value));
+        let response = send(malformed, test_png(8, 8)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(response.text().await.unwrap().contains(expected));
+        assert_eq!(
+            a.store.picture(identity.unwrap()).await.unwrap(),
+            replacement
+        );
+        let after: (i64, i64) = db
+            .query_row(
+                "SELECT (SELECT count(*) FROM pictures),next_id FROM picture_sequence",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            db.query_row("SELECT name FROM pictures", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "Native Wire"
+        );
+    }
+    task.abort();
+}

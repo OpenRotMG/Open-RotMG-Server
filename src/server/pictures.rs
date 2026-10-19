@@ -29,7 +29,9 @@ pub(super) async fn save(
                     "dataType",
                     "tags",
                     "overwrite",
-                    "data"
+                    "data",
+                    "Filename",
+                    "Upload"
                 ]
                 .contains(&name.as_str()),
                 "unsupported picture field"
@@ -46,6 +48,11 @@ pub(super) async fn save(
                 ensure!(!form.contains_key(&name), "duplicate picture metadata");
                 let value = field.text().await?;
                 ensure!(value.len() <= 256, "picture metadata exceeds 256 bytes");
+                match name.as_str() {
+                    "Filename" => ensure!(value == "Foo.png", "invalid picture Filename"),
+                    "Upload" => ensure!(value == "Submit Query", "invalid picture Upload"),
+                    _ => {}
+                }
                 form.insert(name, value);
             }
         }
