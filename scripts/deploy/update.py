@@ -228,6 +228,9 @@ def rehearse(stage, work, config):
     path = work / 'shadow.json'
     path.write_text(json.dumps(cfg))
     with (work / 'shadow.log').open('w') as log:
+        # An unconfirmed child exit must retain its executable and diagnostics.
+        running = work / 'rehearsal-running'
+        running.touch()
         process = subprocess.Popen([str(stage / 'openrotmg'), '--config', str(path)],
                                    stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -237,6 +240,7 @@ def rehearse(stage, work, config):
             if process.poll() is None:
                 process.send_signal(signal.SIGTERM)
             process.wait(timeout=20)
+            running.unlink()
         require(process.returncode == 0, 'Rehearsal shutdown failed')
     after = rows(shadow / 'game.db')
     verify_migration(before, after)
@@ -252,8 +256,19 @@ def rehearse(stage, work, config):
 
 
 def deploy(stage, work, metadata, config):
-    run('runuser', '-u', 'openrotmg', '--', 'test', '-x', str(stage / 'openrotmg'))
-    rehearse(stage, work, config)
+    try:
+        run('runuser', '-u', 'openrotmg', '--', 'test', '-x', str(stage / 'openrotmg'))
+        rehearse(stage, work, config)
+    except Exception:
+        require(stage.parent == LIVE.parent and stage.name.startswith('server-stage-') and not stage.is_symlink(),
+                'Refusing cleanup outside the owned candidate directory')
+        reason = ('rehearsal exit unconfirmed' if (work / 'rehearsal-running').exists()
+                  else 'release files changed' if files(stage) != metadata['manifest'] else None)
+        if reason is None:
+            shutil.rmtree(stage)
+        print(json.dumps({'candidate_cleanup': 'removed' if reason is None else 'retained',
+                          'stage': str(stage), 'reason': reason, 'recovery_directory': str(work)}), flush=True)
+        raise
     install_backups(stage)
     require(files(stage) == metadata['manifest'], 'Rehearsal changed release files')
     require(main_revision() == metadata['revision'], 'Main advanced during rehearsal; no cutover performed')
@@ -293,19 +308,18 @@ def main(desired, raw):
     require(len(raw) <= LIMIT, 'Deployment archive exceeds 64 MiB')
     ROOT.mkdir(mode=0o700, exist_ok=True)
     require(shutil.disk_usage(ROOT).free >= 2 * 1024**3, 'Less than 2 GiB free; inspect retained recovery data before deploying')
-    work = ROOT / (desired + '-' + str(time.time_ns()))
-    work.mkdir(mode=0o700)
+    work = None
     try:
         with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as archive:
             members = archive.getmembers()
             require(sorted(m.name for m in members) == ['release.json', 'server.tar.gz']
                     and all(m.isfile() for m in members) and sum(m.size for m in members) <= LIMIT,
                     'Expected only release.json and server.tar.gz')
-            for member in members:
-                (work / member.name).write_bytes(archive.extractfile(member).read())
-        metadata = json.loads((work / 'release.json').read_text())
+            release = archive.extractfile('release.json').read()
+            package = archive.extractfile('server.tar.gz').read()
+        metadata = json.loads(release)
         require(metadata['format'] == 1 and metadata['revision'] == desired, 'Artifact source mismatch')
-        require(digest(work / 'server.tar.gz') == metadata['archive_sha256'], 'Artifact archive mismatch')
+        require(hashlib.sha256(package).hexdigest() == metadata['archive_sha256'], 'Artifact archive mismatch')
         config = json.loads(CONFIG.read_text())
         if (LIVE / 'REVISION').read_text().strip() == desired:
             require(files(LIVE) == metadata['manifest'], 'Already deployed server differs from this artifact')
@@ -315,6 +329,11 @@ def main(desired, raw):
             verify_backup(0)
             status('up_to_date', desired)
             return
+        work = ROOT / (desired + '-' + str(time.time_ns()))
+        work.mkdir(mode=0o700)
+        (work / 'release.json').write_bytes(release)
+        (work / 'server.tar.gz').write_bytes(package)
+        del release, package
         stage = LIVE.with_name('server-stage-' + str(time.time_ns()))
         unpack(work / 'server.tar.gz', stage, metadata)
         status('rehearsing', desired)
@@ -323,7 +342,7 @@ def main(desired, raw):
     except Exception as error:
         activated = (LIVE / 'REVISION').read_text().strip() == desired
         state = 'activated_unverified' if activated else 'failed'
-        status(state, desired, recovery_directory=str(work), error=str(error))
+        status(state, desired, recovery_directory=str(work) if work is not None else None, error=str(error))
         raise
 
 
