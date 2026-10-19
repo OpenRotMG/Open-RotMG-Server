@@ -540,7 +540,7 @@ impl World {
         for body in messages {
             for (peer, p) in &mut self.players {
                 if p.known.contains(&id)
-                    && (*peer != id || native_hits::expect_shoot_ack(p, vec![]))
+                    && (*peer != id || native_hits::expect_shoot_ack(p, vec![], &self.clock))
                 {
                     send(p, 13, body.clone());
                 }

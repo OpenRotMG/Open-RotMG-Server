@@ -114,6 +114,9 @@ mod native_hits;
 #[cfg(test)]
 mod native_hits_tests;
 mod npc_attacks;
+mod npc_queries;
+#[cfg(test)]
+mod npc_query_tests;
 #[cfg(test)]
 mod quest_completion_tests;
 #[cfg(test)]
@@ -455,6 +458,8 @@ pub struct World {
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: BTreeMap<i32, Entity>,
     actor_ids: BTreeSet<i32>,
+    // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
+    npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
     quest_ids: BTreeSet<i32>,
     pub players: BTreeMap<i32, Player>,
@@ -475,6 +480,7 @@ pub struct World {
     last_npc_step: u64,
     attack_epoch: Instant,
     clock: crate::clock::Clock,
+    new_tick_at: Instant,
     pub(crate) prepared_seed: Option<u64>,
     pub tick: u64,
     ids: Arc<AtomicI32>,
@@ -570,7 +576,7 @@ impl Directory {
             "world_players": world.players.len(), "world_entities": world.entities.len(), "world_projectiles": world.bullets.len(),
             "native_acknowledgements": {"weapon_tick_records":p.weapon_ticks.len(),"goto":p.goto_acks.len(),"shoot":p.shoot_acks.len(),
                 "oldest_goto_ms":p.goto_acks.front().map(|(_,at)|at.elapsed().as_millis()),
-                "oldest_shoot_ms":p.shoot_acks.front().map(|(at,_)|at.elapsed().as_millis())},
+                "oldest_shoot_pause_excluding_ms":p.shoot_acks.front().map(|(at,_)|world.clock.now().duration_since(*at).as_millis())},
             "tick_interval_ms": 50, "recent_ticks": ticks, "tick": self.tick,
             "total_worlds": self.worlds.len(), "total_players": self.worlds.values().map(|w| w.players.len()).sum::<usize>(),
             "total_entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
@@ -818,6 +824,7 @@ impl Directory {
         world.realm_layout = layout.map(|index| self.realms[index].name().to_owned());
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
+        world.new_tick_at = self.clock.now();
         if let Some(seed) = self.prepared_seed {
             let seed = seed ^ self.next_world as u64;
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -1552,6 +1559,7 @@ impl World {
             realm_layout: None,
             entities,
             non_population_ids: actor_ids.clone(),
+            npc_global_ids: actor_ids.clone(),
             actor_ids,
             quest_ids,
             players: BTreeMap::new(),
@@ -1573,6 +1581,7 @@ impl World {
             performance: std::cell::RefCell::default(),
             attack_epoch: Instant::now(),
             clock: crate::clock::Clock::default(),
+            new_tick_at: Instant::now(),
             prepared_seed: None,
             tick: 0,
             ids,
@@ -1800,6 +1809,7 @@ impl World {
         );
         self.cells[cell].insert(id);
         self.actor_ids.insert(id);
+        self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
         if definition.quest {
             self.quest_ids.insert(id);
@@ -1834,6 +1844,7 @@ impl World {
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
         self.actor_ids.remove(&id);
+        self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
         self.quest_ids.remove(&id);
         self.ability_state.objects.remove(&id);
@@ -4106,32 +4117,7 @@ impl World {
             .map(|p| p.pos)
             .chain(self.decoy_positions())
             .collect();
-        let ids: Vec<_> = self
-            .actors()
-            .filter(|e| {
-                // Unstarted ordinary AI has no running clocks to suspend; keep distant births dormant.
-                if e.population_slot.is_some()
-                    && e.activated.is_none()
-                    && e.stage.is_none()
-                    && e.expires.is_none()
-                    && e.next_shot <= self.now
-                    && e.next_aux == 0
-                    && e.reaction_until == 0
-                    && e.blocked_since.is_none()
-                    && e.charge.is_none()
-                    && e.script.is_none()
-                    && audience.iter().all(|p| e.pos.distance(*p) >= 20.)
-                {
-                    return false;
-                }
-                let object = &self.content.objects[&e.kind];
-                // Breakable scenery takes damage but has no movement/attack state machine.
-                object.class != "Wall"
-                    && !matches!(e.kind, 0xd5f | 0xd60)
-                    && (object.enemy || matches!(e.kind, 0x173 | 0xd7d))
-            })
-            .map(|e| e.id)
-            .collect();
+        let ids = self.npc_candidates(&audience);
         for id in ids {
             let Some(entity) = self.entities.get(&id) else {
                 continue;
@@ -5008,6 +4994,13 @@ impl World {
         });
         self.bullets = bullets;
         if self.tick.is_multiple_of(2) {
+            // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
+            // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
+            let now = self.clock.now();
+            let tick_ms = i32::try_from(now.duration_since(self.new_tick_at).as_millis())
+                .expect("NEW_TICK interval exceeds i32 milliseconds")
+                .max(100);
+            self.new_tick_at = now;
             for id in ids {
                 if let Err(e) = self.updates(id, false) {
                     tracing::error!(player=id,error=%e,"visibility update failed");
@@ -5029,7 +5022,7 @@ impl World {
                     .copied()
                     .collect();
                 let mut o = Writer::new();
-                o.i32(p.tick).i32(100).i16(dynamic.len() as i16);
+                o.i32(p.tick).i32(tick_ms).i16(dynamic.len() as i16);
                 for entity in dynamic {
                     o.0.extend(self.stats(entity, id).expect("visible entity must exist"));
                 }
