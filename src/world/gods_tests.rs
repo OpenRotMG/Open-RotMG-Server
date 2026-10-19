@@ -22,6 +22,79 @@ fn player(w: &mut World, pos: Pos) -> i32 {
 }
 
 #[test]
+fn god_pursuit_uses_each_legacy_acquisition_radius() {
+    let mut w = tests::arena(1);
+    let home = Pos { x: 12.5, y: 100.5 };
+    for (kind, sight, speed) in [
+        (0x659, 7., 4.),
+        (0x657, 7., 6.),
+        (0x651, 9., 6.),
+        (0x654, 7., 6.),
+    ] {
+        let id = w.spawn_entity(kind, home, vec![]).unwrap();
+        for distance in [6., sight - 0.01] {
+            let target = Pos {
+                x: home.x,
+                y: home.y + distance,
+            };
+            assert_eq!(
+                w.god_movement(id, target, 0).unwrap(),
+                (encounter::Motion::Chase { sight, stop: 4. }, speed),
+                "{kind:#x} must pursue at {distance} tiles"
+            );
+        }
+        for target in [
+            None,
+            Some(Pos {
+                x: home.x,
+                y: home.y + sight + 0.01,
+            }),
+        ] {
+            assert_eq!(
+                w.god_movement(id, target, 0).unwrap(),
+                (encounter::Motion::Wander, 4.)
+            );
+        }
+        w.remove_entity(id);
+    }
+}
+
+#[test]
+fn reported_gods_pursue_visible_players_but_not_cloaked_players() {
+    for kind in [0x659, 0x657, 0x651, 0x654] {
+        let mut w = tests::arena(1);
+        let home = Pos { x: 12.5, y: 100.5 };
+        let id = w.spawn_entity(kind, home, vec![]).unwrap();
+        let p = player(
+            &mut w,
+            Pos {
+                x: home.x,
+                y: home.y + 6.,
+            },
+        );
+        for _ in 0..60 {
+            w.now += 50;
+            w.npc_step();
+        }
+        let e = &w.entities[&id];
+        assert!(
+            e.pos.y > home.y + 1.9,
+            "{kind:#x} did not approach the player: {:?}",
+            e.pos
+        );
+        assert!((e.pos.x - home.x).abs() < 0.001);
+        assert!(e.pos.distance(w.players[&p].pos) <= 4.01);
+        assert_eq!((e.home.x, e.home.y), (home.x, home.y));
+        assert_eq!(e.hp, w.content.objects[&kind].hp);
+        assert_eq!(w.players[&p].character.kills, 0);
+        w.apply_condition(p, condition::INVISIBLE, 1000).unwrap();
+        w.now += 50;
+        w.npc_step();
+        assert_eq!(w.entities[&id].motion, Some(encounter::Motion::Wander));
+    }
+}
+
+#[test]
 fn area_scaled_godlands_count_real_children_and_bounded_construct_trios() {
     let mut d = directory();
     let w = d.worlds.get_mut(&-3).unwrap();
