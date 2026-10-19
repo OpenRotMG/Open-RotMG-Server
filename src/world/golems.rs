@@ -71,6 +71,7 @@ impl World {
             .collect();
         for id in satellites {
             self.entities.get_mut(&id).unwrap().expires = Some(self.now + 30000);
+            self.npc_global_ids.insert(id);
         }
         tracing::debug!(
             camp,

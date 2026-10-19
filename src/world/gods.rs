@@ -115,13 +115,13 @@ impl World {
             let dying = hp < 400;
             if dying && expiry.is_none() {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.expires = Some(self.now + 3000);
+                e.expires = Some(self.now + 1000);
                 e.next_shot = self.now;
                 let mut out = Writer::new();
                 out.u8(15)
                     .i32(id)
                     .f32(0.3)
-                    .f32(10.)
+                    .f32(3.)
                     .f32(0.)
                     .f32(0.)
                     .u32(0xffff0000);
@@ -134,7 +134,7 @@ impl World {
                 }
                 tracing::debug!(
                     entity = id,
-                    deadline = self.now + 3000,
+                    deadline = self.now + 1000,
                     "Djinn self-destruction telegraphed"
                 );
             }

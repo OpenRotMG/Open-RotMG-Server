@@ -172,7 +172,7 @@ fn grates_have_bounded_selected_children_and_existing_portal_sources_are_unchang
     for (enemy, portal, chance) in [
         (0x610, 0x717, 0.01),
         (0x654, 0x718, 0.17),
-        (0x653, 0x70c, 0.11),
+        (0x653, 0x70c, 0.25),
         (0x659, 0x71a, 0.17),
     ] {
         assert_eq!(crate::dungeon::portal_drop(enemy), Some((portal, chance)));

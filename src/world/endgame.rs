@@ -13,6 +13,16 @@ struct ForcedRoute {
     destination: i32,
     frozen: bool,
 }
+impl RealmDirectory {
+    pub(super) fn references_world(&self, id: i32) -> bool {
+        self.active == id
+            || self.cycles.contains_key(&id)
+            || self
+                .forced
+                .values()
+                .any(|r| r.origin == id || r.destination == id)
+    }
+}
 impl Default for RealmDirectory {
     fn default() -> Self {
         Self {
@@ -225,12 +235,14 @@ impl Directory {
                     .map(|e| (*origin, e.id, e.pos))
             })
             .collect();
+        let origins: Vec<_> = markers.iter().map(|(origin, _, _)| *origin).collect();
         for (origin, marker, pos) in markers {
             let result = (|| -> Result<()> {
                 ensure!(
                     self.worlds[&origin].walkable(pos),
                     "authored Chamber entrance position blocked"
                 );
+                self.reserve_worlds(1, &origins)?;
                 let destination = self.instance(crate::endgame::CHAMBER, None)?;
                 let portal =
                     match self
@@ -380,10 +392,7 @@ impl Directory {
         }
     }
     fn replace_realm(&mut self, origin: i32) -> Result<()> {
-        ensure!(
-            self.worlds.len() + 2 <= 12,
-            "no room for collective Castle and replacement Realm"
-        );
+        self.reserve_worlds(2, &[origin])?;
         let castle = self.make(CASTLE, "Oryx's Castle", false, None)?;
         let realm = self.make("realm-shore", "Realm", false, None)?;
         let next_cycle = RealmCycle::new(realm.hero_identities())?;
@@ -703,6 +712,34 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capacity_reclamation_preserves_realm_cycles_and_forced_routes() {
+        let mut d = super::super::tests::directory();
+        super::super::tests::fill_world_capacity(&mut d);
+        let id = *d.idle.keys().next().unwrap();
+        d.grants.retain(|_, g| g.destination != id);
+        d.endgame
+            .cycles
+            .insert(id, RealmCycle::new(BTreeSet::from([1])).unwrap());
+        assert!(d.instance("vault", Some(2)).is_err());
+        d.endgame.cycles.remove(&id);
+        d.endgame.active = id;
+        assert!(d.instance("vault", Some(2)).is_err());
+        d.endgame.active = -3;
+        d.endgame.forced.insert(
+            1,
+            ForcedRoute {
+                origin: -3,
+                destination: id,
+                frozen: false,
+            },
+        );
+        assert!(d.instance("vault", Some(2)).is_err());
+        d.endgame.forced.clear();
+        d.instance("vault", Some(2)).unwrap();
+        assert!(!d.worlds.contains_key(&id));
+        assert_eq!(d.worlds.len(), 12);
+    }
     fn recipient(d: &mut Directory, account: i32) -> (i32, mpsc::Receiver<Packet>) {
         let w = d.worlds.get_mut(&-3).unwrap();
         let mut ch = super::super::tests::ch(w);
@@ -942,9 +979,7 @@ mod tests {
         assert!(!w.entities.contains_key(&opened));
         assert_eq!(w.players[&a].character.items[4], i32::from(INCANTATION));
         assert!(w.players[&a].persistence_failure.is_some());
-        while d.worlds.len() < 12 {
-            d.instance("pirate-cave", None).unwrap();
-        }
+        super::super::tests::fill_world_capacity(&mut d);
         let plan = incantation(d.worlds.get_mut(&-3).unwrap(), b).unwrap();
         let opened = plan.unlock.unwrap().opened;
         assert!(d.stage_unlock(plan).is_err());
