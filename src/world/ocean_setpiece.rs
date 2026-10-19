@@ -120,7 +120,7 @@ impl World {
                 )
                 .with_context(|| format!("Hermit spawner placement failed at offset {x},{y}"))?;
             let e = self.entities.get_mut(&id).unwrap();
-            e.parent = Some(root);
+            e.parent.set(Some(root), id, &mut self.timed_ids);
             e.quest = Some(root);
             e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
         }

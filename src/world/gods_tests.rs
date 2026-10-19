@@ -22,6 +22,79 @@ fn player(w: &mut World, pos: Pos) -> i32 {
 }
 
 #[test]
+fn god_pursuit_uses_each_legacy_acquisition_radius() {
+    let mut w = tests::arena(1);
+    let home = Pos { x: 12.5, y: 100.5 };
+    for (kind, sight, speed) in [
+        (0x659, 7., 4.),
+        (0x657, 7., 6.),
+        (0x651, 9., 6.),
+        (0x654, 7., 6.),
+    ] {
+        let id = w.spawn_entity(kind, home, vec![]).unwrap();
+        for distance in [6., sight - 0.01] {
+            let target = Pos {
+                x: home.x,
+                y: home.y + distance,
+            };
+            assert_eq!(
+                w.god_movement(id, target, 0).unwrap(),
+                (encounter::Motion::Chase { sight, stop: 4. }, speed),
+                "{kind:#x} must pursue at {distance} tiles"
+            );
+        }
+        for target in [
+            None,
+            Some(Pos {
+                x: home.x,
+                y: home.y + sight + 0.01,
+            }),
+        ] {
+            assert_eq!(
+                w.god_movement(id, target, 0).unwrap(),
+                (encounter::Motion::Wander, 4.)
+            );
+        }
+        w.remove_entity(id);
+    }
+}
+
+#[test]
+fn reported_gods_pursue_visible_players_but_not_cloaked_players() {
+    for kind in [0x659, 0x657, 0x651, 0x654] {
+        let mut w = tests::arena(1);
+        let home = Pos { x: 12.5, y: 100.5 };
+        let id = w.spawn_entity(kind, home, vec![]).unwrap();
+        let p = player(
+            &mut w,
+            Pos {
+                x: home.x,
+                y: home.y + 6.,
+            },
+        );
+        for _ in 0..60 {
+            w.now += 50;
+            w.npc_step();
+        }
+        let e = &w.entities[&id];
+        assert!(
+            e.pos.y > home.y + 1.9,
+            "{kind:#x} did not approach the player: {:?}",
+            e.pos
+        );
+        assert!((e.pos.x - home.x).abs() < 0.001);
+        assert!(e.pos.distance(w.players[&p].pos) <= 4.01);
+        assert_eq!((e.home.x, e.home.y), (home.x, home.y));
+        assert_eq!(e.hp, w.content.objects[&kind].hp);
+        assert_eq!(w.players[&p].character.kills, 0);
+        w.apply_condition(p, condition::INVISIBLE, 1000).unwrap();
+        w.now += 50;
+        w.npc_step();
+        assert_eq!(w.entities[&id].motion, Some(encounter::Motion::Wander));
+    }
+}
+
+#[test]
 fn area_scaled_godlands_count_real_children_and_bounded_construct_trios() {
     let mut d = directory();
     let w = d.worlds.get_mut(&-3).unwrap();
@@ -330,6 +403,35 @@ fn leviathan_magic_eye_retains_cloaked_targets_without_giving_other_gods_their_p
     w.npc_step();
     assert!(w.bullets.iter().any(|b| b.source_kind == 0x6d8));
     assert!(w.bullets.iter().all(|b| b.source_kind == 0x6d8));
+}
+
+#[test]
+fn white_demon_defeats_keep_rewards_without_opening_a_dungeon() {
+    use rand::SeedableRng;
+
+    let mut w = tests::arena(0);
+    w.name = "Realm".into();
+    let pos = Pos { x: 10.5, y: 10.5 };
+    let p = player(&mut w, pos);
+    assert_eq!(w.content.objects[&0x651].name, "White Demon");
+    for seed in 0..64 {
+        w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let demon = w.spawn_entity(0x651, pos, vec![]).unwrap();
+        let hp = w.entities[&demon].hp;
+        let xp = w.players[&p].experience_queued;
+        assert_eq!(
+            w.damage_enemy(p, demon, hp, true, &[], Some(0)).unwrap(),
+            hp
+        );
+        assert!(!w.entities.contains_key(&demon));
+        assert_eq!(w.players[&p].character.kills, seed + 1);
+        assert!(w.players[&p].experience_queued > xp);
+        assert!(
+            w.portal_requests.is_empty(),
+            "unexpected dungeon for seed {seed}"
+        );
+    }
+    assert_eq!(crate::dungeon::portal_drop(0x651), None);
 }
 
 #[test]
