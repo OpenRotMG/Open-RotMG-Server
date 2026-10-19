@@ -194,7 +194,11 @@ impl World {
             .entity
             .context("landed fauna lacks entity")?;
         let e = self.entities.get_mut(&id).unwrap();
-        e.expires = birth.lifetime.map(|ms| self.now + ms);
+        e.expires.set(
+            birth.lifetime.map(|ms| self.now + ms),
+            id,
+            &mut self.timed_ids,
+        );
         e.activated = Some(self.now);
         if matches!(birth.kind, 0x958 | 0x959 | 0x960 | 0x961) {
             e.condition |= crate::condition::bit(crate::condition::INVULNERABLE);

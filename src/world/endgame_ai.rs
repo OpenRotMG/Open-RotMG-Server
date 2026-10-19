@@ -71,7 +71,8 @@ impl World {
             .values_mut()
             .filter(|e| e.parent == Some(parent) && e.kind == wave.kind && e.expires.is_none())
         {
-            e.expires = Some(self.now + wave.lifetime);
+            e.expires
+                .set(Some(self.now + wave.lifetime), e.id, &mut self.timed_ids);
             e.activated.get_or_insert(self.now);
             if matches!(e.kind, 0x174a | 0x174b | 0x944) {
                 let rate = match e.kind {
@@ -264,7 +265,11 @@ impl World {
                     3.,
                     self.content.objects[&kind].projectiles[&0].min,
                 )?;
-                self.entities.get_mut(&id).unwrap().expires = Some(self.now + 50);
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
             }
             0xdf1 if target.is_some_and(|p| pos.distance(p) < 2.) => {
                 self.area_damage(kind, pos, 2., 40)?

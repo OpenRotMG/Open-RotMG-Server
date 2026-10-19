@@ -143,7 +143,8 @@ fn every_existing_clock_or_script_keeps_distant_population_eligible() {
     let mutations: [fn(&mut Entity); 8] = [
         |e| e.activated = Some(0),
         |e| e.stage = Some(0),
-        |e| e.expires = Some(200),
+        // Eligibility reads the field directly; the expiry index is irrelevant here.
+        |e| e.expires.set(Some(200), e.id, &mut BTreeSet::new()),
         |e| e.next_shot = 101,
         |e| e.next_aux = 1,
         |e| e.reaction_until = 1,

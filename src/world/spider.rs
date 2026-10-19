@@ -74,7 +74,7 @@ impl World {
                 for (kind, pos) in positions {
                     let child = self.spawn_entity(kind, pos, vec![])?;
                     let e = self.entities.get_mut(&child).unwrap();
-                    e.parent = Some(id);
+                    e.parent.set(Some(id), child, &mut self.timed_ids);
                     e.activated = Some(self.now);
                 }
                 self.entities.get_mut(&id).unwrap().stage = Some(1);

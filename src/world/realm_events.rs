@@ -95,7 +95,7 @@ impl World {
             e.orbit = orbit;
             e.phase = phase;
             e.home = home;
-            e.expires = None;
+            e.expires.set(None, *child, &mut self.timed_ids);
             e.activated = None;
             if kind == 0xd5a {
                 e.next_aux = self.now + 1000;
@@ -180,7 +180,7 @@ impl World {
                 };
                 for eye in self.event_birth(id, 0xd5d, count, 1.)? {
                     let e = self.entities.get_mut(&eye).unwrap();
-                    e.parent = Some(id);
+                    e.parent.set(Some(id), eye, &mut self.timed_ids);
                     e.home = e.pos;
                     e.stage = Some(0);
                 }
@@ -250,9 +250,12 @@ impl World {
     }
     pub(super) fn event_step(&mut self) {
         let roots: Vec<_> = self
-            .non_population_actors()
-            .filter(|e| e.kind == 0xd5f && e.quest == Some(e.id))
-            .map(|e| e.id)
+            .pentaract_ids
+            .iter()
+            .filter(|id| {
+                self.non_population_ids.contains(id) && self.entities[id].quest == Some(**id)
+            })
+            .copied()
             .collect();
         for root in roots {
             if let Err(error) = self.pentaract_step(root) {
