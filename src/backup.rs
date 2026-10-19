@@ -79,7 +79,12 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 "Backup picture input exceeds 32 MiB"
             );
             let pictures: Vec<Picture> = serde_json::from_slice(&input)?;
+            store::pictures::validate_capacity(0, pictures.len())?;
+            let mut owners = std::collections::HashMap::new();
             for picture in &pictures {
+                let owned = owners.entry(picture.account).or_insert(0);
+                *owned += 1;
+                store::pictures::validate_capacity(*owned, pictures.len())?;
                 ensure!(
                     picture.id > 0
                         && picture.account > 0

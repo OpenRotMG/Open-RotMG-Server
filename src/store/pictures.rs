@@ -2,6 +2,21 @@ use super::*;
 use std::io::Read;
 
 pub const MAX_PNG: usize = 16 * 1024;
+pub const MAX_PER_ACCOUNT: usize = 128;
+pub const MAX_TOTAL: usize = 1024;
+
+pub fn validate_capacity(max_account: usize, total: usize) -> Result<()> {
+    ensure!(
+        max_account <= MAX_PER_ACCOUNT,
+        "picture account capacity exceeded: {max_account} rows, limit {MAX_PER_ACCOUNT}; delete an owned picture before saving a new name"
+    );
+    ensure!(
+        total <= MAX_TOTAL,
+        "picture global capacity exceeded: {total} rows, limit {MAX_TOTAL}; an owner must delete a picture before a new name can be saved"
+    );
+    Ok(())
+}
+
 pub const TABLE: &str = "CREATE TABLE pictures(id INTEGER PRIMARY KEY CHECK(id BETWEEN 1 AND 2147483647),account INTEGER NOT NULL REFERENCES accounts(id),name TEXT NOT NULL,data_type INTEGER NOT NULL CHECK(data_type BETWEEN 1 AND 7),tags TEXT NOT NULL,png BLOB NOT NULL CHECK(typeof(png)='blob' AND length(png)<=16384),UNIQUE(account,name))";
 pub const SEQUENCE: &str = "CREATE TABLE picture_sequence(id INTEGER PRIMARY KEY CHECK(id=1),next_id INTEGER NOT NULL CHECK(typeof(next_id)='integer' AND next_id BETWEEN 1 AND 2147483648))";
 
@@ -132,6 +147,12 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
         references == vec![("accounts".into(), "account".into(), "id".into())],
         "invalid picture account foreign key"
     );
+    let (max_account, total) = db.query_row(
+        "SELECT coalesce(max(n),0),coalesce(sum(n),0) FROM (SELECT count(*) n FROM pictures GROUP BY account)",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    validate_capacity(max_account, total)?;
     let oversized: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pictures WHERE typeof(png)<>'blob' OR length(png)>16384 OR length(name)>32 OR length(tags)>256)", [], |r| r.get(0))?;
     ensure!(
         !oversized,
@@ -194,13 +215,18 @@ impl Store {
         metadata(&name, data_type, &tags)?;
         validate_png(data_type, &png)?;
         self.call(move |db| {
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let existing: Option<i32> = tx.query_row("SELECT id FROM pictures WHERE account=?1 AND name=?2", params![account, name], |r| r.get(0)).optional()?;
             let id = if let Some(id) = existing {
                 ensure!(overwrite, "picture name already exists; overwrite permission required");
                 tx.execute("UPDATE pictures SET data_type=?2,tags=?3,png=?4 WHERE id=?1 AND account=?5", params![id,data_type,tags,png,account])?;
                 id
             } else {
+                let (owned, total): (usize, usize) = tx.query_row(
+                    "SELECT (SELECT count(*) FROM pictures WHERE account=?1),count(*) FROM pictures",
+                    [account], |r| Ok((r.get(0)?, r.get(1)?)),
+                )?;
+                validate_capacity(owned + 1, total + 1)?;
                 let next: i64 = tx.query_row("SELECT next_id FROM picture_sequence WHERE id=1", [], |r| r.get(0))?;
                 let id = i32::try_from(next).context("picture IDs exhausted")?;
                 ensure!(id > 0, "invalid picture sequence");

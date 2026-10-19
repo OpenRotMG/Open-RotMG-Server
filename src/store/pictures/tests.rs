@@ -402,3 +402,280 @@ fn valid_crc_does_not_hide_apng_bad_zlib_filter_or_trailing_stream() {
         assert!(validate_png(2, &invalid).is_err());
     }
 }
+
+async fn capacity_fixture(
+    count: usize,
+    accounts: usize,
+) -> (std::path::PathBuf, Content, Store, Vec<i32>) {
+    let (path, content, store) = fixture();
+    let mut owners = Vec::new();
+    for i in 0..accounts {
+        owners.push(store.list(format!("capacity-{i}")).await.unwrap().id);
+    }
+    let saved = owners.clone();
+    store
+        .call(move |db| {
+            let tx = db.transaction()?;
+            for i in 0..count {
+                tx.execute(
+                    "INSERT INTO pictures VALUES(?1,?2,?3,2,'capacity',?4)",
+                    params![
+                        i + 1,
+                        saved[(i / MAX_PER_ACCOUNT) % saved.len()],
+                        format!("Art {i}"),
+                        test_png(8, 8)
+                    ],
+                )?;
+            }
+            tx.execute("UPDATE picture_sequence SET next_id=?1", [count + 1])?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    (path, content, store, owners)
+}
+
+type PictureState = (Vec<(i32, i32, String, i32, String, Vec<u8>)>, i64, i64);
+
+fn picture_state(path: &Path) -> PictureState {
+    let db = Connection::open(path).unwrap();
+    let mut q = db
+        .prepare("SELECT id,account,name,data_type,tags,png FROM pictures ORDER BY id")
+        .unwrap();
+    let rows = q
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    let next = db
+        .query_row("SELECT next_id FROM picture_sequence", [], |r| r.get(0))
+        .unwrap();
+    let credits = db
+        .query_row("SELECT sum(credits) FROM accounts", [], |r| r.get(0))
+        .unwrap();
+    (rows, next, credits)
+}
+
+#[tokio::test]
+async fn capacity_exact_bounds_atomic_rejection_overwrite_delete_and_restart() {
+    let (path, content, store, owners) = capacity_fixture(MAX_TOTAL - 1, 9).await;
+    let before = picture_state(&path);
+    let error = store
+        .save_picture(
+            owners[0],
+            "Art 128".into(),
+            2,
+            "".into(),
+            test_png(8, 8),
+            true,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("account capacity exceeded: 129 rows, limit 128")
+    );
+    assert_eq!(picture_state(&path), before);
+    let mut tasks = Vec::new();
+    for i in 0..8 {
+        let store = store.clone();
+        let owner = owners[8];
+        tasks.push(tokio::spawn(async move {
+            store
+                .save_picture(
+                    owner,
+                    format!("Race {i}"),
+                    2,
+                    "".into(),
+                    test_png(8, 8),
+                    true,
+                )
+                .await
+        }));
+    }
+    let mut created = Vec::new();
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(id) => created.push(id),
+            Err(e) => assert!(
+                e.to_string()
+                    .contains("global capacity exceeded: 1025 rows, limit 1024")
+            ),
+        }
+    }
+    assert_eq!(created, vec![1024]);
+    assert_eq!(picture_state(&path).1, 1025);
+    let before = picture_state(&path);
+    assert!(
+        store
+            .save_picture(
+                owners[8],
+                "Art 0".into(),
+                2,
+                "".into(),
+                test_png(8, 8),
+                true
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(picture_state(&path), before);
+    assert_eq!(
+        store
+            .save_picture(
+                owners[0],
+                "Art 0".into(),
+                3,
+                "changed".into(),
+                test_png(16, 8),
+                true
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        store
+            .save_picture(
+                owners[0],
+                "Art 0".into(),
+                2,
+                "".into(),
+                test_png(8, 8),
+                false
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("overwrite permission")
+    );
+    store.delete_picture(owners[8], 1024).await.unwrap();
+    assert_eq!(
+        store
+            .save_picture(
+                owners[8],
+                "Reclaimed".into(),
+                2,
+                "".into(),
+                test_png(8, 8),
+                true
+            )
+            .await
+            .unwrap(),
+        1025
+    );
+    drop(store);
+    let store = Store::open(&path, &content).unwrap();
+    assert_eq!(store.picture(1).await.unwrap(), test_png(16, 8));
+    let before = picture_state(&path);
+    assert!(
+        store
+            .save_picture(
+                owners[8],
+                "Blocked after restart".into(),
+                2,
+                "".into(),
+                test_png(8, 8),
+                true
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(picture_state(&path), before);
+    store.delete_picture(owners[0], 1).await.unwrap();
+    assert_eq!(
+        store
+            .save_picture(
+                owners[0],
+                "New after restart".into(),
+                2,
+                "".into(),
+                test_png(8, 8),
+                true
+            )
+            .await
+            .unwrap(),
+        1026
+    );
+    let state = picture_state(&path);
+    assert_eq!((state.0.len(), state.1, state.2), (1024, 1027, before.2));
+}
+
+#[tokio::test]
+async fn capacity_concurrent_last_account_slot_cannot_be_bypassed_by_other_owner_names() {
+    let (path, content, store, owners) = capacity_fixture(MAX_PER_ACCOUNT - 1, 2).await;
+    let mut tasks = Vec::new();
+    for i in 0..16 {
+        let store = store.clone();
+        let owner = owners[0];
+        tasks.push(tokio::spawn(async move {
+            store
+                .save_picture(
+                    owner,
+                    format!("Race {i}"),
+                    2,
+                    "".into(),
+                    test_png(8, 8),
+                    true,
+                )
+                .await
+        }));
+    }
+    let mut created = Vec::new();
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(id) => created.push(id),
+            Err(e) => assert!(e.to_string().contains("account capacity exceeded")),
+        }
+    }
+    assert_eq!(created, vec![128]);
+    assert_eq!(picture_state(&path).1, 129);
+    assert_eq!(
+        store
+            .save_picture(
+                owners[1],
+                "Art 0".into(),
+                3,
+                "other".into(),
+                test_png(16, 8),
+                true
+            )
+            .await
+            .unwrap(),
+        129
+    );
+    assert_eq!(store.picture(1).await.unwrap(), test_png(8, 8));
+    drop(store);
+    Store::open(&path, &content).unwrap();
+}
+
+#[tokio::test]
+async fn capacity_oversized_current_state_is_rejected_without_truncation() {
+    for (count, accounts, message) in [
+        (129, 1, "account capacity exceeded"),
+        (1025, 9, "global capacity exceeded"),
+    ] {
+        let (path, content, store, _) = capacity_fixture(count, accounts).await;
+        drop(store);
+        let before = picture_state(&path);
+        assert!(
+            Store::open(&path, &content)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains(message)
+        );
+        assert_eq!(picture_state(&path), before);
+    }
+}
