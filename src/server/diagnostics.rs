@@ -401,7 +401,7 @@ fn public_diagnostics(report: &Value) -> Value {
         "native_acknowledgements":{
             "weapon_tick_records":report["context"]["native_acknowledgements"]["weapon_tick_records"],"goto":report["context"]["native_acknowledgements"]["goto"],
             "shoot":report["context"]["native_acknowledgements"]["shoot"],"oldest_goto_ms":report["context"]["native_acknowledgements"]["oldest_goto_ms"],
-            "oldest_shoot_ms":report["context"]["native_acknowledgements"]["oldest_shoot_ms"],"last_update_ack_received_age_ms":connection["last_update_ack_received_age_ms"]},
+            "oldest_shoot_pause_excluding_ms":report["context"]["native_acknowledgements"]["oldest_shoot_pause_excluding_ms"],"last_update_ack_received_age_ms":connection["last_update_ack_received_age_ms"]},
 
         "connection": {"connection_id":connection["connection_id"].as_u64(),"process_id":connection["process_id"].as_u64(),"world_id":connection["world_id"].as_i64(),
             "slow_commands":connection["slow_commands"].as_array().map(|a|a.iter().rev().take(8).rev().map(command_observation).collect::<Vec<_>>()),
@@ -732,11 +732,11 @@ mod tests {
             "connection": {"user_agent": "PRIVATE_UA Chrome/123 Linux", "rtt_samples": [{"age_ms": 1000, "rtt_ms": 75}],
                 "browser_samples": [{"age_ms": 1000, "sample": {"build": r#"{"website":"PRIVATE_BUILD"}"#, "renderer": "PRIVATE_GPU", "hidden_during_interval": false, "frames": 300, "elapsed_ms": 5000, "max_frame_gap_ms": 40}}]}});
         report["context"]["native_acknowledgements"] =
-            json!({"shoot":3,"oldest_shoot_ms":5213,"PRIVATE_ACK":"PRIVATE_VALUE"});
+            json!({"shoot":3,"oldest_shoot_pause_excluding_ms":5213,"PRIVATE_ACK":"PRIVATE_VALUE"});
         let attachment = public_diagnostics(&report);
         assert_eq!(attachment["native_acknowledgements"]["shoot"], 3);
         assert_eq!(
-            attachment["native_acknowledgements"]["oldest_shoot_ms"],
+            attachment["native_acknowledgements"]["oldest_shoot_pause_excluding_ms"],
             5213
         );
         assert_eq!(attachment["tick_ms"]["samples"], 2400);
