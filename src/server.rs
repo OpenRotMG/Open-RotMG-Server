@@ -4,6 +4,10 @@ mod character_slot_tests;
 mod client_contract_tests;
 mod input;
 #[cfg(test)]
+mod lifecycle_finalize_tests;
+#[cfg(test)]
+mod lifecycle_native_tests;
+#[cfg(test)]
 mod name_choice_boundaries_tests;
 #[cfg(test)]
 mod name_choice_tests;
@@ -37,7 +41,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use input::Incoming;
 use serde::Deserialize;
 use std::{
@@ -46,45 +50,9 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-#[derive(Clone)]
-pub struct SessionControl {
-    cancel: tokio::sync::watch::Sender<bool>,
-    done: tokio::sync::watch::Receiver<Option<std::result::Result<(), String>>>,
-}
-pub struct Owner {
-    registry: Arc<Mutex<BTreeMap<i32, Option<SessionControl>>>>,
-    id: i32,
-    registered: bool,
-    cancel: Option<tokio::sync::watch::Receiver<bool>>,
-    done: Option<tokio::sync::watch::Sender<Option<std::result::Result<(), String>>>>,
-    acknowledged: bool,
-}
-impl Owner {
-    fn release(mut self) {
-        self.acknowledged = true;
-        let done = self.done.clone();
-        drop(self);
-        if let Some(done) = done {
-            done.send_replace(Some(Ok(())));
-        }
-    }
-    fn failed(&self, error: String) {
-        if let Some(done) = &self.done {
-            done.send_replace(Some(Err(error)));
-        }
-    }
-}
-impl Drop for Owner {
-    fn drop(&mut self) {
-        self.registry
-            .lock()
-            .expect("ownership registry poisoned")
-            .remove(&self.id);
-        if !self.acknowledged {
-            self.failed("Session ended without a save acknowledgement".into());
-        }
-    }
-}
+pub(crate) mod lifecycle;
+pub use lifecycle::Owner;
+use lifecycle::{CloseReason, Stage};
 impl App {
     fn server_usage(&self) -> Result<f64> {
         ensure!(
@@ -112,71 +80,9 @@ impl App {
         );
         Ok(usage)
     }
-    pub(crate) fn claim(&self, id: i32) -> Result<Owner> {
-        let mut owners = self.owners.lock().expect("ownership registry poisoned");
-        ensure!(owners.len() < self.max_players, "development world full");
-        ensure!(
-            !owners.contains_key(&id),
-            "account already has an active session"
-        );
-        owners.insert(id, None);
-        Ok(Owner {
-            registry: self.owners.clone(),
-            id,
-            registered: false,
-            cancel: None,
-            done: None,
-            acknowledged: false,
-        })
-    }
-    fn claim_session(&self, id: i32) -> Result<Owner> {
-        let mut owner = self.claim(id)?;
-        let (cancel, receiver) = tokio::sync::watch::channel(false);
-        let (done, completion) = tokio::sync::watch::channel(None);
-        self.owners
-            .lock()
-            .expect("ownership registry poisoned")
-            .insert(
-                id,
-                Some(SessionControl {
-                    cancel,
-                    done: completion,
-                }),
-            );
-        owner.cancel = Some(receiver);
-        owner.done = Some(done);
-        Ok(owner)
-    }
-    async fn kick(&self, account: i32) -> Result<bool> {
-        let control = self
-            .owners
-            .lock()
-            .expect("ownership registry poisoned")
-            .get(&account)
-            .cloned();
-        let Some(control) = control else {
-            return Ok(false);
-        };
-        let mut control =
-            control.context("Account is busy outside a game connection; retry shortly")?;
-        control.cancel.send_replace(true);
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                if let Some(result) = control.done.borrow().clone() {
-                    result.map_err(anyhow::Error::msg)?;
-                    return Ok(true);
-                }
-                control
-                    .done
-                    .changed()
-                    .await
-                    .context("Session closed without a save acknowledgement")?;
-            }
-        })
-        .await
-        .context("Disconnect save is still pending; no successful kick was confirmed")?
-    }
 }
+#[cfg(test)]
+pub(crate) use account_actions::tests::fixture as lifecycle_test_fixture;
 use tokio::sync::mpsc;
 mod account_actions;
 pub(crate) mod diagnostics;
@@ -208,13 +114,15 @@ pub struct App {
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
-    pub owners: Arc<Mutex<BTreeMap<i32, Option<SessionControl>>>>,
+    pub owners: Arc<Mutex<BTreeMap<i32, lifecycle::Claim>>>,
     pub authentication: Arc<tokio::sync::RwLock<()>>,
     pub guild_actions: Arc<tokio::sync::Mutex<()>>,
     pub gold_updates: Arc<tokio::sync::Mutex<()>>,
     pub bots: Arc<Mutex<BTreeMap<i32, Owner>>>,
+    #[cfg(test)]
     pub quarantined: Arc<Mutex<Vec<Owner>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
+    pub(crate) admission: Arc<lifecycle::drain::Admission>,
 }
 fn error(e: anyhow::Error) -> Response {
     tracing::error!(error=%format_args!("{e:#}"),"request failed");
@@ -338,7 +246,11 @@ async fn delete_character(
         let _authentication = a.authentication.read().await;
         let account = a.store.authenticate(guid, password).await?;
         let _claim = a.claim(account)?;
-        a.store.delete_character(account, character).await
+        lifecycle::account(&a, vec![account], "delete_character", move |a| async move {
+            lifecycle::stage(Stage::Store);
+            a.store.delete_character(account, character).await
+        })
+        .await
     }
     .await;
     let xml = match result {
@@ -392,10 +304,15 @@ async fn account_request(
                 )
                 .await?;
             // Fence the current verifier through ownership and commit, without upgrading a read lock.
-            let _authentication = a.authentication.write().await;
+            let authentication = a.authentication.clone().write_owned().await;
             let id = a.store.authenticate(guid, password).await?;
             let _claim = a.claim(id)?;
-            a.store.change_password(id, verifier).await?;
+            lifecycle::account(&a, vec![id], "change_password", move |a| async move {
+                let _authentication = authentication;
+                lifecycle::stage(Stage::Store);
+                a.store.change_password(id, verifier).await
+            })
+            .await?;
             return Ok(id);
         }
         let _authentication = a.authentication.read().await;
@@ -425,9 +342,12 @@ async fn account_request(
                     )
                     .await?;
                 let _claim = a.claim(id)?;
-                a.store
-                    .choose_name(id, form.get("name").context("name required")?.clone())
-                    .await?;
+                let name = form.get("name").context("name required")?.clone();
+                lifecycle::account(&a, vec![id], "choose_name", move |a| async move {
+                    lifecycle::stage(Stage::Store);
+                    a.store.choose_name(id, name).await
+                })
+                .await?;
                 id
             }
             "purchaseCharSlot" => {
@@ -447,7 +367,16 @@ async fn account_request(
                 );
                 let id = a.store.authenticate(guid, password).await?;
                 let _claim = a.claim(id)?;
-                a.store.purchase_character_slot(id, timer).await?;
+                lifecycle::account(
+                    &a,
+                    vec![id],
+                    "purchase_character_slot",
+                    move |a| async move {
+                        lifecycle::stage(Stage::Store);
+                        a.store.purchase_character_slot(id, timer).await
+                    },
+                )
+                .await?;
                 id
             }
             _ => bail!("account operation not implemented"),
@@ -592,11 +521,16 @@ async fn websocket(
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.chars().take(512).collect());
-    ws.max_message_size(1_048_576)
-        .on_upgrade(move |socket| async move {
+    let entry = match lifecycle::drain::entry(&a) {
+        Ok(entry) => entry,
+        Err(error) => return hiscores::json_error(StatusCode::SERVICE_UNAVAILABLE, error),
+    };
+    ws.max_message_size(1_048_576).on_upgrade(move |socket| {
+        entry.scope(async move {
             let _permit = permit;
             connection(socket, a, user_agent, browser).await
         })
+    })
 }
 #[derive(Deserialize)]
 struct DiagnosticQuery {
@@ -607,6 +541,31 @@ fn fail(description: &str) -> Packet {
     o.i32(0).utf(description);
     Packet { id: 0, body: o.0 }
 }
+struct NativeReader<'a>(Reader<'a>);
+impl<'a> NativeReader<'a> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8]> {
+        self.0.take(n).context(CloseReason::Protocol)
+    }
+    fn done(&self) -> Result<()> {
+        self.0.done().context(CloseReason::Protocol)
+    }
+}
+macro_rules! native_readers {
+    ($($method:ident: $ty:ty),*) => { impl NativeReader<'_> { $(fn $method(&mut self) -> Result<$ty> { self.0.$method().context(CloseReason::Protocol) })* } };
+}
+native_readers!(u8: u8, i16: i16, i32: i32, f32: f32, utf: String);
+impl<'a> std::ops::Deref for NativeReader<'a> {
+    type Target = Reader<'a>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for NativeReader<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 fn slot(r: &mut Reader<'_>) -> Result<Slot> {
     Ok(Slot {
         object: r.i32()?,
@@ -614,7 +573,8 @@ fn slot(r: &mut Reader<'_>) -> Result<Slot> {
         kind: r.i16()? as i32,
     })
 }
-pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
+async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
+    lifecycle::stage(Stage::Store);
     if let Some(purchase) = &plan.vault_purchase {
         let _gold = a.gold_updates.lock().await;
         let result = a
@@ -629,11 +589,13 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 purchase.chest,
             )
             .await;
-        return a
-            .world
+        lifecycle::stage(Stage::Publication);
+        a.world
             .for_player(plan.player)
             .call(move |w| w.finish_vault_purchase(plan, result))
-            .await;
+            .await?;
+        lifecycle::stage(Stage::Settled);
+        return Ok(());
     }
     if let Some((_, purchase)) = &plan.purchase {
         let _gold = a.gold_updates.lock().await;
@@ -649,13 +611,17 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 purchase.clone(),
             )
             .await;
-        return a
-            .world
+        lifecycle::stage(Stage::Publication);
+        a.world
             .for_player(plan.player)
             .call(move |w| w.finish_purchase(plan, result))
-            .await;
+            .await?;
+        lifecycle::stage(Stage::Settled);
+        return Ok(());
     }
+    lifecycle::stage(Stage::Reservation);
     let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
+    lifecycle::stage(Stage::Store);
     let collector = plan.collected.map(|_| plan.account);
     let result = if let Some(pet) = plan.companion.as_ref().filter(|pet| pet.permanent) {
         a.store
@@ -728,20 +694,75 @@ pub(crate) async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                     .context("inventory commit returned no revision")
             })
     };
+    lifecycle::stage(Stage::Publication);
     a.world
         .directory(move |d| d.finish_inventory(plan, result))
         .await?;
     if let Some(account) = collector {
         gold::sync(a, account).await?;
     }
+    lifecycle::stage(Stage::Settled);
     Ok(())
 }
+pub(crate) async fn inventory(
+    a: &App,
+    id: i32,
+    prepare: impl FnOnce(&mut World) -> Result<Option<InventoryPlan>> + Send + 'static,
+) -> Result<Result<()>> {
+    lifecycle::player(a, id, "inventory", move |a| async move {
+        lifecycle::stage(Stage::Reservation);
+        let prepared = a.world.for_player(id).call(move |w| Ok(prepare(w))).await?;
+        match prepared {
+            Ok(Some(plan)) => {
+                persist(&a, plan).await?;
+                Ok(Ok(()))
+            }
+            Ok(None) => Ok(Ok(())),
+            Err(error) if lifecycle::rule_rejection(&error) => {
+                lifecycle::stage(Stage::Rejected);
+                Ok(Err(error))
+            }
+            Err(error) => Err(error),
+        }
+    })
+    .await
+}
+
+async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Character) -> Result<()> {
+    lifecycle::stage(Stage::Store);
+    let result = a
+        .store
+        .progress(snapshot.clone())
+        .await
+        .context("progress persistence failed");
+    lifecycle::stage(Stage::Publication);
+    a.world
+        .for_player(id)
+        .call(move |w| {
+            w.committed(id, result)?;
+            w.finish_progress(id, snapshot)
+        })
+        .await
+}
+#[cfg(test)]
 async fn persist_death(
     a: &App,
     id: i32,
     ch: crate::store::Character,
     killer: String,
 ) -> Result<()> {
+    lifecycle::player(a, id, "death", move |a| async move {
+        persist_death_inner(&a, id, ch, killer).await
+    })
+    .await
+}
+async fn persist_death_inner(
+    a: &App,
+    id: i32,
+    ch: crate::store::Character,
+    killer: String,
+) -> Result<()> {
+    lifecycle::stage(Stage::Store);
     let slot = ch
         .items
         .iter()
@@ -753,6 +774,7 @@ async fn persist_death(
             .resurrect(ch, slot, a.content.clone())
             .await
             .context("resurrection persistence failed");
+        lifecycle::stage(Stage::Publication);
         a.world
             .directory(move |d| d.finish_resurrection(id, result))
             .await
@@ -762,6 +784,7 @@ async fn persist_death(
             .death(ch, killer)
             .await
             .context("death persistence failed");
+        lifecycle::stage(Stage::Publication);
         a.world
             .for_player(id)
             .call(move |w| {
@@ -772,23 +795,49 @@ async fn persist_death(
     }
 }
 async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
-    let id = plan.plans[0].player;
-    let writes = plan
-        .plans
-        .iter()
-        .map(|p| InventoryWrite {
-            id: p.character,
-            account: p.account,
-            revision: p.revision,
-            items: p.items.clone(),
-        })
-        .collect();
-    let result = a.store.exchange(writes, Vec::new()).await;
-    a.world
-        .for_player(id)
-        .call(move |w| w.finish_trade(plan, result))
-        .await
+    let report_failure = lifecycle::failure_reporter(
+        a,
+        &plan.plans.iter().map(|p| p.account).collect::<Vec<_>>(),
+        "trade",
+    )?;
+    let result = std::panic::AssertUnwindSafe(async {
+        lifecycle::stage(Stage::Store);
+        let id = plan.plans[0].player;
+        let writes = plan
+            .plans
+            .iter()
+            .map(|p| InventoryWrite {
+                id: p.character,
+                account: p.account,
+                revision: p.revision,
+                items: p.items.clone(),
+            })
+            .collect();
+        let result = a.store.exchange(writes, Vec::new()).await;
+        lifecycle::stage(Stage::Publication);
+        a.world
+            .for_player(id)
+            .call(move |w| w.finish_trade(plan, result))
+            .await
+    })
+    .catch_unwind()
+    .await;
+    match result {
+        Ok(Ok(())) => {
+            lifecycle::stage(Stage::Settled);
+            Ok(())
+        }
+        Ok(Err(error)) => {
+            report_failure(format!("{error:#}"));
+            Err(error)
+        }
+        Err(panic) => {
+            report_failure("trade completion task panicked".into());
+            std::panic::resume_unwind(panic)
+        }
+    }
 }
+
 fn trade_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
     ensure!(r.i16()? == 12, "trade offer must contain twelve slots");
     let mut values = [false; 12];
@@ -810,6 +859,8 @@ struct Session {
     player: Option<i32>,
     expected: Option<i32>,
     reconnecting: bool,
+    transfer: Option<Packet>,
+    runtime: Option<tokio::runtime::Handle>,
     diagnostics: diagnostics::ConnectionDiagnostics,
 }
 fn collision_report(other: bool, r: &mut Reader<'_>) -> Result<()> {
@@ -856,11 +907,73 @@ async fn handle(
     lost: &tokio::sync::watch::Sender<bool>,
     received: std::time::Instant,
 ) -> Result<()> {
+    let entry = lifecycle::drain::entry(a)?;
+    if let (Some(owner), Some(player)) = (&session.account, session.player) {
+        owner.bind(player)?;
+    }
+    let mut owned_session = std::mem::take(session);
+    let reply = tx.clone();
+    let tx = tx.clone();
+    let lost = lost.clone();
+    let accounts = owned_session
+        .account
+        .as_ref()
+        .map(|owner| vec![owner.id])
+        .unwrap_or_default();
+    let (app, completed_session, result) =
+        lifecycle::account(a, accounts, "native_packet", move |mut app| async move {
+            let result = entry
+                .scope(handle_inner(
+                    &mut app,
+                    packet,
+                    &mut owned_session,
+                    &tx,
+                    &lost,
+                    received,
+                ))
+                .await;
+            if let (Err(error), Some(owner)) = (&result, &owned_session.account) {
+                lifecycle::observe(&app, owner.id, "native_packet", error);
+            }
+            Ok((app, owned_session, result))
+        })
+        .await?;
+    *a = app;
+    *session = completed_session;
+    result?;
+    if let Some(packet) = session.transfer.take() {
+        let id = session
+            .player
+            .context("prepared transfer lost its avatar")?;
+        depart(a, id).await?;
+        session.player = None;
+        // Admission must be released before RECONNECT can reach an immediate replacement HELLO.
+        session
+            .account
+            .take()
+            .context("transfer ownership missing")?
+            .release();
+        enqueue_reply(&reply, packet)?;
+        session.reconnecting = true;
+    }
+    Ok(())
+}
+
+async fn handle_inner(
+    a: &mut App,
+    packet: Packet,
+    session: &mut Session,
+    tx: &mpsc::Sender<Packet>,
+    lost: &tokio::sync::watch::Sender<bool>,
+    received: std::time::Instant,
+) -> Result<()> {
     let Session {
         account,
         player,
         expected,
         reconnecting,
+        transfer: _,
+        runtime,
         diagnostics,
     } = session;
     if *reconnecting {
@@ -888,25 +1001,33 @@ async fn handle(
         );
         return Ok(());
     }
-    let mut r = Reader::new(&packet.body);
+    macro_rules! ensure_protocol {
+        ($condition:expr, $($detail:tt)*) => { ensure!($condition, anyhow::anyhow!($($detail)*).context(CloseReason::Protocol)); };
+    }
+    let mut r = NativeReader(Reader::new(&packet.body));
+    if packet.id == wire::BUY {
+        let mut shape = NativeReader(Reader::new(&packet.body));
+        shape.i32()?;
+        shape.done()?;
+    }
     match packet.id {
         wire::HELLO => {
-            ensure!(account.is_none(), "duplicate HELLO");
+            ensure_protocol!(account.is_none(), "duplicate HELLO");
             let version = r.utf()?;
-            ensure!(version == "123.5.1", "unsupported client build {version}");
+            ensure_protocol!(version == "123.5.1", "unsupported client build {version}");
             let game = r.i32()?;
-            let guid = a.keys.decrypt(&r.utf()?)?;
-            let password = a.keys.decrypt(&r.utf()?)?;
-            let secret = a.keys.decrypt(&r.utf()?)?;
-            ensure!(
+            let guid = a.keys.decrypt(&r.utf()?).context(CloseReason::Protocol)?;
+            let password = a.keys.decrypt(&r.utf()?).context(CloseReason::Protocol)?;
+            let secret = a.keys.decrypt(&r.utf()?).context(CloseReason::Protocol)?;
+            ensure_protocol!(
                 secret.is_empty(),
                 "external platform authentication is not implemented"
             );
             let keytime = r.i32()?;
-            let n = usize::try_from(r.i16()?)?;
-            ensure!(n == 0 || n == 16, "invalid transfer key size");
+            let n = usize::try_from(r.i16()?).context(CloseReason::Protocol)?;
+            ensure_protocol!(n == 0 || n == 16, "invalid transfer key size");
             let key = r.take(n)?.to_vec();
-            ensure!(r.i32()? == 0, "map editor JSON not supported");
+            ensure_protocol!(r.i32()? == 0, "map editor JSON not supported");
             for _ in 0..4 {
                 r.utf()?;
             }
@@ -915,10 +1036,17 @@ async fn handle(
             let registered = !password.is_empty();
             let id = a.store.authenticate(guid, password).await?;
             let mut owner = a.claim_session(id)?;
+            if let Some(runtime) = runtime {
+                owner.arm_cleanup(a, runtime.clone());
+            }
             owner.registered = registered;
             *account = Some(owner);
             drop(authentication);
-            a.store.compete(id).await?;
+            lifecycle::account(a, vec![id], "login", move |a| async move {
+                lifecycle::stage(Stage::Store);
+                a.store.compete(id).await
+            })
+            .await?;
             let prepared = a
                 .testing
                 .as_ref()
@@ -963,27 +1091,39 @@ async fn handle(
         }
         wire::CREATE | wire::LOAD => {
             let _guild = a.guild_actions.lock().await;
-            ensure!(player.is_none(), "character already loaded");
+            ensure_protocol!(player.is_none(), "character already loaded");
             let account = account
                 .as_ref()
-                .context("HELLO required before character selection")?
+                .ok_or_else(|| lifecycle::protocol("HELLO required before character selection"))?
                 .id;
             let ch = if packet.id == wire::CREATE {
-                ensure!(
+                ensure_protocol!(
                     expected.is_none(),
                     "transfer requires LOAD of the existing character"
                 );
                 let kind = r.i16()? as u16;
                 r.done()?;
-                a.store.create(account, a.content.get(kind)?).await?
+                let class = a.content.get(kind).context(CloseReason::Protocol)?;
+                ensure_protocol!(class.class == "Player", "unknown playable class");
+                lifecycle::stage(Stage::Store);
+                a.store.create(account, class).await?
             } else {
                 let id = r.i32()?;
                 r.done()?;
-                ensure!(
+                ensure_protocol!(
                     expected.is_none_or(|bound| bound == id),
                     "transfer character mismatch"
                 );
-                a.store.load(account, id).await?
+                a.store.load(account, id).await.map_err(|error| {
+                    if matches!(
+                        error.downcast_ref::<rusqlite::Error>(),
+                        Some(rusqlite::Error::QueryReturnedNoRows)
+                    ) {
+                        error.context(CloseReason::Protocol)
+                    } else {
+                        error
+                    }
+                })?
             };
             let output = crate::world::Output {
                 packets: tx.clone(),
@@ -1002,6 +1142,8 @@ async fn handle(
                 .map(|t| t.native_entry(account))
                 .transpose()?
                 .flatten();
+            let bind = lifecycle::binding(a, account)?;
+            lifecycle::stage(Stage::Publication);
             *player = Some(
                 a.world
                     .call(move |w| {
@@ -1014,6 +1156,7 @@ async fn handle(
                             prepared.map(|(_, pos)| pos),
                             presentation,
                         )?;
+                        bind(id)?;
                         w.sync_account_lists(id, Some(lists))?;
                         Ok(id)
                     })
@@ -1054,20 +1197,23 @@ async fn handle(
                 y: r.f32()?,
             };
             let count = r.i16()?;
-            ensure!((0..=128).contains(&count), "movement history too long");
+            ensure_protocol!((0..=128).contains(&count), "movement history too long");
             for _ in 0..count {
                 r.i32()?;
                 r.f32()?;
                 r.f32()?;
             }
             r.done()?;
-            let id = player.context("MOVE before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("MOVE before character"))?;
             a.world
                 .call(move |w| {
                     w.acknowledge_tick(id, tick)?;
                     match w.native_move_received(id, pos, (time, received)) {
                         Ok(_) => Ok(()),
-                        Err(e) => w.correct_position(id, time, &e.to_string()),
+                        Err(e) if lifecycle::rule_rejection(&e) => {
+                            w.correct_position(id, time, &e.to_string())
+                        }
+                        Err(error) => Err(error),
                     }
                 })
                 .await?;
@@ -1082,7 +1228,7 @@ async fn handle(
             };
             let angle = r.f32()?;
             r.done()?;
-            let id = player.context("shoot before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("shoot before character"))?;
             a.world
                 .call(move |w| {
                     match w.native_shoot_received(id, (time, received), bullet, kind, pos, angle) {
@@ -1104,27 +1250,35 @@ async fn handle(
         | wire::JOIN_GUILD
         | wire::CHANGE_GUILD_RANK
         | wire::GUILD_REMOVE => {
-            let id = player.context("guild action before character")?;
+            let mut shape = NativeReader(Reader::new(&packet.body));
+            shape.utf()?;
+            if packet.id == wire::CHANGE_GUILD_RANK {
+                shape.i32()?;
+            }
+            shape.done()?;
+            let id = player.ok_or_else(|| lifecycle::protocol("guild action before character"))?;
             guilds::native(a, id, packet.id, &mut r, tx, received).await?;
         }
         50 if guilds::merchant(
             a,
-            player.context("purchase before character")?,
+            player.ok_or_else(|| lifecycle::protocol("purchase before character"))?,
             &packet.body,
         )
         .await? =>
         {
-            let id = player.context("guild purchase before character")?;
+            let id =
+                player.ok_or_else(|| lifecycle::protocol("guild purchase before character"))?;
             guilds::native(a, id, packet.id, &mut r, tx, received).await?;
         }
         wire::PLAYER_TEXT => {
-            let text = player_text(&mut r)?;
+            let text = player_text(&mut r).context(CloseReason::Protocol)?;
             if text.trim().eq_ignore_ascii_case("/tutorial") {
                 crate::world::validate_chat(&text)?;
-                return reconnect(a, session, tx, Reconnect::Tutorial, received).await;
+                return reconnect(a, session, Reconnect::Tutorial, received).await;
             }
             if let Some((kind, name)) = guilds::chat_command(&text) {
-                let id = player.context("guild command before character")?;
+                let id =
+                    player.ok_or_else(|| lifecycle::protocol("guild command before character"))?;
                 let mut body = Writer::new();
                 body.utf(name);
                 guilds::native(a, id, kind, &mut Reader::new(&body.0), tx, received).await?;
@@ -1140,7 +1294,7 @@ async fn handle(
             } else {
                 None
             };
-            let id = player.context("chat before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("chat before character"))?;
 
             if let Some(message) = text
                 .trim()
@@ -1165,10 +1319,11 @@ async fn handle(
                 "/discord" | "/discord recovery" | "/discord norecovery"
             ) {
                 let result = async {
-                    ensure!(a.discord_link_token.is_some(), "Discord linking is not configured");
+                    ensure!(a.discord_link_token.is_some(), lifecycle::controller("Discord linking is not configured"));
                     let owner = account.as_ref().context("authenticated session required")?;
-                    ensure!(owner.registered, "sign into your registered account again before Discord account actions");
+                    ensure!(owner.registered, lifecycle::controller("sign into your registered account again before Discord account actions"));
                     let owner = owner.id;
+                    lifecycle::stage(Stage::Store);
                     let reply = match text.trim() {
                         "/discord recovery" => {
                             let code = a.store.issue_recovery_code(owner).await?;
@@ -1183,11 +1338,16 @@ async fn handle(
                             format!("Use /link code:{code} with the official Discord bot within five minutes. This makes your Discord identity visible on hiscores. Keep this code private.")
                         }
                     };
+                    lifecycle::stage(Stage::Settled);
                     Ok::<_, anyhow::Error>(reply)
                 }.await;
                 let reply = match result {
                     Ok(text) => text,
-                    Err(error) => error.to_string(),
+                    Err(error) if lifecycle::rule_rejection(&error) => {
+                        lifecycle::stage(Stage::Rejected);
+                        error.to_string()
+                    }
+                    Err(error) => return Err(error),
                 };
                 enqueue_reply(tx, crate::world::chat_private(&reply))?;
             } else if matches!(
@@ -1205,7 +1365,7 @@ async fn handle(
                     let args: Vec<_> = text.split_whitespace().collect();
                     ensure!(
                         args.len() == 2,
-                        "Usage: /ignore <player> or /unignore <player>"
+                        lifecycle::controller("Usage: /ignore <player> or /unignore <player>")
                     );
                     let owner = account
                         .as_ref()
@@ -1213,10 +1373,13 @@ async fn handle(
                         .id;
                     let target = a.store.account_named(args[1].into()).await?;
                     let add = args[0].eq_ignore_ascii_case("/ignore");
+                    lifecycle::stage(Stage::Store);
                     let lists = a.store.edit_account_list(owner, 1, add, target).await?;
+                    lifecycle::stage(Stage::Publication);
                     a.world
                         .call(move |w| w.sync_account_lists(id, Some(lists)))
                         .await?;
+                    lifecycle::stage(Stage::Settled);
                     Ok::<_, anyhow::Error>(if add {
                         "Player ignored."
                     } else {
@@ -1226,11 +1389,18 @@ async fn handle(
                 .await;
                 let reply = match result {
                     Ok(text) => crate::world::chat_info(text),
-                    Err(error) => crate::world::chat_error(&error.to_string()),
+                    Err(error) if lifecycle::rule_rejection(&error) => {
+                        lifecycle::stage(Stage::Rejected);
+                        crate::world::chat_error(&error.to_string())
+                    }
+                    Err(error) => return Err(error),
                 };
                 enqueue_reply(tx, reply)?;
             } else if let Err(error) = a.world.directory(move |d| d.chat(id, text, received)).await
             {
+                if !lifecycle::rule_rejection(&error) {
+                    return Err(error);
+                }
                 tracing::warn!(player=id, error=%error, "local chat rejected");
                 enqueue_reply(tx, crate::world::chat_error(&error.to_string()))?;
             }
@@ -1238,30 +1408,38 @@ async fn handle(
         wire::EDIT_ACCOUNT_LIST => {
             let list = r.i32()?;
             let add = r.u8()?;
-            ensure!(add <= 1, "invalid account list operation");
+            ensure_protocol!(add <= 1, "invalid account list operation");
             let target = r.i32()?;
             r.done()?;
-            let id = player.context("account list edit before character")?;
+            let id =
+                player.ok_or_else(|| lifecycle::protocol("account list edit before character"))?;
             let owner = account
                 .as_ref()
                 .context("authenticated session required")?
                 .id;
             let result = async {
-                ensure!((0..=1).contains(&list), "invalid account list");
+                ensure_protocol!((0..=1).contains(&list), "invalid account list");
                 let target = a
                     .world
                     .call(move |w| w.account_list_target(id, target))
                     .await?;
+                lifecycle::stage(Stage::Store);
                 let lists = a
                     .store
                     .edit_account_list(owner, list, add != 0, target)
                     .await?;
+                lifecycle::stage(Stage::Publication);
                 a.world
                     .call(move |w| w.sync_account_lists(id, Some(lists)))
-                    .await
+                    .await?;
+                lifecycle::stage(Stage::Settled);
+                Ok::<_, anyhow::Error>(())
             }
             .await;
             if let Err(error) = result {
+                if !lifecycle::rule_rejection(&error) {
+                    return Err(error);
+                }
                 tracing::warn!(player=id, list, target, error=%error, "account list edit rejected");
                 // The selected client only adds to ACCOUNTLIST 0; a fresh session clears an optimistic lock.
                 if list == 0 && add != 0 {
@@ -1269,42 +1447,52 @@ async fn handle(
                         error.context("Lock change failed; reconnect to refresh your player list")
                     );
                 }
+                lifecycle::stage(Stage::Publication);
                 a.world
                     .call(move |w| w.sync_account_lists(id, None))
                     .await?;
+                lifecycle::stage(Stage::Settled);
                 enqueue_reply(tx, crate::world::chat_error(&error.to_string()))?;
             }
         }
         wire::BUY => {
             let merchant = r.i32()?;
             r.done()?;
-            let id = player.context("purchase before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("purchase before character"))?;
             let registered = account
                 .as_ref()
-                .context("purchase before HELLO")?
+                .ok_or_else(|| lifecycle::protocol("purchase before HELLO"))?
                 .registered;
+            lifecycle::stage(Stage::Reservation);
             let plan = if registered {
                 a.world.call(move |w| w.buy(id, merchant)).await
             } else {
-                Err(anyhow::anyhow!("Register and sign in before buying items."))
+                Err(lifecycle::controller(
+                    "Register and sign in before buying items.",
+                ))
             };
             match plan {
                 Ok(plan) => persist(a, plan).await?,
-                Err(error) => {
+                Err(error) if lifecycle::rule_rejection(&error) => {
+                    lifecycle::stage(Stage::Rejected);
                     tracing::warn!(player=id, merchant, error=%error, "purchase rejected");
                     enqueue_reply(tx, crate::world::shop::reply(false, &error.to_string()))?;
                 }
+                Err(error) => return Err(error),
             }
         }
         wire::TELEPORT => {
             let target = r.i32()?;
             r.done()?;
-            let id = player.context("teleport before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("teleport before character"))?;
             if let Err(error) = a
                 .world
                 .directory(move |d| d.teleport(id, target, received))
                 .await
             {
+                if !lifecycle::rule_rejection(&error) {
+                    return Err(error);
+                }
                 tracing::warn!(player=id, target, error=%error, "teleport rejected");
                 enqueue_reply(tx, crate::world::chat_error(&error.to_string()))?;
             }
@@ -1325,7 +1513,7 @@ async fn handle(
                 y: r.f32()?,
             };
             r.done()?;
-            let id = player.context("ground damage before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("ground damage before character"))?;
             a.world
                 .call(move |w| w.ground_damage(id, time, pos))
                 .await?;
@@ -1333,7 +1521,7 @@ async fn handle(
         22 => {
             let time = r.i32()?;
             r.done()?;
-            let id = player.context("SHOOT ACK before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("SHOOT ACK before character"))?;
             a.world.call(move |w| w.acknowledge_shoot(id, time)).await?;
         }
         76 => {
@@ -1347,28 +1535,29 @@ async fn handle(
             let bullet = r.u8()?;
             let owner = r.i32()?;
             r.done()?;
-            let id = player.context("hit report before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("hit report before character"))?;
             a.world
                 .call(move |w| w.native_player_hit(id, owner, bullet))
                 .await?;
         }
         59 => {
-            player.context("area acknowledgement before character")?;
+            player.ok_or_else(|| lifecycle::protocol("area acknowledgement before character"))?;
             r.i32()?;
             r.f32()?;
             r.f32()?;
             r.done()?;
         }
-        66 | 51 => collision_report(packet.id == 66, &mut r)?,
+        66 | 51 => collision_report(packet.id == 66, &mut r).context(CloseReason::Protocol)?,
         30 => {
             let time = r.i32()?;
-            let s = slot(&mut r)?;
+            let s = slot(&mut r).context(CloseReason::Protocol)?;
             let pos = Pos {
                 x: r.f32()?,
                 y: r.f32()?,
             };
             r.done()?;
-            let id = player.context("item use before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("item use before character"))?;
+            lifecycle::stage(Stage::Reservation);
             match a
                 .world
                 .call(move |w| w.native_use_item(id, time, s, pos))
@@ -1376,24 +1565,26 @@ async fn handle(
             {
                 Ok(Some(plan)) => persist(a, plan).await?,
                 Ok(None) => {}
-                Err(error) => {
+                Err(error) if lifecycle::rule_rejection(&error) => {
+                    lifecycle::stage(Stage::Rejected);
                     tracing::warn!(player=id, item=s.kind, slot=s.slot, error=%error, "item use rejected");
                     enqueue_reply(tx, crate::world::chat_error(&error.to_string()))?;
                     let mut out = Writer::new();
                     out.i32(1);
                     enqueue_reply(tx, Packet { id: 4, body: out.0 })?;
                 }
+                Err(error) => return Err(error),
             }
         }
         21 => {
             let name = r.utf()?;
             r.done()?;
-            let id = player.context("trade request before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("trade request before character"))?;
             a.world.call(move |w| w.request_trade(id, name)).await?;
         }
         1 => {
             r.done()?;
-            let id = player.context("trade cancel before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("trade cancel before character"))?;
             a.world
                 .call(move |w| {
                     w.cancel_trade(id, "Trade cancelled.");
@@ -1402,16 +1593,17 @@ async fn handle(
                 .await?;
         }
         37 => {
-            let values = trade_offer(&mut r)?;
+            let values = trade_offer(&mut r).context(CloseReason::Protocol)?;
             r.done()?;
-            let id = player.context("trade change before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("trade change before character"))?;
             a.world.call(move |w| w.change_trade(id, values)).await?;
         }
         57 => {
-            let mine = trade_offer(&mut r)?;
-            let theirs = trade_offer(&mut r)?;
+            let mine = trade_offer(&mut r).context(CloseReason::Protocol)?;
+            let theirs = trade_offer(&mut r).context(CloseReason::Protocol)?;
             r.done()?;
-            let id = player.context("trade accept before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("trade accept before character"))?;
+            lifecycle::stage(Stage::Reservation);
             if let Some(plan) = a
                 .world
                 .call(move |w| w.accept_trade(id, mine, theirs))
@@ -1421,9 +1613,11 @@ async fn handle(
             }
         }
         35 => {
-            let slot = slot(&mut r)?;
+            let slot = slot(&mut r).context(CloseReason::Protocol)?;
             r.done()?;
-            let id = player.context("inventory drop before character")?;
+            let id =
+                player.ok_or_else(|| lifecycle::protocol("inventory drop before character"))?;
+            lifecycle::stage(Stage::Reservation);
             let plan = a.world.call(move |w| w.drop_item(id, slot)).await?;
             persist(a, plan).await?;
         }
@@ -1431,17 +1625,19 @@ async fn handle(
             r.i32()?;
             r.f32()?;
             r.f32()?;
-            let from = slot(&mut r)?;
-            let to = slot(&mut r)?;
+            let from = slot(&mut r).context(CloseReason::Protocol)?;
+            let to = slot(&mut r).context(CloseReason::Protocol)?;
             r.done()?;
-            let id = player.context("inventory swap before character")?;
+            let id =
+                player.ok_or_else(|| lifecycle::protocol("inventory swap before character"))?;
+            lifecycle::stage(Stage::Reservation);
             let plan = a.world.call(move |w| w.swap(id, from, to)).await?;
             persist(a, plan).await?;
         }
         14 => {
             let time = r.i32()?;
             r.done()?;
-            let id = player.context("GOTO ACK before character")?;
+            let id = player.ok_or_else(|| lifecycle::protocol("GOTO ACK before character"))?;
             a.world.call(move |w| w.acknowledge_goto(id, time)).await?;
         }
         48 => {
@@ -1450,8 +1646,12 @@ async fn handle(
         33 => {
             let name = r.utf()?;
             r.done()?;
-            let account = account.as_ref().context("name before HELLO")?.id;
+            let account = account
+                .as_ref()
+                .ok_or_else(|| lifecycle::protocol("name before HELLO"))?
+                .id;
             let _gold = a.gold_updates.lock().await;
+            lifecycle::stage(Stage::Reservation);
             let reservation = if let Some(id) = *player {
                 match a
                     .world
@@ -1461,6 +1661,7 @@ async fn handle(
                 {
                     Ok(plan) => Some((id, plan)),
                     Err(reason) => {
+                        lifecycle::stage(Stage::Rejected);
                         tracing::info!(account, reason, "name choice rejected before reservation");
                         let mut o = Writer::new();
                         o.u8(0).utf(reason);
@@ -1471,10 +1672,12 @@ async fn handle(
             } else {
                 None
             };
+            lifecycle::stage(Stage::Store);
             let result = a
                 .store
                 .name_choice(account, name.clone(), reservation.is_some())
                 .await;
+            lifecycle::stage(Stage::Publication);
             let rejection = if let Some((id, plan)) = reservation {
                 a.world
                     .for_player(id)
@@ -1486,6 +1689,7 @@ async fn handle(
                     crate::store::NameChoice::Committed { .. } => None,
                 }
             };
+            lifecycle::stage(Stage::Settled);
             if let Some(reason) = rejection {
                 tracing::info!(account, reason, "name choice rejected without charge");
             }
@@ -1498,7 +1702,7 @@ async fn handle(
             let _guild = a.guild_actions.lock().await;
             let portal = if packet.id == 3 { Some(r.i32()?) } else { None };
             r.done()?;
-            player.context("transfer before character")?;
+            player.ok_or_else(|| lifecycle::protocol("transfer before character"))?;
             let guild_portal = a
                 .world
                 .call(move |w| {
@@ -1510,16 +1714,23 @@ async fn handle(
             if guild_portal {
                 let guild = a
                     .store
-                    .guild(account.as_ref().context("guild portal before HELLO")?.id)
+                    .guild(
+                        account
+                            .as_ref()
+                            .ok_or_else(|| lifecycle::protocol("guild portal before HELLO"))?
+                            .id,
+                    )
                     .await?;
                 a.world.directory(move |d| d.guild_instance(guild)).await?;
             }
-            reconnect(a, session, tx, Reconnect::Portal(portal), received).await?;
+            reconnect(a, session, Reconnect::Portal(portal), received).await?;
         }
-        _ => bail!(
-            "packet {} is not implemented in this development build",
-            packet.id
-        ),
+        _ => {
+            return Err(anyhow::anyhow!(CloseReason::Protocol).context(format!(
+                "packet {} is not implemented in this development build",
+                packet.id
+            )));
+        }
     }
     Ok(())
 }
@@ -1532,7 +1743,6 @@ enum Reconnect {
 async fn reconnect(
     a: &App,
     session: &mut Session,
-    tx: &mpsc::Sender<Packet>,
     request: Reconnect,
     received: std::time::Instant,
 ) -> Result<()> {
@@ -1574,8 +1784,6 @@ async fn reconnect(
     let Some((destination, keytime, key, name)) = transfer else {
         return Ok(());
     };
-    depart(a, id).await?;
-    session.player = None;
     let mut o = Writer::new();
     o.utf(&name)
         .utf("")
@@ -1584,17 +1792,11 @@ async fn reconnect(
         .i32(keytime)
         .i16(key.len() as i16);
     o.0.extend(key);
-    enqueue_reply(tx, Packet { id: 39, body: o.0 })?;
-    session.reconnecting = true;
-    session
-        .account
-        .take()
-        .context("transfer ownership missing")?
-        .release();
-    tracing::info!(
+    session.transfer = Some(Packet { id: 39, body: o.0 });
+    tracing::debug!(
         player = id,
         destination,
-        "durable departure acknowledged; reconnect queued"
+        "transfer prepared; retirement required before reconnect"
     );
     Ok(())
 }
@@ -1608,6 +1810,28 @@ async fn connection(
     let (wsout, wsin) = socket.split();
     connection_io(wsout, wsin, a, user_agent, browser).await;
 }
+async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
+    output: &mut S,
+    message: Message,
+    lost: &mut tokio::sync::watch::Receiver<bool>,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+    cancel: Option<tokio::sync::watch::Receiver<bool>>,
+    drain: &mut tokio::sync::watch::Receiver<u64>,
+) -> std::result::Result<(), CloseReason> {
+    tokio::select! {
+        biased;
+        _ = drain.changed() => Err(CloseReason::Shutdown),
+        _ = async { if !*lost.borrow() { let _ = lost.changed().await; } } => Err(CloseReason::Output),
+        _ = async { if !*shutdown.borrow() { let _ = shutdown.changed().await; } } => Err(CloseReason::Shutdown),
+        _ = async { match cancel { Some(mut cancel) => { if !*cancel.borrow() { let _ = cancel.changed().await; } }, None => std::future::pending::<()>().await } } => Err(CloseReason::Controller),
+        sent = tokio::time::timeout(std::time::Duration::from_secs(5), output.send(message)) => match sent {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => Err(CloseReason::Transport),
+            Err(_) => Err(CloseReason::Deadline),
+        }
+    }
+}
+
 async fn connection_io<S, I>(
     mut wsout: S,
     wsin: I,
@@ -1621,6 +1845,10 @@ async fn connection_io<S, I>(
         + Unpin
         + 'static,
 {
+    let mut drain = lifecycle::drain::stopping(&a);
+    let Ok(_connection) = lifecycle::drain::entry(&a) else {
+        return;
+    };
     let (tx, mut rx) = mpsc::channel::<Packet>(64);
     let (lost, mut lost_rx) = tokio::sync::watch::channel(false);
     // Actor work and output backpressure must not manufacture late, clustered input receipts.
@@ -1629,7 +1857,10 @@ async fn connection_io<S, I>(
     let deadline = tokio::time::sleep(std::time::Duration::from_secs(10));
     tokio::pin!(deadline);
     let mut codec = Codec::server();
-    let mut session = Session::default();
+    let mut session = Session {
+        runtime: Some(tokio::runtime::Handle::current()),
+        ..Session::default()
+    };
     session.diagnostics.user_agent = user_agent;
     session.diagnostics.browser = browser;
     let mut reconnect_sent = false;
@@ -1638,8 +1869,44 @@ async fn connection_io<S, I>(
     let mut transfers = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut testing_stop = a.testing.as_ref().map(|t| t.stopped.subscribe());
     let mut terminal_drain = false;
-    let mut close_reason = "transport_ended";
+    let mut close_reason = CloseReason::Transport;
+    macro_rules! send {
+        ($message:expr) => {
+            send_frame(
+                &mut wsout,
+                $message,
+                &mut lost_rx,
+                &mut shutdown,
+                session.account.as_ref().and_then(|o| o.cancel.clone()),
+                &mut drain,
+            )
+            .await
+            .map_err(|reason| {
+                close_reason = reason;
+            })
+        };
+    }
     'connection: loop {
+        if *lost_rx.borrow() {
+            close_reason = CloseReason::Output;
+            break;
+        }
+        if *shutdown.borrow()
+            || drain.has_changed().expect("live admission sender lost")
+            || !lifecycle::drain::open(&a)
+        {
+            close_reason = CloseReason::Shutdown;
+            break;
+        }
+        if session
+            .account
+            .as_ref()
+            .and_then(|o| o.cancel.as_ref())
+            .is_some_and(|c| *c.borrow())
+        {
+            close_reason = CloseReason::Controller;
+            break;
+        }
         tokio::select! {
             _=async { match testing_stop.as_mut() { Some(stop) => { if stop.borrow().is_none() { let _ = stop.changed().await; } }, None => std::future::pending::<()>().await } } => {
                 let player=session.player;
@@ -1656,6 +1923,7 @@ async fn connection_io<S, I>(
             },
             event=incoming.recv()=>match event {
                 Some(Incoming::Command(packet, received, _bytes))=>{
+                    if incoming.is_closed() { break; }
                     if a.testing.as_ref().is_some_and(|t| t.stopped.borrow().is_some()) { if terminal_drain {continue;} break; }
                     if !session.reconnecting {
                         let id=packet.id;
@@ -1668,27 +1936,37 @@ async fn connection_io<S, I>(
                         let result=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packet,&mut session,&tx,&lost,received)).await;
                         session.diagnostics.handled(diagnostics::CommandSample {packet:id,queued,handling:handling.elapsed(),queue_before,queue_after:incoming.len(),failed:result.is_err(),requests:requests.lock().expect("request timings poisoned").clone()});
                         if let Err(e)=result {
+                            let rejected = lifecycle::rule_rejection(&e);
+                            close_reason=if e.is::<ReplyQueueError>() { CloseReason::Output } else if rejected { CloseReason::Controller } else { e.downcast_ref::<CloseReason>().copied().unwrap_or(CloseReason::Internal) };
+                            if close_reason == CloseReason::Internal && let Some(owner) = &session.account {
+                                owner.failed(format!("unclassified native command failure: {e:#}"));
+                            }
                             tracing::error!(account=session.account.as_ref().map(|o|o.id),player=session.player,packet=id,error=%format_args!("{e:#}"),"game command rejected");
-                            if e.is::<ReplyQueueError>() { close_reason="reply_queue_full";break 'connection; }
-                            if matches!(id,1|21|37|57) && let Some(player) = session.player {
+                            if e.is::<ReplyQueueError>() { close_reason=CloseReason::Output;break 'connection; }
+                            if e.downcast_ref::<CloseReason>() == Some(&CloseReason::Protocol) {
+                                close_reason=CloseReason::Protocol;
+                                let f=fail(&e.to_string());
+                                let _=send!(Message::Binary(codec.frame(f.id,f.body).into()));
+                                break 'connection;
+                            }
+                            if rejected && matches!(id,1|21|37|57) && let Some(player) = session.player {
                                 let reason = e.to_string();
                                 let closed = a.world.for_player(player).call(move |w| Ok(w.cancel_trade(player, &reason))).await;
-                                match closed { Ok(true) => {}, Ok(false) => { let mut out = Writer::new(); out.i32(1).utf(&e.to_string()); if wsout.send(Message::Binary(codec.frame(12,out.0).into())).await.is_err() {break 'connection;} }, Err(error) => { tracing::error!(%error,"trade rejection notification failed"); break 'connection; } }
+                                match closed { Ok(true) => {}, Ok(false) => { let mut out = Writer::new(); out.i32(1).utf(&e.to_string()); if send!(Message::Binary(codec.frame(12,out.0).into())).is_err() {break 'connection;} }, Err(error) => { tracing::error!(%error,"trade rejection notification failed"); break 'connection; } }
                                 continue;
                             }
-                            if matches!(id,30|35|65) {
+                            if rejected && matches!(id,30|35|65) {
                                 let mut o=Writer::new();o.i32(1);
-                                if wsout.send(Message::Binary(codec.frame(4,o.0).into())).await.is_err(){break 'connection;}
+                                if send!(Message::Binary(codec.frame(4,o.0).into())).is_err(){break 'connection;}
                                 continue;
                             }
-                            close_reason="command_rejected";
                             let f=fail(&e.to_string());
-                            let _=wsout.send(Message::Binary(codec.frame(f.id,f.body).into())).await;
+                            let _=send!(Message::Binary(codec.frame(f.id,f.body).into()));
                             break 'connection;
                         }
                     }
                 },
-                Some(Incoming::Ping(bytes))=>{if wsout.send(Message::Pong(bytes)).await.is_err(){break}},
+                Some(Incoming::Ping(bytes))=>{if send!(Message::Pong(bytes)).is_err(){break}},
                 None=>break,
             },
             _=transfers.tick(),if session.player.is_some() && !session.reconnecting=>{
@@ -1705,7 +1983,7 @@ async fn connection_io<S, I>(
                         let packet = transfer.packet();
                         // Retired-world frames must not follow RECONNECT into a replacement scene.
                         while rx.try_recv().is_ok() {}
-                        if wsout.send(Message::Binary(codec.frame(packet.id,packet.body).into())).await.is_err(){break;}
+                        if send!(Message::Binary(codec.frame(packet.id,packet.body).into())).is_err(){break;}
                         reconnect_sent=true;
                         deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));
                     }
@@ -1713,7 +1991,7 @@ async fn connection_io<S, I>(
                     Err(error) => {
                         tracing::error!(player,%error,"automatic durable transfer failed");
                         let f=fail(&error.to_string());
-                        let _=wsout.send(Message::Binary(codec.frame(f.id,f.body).into())).await;
+                        let _=send!(Message::Binary(codec.frame(f.id,f.body).into()));
                         break;
                     }
                 }
@@ -1724,9 +2002,10 @@ async fn connection_io<S, I>(
                     None => std::future::pending::<()>().await,
                 }
             }=>{tracing::info!(account=session.account.as_ref().map(|o|o.id),"closing requested game session");break;},
-            _=shutdown.changed()=>{close_reason="shutdown";break;},
-            _=lost_rx.changed()=>{close_reason="lag_or_protocol_guard";tracing::warn!(player=session.player,"closing slow game connection before its state diverges");break;},
-            _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{close_reason="connection_deadline";tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
+            _=shutdown.changed()=>{close_reason=CloseReason::Shutdown;break;},
+            _=drain.changed()=>{close_reason=CloseReason::Shutdown;break;},
+            _=lost_rx.changed()=>{close_reason=CloseReason::Output;tracing::warn!(player=session.player,"closing slow game connection before its state diverges");break;},
+            _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{close_reason=CloseReason::Deadline;tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
             outgoing=rx.recv()=>{
                 let Some(packet)=outgoing else {break};
                 let reconnect=packet.id==39;
@@ -1735,7 +2014,7 @@ async fn connection_io<S, I>(
                 let frame = codec.frame(packet.id,packet.body);
                 if let (Some(testing),Some(player),Some(nonce)) = (&a.testing,session.player,nonce) { testing.note_native_frame(nonce,player,&frame); }
                 let sending = std::time::Instant::now();
-                if wsout.send(Message::Binary(frame.into())).await.is_err(){break;}
+                if send!(Message::Binary(frame.into())).is_err(){break;}
                 session.diagnostics.packets_out += 1;
                 session.diagnostics.last_socket_send=Some(std::time::Instant::now());
                 session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
@@ -1744,28 +2023,42 @@ async fn connection_io<S, I>(
             },
             _=ping.tick()=>{if session.account.is_some() && !a.world.clock.paused(){serial+=1;let mut o=Writer::new();o.i32(serial);
                 session.diagnostics.sent(serial);
-                if wsout.send(Message::Binary(codec.frame(wire::PING,o.0).into())).await.is_err(){break;}}}
+                if send!(Message::Binary(codec.frame(wire::PING,o.0).into())).is_err(){break;}}}
         }
     }
     input_task.abort();
+    // Publish custody before diagnostics; neither a cancelled socket task nor its sink owns cleanup.
+    let finalization = session
+        .account
+        .take()
+        .map(|owner| owner.close(&a, close_reason));
     if let Some(id) = session.player {
-        diagnostics::disconnect(&a,id,&session.diagnostics,serde_json::json!({"reason":close_reason,
-            "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()})).await;
-    }
-    if let Some(id) = session.player
-        && let Err(e) = depart(&a, id).await
-    {
-        tracing::error!(player=id,error=%e,"disconnect save failed; avatar retained for diagnosis");
-        if let Some(owner) = session.account.take() {
-            owner.failed(e.to_string());
-            a.quarantined
-                .lock()
-                .expect("quarantine registry poisoned")
-                .push(owner);
+        let diagnostic = diagnostics::disconnect(
+            &a,
+            id,
+            &session.diagnostics,
+            serde_json::json!({"reason":close_reason.to_string(),
+            "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()}),
+        );
+        if std::panic::AssertUnwindSafe(diagnostic)
+            .catch_unwind()
+            .await
+            .is_err()
+        {
+            eprintln!(
+                "native disconnect diagnostics panicked; finalization remains owned for avatar={id}"
+            );
         }
     }
-    if let Some(owner) = session.account.take() {
-        owner.release();
+    if let Some(result) = finalization {
+        let result = match result {
+            Ok(Some(finalization)) => finalization.wait().await,
+            Ok(None) => Ok(()),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            tracing::error!(player=?session.player,error=%error,"disconnect finalization failed; account fenced");
+        }
     }
 }
 pub(crate) async fn automatic_transfer(
@@ -1779,31 +2072,93 @@ pub(crate) async fn automatic_transfer(
     Ok(transfer)
 }
 pub(crate) async fn depart(a: &App, id: i32) -> Result<()> {
+    // Legacy owned adapter continuations retain custody until their Phase2 conversion.
+    if lifecycle::nested_operation() {
+        return lifecycle::player(a, id, "departure", move |a| async move {
+            depart_inner(&a, id).await
+        })
+        .await;
+    }
+    if !a
+        .owners
+        .lock()
+        .expect("ownership registry poisoned")
+        .values()
+        .any(|c| c.matches_avatar(id))
+    {
+        lifecycle::player(a, id, "departure_binding", |_| async { Ok(()) }).await?;
+    }
+    lifecycle::finalize(a, id, CloseReason::Controller)?
+        .wait()
+        .await
+}
+enum DepartureStep {
+    Save(crate::store::Character),
+    Progress(crate::store::Character),
+    Death(crate::store::Character, String),
+    Waiting,
+}
+async fn depart_inner(a: &App, id: i32) -> Result<()> {
     loop {
-        if let Some(ch) = a
+        lifecycle::stage(Stage::Reservation);
+        let step = a
             .world
             .for_player(id)
-            .call(move |w| w.begin_departure(id))
-            .await?
-        {
-            let result = if ch.alive {
-                a.store
-                    .progress(ch)
-                    .await
-                    .context("departure persistence failed")
-            } else {
-                Ok(())
-            };
-            return a
-                .world
-                .for_player(id)
-                .call(move |w| {
-                    w.committed(id, result)?;
-                    w.finish_departure(id)
-                })
-                .await;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            .call(move |w| {
+                if let Some(ch) = w.begin_departure(id)? {
+                    return Ok(DepartureStep::Save(ch));
+                }
+                // Departure already owns this generation, so the collector cannot admit its prerequisites.
+                if let Some((_, snapshot)) =
+                    w.pending_progress_where(|player, _| player == id).pop()
+                {
+                    return Ok(DepartureStep::Progress(snapshot));
+                }
+                if let Some((_, ch, killer)) =
+                    w.pending_deaths_where(|player, _| player == id).pop()
+                {
+                    return Ok(DepartureStep::Death(ch, killer));
+                }
+                Ok(DepartureStep::Waiting)
+            })
+            .await?;
+        let ch = match step {
+            DepartureStep::Progress(snapshot) => {
+                persist_progress_inner(a, id, snapshot).await?;
+                continue;
+            }
+            DepartureStep::Death(ch, killer) => {
+                persist_death_inner(a, id, ch, killer).await?;
+                continue;
+            }
+            DepartureStep::Waiting => {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                continue;
+            }
+            DepartureStep::Save(ch) => ch,
+        };
+        let retirement = lifecycle::retirement(a, ch.account, id)?;
+        lifecycle::stage(Stage::Store);
+        let result = if ch.alive {
+            a.store
+                .progress(ch)
+                .await
+                .context("departure persistence failed")
+        } else {
+            Ok(())
+        };
+        lifecycle::stage(Stage::Publication);
+        a.world
+            .for_player(id)
+            .call(move |w| {
+                w.committed(id, result)?;
+                w.finish_departure(id)
+            })
+            .await?;
+        lifecycle::stage(Stage::Retirement);
+        retirement()?;
+        lifecycle::stage(Stage::Settled);
+        return Ok(());
     }
 }
 #[derive(Deserialize)]
@@ -1819,25 +2174,44 @@ async fn bot_create(
     let result: Result<serde_json::Value> = async {
         control(&a, &headers)?;
         let acc = a.store.list(input.guid).await?;
-        let owner = a.claim(acc.id)?;
-        let ch = if acc.characters.is_empty() {
-            a.store.create(acc.id, a.content.get(WIZARD)?).await?
-        } else {
-            ensure!(acc.characters.len() == 1, "unexpected character count");
-            acc.characters[0].clone()
-        };
-        let destination = a.world.directory(move |d| d.initial(input.world)).await?;
-        let presentation = a.store.presentation(acc.id).await?;
-        let id = a
-            .world
-            .in_world(destination)
-            .call(move |w| w.enter_at(ch, None, None, presentation))
-            .await?;
-        a.bots
-            .lock()
-            .expect("bot ownership registry poisoned")
-            .insert(id, owner);
-        Ok(serde_json::json!({"player":id}))
+        let mut owner = a.claim(acc.id)?;
+        let account = acc.id;
+        lifecycle::account(&a, vec![account], "script_entry", move |a| async move {
+            owner.arm_cleanup(&a, tokio::runtime::Handle::current());
+            lifecycle::stage(Stage::Store);
+            let ch = if acc.characters.is_empty() {
+                a.store.create(acc.id, a.content.get(WIZARD)?).await?
+            } else {
+                ensure!(acc.characters.len() == 1, "unexpected character count");
+                acc.characters[0].clone()
+            };
+            let bind = lifecycle::binding(&a, acc.id)?;
+            lifecycle::stage(Stage::Reservation);
+            let destination = a.world.directory(move |d| d.initial(input.world)).await?;
+            lifecycle::stage(Stage::Store);
+            let presentation = a.store.presentation(acc.id).await?;
+            lifecycle::stage(Stage::Publication);
+            let id = a
+                .world
+                .in_world(destination)
+                .call(move |w| {
+                    let id = w.enter_at(ch, None, None, presentation)?;
+                    bind(id)?;
+                    Ok(id)
+                })
+                .await?;
+            let mut bots = a.bots.lock().expect("bot ownership registry poisoned");
+            ensure!(
+                !bots.contains_key(&id),
+                "script avatar already has a controller owner"
+            );
+            owner.publish_script(id)?;
+            bots.insert(id, owner);
+            lifecycle::stage(Stage::Settled);
+            Ok(id)
+        })
+        .await
+        .map(|id| serde_json::json!({"player":id}))
     }
     .await;
     match result {
@@ -1846,7 +2220,10 @@ async fn bot_create(
     }
 }
 fn control(a: &App, headers: &HeaderMap) -> Result<()> {
-    ensure!(!*a.shutdown.borrow(), "server is shutting down");
+    ensure!(
+        !*a.shutdown.borrow() && lifecycle::drain::open(a),
+        "server admission is frozen"
+    );
     let token = a.control.as_ref().context("script control is disabled")?;
     ensure!(
         headers.get("authorization").and_then(|v| v.to_str().ok())
@@ -1868,14 +2245,7 @@ async fn bot_action(
     let result: Result<serde_json::Value> = async {
         control(&a, &headers)?;
         let id = input.player;
-        if let Some(plan) = a
-            .world
-            .for_player(id)
-            .call(move |w| w.action(id, input.action))
-            .await?
-        {
-            persist(&a, plan).await?;
-        }
+        inventory(&a, id, move |w| w.action(id, input.action)).await??;
         a.world.for_player(id).call(move |w| w.observe(id)).await
     }
     .await;
@@ -1897,14 +2267,25 @@ async fn bot_trade(
     let result: Result<serde_json::Value> = async {
         control(&a, &headers)?;
         let id = input.player;
-        if let Some(plan) = a
-            .world
-            .for_player(id)
-            .call(move |w| w.script_trade(id, input.action))
-            .await?
-        {
-            persist_trade(&a, plan).await?;
-        }
+        lifecycle::player(&a, id, "trade", move |a| async move {
+            lifecycle::stage(Stage::Reservation);
+            let prepared = a
+                .world
+                .for_player(id)
+                .call(move |w| Ok(w.script_trade(id, input.action)))
+                .await?;
+            match prepared {
+                Ok(Some(plan)) => persist_trade(&a, plan).await,
+                Ok(None) => Ok(()),
+                Err(error) => {
+                    if lifecycle::rule_rejection(&error) {
+                        lifecycle::stage(Stage::Rejected);
+                    }
+                    Err(error)
+                }
+            }
+        })
+        .await?;
         a.world.for_player(id).call(move |w| w.observe(id)).await
     }
     .await;
@@ -1940,14 +2321,13 @@ async fn script(State(a): State<App>, headers: HeaderMap, Json(input): Json<Scri
         }
         let start = tokio::time::Instant::now();
         let mut shutdown=a.shutdown.subscribe();
+        let mut drain=lifecycle::drain::stopping(&a);
         let mut frames = Vec::new();
         for step in input.steps {
-            tokio::select!{_=tokio::time::sleep_until(start+std::time::Duration::from_millis(step.at_ms))=>{},_=shutdown.changed()=>bail!("server is shutting down")};
+            tokio::select!{_=tokio::time::sleep_until(start+std::time::Duration::from_millis(step.at_ms))=>{},_=shutdown.changed()=>bail!("server is shutting down"),_=drain.changed()=>bail!("server admission is frozen")};
             let id = input.player;
-            if let Some(action) = step.action
-                && let Some(plan) = a.world.for_player(id).call(move |w| w.action(id, action)).await?
-            {
-                persist(&a, plan).await?;
+            if let Some(action) = step.action {
+                inventory(&a, id, move |w| w.action(id, action)).await??;
             }
             frames.push(a.world.for_player(id).call(move |w| w.observe(id)).await?);
         }
@@ -2011,18 +2391,9 @@ async fn bot_leave(
 ) -> Response {
     let result: Result<()> = async {
         control(&a, &headers)?;
-        ensure!(
-            a.bots
-                .lock()
-                .expect("bot ownership registry poisoned")
-                .contains_key(&input.player),
-            "not a script-owned player"
-        );
-        depart(&a, input.player).await?;
-        a.bots
-            .lock()
-            .expect("bot ownership registry poisoned")
-            .remove(&input.player);
+        if let Some(finalization) = close_script(&a, input.player)? {
+            finalization.wait().await?;
+        }
         Ok(())
     }
     .await;
@@ -2031,55 +2402,132 @@ async fn bot_leave(
         Err(e) => error(e),
     }
 }
-pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
-    let deaths = a.clone();
-    tokio::spawn(async move {
-        let result: Result<()> = async {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                let progress = deaths.world.collect(World::pending_progress).await?;
-                if !progress.is_empty() {
-                    let result = deaths
-                        .store
-                        .progress_batch(progress.iter().map(|(_, ch)| ch.clone()).collect())
-                        .await
-                        .context("progress persistence failed");
-                    for (id, snapshot) in progress {
-                        let result = result
-                            .as_ref()
-                            .map(|_| ())
-                            .map_err(|error| anyhow::anyhow!("{error:#}"));
-                        if let Err(error) = deaths
-                            .world
-                            .for_player(id)
-                            .call(move |w| {
-                                w.committed(id, result)?;
-                                w.finish_progress(id, snapshot)
-                            })
-                            .await
-                        {
-                            tracing::error!(player=id, error=%format_args!("{error:#}"), "progress completion failed");
-                        }
-                    }
-                }
-                let pending = deaths.world.collect(World::pending_deaths).await?;
-                for (id, ch, killer) in pending {
-                    if let Err(error) = persist_death(&deaths, id, ch, killer).await {
-                        tracing::error!(player=id,error=%format_args!("{error:#}"),"death completion failed");
-                    }
-                }
-            }
-        }.await;
-        if let Err(error) = result {
-            tracing::error!(error=%format_args!("{error:#}"), "persistence coordinator stopped");
-        }
-    });
-    let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
-        format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
-    })?;
-    if a.shore_bots {
-        crate::bots::start(&a).await?;
+fn close_script(a: &App, player: i32) -> Result<Option<lifecycle::Finalized>> {
+    // Serialize map custody with registry publication, so a duplicate cannot see neither.
+    let mut bots = a.bots.lock().expect("bot ownership registry poisoned");
+    match bots.remove(&player) {
+        Some(owner) => owner.close(a, CloseReason::Controller),
+        None => lifecycle::join_script(a, player).map(Some),
     }
+}
+fn close_scripts(a: &App) -> Result<Vec<lifecycle::Finalized>> {
+    let mut bots = a.bots.lock().expect("bot ownership registry poisoned");
+    let mut completions = lifecycle::script_finalizations(a);
+    for id in bots.keys().copied().collect::<Vec<_>>() {
+        if let Some(completion) = bots
+            .remove(&id)
+            .expect("script owner")
+            .close(a, CloseReason::Shutdown)?
+        {
+            completions.push(completion);
+        }
+    }
+    Ok(completions)
+}
+
+pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
+    let app = a.clone();
+    let progress = a
+        .world
+        .directory(move |d| {
+            let mut owned = BTreeMap::new();
+            let mut failure = None;
+            let plans: Vec<_> = d
+                .worlds
+                .values_mut()
+                .flat_map(|w| {
+                    w.pending_progress_where(|id, account| {
+                        match lifecycle::reserve_player(&app, account, id, "progress") {
+                            Ok(Some(guard)) => {
+                                owned.insert(id, guard);
+                                true
+                            }
+                            Ok(None) => false,
+                            Err(error) => {
+                                failure = Some(error);
+                                false
+                            }
+                        }
+                    })
+                })
+                .collect();
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            Ok(plans
+                .into_iter()
+                .map(|(id, snapshot)| {
+                    (
+                        owned.remove(&id).expect("reserved progress owner"),
+                        id,
+                        snapshot,
+                    )
+                })
+                .collect::<Vec<_>>())
+        })
+        .await?;
+    for (guard, id, snapshot) in progress {
+        if let Err(error) = lifecycle::complete(guard, move |a| async move {
+            persist_progress_inner(&a, id, snapshot).await
+        })
+        .await
+        {
+            tracing::error!(player=id,error=%format_args!("{error:#}"),"progress completion failed");
+        }
+    }
+    let app = a.clone();
+    let pending = a
+        .world
+        .directory(move |d| {
+            let mut owned = BTreeMap::new();
+            let mut failure = None;
+            let plans: Vec<_> = d
+                .worlds
+                .values_mut()
+                .flat_map(|w| {
+                    w.pending_deaths_where(|id, account| {
+                        match lifecycle::reserve_player(&app, account, id, "death") {
+                            Ok(Some(guard)) => {
+                                owned.insert(id, guard);
+                                true
+                            }
+                            Ok(None) => false,
+                            Err(error) => {
+                                failure = Some(error);
+                                false
+                            }
+                        }
+                    })
+                })
+                .collect();
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            Ok(plans
+                .into_iter()
+                .map(|(id, ch, killer)| {
+                    (
+                        owned.remove(&id).expect("reserved death owner"),
+                        id,
+                        ch,
+                        killer,
+                    )
+                })
+                .collect::<Vec<_>>())
+        })
+        .await?;
+    for (guard, id, ch, killer) in pending {
+        if let Err(error) = lifecycle::complete(guard, move |a| async move {
+            persist_death_inner(&a, id, ch, killer).await
+        })
+        .await
+        {
+            tracing::error!(player=id,error=%format_args!("{error:#}"),"death completion failed");
+        }
+    }
+    Ok(())
+}
+fn routes(a: &App, client: PathBuf) -> Router {
     let app = Router::new()
         .route("/legacy-api/char/list", post(chars))
         .route("/legacy-api/char/fame", post(fame))
@@ -2090,7 +2538,6 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         .nest_service("/sfx", tower_http::services::ServeDir::new(a.sfx.clone()))
         .route("/client.swf", get(swf))
         .route("/game", get(websocket))
-        .route("/health", get(health))
         .route(
             "/api/diagnostics/{key}",
             post(diagnostics::browser_sample).layer(DefaultBodyLimit::max(4096)),
@@ -2113,8 +2560,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         .route("/internal/discord/kick", post(discord_kick))
         .route("/internal/discord/recover", post(discord_recover))
         .route("/api/account/recover", post(reset_password));
-    let app = app
-        .route("/dev/testing", post(testing::command))
+    app.route("/dev/testing", post(testing::command))
         .route("/dev/join", post(bot_create))
         .route("/dev/action", post(bot_action))
         .route("/dev/trade", post(bot_trade))
@@ -2122,6 +2568,12 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         .route("/dev/map", get(map))
         .route("/dev/observe", post(observe))
         .route("/dev/leave", post(bot_leave))
+        .route_layer(axum::middleware::from_fn_with_state(
+            a.clone(),
+            lifecycle::drain::http_entry,
+        ))
+        .merge(lifecycle::drain::routes())
+        .route("/health", get(health))
         .route_service(
             "/",
             tower_http::services::ServeFile::new(client.join("index.html")),
@@ -2135,7 +2587,30 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
             tower_http::services::ServeDir::new(client.join("vendor")),
         )
         .layer(DefaultBodyLimit::max(1_048_576))
-        .with_state(a.clone());
+        .with_state(a.clone())
+}
+
+pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
+    let deaths = a.clone();
+    tokio::spawn(async move {
+        let result: Result<()> = async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                persistence_tick(&deaths).await?;
+            }
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::error!(error=%format_args!("{error:#}"), "persistence coordinator stopped");
+        }
+    });
+    let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
+        format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
+    })?;
+    if a.shore_bots {
+        crate::bots::start(&a).await?;
+    }
+    let app = routes(&a, client);
     tracing::info!(address=%bind,origin=%a.origin,max_players=a.max_players,behind_proxy=a.behind_proxy,"game frontdoor listening");
     if !a.behind_proxy {
         eprintln!(
@@ -2145,7 +2620,8 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
     let shutdown = a.clone();
     let failure = Arc::new(Mutex::new(None));
     let report = failure.clone();
-    axum::serve(
+    let (stopped, mut stop) = tokio::sync::watch::channel(false);
+    let serving = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
@@ -2153,44 +2629,24 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         let result: Result<()> = async {
             shutdown_signal().await?;
             tracing::info!("saving active characters before shutdown");
-            let _ = shutdown.shutdown.send(true);
-            let bots: Vec<_> = shutdown
-                .bots
-                .lock()
-                .expect("bot registry poisoned")
-                .keys()
-                .copied()
-                .collect();
-            for id in bots {
-                depart(&shutdown, id).await?;
-                shutdown
-                    .bots
-                    .lock()
-                    .expect("bot registry poisoned")
-                    .remove(&id);
-            }
-            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-            while !shutdown
-                .owners
-                .lock()
-                .expect("ownership registry poisoned")
-                .is_empty()
-            {
-                ensure!(
-                    tokio::time::Instant::now() < deadline,
-                    "shutdown save timed out; inspect quarantined characters and logs"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            Ok(())
+            lifecycle::drain::prepare(&shutdown);
+            shutdown.shutdown.send_replace(true);
+            lifecycle::drain::terminate(&shutdown).await
         }
         .await;
         if let Err(e) = result {
             tracing::error!(error=%e,"shutdown persistence failed");
             *report.lock().expect("shutdown report poisoned") = Some(e.to_string());
         }
-    })
-    .await?;
+        stopped.send_replace(true);
+    });
+    tokio::select! {
+        result = serving => result?,
+        _ = async { let _ = stop.changed().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } => {
+            let failure = failure.lock().expect("shutdown report poisoned").clone();
+            bail!("HTTP shutdown deadline exceeded; drain failure={failure:?}");
+        }
+    }
     if let Some(e) = failure.lock().expect("shutdown report poisoned").take() {
         bail!("{e}");
     }

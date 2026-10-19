@@ -86,7 +86,8 @@ impl World {
                 _ => (Motion::Tangential, 8.),
             },
             kind if GODS.contains(&kind) => {
-                if target.is_none_or(|p| e.pos.distance(p) > 7.) {
+                let sight = if kind == 0x651 { 9. } else { 7. };
+                if target.is_none_or(|p| e.pos.distance(p) > sight) {
                     (Motion::Wander, 4.)
                 } else {
                     chase(
@@ -95,7 +96,7 @@ impl World {
                             0x659 => 4.,
                             _ => 6.,
                         },
-                        7.,
+                        sight,
                         4.,
                     )
                 }

@@ -45,14 +45,14 @@ impl Directory {
                     .checked_duration_since(*last)
                     .context("teleport receive clock regressed")?
                     >= Duration::from_secs(10),
-                "Too soon to teleport again; wait ten seconds."
+                controller("Too soon to teleport again; wait ten seconds.")
             );
         }
         self.teleports
             .retain(|_, last| received.saturating_duration_since(*last) < Duration::from_secs(10));
         ensure!(
             self.teleports.len() < 4096,
-            "Teleport rate registry is full."
+            controller("Teleport rate registry is full.")
         );
         let world = self.resolve(Target::Player(id))?;
         let movement_received = received
@@ -102,37 +102,48 @@ impl World {
     }
 
     fn teleport_destination(&self, id: i32, target: i32) -> Result<Pos> {
-        ensure!(self.allow_teleport(), "Cannot teleport in this world.");
+        ensure!(
+            self.allow_teleport(),
+            controller("Cannot teleport in this world.")
+        );
         let p = self
             .players
             .get(&id)
             .context("Teleport sender is no longer in this world.")?;
         ensure!(
-            ready(p),
+            p.persistence_failure.is_none(),
             "Busy, dead, departing or quarantined players cannot teleport."
         );
         ensure!(
-            !p.correcting()?,
-            "Position correction awaits GOTO acknowledgement."
+            ready(p),
+            controller("Busy, dead, departing or quarantined players cannot teleport.")
         );
-        ensure!(!p.paused, "Cannot teleport while paused.");
-        ensure!(id != target, "You are already at yourself.");
+        ensure!(
+            !p.correcting()?,
+            controller("Position correction awaits GOTO acknowledgement.")
+        );
+        ensure!(!p.paused, controller("Cannot teleport while paused."));
+        ensure!(id != target, controller("You are already at yourself."));
         let q = self
             .players
             .get(&target)
-            .context("Teleport target is not a live player in this world.")?;
+            .ok_or_else(|| controller("Teleport target is not a live player in this world."))?;
         ensure!(
             ready(q),
-            "Teleport target is busy, dead, departing or quarantined."
+            controller("Teleport target is busy, dead, departing or quarantined.")
         );
-        ensure!(!q.paused, "Cannot teleport to a paused player.");
+        ensure!(!q.paused, controller("Cannot teleport to a paused player."));
         ensure!(
             p.known.contains(&target),
-            "Teleport target has not been observed."
+            controller("Teleport target has not been observed.")
+        );
+        ensure!(
+            q.pos.x.is_finite() && q.pos.y.is_finite() && self.map.cell(q.pos.x, q.pos.y).is_some(),
+            "Teleport target's position is blocked."
         );
         ensure!(
             self.player_position_valid(None, q.pos),
-            "Teleport target's position is blocked."
+            controller("Teleport target's position is blocked.")
         );
         Ok(q.pos)
     }

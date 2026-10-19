@@ -48,9 +48,9 @@ impl Store {
         self.call(move |db| {
             let tx = db.transaction()?;
             let eligible: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM discord_links l JOIN credentials c ON c.account=l.account WHERE l.account=?1)", [account], |r| r.get(0))?;
-            ensure!(eligible, "link your registered game account using /discord and /link first");
+            ensure!(eligible, Rejected("link your registered game account using /discord and /link first"));
             let previous: Option<i64> = tx.query_row("SELECT issued_at FROM recovery_codes WHERE account=?1", [account], |r| r.get(0)).optional()?;
-            ensure!(previous.is_none_or(|t| time-t >= 60), "wait one minute before requesting another recovery code");
+            ensure!(previous.is_none_or(|t| time-t >= 60), Rejected("wait one minute before requesting another recovery code"));
             tx.execute("DELETE FROM recovery_codes WHERE expires_at<=?1", [time])?;
             tx.execute("INSERT INTO recovery_codes(account,hash,issued_at,expires_at) VALUES(?1,?2,?3,?4) ON CONFLICT(account) DO UPDATE SET hash=excluded.hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at", params![account,hash,time,time+300])?;
             tx.commit()?;

@@ -83,15 +83,15 @@ impl World {
             .players
             .get_mut(&id)
             .context("SHOOT ACK player missing")?;
-        ensure!(time >= -1, "invalid SHOOT acknowledgement time");
+        ensure!(time >= -1, protocol("invalid SHOOT acknowledgement time"));
         let (sent, bullets) = p
             .shoot_acks
             .pop_front()
-            .context("unsolicited SHOOT acknowledgement")?;
+            .ok_or_else(|| protocol("unsolicited SHOOT acknowledgement"))?;
         let age = self.clock.now().duration_since(sent);
         ensure!(
             age <= Duration::from_secs(5),
-            "SHOOT acknowledgement timed out"
+            protocol("SHOOT acknowledgement timed out")
         );
         for bullet in bullets {
             let key = (bullet.owner, bullet.id);

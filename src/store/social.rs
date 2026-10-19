@@ -29,7 +29,7 @@ impl Store {
                 |r| r.get(0),
             )
             .optional()?
-            .context("Player not found.")
+            .ok_or_else(|| anyhow::anyhow!(Rejected("Player not found.")))
         })
         .await
     }
@@ -47,7 +47,7 @@ impl Store {
     ) -> Result<AccountLists> {
         ensure!(
             (0..=1).contains(&list) && account != target,
-            "invalid account list edit"
+            Rejected("invalid account list edit")
         );
         self.call(move |db| {
             let tx = db.transaction()?;

@@ -171,7 +171,7 @@ fn grates_have_bounded_selected_children_and_existing_portal_sources_are_unchang
     assert!(w.entities.is_empty());
     for (enemy, portal, chance) in [
         (0x610, 0x717, 0.01),
-        (0x654, 0x718, 0.17),
+        (0x654, 0x71b, 0.1),
         (0x653, 0x70c, 0.25),
         (0x659, 0x71a, 0.17),
     ] {
@@ -183,6 +183,95 @@ fn grates_have_bounded_selected_children_and_existing_portal_sources_are_unchang
         );
     }
     assert_eq!(crate::dungeon::portal_drop(0x600), None);
+}
+
+#[test]
+fn medusa_defeat_earns_an_abyss_portal_only_in_the_realm() {
+    for succeeds in [true, false] {
+        let seed = (0..64)
+            .find(|seed| rand::rngs::StdRng::seed_from_u64(*seed).gen_bool(0.1) == succeeds)
+            .unwrap();
+        let mut d = tests::directory();
+        let (player, _rx) = tests::receive(&mut d, -3, 1, crate::content::WIZARD);
+        let w = d.worlds.get_mut(&-3).unwrap();
+        assert_eq!(w.content.objects[&0x654].name, "Medusa");
+        assert_eq!(w.content.objects[&0x657].name, "Flying Brain");
+        let pos = w.players[&player].pos;
+        let medusa = w.spawn_entity(0x654, pos, vec![]).unwrap();
+        let hp = w.entities[&medusa].hp;
+        w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+        w.damage_enemy(player, medusa, hp, true, &[], None).unwrap();
+        let expected = if succeeds { vec![(0x71b, pos)] } else { vec![] };
+        let observed: Vec<_> = w.portal_requests.iter().map(|(kind, _)| *kind).collect();
+        println!("Medusa defeat: successful_roll={succeeds}, requested_portals={observed:x?}");
+        assert_eq!(
+            observed,
+            expected.iter().map(|(kind, _)| *kind).collect::<Vec<_>>()
+        );
+        assert!(!w.entities.contains_key(&medusa));
+        let worlds = d.worlds.len();
+        d.step();
+        assert_eq!(d.worlds.len(), worlds + usize::from(succeeds));
+        if succeeds {
+            let portal = *d.portals.keys().next().unwrap();
+            assert_eq!(d.worlds[&-3].entities[&portal].kind, 0x71b);
+            let destination = d.portals[&portal].destination.unwrap();
+            assert_eq!(d.worlds[&destination].name, "Abyss of Demons");
+            assert_eq!(
+                d.destination(player, Some(portal)).unwrap(),
+                (1, 101, destination)
+            );
+            let (time, key, _) = d.issue(1, 101, destination).unwrap();
+            let ch = d.worlds.get_mut(&-3).unwrap().leave(player).unwrap();
+            assert_eq!(d.consume(1, destination, time, key.clone()).unwrap(), ch.id);
+            assert!(d.consume(1, destination, time, key).is_err());
+            let items = ch.items.clone();
+            let arrival = d
+                .worlds
+                .get_mut(&destination)
+                .unwrap()
+                .enter(ch, None)
+                .unwrap();
+            let ch = &d.worlds[&destination].players[&arrival].character;
+            assert_eq!((ch.account, ch.id, ch.alive), (1, 101, true));
+            assert_eq!(ch.items, items);
+            println!("Earned portal 0x71b entered Abyss of Demons as the same living character");
+        } else {
+            assert!(d.portals.is_empty());
+        }
+    }
+    for (name, kind) in [
+        ("Realm", 0x654),
+        ("Realm", 0x657),
+        ("Abyss of Demons", 0x654),
+    ] {
+        let mut w = arena();
+        w.name = name.into();
+        let player = w.enter(tests::ch(&w), None).unwrap();
+        let mut hits = 0;
+        for seed in 0..64 {
+            let enemy = w
+                .spawn_entity(kind, w.players[&player].pos, vec![])
+                .unwrap();
+            let hp = w.entities[&enemy].hp;
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.damage_enemy(player, enemy, hp, true, &[], None).unwrap();
+            let expected = name == "Realm"
+                && kind == 0x654
+                && rand::rngs::StdRng::seed_from_u64(seed).gen_bool(0.1);
+            assert_eq!(
+                w.portal_requests.len(),
+                usize::from(expected),
+                "{name} {kind:#x} seed={seed}"
+            );
+            if expected {
+                assert_eq!(w.portal_requests[0].0, 0x71b);
+                hits += 1;
+            }
+            w.portal_requests.clear();
+        }
+        assert_eq!(hits > 0, name == "Realm" && kind == 0x654);
+    }
 }
 
 #[test]

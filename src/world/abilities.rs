@@ -53,36 +53,43 @@ impl World {
     ) -> Result<()> {
         let p = &self.players[&id];
         ensure!(
+            p.persistence_failure.is_none(),
+            "ability caster is unavailable"
+        );
+        ensure!(
             p.character.alive
                 && !p.death_pending
                 && !p.departing
                 && (!p.pending || p.progress_started)
                 && !p.paused
                 && p.persistence_failure.is_none(),
-            "ability caster is unavailable"
+            controller("ability caster is unavailable")
         );
         ensure!(
             slot.object == id && slot.kind == item.kind as i32 && p.character.items[1] == slot.kind,
-            "ability item does not match equipped item"
+            controller("ability item does not match equipped item")
         );
         ensure!(
             slot.slot == 1 && item.slot_type == self.content.get(p.character.class)?.slots[1],
-            "ability must be equipped by a compatible class"
+            controller("ability must be equipped by a compatible class")
         );
         ensure!(
             p.tx.as_ref()
                 .is_none_or(|tx| !*tx.lost.borrow() && !tx.packets.is_closed()),
-            "ability connection is closed"
+            controller("ability connection is closed")
         );
         ensure!(
             p.conditions(self.now) & crate::condition::bit(crate::condition::QUIET) == 0,
-            "cannot cast while Quiet"
+            controller("cannot cast while Quiet")
         );
-        ensure!(p.character.mp >= item.mana_cost, "not enough mana");
+        ensure!(
+            p.character.mp >= item.mana_cost,
+            controller("not enough mana")
+        );
         ensure!(
             p.last_ability
                 .is_none_or(|last| self.now >= last + item.cooldown_ms),
-            "ability cooldown"
+            controller("ability cooldown")
         );
         let reach = item
             .abilities
@@ -100,7 +107,7 @@ impl World {
                 && pos.y.is_finite()
                 && p.pos.distance(pos) <= reach
                 && self.map.cell(pos.x, pos.y).is_some(),
-            "invalid ability target or target too far"
+            controller("invalid ability target or target too far")
         );
         let p = self.players.get_mut(&id).unwrap();
         p.character.mp -= item.mana_cost;
@@ -169,7 +176,7 @@ impl World {
                 + self.ability_state.objects.len()
                 + item.abilities.len()
                 <= MAX_ACTIVE,
-            "active ability budget exhausted"
+            controller("active ability budget exhausted")
         );
         let origin = self.players[&id].pos;
         for effect in &item.abilities {
@@ -177,7 +184,7 @@ impl World {
                 Ability::Shoot => {
                     ensure!(
                         self.players[&id].controller == Controller::Human,
-                        "projectile abilities require native reports"
+                        controller("projectile abilities require native reports")
                     );
                     ensure!(
                         (1..=5).contains(&item.shots)
@@ -195,11 +202,11 @@ impl World {
                 Ability::Teleport { distance } => {
                     ensure!(
                         origin.distance(pos) <= *distance && self.walkable(pos),
-                        "teleport target is blocked or outside ability range"
+                        controller("teleport target is blocked or outside ability range")
                     );
                 }
                 Ability::Trap { .. } => {
-                    ensure!(self.walkable(pos), "trap target is blocked");
+                    ensure!(self.walkable(pos), controller("trap target is blocked"));
                     self.content.get(0x711)?;
                 }
                 Ability::Decoy { .. } => {
