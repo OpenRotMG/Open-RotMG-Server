@@ -1,7 +1,12 @@
 import hashlib
 import importlib.util
 import io
+import contextlib
 import json
+import os
+import socket
+import subprocess
+import sys
 import sqlite3
 from pathlib import Path
 import tarfile
@@ -215,9 +220,10 @@ class UpdateTest(unittest.TestCase):
         with self.deployment() as (raw, metadata, live, work):
             with patch.object(update, 'run'), patch.object(update, 'rehearse'), patch.object(update, 'install_backups'), \
                     patch.object(update, 'warn_restart'), patch.object(update.subprocess, 'check_output', return_value='failed'), \
-                    patch.object(update.ctypes, 'CDLL') as exchange:
+                    patch.object(update, 'stop_prepared') as prepared, patch.object(update.ctypes, 'CDLL') as exchange:
                 with self.assertRaisesRegex(RuntimeError, 'Shutdown save failed'):
                     update.main('a' * 40, raw)
+                prepared.assert_called_once()
                 exchange.assert_not_called()
             self.assertEqual(len(list(live.parent.glob('server-stage-*'))), 1)
             self.assertEqual((live / 'REVISION').read_text().strip(), 'b' * 40)
@@ -234,12 +240,14 @@ class UpdateTest(unittest.TestCase):
                 return 0
             with patch.object(update, 'run'), patch.object(update, 'rehearse'), patch.object(update, 'install_backups'), \
                     patch.object(update, 'warn_restart'), patch.object(update.subprocess, 'check_output', return_value='success'), \
+                    patch.object(update, 'stop_prepared') as prepared, \
                     patch.object(update, 'copy_db', side_effect=lambda source, target: target.write_bytes(b'frozen db')), \
                     patch.object(update, 'ready', side_effect=RuntimeError('new service unavailable')), \
                     patch.object(update.ctypes, 'CDLL') as libc:
                 libc.return_value.renameat2.side_effect = exchange
                 with self.assertRaisesRegex(RuntimeError, 'new service unavailable'):
                     update.main('a' * 40, raw)
+                prepared.assert_called_once()
             previous = next(live.parent.glob('server-stage-*'))
             self.assertEqual((previous / 'REVISION').read_text().strip(), 'b' * 40)
             self.assertEqual((live / 'REVISION').read_text().strip(), 'a' * 40)
@@ -311,7 +319,7 @@ class UpdateTest(unittest.TestCase):
             lock = root / 'backup.lock'
             lock.touch()
             lock.chmod(0o444)
-            with patch.object(update, 'LAST_BACKUP', root / 'receipt.json'), patch.object(update, 'run'), patch.object(update, 'install_backups'), \
+            with patch.object(update, 'LAST_BACKUP', root / 'receipt.json'), patch.object(update, 'run'), patch.object(update, 'stop_prepared'), patch.object(update, 'install_backups'), \
                     patch.object(update, 'rehearse'), patch.object(update, 'files', return_value={}), \
                     patch.object(update.subprocess, 'check_output', return_value='failed'), \
                     patch.object(update, 'main_revision', return_value='a' * 40), \
@@ -453,7 +461,7 @@ class UpdateTest(unittest.TestCase):
                 update.warn_restart({'bind': '127.0.0.1:18923'})
         sleep.assert_not_called()
 
-    def test_announcement_endpoint_errors_are_loud_but_an_old_server_still_restarts(self):
+    def test_announcement_endpoint_errors_are_loud_and_old_warning_endpoint_is_unsupported(self):
         with tempfile.TemporaryDirectory() as tmp:
             token = Path(tmp) / 'discord-link-token'
             token.write_text('a' * 64)
@@ -479,11 +487,277 @@ class UpdateTest(unittest.TestCase):
                     patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
                     patch.object(update, 'main_revision', return_value='a' * 40), \
                     patch.object(update, 'warn_restart', side_effect=lambda config: order.append('warn')), \
+                    patch.object(update, 'stop_prepared', side_effect=lambda config, work: order.extend(['prepare', ('systemctl', 'stop', 'openrotmg.service')])), \
                     patch.object(update, 'run', side_effect=lambda *args: order.append(args)), \
                     patch.object(update.subprocess, 'check_output', return_value='failed'):
                 with self.assertRaisesRegex(RuntimeError, 'Shutdown save failed'):
                     update.deploy(root, root, {'manifest': {}, 'revision': 'a' * 40}, {'state': str(root)})
-            self.assertEqual(order[-2:], ['warn', ('systemctl', 'stop', 'openrotmg.service')])
+            self.assertEqual(order[-3:], ['warn', 'prepare', ('systemctl', 'stop', 'openrotmg.service')])
+
+
+class DrainTest(unittest.TestCase):
+    process = {'pid': 123, 'start_ticks': 456, 'binary_sha256': 'e' * 64}
+    receipt = {'instance': 'a' * 64, 'generation': 1}
+
+    def result(self, state='ready', **fields):
+        return {'receipt': self.receipt, 'state': state, 'errors': [], **fields}
+
+    def environment(self, root, request):
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.object(update, 'drain_process', return_value=self.process))
+        stack.enter_context(patch.object(update, 'drain_request', side_effect=request))
+        stack.enter_context(patch.object(update.time, 'sleep'))
+        run = stack.enter_context(patch.object(update, 'run'))
+        return stack, run
+
+    def test_ready_is_revalidated_before_the_only_stop_and_receipt_is_retained(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            operations = []
+
+            def request(config, operation, receipt=None):
+                operations.append(operation)
+                self.assertEqual(receipt, None if operation == 'prepare' else self.receipt)
+                return self.result()
+
+            stack, run = self.environment(root, request)
+            with stack:
+                evidence = update.stop_prepared({}, root)
+            self.assertEqual(operations, ['prepare', 'status'])
+            run.assert_called_once_with('systemctl', 'stop', 'openrotmg.service')
+            self.assertEqual(evidence['stage'], 'stopped')
+            self.assertEqual(json.loads((root / 'drain-receipt.json').read_text()), evidence)
+
+    def test_sql_failure_cancels_same_receipt_but_never_stops_or_reports_success(self):
+        operations = []
+
+        def request(config, operation, receipt=None):
+            operations.append(operation)
+            return self.result('cancelled' if operation == 'cancel' else 'failed', errors=['SQL final save failure'])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, request)
+            with stack, self.assertRaisesRegex(RuntimeError, 'SQL final save failure'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+            self.assertEqual(operations, ['prepare', 'cancel'])
+            proof = json.loads((root / 'drain-receipt.json').read_text())
+            self.assertEqual(proof['stage'], 'cancelled_after_failure')
+            self.assertIn('SQL final save failure', proof['original_error'])
+
+    def test_timeout_before_acceptance_and_lost_response_after_acceptance_recover_cancel_only(self):
+        for label in ['timeout before acceptance', 'lost response after acceptance']:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                operations = []
+
+                def request(config, operation, receipt=None):
+                    operations.append(operation)
+                    if len(operations) == 1:
+                        raise TimeoutError(label)
+                    return self.result('cancelled' if operation == 'cancel' else 'ready')
+
+                stack, run = self.environment(root, request)
+                with stack, self.assertRaisesRegex(TimeoutError, label):
+                    update.stop_prepared({}, root)
+                run.assert_not_called()
+                self.assertEqual(operations, ['prepare', 'prepare', 'cancel'])
+                proof = json.loads((root / 'drain-receipt.json').read_text())
+                self.assertEqual(proof['drain']['receipt'], self.receipt)
+                self.assertEqual(proof['original_error'], label)
+
+    def test_preparing_deadline_then_settlement_and_cancel_remains_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, [self.result('preparing'), self.result(), self.result('cancelled')])
+            with stack, patch.object(update.time, 'monotonic', side_effect=[0, 21, 21, 21]), \
+                    self.assertRaisesRegex(RuntimeError, 'readiness timed out'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+            proof = json.loads((root / 'drain-receipt.json').read_text())
+            self.assertEqual(proof['stage'], 'cancelled_after_failure')
+
+    def test_cancellation_failure_preserves_both_errors_and_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, [self.result('failed', errors=['SQL original']), RuntimeError('cancel denied')])
+            with stack, self.assertRaisesRegex(RuntimeError, 'SQL original; drain cancellation failed: cancel denied'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+            proof = json.loads((root / 'drain-receipt.json').read_text())
+            self.assertIn('SQL original', proof['original_error'])
+            self.assertEqual(proof['cancellation_error'], 'cancel denied')
+            self.assertEqual(proof['drain']['receipt'], self.receipt)
+
+    def test_process_replacement_never_stops_or_cancels_the_replacement(self):
+        for replace_at in [1, 2, 3, 4, 5]:
+            with self.subTest(replace_at=replace_at), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                stack, run = self.environment(root, lambda *args: self.result())
+                calls = 0
+
+                def process(config):
+                    nonlocal calls
+                    calls += 1
+                    return self.process if calls <= replace_at else {**self.process, 'start_ticks': 999}
+
+                with stack, patch.object(update, 'drain_process', side_effect=process), \
+                        patch.object(update, 'drain_request', return_value=self.result()) as request, \
+                        self.assertRaisesRegex(RuntimeError, 'process replaced'):
+                    update.stop_prepared({}, root)
+                run.assert_not_called()
+                self.assertNotIn('cancel', [call.args[1] for call in request.call_args_list])
+
+    def test_stale_status_or_receipt_cannot_authorize_stop_or_new_prepare(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, [self.result(), RuntimeError('HTTP 409 stale receipt'),
+                                                 RuntimeError('HTTP 409 stale receipt')])
+            with stack, self.assertRaisesRegex(RuntimeError, 'stale receipt.*cancellation failed'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+
+    def test_abort_after_acceptance_cancels_and_reraises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, [self.result(), KeyboardInterrupt('aborted'), self.result('cancelled')])
+            with stack, self.assertRaisesRegex(KeyboardInterrupt, 'aborted'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+
+    def test_failed_stop_preserves_original_and_explicit_cancel_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, [self.result(), self.result(), RuntimeError('termination cannot be cancelled')])
+            with stack:
+                run.side_effect = RuntimeError('stop command failed')
+                with self.assertRaisesRegex(RuntimeError, 'stop command failed; drain cancellation failed: termination'):
+                    update.stop_prepared({}, root)
+            self.assertEqual(run.call_count, 1)
+
+    def test_missing_endpoint_is_a_hard_failure_not_an_announcement_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, RuntimeError('Drain prepare rejected: HTTP 404'))
+            with stack, self.assertRaisesRegex(RuntimeError, 'HTTP 404.*cancellation failed'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+
+    def test_http_helper_auth_schema_and_stale_receipt_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp) / 'token'
+            token.write_text('test-only-token')
+            response = unittest.mock.MagicMock()
+            response.__enter__.return_value = io.BytesIO(json.dumps(self.result()).encode())
+            opener = unittest.mock.Mock()
+            opener.open.return_value = response
+            with patch.object(update, 'ANNOUNCE_TOKEN', token), \
+                    patch.object(update.urllib.request, 'build_opener', return_value=opener) as build:
+                self.assertEqual(update.drain_request({'bind': '127.0.0.1:12345'}, 'status', self.receipt), self.result())
+                request = opener.open.call_args.args[0]
+                self.assertEqual(request.get_header('Authorization'), 'Bearer test-only-token')
+                self.assertEqual(json.loads(request.data), self.receipt)
+                self.assertEqual(request.get_method(), 'POST')
+                self.assertEqual(request.get_header('Content-type'), 'application/json')
+                self.assertEqual(build.call_args.args[0].proxies, {})
+                with self.assertRaisesRegex(RuntimeError, 'redirected'):
+                    build.call_args.args[1].redirect_request(None, unittest.mock.Mock(), 302, '', {}, 'http://elsewhere/')
+                invalid = [{}, self.result(receipt={**self.receipt, 'generation': 2}),
+                           self.result(receipt={**self.receipt, 'generation': True}),
+                           self.result(errors=['ready cannot have errors']), self.result('invalid')]
+                for value in invalid:
+                    with self.subTest(value=value):
+                        response.__enter__.return_value = io.BytesIO(json.dumps(value).encode())
+                        with self.assertRaisesRegex(RuntimeError, 'Invalid|Stale|errors'):
+                            update.drain_request({'bind': '127.0.0.1:12345'}, 'status', self.receipt)
+                with self.assertRaisesRegex(RuntimeError, 'loopback'):
+                    update.drain_request({'bind': '192.0.2.1:12345'}, 'prepare')
+
+    def test_stale_main_blocks_warning_preparation_and_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(update, 'run'), patch.object(update, 'rehearse'), \
+                    patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
+                    patch.object(update, 'main_revision', return_value='b' * 40), \
+                    patch.object(update, 'warn_restart') as warn, patch.object(update, 'stop_prepared') as stop:
+                with self.assertRaisesRegex(RuntimeError, 'Main advanced'):
+                    update.deploy(root, root, {'manifest': {}, 'revision': 'a' * 40}, {})
+                warn.assert_not_called()
+                stop.assert_not_called()
+
+    def test_failed_preparation_never_reaches_exchange(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'backup.lock').touch()
+            with patch.object(update, 'run') as run, patch.object(update, 'rehearse'), \
+                    patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
+                    patch.object(update, 'LAST_BACKUP', root / 'backup.json'), \
+                    patch.object(update, 'main_revision', return_value='a' * 40), patch.object(update, 'warn_restart'), \
+                    patch.object(update, 'stop_prepared', side_effect=RuntimeError('SQL prepare failed')), \
+                    patch.object(update.ctypes, 'CDLL') as exchange:
+                with self.assertRaisesRegex(RuntimeError, 'SQL prepare failed'):
+                    update.deploy(root, root, {'manifest': {}, 'revision': 'a' * 40}, {})
+                exchange.assert_not_called()
+                self.assertEqual(run.call_count, 1)
+
+
+    def test_receipt_write_failure_after_acceptance_still_cancels_before_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            operations = []
+            def request(config, operation, receipt=None):
+                operations.append(operation)
+                return self.result('cancelled' if operation == 'cancel' else 'ready')
+            stack, run = self.environment(root, request)
+            with stack, patch.object(update, 'write_drain_receipt', side_effect=[None, OSError('receipt disk full'), None]), \
+                    self.assertRaisesRegex(OSError, 'receipt disk full'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+            self.assertEqual(operations, ['prepare', 'cancel'])
+
+    def test_final_status_failure_preserves_sql_cause_and_cancels_without_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stack, run = self.environment(root, [self.result(), self.result('failed', errors=['late SQL cause']), self.result('cancelled')])
+            with stack, self.assertRaisesRegex(RuntimeError, 'no longer current: late SQL cause'):
+                update.stop_prepared({}, root)
+            run.assert_not_called()
+
+    def test_main_advancing_during_warning_cannot_prepare_or_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'backup.lock').touch()
+            with patch.object(update, 'run') as run, patch.object(update, 'rehearse'), \
+                    patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
+                    patch.object(update, 'LAST_BACKUP', root / 'backup.json'), \
+                    patch.object(update, 'main_revision', side_effect=['a' * 40, 'b' * 40]), \
+                    patch.object(update, 'warn_restart') as warn, patch.object(update, 'stop_prepared') as stop:
+                with self.assertRaisesRegex(RuntimeError, 'Main advanced during restart warning'):
+                    update.deploy(root, root, {'manifest': {}, 'revision': 'a' * 40}, {})
+                warn.assert_called_once()
+                stop.assert_not_called()
+                self.assertEqual(run.call_count, 1)
+
+
+    def test_readiness_listener_must_belong_to_the_exact_service_process(self):
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            config = {'bind': '127.0.0.1:' + str(listener.getsockname()[1])}
+            with patch.object(update.subprocess, 'check_output', return_value=str(os.getpid())):
+                identity = update.drain_process(config)
+            self.assertEqual(identity['pid'], os.getpid())
+            self.assertGreater(identity['start_ticks'], 0)
+            self.assertRegex(identity['listener_inode'], r'^[0-9]+$')
+            child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)'])
+            try:
+                with patch.object(update.subprocess, 'check_output', return_value=str(child.pid)), \
+                        self.assertRaisesRegex(RuntimeError, 'endpoint is not owned'):
+                    update.drain_process(config)
+            finally:
+                child.terminate()
+                child.wait(timeout=5)
 
 
 if __name__ == '__main__':

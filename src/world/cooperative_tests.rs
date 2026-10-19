@@ -209,6 +209,101 @@ fn quest_marker_keeps_level_priority_and_excludes_unavailable_targets() {
 }
 
 #[test]
+fn indexed_quests_match_full_realm_scan_across_levels_positions_accounts_and_lifecycle() {
+    let mut d = Directory::prepared(
+        std::path::Path::new("data"),
+        tests::world().content,
+        8,
+        12351,
+    )
+    .unwrap();
+    let (id, _rx) = receive(&mut d, -3, 1, WIZARD);
+    let w = d.worlds.get_mut(&-3).unwrap();
+    let spawn = w.players[&id].pos;
+    let mut candidates: Vec<_> = w
+        .entities
+        .values()
+        .filter(|e| w.content.objects[&e.kind].quest)
+        .map(|e| e.id)
+        .collect();
+    assert!(candidates.len() > 100);
+    for state in 0..3 {
+        if state == 1 {
+            for (i, &entity) in candidates.iter().enumerate() {
+                let e = w.entities.get_mut(&entity).unwrap();
+                match i % 4 {
+                    0 => e.published = false,
+                    1 => e.extra_stats.push((54, 1)),
+                    2 => e.hp = 0,
+                    _ => (),
+                }
+            }
+        } else if state == 2 {
+            for entity in candidates.drain(..) {
+                w.remove_entity(entity);
+            }
+            assert!(w.quests_by_level.is_empty());
+            // All selected quest kinds include missing levels and the legacy maximum-level exceptions.
+            let kinds: Vec<_> = w
+                .content
+                .objects
+                .values()
+                .filter(|o| o.quest)
+                .map(|o| o.kind)
+                .collect();
+            for kind in kinds {
+                for _ in 0..2 {
+                    candidates.push(w.spawn_entity(kind, spawn, vec![]).unwrap());
+                }
+            }
+        }
+        for level in 1..=20 {
+            for x in 0..5 {
+                for y in 0..5 {
+                    for account in [1, 2] {
+                        let p = w.players.get_mut(&id).unwrap();
+                        p.character.level = level;
+                        p.character.account = account;
+                        p.pos = Pos {
+                            x: (x as f32 + 0.5) * w.map.width as f32 / 5.,
+                            y: (y as f32 + 0.5) * w.map.height as f32 / 5.,
+                        };
+                        let p = &w.players[&id];
+                        let expected = candidates
+                            .iter()
+                            .map(|id| &w.entities[id])
+                            .filter_map(|e| {
+                                let o = &w.content.objects[&e.kind];
+                                let max = match e.kind {
+                                    0x617 => 8,
+                                    0x609 | 0x60d => 9,
+                                    0x61f => 10,
+                                    _ => 20,
+                                };
+                                (o.quest && e.hp > 0 && e.accessible(account) && level <= max)
+                                    .then_some((e, o.quest_level?.abs_diff(level)))
+                            })
+                            .min_by(|(a, al), (b, bl)| {
+                                al.cmp(bl)
+                                    .then_with(|| {
+                                        a.pos.distance(p.pos).total_cmp(&b.pos.distance(p.pos))
+                                    })
+                                    .then_with(|| a.id.cmp(&b.id))
+                            })
+                            .map(|(e, _)| e.id);
+                        assert_eq!(
+                            w.quest_target(id),
+                            expected,
+                            "state={state} level={level} cell=({x},{y}) account={account}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn selected_minimap_teleport_goto_effect_and_current_view() {
     let (mut d, a, b, mut ar, mut br) = setup();
     let info = d.worlds[&-2].map_info();

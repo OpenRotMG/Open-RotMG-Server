@@ -130,6 +130,55 @@ async fn existing_client_still_starts_and_serves_gameplay_before_editor_rollout(
     );
 }
 
+#[tokio::test]
+async fn picture_routes_preserve_upstream_shutdown_admission() {
+    let (dir, app) = account_actions::tests::fixture();
+    let router = routes(&app, dir.join("client"));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let http = reqwest::Client::new();
+    assert_eq!(
+        http.post(format!("{url}/legacy-api/picture/list"))
+            .form(&[("myGUID", "shutdown-fixture")])
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    app.shutdown.send_replace(true);
+    for operation in ["save", "get", "list", "delete"] {
+        let response = http
+            .post(format!("{url}/legacy-api/picture/{operation}"))
+            .form(&[("id", "1")])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{operation}"
+        );
+    }
+    assert_eq!(
+        http.get(format!("{url}/health"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    task.abort();
+}
+
 #[test]
 fn deployed_proxy_routes_only_named_editor_assets_not_source_or_draw_prefixes() {
     let config = include_str!("../../scripts/deploy/Caddyfile");

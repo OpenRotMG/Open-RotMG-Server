@@ -7,6 +7,8 @@ async fn equipment_death_waits_for_final_inventory_and_boost_excluded_queued_pro
     a.world.clock.set_paused(true);
     a.world = a.world.in_world(-3);
     let account = a.store.list("equipment-queued".into()).await.unwrap();
+    let _owner = a.claim(account.id).unwrap();
+    let bind = lifecycle::binding(&a, account.id).unwrap();
     let mut ch = a
         .store
         .create(account.id, a.content.get(crate::content::WIZARD).unwrap())
@@ -35,7 +37,11 @@ async fn equipment_death_waits_for_final_inventory_and_boost_excluded_queued_pro
     let (lost, _) = tokio::sync::watch::channel(false);
     let id = a
         .world
-        .call(move |w| w.enter(ch, Some(crate::world::Output { packets, lost })))
+        .call(move |w| {
+            let id = w.enter(ch, Some(crate::world::Output { packets, lost }))?;
+            bind(id)?;
+            Ok(id)
+        })
         .await
         .unwrap();
     let plan = a
@@ -130,6 +136,8 @@ async fn equipment_death_storage_failure_never_publishes_death_or_reward() {
         .list("equipment-death-failure".into())
         .await
         .unwrap();
+    let _owner = a.claim(account.id).unwrap();
+    let bind = lifecycle::binding(&a, account.id).unwrap();
     let ch = a
         .store
         .create(account.id, a.content.get(crate::content::WIZARD).unwrap())
@@ -142,6 +150,7 @@ async fn equipment_death_storage_failure_never_publishes_death_or_reward() {
         .world
         .call(move |w| {
             let id = w.enter(ch, Some(crate::world::Output { packets, lost }))?;
+            bind(id)?;
             let p = w.players.get_mut(&id).unwrap();
             p.character.hp = 0;
             p.death_pending = true;

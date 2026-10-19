@@ -32,12 +32,14 @@ fn check_counts(w: &World) {
         }
     }
     assert_eq!(counts, w.population_counts);
-    let quests: BTreeSet<_> = w
-        .actors()
-        .filter(|e| w.content.objects[&e.kind].quest)
-        .map(|e| e.id)
-        .collect();
-    assert_eq!(quests, w.quest_ids);
+    let mut quests: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+    for e in w.actors() {
+        let o = &w.content.objects[&e.kind];
+        if let Some(level) = o.quest_level.filter(|_| o.quest) {
+            quests.entry(level).or_default().insert(e.id);
+        }
+    }
+    assert_eq!(quests, w.quests_by_level);
     let scripted: BTreeSet<_> = w
         .actors()
         .filter(|e| e.population_slot.is_none())

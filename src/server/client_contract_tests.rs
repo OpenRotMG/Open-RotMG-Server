@@ -1525,6 +1525,14 @@ async fn server_player_text_reports_current_world_privately_without_gameplay_cha
     assert_eq!(r.utf().unwrap(), "Guest1");
     assert_eq!(r.i32().unwrap(), id);
     assert!(peer_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
+    let character = a
+        .world
+        .for_player(id)
+        .call(move |w| Ok(w.players[&id].character.id))
+        .await
+        .unwrap();
+    let durable_before =
+        serde_json::to_value(a.store.load(account, character).await.unwrap()).unwrap();
     for mode in 0..5 {
         a.world
             .for_player(id)
@@ -1542,17 +1550,53 @@ async fn server_player_text_reports_current_world_privately_without_gameplay_cha
             .await
             .unwrap();
         now += Duration::from_secs(2);
-        handle(&mut a, packet("/server"), &mut session, &tx, &lost, now)
+        let before = a
+            .world
+            .for_player(id)
+            .call(move |w| Ok(snapshot(w, id)))
             .await
             .unwrap();
-        if mode == 3 {
-            assert!(rx.try_recv().is_err());
-        } else {
-            reply(
-                rx.try_recv().unwrap(),
-                "*Error*",
-                "Dead, departing or quarantined players cannot chat.",
+        let result = handle(&mut a, packet("/server"), &mut session, &tx, &lost, now).await;
+        if mode == 4 {
+            let error = result.unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "Dead, departing or quarantined players cannot chat."
             );
+            assert!(!lifecycle::rule_rejection(&error));
+            assert!(
+                rx.try_recv().is_err()
+                    && peer_rx.try_recv().is_err()
+                    && remote_rx.try_recv().is_err()
+            );
+            let after = a
+                .world
+                .for_player(id)
+                .call(move |w| {
+                    assert!(w.players[&id].pending);
+                    Ok(snapshot(w, id))
+                })
+                .await
+                .unwrap();
+            assert_eq!(after, before);
+            assert!(
+                a.world
+                    .directory(move |d| Ok(d.player_view(id)?.lifecycle.quarantined))
+                    .await
+                    .unwrap()
+            );
+            assert!(a.claim(account).is_err());
+        } else {
+            result.unwrap();
+            if mode == 3 {
+                assert!(rx.try_recv().is_err());
+            } else {
+                reply(
+                    rx.try_recv().unwrap(),
+                    "*Error*",
+                    "Dead, departing or quarantined players cannot chat.",
+                );
+            }
         }
     }
     let mut malformed = packet("/server");
@@ -1567,6 +1611,50 @@ async fn server_player_text_reports_current_world_privately_without_gameplay_cha
         handle(&mut a, packet("/server"), &mut session, &tx, &lost, now)
             .await
             .is_err()
+    );
+    assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
+    let before_close = a
+        .world
+        .for_player(id)
+        .call(move |w| Ok(snapshot(w, id)))
+        .await
+        .unwrap();
+    let completion = session
+        .account
+        .take()
+        .unwrap()
+        .close(&a, CloseReason::Internal)
+        .unwrap()
+        .unwrap();
+    let cause = completion.wait().await.unwrap_err().to_string();
+    assert!(cause.contains("test save failure"), "{cause}");
+    assert!(cause.contains("controller_stop=acknowledged"), "{cause}");
+    assert!(
+        lifecycle::failure(&a, account)
+            .unwrap()
+            .contains("test save failure")
+    );
+    assert!(a.claim(account).is_err());
+    let after_close = a
+        .world
+        .for_player(id)
+        .call(move |w| {
+            let p = &w.players[&id];
+            assert!(p.departing && p.pending && p.tx.is_none());
+            Ok(snapshot(w, id))
+        })
+        .await
+        .unwrap();
+    assert_eq!(after_close, before_close);
+    assert!(
+        a.world
+            .directory(move |d| Ok(d.player_view(id)?.lifecycle.quarantined))
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(a.store.load(account, character).await.unwrap()).unwrap(),
+        durable_before
     );
     assert!(rx.try_recv().is_err() && peer_rx.try_recv().is_err() && remote_rx.try_recv().is_err());
     std::fs::remove_dir_all(dir).unwrap();

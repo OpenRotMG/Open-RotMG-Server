@@ -3,6 +3,7 @@ pub mod snake;
 pub mod spider;
 pub mod sprite;
 pub mod trench;
+pub mod undead;
 
 pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
@@ -18,8 +19,9 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
     match enemy {
         trench::HERMIT => Some((0x730, 1.)),
         0x60e..=0x610 => Some((0x717, 0.01)),
+        0x654 => Some((0x71b, 0.1)),
         0x62c | 0x637 => Some((0x719, 0.1)),
-        0x640 | 0x645 | 0x649 | 0x650 | 0x654 => Some((0x718, 0.17)),
+        0x640 | 0x645 | 0x646 | 0x649 | 0x650 => Some((0x718, 0.17)),
         0x653 => Some((0x70c, 0.25)),
         0x659 => Some((0x71a, 0.17)),
         _ => None,
@@ -65,6 +67,31 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn snake_pit_portals_drop_only_from_the_five_highlands_demigods() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let sources: Vec<_> = content
+            .objects
+            .iter()
+            .filter(|(kind, _)| portal_drop(**kind).is_some_and(|(portal, _)| portal == 0x718))
+            .map(|(&kind, definition)| {
+                assert!(definition.enemy);
+                assert_eq!(portal_drop(kind), Some((0x718, 0.17)));
+                definition.name.as_str()
+            })
+            .collect();
+        assert_eq!(
+            sources,
+            [
+                "Undead Dwarf God",
+                "Ogre King",
+                "Minotaur",
+                "Flayer God",
+                "Lizard God"
+            ]
+        );
+    }
+
+    #[test]
     fn all_dungeons_resolve_selected_portals_and_have_complete_connected_routes() {
         let content = Content::load(Path::new("data")).unwrap();
         for (portal, name, _, boss) in DUNGEONS {
@@ -79,6 +106,8 @@ pub(crate) mod tests {
                 snake_pit(&content, 12351).unwrap()
             } else if name == "sprite-world" {
                 sprite::generate(&content, 12351).unwrap()
+            } else if name == "undead-lair" {
+                undead::generate(&content, 12351).unwrap()
             } else {
                 Map::load(&Path::new("data").join(format!("{name}.wmap")), &content).unwrap()
             };

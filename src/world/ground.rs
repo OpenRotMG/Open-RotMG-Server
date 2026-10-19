@@ -4,7 +4,7 @@ impl World {
     pub fn ground_damage(&mut self, id: i32, time: i32, pos: Pos) -> Result<()> {
         ensure!(
             time >= 0 && pos.x.is_finite() && pos.y.is_finite(),
-            "invalid ground damage report"
+            protocol("invalid ground damage report")
         );
         let p = self
             .players
@@ -12,12 +12,12 @@ impl World {
             .context("ground damage player missing")?;
         ensure!(
             p.pos.distance(pos) <= 3.,
-            "ground damage position is outside the native movement window"
+            protocol("ground damage position is outside the native movement window")
         );
         let c = self
             .map
             .cell(pos.x, pos.y)
-            .context("ground damage outside map")?;
+            .ok_or_else(|| protocol("ground damage outside map"))?;
         let i = pos.y as usize * self.map.width as usize + pos.x as usize;
         // A native report can precede receipt of a restored-floor UPDATE; its RNG draw still occurred.
         let ground = if p.controller == Controller::Human
@@ -32,7 +32,7 @@ impl World {
             .content
             .hazards
             .get(&ground)
-            .context("ground report has no current or prior hazard")?
+            .ok_or_else(|| protocol("ground report has no current or prior hazard"))?
             .clone();
         let protected = self.cells[i]
             .iter()

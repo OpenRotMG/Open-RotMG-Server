@@ -111,7 +111,7 @@ pub(super) async fn reset_password(
             a.store.reset_account(request.token.clone()).await?;
             let verifier = a.store.prepare_password(request.password).await?;
             // Fence authentication through its ownership claim, not just the credential lookup.
-            let _authentication = a.authentication.write().await;
+            let authentication = a.authentication.clone().write_owned().await;
             let account = a.store.reset_account(request.token.clone()).await?;
             a.kick(account).await?;
             ensure!(
@@ -121,7 +121,13 @@ pub(super) async fn reset_password(
                     .contains_key(&account),
                 "account ownership was not released"
             );
-            a.store.finish_reset(request.token, verifier).await?;
+            let _claim = a.claim(account)?;
+            super::lifecycle::account(&a, vec![account], "password_reset", move |a| async move {
+                let _authentication = authentication;
+                super::lifecycle::stage(Stage::Store);
+                a.store.finish_reset(request.token, verifier).await
+            })
+            .await?;
             Ok(serde_json::json!({"reset":true}))
         }
         .await,

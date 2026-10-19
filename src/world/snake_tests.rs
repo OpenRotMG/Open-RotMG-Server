@@ -2,6 +2,30 @@ use super::{tests, *};
 use std::path::Path;
 
 #[test]
+fn minotaur_defeats_can_earn_snake_pits_only_in_the_realm() {
+    let mut w = tests::arena(6);
+    let player = w.enter(tests::ch(&w), None).unwrap();
+    let pos = w.players[&player].pos;
+    for name in ["Realm", "Snake Pit"] {
+        w.name = name.into();
+        w.portal_requests.clear();
+        w.rng = rand::SeedableRng::seed_from_u64(213);
+        for _ in 0..64 {
+            let enemy = w.spawn_entity(0x646, pos, vec![]).unwrap();
+            w.damage_enemy(player, enemy, 10000, true, &[], None)
+                .unwrap();
+            assert!(!w.entities.contains_key(&enemy));
+        }
+        assert_eq!(!w.portal_requests.is_empty(), name == "Realm");
+        assert!(
+            w.portal_requests
+                .iter()
+                .all(|&(kind, at)| kind == 0x718 && at.distance(pos) == 0.)
+        );
+    }
+}
+
+#[test]
 fn snake_pit_attack_and_shield_windows_share_the_timed_cycle() {
     use crate::encounter::{
         Anchor, Motion,

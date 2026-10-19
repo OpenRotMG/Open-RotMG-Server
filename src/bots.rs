@@ -1653,7 +1653,16 @@ pub async fn start_test(
     world: i32,
     position: Pos,
     profile: &str,
+    owner: crate::server::Owner,
 ) -> Result<()> {
     validate_test_class(character.class, profile)?;
-    runtime::start_selected(app, selected_profile(profile)?, character, world, position).await
+    runtime::start_selected(
+        app,
+        selected_profile(profile)?,
+        character,
+        world,
+        position,
+        owner,
+    )
+    .await
 }

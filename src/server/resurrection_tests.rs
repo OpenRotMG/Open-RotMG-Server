@@ -10,6 +10,7 @@ async fn fixture(
     Character,
     mpsc::Receiver<Packet>,
     tokio::sync::watch::Receiver<bool>,
+    Owner,
 ) {
     let (dir, mut a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);
@@ -36,10 +37,13 @@ async fn fixture(
     let (packets, rx) = mpsc::channel(4096);
     let (lost, loss) = tokio::sync::watch::channel(false);
     a.world = a.world.in_world(-3);
+    let owner = a.claim(ch.account).unwrap();
+    let bind = lifecycle::binding(&a, ch.account).unwrap();
     let (id, fatal) = a
         .world
         .call(move |w| {
             let id = w.enter(ch, Some(crate::world::Output { packets, lost }))?;
+            bind(id)?;
             let p = w.players.get_mut(&id).unwrap();
             p.character.hp = 0;
             p.death_pending = true;
@@ -48,12 +52,12 @@ async fn fixture(
         })
         .await
         .unwrap();
-    (dir, a, id, fatal, rx, loss)
+    (dir, a, id, fatal, rx, loss, owner)
 }
 
 #[tokio::test]
 async fn equipped_amulet_is_durably_consumed_before_one_owned_nexus_return() {
-    let (dir, mut a, id, fatal, mut rx, _) = fixture(3).await;
+    let (dir, mut a, id, fatal, mut rx, _, owner) = fixture(3).await;
     let expected = fatal.clone();
     persist_death(&a, id, fatal, "Pirate".into()).await.unwrap();
     let restored = a.store.load(expected.account, expected.id).await.unwrap();
@@ -113,7 +117,7 @@ async fn equipped_amulet_is_durably_consumed_before_one_owned_nexus_return() {
         .await
         .unwrap();
     let mut session = Session {
-        account: Some(a.claim(expected.account).unwrap()),
+        account: Some(owner),
         player: Some(id),
         ..Default::default()
     };
@@ -231,7 +235,7 @@ async fn equipped_amulet_is_durably_consumed_before_one_owned_nexus_return() {
 
 #[tokio::test]
 async fn resurrection_failure_quarantines_without_death_or_live_inventory_changes() {
-    let (dir, a, id, fatal, _rx, loss) = fixture(3).await;
+    let (dir, a, id, fatal, _rx, loss, _owner) = fixture(3).await;
     let account = fatal.account;
     let character = fatal.id;
     let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
@@ -265,7 +269,7 @@ async fn resurrection_failure_quarantines_without_death_or_live_inventory_change
 
 #[tokio::test]
 async fn disconnect_during_resurrection_keeps_the_saved_character_without_issuing_a_grant() {
-    let (dir, a, id, fatal, _rx, _) = fixture(3).await;
+    let (dir, a, id, fatal, _rx, _, _owner) = fixture(3).await;
     let account = fatal.account;
     let character = fatal.id;
     a.world
@@ -291,14 +295,14 @@ async fn disconnect_during_resurrection_keeps_the_saved_character_without_issuin
 
 #[tokio::test]
 async fn backpack_amulet_cannot_avoid_death_and_committed_death_cannot_be_resurrected() {
-    let (dir, a, id, fatal, _rx, _) = fixture(4).await;
+    let (dir, a, id, fatal, _rx, _, _owner) = fixture(4).await;
     let account = fatal.account;
     let character = fatal.id;
     persist_death(&a, id, fatal, "Pirate".into()).await.unwrap();
     assert!(a.store.load(account, character).await.is_err());
     assert!(automatic_transfer(&a, id).await.unwrap().is_none());
     std::fs::remove_dir_all(dir).unwrap();
-    let (dir, a, _id, mut fatal, _rx, _) = fixture(4).await;
+    let (dir, a, _id, mut fatal, _rx, _, _owner) = fixture(4).await;
     a.store
         .death(fatal.clone(), "normal committed death".into())
         .await
