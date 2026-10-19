@@ -501,7 +501,11 @@ fn lair_escorts_protect_their_own_boss_then_follow_with_resting_hysteresis() {
             vec![],
         )
         .unwrap();
-    w.entities.get_mut(&id).unwrap().parent = Some(own);
+    w.entities
+        .get_mut(&id)
+        .unwrap()
+        .parent
+        .set(Some(own), id, &mut w.timed_ids);
     let p = player(
         &mut w,
         Pos {
@@ -551,7 +555,7 @@ fn lair_paladin_full_heal_respects_sick_stun_and_encounter_ownership() {
     let foreign = w.spawn_entity(0xdab, pos, vec![]).unwrap();
     for (id, parent) in [(healer, a), (friend, a), (foreign, b)] {
         let e = w.entities.get_mut(&id).unwrap();
-        e.parent = Some(parent);
+        e.parent.set(Some(parent), id, &mut w.timed_ids);
         e.hp = w.content.objects[&e.kind].hp - 150;
     }
     let hurt = w.entities[&healer].hp;
