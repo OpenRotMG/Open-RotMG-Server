@@ -627,3 +627,30 @@ fn goto_ack_backlog_and_real_time_timeout_fail_closed() {
     assert!(*loss.borrow());
     assert_eq!(w.players[&id].movement_credit, 0.);
 }
+
+#[test]
+fn new_tick_advertises_the_elapsed_interval_when_steps_run_late() {
+    let (mut w, _id, mut rx, _loss) = native();
+    let mut tick_time = || {
+        let mut found = None;
+        while let Ok(packet) = rx.try_recv() {
+            if packet.id == wire::NEW_TICK {
+                let mut r = crate::wire::Reader::new(&packet.body);
+                r.i32().unwrap();
+                found = Some(r.i32().unwrap());
+            }
+        }
+        found.expect("NEW_TICK sent")
+    };
+    w.step();
+    w.step();
+    tick_time();
+    std::thread::sleep(Duration::from_millis(250));
+    w.step();
+    w.step();
+    let advertised = tick_time();
+    assert!(
+        (250..2000).contains(&advertised),
+        "advertised {advertised}ms"
+    );
+}

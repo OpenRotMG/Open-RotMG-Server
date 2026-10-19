@@ -480,6 +480,7 @@ pub struct World {
     last_npc_step: u64,
     attack_epoch: Instant,
     clock: crate::clock::Clock,
+    new_tick_at: Instant,
     pub(crate) prepared_seed: Option<u64>,
     pub tick: u64,
     ids: Arc<AtomicI32>,
@@ -823,6 +824,7 @@ impl Directory {
         world.realm_layout = layout.map(|index| self.realms[index].name().to_owned());
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
+        world.new_tick_at = self.clock.now();
         if let Some(seed) = self.prepared_seed {
             let seed = seed ^ self.next_world as u64;
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -1579,6 +1581,7 @@ impl World {
             performance: std::cell::RefCell::default(),
             attack_epoch: Instant::now(),
             clock: crate::clock::Clock::default(),
+            new_tick_at: Instant::now(),
             prepared_seed: None,
             tick: 0,
             ids,
@@ -4991,6 +4994,13 @@ impl World {
         });
         self.bullets = bullets;
         if self.tick.is_multiple_of(2) {
+            // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
+            // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
+            let now = self.clock.now();
+            let tick_ms = i32::try_from(now.duration_since(self.new_tick_at).as_millis())
+                .expect("NEW_TICK interval exceeds i32 milliseconds")
+                .max(100);
+            self.new_tick_at = now;
             for id in ids {
                 if let Err(e) = self.updates(id, false) {
                     tracing::error!(player=id,error=%e,"visibility update failed");
@@ -5012,7 +5022,7 @@ impl World {
                     .copied()
                     .collect();
                 let mut o = Writer::new();
-                o.i32(p.tick).i32(100).i16(dynamic.len() as i16);
+                o.i32(p.tick).i32(tick_ms).i16(dynamic.len() as i16);
                 for entity in dynamic {
                     o.0.extend(self.stats(entity, id).expect("visible entity must exist"));
                 }
