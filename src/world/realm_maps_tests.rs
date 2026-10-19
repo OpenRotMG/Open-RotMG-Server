@@ -262,7 +262,11 @@ fn spatial_queries_keep_passive_scenery_and_transient_actors_indexed() {
         .spawn_entity(0x107, Pos { x: 6.5, y: 6.5 }, vec![])
         .unwrap();
     assert!(world.actor_ids.contains(&transient));
-    world.entities.get_mut(&transient).unwrap().expires = Some(50);
+    world.entities.get_mut(&transient).unwrap().expires.set(
+        Some(50),
+        transient,
+        &mut world.timed_ids,
+    );
     world.now = 50;
     world.mechanic_expiry();
     assert!(!world.actor_ids.contains(&transient));
@@ -312,4 +316,40 @@ fn realm_creation_selects_layout_and_isolates_map_edits() {
         }
     }
     assert_eq!(selected.len(), 3);
+}
+
+#[test]
+fn realm_step_indexes_cover_every_timed_gun_and_pentaract_actor() {
+    let path = Path::new("data");
+    let content = Arc::new(Content::load(path).unwrap());
+    let mut d = Directory::prepared(path, content, 16, 12351).unwrap();
+    let w = d.worlds.get_mut(&-3).unwrap();
+    let ch = tests::ch(w);
+    w.enter(ch, None).unwrap();
+    for _ in 0..600 {
+        w.step();
+        let timed: Vec<_> = w
+            .actors()
+            .filter(|e| e.expires.is_some() || e.parent.is_some())
+            .map(|e| e.id)
+            .collect();
+        assert!(
+            timed.iter().all(|id| w.timed_ids.contains(id)),
+            "timed actor missing from index"
+        );
+        let guns: BTreeSet<_> = w
+            .actors()
+            .filter(|e| (0x802..=0x805).contains(&e.kind))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(w.gun_ids, guns);
+        let pentaracts: BTreeSet<_> = w
+            .entities
+            .values()
+            .filter(|e| e.kind == 0xd5f)
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(w.pentaract_ids, pentaracts);
+    }
+    assert!(!w.gun_ids.is_empty() || w.actors().all(|e| !(0x802..=0x805).contains(&e.kind)));
 }

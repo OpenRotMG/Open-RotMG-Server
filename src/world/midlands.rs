@@ -219,7 +219,8 @@ impl World {
         );
         if kind == 0x900 && hp < 500 && e.expires.is_none() {
             let e = self.entities.get_mut(&id).unwrap();
-            e.expires = Some(self.now + 1000);
+            e.expires
+                .set(Some(self.now + 1000), id, &mut self.timed_ids);
             for member in self.shield_members(id)? {
                 self.flash_inland(member, 0xffff0000, 0.5, 2.);
                 self.entities.get_mut(&member).unwrap().stage = Some(2);
