@@ -1182,7 +1182,10 @@ impl Directory {
             .get(&key)
             .ok_or_else(|| protocol("unknown or already used transfer grant"))?;
         ensure!(!grant.consumed, protocol("transfer grant already used"));
-        ensure!(grant.expires > self.tick, protocol("transfer grant expired"));
+        ensure!(
+            grant.expires > self.tick,
+            protocol("transfer grant expired")
+        );
         ensure!(
             grant.account == account
                 && grant.destination == destination
@@ -5457,6 +5460,8 @@ mod tests {
         for cancel_at in ["capacity_wait", "enqueued", "started", "resumed"] {
             let (tx, mut rx) = mpsc::channel::<Job>(1);
             let handle = Handle {
+                lifecycle_lost_reply: Default::default(),
+                lifecycle_job_gate: Default::default(),
                 tx,
                 target: Target::World(-1),
                 clock: directory.clock.clone(),

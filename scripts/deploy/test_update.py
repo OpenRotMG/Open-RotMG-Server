@@ -220,9 +220,10 @@ class UpdateTest(unittest.TestCase):
         with self.deployment() as (raw, metadata, live, work):
             with patch.object(update, 'run'), patch.object(update, 'rehearse'), patch.object(update, 'install_backups'), \
                     patch.object(update, 'warn_restart'), patch.object(update.subprocess, 'check_output', return_value='failed'), \
-                    patch.object(update.ctypes, 'CDLL') as exchange:
+                    patch.object(update, 'stop_prepared') as prepared, patch.object(update.ctypes, 'CDLL') as exchange:
                 with self.assertRaisesRegex(RuntimeError, 'Shutdown save failed'):
                     update.main('a' * 40, raw)
+                prepared.assert_called_once()
                 exchange.assert_not_called()
             self.assertEqual(len(list(live.parent.glob('server-stage-*'))), 1)
             self.assertEqual((live / 'REVISION').read_text().strip(), 'b' * 40)
@@ -239,12 +240,14 @@ class UpdateTest(unittest.TestCase):
                 return 0
             with patch.object(update, 'run'), patch.object(update, 'rehearse'), patch.object(update, 'install_backups'), \
                     patch.object(update, 'warn_restart'), patch.object(update.subprocess, 'check_output', return_value='success'), \
+                    patch.object(update, 'stop_prepared') as prepared, \
                     patch.object(update, 'copy_db', side_effect=lambda source, target: target.write_bytes(b'frozen db')), \
                     patch.object(update, 'ready', side_effect=RuntimeError('new service unavailable')), \
                     patch.object(update.ctypes, 'CDLL') as libc:
                 libc.return_value.renameat2.side_effect = exchange
                 with self.assertRaisesRegex(RuntimeError, 'new service unavailable'):
                     update.main('a' * 40, raw)
+                prepared.assert_called_once()
             previous = next(live.parent.glob('server-stage-*'))
             self.assertEqual((previous / 'REVISION').read_text().strip(), 'b' * 40)
             self.assertEqual((live / 'REVISION').read_text().strip(), 'a' * 40)

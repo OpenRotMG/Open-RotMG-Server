@@ -484,7 +484,9 @@ async fn socket_fault_after_commit(fault: &str) {
             })
             .await;
         bad_socket.receive(13).await;
+        a.world.clock.set_paused(false);
         tokio::time::sleep(Duration::from_secs(6)).await;
+        a.world.clock.set_paused(true);
         bad_socket
             .send(Packet {
                 id: 22,
