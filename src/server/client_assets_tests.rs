@@ -77,6 +77,59 @@ async fn named_editor_assets_remain_raw_and_do_not_replace_dynamic_gameplay_or_e
     task.abort();
 }
 
+#[tokio::test]
+async fn existing_client_still_starts_and_serves_gameplay_before_editor_rollout() {
+    let (dir, mut app) = account_actions::tests::fixture();
+    let client = dir.join("legacy-client");
+    std::fs::create_dir_all(client.join("vendor")).unwrap();
+    std::fs::write(client.join("index.html"), b"existing game entry").unwrap();
+    std::fs::write(client.join("vendor/ruffle.js"), b"existing runtime").unwrap();
+    crate::validate_client_assets(&client).unwrap();
+    app.swf = Arc::new(b"dynamic existing gameplay".to_vec());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let router = client_assets(&client)
+        .route("/client.swf", get(swf))
+        .with_state(app);
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let http = reqwest::Client::new();
+    for (path, bytes) in [
+        ("/", b"existing game entry".as_slice()),
+        ("/vendor/ruffle.js", b"existing runtime"),
+        ("/client.swf", b"dynamic existing gameplay"),
+    ] {
+        let response = http.get(format!("{url}{path}")).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.bytes().await.unwrap(), bytes);
+    }
+    for path in ["/launcher.js", "/draw.html", "/native-texture-editor.swf"] {
+        assert_eq!(
+            http.get(format!("{url}{path}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    task.abort();
+    std::fs::remove_file(client.join("vendor/ruffle.js")).unwrap();
+    assert!(
+        crate::validate_client_assets(&client)
+            .unwrap_err()
+            .to_string()
+            .contains("vendor/ruffle.js")
+    );
+    std::fs::write(client.join("vendor/ruffle.js"), b"existing runtime").unwrap();
+    std::fs::remove_file(client.join("index.html")).unwrap();
+    assert!(
+        crate::validate_client_assets(&client)
+            .unwrap_err()
+            .to_string()
+            .contains("index.html")
+    );
+}
+
 #[test]
 fn deployed_proxy_routes_only_named_editor_assets_not_source_or_draw_prefixes() {
     let config = include_str!("../../scripts/deploy/Caddyfile");

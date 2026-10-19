@@ -26,6 +26,15 @@ fn main() -> Result<()> {
     }
     serve(args)
 }
+fn validate_client_assets(client: &std::path::Path) -> Result<()> {
+    for file in ["index.html", "vendor/ruffle.js"] {
+        ensure!(
+            client.join(file).is_file(),
+            "missing client asset {file}; run ./run.sh to download and prepare the local client"
+        );
+    }
+    Ok(())
+}
 #[tokio::main]
 async fn serve(args: Vec<String>) -> Result<()> {
     if backup::run(&args).await? {
@@ -52,18 +61,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
     }
-    for file in [
-        "index.html",
-        "launcher.js",
-        "draw.html",
-        "native-texture-editor.swf",
-        "vendor/ruffle.js",
-    ] {
-        ensure!(
-            client.join(file).is_file(),
-            "missing client asset {file}; run ./run.sh to download and prepare the local client"
-        );
-    }
+    validate_client_assets(&client)?;
     ensure!(
         client.join("client.swf").is_file(),
         "missing reference client {}; run ./run.sh to download the pinned client",
