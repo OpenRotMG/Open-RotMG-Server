@@ -484,7 +484,7 @@ impl World {
             .players
             .values()
             .filter(|p| p.character.alive && !p.death_pending && !p.departing && !p.paused)
-            .flat_map(|p| self.entities_near(p.pos, 20.))
+            .flat_map(|p| self.actors_near(p.pos, 20.))
             .filter(|e| e.population_slot.is_some())
             .filter_map(|e| e.camp)
             .collect();

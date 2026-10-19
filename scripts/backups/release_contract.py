@@ -60,6 +60,21 @@ def check(binary, data, directory, revision):
             row[field] += 20
     if paid != expected:
         raise RuntimeError('Release restored death changed unrelated records or historical payouts')
+    before_art = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    next_id = before_art['picture_sequence'][0]['next_id']
+    if next_id <= max(row['id'] for row in before_art['pictures']) + 1:
+        raise RuntimeError('Art fixture did not preserve a deleted high-water ID')
+    result = subprocess.run([str(binary), '--backup-exercise-pictures', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError('Release restored art exercise failed: ' + result.stderr.strip())
+    if json.loads(result.stdout) != {'exercised_pictures': True, 'deleted_id': next_id, 'next_id': next_id + 1}:
+        raise RuntimeError('Release restored art exercise returned an invalid receipt')
+    after_art = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    expected = deepcopy(before_art)
+    expected['picture_sequence'][0]['next_id'] += 1
+    if after_art != expected:
+        raise RuntimeError('Restored art exercise changed existing artwork or unrelated rows')
+    backup.validate(dict(bundle, game=after_art))
     print(json.dumps({'event': 'release_backup_contract_passed', 'revision': revision}))
 
 

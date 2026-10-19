@@ -204,7 +204,7 @@ fn gravestones_publish_native_names_and_exact_expiry_removals_without_loot() {
         w.now += 1;
         w.mechanic_expiry();
         assert!(!w.entities.contains_key(&grave));
-        assert!(w.cells.iter().all(|cell| !cell.contains(&grave)));
+        assert_eq!(w.cells.count(grave), 0);
         w.updates(viewer, false).unwrap();
         let mut dropped = Writer::new();
         dropped.i16(0).i16(0).i16(1).i32(grave);

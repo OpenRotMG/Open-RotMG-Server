@@ -45,10 +45,11 @@ impl World {
         let old = e.pos;
         let cell = |p: Pos| p.y as usize * self.map.width as usize + p.x as usize;
         ensure!(
-            self.cells[cell(old)].remove(&id),
+            self.cells.remove(cell(old), id),
             "planewalking NPC absent from spatial index"
         );
-        self.cells[cell(to)].insert(id);
+        self.cells
+            .insert(cell(to), id, self.actor_ids.contains(&id));
         let e = self.entities.get_mut(&id).unwrap();
         e.pos = to;
         e.goal = None;

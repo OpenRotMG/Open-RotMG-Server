@@ -58,6 +58,48 @@ pub async fn run(args: &[String]) -> Result<bool> {
             );
             validate(serde_json::from_slice(&input)?)?;
         }
+        ["--backup-validate-pictures"] => {
+            use base64::Engine;
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Picture {
+                id: i32,
+                account: i32,
+                name: String,
+                data_type: i32,
+                tags: String,
+                png: String,
+            }
+            let mut input = Vec::new();
+            std::io::stdin()
+                .take(32 * 1024 * 1024 + 1)
+                .read_to_end(&mut input)?;
+            ensure!(
+                input.len() <= 32 * 1024 * 1024,
+                "Backup picture input exceeds 32 MiB"
+            );
+            let pictures: Vec<Picture> = serde_json::from_slice(&input)?;
+            store::pictures::validate_capacity(0, pictures.len())?;
+            let mut owners = std::collections::HashMap::new();
+            for picture in &pictures {
+                let owned = owners.entry(picture.account).or_insert(0);
+                *owned += 1;
+                store::pictures::validate_capacity(*owned, pictures.len())?;
+                ensure!(
+                    picture.id > 0
+                        && picture.account > 0
+                        && picture.png.len() <= store::pictures::MAX_PNG.div_ceil(3) * 4,
+                    "Invalid backup picture identity or size"
+                );
+                store::pictures::metadata(&picture.name, picture.data_type, &picture.tags)?;
+                let png = base64::engine::general_purpose::STANDARD.decode(&picture.png)?;
+                store::pictures::validate_png(picture.data_type, &png)?;
+            }
+            println!(
+                "{}",
+                serde_json::json!({"validated_pictures": pictures.len()})
+            );
+        }
         ["--backup-validate-updates"] => {
             let mut input = Vec::new();
             std::io::stdin()
@@ -92,6 +134,29 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         "backup-fixture-password".into(),
                     )
                     .await?;
+                store
+                    .save_picture(
+                        account.id,
+                        "Backup Art".into(),
+                        2,
+                        "backup, fixture".into(),
+                        fixture_png(),
+                        true,
+                    )
+                    .await?;
+                if !alive {
+                    let removed = store
+                        .save_picture(
+                            account.id,
+                            "Removed Art".into(),
+                            2,
+                            "".into(),
+                            fixture_png(),
+                            true,
+                        )
+                        .await?;
+                    store.delete_picture(account.id, removed).await?;
+                }
                 let code = store.issue_discord_code(account.id).await?;
                 store
                     .redeem_discord_code(code, format!("1234567890123456{}", i32::from(alive)))
@@ -242,6 +307,15 @@ pub async fn run(args: &[String]) -> Result<bool> {
                     .query_map([], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, i32>(1)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>()?
             };
+            let picture_ids = {
+                let db = rusqlite::Connection::open(database)?;
+                let mut q = db.prepare("SELECT id FROM pictures ORDER BY id")?;
+                q.query_map([], |r| r.get::<_, i32>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for id in &picture_ids {
+                store.picture(*id).await?;
+            }
             store.updates().await?;
             for (account, id) in &rows {
                 store.vaults(*account).await?;
@@ -249,11 +323,78 @@ pub async fn run(args: &[String]) -> Result<bool> {
             }
             println!(
                 "{}",
-                serde_json::json!({"loaded_living_characters": rows.len()})
+                serde_json::json!({"loaded_living_characters": rows.len(), "loaded_pictures": picture_ids.len()})
             );
         }
         ["--backup-exercise-vault", database, data] => {
             exercise_vault(Path::new(database), Path::new(data)).await?;
+        }
+        ["--backup-exercise-pictures", database, data] => {
+            let content = content::Content::load(Path::new(data))?;
+            let store = store::Store::open(Path::new(database), &content)?;
+            let db = rusqlite::Connection::open(database)?;
+            let (id, owner): (i32, i32) = db.query_row(
+                "SELECT id,account FROM pictures ORDER BY id LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let other: i32 = db.query_row(
+                "SELECT id FROM accounts WHERE id<>?1 LIMIT 1",
+                [owner],
+                |r| r.get(0),
+            )?;
+            let next: i64 =
+                db.query_row("SELECT next_id FROM picture_sequence WHERE id=1", [], |r| {
+                    r.get(0)
+                })?;
+            ensure!(
+                store.picture(id).await? == fixture_png(),
+                "restored fixture artwork changed"
+            );
+            ensure!(
+                store.delete_picture(other, id).await.is_err(),
+                "restored art ownership bypass"
+            );
+            let created = store
+                .save_picture(
+                    owner,
+                    "Restored Art".into(),
+                    2,
+                    "restored".into(),
+                    fixture_png(),
+                    true,
+                )
+                .await?;
+            ensure!(
+                i64::from(created) == next,
+                "restored picture sequence reused a deleted ID"
+            );
+            ensure!(
+                store
+                    .save_picture(
+                        owner,
+                        "Restored Art".into(),
+                        3,
+                        "updated".into(),
+                        fixture_png(),
+                        true
+                    )
+                    .await?
+                    == created,
+                "restored overwrite changed ID"
+            );
+            store.delete_picture(owner, created).await?;
+            drop(store);
+            let reopened = store::Store::open(Path::new(database), &content)?;
+            ensure!(
+                reopened.picture(created).await.is_err()
+                    && reopened.picture(id).await? == fixture_png(),
+                "restored deletion/retrieval failed on reopen"
+            );
+            println!(
+                "{}",
+                serde_json::json!({"exercised_pictures":true,"deleted_id":created,"next_id":next+1})
+            );
         }
         ["--backup-exercise-death", database, data] => {
             exercise_death(Path::new(database), Path::new(data)).await?;
@@ -469,4 +610,30 @@ async fn exercise_death(database: &Path, data: &Path) -> Result<()> {
         serde_json::json!({"exercised_death": ch.id, "base_fame":19,"equipment_fame":1,"total_fame":20})
     );
     Ok(())
+}
+
+fn fixture_png() -> Vec<u8> {
+    use std::io::Write;
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut header = Vec::from(8_u32.to_be_bytes());
+    header.extend(8_u32.to_be_bytes());
+    header.extend([8, 6, 0, 0, 0]);
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&[0; 264])
+        .expect("fixture PNG compression");
+    for (kind, data) in [
+        (b"IHDR", header),
+        (b"IDAT", encoder.finish().expect("fixture PNG compression")),
+        (b"IEND", vec![]),
+    ] {
+        png.extend((data.len() as u32).to_be_bytes());
+        png.extend(kind);
+        png.extend(&data);
+        let mut crc = crc32fast::Hasher::new();
+        crc.update(kind);
+        crc.update(&data);
+        png.extend(crc.finalize().to_be_bytes());
+    }
+    png
 }

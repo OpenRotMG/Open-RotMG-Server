@@ -13,6 +13,7 @@ mod name_choice_boundaries_tests;
 mod name_choice_tests;
 #[cfg(test)]
 mod password_tests;
+mod pictures;
 #[cfg(test)]
 mod purchase_tests;
 #[cfg(test)]
@@ -111,6 +112,7 @@ pub struct App {
     pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
     pub society: Arc<Mutex<crate::bots::adventures::Society>>,
     pub requests: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
+    pub picture_reads: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
@@ -133,7 +135,7 @@ fn error(e: anyhow::Error) -> Response {
     )
         .into_response()
 }
-fn admit(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<bool> {
+fn request_ip(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<IpAddr> {
     if let Some(origin) = headers.get("origin") {
         ensure!(
             origin.to_str()? == a.origin,
@@ -152,6 +154,10 @@ fn admit(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<bool> {
     } else {
         peer.ip()
     };
+    Ok(ip)
+}
+fn admit(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<bool> {
+    let ip = request_ip(a, headers, peer)?;
     Ok(rate_allow(
         &mut a.requests.lock().expect("request registry poisoned"),
         ip,
@@ -2527,8 +2533,43 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
     }
     Ok(())
 }
+fn client_assets(client: &std::path::Path) -> Router<App> {
+    let mut router = Router::new();
+    for (route, file) in [
+        ("/", "index.html"),
+        ("/index.html", "index.html"),
+        ("/launcher.js", "launcher.js"),
+        ("/draw.html", "draw.html"),
+        ("/native-texture-editor.swf", "native-texture-editor.swf"),
+    ] {
+        router = router.route_service(
+            route,
+            tower_http::services::ServeFile::new(client.join(file)),
+        );
+    }
+    router.nest_service(
+        "/vendor",
+        tower_http::services::ServeDir::new(client.join("vendor")),
+    )
+}
+
+#[cfg(test)]
+mod client_assets_tests;
+
 fn routes(a: &App, client: PathBuf) -> Router {
     let app = Router::new()
+        .route(
+            "/legacy-api/picture/save",
+            post(pictures::save).layer(DefaultBodyLimit::max(24 * 1024)),
+        )
+        .route(
+            "/legacy-api/picture/get",
+            post(pictures::get_picture).layer(DefaultBodyLimit::max(2048)),
+        )
+        .route(
+            "/legacy-api/picture/{operation}",
+            post(pictures::request).layer(DefaultBodyLimit::max(2048)),
+        )
         .route("/legacy-api/char/list", post(chars))
         .route("/legacy-api/char/fame", post(fame))
         .route("/legacy-api/char/delete", post(delete_character))
@@ -2574,18 +2615,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         ))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
-        .route_service(
-            "/",
-            tower_http::services::ServeFile::new(client.join("index.html")),
-        )
-        .route_service(
-            "/index.html",
-            tower_http::services::ServeFile::new(client.join("index.html")),
-        )
-        .nest_service(
-            "/vendor",
-            tower_http::services::ServeDir::new(client.join("vendor")),
-        )
+        .merge(client_assets(&client))
         .layer(DefaultBodyLimit::max(1_048_576))
         .with_state(a.clone())
 }

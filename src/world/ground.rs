@@ -34,7 +34,9 @@ impl World {
             .get(&ground)
             .ok_or_else(|| protocol("ground report has no current or prior hazard"))?
             .clone();
-        let protected = self.cells[i]
+        let protected = self
+            .cells
+            .ids(i)
             .iter()
             .any(|id| self.content.objects[&self.entities[id].kind].protects_ground);
         let p = self.players.get_mut(&id).unwrap();

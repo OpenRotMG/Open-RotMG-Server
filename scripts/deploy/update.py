@@ -54,6 +54,164 @@ def files(root):
     return {str(p.relative_to(root)): digest(p) for p in root.rglob('*') if p.is_file()}
 
 
+def outcome(work, state, stage=None, reason=None):
+    identity = list((stage.stat().st_dev, stage.stat().st_ino)) if stage is not None and stage.exists() else None
+    value = {'format': 1, 'state': state, 'stage': str(stage) if stage is not None else None,
+             'stage_identity': identity, 'reason': reason}
+    temporary = work / 'outcome.json.new'
+    temporary.write_text(json.dumps(value) + '\n')
+    temporary.replace(work / 'outcome.json')
+
+
+def active_paths():
+    paths = set()
+    for process in Path('/proc').glob('[0-9]*'):
+        for link in [process / 'exe', process / 'cwd', *list((process / 'fd').glob('*'))]:
+            try:
+                target = Path(os.readlink(link))
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            if target.is_absolute():
+                paths.add(target)
+        try:
+            paths.update(Path(os.fsdecode(arg)) for arg in (process / 'cmdline').read_bytes().split(b'\0') if arg.startswith(b'/'))
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return paths
+
+
+def retain_deployments(apply=True):
+    attempts, metadata, pinned = {}, {}, []
+    cache = ROOT / 'release-manifests'
+    require(not cache.is_symlink() and (not cache.exists() or cache.is_dir()), 'Unsafe release manifest cache')
+    for path in cache.glob('*.json'):
+        require(not path.is_symlink() and re.fullmatch('[0-9a-f]{40}\\.json', path.name), 'Unsafe cached manifest path')
+        value = json.loads(path.read_text())
+        require(value['format'] == 1 and path.stem == value['revision'], 'Invalid cached release manifest')
+        metadata[path.stem] = value
+    for work in sorted(ROOT.iterdir(), key=lambda p: p.name):
+        if not re.fullmatch('[0-9a-f]{40}-[0-9]+', work.name):
+            continue
+        require(work.is_dir() and not work.is_symlink(), 'Unsafe deployment workspace: ' + str(work))
+        if (work / 'release.json').exists():
+            value = json.loads((work / 'release.json').read_text())
+            require(value['revision'] == work.name[:40] and value['format'] == 1, 'Invalid retained release metadata')
+            if value['revision'] in metadata:
+                require(metadata[value['revision']]['manifest'] == value['manifest'], 'Conflicting release metadata')
+            metadata[value['revision']] = value
+        receipt = json.loads((work / 'outcome.json').read_text()) if (work / 'outcome.json').exists() else None
+        if receipt is not None:
+            require(receipt['format'] == 1 and receipt['state'] in {'preparing', 'cutover', 'success', 'failed', 'pinned', 'artifact_only'},
+                    'Invalid deployment outcome: ' + str(work))
+            if receipt['state'] == 'success':
+                require(receipt['stage'] is not None and (work / 'previous-server-path').read_text().strip() == receipt['stage']
+                        and all((work / 'cutover' / n).is_file() for n in ['game.db', 'server.pem']),
+                        'Invalid successful cutover receipt: ' + str(work))
+        attempts[work] = receipt
+    live_revision = (LIVE / 'REVISION').read_text().strip()
+    keep = set()
+    for state, limit in [('success', 2), ('failed', 3)]:
+        ordered = sorted((w for w, r in attempts.items() if r is not None and r['state'] == state),
+                         key=lambda w: int(w.name.rsplit('-', 1)[1]), reverse=True)
+        keep.update(ordered[:limit])
+    # Two completed cutovers retain the two preceding source trees and frozen saves.
+    keep.update(w for w, r in attempts.items() if r is None or r['state'] not in {'success', 'failed', 'artifact_only'}
+                or w.name[:40] == live_revision or (w / 'retain').exists() or (w / 'rehearsal-running').exists())
+    running = active_paths() if set(attempts) - keep else set()
+    keep.update(w for w in attempts if any(w == p or w in p.parents for p in running))
+    for work, receipt in attempts.items():
+        if work in keep:
+            continue
+        if receipt['state'] == 'artifact_only':
+            require(receipt['stage'] is None and {p.name for p in work.iterdir()} <= {'outcome.json', 'release.json', 'server.tar.gz'},
+                    'Artifact-only workspace contains unclassified evidence: ' + str(work))
+        if receipt['stage'] is None:
+            continue
+        stage = Path(receipt['stage'])
+        require(stage.parent == LIVE.parent and re.fullmatch('server-stage-[0-9]+', stage.name)
+                and not stage.is_symlink(), 'Unsafe retained stage: ' + str(stage))
+        if not stage.exists() and receipt['state'] == 'failed':
+            continue
+        valid = stage.exists() and [stage.stat().st_dev, stage.stat().st_ino] == receipt['stage_identity']
+        revision = (stage / 'REVISION').read_text().strip() if valid else None
+        valid = valid and revision in metadata and not any(p.is_symlink() for p in stage.rglob('*'))
+        if not valid or files(stage) != metadata[revision]['manifest'] or any(stage == p or stage in p.parents for p in running):
+            keep.add(work)
+            pinned.append({'path': str(work), 'reason': 'stage identity, contents or use requires review'})
+    protected = {LIVE}
+    revisions = {live_revision}
+    for work in keep:
+        revisions.add(work.name[:40])
+        receipt = attempts[work]
+        if receipt is not None and receipt['stage'] is not None:
+            protected.add(Path(receipt['stage']))
+        if (work / 'previous-server-path').exists():
+            protected.add(Path((work / 'previous-server-path').read_text().strip()))
+        if (work / 'shadow.json').exists():
+            protected.add(Path(json.loads((work / 'shadow.json').read_text())['data']).parent)
+    for stage in protected:
+        if (stage / 'REVISION').exists():
+            revisions.add((stage / 'REVISION').read_text().strip())
+    remove = set(attempts) - keep
+    for work in remove.copy():
+        receipt = attempts[work]
+        if receipt['stage'] is not None:
+            stage = Path(receipt['stage'])
+            if stage in protected:
+                remove.discard(work)
+                keep.add(work)
+                revisions.add(work.name[:40])
+                pinned.append({'path': str(work), 'reason': 'stage is referenced by a kept attempt'})
+            elif stage.exists():
+                remove.add(stage)
+    releases = BACKUPS / 'releases'
+    current = (BACKUPS / 'current').resolve()
+    if attempts and releases.exists():
+        require((BACKUPS / 'current').is_symlink() and current.is_dir(), 'Backup tool pointer is invalid')
+        for bundle in releases.iterdir():
+            if not re.fullmatch('[0-9a-f]{40}', bundle.name) or bundle == current or bundle.name in revisions:
+                continue
+            if any(bundle == p or bundle in p.parents for p in running):
+                revisions.add(bundle.name)
+                continue
+            mapping = {'backup.py': 'scripts/backups/backup.py', 'openrotmg': 'openrotmg', 'REVISION': 'REVISION',
+                       'openrotmg-backup.sh': 'scripts/backups/openrotmg-backup.sh'}
+            manifest = metadata[bundle.name]['manifest'] if bundle.name in metadata else {}
+            mapping.update({n: n for n in manifest if n.startswith('data/')})
+            valid = all(n in manifest for n in mapping.values()) and bundle.is_dir() and not bundle.is_symlink()
+            if not valid or any(p.is_symlink() for p in bundle.rglob('*')) or files(bundle) != {n: manifest[s] for n, s in mapping.items()}:
+                pinned.append({'path': str(bundle), 'reason': 'backup tool provenance requires review'})
+                revisions.add(bundle.name)
+                continue
+            remove.add(bundle)
+    remove.update(p for p in cache.glob('*.json') if p.stem not in revisions)
+    result = {'retention': 'applied' if apply else 'dry_run', 'remove': sorted(str(p) for p in remove),
+              'kept_attempts': len(keep), 'unresolved_attempts': sum(r is None or r['state'] not in {'success', 'failed', 'artifact_only'}
+                  or (w / 'retain').exists() or (w / 'rehearsal-running').exists() for w, r in attempts.items()),
+              'review': pinned}
+    if apply and attempts:
+        temporary = ROOT / 'retention.json.new'
+        result['retention'] = 'applying'
+        temporary.write_text(json.dumps(result) + '\n')
+        temporary.replace(ROOT / 'retention.json')
+        # Rollback manifests must outlive the retired attempts that originally delivered them.
+        cache.mkdir(mode=0o700, exist_ok=True)
+        for revision in revisions & metadata.keys():
+            source = cache / (revision + '.json.new')
+            source.write_text(json.dumps(metadata[revision]) + '\n')
+            source.replace(cache / (revision + '.json'))
+        for path in sorted(remove, key=str):
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        result['retention'] = 'applied'
+        temporary.write_text(json.dumps(result) + '\n')
+        temporary.replace(ROOT / 'retention.json')
+    print(json.dumps(result), flush=True)
+    return result
+
+
 def status(state, desired, **fields):
     value = {'state': state, 'desired': desired, 'running': (LIVE / 'REVISION').read_text().strip(),
              'checked_at': int(time.time()), **fields}
@@ -416,6 +574,7 @@ def deploy(stage, work, metadata, config):
         fcntl.flock(lock, fcntl.LOCK_EX)
         warn_restart(config)
         require(main_revision() == metadata['revision'], 'Main advanced during restart warning; no cutover performed')
+        outcome(work, 'cutover', stage)
         stop_prepared(config, work)
         cutover = 'shutdown_result'
         try:
@@ -463,6 +622,7 @@ def main(desired, raw):
     require(main_revision() == desired, 'Main advanced; refusing stale server deployment')
     require(len(raw) <= LIMIT, 'Deployment archive exceeds 64 MiB')
     ROOT.mkdir(mode=0o700, exist_ok=True)
+    retain_deployments()
     require(shutil.disk_usage(ROOT).free >= 2 * 1024**3, 'Less than 2 GiB free; inspect retained recovery data before deploying')
     work = None
     try:
@@ -490,12 +650,25 @@ def main(desired, raw):
         (work / 'release.json').write_bytes(release)
         (work / 'server.tar.gz').write_bytes(package)
         del release, package
+        outcome(work, 'preparing')
         stage = LIVE.with_name('server-stage-' + str(time.time_ns()))
         unpack(work / 'server.tar.gz', stage, metadata)
+        outcome(work, 'preparing', stage)
         status('rehearsing', desired)
         deploy(stage, work, metadata, config)
+        outcome(work, 'success', stage)
+        retain_deployments()
         status('deployed', desired, recovery_directory=str(work), backup=json.loads(LAST_BACKUP.read_text()))
     except Exception as error:
+        if work is not None and (work / 'outcome.json').exists():
+            receipt = json.loads((work / 'outcome.json').read_text())
+            if receipt['state'] != 'success':
+                stage = Path(receipt['stage']) if receipt['stage'] is not None else None
+                safe = receipt['state'] == 'preparing' and stage is not None and not any((work / n).exists() for n in
+                    ['rehearsal-running', 'drain-receipt.json', 'cutover', 'previous-server-path', 'post-stop-failure.json'])
+                safe = safe and (not stage.exists() or files(stage) == metadata['manifest'])
+                outcome(work, 'failed' if safe else 'pinned', stage, str(error))
+                retain_deployments()
         activated = (LIVE / 'REVISION').read_text().strip() == desired
         state = 'activated_unverified' if activated else 'failed'
         status(state, desired, recovery_directory=str(work) if work is not None else None, error=str(error))

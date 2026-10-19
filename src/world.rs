@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
 #[cfg(test)]
 mod audit_tests;
+mod cell_index;
 mod charges;
 pub(crate) mod chat;
 #[cfg(test)]
@@ -497,7 +498,7 @@ pub struct World {
     ability_state: abilities::State,
     companions: companions::State,
     finale: endgame_ai::Actors,
-    cells: Vec<BTreeSet<i32>>,
+    cells: cell_index::CellIndex,
     fountains: Vec<(i32, Pos)>,
     next_fountain_heal: u64,
     rng: rand::rngs::StdRng,
@@ -1595,7 +1596,7 @@ impl World {
         let mut actor_ids = BTreeSet::new();
         let mut quests_by_level: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         let mut fountains = Vec::new();
-        let mut cells = vec![BTreeSet::new(); map.cells.len()];
+        let mut cells = cell_index::CellIndex::new(map.width as usize, map.height as usize);
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
             for (x, c) in row.iter().enumerate() {
                 if let Some(kind) = c.object {
@@ -1692,12 +1693,12 @@ impl World {
                     if o.name == "White Fountain" {
                         fountains.push((id, pos));
                     }
-                    cells[y * map.width as usize + x].insert(id);
-                    if o.enemy
+                    let actor = o.enemy
                         || o.quest
                         || !o.static_object
-                        || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805)
-                    {
+                        || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805);
+                    cells.insert(y * map.width as usize + x, id, actor);
+                    if actor {
                         actor_ids.insert(id);
                     }
                     if let Some(level) = o.quest_level.filter(|_| o.quest) {
@@ -1973,7 +1974,7 @@ impl World {
                 bullet: 0,
             },
         );
-        self.cells[cell].insert(id);
+        self.cells.insert(cell, id, true);
         self.actor_ids.insert(id);
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
@@ -2059,7 +2060,7 @@ impl World {
         }
         let cell = entity.pos.y as usize * self.map.width as usize + entity.pos.x as usize;
         assert!(
-            self.cells[cell].remove(&id),
+            self.cells.remove(cell, id),
             "entity absent from spatial index"
         );
         entity
@@ -2837,9 +2838,25 @@ impl World {
         )
         .filter(move |e| e.pos.distance(pos) < radius)
     }
+    fn actors_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
+        let clamp = |v: f32, max: i32| (v as i32).clamp(0, max - 1) as usize;
+        let (x0, x1) = (
+            clamp(pos.x - radius - 1., self.map.width),
+            clamp(pos.x + radius + 1., self.map.width),
+        );
+        let (y0, y1) = (
+            clamp(pos.y - radius - 1., self.map.height),
+            clamp(pos.y + radius + 1., self.map.height),
+        );
+        self.cells
+            .actors_in(x0, y0, x1, y1)
+            .map(|id| &self.entities[&id])
+            .filter(move |e| e.pos.distance(pos) < radius)
+    }
     fn entities_at(&self, pos: Pos) -> impl Iterator<Item = &Entity> {
         self.map.cell(pos.x, pos.y).into_iter().flat_map(move |_| {
-            self.cells[pos.y as usize * self.map.width as usize + pos.x as usize]
+            self.cells
+                .ids(pos.y as usize * self.map.width as usize + pos.x as usize)
                 .iter()
                 .map(|id| self.entities.get(id).expect("occupied cell missing entity"))
         })
@@ -2851,7 +2868,8 @@ impl World {
         let y1 = (a.y.max(b.y) as i32 + 1).min(self.map.height - 1);
         (y0..=y1).flat_map(move |y| {
             (x0..=x1).flat_map(move |x| {
-                self.cells[(y * self.map.width + x) as usize]
+                self.cells
+                    .ids((y * self.map.width + x) as usize)
                     .iter()
                     .map(|id| self.entities.get(id).expect("occupied cell missing entity"))
             })
@@ -4379,10 +4397,11 @@ impl World {
         let old = self.entities[&id].pos;
         let cell = |p: Pos| p.y as usize * self.map.width as usize + p.x as usize;
         assert!(
-            self.cells[cell(old)].remove(&id),
+            self.cells.remove(cell(old), id),
             "moving NPC missing from spatial index"
         );
-        self.cells[cell(pos)].insert(id);
+        self.cells
+            .insert(cell(pos), id, self.actor_ids.contains(&id));
         let e = self.entities.get_mut(&id).unwrap();
         e.pos = pos;
         e.last_step = Pos {
@@ -6790,7 +6809,7 @@ mod tests {
         w.step();
         assert!(!w.entities.contains_key(&bag));
         assert!(!w.bag_expiry.contains_key(&bag));
-        assert!(w.cells.iter().all(|cell| !cell.contains(&bag)));
+        assert_eq!(w.cells.count(bag), 0);
         assert_eq!(w.players[&owner].character.items[5], 0xa22);
     }
     #[test]
@@ -6866,7 +6885,7 @@ mod tests {
         assert!(!w.entities.contains_key(&bag));
         assert_eq!(w.players[&owner].character.items[5], 0xa4f);
         assert_eq!(w.players[&other].character.items[5], -1);
-        assert_eq!(w.cells.iter().filter(|c| c.contains(&bag)).count(), 0);
+        assert_eq!(w.cells.count(bag), 0);
     }
     #[test]
     fn native_projectile_observation_exposes_only_the_players_friendly_origins() {
@@ -7420,7 +7439,7 @@ mod tests {
         let current = w.entities[&npc].pos;
         assert!(initial.distance(current) > 2.);
         assert!(current.distance(w.players[&player].pos) <= 1.3);
-        assert_eq!(w.cells.iter().filter(|cell| cell.contains(&npc)).count(), 1);
+        assert_eq!(w.cells.count(npc), 1);
         assert!(w.entities_at(current).any(|e| e.id == npc));
         assert!(w.players[&player].character.hp < 100);
         let before = current;

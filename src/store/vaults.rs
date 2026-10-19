@@ -99,7 +99,7 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
         &["account", "items", "revision"]
     };
     ensure!(
-        (0..=14).contains(&version)
+        (0..=15).contains(&version)
             && mask == (version >= 13)
             && columns
                 .iter()
@@ -221,7 +221,12 @@ pub(super) fn legacy_fixture(db: &Connection) -> Result<()> {
         )?,
         "legacy fixture cannot discard paid death awards"
     );
-    db.execute_batch("ALTER TABLE deaths DROP COLUMN equipment_fame")?;
+    ensure!(
+        !db.query_row("SELECT EXISTS(SELECT 1 FROM pictures)", [], |r| r
+            .get::<_, bool>(0))?,
+        "legacy fixture cannot discard saved pictures"
+    );
+    db.execute_batch("DROP TABLE pictures; DROP TABLE picture_sequence; ALTER TABLE deaths DROP COLUMN equipment_fame")?;
     let current: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('vaults') WHERE name='chest')",
         [],

@@ -30,6 +30,7 @@ mod guilds;
 mod hiscores;
 mod legends;
 pub use guilds::{Guild, GuildAction, Membership as GuildMembership};
+pub(crate) mod pictures;
 #[cfg(test)]
 mod presentation_tests;
 mod purchases;
@@ -348,7 +349,7 @@ impl Store {
         let mut c = Connection::open(path)?;
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14),
+            matches!(version, 0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15),
             "unsupported game database schema {version}"
         );
         death_awards::check_schema(&c, version)?;
@@ -432,6 +433,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         character_slots::migrate(&migration, version)?;
         vaults::migrate(&migration, version)?;
         death_awards::migrate(&migration, version, legacy_base)?;
+        pictures::migrate(&migration, version)?;
         let records = {
             let mut q = migration.prepare("SELECT id,stats FROM characters ORDER BY id")?;
             q.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))?
@@ -504,7 +506,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             );
         }
         death_awards::validate_wallets(&migration)?;
-        migration.pragma_update(None, "user_version", 14)?;
+        migration.pragma_update(None, "user_version", 15)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

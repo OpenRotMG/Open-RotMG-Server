@@ -66,7 +66,7 @@ impl World {
                     y: (area.y + y) as f32 + 0.5,
                 };
                 let index = pos.y as usize * self.map.width as usize + pos.x as usize;
-                let old: Vec<_> = self.cells[index].iter().copied().collect();
+                let old: Vec<_> = self.cells.ids(index).to_vec();
                 for id in old {
                     self.remove_entity(id);
                 }

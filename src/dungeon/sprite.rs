@@ -2,12 +2,10 @@ use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 
-const COLORS: [u8; 5] = [0xa0, 0xa1, 0xa2, 0xa3, 0xa4];
 const TREES: [u16; 5] = [0x175, 0x176, 0x177, 0x178, 0x179];
 const SPRITES: [u16; 5] = [0xd00, 0xd01, 0xd02, 0xd03, 0xd04];
 
-// Period guides describe conveyor floors, a tiled/solid superstition, and zero to five gods.
-// No official generator was recovered, so each seed builds that variation explicitly.
+// Preserve seeded routes while matching classic rectangular platforms and conveyor lanes.
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let directions = [(1i32, 0), (-1, 0), (0, 1), (0, -1)];
@@ -66,17 +64,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         ],
         spawns: vec![],
     };
-    let tiled_world = rng.gen_bool(0.5);
-    let mut room_color = Vec::new();
     for (i, &(cx, cy)) in centers.iter().enumerate() {
-        let primary = COLORS[rng.gen_range(0..COLORS.len())];
-        let secondary = COLORS[rng.gen_range(0..COLORS.len())];
-        let tiled = if tiled_world {
-            rng.gen_bool(0.8)
-        } else {
-            rng.gen_bool(0.2)
-        };
-        room_color.push((primary, secondary, tiled));
         let radius = if i == 0 || i == boss {
             8
         } else {
@@ -84,19 +72,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         };
         for y in cy - radius..=cy + radius {
             for x in cx - radius..=cx + radius {
-                if (x - cx) * (x - cx) + (y - cy) * (y - cy) > radius * radius {
-                    continue;
-                }
-                paint(&mut map, x, y, primary, secondary, tiled);
+                paint(&mut map, x, y);
             }
         }
     }
     for &(a, b) in &edges {
         let ((x0, y0), (x1, y1)) = (centers[a], centers[b]);
-        let (primary, secondary, tiled) = room_color[b];
         for y in y0.min(y1) - 1..=y0.max(y1) + 1 {
             for x in x0.min(x1) - 1..=x0.max(x1) + 1 {
-                paint(&mut map, x, y, primary, secondary, tiled);
+                paint(&mut map, x, y);
             }
         }
     }
@@ -155,7 +139,6 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         seed,
         rooms = rooms.len(),
         gods,
-        tiled_world,
         width,
         height,
         "generated varied Sprite World"
@@ -163,13 +146,16 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     Ok(map)
 }
 
-fn paint(map: &mut Map, x: i32, y: i32, primary: u8, secondary: u8, tiled: bool) {
-    let cell = &mut map.cells[(y * map.width + x) as usize];
-    cell.ground = if tiled && (x + y) % 2 == 1 {
-        secondary
-    } else {
-        primary
-    };
+fn paint(map: &mut Map, x: i32, y: i32) {
+    // One pattern aligned to the room centers keeps corridor joins seamless and arrivals stationary.
+    map.cells[(y * map.width + x) as usize].ground =
+        match ((x - 12).rem_euclid(8), (y - 12).rem_euclid(8)) {
+            (_, 2) => 0xa1,
+            (_, 3) => 0xa2,
+            (2, _) => 0xa3,
+            (3, _) => 0xa4,
+            _ => 0xa0,
+        };
 }
 
 fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
