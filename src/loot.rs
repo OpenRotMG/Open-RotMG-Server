@@ -340,8 +340,10 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Tier(3, ABILITIES)),
         ],
         0x908 | 0x909 | 0x90b => &[],
+        // Malphas and the Abyss Idol both drop a Potion of Vitality and a Potion of Defense.
         crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL => &[
             (1., Item(0xa34)),
+            (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
@@ -554,6 +556,18 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+    #[test]
+    fn abyss_bosses_always_drop_the_vitality_and_defense_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in [crate::dungeon::abyss::MALPHAS, crate::dungeon::abyss::IDOL] {
+            for seed in 0..64 {
+                let mut rng = StdRng::seed_from_u64(seed);
+                let items = rewards(&content, kind, &mut rng);
+                assert!(items.contains(&0xa34), "kind {kind:#x} seed {seed}");
+                assert!(items.contains(&0xa20), "kind {kind:#x} seed {seed}");
+            }
+        }
+    }
     #[test]
     fn desert_werewolf_uses_only_existing_ordered_public_tiers_without_a_minimum() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
