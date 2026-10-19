@@ -218,7 +218,6 @@ pub(crate) mod tests {
         let content = Content::load(Path::new("data")).unwrap();
         let mut layouts = BTreeSet::new();
         let mut gods = BTreeSet::new();
-        let (mut tiled, mut solid) = (0, 0);
         for seed in 0..48 {
             let map = sprite::generate(&content, seed).unwrap();
             assert_eq!(
@@ -239,28 +238,47 @@ pub(crate) mod tests {
             let god_count = map.cells.iter().filter(|c| c.object == Some(0xd05)).count();
             assert!(god_count <= 5, "seed {seed}");
             gods.insert(god_count);
-            let mut changes = 0;
-            let mut pairs = 0;
-            for y in 0..map.height - 1 {
-                for x in 0..map.width - 1 {
-                    let a = map.cells[(y * map.width + x) as usize].ground;
-                    let b = map.cells[(y * map.width + x + 1) as usize].ground;
-                    if (0xa0..=0xa4).contains(&a) && (0xa0..=0xa4).contains(&b) {
-                        pairs += 1;
-                        changes += usize::from(a != b);
-                    }
-                }
+            let (sx, sy) = (map.spawns[0].0 as i32, map.spawns[0].1 as i32);
+            let ground = |x, y| map.cells[(y * map.width + x) as usize].ground;
+            assert_eq!(ground(sx, sy), 0xa0, "moving entrance for seed {seed}");
+            for (dx, dy) in [(-8, -8), (-8, 8), (8, -8), (8, 8)] {
+                assert!(
+                    (0xa0..=0xa4).contains(&ground(sx + dx, sy + dy)),
+                    "rounded entrance for seed {seed}"
+                );
             }
-            if changes * 4 > pairs {
-                tiled += 1;
-            } else {
-                solid += 1;
+            for dx in -8..=8 {
+                assert_eq!(
+                    ground(sx + dx, sy + 2),
+                    0xa1,
+                    "broken purple lane, seed {seed}"
+                );
+                assert_eq!(
+                    ground(sx + dx, sy + 3),
+                    0xa2,
+                    "broken red lane, seed {seed}"
+                );
             }
+            for kind in 0xa0..=0xa4 {
+                assert!(
+                    map.cells.iter().any(|c| c.ground == kind),
+                    "missing floor {kind:#x}, seed {seed}"
+                );
+            }
+            let floor = map
+                .cells
+                .iter()
+                .filter(|c| (0xa0..=0xa4).contains(&c.ground))
+                .count();
+            let white = map.cells.iter().filter(|c| c.ground == 0xa0).count();
+            assert!(
+                white * 5 >= floor,
+                "no stationary floor between conveyors, seed {seed}"
+            );
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             assert!(crate::loot::rewards(&content, 0xd06, &mut rng).contains(&0xa4c));
         }
         assert!(layouts.len() > 40, "seeds collapsed to one Sprite World");
         assert!(gods.contains(&0) && gods.contains(&5), "god count {gods:?}");
-        assert!(tiled > 0 && solid > 0, "tiled={tiled} solid={solid}");
     }
 }
