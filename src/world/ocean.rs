@@ -63,7 +63,7 @@ impl World {
         let id = self.insert_entity(kind, pos, vec![])?;
         let quest = self.entities[&parent].quest;
         let e = self.entities.get_mut(&id).unwrap();
-        e.parent = Some(parent);
+        e.parent.set(Some(parent), id, &mut self.timed_ids);
         e.quest = quest;
         Ok(id)
     }
@@ -246,7 +246,11 @@ impl World {
                 Some(4) if elapsed >= 6000 => {
                     for child in self.ocean_children(id, 0xd63) {
                         self.ocean_stage(child, 2);
-                        self.entities.get_mut(&child).unwrap().expires = Some(self.now + 50);
+                        self.entities.get_mut(&child).unwrap().expires.set(
+                            Some(self.now + 50),
+                            child,
+                            &mut self.timed_ids,
+                        );
                     }
                     self.ocean_stage(id, 5);
                 }
@@ -320,19 +324,31 @@ impl World {
                 if stage.is_none() {
                     self.ocean_toss(id, 0x1703, 6, 1., TAU / 12.)?;
                     self.ocean_stage(id, 0);
-                    self.entities.get_mut(&id).unwrap().expires = Some(self.now + 550);
+                    self.entities.get_mut(&id).unwrap().expires.set(
+                        Some(self.now + 550),
+                        id,
+                        &mut self.timed_ids,
+                    );
                 }
             }
             0x1703 => {
                 if stage.is_none() {
                     self.ocean_stage(id, 0);
-                    self.entities.get_mut(&id).unwrap().expires = Some(self.now + 50);
+                    self.entities.get_mut(&id).unwrap().expires.set(
+                        Some(self.now + 50),
+                        id,
+                        &mut self.timed_ids,
+                    );
                 }
             }
             0x1704 => {
                 if stage.is_none() {
                     self.ocean_stage(id, 0);
-                    self.entities.get_mut(&id).unwrap().expires = Some(self.now + 12000);
+                    self.entities.get_mut(&id).unwrap().expires.set(
+                        Some(self.now + 12000),
+                        id,
+                        &mut self.timed_ids,
+                    );
                     self.ocean_say(id, "Is King Alexander alive?");
                 }
                 self.entities.get_mut(&id).unwrap().extra_stats =
@@ -647,7 +663,9 @@ impl World {
                 let id = self.spawn_entity(0x1704, e.pos, vec![])?;
                 let child = self.entities.get_mut(&id).unwrap();
                 child.condition |= condition::bit(condition::INVINCIBLE);
-                child.expires = Some(self.now + 12000);
+                child
+                    .expires
+                    .set(Some(self.now + 12000), id, &mut self.timed_ids);
             }
         }
         Ok(())
@@ -689,7 +707,11 @@ impl World {
         for id in wounded {
             self.ocean_toss(id, 0x1705, 3, 5., TAU / 8.)?;
             for gift in self.ocean_children(id, 0x1705) {
-                self.entities.get_mut(&gift).unwrap().parent = None;
+                self.entities
+                    .get_mut(&gift)
+                    .unwrap()
+                    .parent
+                    .set(None, gift, &mut self.timed_ids);
             }
             self.ocean_say(id, "Thank you kind sailor.");
             self.remove_entity(id);

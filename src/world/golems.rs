@@ -70,7 +70,11 @@ impl World {
             .map(|e| e.id)
             .collect();
         for id in satellites {
-            self.entities.get_mut(&id).unwrap().expires = Some(self.now + 30000);
+            self.entities.get_mut(&id).unwrap().expires.set(
+                Some(self.now + 30000),
+                id,
+                &mut self.timed_ids,
+            );
             self.npc_global_ids.insert(id);
         }
         tracing::debug!(

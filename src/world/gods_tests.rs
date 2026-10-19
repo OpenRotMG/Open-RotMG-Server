@@ -333,6 +333,35 @@ fn leviathan_magic_eye_retains_cloaked_targets_without_giving_other_gods_their_p
 }
 
 #[test]
+fn white_demon_defeats_keep_rewards_without_opening_a_dungeon() {
+    use rand::SeedableRng;
+
+    let mut w = tests::arena(0);
+    w.name = "Realm".into();
+    let pos = Pos { x: 10.5, y: 10.5 };
+    let p = player(&mut w, pos);
+    assert_eq!(w.content.objects[&0x651].name, "White Demon");
+    for seed in 0..64 {
+        w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let demon = w.spawn_entity(0x651, pos, vec![]).unwrap();
+        let hp = w.entities[&demon].hp;
+        let xp = w.players[&p].experience_queued;
+        assert_eq!(
+            w.damage_enemy(p, demon, hp, true, &[], Some(0)).unwrap(),
+            hp
+        );
+        assert!(!w.entities.contains_key(&demon));
+        assert_eq!(w.players[&p].character.kills, seed + 1);
+        assert!(w.players[&p].experience_queued > xp);
+        assert!(
+            w.portal_requests.is_empty(),
+            "unexpected dungeon for seed {seed}"
+        );
+    }
+    assert_eq!(crate::dungeon::portal_drop(0x651), None);
+}
+
+#[test]
 fn researched_stat_potions_are_independent_normal_drops_without_incantations() {
     let w = tests::world();
     for (kind, potion) in [
