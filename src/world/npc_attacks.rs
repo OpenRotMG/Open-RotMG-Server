@@ -33,6 +33,9 @@ impl World {
             endgame::{ORYX, ORYX2, OryxPhase},
         };
         let e = &self.entities[&id];
+        if crate::dungeon::jungle::ROSTER.contains(&e.kind) {
+            return Ok(Some(self.jungle_schedule(id)?));
+        }
         if crate::encounter::landmarks::ROSTER.contains(&e.kind) {
             let state = e.stage.context("landmark attack phase missing")?;
             let script = e

@@ -85,6 +85,10 @@ impl World {
     pub(super) fn configure_landmark_child(&mut self, id: i32) {
         let e = self.entities.get_mut(&id).unwrap();
         match e.kind {
+            0xdc0 | 0xdc1 => {
+                e.expires.set(None, id, &mut self.timed_ids);
+                e.home = e.pos;
+            }
             0xd52 => {
                 e.script
                     .get_or_insert_with(landmark_ai::Script::default)

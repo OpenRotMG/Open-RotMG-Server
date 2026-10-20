@@ -1,5 +1,5 @@
 // GPL-3.0 reference; data/REALM-SRC-LICENSE: moistosaurus/realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff
-// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract}.cs.
+// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,TempleA,TempleB}.cs.
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -56,6 +56,103 @@ impl Piece {
     }
     fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
         let mut p = match kind {
+            0xdc2 => {
+                let mut p = Self::new(60, 60);
+                for y in 0..60 {
+                    for x in 0..60 {
+                        let (dx, dy) = ((x as f32 - 30.).abs() / 30., (y as f32 - 30.).abs() / 30.);
+                        if dx + rng.gen_range(0.0..0.3) < 0.9
+                            && dy + rng.gen_range(0.0..0.3) < 0.9
+                            && !rng.gen_ratio(1, 50)
+                        {
+                            p.set(
+                                x,
+                                y,
+                                if rng.r#gen::<f32>() < (1. - dx.hypot(dy)).powi(2) {
+                                    1
+                                } else {
+                                    5
+                                },
+                            );
+                        }
+                    }
+                }
+                if rng.gen_bool(0.5) {
+                    for n in 0..20 {
+                        p.set(17 + n, 17, if n == 19 { 3 } else { 2 });
+                        p.set(17 + n, 18, 3);
+                        p.set(17, 17 + n, if n == 19 { 3 } else { 2 });
+                        if n > 0 {
+                            p.set(18, 17 + n, 3);
+                        }
+                    }
+                    for n in 0..19 {
+                        p.set(25 + n, 42, 3);
+                        p.set(25 + n, 43, if n == 0 { 3 } else { 2 });
+                        if n < 18 {
+                            p.set(42, 25 + n, 3);
+                        }
+                        p.set(43, 25 + n, if n == 0 { 3 } else { 2 });
+                    }
+                    for (x, y) in [
+                        (22, 22),
+                        (38, 22),
+                        (22, 38),
+                        (38, 38),
+                        (26, 26),
+                        (34, 26),
+                        (26, 34),
+                        (34, 34),
+                    ] {
+                        p.set(x, y, 4);
+                    }
+                } else {
+                    for n in 0..23 {
+                        if (10..=12).contains(&n) {
+                            continue;
+                        }
+                        for t in [16, 17, 37, 38] {
+                            p.set(16 + n, t, 3);
+                            p.set(t, 16 + n, 3);
+                        }
+                    }
+                    for n in [7, 8, 9, 13, 14, 15] {
+                        for t in [15, 39] {
+                            p.set(16 + n, t, 2);
+                            p.set(t, 16 + n, 2);
+                        }
+                    }
+                    for y in 0..4 {
+                        for x in 0..4 {
+                            p.set(21 + x * 4, 21 + y * 4, 4);
+                        }
+                    }
+                    p.boss = (27, 27);
+                }
+                for y in 6..54 {
+                    for x in 6..54 {
+                        if p.cells[y * 60 + x] == 5
+                            && (!(17..=43).contains(&x) || !(17..=43).contains(&y))
+                        {
+                            let r: f32 = rng.r#gen();
+                            if r > 0.33 {
+                                p.set(
+                                    x,
+                                    y,
+                                    if r > 0.6 {
+                                        6
+                                    } else if r > 0.35 {
+                                        7
+                                    } else {
+                                        8
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+                p
+            }
             0x91f => {
                 let mut p = Self::new(25, 25);
                 let radius = rng.gen_range(20..=25) / 2;
@@ -333,7 +430,7 @@ impl Piece {
             }
             _ => unreachable!("named setpiece kind validated by caller"),
         };
-        if matches!(kind, 0x91b | 0x928 | 0x67d | 0x668) {
+        if matches!(kind, 0x91b | 0x928 | 0x67d | 0x668 | 0xdc2) {
             for _ in 0..rng.gen_range(0..4) {
                 p = p.rotate();
             }
@@ -348,6 +445,14 @@ impl Piece {
     }
     fn tile(kind: u16, mark: u8) -> (u8, Option<u16>) {
         match (kind, mark) {
+            (0xdc2, 1) => (0xc5, None),
+            (0xdc2, 2) => (0xc5, Some(0x1f4)),
+            (0xdc2, 3) => (0xc5, Some(0x1f2)),
+            (0xdc2, 4) => (0xc5, Some(0x1f3)),
+            (0xdc2, 5) => (0x56, None),
+            (0xdc2, 6) => (0x56, Some(0xdd4)),
+            (0xdc2, 7) => (0x56, Some(0xdd5)),
+            (0xdc2, 8) => (0x56, Some(0xdda)),
             (0x91f, 1) => (0x46, None),
             (0x91f, 2) => (0x46, Some(0x194)),
             (0x91b, 1) => (0xad, None),
@@ -466,9 +571,14 @@ impl World {
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
-                            c.region == 0
-                                && self.content.grounds[&c.ground] > 0.
-                                && !matches!(c.ground, 0x72 | 0x73)
+                            let untouched = kind == 0xdc2
+                                && piece.cells
+                                    [(y - a.y) as usize * piece.width + (x - a.x) as usize]
+                                    == 0;
+                            untouched
+                                || c.region == 0
+                                    && self.content.grounds[&c.ground] > 0.
+                                    && !matches!(c.ground, 0x72 | 0x73)
                         })
                     })
             })

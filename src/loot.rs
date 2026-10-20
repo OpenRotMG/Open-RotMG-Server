@@ -21,6 +21,18 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
         ],
+        crate::dungeon::jungle::BOSS => &[
+            (1., Item(0xc1a)),
+            (0.4, Item(0xc17)),
+            (0.25, Item(0xc15)),
+            (0.3, Item(0xc16)),
+            (0.4, Item(0xc14)),
+            (0.003, Item(0x722)),
+        ],
+        crate::dungeon::jungle::SHAMAN
+        | crate::dungeon::jungle::WARRIOR
+        | crate::dungeon::jungle::HUNTER => &[(0.1, Item(0xc1a))],
+        kind if crate::dungeon::jungle::ROSTER.contains(&kind) => &[],
         crate::dungeon::spider::BOSS => {
             &[(0.2, Item(0xa16)), (0.2, Item(0x708)), (0.2, Item(0x709))]
         }
@@ -468,6 +480,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | 0xd78
                 | 0xd79
                 | crate::dungeon::spider::BOSS
+                | crate::dungeon::jungle::BOSS
                 | crate::dungeon::abyss::MALPHAS
                 | crate::dungeon::abyss::IDOL
                 | crate::endgame::ORYX
@@ -502,11 +515,27 @@ pub fn private(kind: u16) -> bool {
         )
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
+        | crate::dungeon::jungle::BOSS
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
 }
-fn chest_table(kind: u16) -> [(f64, Pick); 12] {
+fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
     use Pick::Tier;
+    if kind == crate::dungeon::jungle::COIL {
+        return vec![
+            (0.3, Tier(4, WEAPONS)),
+            (0.2, Tier(5, WEAPONS)),
+            (0.3, Tier(4, ARMOR)),
+            (0.2, Tier(5, ARMOR)),
+            (0.25, Tier(1, ABILITIES)),
+            (0.15, Tier(2, ABILITIES)),
+            (0.3, Tier(2, RINGS)),
+            (0.2, Tier(3, RINGS)),
+            (0.5, Tier(1, &[10])),
+            (0.5, Tier(1, &[10])),
+            (0.5, Tier(1, &[10])),
+        ];
+    }
     let (weapon, armor) = match kind {
         0x67d => (6, 5),
         0x668 => (7, 6),
@@ -526,12 +555,13 @@ fn chest_table(kind: u16) -> [(f64, Pick); 12] {
         (0.15, Tier(3, RINGS)),
         (0.5, Tier(1, &[10])),
     ]
+    .to_vec()
 }
 pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
     let picks = chest_table(kind);
-    for (_, pick) in picks {
+    for (_, pick) in &picks {
         ensure!(
-            !candidates(content, pick).is_empty(),
+            !candidates(content, *pick).is_empty(),
             "landmark {kind:#x} chest has an empty selected tier"
         );
     }
