@@ -22,6 +22,7 @@ fn manor_life_steal_requires_an_acknowledged_once_only_hit_and_living_owner() {
         damage: 30,
         spec: w.content.objects[&BOSS].projectiles[&0].clone(),
         hit: BTreeSet::new(),
+        hit_enemy: false,
     };
     w.entities.get_mut(&boss).unwrap().hp = 14980;
     assert!(native_hits::expect_shoot_ack(
