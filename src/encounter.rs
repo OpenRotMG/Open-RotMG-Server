@@ -31,6 +31,8 @@ pub enum Motion {
         sight: f32,
         stop: f32,
         idle: f32,
+        duration: u64,
+        cooldown: u64,
     },
     Charge {
         sight: f32,

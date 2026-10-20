@@ -48,6 +48,8 @@ mod landmark_ai;
 
 mod lost_lands;
 mod midlands;
+#[cfg(test)]
+mod movement_tests;
 
 mod named_births;
 mod names;
@@ -148,6 +150,12 @@ pub struct EntityData {
     motion: Option<crate::encounter::Motion>,
     #[serde(skip)]
     following: Following,
+    #[serde(skip)]
+    lair_escort: Option<lair::Escort>,
+    #[serde(skip)]
+    follow_remaining: u64,
+    #[serde(skip)]
+    strict_initialized: bool,
     #[serde(skip)]
     charge: Option<charges::Charge>,
     #[serde(skip)]
@@ -1617,6 +1625,9 @@ impl World {
                             goal: None,
                             motion: None,
                             following: Following::Unknown,
+                            lair_escort: None,
+                            follow_remaining: 0,
+                            strict_initialized: false,
                             charge: None,
                             script: None,
                             last_step: Pos { x: 0., y: 0. },
@@ -1939,6 +1950,9 @@ impl World {
                     goal: None,
                     motion: None,
                     following: Following::Unknown,
+                    lair_escort: None,
+                    follow_remaining: 0,
+                    strict_initialized: false,
                     charge: None,
                     script: None,
                     last_step: Pos { x: 0., y: 0. },
@@ -4402,6 +4416,77 @@ impl World {
         };
         Ok(())
     }
+    // Follow owns its acquisition clock; encounter age must not restart a pursuit.
+    // https://github.com/moistosaurus/realm-src/tree/1855c017eab870d13f0b61b1cf0b9e66a01922ff
+    fn follow_goal(
+        &mut self,
+        id: i32,
+        target: Option<Pos>,
+        motion: crate::encounter::Motion,
+        delta: u64,
+    ) -> Option<Pos> {
+        let crate::encounter::Motion::Follow {
+            sight,
+            stop,
+            duration,
+            cooldown,
+            ..
+        } = motion
+        else {
+            unreachable!("Follow goal requires Follow motion");
+        };
+        let pos = self.entities[&id].pos;
+        let e = self.entities.get_mut(&id).unwrap();
+        let old = e.following;
+        let target = target.filter(|p| pos.distance(*p) < sight);
+        match e.following {
+            Following::Unknown => {
+                if target.is_some() && e.follow_remaining == 0 {
+                    e.following = Following::Acquired;
+                    e.follow_remaining = duration;
+                } else {
+                    e.follow_remaining = e.follow_remaining.saturating_sub(delta);
+                }
+            }
+            Following::Resting => match target {
+                None => {
+                    e.following = Following::Unknown;
+                    e.follow_remaining = duration;
+                }
+                Some(p) if pos.distance(p) > stop + 1. => {
+                    e.following = Following::Acquired;
+                    e.follow_remaining = duration;
+                }
+                _ => {}
+            },
+            Following::Acquired => {}
+        }
+        if e.following == Following::Acquired {
+            match target {
+                None => {
+                    e.following = Following::Unknown;
+                    e.follow_remaining = 0;
+                }
+                Some(_) if duration > 0 && e.follow_remaining == 0 => {
+                    e.following = Following::Unknown;
+                    e.follow_remaining = cooldown;
+                }
+                Some(target) => {
+                    e.follow_remaining = e.follow_remaining.saturating_sub(delta);
+                    if pos.distance(target) <= stop {
+                        e.following = Following::Resting;
+                        e.follow_remaining = 0;
+                    }
+                }
+            }
+        }
+        if old != e.following {
+            e.goal = None;
+        }
+        (e.following == Following::Acquired)
+            .then_some(target)
+            .flatten()
+    }
     fn npc_step(&mut self) -> Vec<(i32, Vec<u8>)> {
         use crate::encounter::{Motion, profile};
         let mut packets = Vec::new();
@@ -4418,7 +4503,7 @@ impl World {
             .chain(self.decoy_positions())
             .collect();
         let ids = self.npc_candidates(&audience);
-        for id in ids {
+        'entities: for id in ids {
             let Some(entity) = self.entities.get(&id) else {
                 continue;
             };
@@ -4507,7 +4592,29 @@ impl World {
             };
             let elapsed = self.now - current.activated.expect("activated encounter");
             let flags = current.conditions(self.now);
-            let (mut motion, mut speed) = if kind == 0x909 && current.stage == Some(1) {
+            let lair_escort = matches!(kind, 0xdaa | 0xdac);
+            let queued_hero = kind == 0x668 || matches!(kind, 0x67e..=0x682);
+            let mut hero_continue = false;
+            let mut target = target;
+            let (mut motion, mut speed) = if lair_escort {
+                if let Err(error) = self.lair_escort_step(id, target, delta) {
+                    self.entities.get_mut(&id).unwrap().last_step = Pos { x: 0., y: 0. };
+                    tracing::error!(entity=id, %error, "Lair escort movement refused");
+                    continue;
+                }
+                (Motion::Stationary, 0.)
+            } else if queued_hero {
+                match self.hero_movement(id, target, delta) {
+                    Ok((motion, speed, completed)) => {
+                        hero_continue = completed;
+                        (motion, speed)
+                    }
+                    Err(error) => {
+                        tracing::error!(entity=id, %error, "Realm hero movement refused");
+                        continue;
+                    }
+                }
+            } else if kind == 0x909 && current.stage == Some(1) {
                 (Motion::Stationary, 0.)
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
@@ -4565,14 +4672,6 @@ impl World {
                         continue;
                     }
                 }
-            } else if matches!(kind, 0xdaa | 0xdac) {
-                match self.lair_escort_movement(id) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Lair escort movement refused");
-                        continue;
-                    }
-                }
             } else if crate::endgame::ROSTER.contains(&kind) {
                 match self.finale_movement(id, target, elapsed) {
                     Ok(movement) => movement,
@@ -4584,300 +4683,354 @@ impl World {
             } else {
                 crate::encounter::movement(kind, self.entities[&id].hp, elapsed)
             };
-            if target.is_none()
-                && matches!(
-                    motion,
-                    Motion::Chase { .. }
-                        | Motion::Maintain { .. }
-                        | Motion::Retreat { .. }
-                        | Motion::Orbit {
-                            anchor: crate::encounter::Anchor::Player,
-                            ..
-                        }
-                        | Motion::Protect {
-                            anchor: crate::encounter::Anchor::Player,
-                            ..
-                        }
-                )
-            {
-                motion = Motion::Wander;
-                speed = 4.;
-            }
-            let e = self.entities.get_mut(&id).unwrap();
-            if e.motion != Some(motion) {
-                e.motion = Some(motion);
-                e.following = Following::Unknown;
-                e.charge = None;
-                e.goal = None;
-                if matches!(motion, Motion::Pace { .. }) {
-                    e.phase = 1.;
+            // Completion invokes at most one successor, after publishing the first motor step.
+            // https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/Behavior.cs
+            for invocation in 0..2 {
+                if lair_escort {
+                    break;
                 }
-                tracing::debug!(entity = id, kind, ?motion, speed, "NPC movement entered");
-            }
-            let planned_motion = if flags & crate::condition::bit(crate::condition::PARALYZED) != 0
-            {
-                if let Some(charge) = &mut e.charge {
-                    charge.suspend(delta);
-                }
-                Motion::Stationary
-            } else {
-                motion
-            };
-            let goal = match planned_motion {
-                Motion::Stationary => {
-                    speed = 0.;
-                    Some(pos)
-                }
-                Motion::Charge { .. } => self.charge_goal(id, target, motion, speed),
-                Motion::WanderHome { radius } => {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    if e.goal.is_none_or(|p| {
-                        p.distance(e.pos) < 0.1 || p.distance(e.home) > radius + 0.01
-                    }) {
-                        let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                        let distance = self.rng.gen_range(0. ..radius);
-                        e.goal = Some(Pos {
-                            x: e.home.x + distance * angle.cos(),
-                            y: e.home.y + distance * angle.sin(),
-                        });
-                    }
-                    e.goal
-                }
-                Motion::Follow { sight, stop, .. } => {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
-                        Some(pos)
-                    } else {
-                        let old = e.following;
-                        let target = target.filter(|p| pos.distance(*p) < sight);
-                        e.following = match target {
-                            None => Following::Unknown,
-                            Some(p)
-                                if pos.distance(p)
-                                    > stop + if old == Following::Resting { 1. } else { 0. } =>
-                            {
-                                Following::Acquired
+                let pos = self.entities[&id].pos;
+                if target.is_none()
+                    && matches!(
+                        motion,
+                        Motion::Chase { .. }
+                            | Motion::Maintain { .. }
+                            | Motion::Retreat { .. }
+                            | Motion::Orbit {
+                                anchor: crate::encounter::Anchor::Player,
+                                ..
                             }
-                            Some(_) => Following::Resting,
-                        };
-                        if old != e.following {
-                            e.goal = None;
+                            | Motion::Protect {
+                                anchor: crate::encounter::Anchor::Player,
+                                ..
+                            }
+                    )
+                {
+                    motion = Motion::Wander;
+                    speed = 4.;
+                }
+                let e = self.entities.get_mut(&id).unwrap();
+                if e.motion != Some(motion) {
+                    e.motion = Some(motion);
+                    e.following = Following::Unknown;
+                    e.follow_remaining = 0;
+                    e.strict_initialized = false;
+                    e.charge = None;
+                    e.goal = None;
+                    if matches!(motion, Motion::Pace { .. }) {
+                        e.phase = 1.;
+                    }
+                    tracing::debug!(entity = id, kind, ?motion, speed, "NPC movement entered");
+                }
+                let planned_motion =
+                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
+                        if let Some(charge) = &mut e.charge {
+                            charge.suspend(delta);
                         }
-                        if e.following == Following::Acquired {
-                            target
+                        Motion::Stationary
+                    } else {
+                        motion
+                    };
+                let goal = match planned_motion {
+                    Motion::Stationary => {
+                        speed = 0.;
+                        Some(pos)
+                    }
+                    Motion::Charge { .. } => self.charge_goal(id, target, motion, speed),
+                    Motion::WanderHome { radius } => {
+                        let e = self.entities.get_mut(&id).unwrap();
+                        if e.goal.is_none_or(|p| {
+                            p.distance(e.pos) < 0.1 || p.distance(e.home) > radius + 0.01
+                        }) {
+                            let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                            let distance = self.rng.gen_range(0. ..radius);
+                            e.goal = Some(Pos {
+                                x: e.home.x + distance * angle.cos(),
+                                y: e.home.y + distance * angle.sin(),
+                            });
+                        }
+                        e.goal
+                    }
+                    Motion::Follow { idle, .. } => {
+                        if let Some(target) = self.follow_goal(id, target, motion, delta) {
+                            Some(target)
+                        } else if idle == 0. {
+                            speed = 0.;
+                            Some(pos)
                         } else {
                             None
                         }
                     }
-                }
-                Motion::Pace { distance } => {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    Some(match e.goal {
-                        Some(goal) if pos.distance(goal) > 0.001 => goal,
-                        _ => {
-                            if e.goal.is_some() {
-                                e.phase = -e.phase;
+                    Motion::Pace { distance } => {
+                        let e = self.entities.get_mut(&id).unwrap();
+                        Some(match e.goal {
+                            Some(goal) if pos.distance(goal) > 0.001 => goal,
+                            _ => {
+                                if e.goal.is_some() {
+                                    e.phase = -e.phase;
+                                }
+                                Pos {
+                                    x: pos.x + distance * e.phase,
+                                    y: pos.y,
+                                }
                             }
-                            Pos {
-                                x: pos.x + distance * e.phase,
-                                y: pos.y,
-                            }
-                        }
-                    })
-                }
-                Motion::Tangential => {
-                    let step = self.entities[&id].last_step;
-                    let length = step.x.hypot(step.y);
-                    if length == 0. {
-                        speed = 0.;
-                        Some(pos)
-                    } else {
-                        Some(Pos {
-                            x: pos.x + step.x / length,
-                            y: pos.y + step.y / length,
                         })
                     }
-                }
-                Motion::Maintain { sight, distance }
-                    if target.is_some_and(|p| pos.distance(p) < sight) =>
-                {
-                    let target = target.expect("acquired maintain-distance target");
-                    let angle = (pos.y - target.y).atan2(pos.x - target.x);
-                    Some(Pos {
-                        x: target.x + distance * angle.cos(),
-                        y: target.y + distance * angle.sin(),
-                    })
-                }
-                Motion::Retreat { distance } => {
-                    let target = target.expect("target-dependent retreat guarded");
-                    if pos.distance(target) >= distance {
-                        speed = 0.;
+                    Motion::Tangential => {
+                        let step = self.entities[&id].last_step;
+                        let length = step.x.hypot(step.y);
+                        if length == 0. {
+                            speed = 0.;
+                            Some(pos)
+                        } else {
+                            Some(Pos {
+                                x: pos.x + step.x / length,
+                                y: pos.y + step.y / length,
+                            })
+                        }
                     }
-                    let angle = (pos.y - target.y).atan2(pos.x - target.x);
-                    Some(Pos {
-                        x: target.x + distance * angle.cos(),
-                        y: target.y + distance * angle.sin(),
-                    })
-                }
-                Motion::Protect { anchor, distance } => {
-                    let leader = match self.orbit_anchor(id, anchor, target) {
-                        Ok(leader) => leader,
-                        Err(error) => {
-                            tracing::error!(entity=id, %error, "protection anchor refused");
-                            continue;
-                        }
-                    };
-                    if pos.distance(leader) <= distance {
-                        speed = 0.;
-                    }
-                    Some(leader)
-                }
-                Motion::Chase { sight, stop }
-                    if target.is_some_and(|p| pos.distance(p) < sight) =>
-                {
-                    if pos.distance(target.expect("acquired chase target")) <= stop {
-                        speed = 0.;
-                    }
-                    target
-                }
-                Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
-                    let target = match self.orbit_anchor(id, anchor, target) {
-                        Ok(target) => target,
-                        Err(error) => {
-                            tracing::error!(entity=id, %error, "orbit anchor refused");
-                            continue;
-                        }
-                    };
-                    let e = self.entities.get_mut(&id).unwrap();
-                    let direction = if let Some(orbit) = e.orbit {
-                        if pos.distance(target) > 0.001 {
-                            e.phase = (pos.y - target.y).atan2(pos.x - target.x);
-                        }
-                        orbit.direction
-                    } else {
-                        if e.goal.is_none() {
-                            e.phase = if matches!(motion, Motion::StrictOrbit { .. }) {
-                                self.rng.gen_range(0. ..std::f32::consts::TAU)
-                            } else {
-                                (pos.y - target.y).atan2(pos.x - target.x)
-                            };
-                        }
-                        1.
-                    };
-                    let angular_speed = if e.quest.is_some()
-                        || e.orbit.is_some()
-                        || matches!(motion, Motion::StrictOrbit { .. })
+                    Motion::Maintain { sight, distance }
+                        if target.is_some_and(|p| pos.distance(p) < sight) =>
                     {
-                        (if e.quest.is_some() || e.orbit.is_some() {
-                            speed / 1.5
-                        } else {
-                            speed
-                        }) * if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
-                            0.5
-                        } else {
-                            1.
-                        }
-                    } else {
-                        speed
-                    };
-                    if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
-                        e.phase = (e.phase + direction * angular_speed / radius * 0.05)
-                            % std::f32::consts::TAU;
+                        let target = target.expect("acquired maintain-distance target");
+                        let angle = (pos.y - target.y).atan2(pos.x - target.x);
+                        Some(Pos {
+                            x: target.x + distance * angle.cos(),
+                            y: target.y + distance * angle.sin(),
+                        })
                     }
-                    Some(Pos {
-                        x: target.x + e.phase.cos() * radius,
-                        y: target.y + e.phase.sin() * radius,
-                    })
-                }
-                Motion::Circle => {
-                    let boss = self
-                        .actors()
-                        .find(|e| e.kind == 0x927 && pos.distance(e.pos) < 10.)
-                        .map(|e| e.pos);
-                    boss.map(|boss| {
-                        let e = self.entities.get_mut(&id).unwrap();
-                        if e.goal.is_none() {
-                            e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                    Motion::Retreat { distance } => {
+                        let target = target.expect("target-dependent retreat guarded");
+                        if pos.distance(target) >= distance
+                            || matches!(kind, 0x67e..=0x682)
+                                && pos.x == target.x
+                                && pos.y == target.y
+                        {
+                            speed = 0.;
                         }
-                        e.phase = (e.phase + profile.speed / 3. * 0.05) % std::f32::consts::TAU;
-                        Pos {
-                            x: boss.x + e.phase.cos() * 3.,
-                            y: boss.y + e.phase.sin() * 3.,
-                        }
-                    })
-                }
-                _ => None,
-            };
-            let goal = if kind == 0xd06 && pos.distance(self.entities[&id].home) > 7. {
-                speed = 7.8;
-                Some(
-                    self.orbit_anchor(id, crate::encounter::Anchor::Home, target)
-                        .expect("live boss home"),
-                )
-            } else {
-                goal
-            };
-            let goal = if let Some(goal) = goal {
-                goal
-            } else {
-                let e = self.entities.get_mut(&id).unwrap();
-                speed = match motion {
-                    Motion::Wander | Motion::Maintain { .. } => speed,
-                    Motion::Follow { idle, .. } | Motion::Charge { idle, .. } => idle,
-                    Motion::Chase { .. } if kind == 0x600 => 4.,
-                    Motion::Chase { .. } if !(0x687..=0x689).contains(&kind) => 4.,
-                    Motion::Protect { .. } => profile.speed,
-                    _ => 2.,
-                };
-                let realm = self.name == "Realm";
-                if e.goal.is_none_or(|goal| {
-                    goal.distance(e.pos) < 0.1
-                        || if realm {
-                            goal.distance(e.pos) > 1.01
+                        let angle = (pos.y - target.y).atan2(pos.x - target.x);
+                        // Retracting gates at radius 8 without clamping the final outward step.
+                        let distance = if matches!(kind, 0x67e..=0x682) {
+                            pos.distance(target) + 1.
                         } else {
-                            goal.distance(e.home) > 2.01
+                            distance
+                        };
+                        Some(Pos {
+                            x: target.x + distance * angle.cos(),
+                            y: target.y + distance * angle.sin(),
+                        })
+                    }
+                    Motion::Protect { anchor, distance } => {
+                        let leader = match self.orbit_anchor(id, anchor, target) {
+                            Ok(leader) => leader,
+                            Err(error) => {
+                                tracing::error!(entity=id, %error, "protection anchor refused");
+                                continue 'entities;
+                            }
+                        };
+                        if pos.distance(leader) <= distance {
+                            speed = 0.;
                         }
-                }) {
-                    let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                    let (center, radius) = if realm {
-                        (e.pos, 1.)
-                    } else {
-                        (e.home, self.rng.gen_range(0. ..2.))
+                        Some(leader)
+                    }
+                    Motion::Chase { sight, stop }
+                        if target.is_some_and(|p| pos.distance(p) < sight) =>
+                    {
+                        if pos.distance(target.expect("acquired chase target")) <= stop {
+                            speed = 0.;
+                        }
+                        target
+                    }
+                    Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
+                        let target = match self.orbit_anchor(id, anchor, target) {
+                            Ok(target) => target,
+                            Err(error) => {
+                                tracing::error!(entity=id, %error, "orbit anchor refused");
+                                continue 'entities;
+                            }
+                        };
+                        let e = self.entities.get_mut(&id).unwrap();
+                        let shield_formation = matches!(kind, 0x900 | 0x902)
+                            && matches!(motion, Motion::StrictOrbit { .. });
+                        if shield_formation && !e.strict_initialized {
+                            e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                            e.strict_initialized = true;
+                            speed = 0.;
+                            Some(pos)
+                        } else {
+                            let direction = if let Some(orbit) = e.orbit {
+                                if pos.distance(target) > 0.001 {
+                                    e.phase = (pos.y - target.y).atan2(pos.x - target.x);
+                                }
+                                orbit.direction
+                            } else {
+                                if !shield_formation && e.goal.is_none() {
+                                    e.phase = if matches!(motion, Motion::StrictOrbit { .. }) {
+                                        self.rng.gen_range(0. ..std::f32::consts::TAU)
+                                    } else {
+                                        (pos.y - target.y).atan2(pos.x - target.x)
+                                    };
+                                }
+                                1.
+                            };
+                            // This older shield formation clock ignores the slowed motor.
+                            let angular_speed = if shield_formation {
+                                speed
+                            } else if e.quest.is_some()
+                                || e.orbit.is_some()
+                                || matches!(motion, Motion::StrictOrbit { .. })
+                            {
+                                (if e.quest.is_some() || e.orbit.is_some() {
+                                    speed / 1.5
+                                } else {
+                                    speed
+                                }) * if flags & crate::condition::bit(crate::condition::SLOWED) != 0
+                                {
+                                    0.5
+                                } else {
+                                    1.
+                                }
+                            } else {
+                                speed
+                            };
+                            if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
+                                e.phase = (e.phase + direction * angular_speed / radius * 0.05)
+                                    % std::f32::consts::TAU;
+                            }
+                            Some(Pos {
+                                x: target.x + e.phase.cos() * radius,
+                                y: target.y + e.phase.sin() * radius,
+                            })
+                        }
+                    }
+                    Motion::Circle => {
+                        let boss = self
+                            .actors()
+                            .find(|e| e.kind == 0x927 && pos.distance(e.pos) < 10.)
+                            .map(|e| e.pos);
+                        boss.map(|boss| {
+                            let e = self.entities.get_mut(&id).unwrap();
+                            if e.goal.is_none() {
+                                e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                            }
+                            e.phase = (e.phase + profile.speed / 3. * 0.05) % std::f32::consts::TAU;
+                            Pos {
+                                x: boss.x + e.phase.cos() * 3.,
+                                y: boss.y + e.phase.sin() * 3.,
+                            }
+                        })
+                    }
+                    _ => None,
+                };
+                let goal = if kind == 0xd06 && pos.distance(self.entities[&id].home) > 7. {
+                    speed = 7.8;
+                    Some(
+                        self.orbit_anchor(id, crate::encounter::Anchor::Home, target)
+                            .expect("live boss home"),
+                    )
+                } else {
+                    goal
+                };
+                let goal = if let Some(goal) = goal {
+                    goal
+                } else {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    speed = match motion {
+                        Motion::Wander | Motion::Maintain { .. } => speed,
+                        Motion::Follow { idle, .. } | Motion::Charge { idle, .. } => idle,
+                        Motion::Chase { .. } if kind == 0x600 => 4.,
+                        Motion::Chase { .. } if !(0x687..=0x689).contains(&kind) => 4.,
+                        Motion::Protect { .. } => profile.speed,
+                        _ => 2.,
                     };
-                    e.goal = Some(if realm && e.pos.distance(e.home) > 24. {
-                        e.home
-                    } else {
-                        Pos {
-                            x: center.x + angle.cos() * radius,
-                            y: center.y + angle.sin() * radius,
-                        }
-                    });
+                    let realm = self.name == "Realm";
+                    if e.goal.is_none_or(|goal| {
+                        goal.distance(e.pos) < 0.1
+                            || if realm {
+                                goal.distance(e.pos) > 1.01
+                            } else {
+                                goal.distance(e.home) > 2.01
+                            }
+                    }) {
+                        let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                        let (center, radius) = if realm {
+                            (e.pos, 1.)
+                        } else {
+                            (e.home, self.rng.gen_range(0. ..2.))
+                        };
+                        e.goal = Some(if realm && e.pos.distance(e.home) > 24. {
+                            e.home
+                        } else {
+                            Pos {
+                                x: center.x + angle.cos() * radius,
+                                y: center.y + angle.sin() * radius,
+                            }
+                        });
+                    }
+                    e.goal.expect("wander destination assigned")
+                };
+                if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
+                    speed = 0.;
+                } else if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
+                    speed *= 0.5;
                 }
-                e.goal.expect("wander destination assigned")
-            };
-            if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
-                speed = 0.;
-            } else if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
-                speed *= 0.5;
+                if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
+                    self.entities.get_mut(&id).unwrap().goal = Some(goal);
+                }
+                let distance = if matches!(motion, Motion::StrictOrbit { .. }) && speed > 0. {
+                    pos.distance(goal)
+                } else {
+                    speed / 1.5 * 0.05
+                };
+                if let Err(error) = self.move_entity_colliding(
+                    id,
+                    goal,
+                    distance,
+                    !matches!(motion, Motion::Charge { .. } | Motion::StrictOrbit { .. }),
+                ) {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    e.goal = None;
+                    e.last_step = Pos { x: 0., y: 0. };
+                    tracing::debug!(entity=id,%error,"NPC movement blocked; retargeting");
+                }
+                if !hero_continue || invocation == 1 {
+                    break;
+                }
+                let pos = self.entities[&id].pos;
+                target = self
+                    .players
+                    .values()
+                    .filter(|p| {
+                        p.character.alive
+                            && !p.death_pending
+                            && !p.departing
+                            && !p.paused
+                            && p.conditions(self.now)
+                                & crate::condition::bit(crate::condition::INVISIBLE)
+                                == 0
+                    })
+                    .map(|p| p.pos)
+                    .chain(self.decoy_positions())
+                    .filter(|p| pos.distance(*p) < 20.)
+                    .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
+                match self.hero_movement(id, target, delta) {
+                    Ok((next_motion, next_speed, completed)) => {
+                        motion = next_motion;
+                        speed = next_speed;
+                        hero_continue = completed;
+                    }
+                    Err(error) => {
+                        tracing::error!(entity=id, %error, "Realm hero continuation refused");
+                        break;
+                    }
+                }
             }
-            if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
-                self.entities.get_mut(&id).unwrap().goal = Some(goal);
-            }
-            let distance = if matches!(motion, Motion::StrictOrbit { .. }) && speed > 0. {
-                pos.distance(goal)
-            } else {
-                speed / 1.5 * 0.05
-            };
-            if let Err(error) = self.move_entity_colliding(
-                id,
-                goal,
-                distance,
-                !matches!(motion, Motion::Charge { .. } | Motion::StrictOrbit { .. }),
-            ) {
+            if queued_hero {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.goal = None;
-                e.last_step = Pos { x: 0., y: 0. };
-                tracing::debug!(entity=id,%error,"NPC movement blocked; retargeting");
+                e.last_step = Pos {
+                    x: e.pos.x - pos.x,
+                    y: e.pos.y - pos.y,
+                };
             }
             let e = &self.entities[&id];
             let schedule = if burst {
