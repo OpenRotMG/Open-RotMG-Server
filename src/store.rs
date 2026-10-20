@@ -1510,6 +1510,33 @@ impl Account {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn all_death_fame_jungle_optional_counter_preserves_old_history() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let store = Store::open(Path::new(":memory:"), &content).unwrap();
+        let account = store
+            .list("jungle-counter-compatibility".into())
+            .await
+            .unwrap();
+        let character = store
+            .create(account.id, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let mut value = serde_json::to_value(&character).unwrap();
+        value.as_object_mut().unwrap().remove("jungles");
+        let old = decode_character(&value.to_string(), [0; 8]).unwrap();
+        assert_eq!(old.jungles, 0);
+        assert_eq!(
+            serde_json::to_value(&old.lifetime).unwrap(),
+            value["lifetime"]
+        );
+        value["jungles"] = serde_json::json!(7);
+        let current = decode_character(&value.to_string(), [0; 8]).unwrap();
+        assert_eq!(current.jungles, 7);
+        assert!(current.lifetime.realm_exits.is_empty());
+        value["jungles"] = serde_json::json!(-1);
+        assert!(decode_character(&value.to_string(), [0; 8]).is_err());
+    }
+    #[tokio::test]
     async fn ground_stat_potions_preserve_backpacks_and_commit_vault_sources_atomically() {
         let content = Content::load(Path::new("data")).unwrap();
         let s = Store::open(Path::new(":memory:"), &content).unwrap();

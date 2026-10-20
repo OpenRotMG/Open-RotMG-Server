@@ -107,6 +107,10 @@ async fn all_death_fame_phase4_autonomous_earned_exits() {
             "abyss-of-demons",
             crate::dungeon::HistoricalDungeon::AbyssOfDemons,
         ),
+        (
+            "forbidden-jungle",
+            crate::dungeon::HistoricalDungeon::ForbiddenJungle,
+        ),
     ] {
         let mut f = TransferFixture::new(template).await;
         let (destination, time, key, reservation, session) = f.issue().await;
