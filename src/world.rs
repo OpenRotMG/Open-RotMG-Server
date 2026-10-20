@@ -5615,6 +5615,54 @@ mod tests {
     }
 
     #[test]
+    fn explicit_scenery_sizes_are_absolute_without_changing_blank_defaults() {
+        let cases = [
+            (398, "", 100),
+            (398, "size:140", 140),
+            (398, "size:160", 160),
+            (404, "", 100),
+            (404, "size:120", 120),
+            (404, "size:140", 140),
+            (256, "size:150", 150),
+            (6174, "", 120),
+            (6175, "", 120),
+            (372, "", 140),
+            (478, "", 175),
+            (290, "", 100),
+            (354, "", 100),
+        ];
+        let map = Map {
+            width: cases.len() as i32,
+            height: 1,
+            cells: cases
+                .iter()
+                .map(|(kind, config, _)| crate::content::Cell {
+                    ground: 0x61,
+                    object: Some(*kind),
+                    config: (*config).into(),
+                    terrain: 0,
+                    region: 0,
+                })
+                .collect(),
+            spawns: vec![],
+        };
+        let w = World::new(world().content, Arc::new(map)).unwrap();
+        let actual: Vec<_> = w.entities.values().map(|e| (e.kind, e.size)).collect();
+        assert_eq!(
+            actual,
+            cases
+                .iter()
+                .map(|(kind, _, size)| (*kind, *size))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !w.actor_ids
+                .iter()
+                .any(|id| [290, 354, 6175].contains(&w.entities[id].kind))
+        );
+    }
+
+    #[test]
     fn one_owner_and_no_teleport() {
         let mut w = world();
         let c = ch(&w);

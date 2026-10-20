@@ -604,9 +604,11 @@ fn encode(map: &Map, content: &Content) -> Result<(Vec<u8>, usize)> {
                         .context("unsupported scenery configuration")?
                         .parse()?;
                     ensure!(
-                        matches!(kind, 0x100..=0x104 | 0x185..=0x18d | 0x197..=0x19f)
+                        ((matches!(kind, 0x100..=0x104 | 0x185..=0x18d | 0x197..=0x19f)
                             && (130..=160).contains(&size)
-                            && size.is_multiple_of(5)
+                            && size.is_multiple_of(5))
+                            || (kind == 0x18e && matches!(size, 140 | 160))
+                            || (kind == 0x194 && matches!(size, 120 | 140)))
                             && c.config == format!("size:{size}"),
                         "unsupported scenery size/configuration"
                     );
@@ -1098,6 +1100,75 @@ mod tests {
         for config in ["size:120", "variant:1", "name:Tombstone"] {
             let mut bad = map.clone();
             bad.cells[2].config = config.into();
+            assert!(encode(&bad, &content).is_err(), "{config}");
+        }
+    }
+
+    #[test]
+    fn realm_prepare_palm_cherry_sizes_preserve_existing_limits_and_roundtrip() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let cell = |kind, size| Cell {
+            ground: 0x61,
+            object: Some(kind),
+            config: format!("size:{size}"),
+            terrain: 0,
+            region: 0,
+        };
+        let mut cells = Vec::new();
+        for kind in (0x100..=0x104).chain(0x185..=0x18d).chain(0x197..=0x19f) {
+            for size in [130, 150, 160] {
+                cells.push(cell(kind, size));
+            }
+        }
+        for (kind, sizes) in [(0x18e, [140, 160]), (0x194, [120, 140])] {
+            for size in sizes {
+                cells.push(cell(kind, size));
+            }
+        }
+        let map = Map {
+            width: cells.len() as i32,
+            height: 1,
+            cells,
+            spawns: vec![],
+        };
+        let (bytes, _) = encode(&map, &content).unwrap();
+        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        let decoded = Map::decode_cells(&bytes, &content).unwrap();
+        assert_eq!(
+            serde_json::to_value(&map.cells).unwrap(),
+            serde_json::to_value(&decoded.cells).unwrap()
+        );
+        for (kind, sizes) in [
+            (0x18e, vec![0, 120, 130, 150, 180]),
+            (0x194, vec![0, 100, 130, 150, 160]),
+            (0x100, vec![0, 132, 165]),
+            (0x181f, vec![140, 150]),
+        ] {
+            for size in sizes {
+                let mut bad = map.clone();
+                bad.cells[0] = cell(kind, size);
+                assert!(encode(&bad, &content).is_err(), "{kind:#x} size:{size}");
+                assert!(
+                    dictionary(
+                        &serde_json::to_vec(&vec![map.cells[0].clone(), cell(kind, size)]).unwrap(),
+                        &content
+                    )
+                    .is_err()
+                );
+            }
+        }
+        for config in [
+            "size:0140",
+            "size:+140",
+            "size:-140",
+            "size:65536",
+            "size:140;",
+            "size:140;size:160",
+            "variant:1",
+        ] {
+            let mut bad = map.clone();
+            bad.cells[0] = cell(0x18e, 140);
+            bad.cells[0].config = config.into();
             assert!(encode(&bad, &content).is_err(), "{config}");
         }
     }
