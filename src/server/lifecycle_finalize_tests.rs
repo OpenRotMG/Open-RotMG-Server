@@ -1468,3 +1468,151 @@ async fn all_death_fame_phase4_multiple_recipients_terminal_transfer() {
         .await
         .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_death_fame_phase4_owned_arrival_takeover_and_drain() {
+    for draining in [false, true] {
+        let (dir, a) = account_actions::tests::fixture();
+        a.world.clock.set_paused(true);
+        let guid = "phase4-owned-arrival";
+        let (owner, source, ch, destination, time, key, reservation) =
+            earned_source(&a, guid).await;
+        let stale_pending = lifecycle::binding(&a, ch.account).unwrap();
+        let stale_next = lifecycle::binding(&a, ch.account).unwrap();
+        lifecycle::finalize_transfer(&a, source, reservation)
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+        owner.release();
+        released(&a, ch.account).await;
+        let (port, server) = socket_server(&a).await;
+        let mut socket = NativeSocket::connect(port, &a.origin).await;
+        socket
+            .send(socket_hello(
+                &dir,
+                guid,
+                destination,
+                Some((time, key.clone())),
+            ))
+            .await;
+        socket.receive(wire::MAP_INFO).await;
+        lifecycle::account(
+            &a,
+            vec![ch.account],
+            "phase4_owned_hello_settled",
+            |_| async { Ok(()) },
+        )
+        .await
+        .unwrap();
+        let (entered, release) = a.store.lifecycle_test_pause_reply();
+        let release = HeldReply(Some(release));
+        socket
+            .send(Packet {
+                id: wire::LOAD,
+                body: ch.id.to_be_bytes().to_vec(),
+            })
+            .await;
+        tokio::time::timeout(Duration::from_secs(5), entered)
+            .await
+            .unwrap()
+            .unwrap();
+        let state = lifecycle::state(&a, ch.account).unwrap();
+        assert!(state.0 && state.1.is_none() && !state.2);
+        assert!(a.claim(ch.account).is_err());
+        assert!(stale_pending(source).is_err());
+        a.world
+            .directory(move |d| {
+                assert!(
+                    d.worlds.values().all(|w| w
+                        .players
+                        .values()
+                        .all(|p| p.character.account != ch.account)),
+                    "LOAD published before owned Store reply"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        if draining {
+            lifecycle::drain::prepare(&a);
+            assert!(!lifecycle::drain::open(&a));
+            assert!(a.claim(ch.account).is_err());
+        }
+        drop(release);
+        if draining {
+            tokio::time::timeout(Duration::from_secs(5), lifecycle::drain::terminate(&a))
+                .await
+                .unwrap()
+                .unwrap();
+            released(&a, ch.account).await;
+            assert!(stale_next(source).is_err());
+            drop(socket);
+        } else {
+            let packet = socket.receive(wire::CREATE_SUCCESS).await;
+            let admitted = Reader::new(&packet.body).i32().unwrap();
+            assert_ne!(admitted, source);
+            lifecycle::account(
+                &a,
+                vec![ch.account],
+                "phase4_owned_load_settled",
+                |_| async { Ok(()) },
+            )
+            .await
+            .unwrap();
+            a.world
+                .directory(move |d| {
+                    let ids: Vec<_> = d
+                        .worlds
+                        .values()
+                        .flat_map(|w| w.players.iter())
+                        .filter(|(_, p)| p.character.account == ch.account)
+                        .map(|(id, _)| *id)
+                        .collect();
+                    assert_eq!(ids, vec![admitted]);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert!(a.claim(ch.account).is_err());
+            drop(socket);
+            released(&a, ch.account).await;
+            let next = a.claim(ch.account).unwrap();
+            assert!(stale_next(source).is_err());
+            assert!(!lifecycle::state(&a, ch.account).unwrap().2);
+            assert!(
+                a.world
+                    .directory(move |d| d.consume(ch.account, destination, time, key))
+                    .await
+                    .is_err()
+            );
+            assert!(!lifecycle::state(&a, ch.account).unwrap().2);
+            drop(next);
+        }
+        a.world
+            .directory(move |d| {
+                assert!(
+                    d.worlds.values().all(|w| w
+                        .players
+                        .values()
+                        .all(|p| p.character.account != ch.account)),
+                    "retired LOAD left a late/ghost actor"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(a.store.lifecycle_test_jobs(), 0);
+        assert!(
+            a.store
+                .load(ch.account, ch.id)
+                .await
+                .unwrap()
+                .lifetime
+                .realm_exits
+                .contains(&crate::dungeon::HistoricalDungeon::SnakePit)
+        );
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    }
+}
