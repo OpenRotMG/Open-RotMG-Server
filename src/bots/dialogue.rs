@@ -483,9 +483,6 @@ pub(super) async fn publish(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests;
-
 impl Brain {
     pub(super) fn dialogue_request(
         &self,

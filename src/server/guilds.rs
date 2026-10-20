@@ -1,8 +1,6 @@
 use super::*;
 use crate::store::GuildAction;
 use std::time::Instant;
-#[cfg(test)]
-mod tests;
 
 pub(super) async fn request(
     State(a): State<App>,

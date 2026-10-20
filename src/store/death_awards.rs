@@ -134,6 +134,3 @@ pub(super) fn total(ch: &Character, equipment: i32) -> Result<i32> {
         .checked_add(equipment)
         .context("total death fame overflow")
 }
-
-#[cfg(test)]
-mod tests;

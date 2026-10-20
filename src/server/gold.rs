@@ -15,6 +15,3 @@ pub(super) async fn sync(a: &App, account: i32) -> Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

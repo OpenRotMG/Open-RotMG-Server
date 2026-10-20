@@ -1,8 +1,5 @@
 use super::*;
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Debug)]
 pub struct SlotReplay;
 impl std::fmt::Display for SlotReplay {

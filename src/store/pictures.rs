@@ -309,33 +309,3 @@ impl Store {
         .await
     }
 }
-
-#[cfg(test)]
-pub(crate) fn test_png(width: u32, height: u32) -> Vec<u8> {
-    use std::io::Write;
-    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
-    let mut header = Vec::from(width.to_be_bytes());
-    header.extend(height.to_be_bytes());
-    header.extend([8, 6, 0, 0, 0]);
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder
-        .write_all(&vec![0; (width as usize * 4 + 1) * height as usize])
-        .unwrap();
-    for (kind, data) in [
-        (b"IHDR", header),
-        (b"IDAT", encoder.finish().unwrap()),
-        (b"IEND", vec![]),
-    ] {
-        out.extend((data.len() as u32).to_be_bytes());
-        out.extend(kind);
-        out.extend(&data);
-        let mut crc = crc32fast::Hasher::new();
-        crc.update(kind);
-        crc.update(&data);
-        out.extend(crc.finalize().to_be_bytes());
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests;

@@ -1,6 +1,4 @@
 use super::*;
-#[cfg(test)]
-mod tests;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Membership {

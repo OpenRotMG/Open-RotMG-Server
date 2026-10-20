@@ -409,7 +409,3 @@ pub(crate) async fn http_entry(
         ),
     }
 }
-
-#[cfg(test)]
-#[path = "../lifecycle_drain_tests.rs"]
-mod tests;

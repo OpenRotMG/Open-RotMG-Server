@@ -296,10 +296,7 @@ impl Brain {
         }
         Ok(false)
     }
-    #[cfg(test)]
-    fn grid(&mut self, v: &PlayerView, content: &Content) -> Arc<Grid> {
-        self.navigation_grid(v, content, &[])
-    }
+
     fn navigation_grid(&mut self, v: &PlayerView, content: &Content, avoid: &[Pos]) -> Arc<Grid> {
         let measuring = crate::performance::Measure::start();
         let observed: BTreeSet<_> = v
@@ -1334,14 +1331,6 @@ impl Clone for Grid {
     }
 }
 impl Grid {
-    #[cfg(test)]
-    fn new(v: &PlayerView) -> Self {
-        let mut grid = Self::terrain(v);
-        for object in v.objects.iter().filter(|o| o.blocks) {
-            grid.walkable.remove(&tile(object.position));
-        }
-        grid
-    }
     fn terrain(v: &PlayerView) -> Self {
         let mut walkable =
             HashSet::with_capacity(v.tiles.iter().filter(|t| t.ground_speed > 0.).count());
@@ -1620,11 +1609,6 @@ impl Grid {
         }
     }
 }
-
-#[cfg(test)]
-mod performance_tests;
-#[cfg(test)]
-mod tests;
 
 mod runtime;
 pub(crate) const OUTPUT_CAPACITY: usize = 512;

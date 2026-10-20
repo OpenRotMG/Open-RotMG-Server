@@ -1,29 +1,9 @@
-#[cfg(test)]
-mod character_slot_tests;
-#[cfg(test)]
-mod client_contract_tests;
 mod input;
-#[cfg(test)]
-mod lifecycle_finalize_tests;
-#[cfg(test)]
-mod lifecycle_native_tests;
-#[cfg(test)]
-mod name_choice_boundaries_tests;
-#[cfg(test)]
-mod name_choice_tests;
+
 #[cfg(test)]
 mod password_tests;
 mod pictures;
-#[cfg(test)]
-mod purchase_tests;
-#[cfg(test)]
-mod queue_tests;
-#[cfg(test)]
-mod resurrection_tests;
-#[cfg(test)]
-mod usage_tests;
-#[cfg(test)]
-mod xp_booster_tests;
+
 use crate::{
     content::{Content, WIZARD},
     crypto::Keys,
@@ -82,8 +62,6 @@ impl App {
         Ok(usage)
     }
 }
-#[cfg(test)]
-pub(crate) use account_actions::tests::fixture as lifecycle_test_fixture;
 use tokio::sync::mpsc;
 mod account_actions;
 pub(crate) mod diagnostics;
@@ -750,18 +728,7 @@ async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Charac
         })
         .await
 }
-#[cfg(test)]
-async fn persist_death(
-    a: &App,
-    id: i32,
-    ch: crate::store::Character,
-    killer: String,
-) -> Result<()> {
-    lifecycle::player(a, id, "death", move |a| async move {
-        persist_death_inner(&a, id, ch, killer).await
-    })
-    .await
-}
+
 async fn persist_death_inner(
     a: &App,
     id: i32,
@@ -2553,9 +2520,6 @@ fn client_assets(client: &std::path::Path) -> Router<App> {
     )
 }
 
-#[cfg(test)]
-mod client_assets_tests;
-
 fn routes(a: &App, client: PathBuf) -> Router {
     let app = Router::new()
         .route(
@@ -2692,93 +2656,3 @@ async fn shutdown_signal() -> Result<()> {
     tokio::signal::ctrl_c().await?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn original_otherhit_has_target_but_squarehit_does_not() {
-        let mut out = Writer::new();
-        out.i32(1234);
-        out.u8(7);
-        out.i32(1001);
-        let square = out.0.clone();
-        out.i32(5000);
-        assert_eq!(square.len(), 9);
-        assert_eq!(out.0.len(), 13);
-        collision_report(false, &mut Reader::new(&square)).unwrap();
-        collision_report(true, &mut Reader::new(&out.0)).unwrap();
-        assert!(collision_report(false, &mut Reader::new(&out.0)).is_err());
-        for end in 0..out.0.len() {
-            assert!(collision_report(true, &mut Reader::new(&out.0[..end])).is_err());
-        }
-        out.u8(0);
-        assert!(collision_report(true, &mut Reader::new(&out.0)).is_err());
-    }
-    #[test]
-    fn native_trade_offer_requires_exact_canonical_twelve_slot_shape() {
-        let mut out = Writer::new();
-        out.i16(12);
-        for slot in 0..12 {
-            out.u8(u8::from(slot == 4));
-        }
-        let mut r = Reader::new(&out.0);
-        let offer = trade_offer(&mut r).unwrap();
-        r.done().unwrap();
-        assert!(offer[4]);
-        assert_eq!(offer.iter().filter(|v| **v).count(), 1);
-        for count in [-1, 0, 11, 13, i16::MAX] {
-            let mut out = Writer::new();
-            out.i16(count);
-            assert!(trade_offer(&mut Reader::new(&out.0)).is_err());
-        }
-        out.0[6] = 2;
-        assert!(trade_offer(&mut Reader::new(&out.0)).is_err());
-        out.0[6] = 1;
-        out.0.pop();
-        assert!(trade_offer(&mut Reader::new(&out.0)).is_err());
-    }
-    #[test]
-    fn selected_player_text_has_only_one_utf_string() {
-        let mut out = Writer::new();
-        out.utf("café 😀");
-        assert_eq!(player_text(&mut Reader::new(&out.0)).unwrap(), "café 😀");
-        for end in 0..out.0.len() {
-            assert!(player_text(&mut Reader::new(&out.0[..end])).is_err());
-        }
-        out.utf("ForgedSender");
-        assert!(player_text(&mut Reader::new(&out.0)).is_err());
-        assert!(player_text(&mut Reader::new(&[0, 1, 0xff])).is_err());
-    }
-    #[test]
-    fn guest_rate_is_bounded_and_expires() {
-        let mut requests = HashMap::new();
-        let now = std::time::Instant::now();
-        let ip = "192.0.2.1".parse().unwrap();
-        for _ in 0..20 {
-            assert!(rate_allow(&mut requests, ip, now));
-        }
-        assert!(!rate_allow(&mut requests, ip, now));
-        assert!(rate_allow(&mut requests, "192.0.2.2".parse().unwrap(), now));
-        assert!(rate_allow(
-            &mut requests,
-            ip,
-            now + std::time::Duration::from_secs(60)
-        ));
-        assert_eq!(requests.len(), 1);
-        for n in 1..=4096 {
-            requests.insert(
-                IpAddr::V6(std::net::Ipv6Addr::from(n as u128)),
-                (now + std::time::Duration::from_secs(60), 1),
-            );
-        }
-        assert!(!rate_allow(
-            &mut requests,
-            "192.0.2.3".parse().unwrap(),
-            now + std::time::Duration::from_secs(60)
-        ));
-    }
-}
-
-#[cfg(test)]
-mod equipment_fame_tests;

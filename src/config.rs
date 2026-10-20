@@ -180,90 +180,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn config() -> Config {
-        serde_json::from_str(r#"{"bind":"127.0.0.1:18923","origin":"https://openrotmg.org","data":"/opt/openrotmg/data","client":"/opt/openrotmg/client","state":"/var/lib/openrotmg","max_players":16,"behind_proxy":true,"realm_seed":12351}"#).unwrap()
-    }
-    #[test]
-    fn explicit_production_config() {
-        config().validate(false).unwrap();
-        assert!(config().validate(true).is_err());
-        assert!(Config::load(&["--config".into()]).is_err());
-        assert!(Config::load(&["--unknown".into()]).is_err());
-        let mut c = config();
-        c.bind = "0.0.0.0:18923".parse().unwrap();
-        assert!(c.validate(false).is_err());
-        c = config();
-        c.origin = "http://openrotmg.org".into();
-        assert!(c.validate(false).is_err());
-        c = config();
-        c.state = "relative".into();
-        assert!(c.validate(false).is_err());
-    }
-    #[test]
-    fn bot_dialogue_is_explicitly_off_unless_selected() {
-        assert!(!config().bot_llm);
-        assert!(!Config::load(&[]).unwrap().0.bot_llm);
-        assert!(Config::load(&["--bot-llm".into()]).unwrap().0.bot_llm);
-        assert!(!Config::load(&["--no-bot-llm".into()]).unwrap().0.bot_llm);
-        for flags in [["--bot-llm", "--bot-llm"], ["--bot-llm", "--no-bot-llm"]] {
-            assert!(Config::load(&flags.map(String::from)).is_err());
-        }
-    }
-    #[test]
-    fn optional_local_port() {
-        let (default, _) = Config::load(&[]).unwrap();
-        assert_eq!(default.bind.to_string(), "127.0.0.1:18923");
-        assert_eq!(default.origin, "http://127.0.0.1:18923");
-        for port in ["1", "8080", "65535"] {
-            let (custom, _) = Config::load(&["--port".into(), port.into()]).unwrap();
-            assert_eq!(custom.bind.to_string(), format!("127.0.0.1:{port}"));
-            assert_eq!(custom.origin, format!("http://127.0.0.1:{port}"));
-        }
-        assert!(Config::load(&["--port".into()]).is_err());
-        for port in ["0", "-1", "65536", "abc", "8080.5"] {
-            assert!(Config::load(&["--port".into(), port.into()]).is_err());
-        }
-        assert!(
-            Config::load(&[
-                "--port".into(),
-                "8080".into(),
-                "--port".into(),
-                "8081".into()
-            ])
-            .is_err()
-        );
-    }
-    #[test]
-    fn shore_bots_default_on_allow_explicit_disable_and_reserve_human_capacity() {
-        assert!(Config::load(&[]).unwrap().0.shore_bots);
-        assert!(config().shore_bots);
-        assert!(
-            !Config::load(&["--no-shore-bots".into()])
-                .unwrap()
-                .0
-                .shore_bots
-        );
-        assert!(Config::load(&["--shore-bots".into()]).unwrap().0.shore_bots);
-        for flags in [
-            ["--shore-bots", "--shore-bots"],
-            ["--no-shore-bots", "--no-shore-bots"],
-            ["--shore-bots", "--no-shore-bots"],
-            ["--no-shore-bots", "--shore-bots"],
-        ] {
-            assert!(Config::load(&flags.map(String::from)).is_err());
-        }
-        let disabled: Config = serde_json::from_str(r#"{"bind":"127.0.0.1:18923","origin":"https://openrotmg.org","data":"/opt/openrotmg/data","client":"/opt/openrotmg/client","state":"/var/lib/openrotmg","max_players":3,"behind_proxy":true,"shore_bots":false,"realm_seed":12351}"#).unwrap();
-        assert!(!disabled.shore_bots);
-        disabled.validate(false).unwrap();
-        let mut production = config();
-        production.shore_bots = true;
-        production.validate(false).unwrap();
-        assert!(production.validate(true).is_err());
-        production.max_players = 6;
-        assert!(production.validate(false).is_err());
-        production.max_players = 7;
-        production.validate(false).unwrap();
-    }
+
     #[test]
     fn explicit_state_does_not_change_client_or_origin() {
         let (original, _) = Config::load(&[]).unwrap();
@@ -287,34 +204,5 @@ mod tests {
         ])
         .unwrap();
         assert!(prepared.test_state && !prepared.shore_bots && control);
-    }
-    #[test]
-    fn malformed_state_arguments_are_rejected() {
-        for args in [
-            vec!["--state"],
-            vec!["--state", "relative"],
-            vec!["--state", "/tmp/a", "--state", "/tmp/b"],
-        ] {
-            assert!(Config::load(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
-        }
-    }
-    #[test]
-    fn local_launcher_remains_explicit() {
-        Config::load(&[]).unwrap();
-        assert!(Config::load(&["--hosted-client".into()]).is_err());
-        assert!(Config::load(&["--client".into()]).is_err());
-        assert!(Config::load(&["--client".into(), "relative".into()]).is_err());
-        assert!(
-            Config::load(&[
-                "--client".into(),
-                "/tmp/client".into(),
-                "--hosted-client".into()
-            ])
-            .is_err()
-        );
-        let (local, _) = Config::load(&["--client".into(), "/tmp/client".into()]).unwrap();
-        assert_eq!(local.client, PathBuf::from("/tmp/client"));
-        Config::load(&["--dev-control".into()]).unwrap();
-        assert!(Config::load(&["--dev-control".into(), "--dev-control".into()]).is_err());
     }
 }

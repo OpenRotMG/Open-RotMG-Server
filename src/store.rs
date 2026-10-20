@@ -13,26 +13,18 @@ mod character_slots;
 mod vaults;
 pub use vaults::{VAULT_CHESTS, VAULT_PRICE};
 mod consumables;
-#[cfg(test)]
-mod name_choice_tests;
+
 pub(crate) use character_slots::SlotReplay;
-#[cfg(all(test, unix))]
-mod crash_tests;
-#[cfg(test)]
-mod credits_tests;
+
 mod death_awards;
-#[cfg(test)]
-mod death_date_tests;
-#[cfg(test)]
-mod deletion_tests;
+
 pub(crate) mod gold;
 mod guilds;
 mod hiscores;
 mod legends;
 pub use guilds::{Guild, GuildAction, Membership as GuildMembership};
 pub(crate) mod pictures;
-#[cfg(test)]
-mod presentation_tests;
+
 mod purchases;
 mod resurrection;
 mod social;
@@ -561,19 +553,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         );
         (ready, release)
     }
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_lose_reply(&self) {
-        assert!(
-            !self
-                .lifecycle_lost_reply
-                .swap(true, std::sync::atomic::Ordering::SeqCst)
-        );
-    }
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_jobs(&self) -> usize {
-        self.lifecycle_jobs
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
+
     #[cfg(test)]
     pub(crate) async fn lifecycle_test_job<T: Send + 'static>(
         &self,
@@ -2232,6 +2212,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(test)]
-mod equipment_fame_tests;

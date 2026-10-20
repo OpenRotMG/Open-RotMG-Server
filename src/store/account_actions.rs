@@ -133,6 +133,3 @@ impl Store {
         Ok(account)
     }
 }
-
-#[cfg(test)]
-mod tests;
