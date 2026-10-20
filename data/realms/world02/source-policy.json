@@ -1,0 +1,487 @@
+{
+  "classes": {
+    "000000": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 232,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "00a811": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 190,
+      "object": 398,
+      "region": 0,
+      "terrain": 11
+    },
+    "0d0d0d": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 259,
+      "region": 0,
+      "terrain": 6
+    },
+    "0f6928": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 189,
+      "object": 407,
+      "region": 0,
+      "terrain": 5
+    },
+    "184a1d": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 256,
+      "region": 0,
+      "terrain": 6
+    },
+    "191919": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 100,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "1e2432": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 87,
+      "object": null,
+      "region": 0,
+      "terrain": 8
+    },
+    "216628": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 389,
+      "region": 0,
+      "terrain": 6
+    },
+    "2b4a8b": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 188,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "2c6019": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 189,
+      "object": 412,
+      "region": 0,
+      "terrain": 5
+    },
+    "2d3a1b": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 86,
+      "object": null,
+      "region": 0,
+      "terrain": 7
+    },
+    "2e2a22": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 241,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "2e4457": {
+      "config": "",
+      "evidence": "reviewed_safe_scenery_substitution",
+      "ground": 38,
+      "object": 352,
+      "region": 0,
+      "source_object": 354,
+      "terrain": 0
+    },
+    "2e4558": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 38,
+      "object": 381,
+      "region": 0,
+      "terrain": 0
+    },
+    "2f3059": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 64,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "323232": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 96,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "323242": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 25,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "35863d": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 70,
+      "object": null,
+      "region": 0,
+      "terrain": 6
+    },
+    "382210": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 6174,
+      "region": 0,
+      "terrain": 6
+    },
+    "3b240d": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 396,
+      "region": 0,
+      "terrain": 6
+    },
+    "3c1e0a": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 28,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "3d3c3c": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 1,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "415229": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 72,
+      "object": null,
+      "region": 0,
+      "terrain": 9
+    },
+    "424242": {
+      "config": "",
+      "evidence": "reviewed_safe_scenery_substitution",
+      "ground": 6,
+      "object": 288,
+      "region": 0,
+      "source_object": 290,
+      "terrain": 0
+    },
+    "434343": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 81,
+      "object": 379,
+      "region": 0,
+      "terrain": 0
+    },
+    "45455b": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 24,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "463e84": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 250,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "474c43": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 197,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "492914": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 6174,
+      "region": 0,
+      "terrain": 6
+    },
+    "4d7393": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 36,
+      "object": 352,
+      "region": 0,
+      "terrain": 0
+    },
+    "4f3118": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 71,
+      "object": 258,
+      "region": 0,
+      "terrain": 4
+    },
+    "515151": {
+      "config": "",
+      "evidence": "reviewed_safe_scenery_substitution",
+      "ground": 70,
+      "object": 263,
+      "region": 0,
+      "source_object": 6175,
+      "terrain": 6
+    },
+    "5278c5": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 114,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "59462f": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 12,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "598923": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 3529,
+      "region": 0,
+      "terrain": 6
+    },
+    "615b6b": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 214,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "633d1e": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 394,
+      "region": 0,
+      "terrain": 6
+    },
+    "6c6476": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 213,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "707070": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 4,
+      "object": 288,
+      "region": 0,
+      "terrain": 0
+    },
+    "756200": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 71,
+      "object": 257,
+      "region": 0,
+      "terrain": 4
+    },
+    "7b8775": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 197,
+      "object": 500,
+      "region": 0,
+      "terrain": 0
+    },
+    "808080": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 96,
+      "object": 263,
+      "region": 0,
+      "terrain": 1
+    },
+    "888a1d": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 71,
+      "object": null,
+      "region": 0,
+      "terrain": 4
+    },
+    "9e8a38": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 71,
+      "object": 264,
+      "region": 0,
+      "terrain": 4
+    },
+    "a67c52": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 208,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "acbca4": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 197,
+      "object": 498,
+      "region": 0,
+      "terrain": 0
+    },
+    "ae8c4c": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 190,
+      "object": null,
+      "region": 0,
+      "terrain": 11
+    },
+    "b5b2b2": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 208,
+      "object": 452,
+      "region": 0,
+      "terrain": 0
+    },
+    "c2bd8c": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 189,
+      "object": null,
+      "region": 0,
+      "terrain": 5
+    },
+    "c96f6f": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 404,
+      "region": 0,
+      "terrain": 6
+    },
+    "caa378": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 237,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "d44a00": {
+      "config": "",
+      "evidence": "safe_visual_lava_replacement",
+      "ground": 54,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "d9d9d9": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 106,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "f7bf51": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 245,
+      "object": null,
+      "region": 0,
+      "terrain": 5
+    },
+    "ffffff": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 185,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    }
+  },
+  "habitat_rule": "Separate reconstructed terrain layer stores listed class tiers: Rock/Snow1, LightSand5, DarkSand11, Yellow4, LightGrass6, DarkGrass7, Grass9, BlueGrass8. Object classes carry explicitly inferred substrate/tier. Tier is reconstruction data, not image-extracted original gameplay zones; no extra land/support geometry.",
+  "safe_scenery_substitutions": "Only3exact named sourceclasses require reviewed nonenemy visual representatives under existing static&&!enemy encoder rule.354->352,290->288,6175->263. Blocks retained but destructibility,HP/EnemyOccupySquare/BlocksSight/size semantics may differ. Never a generic fallback. Separate uncertainty label5. All other unsafeobjects still fatal.",
+  "schema": 1,
+  "selected_client": "123.5.1",
+  "source_commit": "90bc2e3ca2155ede5f2a55931048b59b951b0e0c",
+  "status": "RECONSTRUCTION shared policies, not original identities",
+  "structural_rule": "Colliding wall/floor RGBs require image-specific exact-support reviewed representative annotation; never automatic wall from RGB on an unreviewed image.",
+  "transform": {
+    "crop": [
+      26,
+      26,
+      2074,
+      2074
+    ],
+    "historical_coordinates": "UNKNOWN",
+    "source_dimensions": [
+      2100,
+      2100
+    ],
+    "tile": "source_pixel-26"
+  },
+  "unknown_rule": "All unrecognized RGBs require exact-source component support fingerprint and reviewed ground/terrain annotation. No nearest color, automatic context fill or unreviewed new RGB class.",
+  "validation": {
+    "cell_count": 4194304,
+    "negative_controls": [
+      "unknown_RGB",
+      "missing_unknown_decision",
+      "wrong_component_fingerprint",
+      "missing_object_policy",
+      "unreviewed_structural_support",
+      "road_to_grass",
+      "water_to_grass",
+      "snow_to_rock"
+    ],
+    "normal_loader": "strict existing encode/decode plus normal Source::open and Directory::prepared fixedseed51403. Log every cell mutation by stage, arrivals/entities/mandatory roots; setpiece replacements expected not source-preservation pass.",
+    "source_objects": "all object-only and reviewed structure pixels retained at same coordinates before normal loader/setpieces",
+    "source_visible_ground_positions": "all exact class supports unchanged except declared lava safe visual and approved unknown support",
+    "topology": "four and eight neighbor components of source road/lightwater/snow must match encoded source-class footprints exactly; main walkability includes blocking scenery; all disconnected components inventoried, never deleted to pass"
+  },
+  "water_rule": "Label exact light-blue5278c5 with FOUR-neighbor connectivity only. A component is coastal iff its own support touches any dark-blue2b4a8b pixel in the FOUR-neighbor dilation. Coastal uses0x73, all other light blue0x72. This is an engineering shallow policy: sea-joining rivers in that same blue component are ALSO shallow, never inferred depth. No dark+light union flood. Both walkable .666/Sink."
+}

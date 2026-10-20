@@ -97,12 +97,12 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                         let metadata = read_recipe(&root, &recipe).with_context(|| {
                             format!("Realm recipe {recipe} expected output SHA-256 {sha256}")
                         })?;
-                        let file = safe_path(&root, &metadata.output)?;
+                        let file = safe_path(&root, metadata.output())?;
                         (
-                            metadata.id,
+                            metadata.id().to_owned(),
                             file,
                             sha256,
-                            metadata.profile.name().to_owned(),
+                            metadata.profile().to_owned(),
                         )
                     }
                 };

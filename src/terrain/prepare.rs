@@ -14,31 +14,71 @@ const OBJECTS: &str = "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad9
 const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7";
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "profile")]
+pub(super) enum Recipe {
+    #[serde(rename = "classic-v1")]
+    ClassicV1(ClassicRecipe),
+    #[serde(rename = "reviewed-cells-v1")]
+    ReviewedCellsV1(ReviewedRecipe),
+}
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Recipe {
+pub(super) struct ClassicRecipe {
     schema: u8,
-    pub(super) id: String,
-    pub(super) profile: Profile,
+    id: String,
     width: usize,
     height: usize,
     orientation: Orientation,
     scenery_seed: u64,
     content: ContentIdentity,
     layers: Layers,
-    pub(super) output: String,
+    output: String,
     provenance: Provenance,
 }
 #[derive(Debug, Deserialize, Serialize)]
-pub(super) enum Profile {
-    #[serde(rename = "classic-v1")]
-    ClassicV1,
+#[serde(deny_unknown_fields)]
+pub(super) struct ReviewedRecipe {
+    schema: u8,
+    id: String,
+    width: usize,
+    height: usize,
+    orientation: RowMajor,
+    content: ContentIdentity,
+    inputs: ReviewedInputs,
+    output: String,
+    provenance: ImageProvenance,
 }
-impl Profile {
-    pub(super) fn name(&self) -> &'static str {
-        match self {
-            Self::ClassicV1 => "classic-v1",
-        }
-    }
+#[derive(Debug, Deserialize, Serialize)]
+enum RowMajor {
+    #[serde(rename = "row-major")]
+    RowMajor,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewedInputs {
+    dictionary: Layer,
+    indices: Indices,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Indices {
+    path: String,
+    sha256: String,
+    expanded_sha256: String,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ImageProvenance {
+    kind: ImageKind,
+    source_sha256: String,
+    policy: Layer,
+    annotations: Layer,
+    status: String,
+}
+#[derive(Debug, Deserialize, Serialize)]
+enum ImageKind {
+    #[serde(rename = "image-guided-reconstruction-v1")]
+    ImageGuidedReconstructionV1,
 }
 #[derive(Debug, Deserialize, Serialize)]
 enum Orientation {
@@ -130,6 +170,89 @@ pub(super) fn valid_id(id: &str) -> bool {
     })
 }
 impl Recipe {
+    pub(super) fn id(&self) -> &str {
+        match self {
+            Self::ClassicV1(r) => &r.id,
+            Self::ReviewedCellsV1(r) => &r.id,
+        }
+    }
+    pub(super) fn output(&self) -> &str {
+        match self {
+            Self::ClassicV1(r) => &r.output,
+            Self::ReviewedCellsV1(r) => &r.output,
+        }
+    }
+    pub(super) fn profile(&self) -> &'static str {
+        match self {
+            Self::ClassicV1(_) => "classic-v1",
+            Self::ReviewedCellsV1(_) => "reviewed-cells-v1",
+        }
+    }
+    fn status(&self) -> &str {
+        match self {
+            Self::ClassicV1(r) => &r.provenance.status,
+            Self::ReviewedCellsV1(r) => &r.provenance.status,
+        }
+    }
+    fn validate(&self) -> Result<()> {
+        match self {
+            Self::ClassicV1(r) => r.validate(),
+            Self::ReviewedCellsV1(r) => {
+                ensure!(
+                    r.schema == 2,
+                    "unsupported reviewed recipe schema {}",
+                    r.schema
+                );
+                ensure!(valid_id(&r.id), "invalid Realm ID {}", r.id);
+                ensure!(
+                    r.width == SIDE && r.height == SIDE,
+                    "expected 2048-square cells"
+                );
+                ensure!(
+                    r.content.objects == OBJECTS && r.content.grounds == GROUNDS,
+                    "unsupported content identity"
+                );
+                ensure!(
+                    r.output == format!("{}.wmap", r.id),
+                    "output must match Realm ID"
+                );
+                for hash in [
+                    &r.inputs.dictionary.sha256,
+                    &r.inputs.indices.sha256,
+                    &r.inputs.indices.expanded_sha256,
+                    &r.provenance.source_sha256,
+                    &r.provenance.policy.sha256,
+                    &r.provenance.annotations.sha256,
+                ] {
+                    ensure!(valid_hash(hash), "invalid reviewed source hash");
+                }
+                ensure!(
+                    r.provenance
+                        .status
+                        .starts_with("Approximate image-guided reconstruction"),
+                    "missing approximate reconstruction provenance"
+                );
+                Ok(())
+            }
+        }
+    }
+    fn inputs(&self) -> Vec<&str> {
+        match self {
+            Self::ClassicV1(r) => vec![
+                &r.layers.elevation.path,
+                &r.layers.moisture.path,
+                &r.layers.overrides.path,
+            ],
+            Self::ReviewedCellsV1(r) => vec![
+                &r.inputs.dictionary.path,
+                &r.inputs.indices.path,
+                &r.provenance.policy.path,
+                &r.provenance.annotations.path,
+            ],
+        }
+    }
+}
+impl ClassicRecipe {
     fn validate(&self) -> Result<()> {
         ensure!(
             self.schema == 1,
@@ -188,7 +311,7 @@ fn recipes(root: &Path) -> Result<BTreeMap<String, Recipe>> {
             .context("non-UTF8 recipe path")?;
         let recipe = read_recipe(root, name)?;
         ensure!(
-            found.insert(recipe.id.clone(), recipe).is_none(),
+            found.insert(recipe.id().to_owned(), recipe).is_none(),
             "duplicate Realm recipe ID"
         );
     }
@@ -201,13 +324,15 @@ pub(super) fn read_recipe(root: &Path, relative: &str) -> Result<Recipe> {
     recipe
         .validate()
         .with_context(|| format!("validate recipe {}", path.display()))?;
-    for relative in [
-        &recipe.layers.elevation.path,
-        &recipe.layers.moisture.path,
-        &recipe.layers.overrides.path,
-        &recipe.output,
-    ] {
-        safe_path(root, relative).with_context(|| format!("recipe {}", path.display()))?;
+    let mut paths = BTreeSet::new();
+    paths.insert(path.clone());
+    for relative in std::iter::once(recipe.output()).chain(recipe.inputs()) {
+        let input =
+            safe_path(root, relative).with_context(|| format!("recipe {}", path.display()))?;
+        ensure!(
+            paths.insert(input),
+            "aliased recipe/input/output path {relative}"
+        );
     }
     Ok(recipe)
 }
@@ -216,8 +341,11 @@ fn expand_layer(bytes: &[u8], count: usize, expected: &str) -> Result<Vec<u8>> {
         count <= CELLS && valid_hash(expected),
         "invalid layer size/hash"
     );
+    inflate(bytes, count, CELLS + 4096, expected)
+}
+fn inflate(bytes: &[u8], count: usize, compressed_bound: usize, expected: &str) -> Result<Vec<u8>> {
     ensure!(
-        bytes.len() <= CELLS + 4096,
+        bytes.len() <= compressed_bound,
         "compressed layer exceeds bound"
     );
     let mut decoder = flate2::Decompress::new(true);
@@ -535,6 +663,146 @@ fn encode(map: &Map, content: &Content) -> Result<(Vec<u8>, usize)> {
     Ok((encoder.finish()?, dict.len()))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewedCell {
+    ground: u8,
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    object: Option<u16>,
+    config: String,
+    terrain: u8,
+    region: u8,
+}
+fn dictionary(bytes: &[u8], content: &Content) -> Result<Vec<Cell>> {
+    ensure!(
+        bytes.len() <= 64 * 1024,
+        "reviewed dictionary exceeds bound"
+    );
+    let entries: Vec<ReviewedCell> =
+        serde_json::from_slice(bytes).context("parse reviewed dictionary")?;
+    ensure!(
+        !entries.is_empty() && entries.len() <= i16::MAX as usize,
+        "invalid reviewed dictionary count"
+    );
+    let cells: Vec<_> = entries
+        .into_iter()
+        .map(|c| Cell {
+            ground: c.ground,
+            object: c.object,
+            config: c.config,
+            terrain: c.terrain,
+            region: c.region,
+        })
+        .collect();
+    // Unused entries must pass the same content/configuration guards as output cells.
+    for chunk in cells.chunks(SIDE) {
+        encode(
+            &Map {
+                width: chunk.len() as i32,
+                height: 1,
+                cells: chunk.to_vec(),
+                spawns: vec![],
+            },
+            content,
+        )
+        .context("validate reviewed dictionary")?;
+    }
+    Ok(cells)
+}
+fn hashed_input(root: &Path, path: &str, expected: &str, bound: usize) -> Result<Vec<u8>> {
+    let bytes = bounded_read(&safe_path(root, path)?, bound)?;
+    let actual = sha256(&bytes);
+    ensure!(
+        actual == expected,
+        "input {path} checksum: expected {expected}, got {actual}"
+    );
+    Ok(bytes)
+}
+fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Result<()> {
+    let policy: serde_json::Value =
+        serde_json::from_slice(policy).context("parse source policy")?;
+    let annotations: serde_json::Value =
+        serde_json::from_slice(annotations).context("parse source annotations")?;
+    ensure!(
+        annotations["policy_sha256"] == provenance.policy.sha256
+            && annotations["source_sha256"] == provenance.source_sha256
+            && policy["schema"] == 1
+            && policy["selected_client"] == "123.5.1"
+            && policy["transform"].is_object()
+            && annotations["transform"] == policy["transform"],
+        "inconsistent source audit identity/transform"
+    );
+    let rows = annotations["unknown"]
+        .as_array()
+        .context("missing UNKNOWN decisions")?;
+    ensure!(rows.len() == 101, "missing UNKNOWN decision");
+    let mut pixels = 0u64;
+    for (i, row) in rows.iter().enumerate() {
+        ensure!(
+            row["component"].as_u64() == Some(i as u64 + 1)
+                && row["status"] == "REVIEWED_RECONSTRUCTION"
+                && row["reason"].as_str().is_some_and(|s| !s.is_empty())
+                && row["support_sha256"].as_str().is_some_and(valid_hash)
+                && row["terrain"].as_u64().is_some_and(|t| t <= 12)
+                && row["ground"].as_u64().is_some_and(|g| g <= 255),
+            "unreviewed UNKNOWN component {}",
+            i + 1
+        );
+        pixels += row["pixels"]
+            .as_u64()
+            .filter(|p| *p > 0 && *p <= CELLS as u64)
+            .context("invalid UNKNOWN support size")?;
+    }
+    ensure!(pixels == 20571, "inconsistent UNKNOWN support total");
+    Ok(())
+}
+fn indexed_map(raw: &[u8], dictionary: &[Cell]) -> Result<Map> {
+    ensure!(raw.len() == CELLS * 2, "invalid reviewed index length");
+    let cells = raw
+        .chunks_exact(2)
+        .enumerate()
+        .map(|(i, bytes)| {
+            let index = u16::from_le_bytes([bytes[0], bytes[1]]) as usize;
+            dictionary.get(index).cloned().with_context(|| {
+                format!(
+                    "UNKNOWN dictionary index {index} at {},{}",
+                    i % SIDE,
+                    i / SIDE
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Map {
+        width: SIDE as i32,
+        height: SIDE as i32,
+        cells,
+        spawns: vec![],
+    })
+}
+fn reviewed_map(root: &Path, recipe: &ReviewedRecipe, content: &Content) -> Result<Map> {
+    let inputs = &recipe.inputs;
+    let cells = hashed_input(
+        root,
+        &inputs.dictionary.path,
+        &inputs.dictionary.sha256,
+        64 * 1024,
+    )?;
+    let dictionary = dictionary(&cells, content)?;
+    let p = &recipe.provenance;
+    let policy = hashed_input(root, &p.policy.path, &p.policy.sha256, 64 * 1024)?;
+    let annotations = hashed_input(root, &p.annotations.path, &p.annotations.sha256, 64 * 1024)?;
+    audit(&policy, &annotations, p)?;
+    let indices = &inputs.indices;
+    let compressed = hashed_input(root, &indices.path, &indices.sha256, 2 * CELLS + 4096)?;
+    let raw = inflate(
+        &compressed,
+        2 * CELLS,
+        2 * CELLS + 4096,
+        &indices.expanded_sha256,
+    )?;
+    indexed_map(&raw, &dictionary)
+}
+
 pub(crate) fn run(args: &[String]) -> Result<bool> {
     if args.first().is_none_or(|a| a != "build-realm") {
         return Ok(false);
@@ -569,18 +837,19 @@ pub(crate) fn run(args: &[String]) -> Result<bool> {
         );
     }
     let content = Content::load(&data).context("load selected-client content")?;
-    let layers = &recipe.layers;
-    let e = load_layer(&root, &layers.elevation)?;
-    let m = load_layer(&root, &layers.moisture)?;
-    let o = load_layer(&root, &layers.overrides)?;
-    let (map, mainland) = match (&recipe.profile, &recipe.orientation) {
-        (Profile::ClassicV1, Orientation::XMajor) => {
-            assemble(&e, &m, &o, recipe.width, recipe.height, recipe.scenery_seed)?
+    let (map, mainland) = match recipe {
+        Recipe::ClassicV1(r) => {
+            let e = load_layer(&root, &r.layers.elevation)?;
+            let m = load_layer(&root, &r.layers.moisture)?;
+            let o = load_layer(&root, &r.layers.overrides)?;
+            let (map, mainland) = assemble(&e, &m, &o, r.width, r.height, r.scenery_seed)?;
+            (map, Some(mainland))
         }
+        Recipe::ReviewedCellsV1(r) => (reviewed_map(&root, r, &content)?, None),
     };
     let prepared = started.elapsed();
     let (bytes, dictionary) = encode(&map, &content)?;
-    let output = safe_path(&root, &recipe.output)?;
+    let output = safe_path(&root, recipe.output())?;
     if check {
         ensure!(
             bounded_read(&output, 16 * 1024 * 1024)? == bytes,
@@ -597,7 +866,7 @@ pub(crate) fn run(args: &[String]) -> Result<bool> {
     println!(
         "{}",
         serde_json::json!({
-            "id":id, "profile":"classic-v1", "recipe_identity_sha256":sha256(&serde_json::to_vec(recipe)?),
+            "id":id, "profile":recipe.profile(), "recipe_identity_sha256":sha256(&serde_json::to_vec(recipe)?),
             "status":if check {"checked"} else {"built"}, "output":output,
             "sha256":sha256(&bytes), "bytes":bytes.len(), "width":map.width, "height":map.height,
             "dictionary":dictionary, "habitats":habitats, "mainland":mainland,
@@ -606,8 +875,294 @@ pub(crate) fn run(args: &[String]) -> Result<bool> {
             "roads":map.cells.iter().filter(|c| c.ground == 0xd0).count(),
             "water":map.cells.iter().filter(|c| matches!(c.ground, 0xbc | 0x72 | 0x73)).count(),
             "prepare_ms":prepared.as_millis(), "total_ms":started.elapsed().as_millis(),
-            "reconstruction":recipe.provenance.status,
+            "reconstruction":recipe.status(),
         })
     );
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn zipped(raw: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(raw).unwrap();
+        encoder.finish().unwrap()
+    }
+    fn recipe(value: serde_json::Value) -> Result<Recipe> {
+        let recipe: Recipe = serde_json::from_value(value)?;
+        recipe.validate()?;
+        Ok(recipe)
+    }
+
+    fn reviewed_value() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../data/realms/world02.json")).unwrap()
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_strict_recipe_and_input_paths() {
+        recipe(reviewed_value()).unwrap();
+        for (field, value) in [
+            ("profile", serde_json::json!("UNKNOWN")),
+            ("schema", serde_json::json!(1)),
+            ("id", serde_json::json!("../world2")),
+            ("width", serde_json::json!(2047)),
+            ("height", serde_json::json!(4096)),
+            ("orientation", serde_json::json!("x-major")),
+            ("output", serde_json::json!("world02.wmap")),
+            ("scenery_seed", serde_json::json!(1)),
+        ] {
+            let mut v = reviewed_value();
+            v[field] = value;
+            assert!(recipe(v).is_err(), "{field}");
+        }
+        for path in [
+            vec!["inputs"],
+            vec!["inputs", "dictionary"],
+            vec!["inputs", "indices"],
+            vec!["content"],
+            vec!["provenance"],
+            vec!["provenance", "policy"],
+            vec!["provenance", "annotations"],
+        ] {
+            let mut v = reviewed_value();
+            let mut target = &mut v;
+            for part in path {
+                target = &mut target[part];
+            }
+            target["UNKNOWN"] = serde_json::json!(0);
+            assert!(recipe(v).is_err());
+        }
+        for path in [
+            vec!["content", "objects"],
+            vec!["content", "grounds"],
+            vec!["inputs", "dictionary", "sha256"],
+            vec!["inputs", "indices", "expanded_sha256"],
+            vec!["provenance", "source_sha256"],
+            vec!["provenance", "kind"],
+            vec!["provenance", "status"],
+        ] {
+            let mut v = reviewed_value();
+            let mut target = &mut v;
+            for part in path {
+                target = &mut target[part];
+            }
+            *target = serde_json::json!("UNKNOWN");
+            assert!(recipe(v).is_err());
+        }
+        let root = std::env::temp_dir().join(format!("reviewed-paths-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(root.join("world02")).unwrap();
+        let write = |v: &serde_json::Value| {
+            std::fs::write(root.join("world02.json"), serde_json::to_vec(v).unwrap()).unwrap()
+        };
+        write(&reviewed_value());
+        // Metadata validation must work without outputs or canonical inputs present.
+        read_recipe(&root, "world02.json").unwrap();
+        for path in [
+            "../escape",
+            "/absolute",
+            "world02.json",
+            "classic-world-02-reconstruction.wmap",
+            "world02/cells.indices.zlib",
+            "world02/./cells.indices.zlib",
+        ] {
+            let mut v = reviewed_value();
+            v["inputs"]["dictionary"]["path"] = serde_json::json!(path);
+            write(&v);
+            assert!(read_recipe(&root, "world02.json").is_err(), "{path}");
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("missing", root.join("world02/cells.dictionary.json"))
+                .unwrap();
+            write(&reviewed_value());
+            assert!(read_recipe(&root, "world02.json").is_err());
+        }
+        assert!(hashed_input(&root, "missing", &"0".repeat(64), 64).is_err());
+        std::fs::write(root.join("corrupt"), b"bad").unwrap();
+        assert!(hashed_input(&root, "corrupt", &"0".repeat(64), 64).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_dictionary_requires_every_safe_field() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let valid =
+            serde_json::json!({"ground":190,"object":null,"config":"","terrain":11,"region":0});
+        let parse = |v: serde_json::Value| dictionary(&serde_json::to_vec(&v).unwrap(), &content);
+        parse(serde_json::json!([valid.clone(), valid.clone()])).unwrap();
+        for field in ["ground", "object", "config", "terrain", "region"] {
+            let mut v = valid.clone();
+            v.as_object_mut().unwrap().remove(field);
+            assert!(parse(serde_json::json!([v])).is_err(), "missing {field}");
+        }
+        let unknown_ground = (0..=u8::MAX)
+            .find(|g| !content.grounds.contains_key(g))
+            .unwrap();
+        let hazardous = *content.hazards.keys().next().unwrap();
+        let enemy = content
+            .objects
+            .values()
+            .find(|o| o.static_object && o.enemy)
+            .unwrap()
+            .kind;
+        let mobile = *content
+            .objects
+            .iter()
+            .find(|(_, o)| !o.static_object)
+            .unwrap()
+            .0;
+        for (field, value) in [
+            ("UNKNOWN", serde_json::json!(0)),
+            ("ground", serde_json::json!(unknown_ground)),
+            ("ground", serde_json::json!(hazardous)),
+            ("ground", serde_json::json!(256)),
+            ("object", serde_json::json!(enemy)),
+            ("object", serde_json::json!(mobile)),
+            ("object", serde_json::json!(65535)),
+            ("object", serde_json::json!("UNKNOWN")),
+            ("config", serde_json::json!("size:150")),
+            ("terrain", serde_json::json!(13)),
+            ("region", serde_json::json!(1)),
+        ] {
+            let mut bad = valid.clone();
+            bad[field] = value;
+            // Even an unused extra entry must fail before indices are expanded.
+            assert!(
+                parse(serde_json::json!([valid.clone(), bad])).is_err(),
+                "{field}"
+            );
+        }
+        assert!(parse(serde_json::json!([])).is_err());
+        assert!(dictionary(&vec![b' '; 65537], &content).is_err());
+        assert!(dictionary(br#"[{"ground":190,"object":null,"object":null,"config":"","terrain":11,"region":0}]"#, &content).is_err());
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_indices_bounds_streams_and_hashes() {
+        let raw = vec![0u8; 2 * CELLS];
+        let hash = sha256(&raw);
+        let bytes = zipped(&raw);
+        assert_eq!(
+            inflate(&bytes, 2 * CELLS, 2 * CELLS + 4096, &hash).unwrap(),
+            raw
+        );
+        for invalid in [
+            bytes[..bytes.len() - 1].to_vec(),
+            [bytes.as_slice(), &[0]].concat(),
+            [bytes.as_slice(), bytes.as_slice()].concat(),
+            zipped(&raw[..raw.len() - 1]),
+            zipped(&vec![0; raw.len() + 1]),
+            vec![0; 2 * CELLS + 4097],
+        ] {
+            assert!(inflate(&invalid, 2 * CELLS, 2 * CELLS + 4096, &hash).is_err());
+        }
+        assert!(inflate(&bytes, 2 * CELLS, 2 * CELLS + 4096, &"0".repeat(64)).is_err());
+        // Classic layers must not acquire the reviewed profile's larger bound.
+        assert!(expand_layer(&bytes, 2 * CELLS, &hash).is_err());
+        let mut raw = raw;
+        raw[..2].copy_from_slice(&u16::MAX.to_le_bytes());
+        assert!(
+            indexed_map(&raw, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("UNKNOWN")
+        );
+        assert!(indexed_map(&raw[..raw.len() - 1], &[]).is_err());
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_audit_rejects_unreviewed_or_inconsistent_source() {
+        let Recipe::ReviewedCellsV1(r) = recipe(reviewed_value()).unwrap() else {
+            panic!("reviewed fixture");
+        };
+        let policy = include_bytes!("../../data/realms/world02/source-policy.json");
+        let annotations: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world02/source-annotations.json"
+        ))
+        .unwrap();
+        audit(
+            policy,
+            &serde_json::to_vec(&annotations).unwrap(),
+            &r.provenance,
+        )
+        .unwrap();
+        for (field, value) in [
+            ("policy_sha256", serde_json::json!("0".repeat(64))),
+            ("source_sha256", serde_json::json!("0".repeat(64))),
+            ("transform", serde_json::json!({})),
+            ("unknown", serde_json::json!([])),
+        ] {
+            let mut v = annotations.clone();
+            v[field] = value;
+            assert!(audit(policy, &serde_json::to_vec(&v).unwrap(), &r.provenance).is_err());
+        }
+        for (field, value) in [
+            ("status", serde_json::json!("UNKNOWN")),
+            ("component", serde_json::json!(102)),
+            ("support_sha256", serde_json::json!("UNKNOWN")),
+            ("reason", serde_json::json!("")),
+            ("pixels", serde_json::json!(0)),
+            ("terrain", serde_json::json!(13)),
+        ] {
+            let mut v = annotations.clone();
+            v["unknown"][0][field] = value;
+            assert!(audit(policy, &serde_json::to_vec(&v).unwrap(), &r.provenance).is_err());
+        }
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_world02_exact_two_encodes_and_all_fields() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let root = Path::new("data/realms");
+        let Recipe::ReviewedCellsV1(r) = read_recipe(root, "world02.json").unwrap() else {
+            panic!("reviewed fixture");
+        };
+        let map = reviewed_map(root, &r, &content).unwrap();
+        let (bytes, count) = encode(&map, &content).unwrap();
+        assert_eq!(count, 55);
+        assert_eq!(bytes.len(), 452498);
+        assert_eq!(
+            sha256(&bytes),
+            "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594"
+        );
+        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        assert_eq!(bytes, std::fs::read(root.join(&r.output)).unwrap());
+        let decoded = Map::decode_cells(&bytes, &content).unwrap();
+        assert_eq!(decoded.cells.len(), CELLS);
+        for (i, (a, b)) in decoded.cells.iter().zip(&map.cells).enumerate() {
+            assert_eq!(
+                (a.ground, a.object, &a.config, a.terrain, a.region),
+                (b.ground, b.object, &b.config, b.terrain, b.region),
+                "cell {i}"
+            );
+        }
+        let source = super::super::realms::sources(Path::new("data"))
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name() == r.id)
+            .unwrap();
+        let arrived = source.open(&content).unwrap();
+        assert_eq!(
+            arrived.spawns,
+            [
+                (1024.5, 1676.5),
+                (1942.5, 1024.5),
+                (1024.5, 226.5),
+                (93.5, 1024.5)
+            ]
+        );
+        assert_eq!(
+            map.cells
+                .iter()
+                .zip(&arrived.cells)
+                .filter(
+                    |(a, b)| (a.ground, a.object, &a.config, a.terrain, a.region)
+                        != (b.ground, b.object, &b.config, b.terrain, b.region)
+                )
+                .count(),
+            36
+        );
+    }
 }
