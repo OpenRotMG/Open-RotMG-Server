@@ -723,10 +723,29 @@ fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Res
         serde_json::from_slice(policy).context("parse source policy")?;
     let annotations: serde_json::Value =
         serde_json::from_slice(annotations).context("parse source annotations")?;
+    let (support_key, expected_count, expected_pixels) = match policy["schema"].as_u64() {
+        Some(1) => ("component", 101, 20571),
+        Some(2) => {
+            ensure!(
+                policy["source_sha256"] == provenance.source_sha256
+                    && policy["audit"]["kind"] == "reviewed-supports-v1",
+                "inconsistent reviewed support audit"
+            );
+            let count = policy["audit"]["supports"]
+                .as_u64()
+                .filter(|n| (1..=4096).contains(n))
+                .context("invalid reviewed support count")?;
+            let pixels = policy["audit"]["pixels"]
+                .as_u64()
+                .filter(|n| (1..=CELLS as u64).contains(n))
+                .context("invalid reviewed support total")?;
+            ("support", count, pixels)
+        }
+        _ => bail!("unsupported source audit schema"),
+    };
     ensure!(
         annotations["policy_sha256"] == provenance.policy.sha256
             && annotations["source_sha256"] == provenance.source_sha256
-            && policy["schema"] == 1
             && policy["selected_client"] == "123.5.1"
             && policy["transform"].is_object()
             && annotations["transform"] == policy["transform"],
@@ -735,11 +754,14 @@ fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Res
     let rows = annotations["unknown"]
         .as_array()
         .context("missing UNKNOWN decisions")?;
-    ensure!(rows.len() == 101, "missing UNKNOWN decision");
+    ensure!(
+        rows.len() as u64 == expected_count,
+        "missing UNKNOWN decision"
+    );
     let mut pixels = 0u64;
     for (i, row) in rows.iter().enumerate() {
         ensure!(
-            row["component"].as_u64() == Some(i as u64 + 1)
+            row[support_key].as_u64() == Some(i as u64 + 1)
                 && row["status"] == "REVIEWED_RECONSTRUCTION"
                 && row["reason"].as_str().is_some_and(|s| !s.is_empty())
                 && row["support_sha256"].as_str().is_some_and(valid_hash)
@@ -753,7 +775,10 @@ fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Res
             .filter(|p| *p > 0 && *p <= CELLS as u64)
             .context("invalid UNKNOWN support size")?;
     }
-    ensure!(pixels == 20571, "inconsistent UNKNOWN support total");
+    ensure!(
+        pixels == expected_pixels,
+        "inconsistent UNKNOWN support total"
+    );
     Ok(())
 }
 fn indexed_map(raw: &[u8], dictionary: &[Cell]) -> Result<Map> {
@@ -1113,20 +1138,80 @@ mod tests {
     }
 
     #[test]
-    fn realm_prepare_reviewed_world02_exact_two_encodes_and_all_fields() {
+    fn realm_prepare_versioned_support_audit_requires_explicit_consistent_contract() {
+        let Recipe::ReviewedCellsV1(r) = recipe(reviewed_value()).unwrap() else {
+            panic!("reviewed fixture");
+        };
+        let mut p: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world02/source-policy.json"
+        ))
+        .unwrap();
+        let mut a: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world02/source-annotations.json"
+        ))
+        .unwrap();
+        p["schema"] = serde_json::json!(2);
+        p["source_sha256"] = serde_json::json!(r.provenance.source_sha256);
+        p["audit"] = serde_json::json!({"kind":"reviewed-supports-v1","supports":1,"pixels":3});
+        let mut row = a["unknown"][0].clone();
+        row.as_object_mut().unwrap().remove("component");
+        row["support"] = serde_json::json!(1);
+        row["pixels"] = serde_json::json!(3);
+        a["unknown"] = serde_json::json!([row]);
+        let check = |p: &serde_json::Value, a: &serde_json::Value| {
+            audit(
+                &serde_json::to_vec(p).unwrap(),
+                &serde_json::to_vec(a).unwrap(),
+                &r.provenance,
+            )
+        };
+        check(&p, &a).unwrap();
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(3),
+            serde_json::Value::Null,
+        ] {
+            let mut bad = p.clone();
+            bad["schema"] = value;
+            assert!(check(&bad, &a).is_err());
+        }
+        for (field, value) in [
+            ("kind", serde_json::json!("UNKNOWN")),
+            ("supports", serde_json::json!(0)),
+            ("supports", serde_json::json!(2)),
+            ("supports", serde_json::json!(4097)),
+            ("pixels", serde_json::json!(0)),
+            ("pixels", serde_json::json!(4)),
+            ("pixels", serde_json::json!(CELLS + 1)),
+        ] {
+            let mut bad = p.clone();
+            bad["audit"][field] = value;
+            assert!(check(&bad, &a).is_err());
+        }
+        let mut bad = a.clone();
+        bad["unknown"][0]["support"] = serde_json::json!(2);
+        assert!(check(&p, &bad).is_err());
+        let mut bad = p.clone();
+        bad["source_sha256"] = serde_json::json!("0".repeat(64));
+        assert!(check(&bad, &a).is_err());
+    }
+
+    fn reviewed_roundtrip(
+        file: &str,
+        count: usize,
+        size: usize,
+        hash: &str,
+    ) -> (Content, Map, ReviewedRecipe) {
         let content = Content::load(Path::new("data")).unwrap();
         let root = Path::new("data/realms");
-        let Recipe::ReviewedCellsV1(r) = read_recipe(root, "world02.json").unwrap() else {
+        let Recipe::ReviewedCellsV1(r) = read_recipe(root, file).unwrap() else {
             panic!("reviewed fixture");
         };
         let map = reviewed_map(root, &r, &content).unwrap();
-        let (bytes, count) = encode(&map, &content).unwrap();
-        assert_eq!(count, 55);
-        assert_eq!(bytes.len(), 452498);
-        assert_eq!(
-            sha256(&bytes),
-            "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594"
-        );
+        let (bytes, actual_count) = encode(&map, &content).unwrap();
+        assert_eq!(actual_count, count);
+        assert_eq!(bytes.len(), size);
+        assert_eq!(sha256(&bytes), hash);
         assert_eq!(bytes, encode(&map, &content).unwrap().0);
         assert_eq!(bytes, std::fs::read(root.join(&r.output)).unwrap());
         let decoded = Map::decode_cells(&bytes, &content).unwrap();
@@ -1138,6 +1223,17 @@ mod tests {
                 "cell {i}"
             );
         }
+        (content, map, r)
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_world02_exact_two_encodes_and_all_fields() {
+        let (content, map, r) = reviewed_roundtrip(
+            "world02.json",
+            55,
+            452498,
+            "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594",
+        );
         let source = super::super::realms::sources(Path::new("data"))
             .unwrap()
             .into_iter()
@@ -1163,6 +1259,16 @@ mod tests {
                 )
                 .count(),
             36
+        );
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_world03_exact_two_encodes_and_all_fields() {
+        reviewed_roundtrip(
+            "world03.json",
+            54,
+            442418,
+            "a6621e55c6a3d603bce33767051936f56aba6b6ba3eccab5251f931934b153af",
         );
     }
 }
