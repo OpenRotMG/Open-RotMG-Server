@@ -100,18 +100,23 @@ impl std::error::Error for NestedFinalization {}
 #[derive(Clone)]
 struct Finalization {
     avatar: i32,
+    transfer: Option<Vec<u8>>,
     done: tokio::sync::watch::Receiver<Completion>,
 }
 struct FinalizationGuard {
     registry: Arc<Mutex<BTreeMap<i32, Claim>>>,
     expected: Vec<(i32, Arc<()>)>,
     completion: tokio::sync::watch::Sender<Completion>,
+    transfer: Option<crate::world::TransferReservation>,
     finished: bool,
     #[cfg(test)]
     _task: LiveTask,
 }
 impl Drop for FinalizationGuard {
     fn drop(&mut self) {
+        if let Some(transfer) = &self.transfer {
+            transfer.revoke();
+        }
         if !self.finished {
             let error = "finalization executor abandoned completion".to_string();
             fence_owned(
@@ -285,7 +290,15 @@ impl Owner {
             };
             avatar
                 .map(|avatar| {
-                    begin_finalization(app, self.id, &self.generation, avatar, reason, &runtime)
+                    begin_finalization(
+                        app,
+                        self.id,
+                        &self.generation,
+                        avatar,
+                        reason,
+                        &runtime,
+                        None,
+                    )
                 })
                 .transpose()
         })();
@@ -351,6 +364,7 @@ impl Drop for Owner {
                 avatar,
                 CloseReason::Transport,
                 &cleanup.runtime,
+                None,
             )
         {
             fence_owned(
@@ -606,6 +620,7 @@ fn begin_finalization(
     avatar: i32,
     reason: CloseReason,
     runtime: &tokio::runtime::Handle,
+    mut transfer: Option<crate::world::TransferReservation>,
 ) -> Result<Finalized> {
     let (completion, done) = tokio::sync::watch::channel(None);
     let initial_failure = {
@@ -619,6 +634,15 @@ fn begin_finalization(
         );
         if let Some(previous) = &claim.finalization {
             ensure!(previous.avatar == avatar, "stale finalization avatar");
+            ensure!(
+                transfer
+                    .as_ref()
+                    .is_none_or(|t| previous.transfer.as_deref() == Some(t.key())),
+                "finalization belongs to another transfer"
+            );
+            if let Some(t) = &mut transfer {
+                t.disarm();
+            }
             return Ok(Finalized(previous.done.clone()));
         }
         ensure!(
@@ -628,6 +652,7 @@ fn begin_finalization(
 
         claim.finalization = Some(Finalization {
             avatar,
+            transfer: transfer.as_ref().map(|t| t.key().to_vec()),
             done: done.clone(),
         });
         claim.failure.clone()
@@ -639,10 +664,12 @@ fn begin_finalization(
         registry: a.owners.clone(),
         expected: expected.clone(),
         completion,
+        transfer,
         finished: false,
         #[cfg(test)]
         _task: LiveTask::new(),
     };
+    let transfer_key = guard.transfer.as_ref().map(|t| t.key().to_vec());
     let work = async move {
         let mut stop_acknowledged = false;
         let result = AssertUnwindSafe(async {
@@ -655,8 +682,11 @@ fn begin_finalization(
                         wait_pending(&app, account, &expected[0].1).await?;
                         Err(anyhow::Error::msg(cause.clone()))
                     } else {
+                        stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
+                        stop_acknowledged = true;
+                        super::settle_giver_credits(&app, avatar).await?;
                         self::account(&app, vec![account], "finalization", move |app| async move {
-                            super::depart_inner(&app, avatar).await
+                            super::depart_inner_with_transfer(&app, avatar, transfer_key).await
                         })
                         .await
                     };
@@ -721,6 +751,13 @@ fn begin_finalization(
                 }
             )
         });
+        if let Some(transfer) = &mut guard.transfer {
+            if result.is_ok() {
+                transfer.disarm();
+            } else {
+                transfer.revoke();
+            }
+        }
         // Keep closing identity discoverable until the canonical result is actually published.
         let mut owners = app.owners.lock().expect("ownership registry poisoned");
         guard.completion.send_replace(Some(result));
@@ -774,6 +811,21 @@ pub(super) fn script_finalizations(a: &App) -> Vec<Finalized> {
 }
 
 pub(crate) fn finalize(a: &App, avatar: i32, reason: CloseReason) -> Result<Finalized> {
+    finalize_with_transfer(a, avatar, reason, None)
+}
+pub(crate) fn finalize_transfer(
+    a: &App,
+    avatar: i32,
+    transfer: crate::world::TransferReservation,
+) -> Result<Finalized> {
+    finalize_with_transfer(a, avatar, CloseReason::Controller, Some(transfer))
+}
+fn finalize_with_transfer(
+    a: &App,
+    avatar: i32,
+    reason: CloseReason,
+    transfer: Option<crate::world::TransferReservation>,
+) -> Result<Finalized> {
     ensure!(!nested_operation(), NestedFinalization);
     let runtime = tokio::runtime::Handle::try_current()
         .context("finalization requires a running server executor")?;
@@ -788,7 +840,7 @@ pub(crate) fn finalize(a: &App, avatar: i32, reason: CloseReason) -> Result<Fina
             .map(|(account, claim)| (*account, claim.generation.clone()))
             .context("finalization avatar has no matching session generation")?
     };
-    begin_finalization(a, account, &generation, avatar, reason, &runtime)
+    begin_finalization(a, account, &generation, avatar, reason, &runtime, transfer)
 }
 
 pub(super) struct Operation {
@@ -958,6 +1010,54 @@ fn reserve(a: &App, expected: &[(i32, Arc<()>)], operation: &'static str) -> Res
     })
 }
 
+pub(super) enum CreditAdmission {
+    Reserved(Operation),
+    Waiting(std::pin::Pin<Box<dyn Future<Output = ()> + Send>>),
+}
+// Called only with an actor-verified sealed giver and its exact outstanding recipient source.
+pub(super) fn reserve_credit_recipient(
+    a: &App,
+    giver: (i32, i32),
+    recipient: (i32, i32),
+) -> Result<CreditAdmission> {
+    let mut owners = a.owners.lock().expect("ownership registry poisoned");
+    let source = owners.get(&giver.0).context("causal giver claim missing")?;
+    ensure!(
+        source.matches_avatar(giver.1) && source.failure.is_none(),
+        "stale or fenced causal giver"
+    );
+    let target = owners
+        .get(&recipient.0)
+        .context("causal recipient claim missing")?;
+    ensure!(
+        giver.0 != recipient.0 && target.avatar == Some(recipient.1) && target.failure.is_none(),
+        "stale or fenced causal recipient"
+    );
+    if target.pending {
+        let mut wait = Box::pin(target.idle.clone().notified_owned());
+        wait.as_mut().enable();
+        return Ok(CreditAdmission::Waiting(wait));
+    }
+    let generation = target.generation.clone();
+    // Closing recipients permit ONLY this proven progress prerequisite, never a new controller operation.
+    owners.get_mut(&recipient.0).unwrap().pending = true;
+    Ok(CreditAdmission::Reserved(Operation {
+        app: a.clone(),
+        accounts: vec![(recipient.0, generation)],
+        operation: "causal_progress",
+        stage: Arc::new(Mutex::new(Stage::Reservation)),
+        completed: false,
+    }))
+}
+
+pub(super) fn collector_death_candidate(a: &App, account: i32, avatar: i32) -> Result<bool> {
+    let owners = a.owners.lock().expect("ownership registry poisoned");
+    let claim = owners
+        .get(&account)
+        .context("death candidate claim missing")?;
+    ensure!(claim.matches_avatar(avatar), "stale death candidate avatar");
+    Ok(!claim.pending && claim.failure.is_none() && claim.finalization.is_none())
+}
 pub(super) fn reserve_player(
     a: &App,
     account: i32,
@@ -1186,4 +1286,77 @@ pub(super) fn failure_reporter(
             error,
         )
     })
+}
+
+#[cfg(test)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_death_fame_phase4_transfer_guard_panic_and_abort() {
+    for panic in [false, true] {
+        let (_dir, a) = super::account_actions::tests::fixture();
+        a.world.clock.set_paused(true);
+        let account = a.store.list("phase4-guard-drop".into()).await.unwrap().id;
+        let ch = a
+            .store
+            .create(account, a.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let character = ch.id;
+        let _owner = a.claim_session(account).unwrap();
+        let bind = binding(&a, account).unwrap();
+        let (avatar, time, key, transfer) = a
+            .world
+            .directory(move |d| {
+                let id = d.worlds.get_mut(&-1).unwrap().enter(ch, None)?;
+                bind(id)?;
+                let (time, key, _) = d.issue(account, character, -2)?;
+                let transfer = d.reserve_transfer(key.clone())?;
+                Ok((id, time, key, transfer))
+            })
+            .await
+            .unwrap();
+        let (completion, done) = tokio::sync::watch::channel(None);
+        let guard = FinalizationGuard {
+            registry: a.owners.clone(),
+            expected: generations(&a, &[account]).unwrap(),
+            completion,
+            transfer: Some(transfer),
+            finished: false,
+            #[cfg(test)]
+            _task: LiveTask::new(),
+        };
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _guard = guard;
+            entered.send(()).unwrap();
+            if panic {
+                panic!("injected canonical guard panic");
+            }
+            std::future::pending::<()>().await;
+        });
+        ready.await.unwrap();
+        if !panic {
+            task.abort();
+        }
+        let error = task.await.unwrap_err();
+        assert!(if panic {
+            error.is_panic()
+        } else {
+            error.is_cancelled()
+        });
+        assert!(matches!(*done.borrow(), Some(Err(_))));
+        assert!(state(&a, account).unwrap().2);
+        assert!(
+            a.world
+                .directory(move |d| d.consume(account, -2, time, key))
+                .await
+                .is_err()
+        );
+        assert!(
+            a.world
+                .for_player(avatar)
+                .call(move |w| Ok(w.players.contains_key(&avatar)))
+                .await
+                .unwrap()
+        );
+    }
 }

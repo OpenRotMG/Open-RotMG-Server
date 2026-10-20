@@ -11,7 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         Arc,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicI32, AtomicU8, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -328,6 +328,7 @@ pub struct Player {
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
     death_lifetime: Option<crate::store::FameLifetime>,
+    departure_snapshot: Option<Character>,
     killer: String,
     movement_credit: f32,
     hp_fraction: f32,
@@ -451,6 +452,13 @@ impl Player {
         queue.amount = next;
         self.experience_queued = next;
         Ok(())
+    }
+    fn owes_credit(&self, giver: i32) -> bool {
+        self.level_assists_prepared.iter().any(|a| a.giver == giver)
+            || self
+                .experience_queue
+                .as_ref()
+                .is_some_and(|q| q.assists.iter().flatten().any(|a| a.giver == giver))
     }
     fn record_motion(&mut self, position: Pos, time: i32, at: u64, maximum_speed: f32) {
         let elapsed = i64::from(time) - i64::from(self.motion.time);
@@ -711,13 +719,74 @@ enum Target {
     World(i32),
     Player(i32),
 }
+const TRANSFER_REVOKED: u8 = 1;
+const TRANSFER_WRITE: u8 = 2;
+const TRANSFER_DEPARTED: u8 = 4;
+const TRANSFER_CONSUMED: u8 = 8;
+const TRANSFER_ADMITTED: u8 = 16;
+const TRANSFER_RESERVED: u8 = 32;
+const TRANSFER_RETIRED: u8 = 64;
+#[derive(Clone)]
+struct TransferAuthority(Arc<AtomicU8>);
+impl TransferAuthority {
+    fn transition(&self, set: u8, required: u8, forbidden: u8) -> Result<()> {
+        self.0
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |state| {
+                (state & TRANSFER_REVOKED == 0
+                    && state & required == required
+                    && state & forbidden == 0)
+                    .then_some(state | set)
+            })
+            .map(|_| ())
+            .map_err(|_| protocol("transfer authority revoked or already used"))
+    }
+    fn state(&self) -> u8 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+pub(crate) struct TransferReservation {
+    key: Vec<u8>,
+    authority: TransferAuthority,
+    armed: bool,
+}
+impl TransferReservation {
+    pub(crate) fn key(&self) -> &[u8] {
+        &self.key
+    }
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+    pub(crate) fn revoke(&self) {
+        if self.armed {
+            self.authority
+                .0
+                .fetch_or(TRANSFER_REVOKED, Ordering::SeqCst);
+        }
+    }
+}
+impl Drop for TransferReservation {
+    fn drop(&mut self) {
+        self.revoke();
+    }
+}
+pub(crate) struct TransferArrival {
+    key: Vec<u8>,
+    authority: TransferAuthority,
+}
+struct ExitIntent {
+    source: i32,
+    portal: i32,
+    player: i32,
+    dungeon: crate::dungeon::HistoricalDungeon,
+}
 struct Grant {
+    exit: Option<ExitIntent>,
+    authority: TransferAuthority,
     account: i32,
     character: i32,
     destination: i32,
     key_time: i32,
     expires: u64,
-    consumed: bool,
 }
 struct Portal {
     origin: i32,
@@ -1089,9 +1158,10 @@ impl Directory {
         }
     }
     pub(crate) fn character_transferring(&self, character: i32) -> bool {
-        self.grants
-            .values()
-            .any(|g| g.character == character && !g.consumed)
+        self.grants.values().any(|g| {
+            g.character == character
+                && g.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
+        })
     }
     pub fn location(&self, player: i32) -> Result<i32> {
         self.worlds
@@ -1144,7 +1214,10 @@ impl Directory {
             && self.worlds[&id].players.is_empty()
             && self.worlds[&id].bag_expiry.is_empty()
             && !self.endgame.references_world(id)
-            && !self.grants.values().any(|g| g.destination == id)
+            && !self
+                .grants
+                .values()
+                .any(|g| g.destination == id && g.authority.state() & TRANSFER_REVOKED == 0)
             && !self
                 .portals
                 .values()
@@ -1318,12 +1391,13 @@ impl Directory {
         self.grants.insert(
             key.clone(),
             Grant {
+                exit: None,
+                authority: TransferAuthority(Arc::new(AtomicU8::new(0))),
                 account,
                 character,
                 destination,
                 key_time,
                 expires: self.tick + 2400,
-                consumed: false,
             },
         );
         tracing::info!(
@@ -1335,18 +1409,270 @@ impl Directory {
         );
         Ok((key_time, key, name))
     }
+    pub(crate) fn bind_exit(&mut self, id: i32, portal: Option<i32>, key: &[u8]) -> Result<()> {
+        let Some(portal) = portal else { return Ok(()) };
+        let source = self.location(id)?;
+        let (account, character, destination) = self.destination(id, Some(portal))?;
+        if self.worlds[&destination].name != "Realm" {
+            return Ok(());
+        }
+        let Some(dungeon) =
+            crate::dungeon::HistoricalDungeon::from_world(&self.worlds[&source].name)
+        else {
+            return Ok(());
+        };
+        let grant = self
+            .grants
+            .get_mut(key)
+            .context("earned exit grant missing")?;
+        ensure!(
+            grant.account == account
+                && grant.character == character
+                && grant.destination == destination
+                && grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
+                && grant.exit.is_none(),
+            "earned exit grant binding changed"
+        );
+        grant.exit = Some(ExitIntent {
+            source,
+            portal,
+            player: id,
+            dungeon,
+        });
+        Ok(())
+    }
+    pub(crate) fn reserve_transfer(&mut self, key: Vec<u8>) -> Result<TransferReservation> {
+        let grant = self
+            .grants
+            .get(&key)
+            .context("transfer reservation missing")?;
+        grant
+            .authority
+            .transition(TRANSFER_RESERVED, 0, TRANSFER_RESERVED | TRANSFER_CONSUMED)?;
+        Ok(TransferReservation {
+            key,
+            authority: grant.authority.clone(),
+            armed: true,
+        })
+    }
+    pub(crate) fn accept_source_write(&mut self, id: i32, key: &[u8]) -> Result<()> {
+        self.validate_source_exit(id, key)?;
+        let grant = self.grants.get(key).context("source write grant missing")?;
+        // This transition owns the uncancellable write; cancellation cannot promise to undo accepted SQL.
+        grant.authority.transition(
+            TRANSFER_WRITE,
+            TRANSFER_RESERVED,
+            TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+        )
+    }
+    pub(crate) fn retire_replacement(
+        &mut self,
+        arrival: TransferArrival,
+        account: i32,
+        character: i32,
+        destination: i32,
+    ) -> Result<()> {
+        let grant = self
+            .grants
+            .get(&arrival.key)
+            .context("replacement source grant missing")?;
+        ensure!(
+            Arc::ptr_eq(&arrival.authority.0, &grant.authority.0)
+                && grant.account == account
+                && grant.character == character
+                && grant.destination == destination
+                && grant.expires > self.tick
+                && grant.exit.is_none(),
+            "replacement source grant binding changed"
+        );
+        grant.authority.transition(
+            TRANSFER_RETIRED,
+            TRANSFER_CONSUMED | TRANSFER_DEPARTED,
+            TRANSFER_ADMITTED | TRANSFER_RETIRED,
+        )
+    }
+    pub(crate) fn admit_transfer(
+        &mut self,
+        arrival: TransferArrival,
+        account: i32,
+        character: i32,
+        destination: i32,
+    ) -> Result<()> {
+        let grant = self
+            .grants
+            .get(&arrival.key)
+            .context("arrival grant missing")?;
+        ensure!(
+            Arc::ptr_eq(&arrival.authority.0, &grant.authority.0)
+                && grant.account == account
+                && grant.character == character
+                && grant.destination == destination
+                && grant.expires > self.tick,
+            "arrival grant changed or expired"
+        );
+        ensure!(
+            self.worlds
+                .get(&destination)
+                .is_some_and(|w| w.admission_open),
+            "arrival destination unavailable"
+        );
+        grant.authority.transition(
+            TRANSFER_ADMITTED,
+            TRANSFER_CONSUMED,
+            TRANSFER_ADMITTED | TRANSFER_RETIRED,
+        )
+    }
+    fn validate_exit_destination(&self, grant: &Grant) -> Result<()> {
+        let destination = self
+            .worlds
+            .get(&grant.destination)
+            .context("source transfer destination missing")?;
+        ensure!(
+            destination.admission_open,
+            "source transfer destination unavailable"
+        );
+        if grant.exit.is_some() {
+            ensure!(
+                destination.name == "Realm" && destination.players.len() < destination.max_players,
+                "earned exit destination is full or unavailable"
+            );
+        }
+        Ok(())
+    }
+    fn validate_source_exit(
+        &self,
+        id: i32,
+        key: &[u8],
+    ) -> Result<Option<crate::dungeon::HistoricalDungeon>> {
+        let source = self.location(id)?;
+        let p = &self.worlds[&source].players[&id];
+        let grant = self
+            .grants
+            .get(key)
+            .context("source transfer grant missing")?;
+        ensure!(
+            grant.account == p.character.account
+                && grant.character == p.character.id
+                && grant.authority.state()
+                    & (TRANSFER_REVOKED | TRANSFER_WRITE | TRANSFER_CONSUMED | TRANSFER_DEPARTED)
+                    == 0
+                && grant.authority.state() & TRANSFER_RESERVED != 0
+                && grant.expires > self.tick,
+            "source transfer grant stale or foreign"
+        );
+        self.validate_exit_destination(grant)?;
+        match &grant.exit {
+            None => Ok(None),
+            Some(exit) => {
+                ensure!(
+                    exit.source == source
+                        && exit.player == id
+                        && p.character.alive
+                        && !p.death_pending
+                        && self.worlds[&source]
+                            .entities
+                            .get(&exit.portal)
+                            .is_some_and(|e| e.published && e.pos.distance(p.pos) <= 2.),
+                    "earned exit source changed"
+                );
+                Ok(Some(exit.dungeon))
+            }
+        }
+    }
+    pub(crate) fn begin_source_departure(
+        &mut self,
+        id: i32,
+        key: Option<&[u8]>,
+    ) -> Result<Option<Character>> {
+        let source = self.location(id)?;
+        if let Some(key) = key {
+            let p = &self.worlds[&source].players[&id];
+            if p.death_pending || !p.character.alive {
+                let grant = self
+                    .grants
+                    .get_mut(key)
+                    .context("dying source transfer grant missing")?;
+                grant.authority.transition(
+                    0,
+                    0,
+                    TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+                )?;
+                grant.exit = None;
+            }
+        }
+        let exit = key
+            .map(|key| self.validate_source_exit(id, key))
+            .transpose()?
+            .flatten();
+        let w = self.worlds.get_mut(&source).unwrap();
+        let Some(mut snapshot) = w.begin_departure(id)? else {
+            return Ok(None);
+        };
+        if let Some(exit) = exit {
+            snapshot.lifetime.realm_exits.insert(exit);
+        }
+        w.players.get_mut(&id).unwrap().departure_snapshot = Some(snapshot.clone());
+        Ok(Some(snapshot))
+    }
+    pub(crate) fn finish_source_departure(
+        &mut self,
+        id: i32,
+        snapshot: Character,
+        key: Option<Vec<u8>>,
+    ) -> Result<()> {
+        let source = self.location(id)?;
+        ensure!(
+            self.worlds[&source].players[&id]
+                .departure_snapshot
+                .as_ref()
+                == Some(&snapshot),
+            "source departure snapshot changed"
+        );
+        if let Some(key) = key {
+            let grant = self
+                .grants
+                .get(&key)
+                .context("committed source transfer grant missing")?;
+            self.validate_exit_destination(grant)?;
+            let grant = self
+                .grants
+                .get_mut(&key)
+                .context("committed source transfer grant missing")?;
+            ensure!(
+                grant.account == snapshot.account
+                    && grant.character == snapshot.id
+                    && grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
+                    && grant.authority.state() & TRANSFER_DEPARTED == 0,
+                "committed source transfer binding changed"
+            );
+            grant.authority.transition(
+                TRANSFER_DEPARTED,
+                TRANSFER_WRITE,
+                TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+            )?;
+        }
+        self.worlds.get_mut(&source).unwrap().finish_departure(id)
+    }
     pub fn consume(
         &mut self,
         account: i32,
         destination: i32,
         key_time: i32,
         key: Vec<u8>,
-    ) -> Result<i32> {
+    ) -> Result<(i32, TransferArrival)> {
         let grant = self
             .grants
             .get(&key)
             .ok_or_else(|| protocol("unknown or already used transfer grant"))?;
-        ensure!(!grant.consumed, protocol("transfer grant already used"));
+        ensure!(
+            grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0,
+            protocol("transfer grant already used")
+        );
+        ensure!(
+            grant.authority.state() & TRANSFER_RESERVED == 0
+                || grant.authority.state() & TRANSFER_DEPARTED != 0,
+            protocol("earned exit source has not retired")
+        );
         ensure!(
             grant.expires > self.tick,
             protocol("transfer grant expired")
@@ -1367,12 +1693,24 @@ impl Directory {
         );
         let character = grant.character;
         // HELLO consumes the key before LOAD enters the world; keep its capacity reservation until then.
-        self.grants.get_mut(&key).unwrap().consumed = true;
+        grant.authority.transition(
+            TRANSFER_CONSUMED,
+            if grant.authority.state() & TRANSFER_RESERVED != 0 {
+                TRANSFER_DEPARTED
+            } else {
+                0
+            },
+            TRANSFER_CONSUMED,
+        )?;
+        let arrival = TransferArrival {
+            key: key.clone(),
+            authority: grant.authority.clone(),
+        };
         if destination > 0 {
             self.idle.insert(destination, self.tick);
         }
         tracing::info!(account, character, destination, "transfer grant consumed");
-        Ok(character)
+        Ok((character, arrival))
     }
 
     fn drop_dungeon_portal(&mut self, origin: i32, kind: u16, pos: Pos) -> Result<i32> {
@@ -1413,7 +1751,8 @@ impl Directory {
         self.sync_realm_portal();
         self.grants.retain(|_, g| {
             g.expires > self.tick
-                && !(g.consumed
+                && g.authority.state() & TRANSFER_REVOKED == 0
+                && !(g.authority.state() & TRANSFER_CONSUMED != 0
                     && self.worlds[&g.destination]
                         .players
                         .values()
@@ -1571,6 +1910,33 @@ impl Handle {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_pause_job(
+        &self,
+        call: usize,
+        before: bool,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        self.lifecycle_test_gate(call, before, false)
+    }
+    #[cfg(test)]
+    fn lifecycle_test_gate(
+        &self,
+        call: usize,
+        before: bool,
+        request_only: bool,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        assert!(call > 0);
+        let (entered, ready) = oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        assert!(
+            self.lifecycle_job_gate
+                .lock()
+                .unwrap()
+                .replace((call, before, request_only, entered, wait))
+                .is_none()
+        );
+        (ready, release)
+    }
     #[cfg(test)]
     pub(crate) fn lifecycle_test_lose_reply(&self) {
         assert!(!self.lifecycle_lost_reply.swap(true, Ordering::SeqCst));
@@ -2310,6 +2676,7 @@ impl World {
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
                 death_lifetime: None,
+                departure_snapshot: None,
                 killer: String::new(),
                 movement_credit: 0.78,
                 hp_fraction: 0.,
@@ -3948,6 +4315,10 @@ impl World {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn pending_progress(&mut self) -> Vec<(i32, Character)> {
+        self.pending_progress_where(|_, _| true)
+    }
     pub(crate) fn pending_progress_where(
         &mut self,
         mut accept: impl FnMut(i32, i32) -> bool,
@@ -4219,6 +4590,28 @@ impl World {
         p.bot_aim = None;
         Ok(())
     }
+    #[cfg(test)]
+    pub(crate) fn credit_reservation_for_test(&self, id: i32) -> (Option<Character>, bool) {
+        let p = &self.players[&id];
+        (p.progress_snapshot.clone(), p.departure_snapshot.is_some())
+    }
+    pub(crate) fn credit_recipients(&self, giver: i32) -> Vec<(i32, i32)> {
+        self.players
+            .iter()
+            .filter(|(_, p)| p.owes_credit(giver))
+            .map(|(id, p)| (*id, p.character.account))
+            .collect()
+    }
+    pub(crate) fn refresh_giver_credits(&mut self, id: i32, count: u64) -> Result<()> {
+        let p = self.players.get_mut(&id).context("credit giver missing")?;
+        ensure!(
+            p.departing || p.death_pending,
+            "outgoing assist authority is not sealed"
+        );
+        ensure!(p.persistence_failure.is_none(), "credit giver quarantined");
+        p.character.lifetime.level_assists = p.character.lifetime.level_assists.max(count);
+        Ok(())
+    }
     pub fn begin_departure(&mut self, id: i32) -> Result<Option<Character>> {
         self.cancel_trade(id, "Trade cancelled by departure.");
         let p = self
@@ -4239,9 +4632,25 @@ impl World {
             return Ok(None);
         };
         p.pending = true;
+        p.departure_snapshot = Some(p.character.clone());
         Ok(Some(p.character.clone()))
     }
     pub fn finish_departure(&mut self, id: i32) -> Result<()> {
+        let p = self.players.get(&id).context("departing player missing")?;
+        let snapshot = p
+            .departure_snapshot
+            .as_ref()
+            .context("departure snapshot missing")?;
+        ensure!(
+            p.pending
+                && p.departing
+                && snapshot.id == p.character.id
+                && snapshot.account == p.character.account
+                && snapshot.revision == p.character.revision
+                && snapshot.items == p.character.items,
+            "departure reservation changed"
+        );
+        snapshot.lifetime.follows(&p.character.lifetime)?;
         self.players
             .get_mut(&id)
             .context("departing player missing")?

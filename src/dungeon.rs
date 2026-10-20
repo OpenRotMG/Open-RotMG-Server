@@ -23,6 +23,20 @@ pub enum HistoricalDungeon {
     ManorOfTheImmortals,
 }
 impl HistoricalDungeon {
+    pub fn from_world(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| match kind {
+            Self::PirateCave => name == "Pirate Cave",
+            Self::SpiderDen => name == "Spider Den",
+            Self::ForbiddenJungle => name == "Forbidden Jungle",
+            Self::SnakePit => name == "Snake Pit",
+            Self::SpriteWorld => name == "Sprite World",
+            Self::UndeadLair => name == "Undead Lair",
+            Self::AbyssOfDemons => name == "Abyss of Demons",
+            Self::TombOfTheAncients => name == "Tomb of the Ancients",
+            Self::OceanTrench => name == "Ocean Trench",
+            Self::ManorOfTheImmortals => name == "Manor of the Immortals",
+        })
+    }
     pub const ALL: [Self; 10] = [
         Self::PirateCave,
         Self::SpiderDen,

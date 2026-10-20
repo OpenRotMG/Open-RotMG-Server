@@ -462,6 +462,8 @@ pub struct Store {
     lifecycle_jobs: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     lifecycle_reply_gate: LifecycleReplyGate,
+    #[cfg(test)]
+    lifecycle_current_reply_gate: LifecycleReplyGate,
     tx: mpsc::Sender<Job>,
     legacy_base: [i32; 8],
     classes: std::sync::Arc<std::collections::BTreeMap<u16, Class>>,
@@ -717,6 +719,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             lifecycle_jobs: Default::default(),
             #[cfg(test)]
             lifecycle_reply_gate: Default::default(),
+            #[cfg(test)]
+            lifecycle_current_reply_gate: Default::default(),
             tx,
             legacy_base,
             classes: std::sync::Arc::new(content.classes.clone()),
@@ -748,6 +752,34 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     }
 
     #[cfg(test)]
+    pub(crate) fn lifecycle_test_write_reply_hook(
+        &self,
+    ) -> impl FnOnce() -> (oneshot::Receiver<()>, mpsc::Sender<()>) + Send + 'static {
+        let slot = self.lifecycle_current_reply_gate.clone();
+        move || {
+            let (entered, ready) = oneshot::channel();
+            let (release, wait) = mpsc::channel();
+            assert!(
+                slot.lock().unwrap().replace((entered, wait)).is_none(),
+                "current SQL reply gate already armed"
+            );
+            (ready, release)
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_lose_reply(&self) {
+        assert!(
+            !self
+                .lifecycle_lost_reply
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        );
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_jobs(&self) -> usize {
+        self.lifecycle_jobs
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(test)]
     pub(crate) async fn lifecycle_test_job<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
@@ -768,12 +800,21 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         #[cfg(test)]
         let gate = self.lifecycle_reply_gate.lock().unwrap().take();
         #[cfg(test)]
+        let current_reply = self.lifecycle_current_reply_gate.clone();
+        #[cfg(test)]
         jobs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.tx
             .send(Box::new(move |c| {
                 let result = f(c);
                 #[cfg(test)]
-                if let Some((entered, wait)) = gate {
+                let current = current_reply.lock().unwrap().take();
+                #[cfg(test)]
+                assert!(
+                    gate.is_none() || current.is_none(),
+                    "dispatch and SQL-write gates target the same reply"
+                );
+                #[cfg(test)]
+                for (entered, wait) in gate.into_iter().chain(current) {
                     let _ = entered.send(());
                     if wait.recv().is_err() {
                         let _ = tx.send(Err(anyhow::anyhow!("lifecycle Store gate abandoned")));
@@ -1218,6 +1259,21 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             tx.commit()?;
             Ok(())
         }).await
+    }
+    pub(crate) async fn source_character_alive(
+        &self,
+        account: i32,
+        character: i32,
+    ) -> Result<bool> {
+        self.call(move |db| {
+            db.query_row(
+                "SELECT alive FROM characters WHERE account=?1 AND id=?2",
+                params![account, character],
+                |r| r.get::<_, bool>(0),
+            )
+            .context("source character identity missing")
+        })
+        .await
     }
     pub async fn assist_count(&self, giver: i32) -> Result<u64> {
         self.call(move |db| {

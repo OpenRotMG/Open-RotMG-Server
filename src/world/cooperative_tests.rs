@@ -1,7 +1,5 @@
 use super::*;
 use crate::content::{PRIEST, WIZARD};
-use crate::wire::Reader;
-use std::time::Duration;
 
 use super::tests::receive;
 fn setup() -> (

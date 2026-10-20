@@ -74,8 +74,28 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
     // The first departure owns admission before either coordinator can prepare its prerequisites.
     let (entered, release) = a.world.lifecycle_test_pause_job(1, false);
     let release = Release(Some(release));
-    let (stored, store_release) = a.store.lifecycle_test_pause_reply();
-    let store_release = Release(Some(store_release));
+    let (written, write_gate) = tokio::sync::oneshot::channel();
+    let mut hook = Some(a.store.lifecycle_test_write_reply_hook());
+    let actor = initial.id;
+    a.store
+        .lifecycle_test_job(move |db| {
+            let mut written = Some(written);
+            db.update_hook(Some(
+                move |action: rusqlite::hooks::Action, _: &str, table: &str, row: i64| {
+                    if action == rusqlite::hooks::Action::SQLITE_UPDATE
+                        && table == "characters"
+                        && row == i64::from(actor)
+                    {
+                        if let Some(written) = written.take() {
+                            written.send(hook.take().unwrap()()).unwrap();
+                        }
+                    }
+                },
+            ));
+            Ok(())
+        })
+        .await
+        .unwrap();
     let app = a.clone();
     let waiter = tokio::spawn(async move {
         let _owner = owner;
@@ -95,6 +115,12 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
     drop(release);
     // The real collector attempts admission after departure has custody, even on the RED schedule.
     server::persistence_tick(&a).await.unwrap();
+    // Credit refresh reads precede the write; hold the actual SQL update's reply, not an incidental read.
+    let (stored, store_release) = tokio::time::timeout(Duration::from_secs(2), write_gate)
+        .await
+        .unwrap()
+        .unwrap();
+    let store_release = Release(Some(store_release));
     tokio::time::timeout(Duration::from_secs(2), stored)
         .await
         .expect("departure admitted first deadlocked before persisting queued progress/death")
@@ -118,6 +144,11 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
     assert!(
         a.claim(account).is_err(),
         "SQL commit released admission before World publication"
+    );
+    assert_eq!(
+        a.store.lifecycle_test_jobs(),
+        1,
+        "must hold actual committed writer, not following read/job"
     );
     assert_eq!(
         db.query_row("SELECT count(*) FROM departure_updates", [], |r| r
@@ -231,6 +262,13 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
     server::depart(&a, sibling_id).await.unwrap();
     drop(owner);
     assert!(a.claim(sibling).is_ok());
+    a.store
+        .lifecycle_test_job(|db| {
+            db.update_hook(None::<fn(rusqlite::hooks::Action, &str, &str, i64)>);
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(a.store.lifecycle_test_jobs(), 0);
     drop(db);
     std::fs::remove_dir_all(dir).unwrap();
@@ -257,4 +295,154 @@ async fn lifecycle_finalize_departure_first_queued_progress_then_resurrection() 
 async fn all_death_fame_phase3_dirty_terminal_snapshots() {
     departure_first(false, true, false).await;
     departure_first(false, true, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_death_fame_phase4_real_lethal_sources_and_late_seal() {
+    let (_dir, mut a) = server::lifecycle_test_fixture();
+    a.world.clock.set_paused(true);
+    a.world = a.world.in_world(-3);
+    let mut owners = vec![];
+    let mut actors = vec![];
+    for (index, guid) in [
+        "real-credit-recipient",
+        "real-credit-a",
+        "real-credit-b",
+        "real-credit-unrelated",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let account = a.store.list(guid.into()).await.unwrap().id;
+        let mut ch = a
+            .store
+            .create(account, a.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        if index == 0 {
+            ch.exp = 49;
+            a.store.progress(ch.clone()).await.unwrap();
+        }
+        let character = ch.id;
+        owners.push(a.claim(account).unwrap());
+        let bind = lifecycle::binding(&a, account).unwrap();
+        let id = a
+            .world
+            .call(move |w| {
+                let id = w.enter(ch, None)?;
+                bind(id)?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        actors.push((id, account, character));
+    }
+    server::persistence_tick(&a).await.unwrap();
+    let (recipient, _, recipient_ch) = actors[0];
+    let (giver, giver_account, giver_ch) = actors[1];
+    let (b, _, b_ch) = actors[2];
+    let (unrelated, _, _) = actors[3];
+    a.world
+        .call(move |w| {
+            // Selected enemy with prepared high HP/quest reward exercises existing cap and aggregate XP.
+            let definition = Arc::make_mut(&mut w.content)
+                .objects
+                .get_mut(&0x600)
+                .unwrap();
+            definition.hp = 100_000;
+            definition.xp_multiplier = 1.;
+            definition.quest = true;
+            let pos = w.players[&recipient].pos;
+            for id in [giver, b, unrelated] {
+                w.players.get_mut(&id).unwrap().pos = pos;
+            }
+            for owner in std::iter::once(giver).chain(std::iter::repeat_n(b, 6)) {
+                let enemy = w.spawn_entity(0x600, pos, vec![])?;
+                w.damage_enemy(recipient, enemy, 1, true, &[], None)?;
+                w.damage_enemy(owner, enemy, 200_000, true, &[], None)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let (entered, release) = a.store.lifecycle_test_pause_reply();
+    let release = Release(Some(release));
+    let app = a.clone();
+    let collector = tokio::spawn(async move { server::persistence_tick(&app).await });
+    tokio::time::timeout(Duration::from_secs(5), entered)
+        .await
+        .unwrap()
+        .unwrap();
+    let finalization = lifecycle::finalize(&a, giver, lifecycle::CloseReason::Controller).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if a.world
+                .call(move |w| Ok(w.players[&giver].departing))
+                .await
+                .unwrap()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    a.world
+        .call(move |w| {
+            assert!(w.players[&giver].departure_snapshot.is_none());
+            // Actual delayed kills after authority seal still grant shared XP, but no NEW giver credit.
+            let pos = w.players[&recipient].pos;
+            for _ in 0..10 {
+                let enemy = w.spawn_entity(0x600, pos, vec![])?;
+                w.damage_enemy(recipient, enemy, 1, true, &[], None)?;
+                w.damage_enemy(giver, enemy, 200_000, true, &[], None)?;
+            }
+            let p = &w.players[&recipient];
+            assert!(p.experience_queued > 0);
+            assert!(
+                p.experience_queue
+                    .as_ref()
+                    .unwrap()
+                    .assists
+                    .iter()
+                    .flatten()
+                    .all(|assist| assist.giver != giver_ch)
+            );
+            assert!(
+                p.level_assists_prepared
+                    .iter()
+                    .any(|assist| assist.giver == giver_ch)
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(release);
+    tokio::time::timeout(Duration::from_secs(5), collector)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), finalization.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(a.store.assist_count(giver_ch).await.unwrap(), 1);
+    assert_eq!(a.store.assist_count(b_ch).await.unwrap(), 1);
+    assert_eq!(
+        a.store
+            .load(giver_account, giver_ch)
+            .await
+            .unwrap()
+            .lifetime
+            .level_assists,
+        1
+    );
+    server::persistence_tick(&a).await.unwrap();
+    let account = actors[0].1;
+    let saved = a.store.load(account, recipient_ch).await.unwrap();
+    assert!(saved.level >= 4);
+    assert_eq!(a.store.assist_count(giver_ch).await.unwrap(), 1);
+    drop(owners);
 }

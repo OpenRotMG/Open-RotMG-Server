@@ -745,6 +745,101 @@ pub(crate) async fn inventory(
     .await
 }
 
+enum CreditStep {
+    Done,
+    Waiting(std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>),
+    Progress(lifecycle::Operation, i32, crate::store::Character),
+}
+async fn settle_giver_credits(a: &App, id: i32) -> Result<()> {
+    let account = a
+        .world
+        .for_player(id)
+        .call(move |w| {
+            Ok(w.players
+                .get(&id)
+                .context("credit giver missing")?
+                .character
+                .account)
+        })
+        .await?;
+    let failure = lifecycle::failure_reporter(a, &[account], "causal_giver")?;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let app = a.clone();
+            let step = a
+                .world
+                .directory(move |d| {
+                    let origin = d.location(id)?;
+                    let p = &d.worlds[&origin].players[&id];
+                    ensure!(
+                        p.departing || p.death_pending,
+                        "causal giver has not sealed terminal authority"
+                    );
+                    let giver = (p.character.account, id);
+                    let character = p.character.id;
+                    let recipients: Vec<_> = d
+                        .worlds
+                        .iter()
+                        .flat_map(|(scope, w)| {
+                            w.credit_recipients(character)
+                                .into_iter()
+                                .map(move |(recipient, account)| (*scope, recipient, account))
+                        })
+                        .collect();
+                    let Some((scope, recipient, account)) = recipients.first().copied() else {
+                        return Ok(CreditStep::Done);
+                    };
+                    match lifecycle::reserve_credit_recipient(&app, giver, (account, recipient))? {
+                        lifecycle::CreditAdmission::Waiting(wait) => Ok(CreditStep::Waiting(wait)),
+                        lifecycle::CreditAdmission::Reserved(guard) => {
+                            let snapshot = d
+                                .worlds
+                                .get_mut(&scope)
+                                .unwrap()
+                                .pending_progress_where(|player, _| player == recipient)
+                                .pop()
+                                .context(
+                                    "causal recipient has no admissible progress; source retained",
+                                )?
+                                .1;
+                            Ok(CreditStep::Progress(guard, recipient, snapshot))
+                        }
+                    }
+                })
+                .await?;
+            match step {
+                CreditStep::Done => return Ok(()),
+                CreditStep::Waiting(wait) => wait.await,
+                CreditStep::Progress(guard, recipient, snapshot) => {
+                    lifecycle::complete(guard, move |a| async move {
+                        persist_progress_inner(&a, recipient, snapshot).await
+                    })
+                    .await?;
+                }
+            }
+        }
+    })
+    .await
+    .context("causal recipient completion deadline exceeded; sources retained")
+    .and_then(|r| r);
+    if let Err(error) = &result {
+        failure(format!("{error:#}"));
+    }
+    result
+}
+async fn refresh_giver_credits(a: &App, id: i32) -> Result<()> {
+    let character = a
+        .world
+        .for_player(id)
+        .call(move |w| Ok(w.players[&id].character.id))
+        .await?;
+    let count = a.store.assist_count(character).await?;
+    a.world
+        .for_player(id)
+        .call(move |w| w.refresh_giver_credits(id, count))
+        .await
+}
+
 async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Character) -> Result<()> {
     let reservation = snapshot.clone();
     let assists = a
@@ -768,6 +863,18 @@ async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Charac
         .await
 }
 
+#[cfg(test)]
+async fn persist_death(
+    a: &App,
+    id: i32,
+    ch: crate::store::Character,
+    killer: String,
+) -> Result<()> {
+    lifecycle::player(a, id, "death", move |a| async move {
+        persist_death_inner(&a, id, ch, killer).await
+    })
+    .await
+}
 async fn persist_death_inner(
     a: &App,
     id: i32,
@@ -865,13 +972,18 @@ fn player_text(r: &mut Reader<'_>) -> Result<String> {
     r.done()?;
     Ok(text)
 }
+struct PreparedTransfer {
+    packet: Packet,
+    reservation: crate::world::TransferReservation,
+}
 #[derive(Default)]
 struct Session {
     account: Option<Owner>,
     player: Option<i32>,
     expected: Option<i32>,
+    arrival: Option<crate::world::TransferArrival>,
     reconnecting: bool,
-    transfer: Option<Packet>,
+    transfer: Option<PreparedTransfer>,
     runtime: Option<tokio::runtime::Handle>,
     diagnostics: diagnostics::ConnectionDiagnostics,
 }
@@ -953,11 +1065,13 @@ async fn handle(
     *a = app;
     *session = completed_session;
     result?;
-    if let Some(packet) = session.transfer.take() {
+    if let Some(transfer) = session.transfer.take() {
         let id = session
             .player
             .context("prepared transfer lost its avatar")?;
-        depart(a, id).await?;
+        lifecycle::finalize_transfer(a, id, transfer.reservation)?
+            .wait()
+            .await?;
         session.player = None;
         // Admission must be released before RECONNECT can reach an immediate replacement HELLO.
         session
@@ -965,7 +1079,7 @@ async fn handle(
             .take()
             .context("transfer ownership missing")?
             .release();
-        enqueue_reply(&reply, packet)?;
+        enqueue_reply(&reply, transfer.packet)?;
         session.reconnecting = true;
     }
     Ok(())
@@ -983,6 +1097,7 @@ async fn handle_inner(
         account,
         player,
         expected,
+        arrival,
         reconnecting,
         transfer: _,
         runtime,
@@ -1065,7 +1180,7 @@ async fn handle_inner(
                 .map(|t| t.native_entry(id))
                 .transpose()?
                 .flatten();
-            let (destination, character) = a
+            let (destination, character, transfer_arrival) = a
                 .world
                 .directory(move |d| {
                     if key.is_empty() {
@@ -1074,16 +1189,18 @@ async fn handle_inner(
                                 d.worlds.contains_key(&world),
                                 "prepared native world no longer exists"
                             );
-                            Ok((world, None))
+                            Ok((world, None, None))
                         } else {
-                            Ok((d.initial(game)?, None))
+                            Ok((d.initial(game)?, None, None))
                         }
                     } else {
-                        Ok((game, Some(d.consume(id, game, keytime, key)?)))
+                        let (character, arrival) = d.consume(id, game, keytime, key)?;
+                        Ok((game, Some(character), Some(arrival)))
                     }
                 })
                 .await?;
             *expected = character;
+            *arrival = transfer_arrival;
             diagnostics.world = Some(destination);
             a.world = a.world.in_world(destination);
             let body = a.world.call(|w| Ok(w.map_info())).await?;
@@ -1155,10 +1272,19 @@ async fn handle_inner(
                 .transpose()?
                 .flatten();
             let bind = lifecycle::binding(a, account)?;
+            let transfer_arrival = arrival.take();
+            let destination = diagnostics.world.context("LOAD destination missing")?;
             lifecycle::stage(Stage::Publication);
             *player = Some(
                 a.world
-                    .call(move |w| {
+                    .directory(move |d| {
+                        if let Some(arrival) = transfer_arrival {
+                            d.admit_transfer(arrival, account, ch.id, destination)?;
+                        }
+                        let w = d
+                            .worlds
+                            .get_mut(&destination)
+                            .context("LOAD world missing")?;
                         if let Some(vault) = vault {
                             w.load_vaults(vault)?;
                         }
@@ -1759,6 +1885,10 @@ async fn reconnect(
     let transfer = a
         .world
         .directory(move |d| {
+            let portal = match &request {
+                Reconnect::Portal(portal) => *portal,
+                Reconnect::Tutorial => None,
+            };
             let (account, character, destination) = match request {
                 Reconnect::Tutorial => {
                     d.chat_permit(id, received)?;
@@ -1787,10 +1917,12 @@ async fn reconnect(
                 return Ok(None);
             }
             let (keytime, key, name) = d.issue(account, character, destination)?;
-            Ok(Some((destination, keytime, key, name)))
+            d.bind_exit(id, portal, &key)?;
+            let reservation = d.reserve_transfer(key.clone())?;
+            Ok(Some((destination, keytime, key, name, reservation)))
         })
         .await?;
-    let Some((destination, keytime, key, name)) = transfer else {
+    let Some((destination, keytime, key, name, reservation)) = transfer else {
         return Ok(());
     };
     let mut o = Writer::new();
@@ -1800,8 +1932,11 @@ async fn reconnect(
         .i32(destination)
         .i32(keytime)
         .i16(key.len() as i16);
-    o.0.extend(key);
-    session.transfer = Some(Packet { id: 39, body: o.0 });
+    o.0.extend(&key);
+    session.transfer = Some(PreparedTransfer {
+        packet: Packet { id: 39, body: o.0 },
+        reservation,
+    });
     tracing::debug!(
         player = id,
         destination,
@@ -2108,15 +2243,37 @@ enum DepartureStep {
     Waiting,
 }
 async fn depart_inner(a: &App, id: i32) -> Result<()> {
+    depart_inner_with_transfer(a, id, None).await
+}
+async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> Result<()> {
+    a.world
+        .for_player(id)
+        .call(move |w| w.stop_controller(id))
+        .await?;
+    a.world
+        .directory(move |d| {
+            let p = &d.worlds[&d.location(id)?].players[&id];
+            ensure!(
+                d.worlds
+                    .values()
+                    .all(|w| w.credit_recipients(p.character.id).is_empty()),
+                "causal prerequisites require finalization outside an owned giver operation"
+            );
+            Ok(())
+        })
+        .await?;
+    refresh_giver_credits(a, id).await?;
     loop {
         lifecycle::stage(Stage::Reservation);
+        let transfer = key.clone();
         let step = a
             .world
-            .for_player(id)
-            .call(move |w| {
-                if let Some(ch) = w.begin_departure(id)? {
+            .directory(move |d| {
+                if let Some(ch) = d.begin_source_departure(id, transfer.as_deref())? {
                     return Ok(DepartureStep::Save(ch));
                 }
+                let scope = d.location(id)?;
+                let w = d.worlds.get_mut(&scope).unwrap();
                 // Departure already owns this generation, so the collector cannot admit its prerequisites.
                 if let Some((_, snapshot)) =
                     w.pending_progress_where(|player, _| player == id).pop()
@@ -2148,6 +2305,12 @@ async fn depart_inner(a: &App, id: i32) -> Result<()> {
         };
         let retirement = lifecycle::retirement(a, ch.account, id)?;
         lifecycle::stage(Stage::Store);
+        let snapshot = ch.clone();
+        if let Some(key) = key.clone() {
+            a.world
+                .directory(move |d| d.accept_source_write(id, &key))
+                .await?;
+        }
         let result = if ch.alive {
             a.store
                 .progress(ch)
@@ -2158,10 +2321,10 @@ async fn depart_inner(a: &App, id: i32) -> Result<()> {
         };
         lifecycle::stage(Stage::Publication);
         a.world
-            .for_player(id)
-            .call(move |w| {
-                w.committed(id, result)?;
-                w.finish_departure(id)
+            .directory(move |d| {
+                let scope = d.location(id)?;
+                d.worlds.get_mut(&scope).unwrap().committed(id, result)?;
+                d.finish_source_departure(id, snapshot, key)
             })
             .await?;
         lifecycle::stage(Stage::Retirement);
@@ -2483,6 +2646,28 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
         {
             tracing::error!(player=id,error=%format_args!("{error:#}"),"progress completion failed");
         }
+    }
+    let app = a.clone();
+    let dying = a
+        .world
+        .directory(move |d| {
+            let mut candidates = vec![];
+            for (id, p) in d
+                .worlds
+                .values()
+                .flat_map(|w| w.players.iter())
+                .filter(|(_, p)| p.death_pending && !p.death_started)
+            {
+                if lifecycle::collector_death_candidate(&app, p.character.account, *id)? {
+                    candidates.push(*id);
+                }
+            }
+            Ok(candidates)
+        })
+        .await?;
+    for id in dying {
+        settle_giver_credits(a, id).await?;
+        refresh_giver_credits(a, id).await?;
     }
     let app = a.clone();
     let pending = a

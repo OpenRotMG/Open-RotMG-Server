@@ -119,7 +119,12 @@ impl World {
         if transform {
             self.quest_lethal_transform(target)?;
         } else if kill {
-            let killer = self.players.get(&owner).map(|p| p.character.id);
+            // Terminal authority seals NEW credit sources; damage and shared XP still resolve normally.
+            let killer = self
+                .players
+                .get(&owner)
+                .filter(|p| p.character.alive && !p.death_pending && !p.departing)
+                .map(|p| p.character.id);
             self.defeat_entity_with_killer(target, killer)?;
             tracing::info!(entity = target, owner = owner, "enemy defeated");
         }
