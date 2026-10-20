@@ -787,6 +787,7 @@ fn manor_clear_is_committed_once_and_does_not_disappear_in_counter_zip() {
     assert!(!w.entities[&exit].published);
     w.finish_progress(player, saved).unwrap();
     assert_eq!(w.players[&player].character.manors, 1);
+    assert!(w.players[&player].character.lifetime.realm_exits.is_empty());
     assert!(w.pending_progress_where(|_, _| true).is_empty());
     assert!(w.clear_exit.is_none());
     assert!(w.entities[&exit].published);

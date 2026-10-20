@@ -1513,7 +1513,7 @@ impl Account {
 mod tests {
     use super::*;
     #[tokio::test]
-    async fn all_death_fame_jungle_optional_counter_preserves_old_history() {
+    async fn all_death_fame_optional_dungeon_counters_preserve_old_history() {
         let content = Content::load(Path::new("data")).unwrap();
         let store = Store::open(Path::new(":memory:"), &content).unwrap();
         let account = store
@@ -1525,19 +1525,30 @@ mod tests {
             .await
             .unwrap();
         let mut value = serde_json::to_value(&character).unwrap();
-        value.as_object_mut().unwrap().remove("jungles");
+        value["lifetime"]["shots"] = serde_json::json!(89);
+        value["lifetime"]["projectile_hits"] = serde_json::json!(30);
+        for field in ["jungles", "manors"] {
+            value.as_object_mut().unwrap().remove(field);
+        }
         let old = decode_character(&value.to_string(), [0; 8]).unwrap();
-        assert_eq!(old.jungles, 0);
+        assert_eq!([old.jungles, old.manors], [0, 0]);
         assert_eq!(
             serde_json::to_value(&old.lifetime).unwrap(),
             value["lifetime"]
         );
-        value["jungles"] = serde_json::json!(7);
-        let current = decode_character(&value.to_string(), [0; 8]).unwrap();
-        assert_eq!(current.jungles, 7);
-        assert!(current.lifetime.realm_exits.is_empty());
-        value["jungles"] = serde_json::json!(-1);
-        assert!(decode_character(&value.to_string(), [0; 8]).is_err());
+        for (field, count) in [("jungles", 7), ("manors", 8)] {
+            value[field] = serde_json::json!(count);
+            let current = decode_character(&value.to_string(), [0; 8]).unwrap();
+            assert_eq!(serde_json::to_value(&current).unwrap()[field], value[field]);
+            assert_eq!(
+                serde_json::to_value(&current.lifetime).unwrap(),
+                value["lifetime"]
+            );
+            assert!(current.lifetime.realm_exits.is_empty());
+            value[field] = serde_json::json!(-1);
+            assert!(decode_character(&value.to_string(), [0; 8]).is_err());
+            value[field] = serde_json::json!(count);
+        }
     }
     #[tokio::test]
     async fn ground_stat_potions_preserve_backpacks_and_commit_vault_sources_atomically() {

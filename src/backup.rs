@@ -181,6 +181,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 character.abysses = 5;
                 character.trenches = 6;
                 character.jungles = 7;
+                character.manors = 8;
                 store.progress(character.clone()).await?;
                 let mut items = character.items.clone();
                 items[4] = 0xa22;

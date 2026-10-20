@@ -111,6 +111,10 @@ async fn all_death_fame_phase4_autonomous_earned_exits() {
             "forbidden-jungle",
             crate::dungeon::HistoricalDungeon::ForbiddenJungle,
         ),
+        (
+            "manor-of-the-immortals",
+            crate::dungeon::HistoricalDungeon::ManorOfTheImmortals,
+        ),
     ] {
         let mut f = TransferFixture::new(template).await;
         let (destination, time, key, reservation, session) = f.issue().await;
