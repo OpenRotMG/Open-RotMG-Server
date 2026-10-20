@@ -46,9 +46,10 @@ async function fixture(t,transfer=false) {
   await writeFile(bootstrap,`
     import {appendFileSync} from 'node:fs';
     globalThis.WebSocket=class {
-      constructor(){this.binding=null;queueMicrotask(()=>this.onopen());}
+      constructor(){this.binding=null;if(process.env.FIXTURE_FAULT==='network-enable')this.openSocket=setInterval(()=>{},1000);queueMicrotask(()=>this.onopen());}
       send(raw){const row=JSON.parse(raw);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({...row,at:Date.now()})+'\\n');
         let value=true,error;
+        if(row.method==='Network.enable'&&process.env.FIXTURE_FAULT==='network-enable')error={message:'fixture Network.enable failure'};
         if(row.method==='Network.enable')setTimeout(()=>{const frame=payloadData=>this.onmessage({data:JSON.stringify({method:'Network.webSocketFrameReceived',params:{response:{opcode:2,payloadData}}})});frame(Buffer.from('000000090600000001','hex').toString('base64'));if(process.env.FIXTURE_FAULT==='combat-frames')for(let n=0;n<256;n++)frame(Buffer.from('000000094a00000001','hex').toString('base64'));},0);
         if(row.method==='Runtime.evaluate'&&row.params.expression.includes('playing:'))value={playing:true,binding:this.binding};
         if(row.method==='Runtime.evaluate'&&row.params.expression.startsWith('globalThis[Symbol.for("openrotmg.testing.binding.v1")]=')){this.binding=JSON.parse(row.params.expression.split(']=')[1]);value=this.binding;}
@@ -58,7 +59,7 @@ async function fixture(t,transfer=false) {
         if(process.env.FIXTURE_FAULT==='pause'&&row.method==='Runtime.evaluate'&&row.params.expression.endsWith(')(true)'))error={message:'fixture native pause failure'};
         setTimeout(()=>this.onmessage({data:JSON.stringify({id:row.id,...(error?{error}:{result:row.method==='Runtime.evaluate'?{result:{value}}:{}})})}),process.env.FIXTURE_FAULT==='slow-ack'&&row.method==='Input.dispatchKeyEvent'&&row.params.type==='keyDown'?1000:process.env.FIXTURE_FAULT==='layout-renew-timeout'&&row.method==='Runtime.evaluate'&&row.params.expression.includes('getBoundingClientRect')?900:0);
       }
-      close(){this.onclose?.();}
+      close(){clearInterval(this.openSocket);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({method:'socket.close'})+'\\n');this.onclose?.();}
     };
   `);
   const config=join(dir,'config.json');
@@ -86,6 +87,11 @@ test('native request releases keys, coordinates pause, and replays without repea
   assert.equal(f.calls.length,before);
   assert.equal((await f.events()).length,events.length);
   assert.equal(f.paused(),true);
+});
+test('failed native CDP setup closes its still-live socket',async t=>{
+  const f=await fixture(t),result=await f.run('failed-network',{op:'pause'},'network-enable');
+  assert.equal(result.code,1,result.stderr);assert.match(result.stderr,/fixture Network.enable failure/);
+  assert.ok((await f.events()).some(e=>e.method==='socket.close'));
 });
 test('cross-world coordinates never report a physical movement distance',async t=>{
   const f=await fixture(t,true),result=await f.run('ordinary-transfer',move);

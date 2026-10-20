@@ -1,10 +1,11 @@
-import {spawn, execFile} from 'node:child_process';
+import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdir, open, readFile, writeFile, realpath} from 'node:fs/promises';
+import {mkdir, open, readFile, writeFile, realpath, rename} from 'node:fs/promises';
 import {resolve, dirname, join, isAbsolute} from 'node:path';
 import {pathToFileURL, fileURLToPath} from 'node:url';
 import {randomBytes, randomUUID, createHash} from 'node:crypto';
-import {writeSync} from 'node:fs';
+import {writeSync,readFileSync} from 'node:fs';
+import {startChild,stopChild,identity,registry} from './native-test-process.mjs';
 import {createServer} from 'node:net';
 import {parseArgs} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -21,27 +22,7 @@ export function browserDiagnostic(line, closing=false) {
   if(closing&&m&&m[1]==='gpu/command_buffer/service/shared_image/shared_image_manager.cc'&&m[2]==='SharedImageManager::ProduceSkia: Trying to Produce a Skia representation from a non-existent mailbox.')return 'renderer-shutdown';
   return /\bERROR\b|panicked/.test(line)?'fatal':null;
 }
-export function startChild(command, args, options, signal) {
-  signal.throwIfAborted();
-  const child = spawn(command, args, {...options, detached:true});
-  const closed = new Promise(resolve => child.once('close', (code, killed) => resolve({pid:child.pid,code,signal:killed})));
-  const started = new Promise((resolve, reject) => {child.once('spawn', resolve);child.once('error', reject);});
-  started.catch(()=>{});
-  return {child,closed,started,done:false};
-}
-export async function stopChild(row, grace = 3000) {
-  const signal = name => {
-    try {process.kill(-row.child.pid,name);} catch(error) {if(error.code!=='ESRCH')throw error;}
-  };
-  for (const [name,ms] of [['SIGINT',grace],['SIGTERM',2000],['SIGKILL',5000]]) {
-    if (row.done) return await row.closed;
-    if (!row.child.pid) {await row.started;}
-    signal(name);
-    const stopped = await Promise.race([row.closed.then(value=>({value})),delay(ms,undefined,{ref:false}).then(()=>null)]);
-    if (stopped) {row.done=true;return stopped.value;}
-  }
-  throw Error('Owned child did not close after SIGKILL: '+row.child.pid);
-}
+export {startChild,stopChild} from './native-test-process.mjs';
 async function freePort() {
   const server=createServer();await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
   const port=server.address().port;await new Promise((ok,bad)=>server.close(error=>error?bad(error):ok()));return port;
@@ -58,9 +39,10 @@ export async function runCase(scenario, options) {
   const out=options.runDir;assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
   const previousOwner=process.env.PI_BROWSER_OWNER;
   const controller=new AbortController(), children=[], files=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
-  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false;
+  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
   const elapsed=()=>Math.round(performance.now()-started);
-  const save=async()=>writeFile(join(out,'result.json'),JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',{mode:0o600});
+  const save=async()=>{await writeFile(join(out,'result.tmp'),JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',{mode:0o600});await rename(join(out,'result.tmp'),join(out,'result.json'));};
+  const register=()=>{registryState.children=children.filter(r=>r.identity).map(r=>({...r.identity,name:r.name}));registry(join(out,'children.json'),registryState);};
   const fail=error=>{if(closing)report.cleanupErrors.push(String(error));else if(!controller.signal.aborted)controller.abort(error);};
   const interrupted=()=>fail(Error('Native test interrupted'));
   process.once('SIGINT',interrupted);process.once('SIGTERM',interrupted);
@@ -68,10 +50,11 @@ export async function runCase(scenario, options) {
   let rejectStop;const stopped=new Promise((_,bad)=>{rejectStop=bad;});stopped.catch(()=>{});
   controller.signal.addEventListener('abort',()=>rejectStop(controller.signal.reason),{once:true});
   const check=()=>controller.signal.throwIfAborted();
-  const bounded=async(name,work)=>{check();phase=name;const t=performance.now();try{return await Promise.race([work(),stopped]);}finally{report.phases[name]=(report.phases[name]??0)+Math.round(performance.now()-t);}};
+  const bounded=async(name,work)=>{check();phase=name;report.phase=name;await save();check();const t=performance.now();try{return await Promise.race([work(),stopped]);}finally{report.phases[name]=(report.phases[name]??0)+Math.round(performance.now()-t);}};
   const log=async name=>{const f=await open(join(out,name),'a',0o600);files.push(f);return f.fd;};
   const launch=(name,command,args,stdio,env=process.env)=>{
-    check();const row=startChild(command,args,{cwd:root,stdio,env},controller.signal);row.name=name;children.push(row);
+    check();const row=startChild(command,args,{cwd:root,stdio,env},controller.signal);row.name=name;children.push(row);register();
+    row.started.then(()=>{if(!row.identity){row.identity=identity(row.child.pid);register();}},fail);
     row.closed.then(value=>{row.done=true;if(!row.stopping)fail(Error(name+' exited before cleanup: '+JSON.stringify(value)));});return row;
   };
   const waitFor=async(work,description,limit=30000)=>{
@@ -87,8 +70,11 @@ export async function runCase(scenario, options) {
   const evaluate=expression=>{check();return connection.eval(expression);};
   async function driver(command) {
     check();const id='case-'+randomUUID(),request=join(out,id+'.request.json');await writeFile(request,JSON.stringify({id,command}),{mode:0o600});check();
-    const row=launch('controller',process.execPath,[join(root,'scripts/game.mjs'),join(out,'native.json'),request],['ignore','pipe',await log('controller.stderr')]);
-    let text='';row.child.stdout.on('data',b=>text+=b);row.stopping=true;await row.started;const status=await row.closed;
+    const row=launch('controller',process.execPath,[join(root,'scripts/game.mjs'),join(out,'native.json'),request],['ignore','pipe','pipe']);
+    const fd=await log('controller.stderr');let text='',errors='';row.child.stdout.on('data',b=>text+=b);
+    row.child.stderr.on('data',b=>{writeSync(fd,b);errors+=b;let n;while((n=errors.indexOf('\n'))>=0){const line=errors.slice(0,n);errors=errors.slice(n+1);if(line.startsWith('{'))try{const value=JSON.parse(line);if(value.id===id&&value.status==='failed')fail(Error('Controller failed: '+value.error));}catch(error){fail(error);}}});
+    row.stopping=true;const deadline=setTimeout(()=>fail(Error('Controller command exceeded 90 seconds')),90000);let status;
+    try{await row.started;status=await Promise.race([row.closed,stopped]);}finally{clearTimeout(deadline);}
     await writeFile(join(out,id+'.result.json'),text,{mode:0o600});assert.equal(status.code,0,'Controller failed; see controller.stderr');check();return JSON.parse(text);
   }
   async function capture(name) {
@@ -97,6 +83,10 @@ export async function runCase(scenario, options) {
   }
   try {
     await save();
+    registryState={parent:identity(process.pid),boot:readFileSync('/proc/sys/kernel/random/boot_id','utf8'),deadline:Date.now()+timeout,children:[],done:false};register();
+    guardian=startChild(process.execPath,[join(root,'scripts/native-test-process.mjs'),out],{stdio:['ignore','ignore',await log('guardian.log')]},controller.signal);await guardian.started;
+    guardian.closed.then(value=>{if(!closing)fail(Error('Cleanup guardian exited early: '+JSON.stringify(value)));});
+    report.guardian=guardian.child.pid;
     report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]])report.inputs[name]=createHash('sha256').update(await readFile(path)).digest('hex');
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);assert(typeof fixtureModule.run==='function'&&fixtureModule.fixture,'Case must export fixture and run(game)');
     const spec=fixtureModule.fixture;assert(Number.isInteger(spec.world),'Fixture needs an explicit world ID');
@@ -210,6 +200,8 @@ export async function runCase(scenario, options) {
       row.stopping=true;
       try{report.children.push({name:row.name,...await stopChild(row)});if(row.name==='Chrome')for(const tab of tabs)managed.released(tab);}catch(error){report.cleanupErrors.push(String(error));}
     }
+    if(registryState){registryState.done=true;register();}
+    if(guardian)try{const end=setTimeout(()=>guardian.child.kill('SIGTERM'),5000);try{const value=await guardian.closed;report.children.push({name:'guardian',...value});assert.equal(value.code,0,'Cleanup guardian failed');}finally{clearTimeout(end);}}catch(error){report.cleanupErrors.push(String(error));}
     for(const f of files)try{await f.close();}catch(error){report.cleanupErrors.push(String(error));}
     report.phases.cleanup=Math.round(performance.now()-cleanup);if(report.cleanupErrors.length)report.status='failed';
     try{await save();}finally{process.removeListener('SIGINT',interrupted);process.removeListener('SIGTERM',interrupted);activeCase=false;if(previousOwner===undefined)delete process.env.PI_BROWSER_OWNER;else process.env.PI_BROWSER_OWNER=previousOwner;}
