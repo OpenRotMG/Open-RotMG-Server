@@ -33,6 +33,16 @@ impl World {
             endgame::{ORYX, ORYX2, OryxPhase},
         };
         let e = &self.entities[&id];
+        if matches!(
+            e.kind,
+            crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
+        ) {
+            return Ok(Some(attacks::manor_entry_schedule(
+                e.kind,
+                e.stage.context("Manor entrance phase missing")?,
+                elapsed,
+            )));
+        }
         if crate::dungeon::jungle::ROSTER.contains(&e.kind) {
             return Ok(Some(self.jungle_schedule(id)?));
         }

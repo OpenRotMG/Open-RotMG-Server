@@ -131,6 +131,22 @@ impl World {
         }
     }
 
+    pub(super) fn summon_limit(&self) -> usize {
+        if self.name == "Manor of the Immortals" {
+            crate::dungeon::manor::SUMMON_LIMIT
+        } else {
+            256
+        }
+    }
+
+    pub(super) fn summon_occupancy(&self) -> usize {
+        self.actors()
+            .filter(|e| e.parent.is_some() || e.quest.is_some())
+            .count()
+            + self.named_births.len()
+            + self.manor_births.len()
+    }
+
     pub(super) fn spawn_children(
         &mut self,
         parent: i32,
@@ -148,14 +164,11 @@ impl World {
         if missing == 0 {
             return Ok(());
         }
+        let occupied = self.summon_occupancy();
+        let limit = self.summon_limit();
         ensure!(
-            self.actors()
-                .filter(|e| e.parent.is_some() || e.quest.is_some())
-                .count()
-                + self.named_births.len()
-                + missing
-                <= 256,
-            "summon budget exhausted"
+            occupied + missing <= limit,
+            "summon budget exhausted: {occupied}+{missing} exceeds {limit}"
         );
         let home = self.entities[&parent].pos;
         let positions: Vec<_> = (0..32)
@@ -199,6 +212,9 @@ impl World {
         let target = target.into();
         if crate::dungeon::jungle::ROSTER.contains(&self.entities[&id].kind) {
             return self.jungle_mechanics(id, elapsed);
+        }
+        if crate::dungeon::manor::ROSTER.contains(&self.entities[&id].kind) {
+            return self.manor_mechanics(id, target, elapsed);
         }
         if self.entities[&id].kind == crate::dungeon::snake::BOSS {
             return self.snake_mechanics(id, elapsed);
@@ -505,10 +521,12 @@ impl World {
     pub(super) fn mechanic_expiry(&mut self) {
         self.fauna_birth_step();
         self.named_birth_step();
+        self.manor_birth_step();
         let due = |e: &Entity| {
             e.expires.is_some_and(|deadline| deadline <= self.now)
-                || e.parent
-                    .is_some_and(|parent| !self.entities.contains_key(&parent))
+                // Thrown hazards finish their fuses even if their summoner dies.
+                || !matches!(e.kind, crate::dungeon::manor::ROCK | crate::dungeon::manor::MINE)
+                    && e.parent.is_some_and(|parent| !self.entities.contains_key(&parent))
         };
         let expired: Vec<_> = self
             .timed_ids
@@ -517,10 +535,12 @@ impl World {
             .copied()
             .collect();
         for id in expired {
-            if matches!(self.entities[&id].kind, 0x91a | 0xd50)
-                && self.entities[&id]
-                    .expires
-                    .is_some_and(|deadline| deadline <= self.now)
+            if matches!(
+                self.entities[&id].kind,
+                0x91a | 0xd50 | crate::dungeon::manor::CREATURE
+            ) && self.entities[&id]
+                .expires
+                .is_some_and(|deadline| deadline <= self.now)
             {
                 if let Err(error) = self.finish_timed_defeat(id) {
                     tracing::error!(entity=id,%error,"timed enemy defeat failed");
@@ -535,6 +555,9 @@ impl World {
         if crate::dungeon::jungle::ROSTER.contains(&defeated.kind) {
             self.jungle_death(defeated);
             return Ok(());
+        }
+        if crate::dungeon::manor::ROSTER.contains(&defeated.kind) {
+            return self.manor_death(defeated);
         }
         if crate::dungeon::trench::ROSTER.contains(&defeated.kind) {
             return self.ocean_death(defeated);

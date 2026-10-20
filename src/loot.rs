@@ -13,6 +13,39 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN => &[
+            (0.5, Item(0xc21)),
+            (0.01, Item(0xc1d)),
+            (0.01, Item(0xc1f)),
+            (0.05, Item(0xc20)),
+            (0.005, Item(0xc09)),
+            (0.01, Item(0xc22)),
+            (0.005, Item(0x722)),
+            (0.03, Tier(9, WEAPONS)),
+            (0.03, Tier(4, ABILITIES)),
+        ],
+        crate::dungeon::manor::KAGE => &[
+            (0.1, Tier(6, WEAPONS)),
+            (0.1, Tier(7, WEAPONS)),
+            (0.05, Tier(8, WEAPONS)),
+            (0.1, Tier(6, ARMOR)),
+            (0.1, Tier(7, ARMOR)),
+            (0.05, Tier(8, ARMOR)),
+            (0.1, Tier(3, ABILITIES)),
+            (0.05, Tier(4, ABILITIES)),
+            (0.1, Tier(3, RINGS)),
+            (0.05, Tier(4, RINGS)),
+            (0.1, Item(0xa22)),
+            (0.1, Item(0xa23)),
+            (0.005, Item(0x722)),
+        ],
+        0x1728 => &[(0.01, Item(0xc22)), (0.03, Tier(8, WEAPONS))],
+        0x1729 => &[(0.05, Tier(6, WEAPONS))],
+        kind if crate::dungeon::manor::ROSTER.contains(&kind)
+            || kind == crate::dungeon::manor::BOOKCASE =>
+        {
+            &[]
+        }
         0x6c4 => &[
             (0.10, Tier(2, WEAPONS)),
             (0.10, Tier(2, ARMOR)),
@@ -481,6 +514,9 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | 0xd79
                 | crate::dungeon::spider::BOSS
                 | crate::dungeon::jungle::BOSS
+                | crate::dungeon::manor::BOSS
+                | crate::dungeon::manor::COFFIN
+                | crate::dungeon::manor::KAGE
                 | crate::dungeon::abyss::MALPHAS
                 | crate::dungeon::abyss::IDOL
                 | crate::endgame::ORYX
@@ -516,6 +552,7 @@ pub fn private(kind: u16) -> bool {
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
         | crate::dungeon::jungle::BOSS
+        | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
 }

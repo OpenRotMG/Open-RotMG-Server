@@ -190,6 +190,7 @@ pub struct Object {
     pub cube: bool,
     pub oryx: bool,
     pub stasis_immune: bool,
+    pub leach_health: bool,
     pub terrain: u8,
     pub spawn_weight: Option<f32>,
     pub spawn_group: Option<SpawnGroup>,
@@ -478,6 +479,7 @@ impl Content {
                 cube: child(n, "Cube").is_some(),
                 oryx: child(n, "Oryx").is_some(),
                 stasis_immune: child(n, "StasisImmune").is_some(),
+                leach_health: child(n, "LeachHealth").is_some(),
                 terrain: match text(n, "Terrain").as_str() {
                     "" => 0,
                     "Mountains" => 1,

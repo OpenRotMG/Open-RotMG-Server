@@ -81,6 +81,9 @@ pub fn profile(kind: u16) -> Option<Profile> {
     if crate::dungeon::jungle::ROSTER.contains(&kind) {
         return Some(jungle::profile(kind));
     }
+    if crate::dungeon::manor::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::manor::profile(kind));
+    }
     if let Some(profile) = crate::dungeon::trench::profile(kind) {
         return Some(profile);
     }
@@ -501,6 +504,26 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if matches!(
+        kind,
+        crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
+    ) {
+        let last = if kind == crate::dungeon::manor::MINE {
+            1
+        } else {
+            3
+        };
+        for stage in 0..=last {
+            for attack in attacks::manor_entry_schedule(kind, stage, 0).attacks {
+                if let attacks::Action::Shoot { projectile, .. } = attack.action {
+                    ensure!(
+                        content.get(kind)?.projectiles.contains_key(&projectile),
+                        "missing Manor entrance projectile {kind:#x}/{projectile}"
+                    );
+                }
+            }
+        }
+    }
     if crate::dungeon::jungle::ROSTER.contains(&kind) {
         for stage in 0..=6 {
             for attack in jungle::schedule(kind, stage, 0).attacks {

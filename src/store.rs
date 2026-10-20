@@ -285,6 +285,8 @@ pub struct Character {
     pub spider_dens: u64,
     #[serde(default)]
     pub jungles: u64,
+    #[serde(default)]
+    pub manors: u64,
 }
 // Keep one field declaration while validating every direct Character decode, not just Store readers.
 impl<'de> Deserialize<'de> for Character {
@@ -1034,6 +1036,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 abysses: 0,
                 trenches: 0,
                 spider_dens: 0,
+                manors: 0,
             };
             tx.execute(
                 "INSERT INTO characters(account,stats,items) VALUES(?1,?2,?3)",
@@ -1207,7 +1210,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let saved: Character = serde_json::from_str(&raw)?;
             ensure!(saved.schema == ch.schema && saved.class == ch.class && saved.base == ch.base
                 && saved.level == ch.level && saved.exp == ch.exp && saved.fame == ch.fame
-                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles
+                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "permanent potion reservation changed");
             ch.lifetime.follows(&saved.lifetime)?;
@@ -1873,6 +1876,7 @@ mod tests {
             ch.abysses = 4;
             ch.spider_dens = 5;
             ch.jungles = 6;
+            ch.manors = 7;
             characters.push(ch);
         }
         characters[1].revision = 1;
@@ -1885,6 +1889,7 @@ mod tests {
             assert_eq!(saved.abysses, 0);
             assert_eq!(saved.spider_dens, 0);
             assert_eq!(saved.jungles, 0);
+            assert_eq!(saved.manors, 0);
         }
         characters[1].revision = 0;
         s.progress_batch(characters.clone()).await.unwrap();
@@ -1896,6 +1901,7 @@ mod tests {
             assert_eq!(saved.abysses, 4);
             assert_eq!(saved.spider_dens, 5);
             assert_eq!(saved.jungles, 6);
+            assert_eq!(saved.manors, 7);
             saved.alive = false;
             saved.hp = 0;
             s.death(saved, "test clear snapshot".into()).await.unwrap();

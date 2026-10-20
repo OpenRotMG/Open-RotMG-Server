@@ -160,7 +160,80 @@ impl Schedule {
             .collect()
     }
 }
+fn manor_schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
+    use crate::dungeon::manor::*;
+    let mut state = 0;
+    let mut age = elapsed;
+    let fan = Attack::fan;
+    let attacks = match kind {
+        BOSS => {
+            let (phase, t) = crate::dungeon::manor::phase(elapsed);
+            age = t;
+            state = phase;
+            match phase % 3 {
+                0 => vec![fan(0, blades(hp), 10., 700, 30.)],
+                1 => [(750, 20), (1450, 6), (2250, 15), (2650, 25)]
+                    .into_iter()
+                    .map(|(delay, n)| Attack::ring(1, n, 50, 30.).fixed(0.).delay(delay).once())
+                    .collect(),
+                2 => vec![],
+                _ => unreachable!(),
+            }
+        }
+        BAT | ESCORT | CHASER => vec![fan(0, 1, 0., 900, 1.)],
+        0x1727 => vec![fan(0, 1, 0., 100, 1.)],
+        CREATURE => vec![fan(0, 1, 0., 200, 4.).delay(1500)],
+        FERATU => vec![fan(0, 5, 9., 1200, 8.)],
+        0x1728 => vec![fan(0, 3, 20., 1500, 8.), fan(1, 5, 5., 1700, 9.)],
+        0x1729 => vec![fan(0, 2, 180., 1500, 10.), fan(1, 1, 0., 750, 8.)],
+        ROCK => vec![Attack::ring(0, 8, 50, 0.).fixed(0.).delay(3000).once()],
+        0x172b => vec![fan(0, 5, 10., 1500, 10.)],
+        0x172c => vec![fan(0, 3, 5., 1500, 9.)],
+        COFFIN | SWARM | DECOY | KAGE | MINE | GRAVE => vec![],
+        _ => unreachable!("unregistered Manor attack"),
+    };
+    Schedule {
+        state,
+        age,
+        attacks,
+    }
+}
+pub(crate) fn manor_entry_schedule(kind: u16, stage: u64, elapsed: u64) -> Schedule {
+    use crate::dungeon::manor::{KAGE, MINE};
+    let mut state = stage << 32;
+    let mut age = elapsed;
+    let attacks = match (kind, stage) {
+        (KAGE, 2) => {
+            let t = elapsed % 1400;
+            let aimed = t >= 1000;
+            state += elapsed / 1400 * 2 + u64::from(aimed);
+            age = if aimed { t - 1000 } else { t };
+            if aimed {
+                vec![Attack::fan(1, 2, 180., 400, 20.)]
+            } else {
+                vec![
+                    Attack::fan(1, 2, 180., 300, 0.)
+                        .fixed((t / 300) as f32 * 30f32.to_radians())
+                        .offset(90.),
+                ]
+            }
+        }
+        (KAGE, 3) => vec![Attack::fan(0, 2, 50., 400, 20.)],
+        (MINE, 1) => vec![Attack::fan(0, 4, 45., 50, 60.).once()],
+        (KAGE, 0 | 1) | (MINE, 0) => vec![],
+        _ => unreachable!("invalid Manor entrance phase"),
+    };
+    Schedule {
+        state,
+        age,
+        attacks,
+    }
+}
+
 pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
+    if crate::dungeon::manor::ROSTER.contains(&kind) {
+        return Some(manor_schedule(kind, hp, elapsed));
+    }
     if super::landmarks::ROSTER.contains(&kind) {
         return Some(super::landmarks::schedule(kind, hp, 0, 0, elapsed));
     }

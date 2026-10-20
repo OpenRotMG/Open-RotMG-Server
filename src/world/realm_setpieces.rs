@@ -56,6 +56,39 @@ impl Piece {
     }
     fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
         let mut p = match kind {
+            crate::dungeon::manor::KAGE => {
+                let mut p = Self::new(65, 65);
+                for y in 1..64 {
+                    for x in 1..64 {
+                        let radius = (x as f32 - 32.).hypot(y as f32 - 32.);
+                        if radius < 28. + rng.gen_range(0.0..4.) {
+                            let mark = if radius > 19. && rng.gen_ratio(1, 7) {
+                                3
+                            } else if rng.gen_ratio(1, 15) {
+                                4
+                            } else if rng.gen_ratio(1, 30) {
+                                5
+                            } else if radius > 24. {
+                                2
+                            } else {
+                                1
+                            };
+                            p.set(x, y, mark);
+                        }
+                    }
+                }
+                for n in 10..55 {
+                    p.set(32, n, 6);
+                    p.set(n, 32, 6);
+                }
+                for y in (20..=44).step_by(6) {
+                    for x in (20..=44).step_by(6) {
+                        p.set(x, y, 7);
+                    }
+                }
+                p.boss = (20 + rng.gen_range(0..5) * 6, 20 + rng.gen_range(0..5) * 6);
+                p
+            }
             0xdc2 => {
                 let mut p = Self::new(60, 60);
                 for y in 0..60 {
@@ -445,6 +478,13 @@ impl Piece {
     }
     fn tile(kind: u16, mark: u8) -> (u8, Option<u16>) {
         match (kind, mark) {
+            (crate::dungeon::manor::KAGE, 1) => (0x57, None),
+            (crate::dungeon::manor::KAGE, 2) => (0x56, None),
+            (crate::dungeon::manor::KAGE, 3) => (0x57, Some(0x181e)),
+            (crate::dungeon::manor::KAGE, 4) => (0x57, Some(0x181b)),
+            (crate::dungeon::manor::KAGE, 5) => (0x57, Some(0x181c)),
+            (crate::dungeon::manor::KAGE, 6) => (0xf1, None),
+            (crate::dungeon::manor::KAGE, 7) => (0x57, Some(crate::dungeon::manor::GRAVE)),
             (0xdc2, 1) => (0xc5, None),
             (0xdc2, 2) => (0xc5, Some(0x1f4)),
             (0xdc2, 3) => (0xc5, Some(0x1f2)),
