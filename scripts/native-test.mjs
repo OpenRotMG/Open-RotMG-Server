@@ -23,6 +23,24 @@ export function browserDiagnostic(line, closing=false) {
   return /\bERROR\b|panicked/.test(line)?'fatal':null;
 }
 export {startChild,stopChild} from './native-test-process.mjs';
+export async function prepareFixture(module, api, signal) {
+  signal.throwIfAborted();
+  const access=async command=>{
+    signal.throwIfAborted();
+    assert(['capabilities','catalog','world_info','observe','inspect'].includes(command.op)||(command.op==='spawn'&&command.spec?.controller==='direct'&&command.spec.profile===null),'Fixture preparation allows only paused reads and explicit direct scout spawn');
+    const result=await api(command);signal.throwIfAborted();return result;
+  };
+  let abort;
+  const cancelled=new Promise((_,reject)=>{abort=()=>reject(signal.reason);signal.addEventListener('abort',abort,{once:true});});
+  try {
+    assert(module.prepare===undefined||typeof module.prepare==='function','Case prepare must be a function');
+    const spec=await Promise.race([module.prepare===undefined?module.fixture:module.prepare(access),cancelled]);
+    assert(spec&&typeof spec==='object'&&['class','level','seed','world','position','equipment','backpack','stats'].every(k=>Object.hasOwn(spec,k)),'Case must return an explicit fixture');
+    const items=(values,n)=>Array.isArray(values)&&values.length===n&&values.every(v=>Number.isInteger(v)&&v>=-1&&v<=65535);
+    assert(Number.isInteger(spec.class)&&spec.class>=0&&spec.class<=65535&&Number.isInteger(spec.level)&&spec.level>=1&&spec.level<=20&&Number.isSafeInteger(spec.seed)&&spec.seed>=0&&Number.isInteger(spec.world)&&(spec.position==='spawn'||(spec.position&&Number.isFinite(spec.position.x)&&Number.isFinite(spec.position.y)))&&items(spec.equipment,4)&&items(spec.backpack,8)&&(spec.stats===null||(Array.isArray(spec.stats)&&spec.stats.length===8&&spec.stats.every(v=>Number.isInteger(v)&&v>=0&&v<=2147483647))),'Invalid explicit fixture bounds');
+    return spec;
+  } finally {signal.removeEventListener('abort',abort);}
+}
 async function freePort() {
   const server=createServer();await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
   const port=server.address().port;await new Promise((ok,bad)=>server.close(error=>error?bad(error):ok()));return port;
@@ -88,8 +106,8 @@ export async function runCase(scenario, options) {
     guardian.closed.then(value=>{if(!closing)fail(Error('Cleanup guardian exited early: '+JSON.stringify(value)));});
     report.guardian=guardian.child.pid;
     report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]])report.inputs[name]=createHash('sha256').update(await readFile(path)).digest('hex');
-    const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);assert(typeof fixtureModule.run==='function'&&fixtureModule.fixture,'Case must export fixture and run(game)');
-    const spec=fixtureModule.fixture;assert(Number.isInteger(spec.world),'Fixture needs an explicit world ID');
+    const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');
+    let spec;
     port=await freePort();chromePort=await freePort();assert.notEqual(port,chromePort,'Ports collided; no launch attempted');
     owner='native-test:'+randomUUID();process.env.PI_BROWSER_OWNER=owner;
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
@@ -115,6 +133,8 @@ export async function runCase(scenario, options) {
       report.client=options.client?{mode:'local',path:options.client,lock:JSON.parse(await readFile(join(options.client,'ruffle/lock.json'),'utf8'))}:{mode:'deployed',selection:JSON.parse(await readFile(join(out,'state/client-selection.json'),'utf8'))};
     });
     delete report.phases.prepareBuildStart;
+    spec=await bounded('fixturePreparation',()=>prepareFixture(fixtureModule,api,AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])));
+    report.fixture=spec;
     await bounded('browserAndFixture',async()=>{
       const auth=join(out,'Xauthority');await writeFile(auth,'',{mode:0o600});const cookie=randomBytes(16).toString('hex');
       await exec('xauth',['-f',auth,'add',':99','MIT-MAGIC-COOKIE-1',cookie]);
