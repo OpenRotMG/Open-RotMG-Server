@@ -516,7 +516,7 @@ struct Spawn {
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
-    navigation_geometry: std::cell::RefCell<view::GeometryCache>,
+    navigation_geometry: Box<std::cell::RefCell<view::GeometryCache>>,
     pub(crate) realm_layout: Option<String>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
@@ -1722,7 +1722,7 @@ impl World {
         Ok(Self {
             content,
             map,
-            navigation_geometry: std::cell::RefCell::default(),
+            navigation_geometry: Box::default(),
             realm_layout: None,
             timed_ids: BTreeSet::new(),
             gun_ids,
