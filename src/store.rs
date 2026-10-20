@@ -172,6 +172,28 @@ impl FameLifetime {
             ..Self::complete()
         }
     }
+    pub fn merge(&mut self, other: &Self) -> Result<()> {
+        self.validate()?;
+        other.validate()?;
+        ensure!(
+            self.completeness == other.completeness,
+            "lifetime completeness changed during merge"
+        );
+        self.shots = self.shots.max(other.shots);
+        self.projectile_hits = self.projectile_hits.max(other.projectile_hits);
+        self.kills = self.kills.max(other.kills);
+        self.god_kills = self.god_kills.max(other.god_kills);
+        self.cube_kills = self.cube_kills.max(other.cube_kills);
+        self.oryx_kills = self.oryx_kills.max(other.oryx_kills);
+        self.tiles = self.tiles.max(other.tiles);
+        self.level_assists = self.level_assists.max(other.level_assists);
+        self.qualified_quests = self.qualified_quests.max(other.qualified_quests);
+        self.inventory_potion_used |= other.inventory_potion_used;
+        self.ability_used |= other.ability_used;
+        self.teleported |= other.teleported;
+        self.realm_exits.extend(&other.realm_exits);
+        Ok(())
+    }
     pub fn follows(&self, previous: &Self) -> Result<()> {
         self.validate()?;
         ensure!(
@@ -1125,6 +1147,10 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 && slot.is_none_or(|slot| ch.items.get(slot) == Some(&kind)),
             "permanent potion ownership or activation mismatch"
         );
+        ensure!(
+            self.content.get(u16::try_from(kind)?)?.is_potion(),
+            "permanent consumable lacks selected potion metadata"
+        );
         let cap = self
             .classes
             .get(&ch.class)
@@ -1165,6 +1191,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             ch.base[index] += amount;
             if let Some(slot) = slot {
                 ch.items[slot] = -1;
+                ch.lifetime.inventory_potion_used = true;
             }
             ch.revision += 1;
             let n = tx.execute("UPDATE characters SET stats=?4,items=?5,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",

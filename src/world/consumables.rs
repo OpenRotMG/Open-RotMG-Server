@@ -133,6 +133,7 @@ impl World {
         }
         let mut plan = self.consumable_plan(id, slot, next)?;
         plan.effects = item.consumable_effects.clone();
+        plan.potion = (slot.object == id && item.is_potion()).then_some(slot);
         Ok(plan)
     }
     pub(super) fn discard_consumable(&mut self, source: (i32, i32)) {

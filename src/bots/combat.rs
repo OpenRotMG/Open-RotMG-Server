@@ -240,6 +240,7 @@ mod tests {
                     damage: 1,
                     spec: spec.clone(),
                     hit: BTreeSet::new(),
+                    hit_enemy: false,
                 };
                 let observed = VisibleProjectile {
                     owner: 8,

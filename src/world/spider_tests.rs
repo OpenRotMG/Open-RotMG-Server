@@ -260,6 +260,7 @@ fn native_web_hits_slow_without_damage_and_queens_blob_applies_weak() {
             damage,
             spec,
             hit: BTreeSet::new(),
+            hit_enemy: false,
         });
         let mut body = Writer::new();
         body.u8(7)

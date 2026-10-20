@@ -681,6 +681,26 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 plan.vaults.clone(),
             )
             .await
+    } else if let Some(source) = plan.potion {
+        ensure!(
+            source.object == plan.player
+                && plan.bags.is_empty()
+                && plan.vaults.is_empty()
+                && plan.collected.is_none(),
+            "inventory potion source must be the consuming actor"
+        );
+        a.store
+            .consume_inventory_potion(
+                InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                },
+                source.slot,
+                u16::try_from(source.kind)?,
+            )
+            .await
     } else {
         a.store
             .exchange_collected(

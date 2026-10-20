@@ -355,6 +355,7 @@ fn phases_prediction_and_zero_damage_conditions_stay_selected_and_use_the_shared
         damage: 0,
         spec: w.content.objects[&0x649].projectiles[&1].clone(),
         hit: BTreeSet::new(),
+        hit_enemy: false,
     };
     w.damage_player(p, &star, true).unwrap();
     assert_eq!(w.players[&p].character.hp, hp);

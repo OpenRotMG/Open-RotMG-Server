@@ -59,6 +59,15 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
         })
         .await
         .unwrap();
+    let entered_lifetime = a
+        .world
+        .call(move |w| Ok(w.players[&id].character.lifetime.clone()))
+        .await
+        .unwrap();
+    assert!(
+        entered_lifetime.tiles > 0,
+        "ordinary entry must create telemetry without XP"
+    );
     let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
     db.execute_batch(&format!("CREATE TABLE departure_updates(alive INTEGER, stats TEXT); CREATE TRIGGER departure_audit AFTER UPDATE ON characters WHEN OLD.account={account} BEGIN INSERT INTO departure_updates VALUES(NEW.alive,NEW.stats); END;")).unwrap();
 
@@ -156,6 +165,10 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
         )
         .unwrap();
     assert_eq!(death_count, i32::from(dying && !amulet));
+    assert_eq!(
+        saved.lifetime, entered_lifetime,
+        "departure/death/resurrection lost real entry telemetry"
+    );
     let expected_updates = i32::from(progress)
         + if dying && !amulet {
             1
@@ -238,4 +251,10 @@ async fn lifecycle_finalize_departure_first_unprepared_death_cancelled_waiter() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lifecycle_finalize_departure_first_queued_progress_then_resurrection() {
     departure_first(true, true, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_death_fame_phase3_dirty_terminal_snapshots() {
+    departure_first(false, true, false).await;
+    departure_first(false, true, true).await;
 }

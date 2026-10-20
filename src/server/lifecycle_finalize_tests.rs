@@ -1968,6 +1968,9 @@ async fn lifecycle_finalize_script_entry_cancelled_waiter_publishes_map_custody_
     assert_eq!(expected.tiles, 0);
     assert!(published.tiles > 0);
     expected.tiles = published.tiles;
+    assert_eq!(expected.lifetime.tiles, 0);
+    assert_eq!(published.lifetime.tiles, published.tiles);
+    expected.lifetime = published.lifetime.clone();
     assert_eq!(
         serde_json::to_value(published).unwrap(),
         serde_json::to_value(&expected).unwrap()

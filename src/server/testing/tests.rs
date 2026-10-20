@@ -189,14 +189,46 @@ async fn ordinary_equipment_action_is_committed_and_pause_is_stable() {
     let before = request(&app, "before", json!({"op":"observe","actor":actor})).await;
     let player = before["session"]["player"].as_i64().unwrap();
     let action = json!({"command":"swap","from":{"object":player,"slot":4,"kind":2599},"to":{"object":player,"slot":3,"kind":-1}});
-    let result = request(
+    let operation = request(
         &app,
         "equip",
         json!({"op":"act","actor":actor,"action":action,"duration_ms":0}),
-    )
-    .await;
+    );
+    tokio::pin!(operation);
+    let result=tokio::time::timeout(Duration::from_secs(10),async {
+        loop {tokio::select!{
+            result=&mut operation=>break result,
+            _=tokio::time::sleep(Duration::from_millis(50))=>super::super::persistence_tick(&app).await.unwrap(),
+        }}
+    }).await.unwrap();
     assert_eq!(result["status"], "succeeded");
     assert_eq!(result["paused"], true);
+    let view = request(
+        &app,
+        "persisted-pause",
+        json!({"op":"observe","actor":actor}),
+    )
+    .await;
+    let player = view["session"]["player"].as_i64().unwrap() as i32;
+    let (account, character, lifetime) = app
+        .world
+        .for_player(player)
+        .call(move |w| {
+            let p = &w.players[&player];
+            Ok((
+                p.character.account,
+                p.character.id,
+                p.character.lifetime.clone(),
+            ))
+        })
+        .await
+        .unwrap();
+    assert!(lifetime.tiles > 0);
+    assert_eq!(
+        app.store.load(account, character).await.unwrap().lifetime,
+        lifetime
+    );
+
     let after = request(&app, "after", json!({"op":"observe","actor":actor})).await;
     assert!(
         after["character"]["stats"]["max_hp"].as_i64().unwrap()
@@ -289,15 +321,47 @@ async fn actual_gameplay_controller_can_run_a_bounded_time_goal() {
     let created = request(&app, "create", json!({"op":"spawn","spec":spawn})).await;
     assert_eq!(created["status"], "succeeded");
     let actor = created["result"]["actor"].as_i64().unwrap();
-    let result = request(
+    let operation = request(
         &app,
         "bounded",
         json!({"op":"run","actor":actor,"goal":{"kind":"time","ms":100},"max_game_ms":1000}),
-    )
-    .await;
+    );
+    tokio::pin!(operation);
+    let result=tokio::time::timeout(Duration::from_secs(10),async {
+        loop {tokio::select!{
+            result=&mut operation=>break result,
+            _=tokio::time::sleep(Duration::from_millis(50))=>super::super::persistence_tick(&app).await.unwrap(),
+        }}
+    }).await.unwrap();
     assert_eq!(result["result"]["goal_reached"], true);
     assert_eq!(result["result"]["state"]["controller"], "game_bot");
     assert_eq!(result["paused"], true);
+    let view = request(
+        &app,
+        "persisted-pause",
+        json!({"op":"observe","actor":actor}),
+    )
+    .await;
+    let player = view["session"]["player"].as_i64().unwrap() as i32;
+    let (account, character, lifetime) = app
+        .world
+        .for_player(player)
+        .call(move |w| {
+            let p = &w.players[&player];
+            Ok((
+                p.character.account,
+                p.character.id,
+                p.character.lifetime.clone(),
+            ))
+        })
+        .await
+        .unwrap();
+    assert!(lifetime.tiles > 0);
+    assert_eq!(
+        app.store.load(account, character).await.unwrap().lifetime,
+        lifetime
+    );
+
     assert_eq!(result["result"]["state"]["lifecycle"]["output"], "live");
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
@@ -800,4 +864,114 @@ async fn dropped_native_renewal_keeps_deadline_and_traces_late_read() {
     }
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn all_death_fame_phase3_pause_requires_durable_lifetime() {
+    struct Reply(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for Reply {
+        fn drop(&mut self) {
+            if let Some(reply) = self.0.take() {
+                let _ = reply.send(());
+            }
+        }
+    }
+    for fail in [false, true] {
+        let (dir, app) = fixture();
+        let pos = app
+            .world
+            .in_world(-1)
+            .call(|w| {
+                let (x, y) = w.map.spawns[0];
+                Ok(Pos { x, y })
+            })
+            .await
+            .unwrap();
+        let created = request(&app, "pause-source", json!({"op":"spawn","spec":spec(pos)})).await;
+        assert_eq!(created["status"], "succeeded");
+        let actor = created["result"]["actor"].as_i64().unwrap();
+        let view = request(&app, "pause-view", json!({"op":"observe","actor":actor})).await;
+        let player = view["session"]["player"].as_i64().unwrap() as i32;
+        let (account, character, lifetime) = app
+            .world
+            .for_player(player)
+            .call(move |w| {
+                let p = &w.players[&player];
+                Ok((
+                    p.character.account,
+                    p.character.id,
+                    p.character.lifetime.clone(),
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(lifetime.tiles > 0);
+        let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+        if fail {
+            db.execute_batch("CREATE TRIGGER fail_telemetry BEFORE UPDATE OF stats ON characters BEGIN SELECT RAISE(ABORT,'injected pause telemetry failure'); END;").unwrap();
+        }
+        let (committed, release) = app.store.lifecycle_test_pause_reply();
+        let release = Reply(Some(release));
+        let tick = super::super::persistence_tick(&app);
+        tokio::pin!(tick);
+        tokio::select! {
+            entered=tokio::time::timeout(Duration::from_secs(2),committed)=>entered.unwrap().unwrap(),
+            result=&mut tick=>panic!("collector completed before held reply: {result:?}"),
+        }
+        let waiting = super::pause(&app, &[], &[]);
+        tokio::pin!(waiting);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), &mut waiting)
+                .await
+                .is_err(),
+            "pause bypassed a held durable completion"
+        );
+        app.world
+            .for_player(player)
+            .call(move |w| {
+                let p = &w.players[&player];
+                assert!(p.pending && p.progress_started);
+                assert!(!w.settled()?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let durable: u64 = db
+            .query_row(
+                "SELECT json_extract(stats,'$.lifetime.tiles') FROM characters WHERE id=?",
+                [character],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(durable, if fail { 0 } else { lifetime.tiles });
+        drop(release);
+        tokio::time::timeout(Duration::from_secs(2), &mut tick)
+            .await
+            .unwrap()
+            .unwrap();
+        let paused = tokio::time::timeout(Duration::from_secs(2), &mut waiting)
+            .await
+            .unwrap();
+        if fail {
+            assert!(format!("{:#}", paused.unwrap_err()).contains("quarantined"));
+            assert_eq!(
+                app.store
+                    .load(account, character)
+                    .await
+                    .unwrap()
+                    .lifetime
+                    .tiles,
+                0
+            );
+        } else {
+            paused.unwrap();
+            assert_eq!(
+                app.store.load(account, character).await.unwrap().lifetime,
+                lifetime
+            );
+        }
+        app.shutdown.send_replace(true);
+        drop(db);
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

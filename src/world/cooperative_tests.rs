@@ -671,3 +671,28 @@ fn fountain_heal_waits_for_its_cadence_and_skips_sick_players() {
         "heals once the sickness ends"
     );
 }
+
+#[test]
+fn all_death_fame_phase3_teleport_facts() {
+    let (mut d, a, b, _ar, _br) = setup();
+    d.worlds
+        .get_mut(&-2)
+        .unwrap()
+        .players
+        .get_mut(&a)
+        .unwrap()
+        .paused = true;
+    assert!(d.teleport(a, b, Instant::now()).is_err());
+    assert!(!d.worlds[&-2].players[&a].character.lifetime.teleported);
+    d.worlds
+        .get_mut(&-2)
+        .unwrap()
+        .players
+        .get_mut(&a)
+        .unwrap()
+        .paused = false;
+    d.teleport(a, b, Instant::now()).unwrap();
+    assert!(d.worlds[&-2].players[&a].character.lifetime.teleported);
+    assert!(!d.worlds[&-2].players[&b].character.lifetime.teleported);
+    assert!(!d.worlds[&-2].players[&a].character.lifetime.ability_used);
+}

@@ -111,6 +111,7 @@ impl World {
         );
         let p = self.players.get_mut(&id).unwrap();
         p.character.mp -= item.mana_cost;
+        p.character.lifetime.ability_used = true;
         p.last_ability = Some(self.now);
         tracing::info!(
             player = id,
@@ -515,6 +516,12 @@ impl World {
             .clone();
         let p = self.players.get_mut(&id).unwrap();
         p.character.shots += 20;
+        p.character.lifetime.shots = p
+            .character
+            .lifetime
+            .shots
+            .checked_add(20)
+            .context("lifetime ability shots overflow")?;
         let mut messages = Vec::new();
         for i in 0..20 {
             let bullet = p.server_bullet;
@@ -533,6 +540,7 @@ impl World {
                 damage,
                 spec: spec.clone(),
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             });
             let mut out = Writer::new();
             out.u8(bullet)

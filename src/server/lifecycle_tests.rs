@@ -567,6 +567,8 @@ async fn lifecycle_owned_diagnostic_sink_panic_during_uncertain_collector_handof
     let (dir, a) = account_actions::tests::fixture();
     let (owner, id, ch) = player(&a, "collector-sink-failure").await;
     let (healthy_owner, healthy, healthy_ch) = player(&a, "collector-sink-healthy").await;
+    // Isolate the intended XP reservation failure from ordinary entry telemetry.
+    persistence_tick(&a).await.unwrap();
     a.world
         .for_player(id)
         .call(move |w| {

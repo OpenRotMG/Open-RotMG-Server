@@ -162,6 +162,8 @@ fn poison_lands_after_throw_and_deals_total_damage_over_time_with_defense_once()
         w.step();
     }
     assert_eq!(w.entities[&target].hp, 900 - (150 - 12));
+    assert_eq!(w.players[&id].character.lifetime.projectile_hits, 0);
+    assert_eq!(w.players[&id].character.lifetime.shots, 0);
 }
 #[test]
 fn skull_drains_actual_enemy_health_and_respects_sick() {
@@ -222,6 +224,8 @@ fn trickster_leaves_decoy_before_teleport_and_decoy_draws_enemy_targeting() {
     let target = enemy(&mut w, 10., 12.);
     w.players.get_mut(&id).unwrap().last_motion = Some((std::f32::consts::PI, w.now));
     cast(&mut w, id, Pos { x: 20., y: 12. }).unwrap();
+    assert!(w.players[&id].character.lifetime.ability_used);
+    assert!(!w.players[&id].character.lifetime.teleported);
     assert_eq!(w.players[&id].pos.distance(Pos { x: 20., y: 12. }), 0.);
     let decoy = w.entities.values().find(|e| e.kind == 0x715).unwrap().id;
     assert!(w.entities[&decoy].pos.x < 14.);
@@ -289,6 +293,8 @@ fn huntress_trap_lands_triggers_once_slows_then_expires() {
     assert_eq!(w.entities[&target].hp, 862);
     assert_eq!(w.entities[&target].conditions(w.now) & SLOWED, 0);
     assert!(w.entities.values().all(|e| e.kind != 0x711));
+    assert_eq!(w.players[&id].character.lifetime.projectile_hits, 0);
+    assert_eq!(w.players[&id].character.lifetime.shots, 0);
 }
 #[test]
 fn special_native_volleys_preserve_damage_and_all_predicted_projectiles() {
@@ -318,6 +324,7 @@ fn special_native_volleys_preserve_damage_and_all_predicted_projectiles() {
             .unwrap();
         }
         assert_eq!(w.bullets.len(), object.shots as usize);
+        assert_eq!(w.players[&id].character.lifetime.shots, object.shots as u64);
         assert!(w.bullets.iter().all(|b| {
             (object.projectiles[&0].min..=object.projectiles[&0].max).contains(&b.damage)
                 && b.spec.effects == object.projectiles[&0].effects
@@ -480,6 +487,8 @@ fn stasis_projectiles_pass_through_and_decoys_absorb_ordinary_hostile_projectile
         spec.speed = if friendly { 1000. } else { 0. };
         spec.multi_hit = false;
         let pos = Pos { x: 12., y: 12. };
+        // Prepared physics admission, independent of the ability's own projectiles.
+        w.players.get_mut(&id).unwrap().character.lifetime.shots += u64::from(friendly);
         w.bullets.push(Bullet {
             owner: if friendly { id } else { first },
             source_kind: 0x650,
@@ -492,6 +501,7 @@ fn stasis_projectiles_pass_through_and_decoys_absorb_ordinary_hostile_projectile
             damage: 50,
             spec,
             hit: BTreeSet::new(),
+            hit_enemy: false,
         });
         w.step();
         if friendly {
@@ -523,6 +533,8 @@ fn friendly_projectiles_respect_collision_conditions() {
                 spec.speed = 500.;
                 spec.multi_hit = multi_hit;
                 let pos = Pos { x: 12., y: 12. };
+                // This collision fixture starts with one already-admitted projectile.
+                w.players.get_mut(&id).unwrap().character.lifetime.shots = 1;
                 w.bullets.push(Bullet {
                     owner: id,
                     source_kind: 0x650,
@@ -535,6 +547,7 @@ fn friendly_projectiles_respect_collision_conditions() {
                     damage,
                     spec,
                     hit: BTreeSet::new(),
+                    hit_enemy: false,
                 });
                 w.step();
                 assert_eq!(
@@ -625,4 +638,153 @@ fn custom_tomes_execute_healing_protection_and_selective_purification() {
             assert_eq!(w.players[&id].conditions(w.now), 0);
         }
     }
+}
+
+#[test]
+fn all_death_fame_phase3_projectile_and_taxonomy() {
+    let (mut objects, caster) = fixture(crate::content::WIZARD, 0xb24);
+    // A prepared metadata-negative fixture exercises destructibility independently of Enemy.
+    let kind = 0x650;
+    Arc::make_mut(&mut objects.content)
+        .objects
+        .get_mut(&kind)
+        .unwrap()
+        .enemy = false;
+    objects
+        .spawn_entity(kind, Pos { x: 14., y: 12. }, vec![])
+        .unwrap();
+    cast(&mut objects, caster, Pos { x: 14., y: 12. }).unwrap();
+    for b in &mut objects.bullets {
+        b.spec.speed = 0.;
+    }
+    objects.step();
+    assert_eq!(objects.players[&caster].character.lifetime.shots, 20);
+    assert_eq!(
+        objects.players[&caster].character.lifetime.projectile_hits, 0,
+        "destructible objects are not enemies"
+    );
+    assert_eq!(objects.players[&caster].character.lifetime.kills, 0);
+    assert!(
+        objects.players[&caster].character.hits > 0,
+        "fixture must actually collide with the destructible non-enemy"
+    );
+    let (mut w, id) = fixture(crate::content::WIZARD, 0xb24);
+    let target = enemy(&mut w, 14., 12.);
+    w.entities.get_mut(&target).unwrap().condition =
+        PARALYZED | crate::condition::bit(crate::condition::INVULNERABLE);
+    cast(&mut w, id, Pos { x: 14., y: 12. }).unwrap();
+    assert_eq!(w.players[&id].character.lifetime.shots, 20);
+    for b in &mut w.bullets {
+        b.spec.multi_hit = true;
+        b.spec.speed = 0.;
+    }
+    w.step();
+    assert_eq!(
+        w.players[&id].character.lifetime.projectile_hits, 20,
+        "zero damage still collides"
+    );
+    w.step();
+    assert_eq!(w.players[&id].character.lifetime.projectile_hits, 20);
+    assert!(w.entities.contains_key(&target));
+    let second = enemy(&mut w, 14., 12.);
+    w.entities.get_mut(&second).unwrap().condition =
+        PARALYZED | crate::condition::bit(crate::condition::INVULNERABLE);
+    w.step();
+    assert_eq!(
+        w.players[&id].character.lifetime.projectile_hits, 20,
+        "piercing another enemy is not another projectile hit"
+    );
+    for _ in 0..15 {
+        w.now += 1001;
+        w.players.get_mut(&id).unwrap().character.mp = 385;
+        cast(&mut w, id, Pos { x: 14., y: 12. }).unwrap();
+        for b in &mut w.bullets {
+            b.spec.multi_hit = true;
+            b.spec.speed = 0.;
+        }
+        w.step();
+    }
+    assert_eq!(w.players[&id].character.lifetime.shots, 320);
+    assert_eq!(
+        w.players[&id].character.lifetime.projectile_hits, 320,
+        "live projectile state survives >256 reused IDs"
+    );
+    let mut other = tests::ch(&w);
+    other.id = 2;
+    other.account = 2;
+    let other = w.enter(other, None).unwrap();
+    let before = w.players[&id].character.lifetime.clone();
+    for kind in [0x651, 0x60e, 0x1740, 0x932] {
+        let enemy = w
+            .spawn_entity(kind, Pos { x: 14., y: 12. }, vec![])
+            .unwrap();
+        let hp = w.entities[&enemy].hp;
+        w.damage_enemy(other, enemy, (hp - 1).max(1), true, &[], None)
+            .unwrap();
+        w.damage_enemy(id, enemy, hp + 100, true, &[], None)
+            .unwrap();
+    }
+    let life = &w.players[&id].character.lifetime;
+    assert_eq!(life.kills - before.kills, 4);
+    assert_eq!(life.god_kills - before.god_kills, 3);
+    assert_eq!(w.content.objects.values().filter(|o| o.god).count(), 54);
+    assert_eq!(w.content.objects.values().filter(|o| o.cube).count(), 7);
+    assert_eq!(w.content.objects.values().filter(|o| o.oryx).count(), 2);
+    assert_eq!(life.oryx_kills - before.oryx_kills, 2);
+    assert_eq!(life.cube_kills - before.cube_kills, 1);
+    assert_eq!(
+        life.projectile_hits, before.projectile_hits,
+        "nonprojectile/delayed damage does not create hits"
+    );
+    assert_eq!(
+        w.players[&other].character.lifetime.oryx_kills, 0,
+        "largest damage is not final blow"
+    );
+    let enemy = w
+        .spawn_entity(0x932, Pos { x: 14., y: 12. }, vec![])
+        .unwrap();
+    w.damage_enemy(id, enemy, 1, true, &[], None).unwrap();
+    w.finish_timed_defeat(enemy).unwrap();
+    assert_eq!(
+        w.players[&id].character.lifetime.oryx_kills, 2,
+        "self destruction has no player Oryx final blow"
+    );
+    let before = w.players[&id].character.lifetime.kills;
+    let enemy = w
+        .spawn_entity(0x650, Pos { x: 14., y: 12. }, vec![])
+        .unwrap();
+    w.remove_entity(enemy);
+    assert_eq!(
+        w.players[&id].character.lifetime.kills, before,
+        "despawn is not death"
+    );
+}
+
+#[test]
+fn all_death_fame_phase3_successful_actions() {
+    for failure in ["quiet", "target"] {
+        let (mut invalid, id) = fixture(crate::content::WIZARD, 0xb24);
+        let pos = if failure == "target" {
+            Pos { x: -10., y: -10. }
+        } else {
+            invalid.players[&id].pos
+        };
+        if failure == "quiet" {
+            invalid
+                .apply_condition(id, crate::condition::QUIET, 1000)
+                .unwrap();
+        }
+        assert!(cast(&mut invalid, id, pos).is_err());
+        assert!(!invalid.players[&id].character.lifetime.ability_used);
+        assert_eq!(invalid.players[&id].character.lifetime.shots, 0);
+    }
+    let (mut w, id) = fixture(crate::content::WIZARD, 0xb24);
+    let pos = w.players[&id].pos;
+    w.players.get_mut(&id).unwrap().character.mp = 0;
+    assert!(cast(&mut w, id, pos).is_err());
+    assert!(!w.players[&id].character.lifetime.ability_used);
+    w.players.get_mut(&id).unwrap().character.mp = 100;
+    cast(&mut w, id, pos).unwrap();
+    assert!(w.players[&id].character.lifetime.ability_used);
+    assert!(!w.players[&id].character.lifetime.teleported);
 }

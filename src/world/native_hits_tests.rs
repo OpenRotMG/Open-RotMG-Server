@@ -25,6 +25,7 @@ fn offer(w: &mut World, id: i32, owner: Option<i32>, bullet: u8, damage: i32) ->
         damage,
         spec,
         hit: BTreeSet::new(),
+        hit_enemy: false,
     });
     let mut body = Writer::new();
     body.u8(bullet)

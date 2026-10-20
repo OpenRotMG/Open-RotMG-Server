@@ -360,6 +360,8 @@ pub struct Player {
     pub(crate) native_update_acked: bool,
     pub known: BTreeSet<i32>,
     quest: Option<i32>,
+    qualified_quest: Option<i32>,
+    committed_lifetime: crate::store::FameLifetime,
     statuses: BTreeMap<u8, (u64, u64)>,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
@@ -371,6 +373,7 @@ pub struct Player {
     tile_scan: Option<(i32, i32)>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
+    death_lifetime: Option<crate::store::FameLifetime>,
     killer: String,
     movement_credit: f32,
     hp_fraction: f32,
@@ -407,6 +410,14 @@ pub struct Player {
     ability_shot: Option<(u16, i32, bool, i32)>,
 }
 impl Player {
+    fn acknowledge_lifetime(&mut self, committed: crate::store::FameLifetime) -> Result<()> {
+        committed.follows(&self.committed_lifetime)?;
+        self.character.lifetime.follows(&self.committed_lifetime)?;
+        self.character.lifetime.merge(&committed)?;
+        // Later live facts remain different from this acknowledged lower bound and must still save.
+        self.committed_lifetime = committed;
+        Ok(())
+    }
     pub(crate) fn queue_experience(
         &mut self,
         amount: i32,
@@ -536,10 +547,13 @@ impl Player {
             );
         }
     }
-    fn progress_queued(&self) -> bool {
+    fn rewards_queued(&self) -> bool {
         self.experience_queued != 0
             || self.experience_queue.is_some()
             || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
+    }
+    fn progress_queued(&self) -> bool {
+        self.character.lifetime != self.committed_lifetime || self.rewards_queued()
     }
     fn active(&self) -> bool {
         self.character.alive
@@ -592,6 +606,7 @@ pub struct Bullet {
     pub damage: i32,
     pub spec: Projectile,
     pub hit: BTreeSet<i32>,
+    pub hit_enemy: bool,
 }
 impl Player {
     pub(crate) fn conditions(&self, now: u64) -> i32 {
@@ -636,6 +651,7 @@ pub struct InventoryPlan {
     pub bags: Vec<(i32, Vec<i32>)>,
     pub effects: Vec<crate::content::ConsumableEffect>,
     pub stat_growth: Option<(Character, Slot, usize, i32)>,
+    pub potion: Option<Slot>,
     pub appearance: Option<(Slot, u32, u32)>,
     pub xp_boost: Option<Slot>,
     pub(crate) companion: Option<companions::Plan>,
@@ -2355,6 +2371,7 @@ impl World {
             id,
             Player {
                 weapon_ticks: VecDeque::from([(-1, ch.items[0])]),
+                committed_lifetime: ch.lifetime.clone(),
                 character: ch,
                 pos,
                 departing: false,
@@ -2370,6 +2387,7 @@ impl World {
                 tx,
                 known: BTreeSet::new(),
                 quest: None,
+                qualified_quest: None,
                 statuses: BTreeMap::new(),
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
@@ -2380,6 +2398,7 @@ impl World {
                 tile_scan: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
+                death_lifetime: None,
                 killer: String::new(),
                 movement_credit: 0.78,
                 hp_fraction: 0.,
@@ -2732,7 +2751,19 @@ impl World {
             let p = self.players.get_mut(&id).unwrap();
             for &(x, y, ground) in &tiles {
                 p.tiles.insert((x, y));
-                p.character.tiles += 1;
+                p.character.tiles = p
+                    .character
+                    .tiles
+                    .checked_add(1)
+                    .context("exploration counter overflow")?;
+                if p.character.alive && !p.death_started && !p.departing {
+                    p.character.lifetime.tiles = p
+                        .character
+                        .lifetime
+                        .tiles
+                        .checked_add(1)
+                        .context("lifetime exploration overflow")?;
+                }
                 o.i16(x).i16(y).u8(ground);
             }
             if !tiles.is_empty() {
@@ -2764,7 +2795,16 @@ impl World {
             p.known_since.entry(*entity).or_insert(self.now);
         }
         p.known = visible;
+        let quest_identity = quest.map(|id| {
+            let e = &self.entities[&id];
+            if crate::quest::root(e.kind) || crate::quest::final_root(e.kind) || e.kind == 0x6c2 {
+                e.quest.unwrap_or(id)
+            } else {
+                id
+            }
+        });
         let p = self.players.get_mut(&id).unwrap();
+        p.qualified_quest = quest_identity;
         if initial || p.quest != quest {
             p.quest = quest;
             let mut out = Writer::new();
@@ -3303,6 +3343,12 @@ impl World {
             return Ok(NativeInput::Applied);
         }
         p.character.shots += 1;
+        p.character.lifetime.shots = p
+            .character
+            .lifetime
+            .shots
+            .checked_add(1)
+            .context("lifetime admitted shots overflow")?;
         let multiplier = if ability {
             1.
         } else if condition & crate::condition::bit(crate::condition::WEAK) != 0 {
@@ -3328,6 +3374,7 @@ impl World {
             damage,
             spec,
             hit: BTreeSet::new(),
+            hit_enemy: false,
         });
         let mut o = Writer::new();
         o.u8(bullet).i32(id).i16(kind as i16).f32(angle);
@@ -3418,7 +3465,7 @@ impl World {
                 controller("XP boost is already active")
             );
             ensure!(
-                !p.progress_queued(),
+                !p.rewards_queued(),
                 controller("character progress is awaiting commit")
             );
             let mut plan = self.consumable_plan(id, slot, -1)?;
@@ -3523,6 +3570,7 @@ impl World {
             bags: bag.into_iter().collect(),
             effects: Vec::new(),
             stat_growth: None,
+            potion: None,
             appearance: None,
             xp_boost: None,
             companion: None,
@@ -3812,7 +3860,7 @@ impl World {
         });
         p.character.items = plan.items;
         p.character.revision = revision;
-        if let Some((snapshot, _, index, amount)) = plan.stat_growth {
+        if let Some((snapshot, source, index, amount)) = plan.stat_growth {
             ensure!(
                 p.character.base == snapshot.base,
                 "reserved potion base stats changed"
@@ -3822,6 +3870,9 @@ impl World {
                 snapshot.base[index] + amount <= cap,
                 "reserved potion exceeds current class cap"
             );
+            let mut committed = snapshot.lifetime.clone();
+            committed.inventory_potion_used |= source.object == plan.player;
+            p.acknowledge_lifetime(committed)?;
             p.character.base[index] = snapshot.base[index] + amount;
             tracing::info!(
                 player = plan.player,
@@ -3830,6 +3881,11 @@ impl World {
                 revision,
                 "permanent stat potion committed"
             );
+        }
+        if plan.potion.is_some() {
+            let mut committed = p.committed_lifetime.clone();
+            committed.inventory_potion_used = true;
+            p.acknowledge_lifetime(committed)?;
         }
         if let Some((_, tex1, tex2)) = plan.appearance {
             p.character.tex1 = tex1;
@@ -4004,7 +4060,11 @@ impl World {
     ) -> Vec<(i32, Character)> {
         let mut plans = Vec::new();
         for (id, p) in &mut self.players {
-            if !p.progress_queued() || p.pending || p.death_started {
+            if !p.progress_queued()
+                || p.pending
+                || p.death_started
+                || ((p.death_pending || p.departing) && !p.rewards_queued())
+            {
                 continue;
             }
             if !accept(*id, p.character.account) {
@@ -4044,7 +4104,9 @@ impl World {
                     assists.len() <= 19,
                     "level assist preparation exceeds lifetime levels"
                 );
-                snapshot.gain_experience(&self.content, p.experience_queued, &mut self.rng)?;
+                if p.rewards_queued() {
+                    snapshot.gain_experience(&self.content, p.experience_queued, &mut self.rng)?;
+                }
                 for (count, queued) in std::iter::once(&mut snapshot.pirate_caves)
                     .chain(snapshot.dungeons.iter_mut())
                     .chain(std::iter::once(&mut snapshot.abysses))
@@ -4107,6 +4169,7 @@ impl World {
                 && p.progress_snapshot.as_ref() == Some(&snapshot),
             "progress reservation changed"
         );
+        p.acknowledge_lifetime(snapshot.lifetime.clone())?;
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
             || snapshot.abysses > p.character.abysses
@@ -4182,13 +4245,14 @@ impl World {
             .filter_map(|id| {
                 self.cancel_trade(id, "Trade cancelled by permanent death.");
                 let p = self.players.get_mut(&id).unwrap();
-                if p.pending || p.progress_queued() || p.death_started {
+                if p.pending || p.rewards_queued() || p.death_started {
                     return None;
                 }
                 if !accept(id, p.character.account) {
                     return None;
                 }
                 p.death_started = true;
+                p.death_lifetime = Some(p.character.lifetime.clone());
                 let mut c = p.character.clone();
                 c.alive = false;
                 Some((id, c, p.killer.clone()))
@@ -4198,7 +4262,10 @@ impl World {
     pub fn finish_death(&mut self, id: i32) -> Result<()> {
         let p = self.players.get(&id).context("dying player missing")?;
         ensure!(
-            p.death_started && p.death_pending && p.persistence_failure.is_none(),
+            p.death_started
+                && p.death_pending
+                && p.persistence_failure.is_none()
+                && p.death_lifetime.as_ref() == Some(&p.character.lifetime),
             "death not pending or persistence failed"
         );
         let maxed = p
@@ -4226,6 +4293,13 @@ impl World {
             .set(lifetime.map(|ms| self.now + ms), grave, &mut self.timed_ids);
         tracing::info!(player=id, grave, kind, maxed, expires=?entity.expires, "gravestone created");
         let p = self.players.get_mut(&id).unwrap();
+        p.acknowledge_lifetime(
+            p.death_lifetime
+                .as_ref()
+                .context("fatal lifetime reservation missing")?
+                .clone(),
+        )?;
+        p.death_lifetime = None;
         p.character.alive = false;
         p.character.xp_boost.active = false;
         p.character.items.fill(-1);
@@ -4267,7 +4341,7 @@ impl World {
             .players
             .get_mut(&id)
             .context("departing player missing")?;
-        if p.pending || p.death_pending || p.progress_queued() {
+        if p.pending || p.death_pending || p.rewards_queued() {
             return Ok(None);
         };
         p.pending = true;
@@ -4402,6 +4476,24 @@ impl World {
                     )?;
                     tracing::debug!(player = id, enemy = e.kind, amount, "experience queued");
                 }
+                let assigned = p.quest == Some(e.id)
+                    || (crate::quest::final_root(e.kind)
+                        && e.quest.is_some()
+                        && p.qualified_quest == e.quest);
+                if assigned
+                    && p.character.hp > 0
+                    && e.damage
+                        .get(&p.character.id)
+                        .is_some_and(|damage| *damage > 0)
+                {
+                    p.character.lifetime.qualified_quests = p
+                        .character
+                        .lifetime
+                        .qualified_quests
+                        .checked_add(1)
+                        .context("qualified quest counter overflow")?;
+                    p.qualified_quest = None;
+                }
                 if p.quest == Some(e.id) {
                     // This exact notification also starts the native client's quest-arrow completion delay.
                     let mut out = Writer::new();
@@ -4453,6 +4545,8 @@ impl World {
         if let Some(owner) = owner {
             let p = self.players.get_mut(&owner).unwrap();
             p.character.kills += 1;
+            self.record_lifetime_kill(owner, kind, false)?;
+            let p = self.players.get_mut(&owner).unwrap();
             if self.content.objects[&kind].quest {
                 p.character.quests += 1;
             }
@@ -5244,6 +5338,7 @@ impl World {
                     },
                     spec,
                     hit: BTreeSet::new(),
+                    hit_enemy: false,
                 };
                 notices.push(enemy_shots::EnemyShot {
                     bullet: bullet.id,
@@ -5463,6 +5558,7 @@ impl World {
                 damage: spec.min,
                 spec,
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             };
             let mut o = Writer::new();
             o.u8(b.id)
@@ -5532,6 +5628,21 @@ impl World {
                         if self.players.get(&b.owner).is_some_and(|p| p.paused) {
                             b.hit.insert(*target);
                             break;
+                        }
+                        if !b.hit_enemy && self.content.objects[&self.entities[target].kind].enemy {
+                            b.hit_enemy = true;
+                            if let Some(p) = self
+                                .players
+                                .get_mut(&b.owner)
+                                .filter(|p| p.character.alive && !p.death_started && !p.departing)
+                            {
+                                p.character.lifetime.projectile_hits = p
+                                    .character
+                                    .lifetime
+                                    .projectile_hits
+                                    .checked_add(1)
+                                    .expect("lifetime projectile hit overflow");
+                            }
                         }
                         self.damage_enemy(
                             b.owner,
@@ -8197,6 +8308,7 @@ mod tests {
             damage: 100,
             spec: w.content.objects[&kind].projectiles[&0].clone(),
             hit: BTreeSet::new(),
+            hit_enemy: false,
         });
         w.remove_entity(emitter);
         w.step();
@@ -8237,6 +8349,7 @@ mod tests {
                 damage: 8,
                 spec,
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             });
             for _ in 0..5 {
                 w.step();
@@ -8483,6 +8596,7 @@ mod tests {
             damage: 7,
             spec,
             hit: BTreeSet::new(),
+            hit_enemy: false,
         };
         let a = b.position(60);
         b.id = 2;

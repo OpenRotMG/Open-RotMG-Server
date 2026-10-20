@@ -204,6 +204,8 @@ fn projectile_ground_rules_ignore_no_walk_but_stop_void_bounds_and_cover() {
             spec.speed = 100.;
             spec.amplitude = 0.;
             spec.lifetime = 1000.;
+            // Prepared physics admission, not a native gameplay observation.
+            w.players.get_mut(&id).unwrap().character.lifetime.shots = u64::from(friendly);
             w.bullets.push(Bullet {
                 owner: if friendly { id } else { enemy },
                 source_kind: if friendly {
@@ -220,6 +222,7 @@ fn projectile_ground_rules_ignore_no_walk_but_stop_void_bounds_and_cover() {
                 damage: 1,
                 spec,
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             });
             for _ in 0..5 {
                 w.step();
@@ -247,6 +250,8 @@ fn projectile_ground_rules_ignore_no_walk_but_stop_void_bounds_and_cover() {
         let id = w.enter(tests::ch(&w), None).unwrap();
         let start = Pos { x: 0.1, y: 100.5 };
         let spec = w.content.objects[&0x683].projectiles[&0].clone();
+        // Prepared physics admission, not a native gameplay observation.
+        w.players.get_mut(&id).unwrap().character.lifetime.shots = u64::from(friendly);
         w.bullets.push(Bullet {
             owner: id,
             source_kind: crate::content::WIZARD,
@@ -259,6 +264,7 @@ fn projectile_ground_rules_ignore_no_walk_but_stop_void_bounds_and_cover() {
             damage: 10,
             spec,
             hit: BTreeSet::new(),
+            hit_enemy: false,
         });
         w.step();
         assert!(w.bullets.is_empty(), "bounds must consume either faction");

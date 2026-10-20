@@ -128,6 +128,9 @@ async fn xp_booster_sources_are_atomic_and_only_eligible_enemy_xp_is_doubled() {
                         },
                     )
                     .unwrap();
+                for (player, snapshot) in w.pending_progress() {
+                    w.finish_progress(player, snapshot).unwrap();
+                }
                 let excluded = w.spawn_entity(0x600, pos, vec![]).unwrap();
                 w.entities.get_mut(&excluded).unwrap().script = Some(landmark_ai::Script {
                     no_experience: true,

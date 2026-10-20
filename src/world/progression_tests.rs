@@ -39,6 +39,7 @@ fn selected_projectiles_deliver_native_condition_ids_through_authoritative_colli
             damage: spec.min,
             spec,
             hit: BTreeSet::new(),
+            hit_enemy: false,
         });
         w.step();
         assert!(w.players[&id].character.hp < 100);
@@ -81,6 +82,8 @@ fn multihit_hits_distinct_targets_once_and_native_projectile_modes_match_client_
     let mut spec = w.content.objects[&0xc02].projectiles[&0].clone();
     assert!(spec.multi_hit);
     spec.boomerang = true;
+    // This physics fixture starts with one already-admitted projectile.
+    w.players.get_mut(&id).unwrap().character.lifetime.shots = 1;
     w.bullets.push(Bullet {
         owner: id,
         source_kind: crate::content::WIZARD,
@@ -93,6 +96,7 @@ fn multihit_hits_distinct_targets_once_and_native_projectile_modes_match_client_
         damage: 1,
         spec: spec.clone(),
         hit: BTreeSet::new(),
+        hit_enemy: false,
     });
     for _ in 0..(spec.lifetime as usize / 50 + 1) {
         w.step();
@@ -290,7 +294,30 @@ fn selected_private_boss_rewards_reach_every_eligible_player_including_the_ninth
                 .any(|e| e.extra_stats.contains(&(54, 809)))
         );
         let plans = w.pending_progress();
-        assert_eq!(plans.len(), 9);
+        assert_eq!(plans.len(), 10);
+        let telemetry = plans
+            .iter()
+            .filter(|(id, _)| !participants.contains(id))
+            .collect::<Vec<_>>();
+        assert_eq!(telemetry.len(), 1);
+        assert_eq!(
+            (
+                telemetry[0].1.exp,
+                telemetry[0].1.fame,
+                telemetry[0].1.dungeons,
+                telemetry[0].1.abysses,
+                telemetry[0].1.spider_dens
+            ),
+            (0, 0, [0; 3], 0, 0)
+        );
+        assert!(telemetry[0].1.lifetime.tiles > 0);
+        assert_eq!(
+            plans
+                .iter()
+                .filter(|(id, _)| participants.contains(id))
+                .count(),
+            9
+        );
         let exit = w.clear_exit.unwrap();
         assert!(!w.entities[&exit].published);
         for (player, snapshot) in plans {
