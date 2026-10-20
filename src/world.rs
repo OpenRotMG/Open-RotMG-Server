@@ -4566,19 +4566,21 @@ impl World {
                 .chain(self.decoy_positions())
                 .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
             let wake = match kind {
+                0x953 | 0x954 => 6.,
+                0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
-                0x617 | 0x61a | 0x6d8 => 12.,
+                0x617 => 8.,
+                0x61a => 10.5,
+                0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
-                _ => 20.,
+                _ => 12.,
             };
-            let radius = if entity.activated.is_some() {
-                20.
-            } else {
-                wake
-            };
+            // Activated enemies keep the same sight radius; they do not keep
+            // shooting once the player leaves that radius.
+            let radius = wake;
             let target = if burst {
                 Some(pos)
             } else {
