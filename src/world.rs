@@ -76,6 +76,10 @@ mod tracked;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+mod coil;
+mod jungle;
+#[cfg(test)]
+mod jungle_tests;
 
 mod cooperative;
 
@@ -863,6 +867,11 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
+            } else if template == "forbidden-jungle" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::jungle::generate(&self.content, seed)?)
             } else if template == "spider-den" {
                 let seed = match self.prepared_seed {
                     Some(seed) => seed ^ self.next_world as u64,
@@ -913,6 +922,7 @@ impl Directory {
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
             let started = Instant::now();
+            world.populate_coil_snakes()?;
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
@@ -1638,6 +1648,7 @@ impl World {
                             condition: crate::dungeon::abyss::initial_condition(kind)
                                 | crate::dungeon::spider::initial_condition(kind)
                                 | crate::dungeon::snake::initial_condition(kind)
+                                | crate::dungeon::jungle::initial_condition(kind)
                                 | if o.stasis_immune {
                                     crate::condition::bit(crate::condition::STASIS_IMMUNE)
                                 } else {
@@ -1730,7 +1741,7 @@ impl World {
             .copied()
             .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
             .collect();
-        Ok(Self {
+        let mut world = Self {
             content,
             map,
             navigation_geometry: Box::default(),
@@ -1791,7 +1802,9 @@ impl World {
             closed_vaults: BTreeMap::new(),
             trades: BTreeMap::new(),
             trade_requests: BTreeMap::new(),
-        })
+        };
+        world.jungle_initialize()?;
+        Ok(world)
     }
     pub fn settled(&self) -> Result<bool> {
         for p in self.players.values() {
@@ -1963,6 +1976,7 @@ impl World {
                     condition: crate::dungeon::abyss::initial_condition(kind)
                         | crate::dungeon::spider::initial_condition(kind)
                         | crate::dungeon::snake::initial_condition(kind)
+                        | crate::dungeon::jungle::initial_condition(kind)
                         | (if kind == 0x91a {
                             crate::condition::bit(crate::condition::INVULNERABLE)
                         } else {
@@ -3818,6 +3832,7 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.abysses))
                     .chain(std::iter::once(&mut snapshot.trenches))
                     .chain(std::iter::once(&mut snapshot.spider_dens))
+                    .chain(std::iter::once(&mut snapshot.jungles))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3853,6 +3868,7 @@ impl World {
         );
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
+            || snapshot.jungles > p.character.jungles
             || snapshot.abysses > p.character.abysses
             || snapshot.trenches > p.character.trenches
             || snapshot.spider_dens > p.character.spider_dens;
@@ -3871,6 +3887,7 @@ impl World {
         p.character.pirate_caves = snapshot.pirate_caves;
         p.character.dungeons = snapshot.dungeons;
         p.character.abysses = snapshot.abysses;
+        p.character.jungles = snapshot.jungles;
         p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
         if leveled && !p.death_pending {
@@ -4230,7 +4247,10 @@ impl World {
             if self.clear_exit.is_none() {
                 let kind = if defeated.kind == crate::dungeon::abyss::MALPHAS {
                     0x71c
-                } else if defeated.kind == crate::dungeon::snake::BOSS {
+                } else if matches!(
+                    defeated.kind,
+                    crate::dungeon::snake::BOSS | crate::dungeon::jungle::BOSS
+                ) {
                     0x704
                 } else {
                     0x71d
@@ -4362,9 +4382,10 @@ impl World {
                 x: resolved.x,
                 y: next.y,
             };
-            let x_clear = self.ocean_walkable(kind, horizontal);
-            let y_clear = self.ocean_walkable(kind, vertical);
-            if self.ocean_walkable(kind, next) && (!slide || x_clear || y_clear) {
+            let clear = |pos| self.jungle_walkable(kind, pos) || self.ocean_walkable(kind, pos);
+            let x_clear = clear(horizontal);
+            let y_clear = clear(vertical);
+            if clear(next) && (!slide || x_clear || y_clear) {
                 resolved = next;
             } else if slide {
                 // Wall contact removes the blocked component, not the entire movement step.
@@ -4616,6 +4637,12 @@ impl World {
                 }
             } else if kind == 0x909 && current.stage == Some(1) {
                 (Motion::Stationary, 0.)
+            } else if crate::dungeon::jungle::ROSTER.contains(&kind) {
+                crate::encounter::jungle::movement(
+                    kind,
+                    current.stage.expect("Jungle movement phase"),
+                    current.parent.is_some(),
+                )
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
@@ -5593,6 +5620,7 @@ mod tests {
             tiles: 0,
             pirate_caves: 0,
             dungeons: [0; 3],
+            jungles: 0,
             abysses: 0,
             trenches: 0,
             spider_dens: 0,

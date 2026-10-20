@@ -14,6 +14,10 @@ impl World {
             tracing::debug!(owner, target, "damage target already removed");
             return Ok(0);
         };
+        // Selected Boss Totems have no HP; zero HP must not turn an immune hit into a defeat.
+        if e.kind == crate::dungeon::jungle::BOSS_TOTEM {
+            return Ok(0);
+        }
         let flags = e.conditions(self.now);
         let affects = !crate::condition::protected(flags);
         let damage =

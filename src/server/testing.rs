@@ -693,6 +693,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         tiles: 0,
         pirate_caves: 0,
         dungeons: [0; 3],
+        jungles: 0,
         abysses: 0,
         trenches: 0,
         spider_dens: 0,

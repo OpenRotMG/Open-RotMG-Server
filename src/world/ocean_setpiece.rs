@@ -157,9 +157,17 @@ mod tests {
             for seed in [0, 12351] {
                 let mut w = World::new(content.clone(), map.clone()).unwrap();
                 w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.populate_coil_snakes().unwrap();
                 w.populate_realm_heroes().unwrap();
                 w.populate_named_quests().unwrap();
                 w.populate_realm_events().unwrap();
+                assert_eq!(
+                    w.entities
+                        .values()
+                        .filter(|e| e.kind == crate::dungeon::jungle::COIL)
+                        .count(),
+                    2
+                );
                 let original = w.map.clone();
                 w.populate_hermit().unwrap();
                 let area = w.setpieces.last().unwrap();

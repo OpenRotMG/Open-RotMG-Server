@@ -3,6 +3,7 @@ use anyhow::{Result, ensure};
 
 pub(crate) mod attacks;
 pub(crate) mod fauna;
+pub(crate) mod jungle;
 pub(crate) mod landmarks;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,6 +78,9 @@ pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
 pub fn profile(kind: u16) -> Option<Profile> {
+    if crate::dungeon::jungle::ROSTER.contains(&kind) {
+        return Some(jungle::profile(kind));
+    }
     if let Some(profile) = crate::dungeon::trench::profile(kind) {
         return Some(profile);
     }
@@ -497,6 +501,19 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if crate::dungeon::jungle::ROSTER.contains(&kind) {
+        for stage in 0..=6 {
+            for attack in jungle::schedule(kind, stage, 0).attacks {
+                if let attacks::Action::Shoot { projectile, .. } = attack.action {
+                    ensure!(
+                        content.get(kind)?.projectiles.contains_key(&projectile),
+                        "missing Jungle projectile {kind:#x}/{projectile}"
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
     if crate::dungeon::trench::ROSTER.contains(&kind) {
         return crate::dungeon::trench::validate(content, kind);
     }
