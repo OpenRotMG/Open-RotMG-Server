@@ -1703,6 +1703,7 @@ impl Room {
             5 => {
                 let (x, y) = (r.f32()?, r.f32()?);
                 r.done()?;
+                let owner_now = now;
                 let now = Instant::now();
                 let dt = now
                     .duration_since(self.players[&player].move_at)
@@ -1716,6 +1717,24 @@ impl Room {
                 } else {
                     None
                 };
+                let _move_trace = tracing::debug_span!(
+                    target: "build100_move",
+                    "MOVE validation",
+                    avatar = player,
+                    generation = self.character(player).generation,
+                    received = ?received,
+                    owner_now = ?owner_now,
+                    validation_now = ?now,
+                    previous_move_at = ?self.players[&player].move_at,
+                    effective_speed = speed,
+                    dt,
+                    credit_before = self.players[&player].move_credit,
+                    from_x = from.0,
+                    from_y = from.1,
+                    requested_x = x,
+                    requested_y = y
+                )
+                .entered();
                 let (x, y) = if let Some(map) = &self.map {
                     ensure!(x.is_finite() && y.is_finite(), "nonfinite movement");
                     let (w, h) = map.dimensions();
@@ -1724,6 +1743,7 @@ impl Room {
                         "movement outside map"
                     );
                     let speed = speed.expect("normal movement speed");
+                    tracing::debug!(target: "build100_move", requested_distance=distance(x,y,from.0,from.1), allowance=speed*dt+self.players[&player].move_credit, admitted=distance(x,y,from.0,from.1)<=speed*dt+self.players[&player].move_credit, "MOVE budget decision");
                     ensure!(
                         distance(x, y, from.0, from.1)
                             <= speed * dt + self.players[&player].move_credit,
@@ -1743,6 +1763,7 @@ impl Room {
                         (2.0..30.0).contains(&x) && (2.0..30.0).contains(&y),
                         "movement outside arena"
                     );
+                    tracing::debug!(target: "build100_move", effective_speed=15_f32, requested_distance=distance(x,y,from.0,from.1), allowance=15.*dt+1., admitted=distance(x,y,from.0,from.1)<=15.*dt+1., "MOVE arena budget decision");
                     ensure!(
                         distance(x, y, from.0, from.1) <= 15. * dt + 1.,
                         "movement exceeds speed limit"
@@ -1762,6 +1783,7 @@ impl Room {
                     .get_mut(&player)
                     .expect("attached avatar")
                     .move_at = now;
+                tracing::debug!(target: "build100_move", applied_x=x, applied_y=y, applied_distance=distance(x,y,from.0,from.1), credit_after=self.players[&player].move_credit, accepted_move_at=?now, "MOVE applied to candidate; not committed or installed");
             }
             8 => {
                 let id = r.u8()?;

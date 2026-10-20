@@ -510,6 +510,20 @@ impl Simulation {
             return Ok(());
         }
         let world = s.world;
+        let player_move = packet.id == 5;
+        let _move_trace = player_move.then(|| {
+            tracing::debug_span!(
+                target: "build100_move",
+                "MOVE owner",
+                session,
+                world,
+                avatar = s.avatar,
+                generation = s.generation,
+                received = ?received,
+                owner_now = ?now
+            )
+            .entered()
+        });
         let player_shot = packet.id == 8;
         let _trace = player_shot.then(|| {
             tracing::debug_span!(
@@ -526,6 +540,9 @@ impl Simulation {
         let candidate_started = Instant::now();
         if player_shot {
             tracing::debug!("build100 weapon candidate begin");
+        }
+        if player_move {
+            tracing::debug!(target: "build100_move", candidate_started=?candidate_started, "MOVE candidate begin");
         }
         let mut candidate = self.worlds[&world].clone();
         let mut output;
@@ -592,6 +609,9 @@ impl Simulation {
             if player_shot {
                 tracing::debug!(elapsed_ms=candidate_started.elapsed().as_secs_f64()*1000.0,success=result.is_ok(),output_count=result.as_ref().ok().map(Vec::len),error=?result.as_ref().err(),"build100 weapon candidate end");
             }
+            if player_move {
+                tracing::debug!(target: "build100_move", candidate_ended=?Instant::now(), accepted=result.is_ok(), error=?result.as_ref().err(), "MOVE candidate end; not committed or installed");
+            }
             output = result?;
         }
         let commit_started = Instant::now();
@@ -600,6 +620,9 @@ impl Simulation {
         }
         // A storage error is fatal to the actor: never acknowledge or publish a candidate that did not commit.
         let committed = self.commit(&candidate, &self.worlds[&world]);
+        if player_move {
+            tracing::debug!(target: "build100_move", commit_started=?commit_started, commit_ended=?Instant::now(), committed=committed.is_ok(), "MOVE SQL commit end; not installed");
+        }
         if player_shot {
             tracing::debug!(
                 elapsed_ms = commit_started.elapsed().as_secs_f64() * 1000.0,
@@ -616,6 +639,9 @@ impl Simulation {
             return Err(error.context(StorageFailure));
         }
         self.worlds.insert(world, candidate);
+        if player_move {
+            tracing::debug!(target: "build100_move", installed=?Instant::now(), "MOVE committed candidate installed; before publication");
+        }
         if arrival.is_some() && self.entry.is_some() {
             let avatar = self.sessions[&session].avatar.expect("loaded avatar");
             output = self

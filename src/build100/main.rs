@@ -272,14 +272,23 @@ async fn connection(socket: WebSocket, a: Arc<App>) -> Result<()> {
                         let session=lease.as_ref().context("HELLO required")?.session;
                         let (reply,receive)=oneshot::channel();
                         let started=std::time::Instant::now();
+                        if id == 5 {
+                            tracing::debug!(target: "build100_move", session, frame_seq, packet_index, received=?received, submitted=?started, "MOVE submit");
+                        }
                         tracing::debug!(session,frame_seq,packet_index,id,"build100 command enqueue begin");
                         let enqueue=tokio::time::timeout(Duration::from_secs(2),a.commands.send(lifecycle::Command::Input{session,packet,received,reply})).await;
                         tracing::debug!(session,frame_seq,packet_index,id,elapsed_ms=started.elapsed().as_secs_f64()*1000.0,success=enqueue.as_ref().is_ok_and(|r|r.is_ok()),"build100 command enqueue end");
+                        if id == 5 {
+                            tracing::debug!(target: "build100_move", session, frame_seq, packet_index, received=?received, enqueue_ended=?std::time::Instant::now(), success=enqueue.as_ref().is_ok_and(|r|r.is_ok()), "MOVE enqueue end");
+                        }
                         enqueue.context("build100 command queue stalled")?.map_err(|_|anyhow::anyhow!("build100 owner stopped"))?;
                         let started=std::time::Instant::now();
                         tracing::debug!(session,frame_seq,packet_index,id,"build100 owner reply begin");
                         let result=input_reply(&mut socket,&mut codec,&mut packets,receive,session).await?;
                         tracing::debug!(session,frame_seq,packet_index,id,elapsed_ms=started.elapsed().as_secs_f64()*1000.0,accepted=result.is_ok(),"build100 owner reply end");
+                        if id == 5 {
+                            tracing::debug!(target: "build100_move", session, frame_seq, packet_index, received=?received, replied=?std::time::Instant::now(), success=result.is_ok(), "MOVE reply");
+                        }
                         if let Err(error)=result {
                             tracing::warn!(session,frame_seq,packet_index,id,bullet=shot.map(|s|s.0),owner=shot.map(|s|s.1),item=shot.map(|s|s.2),error=%error,"build100 request rejected");
                             send(&mut socket,&mut codec,vec![Packet{id:20,body:vec![]},world::message(&error)],Some(session)).await?;
