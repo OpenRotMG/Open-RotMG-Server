@@ -673,7 +673,20 @@ fn entry(
                 );
             }
             ensure!(!object.name.is_empty(), "empty output object name");
-            if !c.config.is_empty() {
+            if !(c.config.is_empty()
+                || kind == 0x1dd
+                    && matches!(
+                        c.config.as_str(),
+                        "conn:16843265"
+                            | "conn:16908545"
+                            | "conn:16908802"
+                            | "conn:33620225"
+                            | "conn:33620482"
+                            | "conn:33685762"
+                            | "conn:33686017"
+                            | "conn:33686018"
+                    ))
+            {
                 let size: u16 = c
                     .config
                     .strip_prefix("size:")
@@ -1424,6 +1437,126 @@ mod tests {
             bad.cells[2].config = config.into();
             assert!(encode(&bad, &content).is_err(), "{config}");
         }
+    }
+
+    #[test]
+    fn realm_prepare_tomb_connections_match_selected_finite_geometry() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let mut connections = BTreeSet::new();
+        for mut value in [
+            33686018u32,
+            16908802,
+            16843266,
+            16908546,
+            16843265,
+            16843009,
+        ] {
+            for _ in 0..4 {
+                connections.insert(value);
+                value = value.rotate_right(8);
+            }
+        }
+        let all_binary: BTreeSet<_> = (0..16)
+            .map(|mask| {
+                u32::from_le_bytes(std::array::from_fn(|i| {
+                    if mask & (1 << i) == 0 { 2 } else { 1 }
+                }))
+            })
+            .collect();
+        assert_eq!(connections, all_binary);
+        assert_eq!(connections.len(), 16);
+        assert!(!connections.contains(&0));
+        assert!(!connections.contains(&u32::MAX));
+        let binding: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world01/tomb-connections.json"
+        ))
+        .unwrap();
+        let allowed: BTreeSet<u32> = binding["supports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                r["cell"]["config"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("conn:")
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(allowed.len(), 8);
+        assert!(allowed.is_subset(&connections));
+        let cell = |kind, config: String| Cell {
+            ground: 247,
+            object: Some(kind),
+            config,
+            terrain: 0,
+            region: 0,
+        };
+        let map = Map {
+            width: 8,
+            height: 1,
+            cells: allowed
+                .iter()
+                .map(|c| cell(477, format!("conn:{c}")))
+                .collect(),
+            spawns: vec![],
+        };
+        let (bytes, _) = encode(&map, &content).unwrap();
+        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        let decoded = Map::decode_cells(&bytes, &content).unwrap();
+        assert_eq!(
+            serde_json::to_value(&map.cells).unwrap(),
+            serde_json::to_value(&decoded.cells).unwrap()
+        );
+        for config in [
+            "conn:0",
+            "conn:-1",
+            "conn:1",
+            "conn: 33686018",
+            "conn:33686018\0",
+            "size:100;conn:33686018",
+            "conn:4294967295",
+            "conn:16843008",
+            "conn:50529027",
+            "conn:302121474",
+            "conn:-2113797630",
+            "conn:033686018",
+            "conn:+33686018",
+            "conn:0x02020202",
+            "conn:33686018;",
+            "conn:33686018;conn:16843009",
+            "size:100",
+        ] {
+            let mut bad = map.clone();
+            bad.cells[0] = cell(477, config.into());
+            assert!(encode(&bad, &content).is_err(), "{config}");
+            assert!(
+                dictionary(
+                    &serde_json::to_vec(&vec![map.cells[0].clone(), bad.cells[0].clone()]).unwrap(),
+                    &content
+                )
+                .is_err(),
+                "unused {config}"
+            );
+        }
+        for value in connections.difference(&allowed) {
+            let mut bad = map.clone();
+            bad.cells[0] = cell(477, format!("conn:{value}"));
+            assert!(encode(&bad, &content).is_err(), "valid but unused {value}");
+        }
+        for kind in [None, Some(288), Some(6175), Some(398)] {
+            for value in &allowed {
+                let mut bad = map.clone();
+                bad.cells[0].object = kind;
+                bad.cells[0].config = format!("conn:{value}");
+                assert!(encode(&bad, &content).is_err(), "{kind:?} {value}");
+            }
+        }
+        let mut blank = map;
+        blank.cells[0].config.clear();
+        encode(&blank, &content).unwrap();
     }
 
     #[test]
