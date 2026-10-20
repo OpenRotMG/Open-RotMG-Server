@@ -13,30 +13,39 @@ const CELLS: usize = SIDE * SIDE;
 const OBJECTS: &str = "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad91534b72";
 const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7";
 
-const SOURCE_LOCAL_IDENTITIES: [(&str, &str); 4] = [
+const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 5] = [
     (
         "classic-world-04-reconstruction",
         "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5",
+        2000,
     ),
     (
         "classic-world-08-reconstruction",
         "d0a544f4943991aa1265b7ebdfecb3a846215f297c1317ffb718ddd89e8d92bc",
+        2000,
     ),
     (
         "classic-world-10-reconstruction",
         "d7f3b0d274f4f6b0cf6093a336b8adbfaf322e9ce6d07c970b3219a8d24afd48",
+        2000,
     ),
     (
         "classic-world-13-reconstruction",
         "15cb5c88982275f3e72d4dc0bc9fb940177662013cacd6b76c1b95aeca46ecd1",
+        2000,
+    ),
+    (
+        "classic-world-06-reconstruction",
+        "f5dcb4af75cce476d80bc59760df78ec880211ba9d3d2847225fc3d3a6b1b30a",
+        2100,
     ),
 ];
 
-fn source_local_transform() -> serde_json::Value {
+fn source_local_transform(dimensions: [usize; 2]) -> serde_json::Value {
     serde_json::json!({
         "kind": "source-local-v1",
-        "source_dimensions": [2000, 2000],
-        "target_dimensions": [2000, 2000],
+        "source_dimensions": dimensions,
+        "target_dimensions": dimensions,
         "mapping": "tile_xy=source_xy",
         "historical_coordinates": "UNKNOWN",
         "status": "One source pixel per engineered cell does not prove original extent, pitch or origin."
@@ -47,24 +56,27 @@ impl ReviewedRecipe {
     fn dimensions(&self) -> Result<[usize; 2]> {
         let source = SOURCE_LOCAL_IDENTITIES
             .iter()
-            .find(|(id, _)| *id == self.id);
+            .find(|(id, hash, _)| *id == self.id || *hash == self.provenance.source_sha256);
         let expected = match self.schema {
             2 => {
                 ensure!(
                     source.is_none(),
-                    "reserved source-local ID {} requires schema 3, not schema 2 padding",
+                    "reserved source-local identity {} requires schema 3, not schema 2 padding or alias",
                     self.id
                 );
                 [SIDE, SIDE]
             }
             3 => {
                 ensure!(
-                    source.is_some_and(|(_, hash)| *hash == self.provenance.source_sha256),
+                    source
+                        .is_some_and(|(id, hash, _)| *id == self.id
+                            && *hash == self.provenance.source_sha256),
                     "unapproved source-local identity {} source {}",
                     self.id,
                     self.provenance.source_sha256
                 );
-                [2000, 2000]
+                let side = source.unwrap().2;
+                [side, side]
             }
             schema => bail!("unsupported reviewed recipe schema {schema}"),
         };
@@ -79,12 +91,17 @@ impl ReviewedRecipe {
         Ok(expected)
     }
     fn audit_inputs(&self, root: &Path) -> Result<Vec<u8>> {
-        self.dimensions()?;
+        let dimensions = self.dimensions()?;
         let p = &self.provenance;
         let policy = hashed_input(root, &p.policy.path, &p.policy.sha256, 64 * 1024)?;
         let annotations =
             hashed_input(root, &p.annotations.path, &p.annotations.sha256, 64 * 1024)?;
-        audit_scoped(&policy, &annotations, p, self.schema == 3)?;
+        audit_scoped(
+            &policy,
+            &annotations,
+            p,
+            (self.schema == 3).then_some(dimensions),
+        )?;
         Ok(policy)
     }
 }
@@ -428,6 +445,13 @@ impl Recipe {
 }
 impl ClassicRecipe {
     fn validate(&self) -> Result<()> {
+        ensure!(
+            !SOURCE_LOCAL_IDENTITIES
+                .iter()
+                .any(|(id, hash, _)| *id == self.id || *hash == self.provenance.source_sha256),
+            "reserved source-local identity {} requires reviewed schema 3",
+            self.id
+        );
         ensure!(
             self.schema == 1,
             "unsupported recipe schema {}",
@@ -823,11 +847,22 @@ fn encode_scoped(
     content: &Content,
     lava: Option<&World01Lava>,
 ) -> Result<(Vec<u8>, usize)> {
+    encode_reviewed(map, content, lava, None)
+}
+fn encode_reviewed(
+    map: &Map,
+    content: &Content,
+    lava: Option<&World01Lava>,
+    recipe: Option<&ReviewedRecipe>,
+) -> Result<(Vec<u8>, usize)> {
+    let shape_matches = match recipe {
+        Some(recipe) => [map.width as usize, map.height as usize] == recipe.dimensions()?,
+        None => map.width <= SIDE as i32 && map.height <= SIDE as i32,
+    };
     ensure!(
         map.width > 0
             && map.height > 0
-            && map.width <= SIDE as i32
-            && map.height <= SIDE as i32
+            && shape_matches
             && map.cells.len() == map.width as usize * map.height as usize,
         "invalid output dimensions/cells"
     );
@@ -937,24 +972,27 @@ fn hashed_input(root: &Path, path: &str, expected: &str, bound: usize) -> Result
 }
 #[cfg(test)]
 fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Result<()> {
-    audit_scoped(policy, annotations, provenance, false)
+    audit_scoped(policy, annotations, provenance, None)
 }
 fn audit_scoped(
     policy: &[u8],
     annotations: &[u8],
     provenance: &ImageProvenance,
-    source_local: bool,
+    source_local: Option<[usize; 2]>,
 ) -> Result<()> {
-    let cell_count = if source_local { 2000 * 2000 } else { CELLS };
+    let cell_count = match source_local {
+        Some([width, height]) => width * height,
+        None => CELLS,
+    };
     let policy: serde_json::Value =
         serde_json::from_slice(policy).context("parse source policy")?;
     let annotations: serde_json::Value =
         serde_json::from_slice(annotations).context("parse source annotations")?;
-    if source_local {
+    if let Some(dimensions) = source_local {
         ensure!(
             policy["schema"] == 2
-                && policy["transform"] == source_local_transform()
-                && annotations["transform"] == source_local_transform(),
+                && policy["transform"] == source_local_transform(dimensions)
+                && annotations["transform"] == source_local_transform(dimensions),
             "source-local-v1 requires exact policy/annotations transform and support audit schema 2"
         );
     }
@@ -1005,7 +1043,7 @@ fn audit_scoped(
             "unreviewed UNKNOWN component {}",
             i + 1
         );
-        if source_local {
+        if source_local.is_some() {
             // Metadata typing is not proof of a source-position/RGB/alpha partition.
             let fields = ["ground", "object", "config", "terrain", "region"]
                 .into_iter()
@@ -1061,7 +1099,9 @@ fn indexed_map(raw: &[u8], dictionary: &[Cell], dimensions: [usize; 2]) -> Resul
 }
 fn index_bytes([width, height]: [usize; 2]) -> Result<usize> {
     ensure!(
-        width > 0 && height > 0 && width <= SIDE && height <= SIDE,
+        width > 0
+            && height > 0
+            && ((width <= SIDE && height <= SIDE) || [width, height] == [2100, 2100]),
         "invalid reviewed dimensions {width}x{height}"
     );
     width
@@ -1150,9 +1190,9 @@ pub(crate) fn run(args: &[String]) -> Result<bool> {
         }
     };
     let prepared = started.elapsed();
-    let (bytes, dictionary) = match lava.as_ref() {
-        Some(lava) => encode_scoped(&map, &content, Some(lava))?,
-        None => encode(&map, &content)?,
+    let (bytes, dictionary) = match recipe {
+        Recipe::ReviewedCellsV1(r) => encode_reviewed(&map, &content, lava.as_ref(), Some(r))?,
+        Recipe::ClassicV1(_) => encode(&map, &content)?,
     };
     let output = safe_path(&root, recipe.output())?;
     if check {
@@ -1209,25 +1249,25 @@ mod tests {
     fn source_local_values(
         index: usize,
     ) -> (serde_json::Value, serde_json::Value, serde_json::Value) {
-        let (id, source) = SOURCE_LOCAL_IDENTITIES[index];
+        let (id, source, side) = SOURCE_LOCAL_IDENTITIES[index];
         let mut value = reviewed_value();
         value["schema"] = serde_json::json!(3);
         value["id"] = serde_json::json!(id);
         value["output"] = serde_json::json!(format!("{id}.wmap"));
-        value["width"] = serde_json::json!(2000);
-        value["height"] = serde_json::json!(2000);
+        value["width"] = serde_json::json!(side);
+        value["height"] = serde_json::json!(side);
         value["provenance"]["source_sha256"] = serde_json::json!(source);
         let policy = serde_json::json!({
             "schema":2, "selected_client":"123.5.1", "source_sha256":source,
-            "transform":source_local_transform(),
-            "audit":{"kind":"reviewed-supports-v1","supports":1,"pixels":4_000_000}
+            "transform":source_local_transform([side, side]),
+            "audit":{"kind":"reviewed-supports-v1","supports":1,"pixels":side * side}
         });
         value["provenance"]["policy"]["sha256"] =
             serde_json::json!(sha256(&serde_json::to_vec(&policy).unwrap()));
         let annotations = serde_json::json!({
             "source_sha256":source, "policy_sha256":value["provenance"]["policy"]["sha256"],
-            "transform":source_local_transform(),
-            "unknown":[{"support":1,"pixels":4_000_000,"support_sha256":"0".repeat(64),
+            "transform":source_local_transform([side, side]),
+            "unknown":[{"support":1,"pixels":side * side,"support_sha256":"0".repeat(64),
                 "status":"REVIEWED_RECONSTRUCTION","reason":"Synthetic geometry test only",
                 "ground":190,"object":null,"config":"","terrain":11,"region":0}]
         });
@@ -1257,15 +1297,15 @@ mod tests {
     }
 
     #[test]
-    fn realm_prepare_source_local_four_geometry_contracts_and_identity_negatives() {
+    fn realm_prepare_source_local_finite_geometry_contracts_and_identity_negatives() {
         let root =
             std::env::temp_dir().join(format!("source-local-metadata-{}", rand::random::<u64>()));
-        for index in 0..4 {
+        for (index, &(_, _, side)) in SOURCE_LOCAL_IDENTITIES.iter().enumerate() {
             let (value, policy, annotations) = source_local_values(index);
             write_source_local(&root, &value, &policy, &annotations);
             assert_eq!(
                 read_recipe(&root, "synthetic.json").unwrap().dimensions(),
-                [2000, 2000]
+                [side, side]
             );
             for (field, invalid) in [
                 ("schema", serde_json::json!(2)),
@@ -1278,7 +1318,15 @@ mod tests {
                 assert!(recipe(bad).is_err(), "{field}");
             }
             for field in ["width", "height"] {
-                for invalid in [0i64, -1, 1999, 2001, 2048, 2100, i64::MAX] {
+                for invalid in [
+                    0i64,
+                    -1,
+                    side as i64 - 1,
+                    side as i64 + 1,
+                    2048,
+                    if side == 2000 { 2100 } else { 2000 },
+                    i64::MAX,
+                ] {
                     let mut bad = value.clone();
                     bad[field] = serde_json::json!(invalid);
                     assert!(recipe(bad).is_err(), "{field} {invalid}");
@@ -1308,6 +1356,9 @@ mod tests {
             padded["schema"] = serde_json::json!(2);
             padded["width"] = serde_json::json!(2048);
             padded["height"] = serde_json::json!(2048);
+            assert!(recipe(padded.clone()).is_err());
+            padded["id"] = serde_json::json!("source-hash-disguise");
+            padded["output"] = serde_json::json!("source-hash-disguise.wmap");
             assert!(recipe(padded).is_err());
             for key in ["policy", "annotations"] {
                 let mut bad = value.clone();
@@ -1317,6 +1368,27 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn realm_prepare_source_local_identity_cannot_hide_in_classic_profile() {
+        let legacy = serde_json::json!({
+            "profile":"classic-v1", "schema":1, "id":"legacy-classic-control", "output":"legacy-classic-control.wmap",
+            "width":2048, "height":2048, "orientation":"x-major", "scenery_seed":12351,
+            "content":{"objects":OBJECTS,"grounds":GROUNDS},
+            "layers":{"elevation":{"path":"e.z","sha256":"0".repeat(64)},"moisture":{"path":"m.z","sha256":"0".repeat(64)},"overrides":{"path":"o.z","sha256":"0".repeat(64)}},
+            "provenance":{"source_url":"https://example.invalid/source","source_sha256":"0".repeat(64),"exporter_url":"https://example.invalid/exporter","exporter_sha256":"0".repeat(64),"emulator":"synthetic","mode":"Perlin","seed_variant":"synthetic","status":"Synthetic identity test only"}
+        });
+        recipe(legacy.clone()).unwrap();
+        for (id, hash, _) in SOURCE_LOCAL_IDENTITIES {
+            let mut bad = legacy.clone();
+            bad["id"] = serde_json::json!(id);
+            bad["output"] = serde_json::json!(format!("{id}.wmap"));
+            assert!(recipe(bad).is_err(), "reserved ID {id}");
+            let mut bad = legacy.clone();
+            bad["provenance"]["source_sha256"] = serde_json::json!(hash);
+            assert!(recipe(bad).is_err(), "reserved hash {hash}");
+        }
     }
 
     #[test]
@@ -1330,11 +1402,15 @@ mod tests {
                 &serde_json::to_vec(p).unwrap(),
                 &serde_json::to_vec(a).unwrap(),
                 &r.provenance,
-                true,
+                Some([r.width, r.height]),
             )
         };
         check(&policy, &annotations).unwrap();
-        for key in source_local_transform().as_object().unwrap().keys() {
+        for key in source_local_transform([r.width, r.height])
+            .as_object()
+            .unwrap()
+            .keys()
+        {
             let mut p = policy.clone();
             let mut a = annotations.clone();
             p["transform"].as_object_mut().unwrap().remove(key);
@@ -1450,17 +1526,161 @@ mod tests {
     }
 
     #[test]
+    fn realm_prepare_world06_exact_extent_stride_stream_and_scope() {
+        let dimensions = [2100, 2100];
+        let size = index_bytes(dimensions).unwrap();
+        assert_eq!(size, 8_820_000);
+        for bad in [
+            [2100, 2048],
+            [2048, 2100],
+            [2099, 2100],
+            [2101, 2100],
+            [2100, 2101],
+        ] {
+            assert!(index_bytes(bad).is_err());
+        }
+        let content = Content::load(Path::new("data")).unwrap();
+        let dictionary = dictionary(
+            &serde_json::to_vec(&serde_json::json!([
+                {"ground":190,"object":null,"config":"","terrain":11,"region":0},
+                {"ground":1,"object":null,"config":"","terrain":1,"region":0},
+                {"ground":70,"object":398,"config":"size:140","terrain":2,"region":0},
+                {"ground":86,"object":6175,"config":"","terrain":3,"region":0},
+                {"ground":173,"object":354,"config":"","terrain":4,"region":0},
+                {"ground":70,"object":404,"config":"size:120","terrain":5,"region":0}
+            ]))
+            .unwrap(),
+            &content,
+        )
+        .unwrap();
+        let positions = [0, 2099, 2100, 4_407_900, 4_409_999];
+        let mut raw = vec![0; size];
+        for (n, i) in positions.into_iter().enumerate() {
+            raw[i * 2..i * 2 + 2].copy_from_slice(&(n as u16 + 1).to_le_bytes());
+        }
+        let map = indexed_map(&raw, &dictionary, dimensions).unwrap();
+        assert_eq!(map.cells.len(), 4_410_000);
+        for (n, i) in positions.into_iter().enumerate() {
+            assert_eq!(
+                map.cell((i % 2100) as f32, (i / 2100) as f32)
+                    .unwrap()
+                    .terrain,
+                n as u8 + 1
+            );
+        }
+        assert!(map.cell(2100., 2099.).is_none());
+        assert!(map.cell(2099., 2100.).is_none());
+        let (value, policy, annotations) = source_local_values(4);
+        let Recipe::ReviewedCellsV1(r) = recipe(value.clone()).unwrap() else {
+            panic!()
+        };
+        audit_scoped(
+            &serde_json::to_vec(&policy).unwrap(),
+            &serde_json::to_vec(&annotations).unwrap(),
+            &r.provenance,
+            Some(dimensions),
+        )
+        .unwrap();
+        let mut bad_policy = policy.clone();
+        let mut bad_annotations = annotations.clone();
+        bad_policy["transform"] = source_local_transform([2000, 2000]);
+        bad_annotations["transform"] = bad_policy["transform"].clone();
+        assert!(
+            audit_scoped(
+                &serde_json::to_vec(&bad_policy).unwrap(),
+                &serde_json::to_vec(&bad_annotations).unwrap(),
+                &r.provenance,
+                Some(dimensions)
+            )
+            .is_err()
+        );
+        bad_policy = policy.clone();
+        bad_annotations = annotations.clone();
+        bad_policy["audit"]["pixels"] = serde_json::json!(4_410_001);
+        bad_annotations["unknown"][0]["pixels"] = serde_json::json!(4_410_001);
+        assert!(
+            audit_scoped(
+                &serde_json::to_vec(&bad_policy).unwrap(),
+                &serde_json::to_vec(&bad_annotations).unwrap(),
+                &r.provenance,
+                Some(dimensions)
+            )
+            .is_err()
+        );
+        for invalid in [serde_json::json!(2100.0), serde_json::json!(true)] {
+            let mut bad = value.clone();
+            bad["width"] = invalid;
+            assert!(recipe(bad).is_err());
+        }
+        let (bytes, _) = encode_reviewed(&map, &content, None, Some(&r)).unwrap();
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, None, Some(&r)).unwrap().0
+        );
+        assert!(encode(&map, &content).is_err());
+        assert!(Map::decode_cells(&bytes, &content).is_err());
+        assert!(Map::decode_realm_cells(&bytes, &content, [2000, 2000]).is_err());
+        let decoded = Map::decode_realm_cells(&bytes, &content, dimensions).unwrap();
+        assert_eq!([decoded.width, decoded.height], [2100, 2100]);
+        assert_eq!(decoded.cells.len(), map.cells.len());
+        for (a, b) in map.cells.iter().zip(&decoded.cells) {
+            assert_eq!(
+                (a.ground, a.object, &a.config, a.terrain, a.region),
+                (b.ground, b.object, &b.config, b.terrain, b.region)
+            );
+        }
+        drop(map);
+        drop(decoded);
+        for bad in [
+            &raw[..size - 1],
+            &raw[..size - 2],
+            &[raw.as_slice(), &[0, 0]].concat(),
+            &vec![0; CELLS * 2],
+        ] {
+            assert!(indexed_map(bad, &dictionary, dimensions).is_err());
+        }
+        let compressed = zipped(&raw);
+        let hash = sha256(&raw);
+        assert_eq!(inflate(&compressed, size, size + 4096, &hash).unwrap(), raw);
+        for bad in [
+            compressed[..compressed.len() - 1].to_vec(),
+            [compressed.as_slice(), &[0]].concat(),
+            [compressed.as_slice(), compressed.as_slice()].concat(),
+            zipped(&raw[..size - 1]),
+        ] {
+            assert!(inflate(&bad, size, size + 4096, &hash).is_err());
+        }
+        raw[size - 2..].copy_from_slice(&6u16.to_le_bytes());
+        assert!(
+            indexed_map(&raw, &dictionary, dimensions)
+                .unwrap_err()
+                .to_string()
+                .contains("6 at 2099,2099")
+        );
+    }
+
+    #[test]
     fn realm_source_open_source_local_synthetic_shape_policy_and_baseline_rejection() {
+        source_local_open(0);
+    }
+
+    #[test]
+    fn realm_source_open_world06_synthetic_shape_policy_and_baseline_rejection() {
+        source_local_open(4);
+    }
+
+    fn source_local_open(index: usize) {
+        let side = SOURCE_LOCAL_IDENTITIES[index].2;
         let root =
             std::env::temp_dir().join(format!("source-local-open-{}", rand::random::<u64>()));
         let realms = root.join("realms");
-        let (mut value, policy, annotations) = source_local_values(0);
+        let (mut value, policy, annotations) = source_local_values(index);
         let cells = serde_json::json!([
             {"ground":190,"object":null,"config":"","terrain":11,"region":0},
             {"ground":190,"object":null,"config":"","terrain":1,"region":0}
         ]);
-        let mut raw = vec![0; 8_000_000];
-        raw[(1000 * 2000 + 1000) * 2] = 1;
+        let mut raw = vec![0; side * side * 2];
+        raw[(side / 2 * side + side / 2) * 2] = 1;
         let compressed = zipped(&raw);
         value["inputs"]["dictionary"]["sha256"] =
             serde_json::json!(sha256(&serde_json::to_vec(&cells).unwrap()));
@@ -1483,10 +1703,17 @@ mod tests {
         };
         let (map, lava) = reviewed_map(&realms, &r, &content).unwrap();
         assert!(lava.is_none());
-        let (bytes, _) = encode(&map, &content).unwrap();
-        assert_eq!(bytes, encode(&map, &content).unwrap().0);
-        let decoded = Map::decode_cells(&bytes, &content).unwrap();
-        assert_eq!(decoded.cells.len(), 4_000_000);
+        let (bytes, _) = encode_reviewed(&map, &content, None, Some(&r)).unwrap();
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, None, Some(&r)).unwrap().0
+        );
+        if side > SIDE {
+            assert!(encode(&map, &content).is_err());
+            assert!(Map::decode_cells(&bytes, &content).is_err());
+        }
+        let decoded = Map::decode_realm_cells(&bytes, &content, [side, side]).unwrap();
+        assert_eq!(decoded.cells.len(), side * side);
         for (a, b) in map.cells.iter().zip(&decoded.cells) {
             assert_eq!(
                 (a.ground, a.object, &a.config, a.terrain, a.region),
@@ -1512,8 +1739,8 @@ mod tests {
         );
         let sources = super::super::realms::sources(&root).unwrap();
         let opened = sources[0].open(&content).unwrap();
-        assert_eq!([opened.width, opened.height], [2000, 2000]);
-        assert_eq!(opened.cells.len(), 4_000_000);
+        assert_eq!([opened.width, opened.height], [side as i32, side as i32]);
+        assert_eq!(opened.cells.len(), side * side);
         assert_eq!(opened.spawns.len(), 4);
         drop(opened);
         let originals = [
@@ -1585,7 +1812,12 @@ mod tests {
             error.contains("expected dimensions [2048, 2048]"),
             "{error}"
         );
-        assert!(error.contains("actual [2000, 2000]"), "{error}");
+        if side <= SIDE {
+            assert!(
+                error.contains(&format!("actual [{side}, {side}]")),
+                "{error}"
+            );
+        }
         let legacy = reviewed_value();
         write_json(&realms, "legacy.json", &legacy);
         std::fs::write(realms.join(legacy["output"].as_str().unwrap()), &bytes).unwrap();
@@ -1621,7 +1853,7 @@ mod tests {
         let error = sources[0].open(&content).unwrap_err().to_string();
         assert!(error.contains("schema 3 source"), "{error}");
         assert!(
-            error.contains("expected dimensions [2000, 2000]"),
+            error.contains(&format!("expected dimensions [{side}, {side}]")),
             "{error}"
         );
         assert!(error.contains("actual [2048, 2048]"), "{error}");

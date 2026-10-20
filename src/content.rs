@@ -749,6 +749,20 @@ impl Map {
         Ok(map)
     }
     pub(crate) fn decode_cells(bytes: &[u8], content: &Content) -> Result<Self> {
+        Self::decode_bounded_cells(bytes, content, false)
+    }
+    pub(crate) fn decode_realm_cells(
+        bytes: &[u8],
+        content: &Content,
+        dimensions: [usize; 2],
+    ) -> Result<Self> {
+        Self::decode_bounded_cells(bytes, content, dimensions == [2100, 2100])
+    }
+    fn decode_bounded_cells(
+        bytes: &[u8],
+        content: &Content,
+        source_local_2100: bool,
+    ) -> Result<Self> {
         let mut data = Vec::new();
         flate2::read::ZlibDecoder::new(bytes)
             .take(16 * 1024 * 1024 + 1)
@@ -792,8 +806,11 @@ impl Map {
         let width = r.int()?;
         let height = r.int()?;
         ensure!(
-            width > 0 && height > 0 && width <= 2048 && height <= 2048,
-            "map dimensions must be within 1..=2048"
+            width > 0
+                && height > 0
+                && ((width <= 2048 && height <= 2048)
+                    || (source_local_2100 && width == 2100 && height == 2100)),
+            "map dimensions {width}x{height} exceed ordinary limit 2048; admitted 2100-square Realm: {source_local_2100}"
         );
         let mut cells = Vec::new();
         let mut spawns = Vec::new();

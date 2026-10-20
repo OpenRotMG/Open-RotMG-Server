@@ -57,12 +57,13 @@ impl Source {
                         content.xml_sha256
                     );
                 }
-                let mut map = Map::decode_cells(bytes, content).with_context(|| {
-                    format!(
-                        "decode Realm layout {} output SHA-256 {}",
-                        asset.contract, asset.sha256
-                    )
-                })?;
+                let mut map = Map::decode_realm_cells(bytes, content, asset.expected_dimensions)
+                    .with_context(|| {
+                        format!(
+                            "decode Realm layout {} output SHA-256 {} expected dimensions {:?}",
+                            asset.contract, asset.sha256, asset.expected_dimensions
+                        )
+                    })?;
                 let [width, height] = asset.expected_dimensions;
                 ensure!(
                     map.width == width as i32
