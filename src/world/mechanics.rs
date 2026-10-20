@@ -139,6 +139,14 @@ impl World {
         }
     }
 
+    pub(super) fn summon_occupancy(&self) -> usize {
+        self.actors()
+            .filter(|e| e.parent.is_some() || e.quest.is_some())
+            .count()
+            + self.named_births.len()
+            + self.manor_births.len()
+    }
+
     pub(super) fn spawn_children(
         &mut self,
         parent: i32,
@@ -156,11 +164,7 @@ impl World {
         if missing == 0 {
             return Ok(());
         }
-        let occupied = self
-            .actors()
-            .filter(|e| e.parent.is_some() || e.quest.is_some())
-            .count()
-            + self.named_births.len();
+        let occupied = self.summon_occupancy();
         let limit = self.summon_limit();
         ensure!(
             occupied + missing <= limit,
@@ -517,10 +521,12 @@ impl World {
     pub(super) fn mechanic_expiry(&mut self) {
         self.fauna_birth_step();
         self.named_birth_step();
+        self.manor_birth_step();
         let due = |e: &Entity| {
             e.expires.is_some_and(|deadline| deadline <= self.now)
-                || e.parent
-                    .is_some_and(|parent| !self.entities.contains_key(&parent))
+                // Thrown hazards finish their fuses even if their summoner dies.
+                || !matches!(e.kind, crate::dungeon::manor::ROCK | crate::dungeon::manor::MINE)
+                    && e.parent.is_some_and(|parent| !self.entities.contains_key(&parent))
         };
         let expired: Vec<_> = self
             .timed_ids

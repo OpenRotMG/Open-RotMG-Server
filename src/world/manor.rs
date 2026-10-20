@@ -5,7 +5,67 @@ use crate::{
     encounter::Motion,
 };
 
+pub(super) struct Toss {
+    parent: i32,
+    kind: u16,
+    position: Pos,
+    deadline: u64,
+    lifetime: u64,
+}
+
 impl World {
+    pub(super) fn manor_toss(
+        &mut self,
+        parent: i32,
+        kind: u16,
+        position: Pos,
+        lifetime: u64,
+    ) -> Result<()> {
+        crate::encounter::validate(&self.content, kind)?;
+        crate::loot::validate(&self.content, kind)?;
+        if self.walkable(position) {
+            ensure!(
+                self.summon_occupancy() < self.summon_limit(),
+                "Manor toss exceeds summon budget"
+            );
+            self.manor_births.push(Toss {
+                parent,
+                kind,
+                position,
+                // Phoenix TossEnemy lands after its flight timer, not alongside the telegraph.
+                deadline: self.now + 1500,
+                lifetime,
+            });
+        } else {
+            tracing::debug!(parent, kind, ?position, "Manor toss has a blocked landing");
+        }
+        self.telegraph_throw(parent, position, 0xffffbf00);
+        Ok(())
+    }
+
+    pub(super) fn manor_birth_step(&mut self) {
+        let mut i = 0;
+        while i < self.manor_births.len() {
+            if self.manor_births[i].deadline > self.now {
+                i += 1;
+                continue;
+            }
+            let toss = self.manor_births.remove(i);
+            if toss.kind == CREATURE && !self.entities.contains_key(&toss.parent) {
+                tracing::debug!(
+                    parent = toss.parent,
+                    "Ruthven's death canceled his pending coffin"
+                );
+                continue;
+            }
+            if let Err(error) =
+                self.manor_child(toss.parent, toss.kind, toss.position, Some(toss.lifetime))
+            {
+                tracing::error!(parent=toss.parent,kind=toss.kind,position=?toss.position,%error,"admitted Manor toss failed to land");
+            }
+        }
+    }
+
     fn manor_child(
         &mut self,
         parent: i32,
@@ -14,7 +74,7 @@ impl World {
         lifetime: Option<u64>,
     ) -> Result<i32> {
         ensure!(
-            self.actors().filter(|e| e.parent.is_some()).count() < self.summon_limit(),
+            self.summon_occupancy() < self.summon_limit(),
             "Manor summon budget exhausted"
         );
         ensure!(
@@ -54,6 +114,9 @@ impl World {
     ) -> Result<()> {
         let e = &self.entities[&id];
         let (kind, pos, hp) = (e.kind, e.pos, e.hp);
+        if matches!(kind, KAGE | MINE) {
+            return self.manor_entry_mechanics(id, target, elapsed);
+        }
         if kind == BOSS {
             let (stage, age) = manor::phase(elapsed);
             let part = stage % 3;
@@ -63,8 +126,7 @@ impl World {
                 }
                 if part == 2 {
                     ensure!(
-                        self.actors().filter(|e| e.parent.is_some()).count() + 49
-                            <= self.summon_limit(),
+                        self.summon_occupancy() + 49 <= self.summon_limit(),
                         "Ruthven bat formation exceeds summon budget"
                     );
                     let mut sites = vec![];
@@ -140,17 +202,13 @@ impl World {
                 });
                 let landed = sites.iter().filter(|p| self.walkable(**p)).count();
                 ensure!(
-                    self.actors().filter(|e| e.parent.is_some()).count() + landed
-                        <= self.summon_limit(),
+                    self.summon_occupancy() + landed <= self.summon_limit(),
                     "Ruthven coffin formation exceeds summon budget"
                 );
                 // The period corridor tactic relies on wall-bound throws failing, not being relocated.
                 // https://www.reddit.com/r/RotMG/comments/u6lp3/damn_those_lil_feratu/
                 for site in sites {
-                    self.telegraph_throw(id, site, 0xff8f3030);
-                    if self.walkable(site) {
-                        self.manor_child(id, CREATURE, site, Some(20000))?;
-                    }
+                    self.manor_toss(id, CREATURE, site, 20000)?;
                 }
                 self.entities.get_mut(&id).unwrap().next_aux = 1;
                 tracing::info!(
@@ -159,7 +217,7 @@ impl World {
                     landed,
                     x = pos.x,
                     y = pos.y,
-                    "Ruthven coffin tosses resolved"
+                    "Ruthven coffin tosses scheduled"
                 );
             }
         } else if kind == 0x1727 && e.stage.is_none() {
@@ -216,8 +274,7 @@ impl World {
             && let Some(site) = target
         {
             if self.walkable(site) {
-                self.telegraph_throw(id, site, 0xffffaa00);
-                self.manor_child(id, ROCK, site, Some(3050))?;
+                self.manor_toss(id, ROCK, site, 3050)?;
             }
             self.entities.get_mut(&id).unwrap().next_aux = self.now + 3000;
         } else if kind == ROCK && e.expires.is_none() {
@@ -236,6 +293,23 @@ impl World {
         elapsed: u64,
     ) -> (Motion, f32) {
         let e = &self.entities[&id];
+        if e.kind == KAGE {
+            return match e.stage.expect("Kage movement phase") {
+                2 => (
+                    Motion::WanderHome { radius: 1. },
+                    crate::encounter::nr_speed(0.4),
+                ),
+                3 => (
+                    Motion::Chase {
+                        sight: 20.,
+                        stop: 1.,
+                    },
+                    crate::encounter::nr_speed(0.8),
+                ),
+                0 | 1 => (Motion::Stationary, 0.),
+                _ => unreachable!("invalid Kage movement phase"),
+            };
+        }
         if e.kind == BOSS {
             match manor::phase(elapsed).0 % 3 {
                 0 => (
@@ -306,7 +380,7 @@ impl World {
                 "Coffin Creature brood has insufficient walkable positions"
             );
             ensure!(
-                self.actors().filter(|e| e.parent.is_some()).count() + count <= self.summon_limit(),
+                self.summon_occupancy() + count <= self.summon_limit(),
                 "Coffin Creature brood exceeds summon budget"
             );
             for i in 0..count {

@@ -48,6 +48,7 @@ mod landmark_ai;
 
 mod lost_lands;
 mod manor;
+mod manor_entry;
 mod midlands;
 #[cfg(test)]
 mod movement_tests;
@@ -548,6 +549,7 @@ pub struct World {
     grenades: Vec<mechanics::Grenade>,
     fauna_births: Vec<fauna_births::Birth>,
     named_births: Vec<named_births::Birth>,
+    manor_births: Vec<manor::Toss>,
     lava_patches: BTreeMap<usize, (u64, u8)>,
     ability_state: abilities::State,
     companions: companions::State,
@@ -721,7 +723,8 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        let map = Arc::new(crate::terrain::generate(&content, seed, 512)?);
+        // The fixture must fit both finite 65-tile graveyards alongside the other setpieces.
+        let map = Arc::new(crate::terrain::generate(&content, seed, 768)?);
         Self::configured(
             path,
             content,
@@ -933,6 +936,7 @@ impl Directory {
             world.populate_named_quests()?;
             world.populate_realm_events()?;
             world.populate_hermit()?;
+            world.populate_manor_entry()?;
             world.populate_realm_population()?;
             tracing::info!(
                 layout = world.realm_layout,
@@ -1771,6 +1775,7 @@ impl World {
             grenades: Vec::new(),
             fauna_births: Vec::new(),
             named_births: Vec::new(),
+            manor_births: Vec::new(),
             lava_patches: BTreeMap::new(),
             ability_state: abilities::State::default(),
             companions: companions::State::default(),
@@ -4574,7 +4579,7 @@ impl World {
             // Self-destruction is a deadline, not target acquisition or a weapon cooldown.
             let shield_burst = self.shield_burst(id);
             let burst = shield_burst
-                || (kind == 0x91a
+                || (matches!(kind, 0x91a | crate::dungeon::manor::MINE)
                     && entity.expires == Some(self.now + 50)
                     && self.now >= entity.next_shot);
             if !burst
@@ -4592,7 +4597,7 @@ impl World {
                         && !p.death_pending
                         && !p.departing
                         && !p.paused
-                        && (kind == 0x6d8
+                        && (matches!(kind, 0x6d8 | crate::dungeon::manor::MINE)
                             || p.conditions(self.now)
                                 & crate::condition::bit(crate::condition::INVISIBLE)
                                 == 0)
@@ -4601,7 +4606,8 @@ impl World {
                 .chain(self.decoy_positions())
                 .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
             let wake = match kind {
-                crate::dungeon::manor::BAT
+                crate::dungeon::manor::KAGE
+                | crate::dungeon::manor::BAT
                 | crate::dungeon::manor::CHASER
                 | crate::dungeon::manor::DECOY
                 | 0x1727 => 20.,
@@ -4620,7 +4626,9 @@ impl World {
             // Activated enemies keep the same sight radius; they do not keep
             // shooting once the player leaves that radius.
             let radius = wake;
-            let target = if burst {
+            let target = if burst && kind == crate::dungeon::manor::MINE {
+                nearest.filter(|p| pos.distance(*p) < 60.)
+            } else if burst {
                 Some(pos)
             } else {
                 nearest.filter(|p| pos.distance(*p) < radius)

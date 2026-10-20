@@ -223,8 +223,9 @@ fn manor_layouts_are_seeded_connected_and_have_a_safe_arrival() {
 #[test]
 fn manor_returns_on_timer_with_four_living_coffins_and_owned_bat_groups() {
     let (mut w, boss) = arena();
-    for t in [0, 9100, 11750, 16750] {
+    for t in [0, 9100, 11750, 13250, 16750] {
         w.now = t;
+        w.mechanic_expiry();
         w.manor_mechanics(boss, Some(Pos { x: 42., y: 42. }), t)
             .unwrap();
     }
@@ -294,6 +295,13 @@ fn manor_corridor_ritual_uses_the_lured_position_and_failed_tosses_do_not_softlo
     ));
     w.now = 11750;
     w.manor_mechanics(boss, None, 11750).unwrap();
+    assert_eq!(w.actors().filter(|e| e.kind == CREATURE).count(), 0);
+    assert_eq!(w.manor_births.len(), 2);
+    w.now = 13249;
+    w.mechanic_expiry();
+    assert_eq!(w.actors().filter(|e| e.kind == CREATURE).count(), 0);
+    w.now = 13250;
+    w.mechanic_expiry();
     let mut ys: Vec<_> = w
         .actors()
         .filter(|e| e.kind == CREATURE)
@@ -353,6 +361,7 @@ fn manor_skipped_room_broods_leave_capacity_for_ruthven() {
     w.now = 11750;
     w.manor_mechanics(boss, None, 11750).unwrap();
     w.now = 16750;
+    w.mechanic_expiry();
     w.manor_mechanics(boss, None, 16750).unwrap();
     assert_eq!(
         w.actors()
@@ -362,6 +371,157 @@ fn manor_skipped_room_broods_leave_capacity_for_ruthven() {
     );
     assert!(w.actors().filter(|e| e.parent.is_some()).count() <= SUMMON_LIMIT);
     assert_eq!(tests::world().summon_limit(), 256);
+}
+
+#[test]
+fn manor_toss_reserves_capacity_and_a_dead_guards_rock_lands_and_explodes() {
+    let (mut w, boss) = arena();
+    w.name = "generic budget".into();
+    for _ in 0..255 {
+        let id = w
+            .spawn_entity(BAT, Pos { x: 20.5, y: 20.5 }, vec![])
+            .unwrap();
+        w.entities
+            .get_mut(&id)
+            .unwrap()
+            .parent
+            .set(Some(boss), id, &mut w.timed_ids);
+    }
+    let guard = w
+        .spawn_entity(0x1729, Pos { x: 30.5, y: 30.5 }, vec![])
+        .unwrap();
+    w.manor_mechanics(guard, Some(Pos { x: 32.5, y: 30.5 }), 0)
+        .unwrap();
+    assert_eq!(w.summon_occupancy(), 256);
+    assert!(w.spawn_children(guard, BAT, 1, 0.4).is_err());
+    w.remove_entity(guard);
+    w.now = 1499;
+    w.mechanic_expiry();
+    assert!(!w.actors().any(|e| e.kind == ROCK));
+    w.now = 1500;
+    w.mechanic_expiry();
+    let rock = w.actors().find(|e| e.kind == ROCK).unwrap().id;
+    assert_eq!(w.entities[&rock].parent, Some(guard));
+    assert_eq!(w.entities[&rock].activated, Some(1500));
+    assert_eq!(w.entities[&rock].expires, Some(4550));
+    assert!(w.manor_births.is_empty());
+    w.now = 4500;
+    w.npc_step();
+    assert_eq!(w.bullets.iter().filter(|b| b.owner == rock).count(), 8);
+    w.now = 4550;
+    w.mechanic_expiry();
+    assert!(!w.entities.contains_key(&rock));
+}
+
+#[test]
+fn manor_kage_grave_cycle_and_mine_deadlines_preserve_selected_definitions() {
+    let (mut w, _) = arena();
+    let kage = w
+        .spawn_entity(KAGE, Pos { x: 20.5, y: 20.5 }, vec![])
+        .unwrap();
+    assert_eq!(w.content.objects[&KAGE].hp, 7000);
+    assert_eq!(w.content.objects[&KAGE].defense, 120);
+    assert_eq!(w.content.objects[&MINE].hp, 500);
+    w.entities.get_mut(&kage).unwrap().hp = 6300;
+    w.manor_mechanics(kage, None, 0).unwrap();
+    assert_eq!(w.entities[&kage].stage, Some(0));
+    w.entities.get_mut(&kage).unwrap().hp = 6299;
+    for (now, elapsed, stage, protected) in [
+        (0, 0, 1, true),
+        (2000, 2000, 2, false),
+        (7000, 5000, 3, true),
+        (11000, 4000, 2, false),
+    ] {
+        w.now = now;
+        w.manor_mechanics(kage, None, elapsed).unwrap();
+        assert_eq!(w.entities[&kage].stage, Some(stage));
+        assert_eq!(condition::protected(w.entities[&kage].condition), protected);
+    }
+    let spin = attacks::manor_entry_schedule(KAGE, 2, 300).snapshot(0.);
+    assert_eq!(spin.len(), 2);
+    assert_eq!(spin[0].0, 1);
+    assert!((spin[0].1 - 30f32.to_radians()).abs() < 0.001);
+    assert_eq!(
+        attacks::manor_entry_schedule(KAGE, 3, 0).snapshot(0.).len(),
+        2
+    );
+    w.manor_mechanics(kage, Some(Pos { x: 24.5, y: 20.5 }), 0)
+        .unwrap();
+    w.remove_entity(kage);
+    w.now = 12499;
+    w.mechanic_expiry();
+    assert!(!w.actors().any(|e| e.kind == MINE));
+    w.now = 12500;
+    w.mechanic_expiry();
+    let mine = w.actors().find(|e| e.kind == MINE).unwrap().id;
+    assert_eq!(w.entities[&mine].expires, Some(16550));
+    w.now = 16499;
+    w.manor_mechanics(mine, None, 3999).unwrap();
+    assert_eq!(w.entities[&mine].stage, Some(0));
+    w.now = 16500;
+    w.manor_mechanics(mine, None, 4000).unwrap();
+    assert_eq!(w.entities[&mine].stage, Some(1));
+    assert_eq!(
+        attacks::manor_entry_schedule(MINE, 1, 0).snapshot(0.).len(),
+        4
+    );
+    w.now = 16550;
+    w.mechanic_expiry();
+    assert!(!w.entities.contains_key(&mine));
+}
+
+#[test]
+fn manor_spectral_mine_triggers_its_four_shots_on_a_cloaked_player() {
+    let (mut w, _) = arena();
+    let (packets, _rx) = mpsc::channel(4096);
+    let (lost, _loss) = watch::channel(false);
+    let player = w
+        .enter(tests::ch(&w), Some(Output { packets, lost }))
+        .unwrap();
+    w.apply_condition(player, condition::INVISIBLE, 5000)
+        .unwrap();
+    let mine = w
+        .spawn_entity(MINE, w.players[&player].pos, vec![])
+        .unwrap();
+    w.npc_step();
+    assert_eq!(w.entities[&mine].stage, Some(1));
+    assert_eq!(w.bullets.iter().filter(|b| b.owner == mine).count(), 4);
+    w.now = 50;
+    w.mechanic_expiry();
+    assert!(!w.entities.contains_key(&mine));
+}
+
+#[test]
+fn manor_realms_have_two_walkable_highland_graveyards_without_closure_membership() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    for source in crate::terrain::realms::sources(std::path::Path::new("data")).unwrap() {
+        let map = source.open(&content).unwrap();
+        let mut w = World::new(content.clone(), map).unwrap();
+        w.rng = rand::rngs::StdRng::seed_from_u64(12351);
+        w.populate_coil_snakes().unwrap();
+        w.populate_realm_heroes().unwrap();
+        w.populate_named_quests().unwrap();
+        w.populate_realm_events().unwrap();
+        w.populate_hermit().unwrap();
+        let original = w.map.clone();
+        let old = w.setpieces.len();
+        w.populate_manor_entry().unwrap();
+        assert_eq!(w.actors().filter(|e| e.kind == KAGE).count(), 2);
+        for area in &w.setpieces[old..] {
+            let center = (area.y + 32) * w.map.width + area.x + 32;
+            assert!(matches!(original.cells[center as usize].terrain, 3 | 4));
+            assert!(w.actors().any(|e| e.kind == KAGE
+                && area.distance(e.pos) == 0.
+                && w.walkable(e.pos)
+                && e.quest.is_none()));
+            assert_eq!(
+                w.actors()
+                    .filter(|e| e.kind == GRAVE && area.distance(e.pos) == 0.)
+                    .count(),
+                24
+            );
+        }
+    }
 }
 
 #[test]

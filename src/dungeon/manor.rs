@@ -20,9 +20,12 @@ pub const COFFIN: u16 = 0x1737;
 pub const FERATU: u16 = 0x1738;
 pub const BOOKCASE: u16 = 0x181a;
 pub const ROCK: u16 = 0x172a;
-pub const ROSTER: [u16; 15] = [
+pub const KAGE: u16 = 0x6db;
+pub const MINE: u16 = 0x6da;
+pub const GRAVE: u16 = 0x181f;
+pub const ROSTER: [u16; 18] = [
     BOSS, BAT, CREATURE, SWARM, ESCORT, DECOY, CHASER, 0x1727, 0x1728, 0x1729, ROCK, 0x172b,
-    0x172c, COFFIN, FERATU,
+    0x172c, COFFIN, FERATU, KAGE, MINE, GRAVE,
 ];
 
 // Phoenix supplies reconstruction timers; the 2012 guide establishes timed return, not a coffin kill gate.
@@ -87,6 +90,7 @@ pub fn profile(kind: u16) -> Profile {
             0.,
         ),
         CREATURE | COFFIN | ROCK => (Stationary, 0., 10.),
+        KAGE | MINE | GRAVE => (Stationary, 0., 20.),
         0x1728 => (
             Chase {
                 sight: 10.,
