@@ -581,7 +581,7 @@ fn encode(map: &Map, content: &Content) -> Result<(Vec<u8>, usize)> {
             Some(kind) => {
                 let object = content.get(kind)?;
                 ensure!(
-                    object.static_object && !object.enemy,
+                    object.static_object && (!object.enemy || object.passive_destructible()),
                     "non-scenery output object {kind:#x}"
                 );
                 if validated_objects.insert(kind) {
@@ -1029,7 +1029,7 @@ mod tests {
         let enemy = content
             .objects
             .values()
-            .find(|o| o.static_object && o.enemy)
+            .find(|o| o.static_object && o.enemy && !o.passive_destructible())
             .unwrap()
             .kind;
         let mobile = *content
@@ -1062,6 +1062,44 @@ mod tests {
         assert!(parse(serde_json::json!([])).is_err());
         assert!(dictionary(&vec![b' '; 65537], &content).is_err());
         assert!(dictionary(br#"[{"ground":190,"object":null,"object":null,"config":"","terrain":11,"region":0}]"#, &content).is_err());
+    }
+
+    #[test]
+    fn realm_prepare_passive_originals_roundtrip_without_broadening_enemy_policy() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let cells: Vec<_> = [0x122, 0x162, 0x181f]
+            .into_iter()
+            .map(|kind| Cell {
+                ground: 0x61,
+                object: Some(kind),
+                config: String::new(),
+                terrain: 0,
+                region: 0,
+            })
+            .collect();
+        let map = Map {
+            width: 3,
+            height: 1,
+            cells,
+            spawns: vec![],
+        };
+        let (bytes, _) = encode(&map, &content).unwrap();
+        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        let decoded = Map::decode_cells(&bytes, &content).unwrap();
+        assert_eq!(
+            serde_json::to_value(&map.cells).unwrap(),
+            serde_json::to_value(&decoded.cells).unwrap()
+        );
+        for kind in [0x163, 0xd70, 0x91b, 0x91f, 0x928] {
+            let mut bad = map.clone();
+            bad.cells[0].object = Some(kind);
+            assert!(encode(&bad, &content).is_err(), "{kind:#x}");
+        }
+        for config in ["size:120", "variant:1", "name:Tombstone"] {
+            let mut bad = map.clone();
+            bad.cells[2].config = config.into();
+            assert!(encode(&bad, &content).is_err(), "{config}");
+        }
     }
 
     #[test]

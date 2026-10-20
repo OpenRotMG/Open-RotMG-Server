@@ -947,12 +947,14 @@ impl Directory {
                 .values()
                 .filter(|e| {
                     let object = &world.content.objects[&e.kind];
-                    object.enemy && object.class != "Wall"
+                    object.enemy && (object.class != "Wall" || object.passive_destructible())
                 })
                 .map(|e| e.kind)
                 .collect();
             for kind in kinds {
-                crate::encounter::validate(&world.content, kind)?;
+                if !world.content.objects[&kind].passive_destructible() {
+                    crate::encounter::validate(&world.content, kind)?;
+                }
                 crate::loot::validate(&world.content, kind)?;
             }
         }
@@ -1703,10 +1705,11 @@ impl World {
                     if o.name == "White Fountain" {
                         fountains.push((id, pos));
                     }
-                    let actor = o.enemy
-                        || o.quest
-                        || !o.static_object
-                        || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805);
+                    let actor = !o.passive_destructible()
+                        && (o.enemy
+                            || o.quest
+                            || !o.static_object
+                            || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805));
                     cells.insert(y * map.width as usize + x, id, actor);
                     if actor {
                         actor_ids.insert(id);
@@ -1997,16 +2000,19 @@ impl World {
                 })),
             },
         );
-        self.cells.insert(cell, id, true);
-        self.actor_ids.insert(id);
+        let actor = !definition.passive_destructible();
+        self.cells.insert(cell, id, actor);
+        if actor {
+            self.actor_ids.insert(id);
+            self.npc_global_ids.insert(id);
+            self.non_population_ids.insert(id);
+        }
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
         }
         if kind == 0xd5f {
             self.pentaract_ids.insert(id);
         }
-        self.npc_global_ids.insert(id);
-        self.non_population_ids.insert(id);
         if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
             self.quests_by_level.entry(level).or_default().insert(id);
         }

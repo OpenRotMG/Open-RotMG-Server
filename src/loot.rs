@@ -67,6 +67,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         {
             &[]
         }
+        // Tombstone rewards are a no-drop reconstruction; selected XML establishes zero XP, not loot.
+        0x181f => &[],
         0x122 | 0x162 | 0x163 | 0xd57 | 0xd58 | 0xd5b..=0xd5f => &[],
         0xd5a => &[(0.05, Item(0xa3b))],
         0xd56 | 0xd59 | 0xd60 => &[
