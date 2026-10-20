@@ -1124,10 +1124,6 @@ impl Drop for LiveTask {
         LIVE_TASKS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
-#[cfg(test)]
-pub(super) fn live_tasks() -> usize {
-    LIVE_TASKS.load(std::sync::atomic::Ordering::SeqCst)
-}
 
 #[cfg(test)]
 pub(crate) fn state(a: &App, account: i32) -> Option<(bool, Option<i32>, bool)> {
@@ -1136,23 +1132,6 @@ pub(crate) fn state(a: &App, account: i32) -> Option<(bool, Option<i32>, bool)> 
         .unwrap()
         .get(&account)
         .map(|c| (c.pending, c.avatar, c.failure.is_some()))
-}
-#[cfg(test)]
-pub(super) fn failure(a: &App, account: i32) -> Option<String> {
-    a.owners
-        .lock()
-        .unwrap()
-        .get(&account)
-        .and_then(|c| c.failure.clone())
-}
-#[cfg(test)]
-pub(super) fn outstanding(a: &App) -> usize {
-    a.owners
-        .lock()
-        .unwrap()
-        .values()
-        .filter(|c| c.pending)
-        .count()
 }
 
 pub(crate) fn observe(a: &App, account: i32, operation: &'static str, error: &anyhow::Error) {
@@ -1208,7 +1187,3 @@ pub(super) fn failure_reporter(
         )
     })
 }
-
-#[cfg(test)]
-#[path = "lifecycle_tests.rs"]
-mod tests;

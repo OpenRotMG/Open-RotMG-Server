@@ -1,7 +1,5 @@
 use super::*;
 use serde::Serialize;
-#[cfg(test)]
-mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

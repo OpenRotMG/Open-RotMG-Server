@@ -9,6 +9,7 @@ mod dungeon;
 mod encounter;
 mod endgame;
 mod loot;
+mod navigation;
 mod performance;
 mod quest;
 mod server;
@@ -141,6 +142,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         keys,
         content,
         swf,
+        browser_links: Arc::new(server::browser_link::Service::from_env(&config.origin)?),
         origin: config.origin,
         sfx: config.data.join("sfx"),
         max_players: config.max_players,

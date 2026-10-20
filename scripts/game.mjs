@@ -104,7 +104,8 @@ async function connect(spec) {
     const noDispatch=setTimeout(()=>rejectRelease(Error('Native DOWN was not dispatched before its deadline')),10000);
     try{await released;return {down};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);holdState=null;}
   }
-  await call('Network.enable');
+  try { await call('Network.enable'); }
+  catch(error) { closing=true;ws.close();throw error; }
   return {...spec,call,evaluate,clock,frames,hold,abort:error=>holdState?.abort(error),close:()=>{closing=true;ws.close();}};
 }
 let leaseStarted=false, leaseTimer, leaseRenewal, leaseError;

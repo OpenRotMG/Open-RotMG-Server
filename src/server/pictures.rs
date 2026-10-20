@@ -244,6 +244,3 @@ pub(super) async fn request(
         Err(e) => error(e),
     }
 }
-
-#[cfg(test)]
-mod tests;

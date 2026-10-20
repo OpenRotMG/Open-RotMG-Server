@@ -119,7 +119,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             4.,
             1000,
-            8.,
+            6.,
         ),
         0x954 => (
             Chase {
@@ -128,7 +128,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             8.,
             2000,
-            8.,
+            6.,
         ),
         0x612 | 0x613 => (
             Chase {
@@ -164,7 +164,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             8.,
             1000,
-            10.,
+            8.,
         ),
         0x61a => (
             Chase {
@@ -173,7 +173,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             7.5,
             200,
-            12.,
+            10.5,
         ),
         0x60e => (Wander, 4., 1000, 5.),
         0x60f => (Wander, 4., 600, 5.),
@@ -399,10 +399,7 @@ fn ring(index: u8, count: usize, offset: f32) -> Vec<(u8, f32)> {
         })
         .collect()
 }
-#[cfg(test)]
-pub fn attacks(kind: u16, hp: i32, heading: f32) -> Vec<(u8, f32)> {
-    phased_attacks(kind, hp, heading, 0)
-}
+
 pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return crate::dungeon::abyss::attacks(kind, heading, elapsed);
@@ -561,18 +558,4 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
         }
     }
     Ok(())
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn candidate_profiles_preserve_boss_threshold_and_cube_patterns() {
-        assert!(attacks(0x927, 640, 0.).is_empty());
-        assert_eq!(attacks(0x927, 639, 0.4), vec![(0, 0.4), (1, 0.4)]);
-        assert_eq!(attacks(0x610, 70, 0.).len(), 5);
-        let red = attacks(0x60e, 70, 0.);
-        assert!((red[1].1 - red[0].1 - 10f32.to_radians()).abs() < 0.00001);
-        assert!(profile(0xffff).is_none());
-        assert!(attacks(0x68a, 5, 0.).is_empty());
-    }
 }

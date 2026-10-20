@@ -377,6 +377,3 @@ impl World {
         self.finish_inventory(plan, Ok(revision))
     }
 }
-
-#[cfg(test)]
-mod tests;

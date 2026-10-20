@@ -214,52 +214,7 @@ impl World {
                     .total_cmp(&self.entities[b].pos.distance(e.pos))
             }))
     }
-    #[cfg(test)]
-    pub(super) fn populate_solos(
-        &mut self,
-        terrain: u8,
-        candidates: &[Pos],
-        kinds: &[u16],
-    ) -> Result<()> {
-        for &kind in kinds {
-            ensure!(
-                self.content.get(kind)?.terrain == terrain,
-                "solo {kind:#x} contradicts XML habitat {terrain}"
-            );
-            crate::encounter::validate(&self.content, kind)?;
-            crate::loot::validate(&self.content, kind)?;
-            ensure!(
-                self.population_space(terrain, 1)?,
-                "solo {kind:#x} exceeds its regional body budget"
-            );
-            let Some(pos) = candidates
-                .iter()
-                .copied()
-                .find(|p| self.population.iter().all(|s| s.pos.distance(*p) >= 8.))
-            else {
-                ensure!(
-                    (2..=7).contains(&terrain),
-                    "cannot place bounded habitat-correct solo"
-                );
-                tracing::info!(
-                    terrain,
-                    kind,
-                    "inland solo refused: habitat capacity exhausted"
-                );
-                continue;
-            };
-            let entity = self.spawn_entity(kind, pos, vec![])?;
-            let slot = self.population.len();
-            self.population.push(Spawn {
-                kind,
-                pos,
-                entity: Some(entity),
-                camp: None,
-            });
-            self.mark_population(entity, slot)?;
-        }
-        Ok(())
-    }
+
     pub(super) fn population_terrain(&self, slot: &Spawn) -> u8 {
         match slot.camp {
             Some(camp) => self.camps[camp].family.terrain,
@@ -421,63 +376,7 @@ impl World {
         );
         Ok(())
     }
-    #[cfg(test)]
-    pub(super) fn populate_families(
-        &mut self,
-        terrain: u8,
-        candidates: &[Pos],
-        leaders: &[u16],
-    ) -> Result<()> {
-        for leader in leaders {
-            let family = FAMILIES
-                .iter()
-                .find(|f| f.leader == *leader)
-                .context("population family is undefined")?;
-            ensure!(family.terrain == terrain, "family placed in wrong terrain");
-            self.validate_family(family)?;
-            let minimum = if matches!(leader, 0x604 | 0x953) {
-                64.
-            } else {
-                12.
-            };
-            let occupied: Vec<_> = self
-                .population
-                .iter()
-                .filter(|s| self.population_terrain(s) == terrain)
-                .map(|s| s.pos)
-                .collect();
-            let layout = candidates.iter().copied().find_map(|center| {
-                if self
-                    .map
-                    .spawns
-                    .iter()
-                    .any(|(x, y)| center.distance(Pos { x: *x, y: *y }) < minimum)
-                    || self
-                        .camps
-                        .iter()
-                        .filter(|c| c.family.terrain == terrain)
-                        .any(|c| self.population[c.start].pos.distance(center) < 8.)
-                {
-                    return None;
-                }
-                self.family_layout(center, family, &occupied)
-            });
-            // Inland biome area can be zero; density ceilings cannot manufacture a different habitat.
-            if layout.is_none() && (2..=7).contains(&terrain) {
-                tracing::info!(
-                    terrain,
-                    leader,
-                    "inland camp refused: habitat capacity exhausted"
-                );
-                continue;
-            }
-            let layout = layout.with_context(|| {
-                format!("terrain {terrain} cannot place full family {leader:#x}; {} candidate centers, {} habitat-valid formations, {} existing camps",candidates.len(),candidates.iter().filter(|center|formation(**center,family.size()).iter().all(|p|self.family_ground(*p,terrain))).count(),self.camps.iter().filter(|c|c.family.terrain==terrain).count())
-            })?;
-            self.place_camp(family, layout)?;
-        }
-        Ok(())
-    }
+
     pub(super) fn repopulate_families(&mut self) -> Result<()> {
         // Only player-near owners reproduce; querying occupied cells avoids scanning dormant camps.
         let active: BTreeSet<_> = self

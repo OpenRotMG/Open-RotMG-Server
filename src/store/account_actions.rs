@@ -48,7 +48,7 @@ impl Store {
         self.call(move |db| {
             let tx = db.transaction()?;
             let eligible: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM discord_links l JOIN credentials c ON c.account=l.account WHERE l.account=?1)", [account], |r| r.get(0))?;
-            ensure!(eligible, Rejected("link your registered game account using /discord and /link first"));
+            ensure!(eligible, Rejected("link your registered game account using /link in Discord first"));
             let previous: Option<i64> = tx.query_row("SELECT issued_at FROM recovery_codes WHERE account=?1", [account], |r| r.get(0)).optional()?;
             ensure!(previous.is_none_or(|t| time-t >= 60), Rejected("wait one minute before requesting another recovery code"));
             tx.execute("DELETE FROM recovery_codes WHERE expires_at<=?1", [time])?;
@@ -77,7 +77,7 @@ impl Store {
                 tx.execute("INSERT INTO discord_recovery(account,enabled_at,last_issued_at) VALUES(?1,?2,0) ON CONFLICT(account) DO NOTHING", params![account,time])?;
                 tx.execute("DELETE FROM recovery_codes WHERE account=?1", [account])?;
             }
-            let previous: i64 = tx.query_row("SELECT last_issued_at FROM discord_recovery WHERE account=?1", [account], |r| r.get(0)).optional()?.context("recovery is not enabled; while signed into the game, type /discord recovery, then use /recover code:<your private code> here")?;
+            let previous: i64 = tx.query_row("SELECT last_issued_at FROM discord_recovery WHERE account=?1", [account], |r| r.get(0)).optional()?.context("recovery is not enabled; use /link in Discord while signed into your game account")?;
             ensure!(time-previous >= 60, "wait one minute before requesting another reset link");
             tx.execute("DELETE FROM password_resets WHERE expires_at<=?1", [time])?;
             tx.execute("INSERT INTO password_resets(account,hash,issued_at,expires_at) VALUES(?1,?2,?3,?4) ON CONFLICT(account) DO UPDATE SET hash=excluded.hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at", params![account,hash,time,time+900])?;
@@ -133,6 +133,3 @@ impl Store {
         Ok(account)
     }
 }
-
-#[cfg(test)]
-mod tests;

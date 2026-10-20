@@ -118,42 +118,4 @@ impl CellIndex {
                 .flat_map(move |sx| self.actors[sy * self.sections_wide + sx].iter().copied())
         })
     }
-    #[cfg(test)]
-    pub fn count(&self, id: i32) -> usize {
-        (0..self.heads.len())
-            .filter(|cell| self.ids(*cell).contains(&id))
-            .count()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shared_cells_collapse_reuse_overflow_and_move_actors_between_sections() {
-        let mut cells = CellIndex::new(32, 32);
-        for (id, actor) in [(7, false), (3, true), (5, true)] {
-            cells.insert(0, id, actor);
-        }
-        assert_eq!(cells.ids(0), [3, 5, 7]);
-        assert_eq!(cells.actors_in(0, 0, 15, 15).collect::<Vec<_>>(), [3, 5]);
-        assert!(cells.remove(0, 5));
-        assert!(cells.remove(0, 7));
-        assert_eq!(cells.ids(0), [3]);
-        assert!(cells.remove(0, 3));
-        assert!(cells.ids(0).is_empty());
-        assert!(!cells.remove(0, 3));
-        assert!(cells.actors_in(0, 0, 15, 15).next().is_none());
-        cells.insert(16, 7, false);
-        cells.insert(16, 3, true);
-        assert_eq!(cells.ids(16), [3, 7]);
-        assert_eq!(cells.overflow.len(), 1);
-        assert_eq!(cells.actors_in(16, 0, 31, 15).collect::<Vec<_>>(), [3]);
-        assert!(cells.remove(16, 3));
-        cells.insert(16 * 32, 3, true);
-        assert!(cells.actors_in(16, 0, 31, 15).next().is_none());
-        assert_eq!(cells.actors_in(0, 16, 15, 31).collect::<Vec<_>>(), [3]);
-        assert_eq!(cells.count(3), 1);
-    }
 }

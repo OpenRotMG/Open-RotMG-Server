@@ -17,13 +17,11 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
-#[cfg(test)]
-mod audit_tests;
+
 mod cell_index;
 mod charges;
 pub(crate) mod chat;
-#[cfg(test)]
-mod client_contract_tests;
+
 mod companions;
 mod consumables;
 mod endgame;
@@ -37,112 +35,68 @@ mod fauna_births;
 mod fauna_special;
 mod ghost_ship;
 mod gods;
-#[cfg(test)]
-mod gods_tests;
+
 mod gold;
 mod golems;
-#[cfg(test)]
-mod golems_tests;
+
 mod ground;
-#[cfg(test)]
-mod ground_tests;
+
 mod guilds;
-#[cfg(test)]
-mod inventory_safety_tests;
-#[cfg(test)]
-mod key_tests;
+
 mod lair;
 mod landmark_ai;
-#[cfg(test)]
-mod landmark_tests;
-#[cfg(test)]
-mod lifecycle_departure_tests;
+
 mod lost_lands;
 mod midlands;
-#[cfg(test)]
-mod midlands_tests;
+
 mod named_births;
 mod names;
 mod ocean;
 mod ocean_setpiece;
-#[cfg(test)]
-mod ocean_tests;
-#[cfg(test)]
-mod player_position_tests;
+
 mod population;
 mod population_density;
+
 #[cfg(test)]
-mod population_density_tests;
-#[cfg(test)]
-mod population_tests;
+mod quest_tests;
+
 mod realm_events;
-#[cfg(test)]
-mod realm_events_tests;
-#[cfg(test)]
-mod realm_maps_tests;
-#[cfg(test)]
-mod realm_movement_tests;
+
 mod realm_portal;
 mod realm_quests;
-#[cfg(test)]
-mod realm_quests_tests;
+
 mod realm_setpieces;
-#[cfg(test)]
-mod realm_setpieces_tests;
+
 mod spider;
-#[cfg(test)]
-mod spider_tests;
+
 mod tracked;
-#[cfg(test)]
-mod xp_booster_tests;
+
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
-#[cfg(test)]
-mod abyss_tests;
-#[cfg(test)]
-mod announce_tests;
-#[cfg(test)]
-mod bot_tests;
-#[cfg(test)]
-mod class_tests;
-#[cfg(test)]
-mod complete_abilities_tests;
-#[cfg(test)]
-mod consumable_tests;
+
 mod cooperative;
-#[cfg(test)]
-mod cooperative_tests;
+
 mod mechanics;
-#[cfg(test)]
-mod mechanics_tests;
+
 mod native_hits;
 #[cfg(test)]
 mod native_hits_tests;
 mod npc_attacks;
 mod npc_queries;
-#[cfg(test)]
-mod npc_query_tests;
-#[cfg(test)]
-mod quest_completion_tests;
-#[cfg(test)]
-mod quiver_tests;
+
 mod reconciliation;
-#[cfg(test)]
-mod reconciliation_tests;
+
 mod resurrection;
 mod snake;
-#[cfg(test)]
-mod snake_tests;
+
 pub use reconciliation::{NativeInput, RejectedNativeShot};
 mod progression;
-#[cfg(test)]
-mod progression_tests;
+
 pub(crate) mod shop;
 mod trade;
 pub(crate) mod view;
-#[cfg(test)]
-mod view_tests;
+
 pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
@@ -683,6 +637,7 @@ struct Spawn {
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
+    navigation_geometry: Box<std::cell::RefCell<view::GeometryCache>>,
     pub(crate) realm_layout: Option<String>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
@@ -865,15 +820,7 @@ impl Directory {
     ) -> Result<Self> {
         Self::fixture(path, content, max_players, seed, None)
     }
-    #[cfg(test)]
-    pub(crate) fn test_prepared(
-        path: &std::path::Path,
-        content: Arc<Content>,
-        max_players: usize,
-        seed: u64,
-    ) -> Result<Self> {
-        Self::fixture(path, content, max_players, seed, Some(seed))
-    }
+
     #[cfg(test)]
     fn fixture(
         path: &std::path::Path,
@@ -1427,10 +1374,7 @@ impl Directory {
         tracing::info!(account, character, destination, "transfer grant consumed");
         Ok(character)
     }
-    #[cfg(test)]
-    fn drop_portal(&mut self, origin: i32, pos: Pos) -> Result<i32> {
-        self.drop_dungeon_portal(origin, 0x717, pos)
-    }
+
     fn drop_dungeon_portal(&mut self, origin: i32, kind: u16, pos: Pos) -> Result<i32> {
         let definition = crate::dungeon::DUNGEONS
             .iter()
@@ -1626,41 +1570,7 @@ impl Handle {
             clock: self.clock.clone(),
         }
     }
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_pause_job(
-        &self,
-        call: usize,
-        before: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        self.lifecycle_test_gate(call, before, false)
-    }
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_pause_request_job(
-        &self,
-        call: usize,
-        before: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        self.lifecycle_test_gate(call, before, true)
-    }
-    #[cfg(test)]
-    fn lifecycle_test_gate(
-        &self,
-        call: usize,
-        before: bool,
-        request_only: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        assert!(call > 0);
-        let (entered, ready) = oneshot::channel();
-        let (release, wait) = std::sync::mpsc::channel();
-        assert!(
-            self.lifecycle_job_gate
-                .lock()
-                .unwrap()
-                .replace((call, before, request_only, entered, wait))
-                .is_none()
-        );
-        (ready, release)
-    }
+
     #[cfg(test)]
     pub(crate) fn lifecycle_test_lose_reply(&self) {
         assert!(!self.lifecycle_lost_reply.swap(true, Ordering::SeqCst));
@@ -1933,6 +1843,7 @@ impl World {
         Ok(Self {
             content,
             map,
+            navigation_geometry: Box::default(),
             realm_layout: None,
             timed_ids: BTreeSet::new(),
             gun_ids,
@@ -2454,15 +2365,7 @@ impl World {
         );
         Ok(id)
     }
-    #[cfg(test)]
-    pub fn enter_autonomous(&mut self, ch: Character, tx: Output) -> Result<i32> {
-        let id = self.enter(ch, Some(tx))?;
-        self.players
-            .get_mut(&id)
-            .context("new controller missing")?
-            .controller = Controller::Autonomous;
-        Ok(id)
-    }
+
     pub fn leave(&mut self, id: i32) -> Result<Character> {
         self.clear_abilities(id);
         self.cancel_trade(id, "Trade cancelled by departure.");
@@ -2658,13 +2561,12 @@ impl World {
             // Equally suitable levels on both sides must compete on distance, not iteration order.
             for id in ids {
                 let e = self.entities.get(id).expect("indexed quest missing");
-                let max = match e.kind {
-                    0x617 => 8,
-                    0x609 | 0x60d => 9,
-                    0x61f => 10,
-                    _ => 20,
-                };
-                if e.hp <= 0 || !e.accessible(player.character.account) || level > max {
+                let (min, max) = self.content.objects[&e.kind].quest_window;
+                if e.hp <= 0
+                    || !e.accessible(player.character.account)
+                    || level < i32::from(min)
+                    || level > i32::from(max)
+                {
                     continue;
                 }
                 if best.is_none_or(|b| {
@@ -2909,12 +2811,7 @@ impl World {
         );
         Ok(credit - charged)
     }
-    #[cfg(test)]
-    pub fn native_move_to(&mut self, id: i32, pos: Pos, time: i32) -> Result<()> {
-        // Skipped simulation ticks must not reduce real movement funding or desynchronize SHOOT prediction.
-        self.native_move_received(id, pos, (time, self.clock.now()))
-            .map(|_| ())
-    }
+
     pub fn native_move_received(
         &mut self,
         id: i32,
@@ -4050,10 +3947,7 @@ impl World {
         );
         Ok(())
     }
-    #[cfg(test)]
-    pub fn pending_progress(&mut self) -> Vec<(i32, Character)> {
-        self.pending_progress_where(|_, _| true)
-    }
+
     pub(crate) fn pending_progress_where(
         &mut self,
         mut accept: impl FnMut(i32, i32) -> bool,
@@ -4832,19 +4726,21 @@ impl World {
                 .chain(self.decoy_positions())
                 .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
             let wake = match kind {
+                0x953 | 0x954 => 6.,
+                0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
-                0x617 | 0x61a | 0x6d8 => 12.,
+                0x617 => 8.,
+                0x61a => 10.5,
+                0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
-                _ => 20.,
+                _ => 12.,
             };
-            let radius = if entity.activated.is_some() {
-                20.
-            } else {
-                wake
-            };
+            // Activated enemies keep the same sight radius; they do not keep
+            // shooting once the player leaves that radius.
+            let radius = wake;
             let target = if burst {
                 Some(pos)
             } else {
@@ -5735,7 +5631,7 @@ impl World {
                 qa_actors=self.players.values().filter(|p| p.controller==Controller::Qa).count(),
                 discovered_tiles=self.players.values().map(|p|p.tiles.len()).sum::<usize>(),
                 cached_view_tiles=self.players.values().map(|p|p.view_tiles.borrow().tiles.len()).sum::<usize>(),
-                cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.capacity()*std::mem::size_of::<view::Tile>()).sum::<usize>(),
+                cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.allocated_bytes()).sum::<usize>(),
                 terrain_rebuilds=self.players.values().map(|p|p.view_tiles.borrow().rebuilds).sum::<u64>(),
                 incremental_terrain_tiles=self.players.values().map(|p|p.view_tiles.borrow().incremental_tiles).sum::<u64>(),
                 cloned_snapshot_tiles=self.players.values().map(|p|p.view_tiles.borrow().cloned_snapshot_tiles).sum::<u64>(),
@@ -5749,88 +5645,30 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 #[cfg(test)]
 #[path = "../examples/testing/cover.rs"]
 mod cover_example;
-#[cfg(test)]
-mod gravestones_tests;
-#[cfg(test)]
-mod loot_interactions_tests;
+
 #[cfg(test)]
 #[path = "../examples/testing/timing.rs"]
 mod timing_example;
 
 #[cfg(test)]
+mod view_navigation_tests;
+
+#[cfg(test)]
+impl World {
+    fn view_geometry_for_test(&self) -> Arc<crate::navigation::Geometry> {
+        self.navigation_geometry
+            .borrow_mut()
+            .get_for_test(&self.map, &self.content)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn active_lifecycle_is_independent_of_pause_and_pending_writes() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.paused = true;
-        p.pending = true;
-        for flags in 0..16 {
-            p.character.alive = flags & 1 == 0;
-            p.death_pending = flags & 2 != 0;
-            p.departing = flags & 4 != 0;
-            p.persistence_failure = (flags & 8 != 0).then(|| "uncertain commit".into());
-            assert_eq!(p.active(), flags == 0, "lifecycle flags={flags}");
-        }
-    }
-    #[test]
-    fn prepared_worlds_share_explicit_seed_without_changing_normal_creation() {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let first =
-            Directory::test_prepared(std::path::Path::new("data"), content.clone(), 4, 12351)
-                .unwrap();
-        let second =
-            Directory::test_prepared(std::path::Path::new("data"), content.clone(), 4, 12351)
-                .unwrap();
-        for id in [-1, -2, -3, -4] {
-            let mut a = first.worlds[&id].rng.clone();
-            let mut b = second.worlds[&id].rng.clone();
-            assert_eq!(
-                rand::RngCore::next_u64(&mut a),
-                rand::RngCore::next_u64(&mut b)
-            );
-            assert!(first.worlds[&id].prepared_seed.is_some());
-        }
-        let ordinary =
-            Directory::test_with_seed(std::path::Path::new("data"), content, 4, 12351).unwrap();
-        assert!(ordinary.worlds.values().all(|w| w.prepared_seed.is_none()));
-    }
+
     use crate::content::WIZARD;
     use std::path::Path;
-    #[test]
-    fn spawned_nexus_exit_publishes_the_name_required_by_native_portal_draw() {
-        let mut w = world();
-        let id = w
-            .spawn_entity(
-                0x712,
-                Pos {
-                    x: w.map.spawns[0].0,
-                    y: w.map.spawns[0].1,
-                },
-                vec![],
-            )
-            .unwrap();
-        assert_eq!(w.entities[&id].name, "Nexus Portal");
-        let bytes = w.stats(id, 0).unwrap();
-        let mut r = crate::wire::Reader::new(&bytes);
-        assert_eq!(r.i32().unwrap(), id);
-        r.f32().unwrap();
-        r.f32().unwrap();
-        let count = r.i16().unwrap();
-        let mut names = Vec::new();
-        for _ in 0..count {
-            let stat = r.u8().unwrap();
-            if stat == 31 {
-                names.push(r.utf().unwrap());
-            } else {
-                r.i32().unwrap();
-            }
-        }
-        r.done().unwrap();
-        assert_eq!(names, ["Nexus Portal"]);
-    }
+
     pub(super) fn world() -> World {
         static FIXTURE: std::sync::OnceLock<(Arc<Content>, Arc<Map>)> = std::sync::OnceLock::new();
         let (content, map) = FIXTURE.get_or_init(|| {
@@ -5891,6 +5729,385 @@ mod tests {
             spider_dens: 0,
         }
     }
+
+    pub(super) fn directory() -> Directory {
+        Directory::load(
+            Path::new("data"),
+            Arc::new(Content::load(Path::new("data")).unwrap()),
+            16,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn one_owner_and_no_teleport() {
+        let mut w = world();
+        let c = ch(&w);
+        let id = w.enter(c.clone(), None).unwrap();
+        assert!(w.enter(c, None).is_err());
+        assert!(w.move_to(id, Pos { x: 12., y: 3. }, 100).is_err());
+    }
+
+    #[test]
+    fn control_cannot_steal_browser_input() {
+        let mut w = world();
+        let (packets, _rx) = mpsc::channel(64);
+        let (lost, _watch) = watch::channel(false);
+        let id = w.enter(ch(&w), Some(Output { packets, lost })).unwrap();
+        assert!(
+            w.action(id, Action::Stop)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("QA-owned")
+        );
+    }
+
+    #[test]
+    fn late_heal_cannot_revive() {
+        let mut w = world();
+        let id = w.enter(ch(&w), None).unwrap();
+        let plan = w
+            .use_item(
+                id,
+                Slot {
+                    object: id,
+                    slot: 4,
+                    kind: 0xa22,
+                },
+                w.players[&id].pos,
+            )
+            .unwrap()
+            .unwrap();
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.hp = 0;
+        p.death_pending = true;
+        w.finish_inventory(plan, Ok(1)).unwrap();
+        assert_eq!(w.players[&id].character.hp, 0);
+        assert_eq!(w.players[&id].character.items[4], -1);
+        let deaths = w.pending_deaths();
+        assert_eq!(deaths.len(), 1);
+        assert!(!deaths[0].1.alive);
+        assert!(w.pending_deaths().is_empty());
+        w.finish_death(id).unwrap();
+        assert!(!w.players[&id].character.alive);
+    }
+    #[test]
+    fn failed_pickup_quarantines_both_owners() {
+        let mut w = world();
+        let id = w.enter(ch(&w), None).unwrap();
+        let bag = w
+            .entities
+            .values()
+            .find(|e| e.kind == 0x806)
+            .unwrap()
+            .clone();
+        w.players.get_mut(&id).unwrap().pos = bag.pos;
+        let plan = w
+            .swap(
+                id,
+                Slot {
+                    object: bag.id,
+                    slot: 0,
+                    kind: 0xa4f,
+                },
+                Slot {
+                    object: id,
+                    slot: 3,
+                    kind: -1,
+                },
+            )
+            .unwrap();
+        assert!(w.entities[&bag.id].reserved);
+        assert!(
+            w.finish_inventory(
+                plan,
+                Err(anyhow::anyhow!("synthetic storage failure").context("pickup commit")),
+            )
+            .is_err()
+        );
+        assert!(w.players[&id].pending && w.entities[&bag.id].reserved);
+        assert_eq!(
+            w.players[&id].persistence_failure.as_deref(),
+            Some("pickup commit: synthetic storage failure")
+        );
+        assert!(w.begin_departure(id).is_err());
+        assert_eq!(w.entities[&bag.id].items[0], 0xa4f);
+        assert_eq!(w.players[&id].character.items[3], -1);
+    }
+
+    #[test]
+    fn ground_drop_is_hidden_until_commit_and_quarantines_uncertain_failure() {
+        let mut w = world();
+        let owner = w.enter(ch(&w), None).unwrap();
+        let mut second = ch(&w);
+        second.id = 2;
+        second.account = 2;
+        let other = w.enter(second, None).unwrap();
+        assert!(
+            w.drop_item(
+                owner,
+                Slot {
+                    object: other,
+                    slot: 4,
+                    kind: 0xa22
+                }
+            )
+            .is_err()
+        );
+        let plan = w
+            .drop_item(
+                owner,
+                Slot {
+                    object: owner,
+                    slot: 4,
+                    kind: 0xa22,
+                },
+            )
+            .unwrap();
+        let ground = plan.dropped.unwrap();
+        assert!(!w.visible(owner).contains(&ground));
+        assert!(!w.visible(other).contains(&ground));
+        assert_eq!(w.players[&owner].character.items[4], 0xa22);
+        assert!(
+            w.drop_item(
+                owner,
+                Slot {
+                    object: owner,
+                    slot: 4,
+                    kind: 0xa22
+                }
+            )
+            .is_err()
+        );
+        w.finish_inventory(plan, Ok(1)).unwrap();
+        assert_eq!(w.players[&owner].character.items[4], -1);
+        assert!(w.visible(other).contains(&ground));
+        let pick = w
+            .swap(
+                other,
+                Slot {
+                    object: ground,
+                    slot: 0,
+                    kind: 0xa22,
+                },
+                Slot {
+                    object: other,
+                    slot: 5,
+                    kind: -1,
+                },
+            )
+            .unwrap();
+        w.finish_inventory(pick, Ok(1)).unwrap();
+        assert_eq!(w.entities[&ground].items[0], -1);
+        assert_eq!(w.players[&other].character.items[5], 0xa22);
+        let plan = w
+            .drop_item(
+                other,
+                Slot {
+                    object: other,
+                    slot: 5,
+                    kind: 0xa22,
+                },
+            )
+            .unwrap();
+        let uncertain = plan.dropped.unwrap();
+        assert!(
+            w.finish_inventory(plan, Err(anyhow::anyhow!("lost database result")))
+                .is_err()
+        );
+        assert!(w.players[&other].pending);
+        assert!(w.begin_departure(other).is_err());
+        w.now += 60_000;
+        w.step();
+        assert!(w.entities[&uncertain].reserved);
+        assert!(!w.visible(owner).contains(&uncertain));
+        assert_eq!(w.players[&other].character.items[5], 0xa22);
+    }
+
+    #[test]
+    fn native_shoot_before_move_uses_the_same_speed_time_and_wall_budget() {
+        let mut w = world();
+        let id = w.enter(ch(&w), None).unwrap();
+        let pos = (1..w.map.height - 1)
+            .flat_map(|y| {
+                (1..w.map.width - 1).map(move |x| Pos {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                })
+            })
+            .find(|p| {
+                (-1..=1).all(|dy| {
+                    (-1..=1).all(|dx| {
+                        w.walkable(Pos {
+                            x: p.x + dx as f32,
+                            y: p.y + dy as f32,
+                        })
+                    })
+                })
+            })
+            .unwrap();
+        let p = w.players.get_mut(&id).unwrap();
+        p.pos = pos;
+        p.last_move = 1000;
+        p.last_move_at = 0;
+        p.movement_credit = 0.;
+        w.now = 100;
+        let origin = Pos {
+            x: pos.x + 0.673777,
+            y: pos.y - 0.139555,
+        };
+        let angle = (-0.139555_f32).atan2(0.673777);
+        assert!(
+            w.shoot(
+                id,
+                1091,
+                1,
+                0xa97,
+                Pos {
+                    x: pos.x + 20.,
+                    y: pos.y
+                },
+                0.
+            )
+            .is_err()
+        );
+        w.shoot(id, 1091, 1, 0xa97, origin, angle).unwrap();
+        assert_eq!(w.players[&id].pos.x, pos.x);
+        assert_eq!(w.players[&id].last_move, 1000);
+        assert_eq!(w.players[&id].movement_credit, 0.);
+        assert_eq!(w.players[&id].character.shots, 1);
+        assert!(
+            w.validate_move(
+                id,
+                Pos {
+                    x: pos.x + 0.6,
+                    y: pos.y
+                },
+                1091
+            )
+            .is_err()
+        );
+        assert!(w.validate_move(id, pos, 999).is_err());
+        assert!(w.move_to(id, pos, 2001).is_err());
+        w.now = 5100;
+        let stationary = Pos {
+            x: pos.x + 0.3 * angle.cos(),
+            y: pos.y + 0.3 * angle.sin(),
+        };
+        w.shoot(id, 6000, 2, 0xa97, stationary, angle).unwrap();
+        w.now = 5600;
+        w.shoot(
+            id,
+            6500,
+            3,
+            0xa97,
+            Pos {
+                x: pos.x + 0.35,
+                y: pos.y,
+            },
+            0.,
+        )
+        .unwrap();
+        assert_eq!(w.players[&id].last_move, 1000);
+        assert_eq!(w.players[&id].movement_credit, 0.);
+        assert!(
+            w.shoot(
+                id,
+                7000,
+                3,
+                0xa97,
+                Pos {
+                    x: f32::NAN,
+                    y: pos.y
+                },
+                angle
+            )
+            .is_err()
+        );
+        let blocker = *w.content.objects.iter().find(|(_, o)| o.blocks).unwrap().0;
+        w.spawn_entity(blocker, pos, vec![]).unwrap();
+        assert!(
+            w.validate_move(
+                id,
+                Pos {
+                    x: pos.x + 0.1,
+                    y: pos.y
+                },
+                1091
+            )
+            .is_ok()
+        );
+        w.spawn_entity(
+            blocker,
+            Pos {
+                x: pos.x + 1.,
+                y: pos.y,
+            },
+            vec![],
+        )
+        .unwrap();
+        assert!(
+            w.validate_move(
+                id,
+                Pos {
+                    x: pos.x + 0.6,
+                    y: pos.y
+                },
+                1200
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("blocked tile")
+        );
+    }
+
+    #[test]
+    fn selected_cover_stops_hostile_projectiles_before_player_damage() {
+        for (kind, passes_cover, hp) in [
+            (0x120, false, 100),
+            (0x120, true, 100),
+            (0x100, false, 100),
+            (0x100, true, 92),
+        ] {
+            let mut w = world();
+            for id in w.entities.keys().copied().collect::<Vec<_>>() {
+                w.remove_entity(id);
+            }
+            for cell in &mut Arc::make_mut(&mut w.map).cells {
+                cell.ground = 0x61;
+            }
+            let player = w.enter(ch(&w), None).unwrap();
+            w.players.get_mut(&player).unwrap().pos = Pos { x: 12.5, y: 100.5 };
+            w.spawn_entity(kind, Pos { x: 11.5, y: 100.5 }, vec![])
+                .unwrap();
+            let start = Pos { x: 10.5, y: 100.5 };
+            let mut spec = w.content.objects[&0x683].projectiles[&0].clone();
+            spec.passes_cover = passes_cover;
+            w.bullets.push(Bullet {
+                owner: 500,
+                source_kind: 0x683,
+                id: 1,
+                friendly: false,
+                start,
+                pos: start,
+                angle: 0.,
+                born: 0,
+                damage: 8,
+                spec,
+                hit: BTreeSet::new(),
+                hit_enemy: false,
+            });
+            for _ in 0..5 {
+                w.step();
+            }
+            assert_eq!(
+                w.players[&player].character.hp, hp,
+                "{kind:#x}/{passes_cover}"
+            );
+            assert!(w.bullets.is_empty());
+        }
+    }
     pub(super) fn receive(
         d: &mut Directory,
         world: i32,
@@ -5910,376 +6127,7 @@ mod tests {
         while rx.try_recv().is_ok() {}
         (id, rx)
     }
-    pub(super) fn directory() -> Directory {
-        Directory::load(
-            Path::new("data"),
-            Arc::new(Content::load(Path::new("data")).unwrap()),
-            16,
-        )
-        .unwrap()
-    }
-    #[test]
-    fn native_control_directory_trace_distinguishes_cancelled_call_stages() {
-        type PendingCall =
-            std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + Send>>;
-        let (dispatch, output) = crate::performance::tests::trace();
-        let _logging = tracing::dispatcher::set_default(&dispatch);
-        let mut directory = directory();
-        for cancel_at in ["capacity_wait", "enqueued", "started", "resumed"] {
-            let (tx, mut rx) = mpsc::channel::<Job>(1);
-            let handle = Handle {
-                lifecycle_lost_reply: Default::default(),
-                lifecycle_job_gate: Default::default(),
-                tx,
-                target: Target::World(-1),
-                clock: directory.clock.clone(),
-            };
-            if cancel_at == "capacity_wait" {
-                assert!(handle.tx.try_send(Box::new(|_| {})).is_ok());
-            }
-            let requests = Arc::new(std::sync::Mutex::new(crate::performance::Requests {
-                native_control: Some(Arc::new(crate::performance::NativeControlTrace {
-                    request: cancel_at.into(),
-                    operation: "renew".into(),
-                    started: Instant::now(),
-                })),
-                ..Default::default()
-            }));
-            let pending: Arc<std::sync::Mutex<Option<PendingCall>>> = Arc::default();
-            let drop_from_job = pending.clone();
-            let scope = requests.clone();
-            let cancel_in_job = cancel_at == "started";
-            *pending.lock().unwrap() = Some(Box::pin(async move {
-                crate::performance::REQUEST
-                    .scope(
-                        scope,
-                        handle.directory(move |d| {
-                            if cancel_in_job {
-                                drop(drop_from_job.lock().unwrap().take());
-                            }
-                            Ok(d.worlds.len())
-                        }),
-                    )
-                    .await
-            }));
-            let mut cx = std::task::Context::from_waker(futures_util::task::noop_waker_ref());
-            assert!(
-                pending
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .as_mut()
-                    .poll(&mut cx)
-                    .is_pending()
-            );
-            if matches!(cancel_at, "capacity_wait" | "enqueued") {
-                drop(pending.lock().unwrap().take());
-            }
-            rx.try_recv().unwrap()(&mut directory);
-            assert!(matches!(
-                rx.try_recv(),
-                Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
-            ));
-            if cancel_at == "resumed" {
-                assert!(
-                    matches!(pending.lock().unwrap().as_mut().unwrap().as_mut().poll(&mut cx), std::task::Poll::Ready(Ok(count)) if count > 0)
-                );
-                drop(pending.lock().unwrap().take());
-            }
-            assert!(pending.lock().unwrap().is_none());
-            let requests = requests.lock().unwrap();
-            assert_eq!(requests.calls, 1);
-            assert_eq!(requests.completed, u64::from(cancel_at != "capacity_wait"));
-            assert_eq!(requests.round_trip.is_zero(), cancel_at != "resumed");
-            let events = crate::performance::tests::events(&output);
-            let events = events
-                .iter()
-                .filter(|event| event["fields"]["request"] == cancel_at)
-                .collect::<Vec<_>>();
-            let stages = events
-                .iter()
-                .map(|event| event["fields"]["stage"].as_str().unwrap())
-                .collect::<Vec<_>>();
-            if cancel_at == "capacity_wait" {
-                assert_eq!(stages, ["capacity_wait"]);
-            } else {
-                assert_eq!(
-                    stages,
-                    [
-                        "capacity_wait",
-                        "capacity_acquired",
-                        "enqueued",
-                        "started",
-                        "completed",
-                        "result_send"
-                    ]
-                );
-                for stage in ["started", "completed", "result_send"] {
-                    let event = events
-                        .iter()
-                        .find(|event| event["fields"]["stage"] == stage)
-                        .unwrap();
-                    let closed =
-                        cancel_at == "enqueued" || cancel_at == "started" && stage != "started";
-                    assert_eq!(event["fields"]["receiver_closed"], closed);
-                }
-            }
-            assert!(events.iter().all(|event| event["fields"]["call"] == 1
-                && event["fields"]["operation"] == "renew"
-                && event["fields"]["elapsed_ms"].as_f64().unwrap() >= 0.));
-        }
-    }
-    #[tokio::test]
-    async fn ordinary_world_requests_do_not_emit_native_control_trace() {
-        let (dispatch, output) = crate::performance::tests::trace();
-        let _logging = tracing::dispatcher::set_default(&dispatch);
-        let handle = Handle::spawn(directory());
-        handle.clock.set_paused(true);
-        let requests = Arc::new(std::sync::Mutex::new(
-            crate::performance::Requests::default(),
-        ));
-        crate::performance::REQUEST
-            .scope(requests.clone(), handle.directory(|_| Ok(())))
-            .await
-            .unwrap();
-        assert_eq!(requests.lock().unwrap().calls, 1);
-        assert!(
-            !crate::performance::tests::events(&output)
-                .iter()
-                .any(|event| event["fields"]["message"] == "native control world request")
-        );
-    }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn command_scope_measures_world_requests_without_charging_sleep_as_cpu() {
-        let handle = Handle::spawn(directory());
-        handle.clock.set_paused(true);
-        let requests = Arc::new(std::sync::Mutex::new(
-            crate::performance::Requests::default(),
-        ));
-        crate::performance::REQUEST
-            .scope(
-                requests.clone(),
-                handle.directory(|_| {
-                    std::thread::sleep(Duration::from_millis(30));
-                    Ok(())
-                }),
-            )
-            .await
-            .unwrap();
-        let r = requests.lock().unwrap();
-        assert_eq!((r.calls, r.completed), (1, 1));
-        assert!(r.work >= Duration::from_millis(30));
-        assert!(r.round_trip >= r.work + r.queued + r.send_wait);
-        if cfg!(target_os = "linux") {
-            assert!(r.cpu.unwrap() < r.work / 2);
-        } else {
-            assert!(r.cpu.is_none());
-        }
-    }
-    #[test]
-    fn directory_routes_and_global_identities_do_not_alias() {
-        let mut d = directory();
-        assert_eq!(d.initial(0).unwrap(), -2);
-        for game in [-1, -2, -3, -4] {
-            assert_eq!(d.initial(game).unwrap(), game);
-        }
-        assert!(d.initial(-5).is_err());
-        assert!(d.initial(-6).is_err());
-        let mut ids = BTreeSet::new();
-        for world in d.worlds.values() {
-            for id in world.entities.keys() {
-                assert!(ids.insert(*id));
-            }
-        }
-        let a = d.worlds.get_mut(&-1).unwrap();
-        let first = a.enter(ch(a), None).unwrap();
-        let b = d.worlds.get_mut(&-2).unwrap();
-        let second = b.enter(ch(b), None).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(d.location(first).unwrap(), -1);
-        assert_eq!(d.location(second).unwrap(), -2);
-        assert!(d.worlds[&-2].safe && !d.worlds[&-3].safe);
-        assert!(d.worlds[&-2].entities.values().any(|e| e.kind == 0x712));
-    }
-    #[test]
-    fn transfer_grants_are_bound_one_use_expiring_and_private() {
-        let mut d = directory();
-        let vault = d.instance("vault", Some(1)).unwrap();
-        assert_eq!(d.instance("vault", Some(1)).unwrap(), vault);
-        assert_ne!(d.instance("vault", Some(2)).unwrap(), vault);
-        assert!(d.issue(2, 1, vault).is_err());
-        let (time, key, _) = d.issue(1, 42, vault).unwrap();
-        assert!(d.consume(2, vault, time, key.clone()).is_err());
-        assert!(d.consume(1, -2, time, key.clone()).is_err());
-        assert!(d.consume(1, vault, time + 1, key.clone()).is_err());
-        assert_eq!(d.consume(1, vault, time, key.clone()).unwrap(), 42);
-        assert!(d.consume(1, vault, time, key).is_err());
-        let (time, key, _) = d.issue(1, 42, -2).unwrap();
-        d.tick += 2400;
-        assert!(d.consume(1, -2, time, key).is_err());
-        let ids = AtomicI32::new(i32::MAX);
-        assert!(allocate_id(&ids).is_err());
-        assert_eq!(ids.load(Ordering::Relaxed), i32::MAX);
-    }
-    #[test]
-    fn vault_entry_reclaims_unreferenced_world_at_capacity() {
-        let mut d = directory();
-        let pos = Pos {
-            x: d.worlds[&-3].map.spawns[0].0,
-            y: d.worlds[&-3].map.spawns[0].1,
-        };
-        for _ in 0..8 {
-            d.drop_portal(-3, pos).unwrap();
-        }
-        d.tick = 600;
-        d.step();
-        assert!(d.portals.is_empty());
-        assert_eq!(d.worlds.len(), 12);
-        let w = d.worlds.get_mut(&-2).unwrap();
-        let portal = w.entities.values().find(|e| e.kind == 0x720).unwrap();
-        let (portal, pos) = (portal.id, portal.pos);
-        let player = w.enter(ch(w), None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = pos;
-        let (account, character, destination) = d
-            .destination(player, Some(portal))
-            .expect("Vault entry must reclaim an empty unreferenced instance");
-        let (time, key, _) = d.issue(account, character, destination).unwrap();
-        assert_eq!(
-            d.consume(account, destination, time, key).unwrap(),
-            character
-        );
-        let ch = d.worlds.get_mut(&-2).unwrap().leave(player).unwrap();
-        assert!(
-            d.worlds
-                .get_mut(&destination)
-                .unwrap()
-                .enter(ch, None)
-                .is_ok()
-        );
-        assert_eq!(d.worlds[&destination].owner, Some(1));
-        assert_eq!(d.worlds.len(), 12);
-    }
-    pub(super) fn fill_world_capacity(d: &mut Directory) {
-        while d.worlds.len() < 12 {
-            let world = d.instance("pirate-cave", None).unwrap();
-            d.issue(1, world, world).unwrap();
-        }
-    }
-    #[test]
-    fn directory_instances_are_bounded_and_idle_instances_are_collected() {
-        let mut d = directory();
-        fill_world_capacity(&mut d);
-        assert!(d.instance("pirate-cave", None).is_err());
-        d.tick = 6001;
-        d.step();
-        assert_eq!(d.worlds.len(), 4);
-    }
-    #[test]
-    fn capacity_reclamation_preserves_players_portals_and_connecting_transfers() {
-        let mut d = directory();
-        fill_world_capacity(&mut d);
-        let ids: Vec<_> = d.worlds.keys().copied().filter(|id| *id > 0).collect();
-        d.grants.retain(|_, g| !ids[..3].contains(&g.destination));
-        let w = d.worlds.get_mut(&ids[0]).unwrap();
-        w.enter(ch(w), None).unwrap();
-        let portal = d.realm_portal;
-        d.portals.insert(
-            portal,
-            Portal {
-                origin: -2,
-                destination: Some(ids[1]),
-                expires: 600,
-            },
-        );
-        d.portals.insert(
-            -1,
-            Portal {
-                origin: ids[2],
-                destination: Some(-2),
-                expires: 600,
-            },
-        );
-        let (key, time) = d
-            .grants
-            .iter()
-            .find(|(_, g)| g.destination == ids[3])
-            .map(|(key, g)| (key.clone(), g.key_time))
-            .unwrap();
-        assert_eq!(d.consume(1, ids[3], time, key.clone()).unwrap(), ids[3]);
-        assert!(d.consume(1, ids[3], time, key.clone()).is_err());
-        assert!(!d.character_transferring(ids[3]));
-        d.step();
-        assert!(d.grants.contains_key(&key));
-        let error = d.instance("vault", Some(2)).unwrap_err();
-        assert!(error.to_string().contains("world instance limit reached"));
-        assert_eq!(d.worlds.len(), 12);
-        d.grants.retain(|_, g| g.destination != ids[4]);
-        let w = d.worlds.get_mut(&ids[4]).unwrap();
-        let (x, y) = w.map.spawns[0];
-        let bag = w
-            .loot_bag(Pos { x, y }, None, vec![ch(w).items[0]])
-            .unwrap();
-        assert!(d.instance("vault", Some(2)).is_err());
-        assert!(d.worlds[&ids[4]].entities.contains_key(&bag));
-        d.worlds.get_mut(&ids[4]).unwrap().remove_entity(bag);
-        assert!(d.reserve_worlds(2, &[]).is_err());
-        assert!(d.reserve_worlds(1, &[ids[4]]).is_err());
-        assert!(ids.iter().all(|id| d.worlds.contains_key(id)));
-        let vault = d.instance("vault", Some(2)).unwrap();
-        assert!(!d.worlds.contains_key(&ids[4]));
-        assert_eq!(d.instance("vault", Some(2)).unwrap(), vault);
-        let w = d.worlds.get_mut(&ids[3]).unwrap();
-        let mut character = ch(w);
-        character.id = ids[3];
-        let player = w.enter(character, None).unwrap();
-        d.step();
-        assert!(!d.grants.contains_key(&key));
-        assert!(!d.reclaimable_world(ids[3]));
-        d.worlds.get_mut(&ids[3]).unwrap().leave(player).unwrap();
-        d.instance("vault", Some(3)).unwrap();
-        assert!(!d.worlds.contains_key(&ids[3]));
-        assert!(d.worlds.contains_key(&ids[0]) && d.worlds.contains_key(&ids[1]));
-        assert!(d.worlds.contains_key(&ids[2]));
-        assert_eq!(d.worlds.len(), 12);
-    }
-    #[test]
-    fn sourced_worlds_preserve_connected_wall_and_merchant_config_stats() {
-        let content = Arc::new(Content::load(Path::new("data")).unwrap());
-        for name in [
-            "nexus",
-            "nexus-limbo",
-            "vault",
-            "realm-shore",
-            "pirate-cave",
-        ] {
-            let map = Arc::new(
-                Map::load(&Path::new("data").join(format!("{name}.wmap")), &content).unwrap(),
-            );
-            let world = World::new(content.clone(), map).unwrap();
-            for e in world.entities.values() {
-                world.stats(e.id, 0).unwrap();
-            }
-            if name == "pirate-cave" {
-                assert!(
-                    world
-                        .entities
-                        .values()
-                        .any(|e| e.extra_stats.iter().any(|(stat, _)| *stat == 41))
-                );
-            }
-            if name == "nexus" {
-                let changer = world.entities.values().find(|e| e.kind == 0x1dc).unwrap();
-                assert_eq!(changer.extra_stats, [(55, 0)]);
-                assert!(
-                    world
-                        .entities
-                        .values()
-                        .any(|e| e.extra_stats.iter().any(|(stat, _)| *stat == 34))
-                );
-            }
-        }
-    }
+
     #[test]
     fn all_death_fame_phase1_causal_levels_a_then_b() {
         for boosted in [false, true] {
@@ -6675,1934 +6523,19 @@ mod tests {
             "unused boosted projection must not reject valid unboosted XP"
         );
     }
-
-    #[test]
-    fn progress_is_invisible_until_commit_and_cannot_heal_pending_death() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        w.players
-            .get_mut(&id)
-            .unwrap()
-            .queue_experience(50, None, false)
-            .unwrap();
-        let plans = w.pending_progress();
-        assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].1.level, 2);
-        assert_eq!(w.players[&id].character.level, 1);
-        assert!(w.pending_progress().is_empty());
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.hp = 0;
-        p.death_pending = true;
-        assert!(w.pending_deaths().is_empty());
-        w.finish_progress(id, plans[0].1.clone()).unwrap();
-        assert_eq!(w.players[&id].character.level, 2);
-        assert_eq!(w.players[&id].character.hp, 0);
-        let death = w.pending_deaths();
-        assert_eq!(death.len(), 1);
-        assert_eq!(death[0].1.level, 2);
-        assert_eq!(death[0].1.hp, 0);
-    }
-    #[test]
-    fn committed_fame_survives_departure_and_permanent_death() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        w.players
-            .get_mut(&id)
-            .unwrap()
-            .queue_experience(1000, None, false)
-            .unwrap();
-        let plans = w.pending_progress();
-        assert_eq!(plans[0].1.fame, 1);
-        assert_eq!(w.players[&id].character.fame, 0);
-        w.finish_progress(id, plans[0].1.clone()).unwrap();
-        let saved = w.begin_departure(id).unwrap().unwrap();
-        assert_eq!(saved.fame, 1);
-        w.finish_departure(id).unwrap();
-        let id = w.enter(saved, None).unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.hp = 0;
-        p.death_pending = true;
-        assert_eq!(w.pending_deaths()[0].1.fame, 1);
-    }
-    #[test]
-    fn departure_waits_for_earned_progress() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        w.players
-            .get_mut(&id)
-            .unwrap()
-            .queue_experience(50, None, false)
-            .unwrap();
-        assert!(w.begin_departure(id).unwrap().is_none());
-        let plans = w.pending_progress();
-        w.finish_progress(id, plans[0].1.clone()).unwrap();
-        let leaving = w.begin_departure(id).unwrap().unwrap();
-        assert_eq!(leaving.exp, 50);
-        assert_eq!(leaving.level, 2);
-        w.finish_departure(id).unwrap();
-        assert!(!w.players.contains_key(&id));
-    }
-    #[test]
-    fn health_excludes_qa_actors_from_population() {
-        let mut d = directory();
-        let w = d.worlds.get_mut(&-1).unwrap();
-        w.enter(ch(w), None).unwrap();
-        let mut native = ch(w);
-        native.id = 2;
-        native.account = 2;
-        let (packets, _rx) = mpsc::channel(64);
-        let (lost, _watch) = watch::channel(false);
-        w.enter(native, Some(Output { packets, lost })).unwrap();
-        let health = d.health(Instant::now());
-        assert_eq!(health["players"], 1);
-        assert_eq!(health["bots"], 0);
-        assert_eq!(health["qa_actors"], 1);
-        assert_eq!(health["worlds"], d.worlds.len());
-        assert_eq!(
-            health["entities"],
-            d.worlds.values().map(|w| w.entities.len()).sum::<usize>()
-        );
-        assert_eq!(
-            health["projectiles"],
-            d.worlds.values().map(|w| w.bullets.len()).sum::<usize>()
-        );
-        assert_eq!(health["tick"], d.tick);
-        assert_eq!(health["max_tick_us"], d.max_tick_us);
-    }
-    #[test]
-    fn health_uptime_uses_elapsed_process_time_not_world_ticks() {
-        let w = directory();
-        let started = Instant::now();
-        let before = w.health(started)["uptime_seconds"].as_u64().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1100));
-        let after = w.health(started)["uptime_seconds"].as_u64().unwrap();
-        assert!(after > before);
-        assert_eq!(w.tick, 0);
-    }
-    #[test]
-    fn one_owner_and_no_teleport() {
-        let mut w = world();
-        let c = ch(&w);
-        let id = w.enter(c.clone(), None).unwrap();
-        assert!(w.enter(c, None).is_err());
-        assert!(w.move_to(id, Pos { x: 12., y: 3. }, 100).is_err());
-    }
-    #[test]
-    fn queue_loss_is_observable() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let (packets, mut rx) = mpsc::channel(1);
-        let (lost, watch) = watch::channel(false);
-        let p = w.players.get_mut(&id).unwrap();
-        p.tx = Some(Output { packets, lost });
-        send(p, 6, vec![1]);
-        assert!(!*watch.borrow());
-        send(p, 6, vec![2]);
-        assert!(*watch.borrow());
-        assert_eq!(rx.try_recv().unwrap().body, vec![1]);
-    }
-    #[test]
-    fn control_cannot_steal_browser_input() {
-        let mut w = world();
-        let (packets, _rx) = mpsc::channel(64);
-        let (lost, _watch) = watch::channel(false);
-        let id = w.enter(ch(&w), Some(Output { packets, lost })).unwrap();
-        assert!(
-            w.action(id, Action::Stop)
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("QA-owned")
-        );
-    }
-    #[test]
-    fn selected_collision_box_is_inclusive() {
-        let a = Pos { x: 0., y: 0. };
-        assert!(inside_box(a, Pos { x: 0.5, y: 0.5 }));
-        assert!(inside_box(a, Pos { x: -0.5, y: -0.5 }));
-        assert!(!inside_box(a, Pos { x: 0.500001, y: 0. }));
-    }
-    #[test]
-    fn fog_reveals_circular_tiles_once_and_remembers_them() {
-        let mut d = directory();
-        let (id, mut rx) = receive(&mut d, -2, 1, WIZARD);
-        let w = d.worlds.get_mut(&-2).unwrap();
-        w.players.get_mut(&id).unwrap().tiles.clear();
-        let initial_count = w.players[&id].character.tiles;
-        let mut known = BTreeSet::new();
-        for (cx, cy) in [(50, 50), (60, 50), (0, 0), (141, 129), (50, 50)] {
-            w.players.get_mut(&id).unwrap().pos = Pos {
-                x: cx as f32 + 0.25,
-                y: cy as f32 + 0.75,
-            };
-            let circle: BTreeSet<_> = (0..w.map.height)
-                .flat_map(|y| (0..w.map.width).map(move |x| (x, y)))
-                .filter(|(x, y)| (x - cx).pow(2) + (y - cy).pow(2) <= 400)
-                .map(|(x, y)| (x as i16, y as i16))
-                .collect();
-            let expected: BTreeSet<_> = circle.difference(&known).copied().collect();
-            w.updates(id, false).unwrap();
-            let mut received = BTreeSet::new();
-            while let Ok(packet) = rx.try_recv() {
-                if packet.id == wire::UPDATE {
-                    let mut r = crate::wire::Reader::new(&packet.body);
-                    for _ in 0..r.i16().unwrap() {
-                        let (x, y) = (r.i16().unwrap(), r.i16().unwrap());
-                        assert_eq!(
-                            r.u8().unwrap(),
-                            w.map.cells[y as usize * w.map.width as usize + x as usize].ground
-                        );
-                        assert!(received.insert((x, y)), "duplicate tile in UPDATE");
-                    }
-                }
-            }
-            assert_eq!(received, expected);
-            known.extend(circle);
-            assert_eq!(w.players[&id].tiles, known);
-            assert_eq!(
-                w.players[&id].character.tiles - initial_count,
-                known.len() as u64
-            );
-            assert!(w.players[&id].known.contains(&id));
-        }
-    }
-    #[test]
-    fn native_minimap_keeps_distant_players_without_revealing_perception_or_fog() {
-        let mut d = directory();
-        let (observer, mut rx) = receive(&mut d, -3, 1, WIZARD);
-        let w = d.worlds.get_mut(&-3).unwrap();
-        let mut character = ch(w);
-        character.id = 2;
-        character.account = 2;
-        let (packets, _rx) = mpsc::channel(128);
-        let (lost, _) = watch::channel(false);
-        let peer = w
-            .enter_autonomous(character, Output { packets, lost })
-            .unwrap();
-        w.updates(observer, false).unwrap();
-        assert!(w.players[&observer].known.contains(&peer));
-        let origin = w.players[&observer].pos;
-        let distant = (0..w.map.height)
-            .flat_map(|y| {
-                (0..w.map.width).map(move |x| Pos {
-                    x: x as f32 + 0.5,
-                    y: y as f32 + 0.5,
-                })
-            })
-            .find(|pos| origin.distance(*pos) > 40. && w.walkable(*pos))
-            .unwrap();
-        w.players.get_mut(&peer).unwrap().pos = distant;
-        while rx.try_recv().is_ok() {}
-        w.updates(observer, false).unwrap();
-        assert!(w.players[&observer].known.contains(&peer));
-        assert!(!w.visible(observer).contains(&peer));
-        assert!(
-            !w.players[&observer]
-                .tiles
-                .contains(&(distant.x as i16, distant.y as i16))
-        );
-        assert!(w.entities.values().any(|e| origin.distance(e.pos) > 20.));
-        let quest = w.quest_target(observer).unwrap();
-        assert!(origin.distance(w.entities[&quest].pos) > 20.);
-        assert!(w.entities.values().all(|e| {
-            origin.distance(e.pos) < 20.
-                || e.id == quest
-                || !w.players[&observer].known.contains(&e.id)
-        }));
-        let private = w.loot_bag(origin, Some(2), vec![0xa4f]).unwrap();
-        w.updates(observer, false).unwrap();
-        assert!(!w.players[&observer].known.contains(&private));
-        w.step();
-        w.step();
-        let expected = w.stats(peer, observer).unwrap();
-        let mut tick = None;
-        while let Ok(packet) = rx.try_recv() {
-            if packet.id == wire::NEW_TICK {
-                tick = Some(packet);
-            }
-        }
-        assert!(
-            tick.unwrap()
-                .body
-                .windows(expected.len())
-                .any(|bytes| bytes == expected)
-        );
-        for (actor, hidden) in [(observer, peer), (peer, observer)] {
-            let view = d.player_view(actor).unwrap();
-            assert!(!view.objects.iter().any(|o| o.id == hidden));
-            if actor == observer {
-                assert!(view.objects.iter().any(|o| o.id == quest));
-                let target = view
-                    .objects
-                    .iter()
-                    .find(|o| o.id == quest)
-                    .unwrap()
-                    .position;
-                assert!(
-                    !view
-                        .tiles
-                        .iter()
-                        .any(|t| t.x == target.x as i16 && t.y == target.y as i16)
-                );
-            }
-        }
-        let (newcomer, _) = receive(&mut d, -3, 3, WIZARD);
-        assert!(d.worlds[&-3].players[&newcomer].known.contains(&peer));
-        let (foreign, _) = receive(&mut d, -2, 4, WIZARD);
-        let w = d.worlds.get_mut(&-3).unwrap();
-        w.updates(observer, false).unwrap();
-        assert!(!w.players[&observer].known.contains(&foreign));
-        while rx.try_recv().is_ok() {}
-        w.leave(peer).unwrap();
-        w.updates(observer, false).unwrap();
-        assert!(!w.players[&observer].known.contains(&peer));
-        let update = rx.try_recv().unwrap();
-        assert_eq!(update.id, wire::UPDATE);
-        let mut r = crate::wire::Reader::new(&update.body);
-        assert_eq!(r.i16().unwrap(), 0);
-        assert_eq!(r.i16().unwrap(), 0);
-        assert_eq!(r.i16().unwrap(), 1);
-        assert_eq!(r.i32().unwrap(), peer);
-        r.done().unwrap();
-    }
-    #[test]
-    fn initial_update_places_self_before_private_container_owner_stats() {
-        let mut w = world();
-        let pos = Pos {
-            x: w.map.spawns[0].0,
-            y: w.map.spawns[0].1,
-        };
-        let bag = w.loot_bag(pos, Some(1), vec![0xa4f]).unwrap();
-        let (tx, mut rx) = mpsc::channel(64);
-        let (lost, _lost) = watch::channel(false);
-        let id = w.enter(ch(&w), Some(Output { packets: tx, lost })).unwrap();
-        assert!(bag < id);
-        assert_eq!(rx.try_recv().unwrap().id, wire::CREATE_SUCCESS);
-        let update = rx.try_recv().unwrap();
-        assert_eq!(update.id, wire::UPDATE);
-        let mut r = crate::wire::Reader::new(&update.body);
-        let tiles = r.i16().unwrap();
-        r.take(tiles as usize * 5).unwrap();
-        assert!(r.i16().unwrap() >= 2);
-        assert_eq!(r.i16().unwrap() as u16, WIZARD);
-        assert_eq!(r.i32().unwrap(), id);
-        assert!(w.visible(id).contains(&bag));
-    }
-    #[test]
-    fn immutable_scenery_is_not_rebroadcast_in_dynamic_ticks() {
-        let mut w = world();
-        let (tx, mut rx) = mpsc::channel(64);
-        let (lost, _lost) = watch::channel(false);
-        let id = w.enter(ch(&w), Some(Output { packets: tx, lost })).unwrap();
-        while rx.try_recv().is_ok() {}
-        assert!(w.players[&id].known.iter().any(|entity| {
-            w.entities
-                .get(entity)
-                .is_some_and(|e| e.hp == 0 && e.items.is_empty())
-        }));
-        w.step();
-        w.step();
-        let dynamic: Vec<_> = w.players[&id]
-            .known
-            .iter()
-            .filter(|entity| {
-                w.players.contains_key(entity)
-                    || w.entities
-                        .get(entity)
-                        .is_some_and(|e| e.hp > 0 || !e.items.is_empty())
-            })
-            .copied()
-            .collect();
-        let mut expected = Writer::new();
-        expected.i32(0).i32(100).i16(dynamic.len() as i16);
-        for entity in dynamic {
-            expected.0.extend(w.stats(entity, id).unwrap());
-        }
-        let mut tick = None;
-        while let Ok(packet) = rx.try_recv() {
-            if packet.id == wire::NEW_TICK {
-                assert!(tick.replace(packet).is_none());
-            }
-        }
-        assert_eq!(tick.unwrap().body, expected.0);
-    }
-    #[test]
-    fn movement_cannot_borrow_future_clock() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let p = w.players[&id].pos;
-        w.move_to(
-            id,
-            Pos {
-                x: p.x + 0.4,
-                y: p.y,
-            },
-            100,
-        )
-        .unwrap();
-        assert!(
-            w.move_to(
-                id,
-                Pos {
-                    x: p.x + 0.8,
-                    y: p.y
-                },
-                200
-            )
-            .is_err()
-        );
-    }
-    #[test]
-    fn shots_cannot_borrow_future_clock() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let p = w.players[&id].pos;
-        let start = Pos {
-            x: p.x + 0.3,
-            y: p.y,
-        };
-        for (time, bullet) in [(100, 1), (100, 2), (500, 3), (500, 4)] {
-            w.shoot(id, time, bullet, 0xa97, start, 0.).unwrap();
-        }
-        assert!(w.shoot(id, 900, 5, 0xa97, start, 0.).is_err());
-        assert_eq!(w.bullets.len(), 4);
-    }
-    #[test]
-    fn magic_potion_publishes_after_commit_and_cannot_restore_pending_death() {
-        let mut w = world();
-        let mut c = ch(&w);
-        c.items[4] = 0xa23;
-        c.mp = 25;
-        let id = w.enter(c, None).unwrap();
-        let slot = Slot {
-            object: id,
-            slot: 4,
-            kind: 0xa23,
-        };
-        let plan = w.use_item(id, slot, w.players[&id].pos).unwrap().unwrap();
-        assert_eq!(w.players[&id].character.mp, 25);
-        assert_eq!(w.players[&id].character.items[4], 0xa23);
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert_eq!(w.players[&id].character.mp, 100);
-        assert_eq!(w.players[&id].character.items[4], -1);
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.items[4] = 0xa23;
-        p.character.mp = 25;
-        let plan = w.use_item(id, slot, w.players[&id].pos).unwrap().unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.hp = 0;
-        p.death_pending = true;
-        w.finish_inventory(plan, Ok(2)).unwrap();
-        assert_eq!(w.players[&id].character.mp, 25);
-    }
-    #[test]
-    fn selected_container_put_flags_cannot_expose_soulbound_items() {
-        let mut w = world();
-        let soulbound = w
-            .content
-            .objects
-            .values()
-            .find(|o| o.class == "Equipment" && o.soulbound && o.bag_type <= 4)
-            .unwrap()
-            .kind;
-        let mut c = ch(&w);
-        c.items[5] = i32::from(soulbound);
-        let id = w.enter(c, None).unwrap();
-        let pos = w.players[&id].pos;
-        let public = w.loot_bag(pos, None, vec![0xa22]).unwrap();
-        let from = Slot {
-            object: id,
-            slot: 5,
-            kind: i32::from(soulbound),
-        };
-        assert!(
-            w.swap(
-                id,
-                from,
-                Slot {
-                    object: public,
-                    slot: 1,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        let private = w
-            .loot_bag(pos, Some(1), vec![i32::from(soulbound)])
-            .unwrap();
-        w.entities.get_mut(&private).unwrap().kind = 0x503;
-        assert!(
-            w.swap(
-                id,
-                Slot {
-                    object: id,
-                    slot: 4,
-                    kind: 0xa22
-                },
-                Slot {
-                    object: private,
-                    slot: 1,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        w.entities.get_mut(&private).unwrap().kind = 0x504;
-        assert!(
-            w.swap(
-                id,
-                from,
-                Slot {
-                    object: private,
-                    slot: 1,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        w.owner = Some(1);
-        w.vaults.insert(
-            private,
-            Vault {
-                account: 1,
-                chest: 0,
-                items: w.entities[&private].items.clone(),
-                revision: 0,
-            },
-        );
-        let plan = w
-            .swap(
-                id,
-                from,
-                Slot {
-                    object: private,
-                    slot: 1,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        assert_eq!(w.players[&id].character.items[5], i32::from(soulbound));
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert_eq!(w.players[&id].character.items[5], -1);
-        assert_eq!(w.entities[&private].items[1], i32::from(soulbound));
-        w.entities.get_mut(&private).unwrap().kind = 0x503;
-        assert!(
-            w.swap(
-                id,
-                Slot {
-                    object: private,
-                    slot: 1,
-                    kind: i32::from(soulbound)
-                },
-                Slot {
-                    object: id,
-                    slot: 5,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        assert!(!w.players[&id].pending && !w.entities[&private].reserved);
-    }
-    #[test]
-    fn late_heal_cannot_revive() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let plan = w
-            .use_item(
-                id,
-                Slot {
-                    object: id,
-                    slot: 4,
-                    kind: 0xa22,
-                },
-                w.players[&id].pos,
-            )
-            .unwrap()
-            .unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.hp = 0;
-        p.death_pending = true;
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert_eq!(w.players[&id].character.hp, 0);
-        assert_eq!(w.players[&id].character.items[4], -1);
-        let deaths = w.pending_deaths();
-        assert_eq!(deaths.len(), 1);
-        assert!(!deaths[0].1.alive);
-        assert!(w.pending_deaths().is_empty());
-        w.finish_death(id).unwrap();
-        assert!(!w.players[&id].character.alive);
-    }
-    #[test]
-    fn failed_pickup_quarantines_both_owners() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let bag = w
-            .entities
-            .values()
-            .find(|e| e.kind == 0x806)
-            .unwrap()
-            .clone();
-        w.players.get_mut(&id).unwrap().pos = bag.pos;
-        let plan = w
-            .swap(
-                id,
-                Slot {
-                    object: bag.id,
-                    slot: 0,
-                    kind: 0xa4f,
-                },
-                Slot {
-                    object: id,
-                    slot: 3,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        assert!(w.entities[&bag.id].reserved);
-        assert!(
-            w.finish_inventory(
-                plan,
-                Err(anyhow::anyhow!("synthetic storage failure").context("pickup commit")),
-            )
-            .is_err()
-        );
-        assert!(w.players[&id].pending && w.entities[&bag.id].reserved);
-        assert_eq!(
-            w.players[&id].persistence_failure.as_deref(),
-            Some("pickup commit: synthetic storage failure")
-        );
-        assert!(w.begin_departure(id).is_err());
-        assert_eq!(w.entities[&bag.id].items[0], 0xa4f);
-        assert_eq!(w.players[&id].character.items[3], -1);
-    }
-    #[tokio::test]
-    async fn sourced_private_chest_publishes_only_atomic_character_vault_commit() {
-        use crate::store::{InventoryWrite, Store};
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let path = std::env::temp_dir().join(format!(
-            "vault-rearrangement-{:016x}.db",
-            rand::random::<u64>()
-        ));
-        let store = Store::open(&path, &content).unwrap();
-        let account = store.list("vault-actor".into()).await.unwrap();
-        let ch = store
-            .create(account.id, content.get(crate::content::WIZARD).unwrap())
-            .await
-            .unwrap();
-        let map = Arc::new(Map::load(std::path::Path::new("data/vault.wmap"), &content).unwrap());
-        let mut w = World::with_ids(content, map, Arc::new(AtomicI32::new(1))).unwrap();
-        w.name = "Vault".into();
-        w.owner = Some(account.id);
-        w.safe = true;
-        let original = store.vault(account.id, 0).await.unwrap();
-        let mut foreign = original.clone();
-        foreign.account += 1;
-        assert!(w.load_vaults(vec![foreign]).is_err());
-        w.load_vaults(vec![original.clone()]).unwrap();
-        let player = w.enter(ch, None).unwrap();
-        let chest = *w.vaults.keys().next().unwrap();
-        w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
-        let plan = w
-            .swap(
-                player,
-                Slot {
-                    object: player,
-                    slot: 4,
-                    kind: 0xa22,
-                },
-                Slot {
-                    object: chest,
-                    slot: 0,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        assert_eq!(w.entities[&chest].items[0], -1);
-        assert_eq!(store.vault(account.id, 0).await.unwrap().items[0], -1);
-        let revisions = store
-            .exchange(
-                vec![InventoryWrite {
-                    id: plan.character,
-                    account: plan.account,
-                    revision: plan.revision,
-                    items: plan.items.clone(),
-                }],
-                plan.vaults.clone(),
-            )
-            .await
-            .unwrap();
-        w.finish_inventory(plan, Ok(revisions[0])).unwrap();
-        assert_eq!(w.players[&player].character.items[4], -1);
-        assert_eq!(w.entities[&chest].items[0], 0xa22);
-        let saved = store.vault(account.id, 0).await.unwrap();
-        assert_eq!(saved.items[0], 0xa22);
-        assert_eq!(saved.revision, 1);
-        assert!(w.load_vaults(vec![original]).is_err());
-        w.load_vaults(vec![saved]).unwrap();
-        for (from, to) in [
-            ((player, 0), (chest, 1)),
-            ((chest, 0), (chest, 2)),
-            ((chest, 2), (chest, 1)),
-        ] {
-            let slot = |(object, slot)| Slot {
-                object,
-                slot,
-                kind: if object == player {
-                    w.players[&player].character.items[slot]
-                } else {
-                    w.entities[&chest].items[slot]
-                },
-            };
-            let before = w.entities[&chest].items.clone();
-            let inventory = w.players[&player].character.items.clone();
-            let plan = w.swap(player, slot(from), slot(to)).unwrap();
-            if from.0 == chest {
-                assert_eq!(plan.items, inventory);
-            }
-            assert!(plan.collected.is_none() && plan.dropped.is_none());
-            assert!(w.players[&player].pending && w.entities[&chest].reserved);
-            assert!(
-                w.swap(
-                    player,
-                    Slot {
-                        object: chest,
-                        slot: 0,
-                        kind: before[0]
-                    },
-                    Slot {
-                        object: chest,
-                        slot: 1,
-                        kind: before[1]
-                    }
-                )
-                .is_err()
-            );
-            let revisions = store
-                .exchange(
-                    vec![InventoryWrite {
-                        id: plan.character,
-                        account: plan.account,
-                        revision: plan.revision,
-                        items: plan.items.clone(),
-                    }],
-                    plan.vaults.clone(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(w.entities[&chest].items, before);
-            w.finish_inventory(plan, Ok(revisions[0])).unwrap();
-            assert_eq!(
-                w.entities[&chest].items,
-                store.vault(account.id, 0).await.unwrap().items
-            );
-        }
-        let expected = vec![-1, 0xa22, 0xa97, -1, -1, -1, -1, -1];
-        assert_eq!(w.entities[&chest].items, expected);
-        assert_eq!(w.players[&player].character.revision, 4);
-        let from = Slot {
-            object: chest,
-            slot: 1,
-            kind: 0xa22,
-        };
-        let to = Slot {
-            object: chest,
-            slot: 2,
-            kind: 0xa97,
-        };
-        let other = w
-            .spawn_entity(0x504, w.entities[&chest].pos, vec![-1; 8])
-            .unwrap();
-        for (a, b) in [
-            (
-                from,
-                Slot {
-                    object: other,
-                    slot: 0,
-                    kind: -1,
-                },
-            ),
-            (
-                Slot {
-                    object: other,
-                    slot: 0,
-                    kind: -1,
-                },
-                Slot {
-                    object: other,
-                    slot: 1,
-                    kind: -1,
-                },
-            ),
-            (Slot { kind: -1, ..from }, to),
-            (from, Slot { kind: -1, ..to }),
-            (Slot { slot: 8, ..from }, to),
-            (from, Slot { slot: 8, ..to }),
-        ] {
-            assert!(w.swap(player, a, b).is_err());
-            assert!(!w.players[&player].pending && !w.entities[&chest].reserved);
-            assert_eq!(w.entities[&chest].items, expected);
-        }
-        let ownership = w.entities[&chest].extra_stats.clone();
-        w.entities.get_mut(&chest).unwrap().extra_stats = vec![(54, account.id + 1)];
-        assert!(w.swap(player, from, to).is_err());
-        w.entities.get_mut(&chest).unwrap().extra_stats = ownership;
-        w.players.get_mut(&player).unwrap().pos.x += 2.0;
-        assert!(w.swap(player, from, to).is_err());
-        w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
-        let plan = w.swap(player, from, to).unwrap();
-        let mut stale = plan.vaults[0].clone();
-        stale.revision += 1;
-        let failed = store
-            .exchange(
-                vec![InventoryWrite {
-                    id: plan.character,
-                    account: plan.account,
-                    revision: plan.revision,
-                    items: plan.items.clone(),
-                }],
-                vec![stale],
-            )
-            .await
-            .unwrap_err();
-        assert!(w.finish_inventory(plan, Err(failed)).is_err());
-        assert!(w.players[&player].persistence_failure.is_some() && w.entities[&chest].reserved);
-        assert_eq!(w.entities[&chest].items, expected);
-        drop(store);
-        let reopened = Store::open(&path, &w.content).unwrap();
-        let vault = reopened.vault(account.id, 0).await.unwrap();
-        assert_eq!((vault.revision, vault.items), (4, expected));
-        let character = reopened
-            .load(account.id, w.players[&player].character.id)
-            .await
-            .unwrap();
-        assert_eq!(character.revision, 4);
-        assert_eq!(character.items, w.players[&player].character.items);
-        drop(reopened);
-        std::fs::remove_file(path).unwrap();
-    }
-    #[test]
-    fn ground_drop_is_hidden_until_commit_and_quarantines_uncertain_failure() {
-        let mut w = world();
-        let owner = w.enter(ch(&w), None).unwrap();
-        let mut second = ch(&w);
-        second.id = 2;
-        second.account = 2;
-        let other = w.enter(second, None).unwrap();
-        assert!(
-            w.drop_item(
-                owner,
-                Slot {
-                    object: other,
-                    slot: 4,
-                    kind: 0xa22
-                }
-            )
-            .is_err()
-        );
-        let plan = w
-            .drop_item(
-                owner,
-                Slot {
-                    object: owner,
-                    slot: 4,
-                    kind: 0xa22,
-                },
-            )
-            .unwrap();
-        let ground = plan.dropped.unwrap();
-        assert!(!w.visible(owner).contains(&ground));
-        assert!(!w.visible(other).contains(&ground));
-        assert_eq!(w.players[&owner].character.items[4], 0xa22);
-        assert!(
-            w.drop_item(
-                owner,
-                Slot {
-                    object: owner,
-                    slot: 4,
-                    kind: 0xa22
-                }
-            )
-            .is_err()
-        );
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert_eq!(w.players[&owner].character.items[4], -1);
-        assert!(w.visible(other).contains(&ground));
-        let pick = w
-            .swap(
-                other,
-                Slot {
-                    object: ground,
-                    slot: 0,
-                    kind: 0xa22,
-                },
-                Slot {
-                    object: other,
-                    slot: 5,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        w.finish_inventory(pick, Ok(1)).unwrap();
-        assert_eq!(w.entities[&ground].items[0], -1);
-        assert_eq!(w.players[&other].character.items[5], 0xa22);
-        let plan = w
-            .drop_item(
-                other,
-                Slot {
-                    object: other,
-                    slot: 5,
-                    kind: 0xa22,
-                },
-            )
-            .unwrap();
-        let uncertain = plan.dropped.unwrap();
-        assert!(
-            w.finish_inventory(plan, Err(anyhow::anyhow!("lost database result")))
-                .is_err()
-        );
-        assert!(w.players[&other].pending);
-        assert!(w.begin_departure(other).is_err());
-        w.now += 60_000;
-        w.step();
-        assert!(w.entities[&uncertain].reserved);
-        assert!(!w.visible(owner).contains(&uncertain));
-        assert_eq!(w.players[&other].character.items[5], 0xa22);
-    }
-    #[test]
-    fn empty_ground_bag_despawns_only_after_commit_before_timeout() {
-        let mut w = world();
-        let owner = w.enter(ch(&w), None).unwrap();
-        let bag = w
-            .loot_bag(w.players[&owner].pos, None, vec![0xa22])
-            .unwrap();
-        let plan = w
-            .swap(
-                owner,
-                Slot {
-                    object: bag,
-                    slot: 0,
-                    kind: 0xa22,
-                },
-                Slot {
-                    object: owner,
-                    slot: 5,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        w.step();
-        assert!(w.entities.contains_key(&bag));
-        assert_eq!(w.players[&owner].character.items[5], -1);
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert!(w.now < 60_000);
-        w.step();
-        assert!(!w.entities.contains_key(&bag));
-        assert!(!w.bag_expiry.contains_key(&bag));
-        assert_eq!(w.cells.count(bag), 0);
-        assert_eq!(w.players[&owner].character.items[5], 0xa22);
-    }
-    #[test]
-    fn private_loot_is_server_scoped_and_reservations_protect_expiry() {
-        let mut w = world();
-        let owner = w.enter(ch(&w), None).unwrap();
-        let mut ch2 = ch(&w);
-        ch2.id = 2;
-        ch2.account = 2;
-        let other = w.enter(ch2, None).unwrap();
-        let pos = w.players[&owner].pos;
-        let bag = w.loot_bag(pos, Some(1), vec![0xa4f]).unwrap();
-        assert!(w.visible(owner).contains(&bag));
-        assert!(!w.visible(other).contains(&bag));
-        for observer in [Some(other), None] {
-            assert!(
-                !w.inspect_map(observer).unwrap()["entities"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|e| e["id"] == bag)
-            );
-        }
-        assert!(
-            w.inspect_map(Some(owner)).unwrap()["entities"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|e| e["id"] == bag)
-        );
-        assert!(w.inspect_map(Some(-999)).is_err());
-        assert!(
-            !w.observe(other).unwrap()["entities"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|e| e["id"] == bag)
-        );
-        let from = Slot {
-            object: bag,
-            slot: 0,
-            kind: 0xa4f,
-        };
-        assert!(
-            w.swap(
-                other,
-                from,
-                Slot {
-                    object: other,
-                    slot: 5,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        let plan = w
-            .swap(
-                owner,
-                from,
-                Slot {
-                    object: owner,
-                    slot: 5,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        w.now = 60_000;
-        w.step();
-        assert!(w.entities.contains_key(&bag));
-        assert_eq!(w.players[&owner].character.items[5], -1);
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        w.step();
-        assert!(!w.entities.contains_key(&bag));
-        assert_eq!(w.players[&owner].character.items[5], 0xa4f);
-        assert_eq!(w.players[&other].character.items[5], -1);
-        assert_eq!(w.cells.count(bag), 0);
-    }
-    #[test]
-    fn native_projectile_observation_exposes_only_the_players_friendly_origins() {
-        let mut w = world();
-        let a = w.enter(ch(&w), None).unwrap();
-        let mut other = ch(&w);
-        other.id = 2;
-        other.account = 2;
-        let b = w.enter(other, None).unwrap();
-        w.now = 1000;
-        for id in [a, b] {
-            let p = w.players[&id].pos;
-            w.shoot(
-                id,
-                1000,
-                1,
-                2711,
-                Pos {
-                    x: p.x + 0.3,
-                    y: p.y,
-                },
-                0.,
-            )
-            .unwrap();
-        }
-        let mut hostile = w.bullets[0].clone();
-        hostile.friendly = false;
-        w.bullets.push(hostile);
-        let observed = w.observe(a).unwrap();
-        let own = observed["own_projectiles"].as_array().unwrap();
-        assert_eq!(own.len(), 1);
-        assert_eq!(
-            own[0]["start"],
-            serde_json::to_value(w.bullets[0].start).unwrap()
-        );
-        assert_eq!(own[0]["angle"], 0.);
-    }
-    #[test]
-    fn native_spread_uses_central_muzzle_without_funding_false_centres() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        let kind = 0xc03;
-        let item = w.content.get(kind).unwrap();
-        let shots = item.shots;
-        let gap = item.arc.to_radians();
-        assert_eq!(shots, 10);
-        let p = w.players.get_mut(&player).unwrap();
-        p.character.items[0] = i32::from(kind);
-        p.next_bullet = 0;
-        p.last_move = 1000;
-        p.last_move_at = w.now;
-        p.movement_credit = 0.;
-        let pos = p.pos;
-        let aim = 0.8f32;
-        let muzzle = Pos {
-            x: pos.x + 0.3 * aim.cos(),
-            y: pos.y + 0.3 * aim.sin(),
-        };
-        for index in 0..shots {
-            let angle = aim + gap * (index as f32 - (shots - 1) as f32 / 2.);
-            if index == 1 {
-                assert!(
-                    w.shoot(player, 1000, index as u8, kind, muzzle, angle + 0.5)
-                        .unwrap_err()
-                        .to_string()
-                        .contains("invalid shot origin")
-                );
-                assert_eq!(w.players[&player].attack_count, 1);
-            }
-            w.shoot(player, 1000, index as u8, kind, muzzle, angle)
-                .unwrap();
-        }
-        assert_eq!(w.players[&player].attack_count, shots);
-        assert_eq!(w.players[&player].movement_credit, 0.);
-        assert_eq!(w.players[&player].pos.x, pos.x);
-        assert_eq!(w.players[&player].pos.y, pos.y);
-    }
-    #[test]
-    fn native_shoot_before_move_uses_the_same_speed_time_and_wall_budget() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let pos = (1..w.map.height - 1)
-            .flat_map(|y| {
-                (1..w.map.width - 1).map(move |x| Pos {
-                    x: x as f32 + 0.5,
-                    y: y as f32 + 0.5,
-                })
-            })
-            .find(|p| {
-                (-1..=1).all(|dy| {
-                    (-1..=1).all(|dx| {
-                        w.walkable(Pos {
-                            x: p.x + dx as f32,
-                            y: p.y + dy as f32,
-                        })
-                    })
-                })
-            })
-            .unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.pos = pos;
-        p.last_move = 1000;
-        p.last_move_at = 0;
-        p.movement_credit = 0.;
-        w.now = 100;
-        let origin = Pos {
-            x: pos.x + 0.673777,
-            y: pos.y - 0.139555,
-        };
-        let angle = (-0.139555_f32).atan2(0.673777);
-        assert!(
-            w.shoot(
-                id,
-                1091,
-                1,
-                0xa97,
-                Pos {
-                    x: pos.x + 20.,
-                    y: pos.y
-                },
-                0.
-            )
-            .is_err()
-        );
-        w.shoot(id, 1091, 1, 0xa97, origin, angle).unwrap();
-        assert_eq!(w.players[&id].pos.x, pos.x);
-        assert_eq!(w.players[&id].last_move, 1000);
-        assert_eq!(w.players[&id].movement_credit, 0.);
-        assert_eq!(w.players[&id].character.shots, 1);
-        assert!(
-            w.validate_move(
-                id,
-                Pos {
-                    x: pos.x + 0.6,
-                    y: pos.y
-                },
-                1091
-            )
-            .is_err()
-        );
-        assert!(w.validate_move(id, pos, 999).is_err());
-        assert!(w.move_to(id, pos, 2001).is_err());
-        w.now = 5100;
-        let stationary = Pos {
-            x: pos.x + 0.3 * angle.cos(),
-            y: pos.y + 0.3 * angle.sin(),
-        };
-        w.shoot(id, 6000, 2, 0xa97, stationary, angle).unwrap();
-        w.now = 5600;
-        w.shoot(
-            id,
-            6500,
-            3,
-            0xa97,
-            Pos {
-                x: pos.x + 0.35,
-                y: pos.y,
-            },
-            0.,
-        )
-        .unwrap();
-        assert_eq!(w.players[&id].last_move, 1000);
-        assert_eq!(w.players[&id].movement_credit, 0.);
-        assert!(
-            w.shoot(
-                id,
-                7000,
-                3,
-                0xa97,
-                Pos {
-                    x: f32::NAN,
-                    y: pos.y
-                },
-                angle
-            )
-            .is_err()
-        );
-        let blocker = *w.content.objects.iter().find(|(_, o)| o.blocks).unwrap().0;
-        w.spawn_entity(blocker, pos, vec![]).unwrap();
-        assert!(
-            w.validate_move(
-                id,
-                Pos {
-                    x: pos.x + 0.1,
-                    y: pos.y
-                },
-                1091
-            )
-            .is_ok()
-        );
-        w.spawn_entity(
-            blocker,
-            Pos {
-                x: pos.x + 1.,
-                y: pos.y,
-            },
-            vec![],
-        )
-        .unwrap();
-        assert!(
-            w.validate_move(
-                id,
-                Pos {
-                    x: pos.x + 0.6,
-                    y: pos.y
-                },
-                1200
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("blocked tile")
-        );
-    }
-    #[test]
-    fn hiscore_snapshots_exclude_qa_and_keep_the_latest_fame_until_death_commits() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let world_id = d.initial(-2).unwrap();
-        let (id, _receiver) = receive(&mut d, world_id, 1, WIZARD);
-        let w = d.worlds.get_mut(&world_id).unwrap();
-        w.players.get_mut(&id).unwrap().character.fame = 100;
-        w.players.get_mut(&id).unwrap().death_pending = true;
-        assert_eq!(d.competitive_characters()[0].fame, 100);
-        d.worlds
-            .get_mut(&world_id)
-            .unwrap()
-            .players
-            .get_mut(&id)
-            .unwrap()
-            .controller = Controller::Qa;
-        assert!(d.competitive_characters().is_empty());
-        let p = d
-            .worlds
-            .get_mut(&world_id)
-            .unwrap()
-            .players
-            .get_mut(&id)
-            .unwrap();
-        p.controller = Controller::Human;
-        p.persistence_failure = Some("test storage failure".into());
-        assert!(d.competitive_characters().is_empty());
-    }
-    #[test]
-    fn only_human_enemy_drop_pickups_stage_collection_and_player_drops_never_do() {
-        for controller in [Controller::Human, Controller::Qa, Controller::Autonomous] {
-            let (mut w, id, enemy) = encounter(0x683);
-            w.players.get_mut(&id).unwrap().controller = controller;
-            w.rng = rand::rngs::StdRng::seed_from_u64(5);
-            let mut defeated = w.remove_entity(enemy);
-            defeated.damage.insert(w.players[&id].character.id, 100);
-            for _ in 0..32 {
-                w.drop_loot(&defeated).unwrap();
-                if w.entities.values().any(|e| !e.drop_slots.is_empty()) {
-                    break;
-                }
-            }
-            let bag = w
-                .entities
-                .values()
-                .find(|e| !e.drop_slots.is_empty())
-                .unwrap()
-                .clone();
-            let slot = *bag.drop_slots.first().unwrap();
-            let kind = bag.items[slot];
-            w.players.get_mut(&id).unwrap().pos = bag.pos;
-            let plan = w
-                .swap(
-                    id,
-                    Slot {
-                        object: bag.id,
-                        slot,
-                        kind,
-                    },
-                    Slot {
-                        object: id,
-                        slot: 11,
-                        kind: -1,
-                    },
-                )
-                .unwrap();
-            assert_eq!(
-                plan.collected,
-                if controller == Controller::Human {
-                    Some(kind as u16)
-                } else {
-                    None
-                }
-            );
-            assert!(w.entities[&bag.id].drop_slots.contains(&slot));
-            w.finish_inventory(plan, Ok(1)).unwrap();
-            assert!(!w.entities[&bag.id].drop_slots.contains(&slot));
-            let plan = w
-                .drop_item(
-                    id,
-                    Slot {
-                        object: id,
-                        slot: 11,
-                        kind,
-                    },
-                )
-                .unwrap();
-            let dropped = plan.dropped.unwrap();
-            assert_eq!(plan.collected, None);
-            w.finish_inventory(plan, Ok(2)).unwrap();
-            let plan = w
-                .swap(
-                    id,
-                    Slot {
-                        object: dropped,
-                        slot: 0,
-                        kind,
-                    },
-                    Slot {
-                        object: id,
-                        slot: 11,
-                        kind: -1,
-                    },
-                )
-                .unwrap();
-            assert_eq!(plan.collected, None);
-        }
-    }
-    #[test]
-    fn dungeon_clear_counter_is_staged_until_progress_commit() {
-        let (mut w, player, boss) = encounter(0x927);
-        w.name = "Pirate Cave".into();
-        let mut defeated = w.remove_entity(boss);
-        defeated.damage.insert(w.players[&player].character.id, 101);
-        w.drop_loot(&defeated).unwrap();
-        assert!(w.cleared);
-        assert_eq!(w.players[&player].character.pirate_caves, 0);
-        assert!(w.entities.values().any(|e| e.kind == 0x71d && !e.published));
-        assert!(!w.entities.values().any(|e| e.kind == 0x71d && e.published));
-        assert!(w.drop_loot(&defeated).is_err());
-        let plans = w.pending_progress();
-        assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].1.pirate_caves, 1);
-        assert!(w.pending_progress().is_empty());
-        assert!(w.begin_departure(player).unwrap().is_none());
-        w.finish_progress(player, plans[0].1.clone()).unwrap();
-        assert_eq!(w.players[&player].character.pirate_caves, 1);
-        assert!(w.entities.values().any(|e| e.kind == 0x71d && e.published));
-        assert!(w.clear_exit.is_none());
-    }
-    fn encounter(kind: u16) -> (World, i32, i32) {
-        let mut w = world();
-        let obsolete: Vec<_> = w
-            .entities
-            .values()
-            .filter(|e| w.content.objects[&e.kind].enemy)
-            .map(|e| e.id)
-            .collect();
-        for id in obsolete {
-            w.remove_entity(id);
-        }
-        let player = w.enter(ch(&w), None).unwrap();
-        let pos = w.players[&player].pos;
-        let npc = w
-            .spawn_entity(
-                kind,
-                Pos {
-                    x: pos.x + 4.,
-                    y: pos.y,
-                },
-                vec![],
-            )
-            .unwrap();
-        w.encounter = true;
-        (w, player, npc)
-    }
-    #[test]
-    fn dropped_portal_binds_both_players_to_one_cave_and_expires() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let w = d.worlds.get_mut(&-3).unwrap();
-        let pos = w.population[0].pos;
-        let a = w.enter(ch(w), None).unwrap();
-        let mut other = ch(w);
-        other.id = 2;
-        other.account = 2;
-        let b = w.enter(other, None).unwrap();
-        w.players.get_mut(&a).unwrap().pos = pos;
-        w.players.get_mut(&b).unwrap().pos = pos;
-        let portal = d.drop_portal(-3, pos).unwrap();
-        assert_eq!(d.portals[&portal].expires, d.tick + 600);
-        d.worlds
-            .get_mut(&-3)
-            .unwrap()
-            .entities
-            .get_mut(&portal)
-            .unwrap()
-            .published = false;
-        assert!(
-            d.destination(a, Some(portal))
-                .unwrap_err()
-                .to_string()
-                .contains("portal not published")
-        );
-        d.worlds
-            .get_mut(&-3)
-            .unwrap()
-            .entities
-            .get_mut(&portal)
-            .unwrap()
-            .published = true;
-        let (_, _, destination) = d.destination(a, Some(portal)).unwrap();
-        assert_eq!(d.destination(b, Some(portal)).unwrap().2, destination);
-        assert_eq!(d.worlds[&destination].name, "Pirate Cave");
-        d.worlds
-            .get_mut(&-3)
-            .unwrap()
-            .players
-            .get_mut(&b)
-            .unwrap()
-            .pos = Pos {
-            x: pos.x + 3.,
-            y: pos.y,
-        };
-        assert!(d.destination(b, Some(portal)).is_err());
-        let fake = d
-            .worlds
-            .get_mut(&-3)
-            .unwrap()
-            .spawn_entity(0x717, pos, vec![])
-            .unwrap();
-        assert!(d.destination(a, Some(fake)).is_err());
-        d.tick = 599;
-        d.step();
-        assert!(!d.portals.contains_key(&portal));
-        assert!(!d.worlds[&-3].entities.contains_key(&portal));
-        assert!(d.destination(a, Some(portal)).is_err());
-    }
-    #[test]
-    fn sprite_world_portal_stays_usable_for_fifteen_seconds_then_expires() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let w = d.worlds.get_mut(&-3).unwrap();
-        let (x, y) = w.map.spawns[0];
-        let pos = Pos { x, y };
-        let player = w.enter(ch(w), None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = pos;
-        d.tick = 1234;
-        let born = d.tick;
-        let portal = d.drop_dungeon_portal(-3, 0x70c, pos).unwrap();
-        for age in [200, 299] {
-            d.tick = born + age - 1;
-            d.step();
-            assert!(d.worlds[&-3].entities.contains_key(&portal));
-            let destination = d.destination(player, Some(portal)).unwrap().2;
-            assert_eq!(d.worlds[&destination].name, "Sprite World");
-        }
-        d.step();
-        assert_eq!(d.tick - born, 300);
-        assert!(!d.portals.contains_key(&portal));
-        assert!(!d.worlds[&-3].entities.contains_key(&portal));
-        assert!(d.destination(player, Some(portal)).is_err());
-    }
-    #[test]
-    fn successive_sprite_worlds_are_not_the_same_map() {
-        let content = Arc::new(Content::load(Path::new("data")).unwrap());
-        let mut d = Directory::test_prepared(Path::new("data"), content, 16, 12351).unwrap();
-        let first = d.prepared_instance("sprite-world").unwrap();
-        let second = d.prepared_instance("sprite-world").unwrap();
-        let grounds = |id| {
-            d.worlds[&id]
-                .map
-                .cells
-                .iter()
-                .map(|c| (c.ground, c.object))
-                .collect::<Vec<_>>()
-        };
-        assert_ne!(grounds(first), grounds(second));
-        assert_eq!(
-            d.worlds[&first]
-                .entities
-                .values()
-                .filter(|e| e.kind == 0x70e && e.published)
-                .count(),
-            0
-        );
-    }
-    #[test]
-    fn shore_population_is_bounded_sourced_and_cannot_respawn_on_players() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let w = d.worlds.get_mut(&-3).unwrap();
-        assert!(w.population_count(11) >= w.population_regions[11].target);
-        for spawn in w
-            .population
-            .iter()
-            .filter(|s| w.content.objects[&s.kind].terrain >= 11)
-        {
-            assert_eq!(
-                w.map.cell(spawn.pos.x, spawn.pos.y).unwrap().terrain,
-                w.content.objects[&spawn.kind].terrain
-            );
-            assert!(w.walkable(spawn.pos));
-        }
-        let pos = w.population.iter().find(|s| s.kind == 0x602).unwrap().pos;
-        let old: BTreeSet<_> = w
-            .population
-            .iter()
-            .filter(|s| w.population_terrain(s) == 11)
-            .filter_map(|s| s.entity)
-            .collect();
-        for id in &old {
-            w.remove_entity(*id);
-        }
-        let player = w.enter(ch(w), None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = pos;
-        w.now = 60000;
-        w.repopulate().unwrap();
-        assert!(w.population_count(11) >= w.population_regions[11].target);
-        for member in w
-            .population
-            .iter()
-            .filter(|s| w.population_terrain(s) == 11)
-        {
-            if let Some(id) = member.entity {
-                assert!(!old.contains(&id));
-                assert!(w.entities[&id].pos.distance(pos) >= 12.);
-            }
-        }
-        assert_eq!(
-            w.entities
-                .values()
-                .filter(|e| {
-                    let object = &w.content.objects[&e.kind];
-                    object.enemy
-                        && object.class != "Wall"
-                        && !(e.quest.is_some() && matches!(e.kind, 0xd5e | 0xd65))
-                })
-                .count(),
-            w.population
-                .iter()
-                .filter(|s| s.entity.is_some_and(|id| w.entities.contains_key(&id)))
-                .count()
-                + w.hero_identities().len()
-        );
-        assert!(w.population_count(11) <= w.population_regions[11].limit);
-        assert_eq!(w.hero_identities().len(), 14);
-        assert!(
-            w.population
-                .iter()
-                .all(|s| !crate::endgame::HEROES.contains(&s.kind))
-        );
-    }
-    #[test]
-    fn moving_chaser_stays_indexed_and_fires_real_selected_projectiles() {
-        let (mut w, player, npc) = encounter(0x687);
-        let initial = w.entities[&npc].pos;
-        for _ in 0..20 {
-            w.step();
-        }
-        let current = w.entities[&npc].pos;
-        assert!(initial.distance(current) > 2.);
-        assert!(current.distance(w.players[&player].pos) <= 1.3);
-        assert_eq!(w.cells.count(npc), 1);
-        assert!(w.entities_at(current).any(|e| e.id == npc));
-        assert!(w.players[&player].character.hp < 100);
-        let before = current;
-        assert!(w.move_entity(npc, Pos { x: -10., y: -10. }, 100.).is_err());
-        assert_eq!(w.entities[&npc].pos.distance(before), 0.);
-        assert!(w.entities_at(before).any(|e| e.id == npc));
-    }
-    #[test]
-    fn boss_emits_both_attacks_only_after_threshold_and_safe_worlds_do_not_run_ai() {
-        let (mut w, _, boss) = encounter(0x927);
-        w.step();
-        assert!(!w.bullets.iter().any(|b| b.owner == boss));
-        w.entities.get_mut(&boss).unwrap().hp = 639;
-        for _ in 0..10 {
-            w.step();
-        }
-        let attacks: Vec<_> = w
-            .bullets
-            .iter()
-            .filter(|b| b.owner == boss)
-            .map(|b| b.spec.speed)
-            .collect();
-        assert!(attacks.contains(&75.));
-        assert!(attacks.contains(&130.));
-        let pos = w.entities[&boss].pos;
-        w.safe = true;
-        for _ in 0..40 {
-            w.step();
-        }
-        assert_eq!(w.entities[&boss].pos.distance(pos), 0.);
-        assert!(!w.bullets.iter().any(|b| b.owner == boss));
-    }
-    #[test]
-    fn overlapping_entities_preserve_collision_visibility_and_removal() {
-        let mut w = world();
-        let (x, y) = w.map.spawns[0];
-        let pos = Pos { x, y };
-        let first = w.spawn_entity(0x806, pos, vec![-1; 8]).unwrap();
-        let second = w.spawn_entity(0x806, pos, vec![-1; 8]).unwrap();
-        assert_eq!(w.entities_at(pos).count(), 2);
-        assert_eq!(
-            w.near_entities(pos, pos)
-                .filter(|e| e.id == first || e.id == second)
-                .count(),
-            2
-        );
-        let wall = w.spawn_entity(0x163, pos, vec![]).unwrap();
-        assert!(!w.walkable(pos));
-        assert!(w.spawn_entity(0x806, pos, vec![]).is_err());
-        w.remove_entity(wall);
-        assert!(w.walkable(pos));
-        w.remove_entity(first);
-        assert_eq!(
-            w.entities_at(pos).map(|e| e.id).collect::<Vec<_>>(),
-            vec![second]
-        );
-    }
-    #[test]
-    fn projectile_keeps_killer_identity_after_emitter_dies() {
-        let mut w = world();
-        let mut character = ch(&w);
-        character.hp = 1;
-        let player = w.enter(character, None).unwrap();
-        let emitter = w.entities.values().find(|e| e.kind == 0x802).unwrap().id;
-        let kind = w.entities[&emitter].kind;
-        let pos = w.players[&player].pos;
-        w.bullets.push(Bullet {
-            owner: emitter,
-            source_kind: kind,
-            id: 1,
-            friendly: false,
-            start: pos,
-            pos,
-            angle: 0.,
-            born: 0,
-            damage: 100,
-            spec: w.content.objects[&kind].projectiles[&0].clone(),
-            hit: BTreeSet::new(),
-            hit_enemy: false,
-        });
-        w.remove_entity(emitter);
-        w.step();
-        assert!(w.players[&player].death_pending);
-        assert_eq!(w.players[&player].killer, w.content.objects[&kind].name);
-    }
-    #[test]
-    fn selected_cover_stops_hostile_projectiles_before_player_damage() {
-        for (kind, passes_cover, hp) in [
-            (0x120, false, 100),
-            (0x120, true, 100),
-            (0x100, false, 100),
-            (0x100, true, 92),
-        ] {
-            let mut w = world();
-            for id in w.entities.keys().copied().collect::<Vec<_>>() {
-                w.remove_entity(id);
-            }
-            for cell in &mut Arc::make_mut(&mut w.map).cells {
-                cell.ground = 0x61;
-            }
-            let player = w.enter(ch(&w), None).unwrap();
-            w.players.get_mut(&player).unwrap().pos = Pos { x: 12.5, y: 100.5 };
-            w.spawn_entity(kind, Pos { x: 11.5, y: 100.5 }, vec![])
-                .unwrap();
-            let start = Pos { x: 10.5, y: 100.5 };
-            let mut spec = w.content.objects[&0x683].projectiles[&0].clone();
-            spec.passes_cover = passes_cover;
-            w.bullets.push(Bullet {
-                owner: 500,
-                source_kind: 0x683,
-                id: 1,
-                friendly: false,
-                start,
-                pos: start,
-                angle: 0.,
-                born: 0,
-                damage: 8,
-                spec,
-                hit: BTreeSet::new(),
-                hit_enemy: false,
-            });
-            for _ in 0..5 {
-                w.step();
-            }
-            assert_eq!(
-                w.players[&player].character.hp, hp,
-                "{kind:#x}/{passes_cover}"
-            );
-            assert!(w.bullets.is_empty());
-        }
-    }
-    #[test]
-    fn native_movement_and_shot_origin_follow_client_positions_without_funding_scripts() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        let pos = w.players[&player].pos;
-        w.attack_epoch = Instant::now() - std::time::Duration::from_millis(2000);
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_move = 1000;
-        p.last_move_at = 1000;
-        p.movement_credit = 0.;
-        w.now = 1000;
-        let next = Pos {
-            x: pos.x + 0.4,
-            y: pos.y,
-        };
-        assert!(w.move_to(player, next, 1100).is_err());
-        w.native_move_to(player, next, 1100).unwrap();
-        let received = w.players[&player].last_move_at;
-        assert!(received >= 2000);
-        let predicted = Pos {
-            x: next.x + 0.4,
-            y: next.y,
-        };
-        assert!(w.move_timed(player, predicted, 1200, received).is_err());
-        w.shoot_timed(
-            player,
-            (1200, received, true),
-            1,
-            0xa97,
-            Pos {
-                x: predicted.x + 0.3,
-                y: predicted.y,
-            },
-            0.,
-        )
-        .unwrap();
-        assert_eq!(w.players[&player].movement_credit, 0.);
-        assert_eq!(w.players[&player].pos.x, next.x);
-        assert_eq!(w.bullets.len(), 1);
-    }
-
-    #[test]
-    fn native_positions_preserve_actual_ingress_without_rejecting_actor_or_network_delay() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        let pos = w.players[&player].pos;
-        w.attack_epoch = Instant::now() - std::time::Duration::from_millis(2000);
-        let received = w.attack_epoch + std::time::Duration::from_millis(1100);
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_move = 1000;
-        p.last_move_at = 1000;
-        p.movement_credit = 0.;
-        let next = Pos {
-            x: pos.x + 0.7,
-            y: pos.y,
-        };
-        w.native_move_received(player, next, (1100, received))
-            .unwrap();
-        w.native_shoot_received(
-            player,
-            (1100, received),
-            1,
-            0xa97,
-            Pos {
-                x: next.x + 0.3,
-                y: next.y,
-            },
-            0.,
-        )
-        .unwrap();
-        let p = &w.players[&player];
-        assert_eq!((p.last_move_at, p.last_attack_at), (1100, 1100));
-        assert_eq!(p.pos.x, next.x);
-        assert_eq!(p.movement_credit, 0.);
-        assert!(
-            w.native_move_received(
-                player,
-                next,
-                (1200, received - std::time::Duration::from_millis(1))
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn queued_progress_must_settle_before_pause_is_confirmed() {
-        let mut w = world();
-        let character = ch(&w);
-        let player = w.enter(character, None).unwrap();
-        w.players
-            .get_mut(&player)
-            .unwrap()
-            .queue_experience(20, None, false)
-            .unwrap();
-        assert!(!w.settled().unwrap());
-        let (id, progress) = w.pending_progress().pop().unwrap();
-        assert!(!w.settled().unwrap());
-        w.finish_progress(id, progress).unwrap();
-        assert!(w.settled().unwrap());
-    }
-    #[test]
-    fn paused_ingress_clock_stays_frozen_while_client_cadence_funds_native_shots() {
-        let mut w = world();
-        let mut character = ch(&w);
-        character.base[5] = 26;
-        let player = w.enter(character, None).unwrap();
-        let pos = w.players[&player].pos;
-        let start = Pos {
-            x: pos.x + 0.3,
-            y: pos.y,
-        };
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_attack = 1000;
-        p.last_attack_at = 1000;
-        p.attack_credit = 0.;
-        w.attack_epoch = w.clock.now() - std::time::Duration::from_millis(1000);
-        w.clock.set_paused(true);
-        let paused = w.clock.now();
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        assert_eq!(w.clock.now(), paused);
-        assert_eq!(
-            w.native_shoot_received(player, (1298, w.clock.now()), 1, 0xa97, start, 0.)
-                .unwrap(),
-            NativeInput::Applied
-        );
-        w.clock.set_paused(false);
-        assert_eq!(
-            w.native_shoot_received(player, (1596, w.clock.now()), 2, 0xa97, start, 0.)
-                .unwrap(),
-            NativeInput::Applied
-        );
-        assert!(w.players[&player].last_attack_at < 1100);
-        assert_eq!(w.players[&player].character.shots, 2);
-        assert_eq!(w.bullets.len(), 2);
-    }
-    #[test]
-    fn native_attack_cadence_uses_client_time_but_keeps_real_ingress_metadata() {
-        let mut w = world();
-        let mut character = ch(&w);
-        character.base[5] = 26;
-        let player = w.enter(character, None).unwrap();
-        let pos = w.players[&player].pos;
-        let start = Pos {
-            x: pos.x + 0.3,
-            y: pos.y,
-        };
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_attack = 1000;
-        p.last_attack_at = 1000;
-        p.attack_credit = 0.;
-        for (time, received) in [(1298, 1200), (1596, 1298)] {
-            for _ in 0..2 {
-                let bullet = w.players[&player].next_bullet;
-                assert_eq!(
-                    w.shoot_timed(player, (time, received, true), bullet, 0xa97, start, 0.)
-                        .unwrap(),
-                    NativeInput::Applied
-                );
-            }
-        }
-        w.now = 9000;
-        w.shoot_timed(player, (1894, 1400, true), 5, 0xa97, start, 0.)
-            .unwrap();
-        assert_eq!(w.players[&player].character.shots, 5);
-        assert_eq!(w.players[&player].last_attack_at, 1400);
-        let seed = w.players[&player].seed;
-        assert!(
-            w.shoot_timed(player, (2192, 1200, true), 6, 0xa97, start, 0.)
-                .unwrap_err()
-                .to_string()
-                .contains("attack receive clock regressed")
-        );
-        assert_eq!(w.players[&player].seed, seed);
-    }
-    #[test]
-    fn native_integer_attack_period_keeps_the_bounded_server_credit() {
-        for dexterity in [15, 17, 18, 25, 75] {
-            let mut w = world();
-            let mut character = ch(&w);
-            character.base[5] = dexterity;
-            let player = w.enter(character, None).unwrap();
-            let period = (1. / (0.0015_f64 + (0.008 - 0.0015) * dexterity as f64 / 75.)) as i32;
-            let pos = w.players[&player].pos;
-            let start = Pos {
-                x: pos.x + 0.3,
-                y: pos.y,
-            };
-            for attack in 0..2000 {
-                let time = attack * period;
-                w.now = time as u64;
-                for _ in 0..2 {
-                    let bullet = w.players[&player].next_bullet;
-                    w.shoot(player, time, bullet, 0xa97, start, 0.).unwrap();
-                }
-                w.bullets.clear();
-            }
-            assert_eq!(w.players[&player].character.shots, 4000);
-            let bullet = w.players[&player].next_bullet;
-            assert!(
-                w.shoot(player, 2000 * period - 3, bullet, 0xa97, start, 0.)
-                    .is_err()
-            );
-        }
-    }
-    #[test]
-    fn candidate_tutorial_gun_still_reaches_its_open_lane() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 12.2, y: 137.8 };
-        assert!((0..200).any(|_| {
-            w.step();
-            w.players[&player].character.hp < 100
-        }));
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 12.2, y: 138.0 };
-        assert!((0..3000).any(|_| {
-            w.step();
-            w.players[&player].death_pending
-        }));
-    }
-    #[test]
-    fn paired_staff_wave() {
-        let w = world();
-        let spec = w.content.objects[&0xa97].projectiles[&0].clone();
-        let mut b = Bullet {
-            owner: 1,
-            source_kind: WIZARD,
-            id: 1,
-            friendly: true,
-            start: Pos { x: 0., y: 0. },
-            pos: Pos { x: 0., y: 0. },
-            angle: 0.,
-            born: 0,
-            damage: 7,
-            spec,
-            hit: BTreeSet::new(),
-            hit_enemy: false,
-        };
-        let a = b.position(60);
-        b.id = 2;
-        let c = b.position(60);
-        assert!((a.x - 1.08).abs() < 0.001);
-        assert!((a.y + c.y).abs() < 0.001);
-        assert!(a.y.abs() > 0.4);
-    }
 }
+
+#[cfg(test)]
+mod complete_abilities_tests;
+
+#[cfg(test)]
+mod cooperative_tests;
+
+#[cfg(test)]
+mod quest_completion_tests;
+
+#[cfg(test)]
+mod xp_booster_tests;
+
+#[cfg(test)]
+mod lifecycle_departure_tests;

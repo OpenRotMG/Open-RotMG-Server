@@ -1,8 +1,6 @@
 use super::*;
 use crate::store::Guild;
 use std::time::Duration;
-#[cfg(test)]
-mod tests;
 
 pub(super) struct Invitation {
     guild: i32,

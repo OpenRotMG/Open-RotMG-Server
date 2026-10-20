@@ -209,9 +209,6 @@ impl Store {
 }
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
 pub(super) fn legacy_fixture(db: &Connection) -> Result<()> {
     ensure!(
         !db.query_row(

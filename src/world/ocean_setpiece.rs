@@ -20,12 +20,13 @@ impl World {
                     .map(|e| e.pos),
             )
             .collect();
+        // Inland event range: realm-src@1855c017, wServer/realm/Oryx.cs::SpawnEvent (Mountains..MidForest).
         let mut candidates: Vec<_> = self
             .map
             .cells
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.terrain == 11)
+            .filter(|(_, c)| (1..=7).contains(&c.terrain))
             .map(|(i, _)| Area {
                 x: i as i32 % self.map.width - 16,
                 y: i as i32 / self.map.width - 14,
@@ -53,7 +54,7 @@ impl World {
                             .all(|x| self.map.cells[(y * self.map.width + x) as usize].region == 0)
                     })
             })
-            .context("Realm has no unoccupied coastal site for the Hermit landmark")?;
+            .context("Realm has no unoccupied inland site for the Hermit landmark")?;
         // Reconstruct the source island's rings without erasing generated waterways.
         for y in 0..29 {
             for x in 0..32 {
@@ -138,8 +139,81 @@ impl World {
             root,
             x = area.x,
             y = area.y,
-            "coastal Hermit landmark placed"
+            "inland Hermit landmark placed"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hermit_lakes_use_inland_event_terrain_on_every_realm_layout() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        for source in crate::terrain::realms::sources(std::path::Path::new("data")).unwrap() {
+            let map = source.open(&content).unwrap();
+            for seed in [0, 12351] {
+                let mut w = World::new(content.clone(), map.clone()).unwrap();
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.populate_realm_heroes().unwrap();
+                w.populate_named_quests().unwrap();
+                w.populate_realm_events().unwrap();
+                let original = w.map.clone();
+                w.populate_hermit().unwrap();
+                let area = w.setpieces.last().unwrap();
+                let x = area.x + 16;
+                let y = area.y + 14;
+                let terrain = original.cells[(y * original.width + x) as usize].terrain;
+                eprintln!(
+                    "{} seed {seed}: Hermit site ({x},{y}), original terrain {terrain}",
+                    source.name()
+                );
+                assert!(
+                    (1..=7).contains(&terrain),
+                    "Hermit belongs in Mountains..MidForest, not coast/lowlands: {terrain}"
+                );
+                let roots: Vec<_> = w
+                    .entities
+                    .values()
+                    .filter(|e| e.kind == crate::dungeon::trench::HERMIT)
+                    .collect();
+                assert_eq!(roots.len(), 1);
+                assert_eq!(content.objects[&roots[0].kind].name, "Hermit God");
+                assert_eq!(
+                    w.entities
+                        .values()
+                        .filter(|e| e.kind == 0xd65 && e.parent == Some(roots[0].id))
+                        .count(),
+                    8
+                );
+                assert!(
+                    original
+                        .spawns
+                        .iter()
+                        .all(|&(x, y)| area.distance(Pos { x, y }) >= 64.)
+                );
+                assert!(
+                    w.setpieces[..w.setpieces.len() - 1]
+                        .iter()
+                        .all(|p| area.separate(p))
+                );
+            }
+        }
+        let mut shore = super::super::tests::arena(11);
+        let entities = shore.entities.len();
+        let pieces = shore.setpieces.len();
+        assert!(
+            shore
+                .populate_hermit()
+                .unwrap_err()
+                .to_string()
+                .contains("no unoccupied inland site")
+        );
+        assert_eq!(
+            (shore.entities.len(), shore.setpieces.len()),
+            (entities, pieces)
+        );
     }
 }

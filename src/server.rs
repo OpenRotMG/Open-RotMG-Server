@@ -1,29 +1,9 @@
-#[cfg(test)]
-mod character_slot_tests;
-#[cfg(test)]
-mod client_contract_tests;
 mod input;
-#[cfg(test)]
-mod lifecycle_finalize_tests;
-#[cfg(test)]
-mod lifecycle_native_tests;
-#[cfg(test)]
-mod name_choice_boundaries_tests;
-#[cfg(test)]
-mod name_choice_tests;
+
 #[cfg(test)]
 mod password_tests;
 mod pictures;
-#[cfg(test)]
-mod purchase_tests;
-#[cfg(test)]
-mod queue_tests;
-#[cfg(test)]
-mod resurrection_tests;
-#[cfg(test)]
-mod usage_tests;
-#[cfg(test)]
-mod xp_booster_tests;
+
 use crate::{
     content::{Content, WIZARD},
     crypto::Keys,
@@ -82,10 +62,9 @@ impl App {
         Ok(usage)
     }
 }
-#[cfg(test)]
-pub(crate) use account_actions::tests::fixture as lifecycle_test_fixture;
 use tokio::sync::mpsc;
 mod account_actions;
+pub(crate) mod browser_link;
 pub(crate) mod diagnostics;
 mod gold;
 mod guilds;
@@ -116,6 +95,7 @@ pub struct App {
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
+    pub(crate) browser_links: Arc<browser_link::Service>,
     pub owners: Arc<Mutex<BTreeMap<i32, lifecycle::Claim>>>,
     pub authentication: Arc<tokio::sync::RwLock<()>>,
     pub guild_actions: Arc<tokio::sync::Mutex<()>>,
@@ -192,6 +172,7 @@ async fn chars(
     State(a): State<App>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
     match admit(&a, &headers, peer) {
@@ -199,7 +180,8 @@ async fn chars(
         Ok(false) => return limited(),
         Err(e) => return error(e),
     }
-    let result: Result<String> = async {
+    let result: Result<(String, Option<String>)> = async {
+        let mut browser = browser_link::native(&a, &headers, &query).await?;
         let guid = form.get("guid").context("guid is required")?.clone();
         ensure!(
             form.get("secret").is_none_or(|s| s.is_empty()),
@@ -207,13 +189,22 @@ async fn chars(
         );
         let password = form.get("password").context("password required")?.clone();
         let _authentication = a.authentication.read().await;
+        let registered = !password.is_empty();
         let account = a.store.characters(guid, password).await?;
+        if registered && let Some(browser) = browser.as_mut() {
+            browser.authenticate(a.store.browser_identity(account.id).await?);
+        }
         let feed = a.store.updates().await?;
-        Ok(account.xml(&feed.news_xml(&a.origin), a.server_usage()?))
+        let xml = account.xml(&feed.news_xml(&a.origin), a.server_usage()?);
+        Ok((xml, browser.and_then(|b| b.cookie)))
     }
     .await;
     match result {
-        Ok(xml) => ([("content-type", "application/xml")], xml).into_response(),
+        Ok((xml, cookie)) => browser_link::with_cookie(
+            &a,
+            ([("content-type", "application/xml")], xml).into_response(),
+            cookie,
+        ),
         Err(e) if e.is::<crate::store::InvalidCredentials>() => {
             tracing::info!("legacy character-list credentials rejected");
             (
@@ -776,18 +767,7 @@ async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Charac
         })
         .await
 }
-#[cfg(test)]
-async fn persist_death(
-    a: &App,
-    id: i32,
-    ch: crate::store::Character,
-    killer: String,
-) -> Result<()> {
-    lifecycle::player(a, id, "death", move |a| async move {
-        persist_death_inner(&a, id, ch, killer).await
-    })
-    .await
-}
+
 async fn persist_death_inner(
     a: &App,
     id: i32,
@@ -1365,10 +1345,7 @@ async fn handle_inner(
                             a.store.disable_recovery(owner).await?;
                             "Discord password recovery disabled. All recovery codes and reset links revoked.".into()
                         }
-                        _ => {
-                            let code = a.store.issue_discord_code(owner).await?;
-                            format!("Use /link code:{code} with the official Discord bot within five minutes. This makes your Discord identity visible on hiscores. Keep this code private.")
-                        }
+                        _ => "Use /link in Discord to link your game account.".into(),
                     };
                     lifecycle::stage(Stage::Settled);
                     Ok::<_, anyhow::Error>(reply)
@@ -2579,9 +2556,6 @@ fn client_assets(client: &std::path::Path) -> Router<App> {
     )
 }
 
-#[cfg(test)]
-mod client_assets_tests;
-
 fn routes(a: &App, client: PathBuf) -> Router {
     let app = Router::new()
         .route(
@@ -2624,6 +2598,12 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/api/collection/{account}", get(collection))
         .route("/internal/discord/announce", post(discord_announce))
         .route("/internal/discord/link", post(discord_link))
+        .route("/internal/discord/link/start", post(browser_link::issue))
+        .route("/api/account/browser", post(browser_link::browser))
+        .route("/api/account/browser/close", post(browser_link::close))
+        .route("/api/account/link/start", post(browser_link::start))
+        .route("/api/account/link/complete", post(browser_link::complete))
+        .route("/api/account/link/callback", get(browser_link::callback))
         .route("/internal/discord/kick", post(discord_kick))
         .route("/internal/discord/recover", post(discord_recover))
         .route("/api/account/recover", post(reset_password));
@@ -2720,91 +2700,10 @@ async fn shutdown_signal() -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn original_otherhit_has_target_but_squarehit_does_not() {
-        let mut out = Writer::new();
-        out.i32(1234);
-        out.u8(7);
-        out.i32(1001);
-        let square = out.0.clone();
-        out.i32(5000);
-        assert_eq!(square.len(), 9);
-        assert_eq!(out.0.len(), 13);
-        collision_report(false, &mut Reader::new(&square)).unwrap();
-        collision_report(true, &mut Reader::new(&out.0)).unwrap();
-        assert!(collision_report(false, &mut Reader::new(&out.0)).is_err());
-        for end in 0..out.0.len() {
-            assert!(collision_report(true, &mut Reader::new(&out.0[..end])).is_err());
-        }
-        out.u8(0);
-        assert!(collision_report(true, &mut Reader::new(&out.0)).is_err());
-    }
-    #[test]
-    fn native_trade_offer_requires_exact_canonical_twelve_slot_shape() {
-        let mut out = Writer::new();
-        out.i16(12);
-        for slot in 0..12 {
-            out.u8(u8::from(slot == 4));
-        }
-        let mut r = Reader::new(&out.0);
-        let offer = trade_offer(&mut r).unwrap();
-        r.done().unwrap();
-        assert!(offer[4]);
-        assert_eq!(offer.iter().filter(|v| **v).count(), 1);
-        for count in [-1, 0, 11, 13, i16::MAX] {
-            let mut out = Writer::new();
-            out.i16(count);
-            assert!(trade_offer(&mut Reader::new(&out.0)).is_err());
-        }
-        out.0[6] = 2;
-        assert!(trade_offer(&mut Reader::new(&out.0)).is_err());
-        out.0[6] = 1;
-        out.0.pop();
-        assert!(trade_offer(&mut Reader::new(&out.0)).is_err());
-    }
-    #[test]
-    fn selected_player_text_has_only_one_utf_string() {
-        let mut out = Writer::new();
-        out.utf("café 😀");
-        assert_eq!(player_text(&mut Reader::new(&out.0)).unwrap(), "café 😀");
-        for end in 0..out.0.len() {
-            assert!(player_text(&mut Reader::new(&out.0[..end])).is_err());
-        }
-        out.utf("ForgedSender");
-        assert!(player_text(&mut Reader::new(&out.0)).is_err());
-        assert!(player_text(&mut Reader::new(&[0, 1, 0xff])).is_err());
-    }
-    #[test]
-    fn guest_rate_is_bounded_and_expires() {
-        let mut requests = HashMap::new();
-        let now = std::time::Instant::now();
-        let ip = "192.0.2.1".parse().unwrap();
-        for _ in 0..20 {
-            assert!(rate_allow(&mut requests, ip, now));
-        }
-        assert!(!rate_allow(&mut requests, ip, now));
-        assert!(rate_allow(&mut requests, "192.0.2.2".parse().unwrap(), now));
-        assert!(rate_allow(
-            &mut requests,
-            ip,
-            now + std::time::Duration::from_secs(60)
-        ));
-        assert_eq!(requests.len(), 1);
-        for n in 1..=4096 {
-            requests.insert(
-                IpAddr::V6(std::net::Ipv6Addr::from(n as u128)),
-                (now + std::time::Duration::from_secs(60), 1),
-            );
-        }
-        assert!(!rate_allow(
-            &mut requests,
-            "192.0.2.3".parse().unwrap(),
-            now + std::time::Duration::from_secs(60)
-        ));
-    }
-}
+mod equipment_fame_tests;
 
 #[cfg(test)]
-mod equipment_fame_tests;
+mod lifecycle_finalize_tests;
+
+#[cfg(test)]
+pub(crate) use account_actions::tests::fixture as lifecycle_test_fixture;

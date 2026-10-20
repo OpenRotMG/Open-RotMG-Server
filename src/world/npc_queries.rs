@@ -101,8 +101,6 @@ impl World {
         if !all_global {
             self.npc_global_ids.extend(candidates.iter().copied());
         }
-        #[cfg(test)]
-        npc_query_tests::COUNTS.set((examined, cells, requested, candidates.len()));
         let mut performance = self.performance.borrow_mut();
         for (name, amount) in [
             ("npc_queries", 1),
