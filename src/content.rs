@@ -176,6 +176,7 @@ pub struct Object {
     pub per_realm_max: Option<usize>,
     pub quest: bool,
     pub quest_level: Option<i32>,
+    pub quest_window: (u8, u8),
     pub xp_multiplier: f32,
     pub blocks: bool,
     pub full_occupy: bool,
@@ -493,6 +494,7 @@ impl Content {
                 quest_level: child(n, "Level")
                     .map(|_| text(n, "Level").parse())
                     .transpose()?,
+                quest_window: crate::quest::window(id),
                 xp_multiplier: number(n, "XpMult", 1.)?,
                 blocks: child(n, "OccupySquare").is_some() || child(n, "FullOccupy").is_some(),
                 full_occupy: child(n, "FullOccupy").is_some(),

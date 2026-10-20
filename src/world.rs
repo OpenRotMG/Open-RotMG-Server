@@ -57,6 +57,9 @@ mod ocean_setpiece;
 mod population;
 mod population_density;
 
+#[cfg(test)]
+mod quest_tests;
+
 mod realm_events;
 
 mod realm_portal;
@@ -2429,13 +2432,12 @@ impl World {
             // Equally suitable levels on both sides must compete on distance, not iteration order.
             for id in ids {
                 let e = self.entities.get(id).expect("indexed quest missing");
-                let max = match e.kind {
-                    0x617 => 8,
-                    0x609 | 0x60d => 9,
-                    0x61f => 10,
-                    _ => 20,
-                };
-                if e.hp <= 0 || !e.accessible(player.character.account) || level > max {
+                let (min, max) = self.content.objects[&e.kind].quest_window;
+                if e.hp <= 0
+                    || !e.accessible(player.character.account)
+                    || level < i32::from(min)
+                    || level > i32::from(max)
+                {
                     continue;
                 }
                 if best.is_none_or(|b| {
