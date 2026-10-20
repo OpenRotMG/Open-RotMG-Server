@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 import backup
+from test_release import legacy_copy
 
 
 class DeathSchema(unittest.TestCase):
@@ -23,6 +24,15 @@ class DeathSchema(unittest.TestCase):
                 db.execute('CREATE TABLE levels(guild_id TEXT,user_id TEXT,username TEXT,xp INTEGER,last_xp_at INTEGER,last_message_id TEXT,PRIMARY KEY(guild_id,user_id))')
             revision = directory / 'REVISION'
             revision.write_text('a' * 40)
+            original = backup.export(directory / 'written/game.db', directory / 'levels.sqlite', directory / 'current.gz', revision, revision, revision)
+            legacy = directory / 'legacy.gz'
+            legacy.write_bytes(gzip.compress(json.dumps(legacy_copy(original)).encode()))
+            baseline = directory / 'baseline'
+            backup.restore(legacy, baseline)
+            subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(baseline / 'game.db'), str(root / 'data')], check=True)
+            valid = backup.export(baseline / 'game.db', baseline / 'levels.sqlite', directory / 'valid.gz', revision, revision, revision)
+            self.assertEqual(valid['schema'], 16)
+            self.assertEqual(valid['game']['legacy_claims'], [])
             for case, (old, new) in enumerate([
                 ('character INTEGER PRIMARY KEY', 'character INTEGER'),
                 ('character INTEGER PRIMARY KEY', 'character TEXT PRIMARY KEY'),
@@ -45,8 +55,11 @@ class DeathSchema(unittest.TestCase):
             ]):
                 with self.subTest(metadata=new):
                     database = directory / 'malformed.db'
-                    with closing(sqlite3.connect(directory / 'written/game.db')) as source, closing(sqlite3.connect(database)) as db:
+                    with closing(sqlite3.connect(baseline / 'game.db')) as source, closing(sqlite3.connect(database)) as db:
                         source.backup(db)
+                        claims_sql = db.execute("SELECT sql FROM sqlite_schema WHERE name='legacy_claims'").fetchone()[0]
+                        db.execute('PRAGMA foreign_keys=OFF')
+                        db.execute('PRAGMA legacy_alter_table=ON')
                         sql = db.execute("SELECT sql FROM sqlite_schema WHERE name='deaths'").fetchone()[0]
                         changed = sql.replace(old, new)
                         if new == 'equipment_fame TEXT NOT NULL':
@@ -54,6 +67,12 @@ class DeathSchema(unittest.TestCase):
                         self.assertNotEqual(sql, changed)
                         columns = 'character,snapshot,killed_by,died_at' + ('' if 'GENERATED' in new else ',equipment_fame') + ',receipt'
                         db.executescript(f'ALTER TABLE deaths RENAME TO preserved_deaths; {changed}; INSERT INTO deaths({columns}) SELECT {columns} FROM preserved_deaths; DROP TABLE preserved_deaths; CREATE INDEX deaths_by_time ON deaths(died_at);')
+                        if new == 'character INTEGER':
+                            db.execute('CREATE UNIQUE INDEX fixture_death_parent ON deaths(character)')
+                        self.assertEqual(db.execute("SELECT sql FROM sqlite_schema WHERE name='legacy_claims'").fetchone()[0], claims_sql)
+                        self.assertEqual(db.execute("SELECT \"table\" FROM pragma_foreign_key_list('legacy_claims') WHERE \"from\"='character'").fetchall(), [('deaths',)])
+                        self.assertFalse(db.execute("SELECT 1 FROM sqlite_schema WHERE sql LIKE '%preserved_deaths%'").fetchall())
+                        self.assertFalse(db.execute('PRAGMA foreign_key_check').fetchall())
                     before = database.read_bytes()
                     with self.assertRaisesRegex(ValueError, 'death.*metadata'):
                         backup.export(database, directory / 'levels.sqlite', directory / f'rejected-{case}.gz',
@@ -160,15 +179,10 @@ class DeathSchema(unittest.TestCase):
             revision = directory / 'REVISION'
             revision.write_text('a' * 40)
             original = backup.export(directory / 'written/game.db', directory / 'levels.sqlite', directory / 'original.gz', revision, revision, revision)
-            old = deepcopy(original)
-            old['schema'] = 15
-            del old['game']['legacy_claims'], old['game']['level_credits']
-            for row in old['game']['deaths']:
-                del row['receipt']
+            old = legacy_copy(original)
             for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
                 for row in old['game'][table]:
                     payload = json.loads(row[field])
-                    del payload['lifetime']
                     payload['tiles'] = 4_000_001
                     row[field] = json.dumps(payload, indent=2)
             archive = directory / 'schema15.gz'
