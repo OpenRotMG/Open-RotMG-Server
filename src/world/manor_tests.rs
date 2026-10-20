@@ -161,12 +161,12 @@ fn manor_layouts_are_seeded_connected_and_have_a_safe_arrival() {
         assert_eq!(
             map.cells
                 .iter()
-                .map(|c| (c.ground, c.object))
+                .map(|c| (c.ground, c.object, &c.config))
                 .collect::<Vec<_>>(),
             again
                 .cells
                 .iter()
-                .map(|c| (c.ground, c.object))
+                .map(|c| (c.ground, c.object, &c.config))
                 .collect::<Vec<_>>()
         );
         let start = map.spawns[0];
@@ -208,6 +208,14 @@ fn manor_layouts_are_seeded_connected_and_have_a_safe_arrival() {
             secrets += 1;
             assert_ne!(c.region, 1);
         }
+        let mut coffins = BTreeMap::new();
+        for c in map.cells.iter().filter(|c| c.object == Some(COFFIN)) {
+            *coffins.entry(c.region).or_insert(0) += 1;
+        }
+        assert!(coffins.values().all(|n| (1..=2).contains(n)));
+        if map.cells.iter().any(|c| c.region == 250) {
+            assert!(coffins.values().any(|n| *n == 2));
+        }
         let sx = start % 224;
         let sy = start / 224;
         assert!(!map.cells.iter().enumerate().any(|(i, c)| {
@@ -215,7 +223,14 @@ fn manor_layouts_are_seeded_connected_and_have_a_safe_arrival() {
                 && sx.abs_diff(i % 224) <= 5
                 && sy.abs_diff(i / 224) <= 5
         }));
-        World::new(w.content.clone(), Arc::new(map)).unwrap();
+        let generated = World::new(w.content.clone(), Arc::new(map)).unwrap();
+        for shelf in generated.actors().filter(|e| e.kind == BOOKCASE) {
+            let cell = &generated.map.cells[shelf.pos.y as usize * 224 + shelf.pos.x as usize];
+            assert_eq!(
+                shelf.condition & condition::bit(condition::INVINCIBLE) == 0,
+                cell.region == 250
+            );
+        }
     }
     assert!(shapes.len() > 10);
     assert!(secrets > 20);

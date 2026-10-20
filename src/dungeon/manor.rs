@@ -234,7 +234,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             }
         }
         if i != 0 && i != boss {
-            if r.secret || rng.gen_ratio(1, 5) {
+            if r.secret {
+                coffins.extend([(cx - 2, cy), (cx + 2, cy)]);
+            } else if rng.gen_ratio(1, 5) {
                 coffins.push((cx, cy));
             } else {
                 let family = if rng.gen_bool(0.3) {
@@ -257,7 +259,13 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
         if i != boss && !r.secret {
             for dx in [-2, -1, 0, 1, 2] {
-                cell(&mut map, cx + dx, cy - r.radius).object = Some(BOOKCASE);
+                let shelf = cell(&mut map, cx + dx, cy - r.radius);
+                shelf.object = Some(BOOKCASE);
+                // Early Manor distinguished its hidden doors by accepting damage only on those shelves.
+                shelf.config = format!(
+                    "eff:{:x}",
+                    crate::condition::bit(crate::condition::INVINCIBLE)
+                );
             }
         }
     }
@@ -274,6 +282,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                         c.ground = 0x6c;
                     }
                     c.object = None;
+                    c.config.clear();
                 }
             }
         }
