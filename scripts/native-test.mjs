@@ -107,7 +107,7 @@ export async function runCase(scenario, options) {
     report.guardian=guardian.child.pid;
     report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]])report.inputs[name]=createHash('sha256').update(await readFile(path)).digest('hex');
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');
-    let spec;
+    let spec=fixtureModule.prepare===undefined?await prepareFixture(fixtureModule,api,controller.signal):null;
     port=await freePort();chromePort=await freePort();assert.notEqual(port,chromePort,'Ports collided; no launch attempted');
     owner='native-test:'+randomUUID();process.env.PI_BROWSER_OWNER=owner;
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
@@ -133,7 +133,7 @@ export async function runCase(scenario, options) {
       report.client=options.client?{mode:'local',path:options.client,lock:JSON.parse(await readFile(join(options.client,'ruffle/lock.json'),'utf8'))}:{mode:'deployed',selection:JSON.parse(await readFile(join(out,'state/client-selection.json'),'utf8'))};
     });
     delete report.phases.prepareBuildStart;
-    spec=await bounded('fixturePreparation',()=>prepareFixture(fixtureModule,api,AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])));
+    if(fixtureModule.prepare!==undefined)spec=await bounded('fixturePreparation',()=>prepareFixture(fixtureModule,api,AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])));
     report.fixture=spec;
     await bounded('browserAndFixture',async()=>{
       const auth=join(out,'Xauthority');await writeFile(auth,'',{mode:0o600});const cookie=randomBytes(16).toString('hex');
