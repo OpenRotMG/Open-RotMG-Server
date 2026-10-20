@@ -23,6 +23,18 @@ impl Room {
     }
 }
 
+// A lair room holds one enemy group, as in the map this server shipped before the
+// procedural generator (data/undead-lair.wmap): skeletons, mummies, constructs, slimes,
+// reapers and vampires each keep their own rooms.
+const FAMILIES: [&[u16]; 6] = [
+    &[0xd91, 0xd92, 0xd93, 0xd94, 0xd95],
+    &[0xd96, 0xd97, 0xd98],
+    &[0xd99, 0xd9a],
+    &[0xd9b, 0xd9e],
+    &[0xda4],
+    &[0xda5, 0xda6],
+];
+
 // Period guides establish the room shapes, not the lost official generator's distributions.
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -149,6 +161,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                     continue;
                 }
                 let i = (y * width + x) as usize;
+                map.cells[i].region = number as u8 + 2; // room identity, region 1 marks the spawn
                 map.cells[i].ground = if number == 0 && (16..=25).contains(&(dx * dx + dy * dy)) {
                     0x61
                 } else if rng.gen_ratio(1, 32) {
@@ -163,13 +176,10 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
         if number != 0 && number != entrance {
             sites.shuffle(&mut rng);
-            let roster = [
-                0xd91, 0xd92, 0xd93, 0xd94, 0xd95, 0xd96, 0xd97, 0xd98, 0xd99, 0xd9a, 0xd9b, 0xd9e,
-                0xda4, 0xda5, 0xda6,
-            ];
+            let family = *FAMILIES.choose(&mut rng).unwrap();
             for _ in 0..rng.gen_range(6..=10) {
                 let i = sites.pop().context("Undead Lair room has no enemy site")?;
-                map.cells[i].object = Some(*roster.choose(&mut rng).unwrap());
+                map.cells[i].object = Some(*family.choose(&mut rng).unwrap());
             }
             for kind in [0xda2, 0xda3, 0x1801, 0x1802, 0x1803] {
                 if rng.gen_bool(0.5) {

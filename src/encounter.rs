@@ -119,7 +119,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             4.,
             1000,
-            8.,
+            6.,
         ),
         0x954 => (
             Chase {
@@ -128,7 +128,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             8.,
             2000,
-            8.,
+            6.,
         ),
         0x612 | 0x613 => (
             Chase {
@@ -164,7 +164,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             8.,
             1000,
-            10.,
+            8.,
         ),
         0x61a => (
             Chase {
@@ -173,7 +173,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             7.5,
             200,
-            12.,
+            10.5,
         ),
         0x60e => (Wander, 4., 1000, 5.),
         0x60f => (Wander, 4., 600, 5.),
