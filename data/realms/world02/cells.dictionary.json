@@ -86,7 +86,7 @@
   {
     "config": "",
     "ground": 38,
-    "object": 352,
+    "object": 354,
     "region": 0,
     "terrain": 0
   },
@@ -163,7 +163,7 @@
   {
     "config": "",
     "ground": 6,
-    "object": 288,
+    "object": 290,
     "region": 0,
     "terrain": 0
   },
@@ -219,7 +219,7 @@
   {
     "config": "",
     "ground": 70,
-    "object": 263,
+    "object": 6175,
     "region": 0,
     "terrain": 6
   },

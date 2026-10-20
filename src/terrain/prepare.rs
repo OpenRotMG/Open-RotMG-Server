@@ -2361,12 +2361,114 @@ mod tests {
     }
 
     #[test]
+    fn realm_prepare_passive_revisions_reverse_to_exact_published_payloads() {
+        for (world, count, baseline) in [
+            (
+                2,
+                699,
+                "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594",
+            ),
+            (
+                3,
+                922,
+                "a6621e55c6a3d603bce33767051936f56aba6b6ba3eccab5251f931934b153af",
+            ),
+        ] {
+            let content = Content::load(Path::new("data")).unwrap();
+            let root = Path::new("data/realms");
+            let Recipe::ReviewedCellsV1(r) =
+                read_recipe(root, &format!("world{world:02}.json")).unwrap()
+            else {
+                panic!()
+            };
+            let mut map =
+                Map::decode_cells(&std::fs::read(root.join(&r.output)).unwrap(), &content).unwrap();
+            let ledger: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(root.join(format!("restoration/world{world:02}-passives.json")))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(ledger["source_sha256"], r.provenance.source_sha256);
+            assert_eq!(ledger["changed_output_pixels"], count);
+            let mut changed = BTreeSet::new();
+            for row in ledger["cohorts"].as_array().unwrap() {
+                let before: ReviewedCell = serde_json::from_value(row["before"].clone()).unwrap();
+                let after: ReviewedCell = serde_json::from_value(row["after"].clone()).unwrap();
+                assert_eq!(
+                    (before.ground, &before.config, before.terrain, before.region),
+                    (after.ground, &after.config, after.terrain, after.region)
+                );
+                assert!([Some(290), Some(354), Some(6175)].contains(&after.object));
+                let mut positions = Vec::new();
+                for run in row["runs"].as_array().unwrap() {
+                    let y = run[0].as_u64().unwrap() as usize;
+                    let start = run[1].as_u64().unwrap() as usize;
+                    let stop = run[2].as_u64().unwrap() as usize;
+                    assert!((26..2074).contains(&y) && start >= 26 && start < stop && stop <= 2074);
+                    for x in start..stop {
+                        let i = (y - 26) * 2048 + x - 26;
+                        assert!(changed.insert(i));
+                        positions.push(i as u32);
+                        let cell = &mut map.cells[i];
+                        assert_eq!(
+                            (
+                                cell.ground,
+                                cell.object,
+                                &cell.config,
+                                cell.terrain,
+                                cell.region
+                            ),
+                            (
+                                after.ground,
+                                after.object,
+                                &after.config,
+                                after.terrain,
+                                after.region
+                            ),
+                            "world{world} {x},{y}"
+                        );
+                        cell.object = before.object;
+                    }
+                }
+                assert_eq!(positions.len() as u64, row["count"].as_u64().unwrap());
+                assert!(positions.windows(2).all(|p| p[0] < p[1]));
+                assert_eq!(
+                    sha256(
+                        &positions
+                            .iter()
+                            .flat_map(|i| i.to_le_bytes())
+                            .collect::<Vec<_>>()
+                    ),
+                    row["output_sha256_le_u32"].as_str().unwrap()
+                );
+            }
+            assert_eq!(changed.len(), count as usize);
+            assert_eq!(
+                sha256(
+                    &changed
+                        .iter()
+                        .flat_map(|i| (*i as u32).to_le_bytes())
+                        .collect::<Vec<_>>()
+                ),
+                ledger["changed_output_support_sha256_le_u32"]
+                    .as_str()
+                    .unwrap()
+            );
+            // Reverting only the declared objects must recover every old field, not just matching counts.
+            assert_eq!(sha256(&encode(&map, &content).unwrap().0), baseline);
+            assert_eq!(map.cells[0].ground, 188);
+            map.cells[0].ground = 190;
+            assert_ne!(sha256(&encode(&map, &content).unwrap().0), baseline);
+        }
+    }
+
+    #[test]
     fn realm_prepare_reviewed_world02_exact_two_encodes_and_all_fields() {
         let (content, map, r) = reviewed_roundtrip(
             "world02.json",
             55,
-            452498,
-            "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594",
+            452520,
+            "7f911d27fd4b28640cab696ab5ac817020640480ac66992976fe66a6141fed30",
         );
         let source = super::super::realms::sources(Path::new("data"))
             .unwrap()
@@ -2400,9 +2502,9 @@ mod tests {
     fn realm_prepare_reviewed_world03_exact_two_encodes_and_all_fields() {
         reviewed_roundtrip(
             "world03.json",
-            54,
-            442418,
-            "a6621e55c6a3d603bce33767051936f56aba6b6ba3eccab5251f931934b153af",
+            55,
+            442591,
+            "0b960c072c0544e9a911842edf36e1afffa91c9c12e410fb9d598fcfb72357a2",
         );
     }
 }

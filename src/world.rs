@@ -5798,6 +5798,141 @@ mod tests {
     }
 
     #[test]
+    fn restored_passives_survive_normal_realm_construction_and_connected_approaches() {
+        use super::entity_store::EntityState;
+        let content = world().content;
+        for (world, count) in [(2, 699), (3, 922)] {
+            let name = format!("classic-world-{world:02}-reconstruction");
+            let sources: Vec<_> = crate::terrain::realms::sources(Path::new("data"))
+                .unwrap()
+                .into_iter()
+                .filter(|s| s.name() == name)
+                .collect();
+            assert_eq!(sources.len(), 1);
+            let directory = Directory::configured(
+                Path::new("data"),
+                content.clone(),
+                16,
+                51403,
+                Some(51403),
+                sources,
+            )
+            .unwrap();
+            let w = &directory.worlds[&-3];
+            assert_eq!(w.realm_layout.as_deref(), Some(name.as_str()));
+            let ledger: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(format!(
+                    "data/realms/restoration/world{world:02}-passives.json"
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+            let mut source_props = BTreeMap::new();
+            for e in w
+                .entities
+                .values()
+                .filter(|e| [290, 354, 6175].contains(&e.kind))
+            {
+                assert!(
+                    source_props
+                        .insert((e.pos.x as i32, e.pos.y as i32), e)
+                        .is_none()
+                );
+            }
+            let mut checked = 0;
+            for row in ledger["cohorts"].as_array().unwrap() {
+                let kind = row["after"]["object"].as_u64().unwrap() as u16;
+                for run in row["runs"].as_array().unwrap() {
+                    let y = run[0].as_i64().unwrap() as i32 - 26;
+                    for x in
+                        run[1].as_i64().unwrap() as i32 - 26..run[2].as_i64().unwrap() as i32 - 26
+                    {
+                        let e = source_props[&(x, y)];
+                        assert_eq!(e.kind, kind);
+                        assert!(matches!(&e.state, EntityState::Owned(_)));
+                        assert!(!w.actor_ids.contains(&e.id));
+                        assert_eq!(e.hp, if kind == 6175 { 1000 } else { 100 });
+                        assert_eq!(e.size, if kind == 6175 { 120 } else { 100 });
+                        assert!(e.extra_stats.is_empty());
+                        assert_eq!(
+                            w.map.cells[(y * w.map.width + x) as usize].object,
+                            Some(kind)
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+            assert_eq!(checked, count);
+            assert_eq!(w.map.spawns.len(), 4);
+            let side = w.map.width as usize;
+            let walkable: Vec<_> = (0..w.map.cells.len())
+                .map(|i| {
+                    w.walkable(Pos {
+                        x: (i % side) as f32 + 0.5,
+                        y: (i / side) as f32 + 0.5,
+                    })
+                })
+                .collect();
+            let (x, y) = w.map.spawns[0];
+            let start = y as usize * side + x as usize;
+            let mut reached = vec![false; walkable.len()];
+            let mut queue = VecDeque::from([start]);
+            assert!(walkable[start]);
+            reached[start] = true;
+            while let Some(i) = queue.pop_front() {
+                for next in [
+                    i.wrapping_sub(side),
+                    i + side,
+                    if i % side > 0 { i - 1 } else { usize::MAX },
+                    if i % side + 1 < side {
+                        i + 1
+                    } else {
+                        usize::MAX
+                    },
+                ] {
+                    if next < reached.len() && walkable[next] && !reached[next] {
+                        reached[next] = true;
+                        queue.push_back(next);
+                    }
+                }
+            }
+            for &(x, y) in &w.map.spawns {
+                assert!(reached[y as usize * side + x as usize]);
+            }
+            let roots: Vec<_> = w
+                .hero_identities()
+                .into_iter()
+                .map(|id| &w.entities[&id])
+                .collect();
+            assert_eq!(roots.len(), 14);
+            for e in &roots {
+                assert!(
+                    (-4..=4).any(|dy| (-4..=4).any(|dx| {
+                        let x = e.pos.x as i32 + dx;
+                        let y = e.pos.y as i32 + dy;
+                        (dx != 0 || dy != 0)
+                            && x >= 0
+                            && y >= 0
+                            && x < w.map.width
+                            && y < w.map.height
+                            && reached[(y * w.map.width + x) as usize]
+                    })),
+                    "{name}: no connected approach to root {} kind{:x} at{:?}",
+                    e.id,
+                    e.kind,
+                    e.pos
+                );
+            }
+            eprintln!(
+                "{name}: prepared seed51403, {count} selected passive props, {} entities/{} actors/{} roots, all4arrivals/rootapproaches connected",
+                w.entities.len(),
+                w.actor_ids.len(),
+                roots.len()
+            );
+        }
+    }
+
+    #[test]
     fn one_owner_and_no_teleport() {
         let mut w = world();
         let c = ch(&w);

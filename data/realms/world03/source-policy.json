@@ -22,8 +22,6 @@
     "supports": 230,
     "pixels": 220692
   },
-  "reviewed_annotations_sha256": "10e6455c6e9f71e4fd9d678618a4da4281bf717e0e261209464458811708eca7",
-  "manual_decisions_sha256": "8e4764600743f8f5bde55c35fce8544b0b005722e988bfe05190dfffd2725df9",
   "classes": {
     "000000": {
       "config": "",
@@ -123,9 +121,9 @@
     },
     "2e4457": {
       "config": "",
-      "evidence": "reviewed_safe_scenery_substitution",
+      "evidence": "explicit_selected_passive_type_revision",
       "ground": 38,
-      "object": 352,
+      "object": 354,
       "region": 0,
       "source_object": 354,
       "terrain": 0
@@ -212,9 +210,9 @@
     },
     "424242": {
       "config": "",
-      "evidence": "reviewed_safe_scenery_substitution",
+      "evidence": "explicit_selected_passive_type_revision",
       "ground": 6,
-      "object": 288,
+      "object": 290,
       "region": 0,
       "source_object": 290,
       "terrain": 0
@@ -558,8 +556,8 @@
     "r004": "Exact gamma-family match for selected Palm Tree variant1 RGB00c714, kind0x18e. Preserve 44 occupied source cells; runtime sprite variant may differ.",
     "r005": "Exact gamma-family match to selected Grey Circle ground0x65; preserve nonblocking ground, not an invented wall.",
     "r006": "Exact selected Tomb Wall variant color, kind0x1dd. Preserve 24 blocking source cells. Hidden Sand Tile substrate inferred, not observable original ground.",
-    "r007": "Exact selected Tombstone variant. Same explicitly disclosed safe Rock Grey substitution as737373.",
-    "r008": "Exact selected Tombstone variant. Source0x181f is Static+Enemy and cannot pass scenery encoding; deliberate safe Rock Grey0x107 substitution, retaining source position/blocking but losing destructibility/HP/original flags/size.",
+    "r007": "Explicit revision restores previously chosen selected Tombstone6175 at its exact source support, default120/HP1000/ordinary destructibility. Earlier Rock Grey263 surrogate remains baseline lineage only. Original instance/first-type minimap cache/hidden fields are not recovered.",
+    "r008": "Explicit revision restores previously chosen selected Tombstone6175 at its exact source support, default120/HP1000/ordinary destructibility. Earlier Rock Grey263 surrogate remains baseline lineage only. Original instance/first-type minimap cache/hidden fields are not recovered.",
     "r009": "Exact selected-client Death Tree variant 5, kind0x181e. Reuse existing World2 choice for same safe static kind, inferred substrate and habitat.",
     "r010": "Exact selected-client Sand Tile ground 0xf7, reviewed Sphinx/stone-site context; not bare beige biome fill.",
     "r011": "Fragments on the existing light-blue river footprint; keep engineering Water choice and river continuity. No calibrated depth/speed or historical identity claim.",
@@ -602,6 +600,17 @@
   "habitat_rule": "Separate reconstructed terrain layer stores listed class tiers: Rock/Snow1, LightSand5, DarkSand11, Yellow4, LightGrass6, DarkGrass7, Grass9, BlueGrass8. Object classes carry explicitly inferred substrate/tier. Tier is reconstruction data, not image-extracted original gameplay zones; no extra land/support geometry.",
   "water_rule": "Label exact light-blue5278c5 with FOUR-neighbor connectivity only. A component is coastal iff its own support touches any dark-blue2b4a8b pixel in the FOUR-neighbor dilation. Coastal uses0x73, all other light blue0x72. This is an engineering shallow policy: sea-joining rivers in that same blue component are ALSO shallow, never inferred depth. No dark+light union flood. Both walkable .666/Sink. Apply to the exact combined reviewed water supports after resolving both observed color families and explicit reviewed masks.",
   "support_rule": "Support IDs enumerate exact RGB masks in the full2100x2100 source, not claimed connected components. Fingerprints are SHA256 of row-major support positions as little-endian u32. All230 masks/220692pixels were context-reviewed. Five-field source choices precede the declared coastal light-water derivation. Dilation/thumbnail grouping was review-only, not annotation expansion.",
-  "uncertainty": "283 irrecoverable blended-detail pixels use explicit manual engineering choices; conservative static substitutions may over-preserve obstacles. 15 unsafe Static+Enemy Tombstone pixels use blocking Rock Grey0x107, losing original identity, HP/destructibility/flags/size. 24 TombWall0x1dd pixels infer SandTile substrate; 44 PalmTree0x18e and109 DeathTree0x181e pixels retain selected occupied positions, not original variant proof. 20 reviewed road fringes remain road, not invented walls. DarkWater0xbc is an engineering NoWalk depth convention, not historical depth evidence.",
-  "reuse_rights": "Source-image and image-derived reuse rights unverified. Public hosting, attribution, code MIT and omission of raw PNG do not grant a licence."
+  "uncertainty": "283 irrecoverable blended-detail pixels use explicit manual engineering choices; conservative static substitutions may over-preserve obstacles. 15 previously substituted Tombstone pixels now explicitly choose6175; original variants, minimap cache and hidden fields remain unproven. The unused515151 policy class is retained unchanged as baseline lineage, not an active World3 assignment. 24 TombWall0x1dd pixels infer SandTile substrate; 44 PalmTree0x18e and109 DeathTree0x181e pixels retain selected occupied positions, not original variant proof. 20 reviewed road fringes remain road, not invented walls. DarkWater0xbc is an engineering NoWalk depth convention, not historical depth evidence.",
+  "reuse_rights": "Source-image and image-derived reuse rights unverified. Public hosting, attribution, code MIT and omission of raw PNG do not grant a licence.",
+  "baseline_semantic_review": {
+    "reviewed_annotations_sha256": "10e6455c6e9f71e4fd9d678618a4da4281bf717e0e261209464458811708eca7",
+    "manual_decisions_sha256": "8e4764600743f8f5bde55c35fce8544b0b005722e988bfe05190dfffd2725df9",
+    "scope": "Hashes identify unchanged pre-restoration review artifacts, not approval of this new selected-type revision."
+  },
+  "passive_restoration": {
+    "path_relative_to_realms": "restoration/world03-passives.json",
+    "sha256": "0c194db9f30f98000a9c5fb5929deacbee9d1f7f7d68c2ad724004feaf61f05d",
+    "baseline_policy_sha256": "69d872f5eac4188edf7040fa4f78a6a269dd5f6104d4b04acab2a1a5e34c1fd6",
+    "baseline_annotations_sha256": "4345b59ad2d536b77ec1ace291d3a714fc2e5cc69dc50e184ba2f7747e1daf4c"
+  }
 }

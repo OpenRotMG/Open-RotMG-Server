@@ -12,7 +12,7 @@
   "inputs": {
     "dictionary": {
       "path": "world02/cells.dictionary.json",
-      "sha256": "26a4484264d4080208db5d6af59663b15ee6941d54aacad7a896b055f0672303"
+      "sha256": "f0b254c9ecbfa7a948903c9ae67480d31a791428e7426ef7c28bd67f72ec390b"
     },
     "indices": {
       "path": "world02/cells.indices.zlib",
@@ -26,12 +26,12 @@
     "source_sha256": "b6db13154d1c78d905770305df725ac912e1de10dd3b52856326e8adc0ba2547",
     "policy": {
       "path": "world02/source-policy.json",
-      "sha256": "dbe3fec10fe44aa8dfa7f925cc9b03d1da3bb8515708cb433fa74fcdaa5fca63"
+      "sha256": "95e84d316ad54cd4db0cb6c714044648ed9fccabf9ad5682af1b1b3bfd977255"
     },
     "annotations": {
       "path": "world02/source-annotations.json",
-      "sha256": "461e100a750d3a21e826aca303ab326e40d84ed3d9ac1a65932cbe11f001dd66"
+      "sha256": "78f3590d9e428973a072e7ab465007e75ccbc476e27b46e9ed4f73cd03dbfbc4"
     },
-    "status": "Approximate image-guided reconstruction, not an authenticated original. Canonical reviewed cells are the rebuild boundary; PNG interpretation is not automated. Historical approval labels in annotations are not file dependencies; redistribution rights remain unverified."
+    "status": "Approximate image-guided reconstruction, not an authenticated original. Canonical reviewed cells are the rebuild boundary; PNG interpretation is not automated. Historical approval labels in annotations are not file dependencies; redistribution rights remain unverified. Explicit new passive-type revision on699 source-bound cells; all other four fields and all other cells preserved. Selected types and defaults do not establish original instance/cache/loot/hidden-state fidelity."
   }
 }

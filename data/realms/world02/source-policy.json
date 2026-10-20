@@ -98,9 +98,9 @@
     },
     "2e4457": {
       "config": "",
-      "evidence": "reviewed_safe_scenery_substitution",
+      "evidence": "explicit_selected_passive_type_revision",
       "ground": 38,
-      "object": 352,
+      "object": 354,
       "region": 0,
       "source_object": 354,
       "terrain": 0
@@ -187,9 +187,9 @@
     },
     "424242": {
       "config": "",
-      "evidence": "reviewed_safe_scenery_substitution",
+      "evidence": "explicit_selected_passive_type_revision",
       "ground": 6,
-      "object": 288,
+      "object": 290,
       "region": 0,
       "source_object": 290,
       "terrain": 0
@@ -252,9 +252,9 @@
     },
     "515151": {
       "config": "",
-      "evidence": "reviewed_safe_scenery_substitution",
+      "evidence": "explicit_selected_passive_type_revision",
       "ground": 70,
-      "object": 263,
+      "object": 6175,
       "region": 0,
       "source_object": 6175,
       "terrain": 6
@@ -445,7 +445,7 @@
     }
   },
   "habitat_rule": "Separate reconstructed terrain layer stores listed class tiers: Rock/Snow1, LightSand5, DarkSand11, Yellow4, LightGrass6, DarkGrass7, Grass9, BlueGrass8. Object classes carry explicitly inferred substrate/tier. Tier is reconstruction data, not image-extracted original gameplay zones; no extra land/support geometry.",
-  "safe_scenery_substitutions": "Only3exact named sourceclasses require reviewed nonenemy visual representatives under existing static&&!enemy encoder rule.354->352,290->288,6175->263. Blocks retained but destructibility,HP/EnemyOccupySquare/BlocksSight/size semantics may differ. Never a generic fallback. Separate uncertainty label5. All other unsafeobjects still fatal.",
+  "safe_scenery_substitutions": "Revision restores previously chosen354/290/6175 on exact256/436/7 source supports now supported by the finite passive role. Earlier visual-only substitutions remain baseline lineage, not current assignments. Original type uniqueness, instance fields, Tombstone cache and loot history remain unproven.",
   "schema": 1,
   "selected_client": "123.5.1",
   "source_commit": "90bc2e3ca2155ede5f2a55931048b59b951b0e0c",
@@ -483,5 +483,11 @@
     "source_visible_ground_positions": "all exact class supports unchanged except declared lava safe visual and approved unknown support",
     "topology": "four and eight neighbor components of source road/lightwater/snow must match encoded source-class footprints exactly; main walkability includes blocking scenery; all disconnected components inventoried, never deleted to pass"
   },
-  "water_rule": "Label exact light-blue5278c5 with FOUR-neighbor connectivity only. A component is coastal iff its own support touches any dark-blue2b4a8b pixel in the FOUR-neighbor dilation. Coastal uses0x73, all other light blue0x72. This is an engineering shallow policy: sea-joining rivers in that same blue component are ALSO shallow, never inferred depth. No dark+light union flood. Both walkable .666/Sink."
+  "water_rule": "Label exact light-blue5278c5 with FOUR-neighbor connectivity only. A component is coastal iff its own support touches any dark-blue2b4a8b pixel in the FOUR-neighbor dilation. Coastal uses0x73, all other light blue0x72. This is an engineering shallow policy: sea-joining rivers in that same blue component are ALSO shallow, never inferred depth. No dark+light union flood. Both walkable .666/Sink.",
+  "passive_restoration": {
+    "path_relative_to_realms": "restoration/world02-passives.json",
+    "sha256": "ba148c01e7fe0126ade690246769d9f0cd48abe79f5a022654b1b7714729c768",
+    "baseline_policy_sha256": "dbe3fec10fe44aa8dfa7f925cc9b03d1da3bb8515708cb433fa74fcdaa5fca63",
+    "baseline_annotations_sha256": "461e100a750d3a21e826aca303ab326e40d84ed3d9ac1a65932cbe11f001dd66"
+  }
 }

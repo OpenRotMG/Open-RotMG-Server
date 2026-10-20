@@ -1,13 +1,13 @@
 {
-  "policy_sha256": "dbe3fec10fe44aa8dfa7f925cc9b03d1da3bb8515708cb433fa74fcdaa5fca63",
+  "policy_sha256": "95e84d316ad54cd4db0cb6c714044648ed9fccabf9ad5682af1b1b3bfd977255",
   "source_sha256": "b6db13154d1c78d905770305df725ac912e1de10dd3b52856326e8adc0ba2547",
   "structural": [
     {
       "choice": {
         "config": "",
-        "evidence": "reviewed_safe_scenery_substitution",
+        "evidence": "explicit_selected_passive_type_revision",
         "ground": 38,
-        "object": 352,
+        "object": 354,
         "region": 0,
         "source_object": 354,
         "terrain": 0
@@ -32,9 +32,9 @@
     {
       "choice": {
         "config": "",
-        "evidence": "reviewed_safe_scenery_substitution",
+        "evidence": "explicit_selected_passive_type_revision",
         "ground": 6,
-        "object": 288,
+        "object": 290,
         "region": 0,
         "source_object": 290,
         "terrain": 0
@@ -83,7 +83,6 @@
       "support_sha256": "8f0b6989c5fe9db179c2dcbb7d2d0d828fe88ce86adb3df113844a14bcc7947b"
     }
   ],
-  "structural_approval": "inputs/parent-world2-structures-decision.json",
   "transform": {
     "crop": [
       26,
@@ -2019,5 +2018,12 @@
       "terrain": 7
     }
   ],
-  "unknown_approval": "inputs/parent-world2-unknown-decision.json"
+  "unknown_approval": "inputs/parent-world2-unknown-decision.json",
+  "baseline_structural_approval": "inputs/parent-world2-structures-decision.json",
+  "passive_restoration": {
+    "path_relative_to_realms": "restoration/world02-passives.json",
+    "sha256": "ba148c01e7fe0126ade690246769d9f0cd48abe79f5a022654b1b7714729c768",
+    "baseline_policy_sha256": "dbe3fec10fe44aa8dfa7f925cc9b03d1da3bb8515708cb433fa74fcdaa5fca63",
+    "baseline_annotations_sha256": "461e100a750d3a21e826aca303ab326e40d84ed3d9ac1a65932cbe11f001dd66"
+  }
 }

@@ -12,12 +12,12 @@
   "inputs": {
     "dictionary": {
       "path": "world03/cells.dictionary.json",
-      "sha256": "a327f4ea1de1a09b52efb3c6618c741ebb41c48e4c3d4b098dbdc6e69668aefd"
+      "sha256": "aae9d68e6d678b6f9254855c5bbcbcd3917f09cad5a90efa6a6492cbbd87a681"
     },
     "indices": {
       "path": "world03/cells.indices.zlib",
-      "sha256": "aaaee83b914dacef086d28b4a73ef3ffeb014c1a46d2436ecb43f3297682e589",
-      "expanded_sha256": "fe11945daca196140d389dac060e5e452ad9e9e08e7e715b8a9fb2b72b55ada3"
+      "sha256": "f2e12ad3f129860c89d5a853c9ad515a49cbc61d870a133719e9af4ada0df8e1",
+      "expanded_sha256": "b49386106723163cd4f635cd36b965d67b5c4db89e3a6ff9b7c581a19726d6f5"
     }
   },
   "output": "classic-world-03-reconstruction.wmap",
@@ -26,12 +26,12 @@
     "source_sha256": "861351094192223962bc38def3c127b08c3cf80b663dd6bffb770b09ce47136e",
     "policy": {
       "path": "world03/source-policy.json",
-      "sha256": "69d872f5eac4188edf7040fa4f78a6a269dd5f6104d4b04acab2a1a5e34c1fd6"
+      "sha256": "ce11ab440ad74ad7c1ddd7571db432a1ba6a0dc05ed87418139d61b7795b11a2"
     },
     "annotations": {
       "path": "world03/source-annotations.json",
-      "sha256": "4345b59ad2d536b77ec1ace291d3a714fc2e5cc69dc50e184ba2f7747e1daf4c"
+      "sha256": "89f8ba2f4dac6fff25d11acce7a022d9c6e577a40e8979e5a2deb70d34ac18fe"
     },
-    "status": "Approximate image-guided reconstruction, not an authenticated original. Canonical reviewed cells are the rebuild boundary, not automatic PNG interpretation. Centered2048crop [26,26,2074,2074), no resampling or discarded non-ocean supports; engineering registration with zero historical tile anchors. Mixed exact color families and230 reviewed supports retain declared substrate/habitat/water choices,283 blended-detail decisions and15 safe Tombstone substitutions. Image-derived reuse rights remain unverified; attribution/code MIT are not a licence grant."
+    "status": "Approximate image-guided reconstruction, not an authenticated original. Canonical reviewed cells are the rebuild boundary, not automatic PNG interpretation. Centered2048crop [26,26,2074,2074), no resampling or discarded non-ocean supports; engineering registration with zero historical tile anchors. Mixed exact color families and230 reviewed supports retain declared substrate/habitat/water choices,283 blended-detail decisions and15 Tombstone positions now restored to selected6175; the former RockGrey substitution is baseline lineage only. Image-derived reuse rights remain unverified; attribution/code MIT are not a licence grant. Explicit new passive-type revision on922 source-bound cells; all other four fields and all other cells preserved. Selected types and defaults do not establish original instance/cache/loot/hidden-state fidelity."
   }
 }
