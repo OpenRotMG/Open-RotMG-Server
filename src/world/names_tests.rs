@@ -18,7 +18,11 @@ fn name_publication_preserves_pending_death_progress_and_departure() {
                 assert!(w.pending_deaths().is_empty());
             }
             2 => {
-                w.players.get_mut(&id).unwrap().experience_queued = 50;
+                w.players
+                    .get_mut(&id)
+                    .unwrap()
+                    .queue_experience(50, None, false)
+                    .unwrap();
                 assert!(w.pending_progress().is_empty());
             }
             3 => {

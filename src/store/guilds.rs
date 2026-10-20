@@ -119,6 +119,15 @@ fn info(db: &Connection, id: i32) -> Result<Guild> {
     )?)
 }
 
+pub(super) fn validate_fame(db: &Connection) -> Result<()> {
+    let broken:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM guild_members m JOIN account_fame f ON f.account=m.account WHERE m.fame>f.earned) OR (SELECT coalesce(sum(earned),0) FROM guilds)>(SELECT coalesce(sum(earned),0) FROM account_fame)",[],|r|r.get(0))?;
+    ensure!(
+        !broken,
+        "Guild contribution or earnings exceed immutable paid account fame; restore reviewed state"
+    );
+    Ok(())
+}
+
 pub(super) fn credit_death(db: &Connection, account: i32, amount: i32) -> Result<()> {
     if let Some(member) = membership(db, account)? {
         ensure!(

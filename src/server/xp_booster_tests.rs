@@ -86,7 +86,11 @@ async fn xp_booster_commits_use_progress_reconnect_and_death_without_bonus_fame(
                 .is_err()
             );
             assert_eq!(w.players[&id].character.items[5], 0xc42);
-            w.players.get_mut(&id).unwrap().experience_queued = 3;
+            w.players
+                .get_mut(&id)
+                .unwrap()
+                .queue_experience(3, None, false)
+                .unwrap();
             let (_, snapshot) = w.pending_progress().pop().unwrap();
             assert_eq!(w.players[&id].character.exp, 1995);
             Ok(snapshot)

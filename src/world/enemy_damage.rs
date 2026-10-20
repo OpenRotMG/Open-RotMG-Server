@@ -76,7 +76,8 @@ impl World {
         if transform {
             self.quest_lethal_transform(target)?;
         } else if kill {
-            self.defeat_entity(target)?;
+            let killer = self.players.get(&owner).map(|p| p.character.id);
+            self.defeat_entity_with_killer(target, killer)?;
             tracing::info!(entity = target, owner = owner, "enemy defeated");
         }
         Ok(actual)

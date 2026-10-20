@@ -86,7 +86,11 @@ fn wizard_spells_continue_during_progress_without_losing_mana_or_unlocking_inven
 fn progress_does_not_bypass_ability_lifecycle_or_inventory_reservations() {
     for state in 0..7 {
         let (mut w, id) = fixture(crate::content::WIZARD, 0xb24);
-        w.players.get_mut(&id).unwrap().experience_queued = 1;
+        w.players
+            .get_mut(&id)
+            .unwrap()
+            .queue_experience(1, None, false)
+            .unwrap();
         w.pending_progress();
         let p = w.players.get_mut(&id).unwrap();
         match state {

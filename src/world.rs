@@ -1,7 +1,7 @@
 use crate::server::lifecycle::{CloseReason, controller, protocol};
 use crate::{
     content::{Content, Map, PARALYZED, Projectile, SLOWED, SPEEDY, STUNNED},
-    store::{AccountLists, AccountPresentation, Character, Vault},
+    store::{AccountLists, AccountPresentation, Character, LevelAssist, Vault},
     wire::{self, Packet, Writer},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -328,6 +328,26 @@ struct ObservedMotion {
     velocity: Pos,
     at: u64,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProgressAnchor {
+    exp: i32,
+    level: i32,
+}
+impl ProgressAnchor {
+    fn of(ch: &Character) -> Self {
+        Self {
+            exp: ch.exp,
+            level: ch.level,
+        }
+    }
+}
+struct QueuedExperience {
+    amount: i32,
+    anchor: ProgressAnchor,
+    // A pending inventory commit can change the batch's starting boost state.
+    assists: [Vec<LevelAssist>; 2],
+}
+
 pub struct Player {
     pub character: Character,
     pub pos: Pos,
@@ -357,6 +377,9 @@ pub struct Player {
     mp_fraction: f32,
     pub pending: bool,
     pub experience_queued: i32,
+    experience_queue: Option<QueuedExperience>,
+    progress_snapshot: Option<Character>,
+    pub(crate) level_assists_prepared: Vec<LevelAssist>,
     clears_queued: [u64; crate::dungeon::DUNGEONS.len()],
     pub(crate) progress_started: bool,
     pub death_pending: bool,
@@ -384,6 +407,86 @@ pub struct Player {
     ability_shot: Option<(u16, i32, bool, i32)>,
 }
 impl Player {
+    pub(crate) fn queue_experience(
+        &mut self,
+        amount: i32,
+        killer: Option<i32>,
+        positive_damage: bool,
+    ) -> Result<()> {
+        ensure!(
+            amount >= 0 && killer.is_none_or(|id| id > 0),
+            "invalid experience source for character {}",
+            self.character.id
+        );
+        let anchor = if self.progress_started {
+            ProgressAnchor::of(
+                self.progress_snapshot
+                    .as_ref()
+                    .context("pending progress lacks its prepared experience anchor")?,
+            )
+        } else {
+            ProgressAnchor::of(&self.character)
+        };
+        crate::store::level_start(anchor.level)?;
+        ensure!(anchor.exp >= 0, "negative experience anchor");
+        let queue = self
+            .experience_queue
+            .get_or_insert_with(|| QueuedExperience {
+                amount: 0,
+                anchor,
+                assists: [Vec::new(), Vec::new()],
+            });
+        ensure!(
+            queue.amount == self.experience_queued && queue.anchor == anchor,
+            "experience queue mismatch: character={} scalar={} sources={} queued_anchor={:?} current_anchor={:?}",
+            self.character.id,
+            self.experience_queued,
+            queue.amount,
+            queue.anchor,
+            anchor
+        );
+        let next = queue
+            .amount
+            .checked_add(amount)
+            .context("experience queue overflow")?;
+        for (mode, assists) in queue.assists.iter_mut().enumerate() {
+            let multiplier = (mode + 1) as u64;
+            let before = u64::try_from(anchor.exp)?
+                .checked_add(
+                    u64::try_from(queue.amount)?
+                        .checked_mul(multiplier)
+                        .context("experience projection overflow")?,
+                )
+                .context("experience projection overflow")?;
+            let after = u64::try_from(anchor.exp)?
+                .checked_add(
+                    u64::try_from(next)?
+                        .checked_mul(multiplier)
+                        .context("experience projection overflow")?,
+                )
+                .context("experience projection overflow")?;
+            for level in anchor.level + 1..=20 {
+                let threshold = u64::try_from(crate::store::level_start(level)?)?;
+                if before < threshold
+                    && threshold <= after
+                    && positive_damage
+                    && let Some(giver) = killer.filter(|giver| *giver != self.character.id)
+                {
+                    assists.push(LevelAssist {
+                        reached_level: u8::try_from(level)?,
+                        giver,
+                    });
+                }
+            }
+            ensure!(
+                assists.len() <= 19,
+                "experience projection exceeds lifetime levels"
+            );
+        }
+        queue.amount = next;
+        self.experience_queued = next;
+        Ok(())
+    }
     fn record_motion(&mut self, position: Pos, time: i32, at: u64, maximum_speed: f32) {
         let elapsed = i64::from(time) - i64::from(self.motion.time);
         if elapsed == 0 {
@@ -434,7 +537,9 @@ impl Player {
         }
     }
     fn progress_queued(&self) -> bool {
-        self.experience_queued != 0 || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
+        self.experience_queued != 0
+            || self.experience_queue.is_some()
+            || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
     }
     fn active(&self) -> bool {
         self.character.alive
@@ -2281,6 +2386,9 @@ impl World {
                 mp_fraction: 0.,
                 pending: false,
                 experience_queued: 0,
+                experience_queue: None,
+                progress_snapshot: None,
+                level_assists_prepared: Vec::new(),
                 clears_queued: [0; crate::dungeon::DUNGEONS.len()],
                 progress_started: false,
                 death_pending: false,
@@ -3903,7 +4011,39 @@ impl World {
                 continue;
             }
             let mut snapshot = p.character.clone();
+            let mut assists = Vec::new();
             let result = (|| -> Result<()> {
+                ensure!(
+                    p.level_assists_prepared.is_empty(),
+                    "unacknowledged level assists"
+                );
+                match &p.experience_queue {
+                    Some(queue) => {
+                        ensure!(
+                            queue.amount == p.experience_queued
+                                && queue.anchor == ProgressAnchor::of(&p.character),
+                            "experience queue mismatch: player={} character={} scalar={} sources={} queued_anchor={:?} current_anchor={:?}",
+                            id,
+                            p.character.id,
+                            p.experience_queued,
+                            queue.amount,
+                            queue.anchor,
+                            ProgressAnchor::of(&p.character)
+                        );
+                        assists = queue.assists[usize::from(p.character.xp_boost.active)].clone();
+                    }
+                    None => ensure!(
+                        p.experience_queued == 0,
+                        "missing experience sources: player={} character={} scalar={} sources=0",
+                        id,
+                        p.character.id,
+                        p.experience_queued
+                    ),
+                }
+                ensure!(
+                    assists.len() <= 19,
+                    "level assist preparation exceeds lifetime levels"
+                );
                 snapshot.gain_experience(&self.content, p.experience_queued, &mut self.rng)?;
                 for (count, queued) in std::iter::once(&mut snapshot.pirate_caves)
                     .chain(snapshot.dungeons.iter_mut())
@@ -3924,12 +4064,35 @@ impl World {
             }
             snapshot.alive = true;
             p.experience_queued = 0;
+            p.experience_queue = None;
+            p.progress_snapshot = Some(snapshot.clone());
+            p.level_assists_prepared = assists;
             p.clears_queued = [0; crate::dungeon::DUNGEONS.len()];
             p.pending = true;
             p.progress_started = true;
             plans.push((*id, snapshot));
         }
         plans
+    }
+    pub(crate) fn progress_assists(
+        &self,
+        id: i32,
+        snapshot: &Character,
+    ) -> Result<Vec<LevelAssist>> {
+        let p = self
+            .players
+            .get(&id)
+            .context("progress assist owner missing")?;
+        ensure!(
+            p.pending
+                && p.progress_started
+                && p.character.id == snapshot.id
+                && p.character.account == snapshot.account
+                && p.character.revision == snapshot.revision
+                && p.progress_snapshot.as_ref() == Some(snapshot),
+            "progress assist reservation changed"
+        );
+        Ok(p.level_assists_prepared.clone())
     }
     pub fn finish_progress(&mut self, id: i32, snapshot: Character) -> Result<()> {
         let p = self
@@ -3940,7 +4103,8 @@ impl World {
             p.pending
                 && p.progress_started
                 && p.character.id == snapshot.id
-                && p.character.revision == snapshot.revision,
+                && p.character.revision == snapshot.revision
+                && p.progress_snapshot.as_ref() == Some(&snapshot),
             "progress reservation changed"
         );
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
@@ -3974,6 +4138,8 @@ impl World {
         }
         p.pending = false;
         p.progress_started = false;
+        p.progress_snapshot = None;
+        p.level_assists_prepared.clear();
         tracing::info!(
             player = id,
             level = p.character.level,
@@ -4206,6 +4372,9 @@ impl World {
         Ok(())
     }
     fn defeat_entity(&mut self, id: i32) -> Result<()> {
+        self.defeat_entity_with_killer(id, None)
+    }
+    fn defeat_entity_with_killer(&mut self, id: i32, killer: Option<i32>) -> Result<()> {
         let e = self.remove_entity(id);
         let definition = &self.content.objects[&e.kind];
         // Reference Reproduce suppresses follower XP; Pentaract Spawn explicitly allows eye XP.
@@ -4223,11 +4392,14 @@ impl World {
                     .expect("validated player level") as f32
                     * if definition.quest { 0.5 } else { 0.1 }) as i32;
                 let amount = reward.min(cap);
-                p.experience_queued = p
-                    .experience_queued
-                    .checked_add(amount)
-                    .expect("experience queue overflow");
-                if amount > 0 {
+                if amount != 0 {
+                    p.queue_experience(
+                        amount,
+                        killer,
+                        e.damage
+                            .get(&p.character.id)
+                            .is_some_and(|damage| *damage > 0),
+                    )?;
                     tracing::debug!(player = id, enemy = e.kind, amount, "experience queued");
                 }
                 if p.quest == Some(e.id) {
@@ -5577,6 +5749,7 @@ mod tests {
     pub(super) fn ch(w: &World) -> Character {
         Character {
             schema: 1,
+            lifetime: crate::store::FameLifetime::complete(),
             class: WIZARD,
             base: w.content.classes[&WIZARD].base,
             tex1: 0,
@@ -5997,10 +6170,410 @@ mod tests {
         }
     }
     #[test]
+    fn all_death_fame_phase1_causal_levels_a_then_b() {
+        for boosted in [false, true] {
+            let mut w = world();
+            let mut content = (*w.content).clone();
+            let enemy = content.objects.get_mut(&0x600).unwrap();
+            enemy.hp = 100_000;
+            enemy.xp_multiplier = 1.;
+            enemy.quest = true;
+            w.content = Arc::new(content);
+            let mut recipient = ch(&w);
+            recipient.exp = 49;
+            recipient.xp_boost.active = boosted;
+            let recipient = w.enter(recipient, None).unwrap();
+            let pos = w.players[&recipient].pos;
+            let mut actors = Vec::new();
+            for character in 2..=4 {
+                let mut c = ch(&w);
+                c.id = character;
+                c.account = character;
+                let id = w.enter(c, None).unwrap();
+                w.players.get_mut(&id).unwrap().pos = pos;
+                actors.push(id);
+            }
+            let (a, b, unrelated) = (actors[0], actors[1], actors[2]);
+            for (index, killer) in std::iter::once(a)
+                .chain(std::iter::repeat_n(b, if boosted { 3 } else { 6 }))
+                .enumerate()
+            {
+                let enemy = w.spawn_entity(0x600, pos, vec![]).unwrap();
+                w.damage_enemy(recipient, enemy, 1, true, &[], Some(1))
+                    .unwrap();
+                // None is the existing delayed-damage path; it must retain the actual lethal owner too.
+                w.damage_enemy(
+                    killer,
+                    enemy,
+                    200_000,
+                    true,
+                    &[],
+                    if index == 0 { Some(2) } else { None },
+                )
+                .unwrap();
+            }
+            assert!(w.pending_progress_where(|_, _| false).is_empty());
+            assert_eq!(w.players[&recipient].character.level, 1);
+            let mut expected_rng = w.rng.clone();
+            let expected: BTreeMap<_, _> = w
+                .players
+                .iter()
+                .map(|(id, p)| {
+                    let mut ch = p.character.clone();
+                    ch.gain_experience(&w.content, p.experience_queued, &mut expected_rng)
+                        .unwrap();
+                    (*id, ch)
+                })
+                .collect();
+            let plans: BTreeMap<_, _> = w.pending_progress().into_iter().collect();
+            for (id, plan) in &plans {
+                assert_eq!(
+                    serde_json::to_value(plan).unwrap(),
+                    serde_json::to_value(&expected[id]).unwrap()
+                );
+            }
+            assert_eq!(
+                rand::RngCore::next_u64(&mut w.rng),
+                rand::RngCore::next_u64(&mut expected_rng)
+            );
+            assert_eq!(plans[&recipient].exp, if boosted { 249 } else { 224 });
+            assert_eq!(plans[&recipient].level, 3);
+            assert_eq!(
+                w.players[&recipient].level_assists_prepared,
+                [
+                    LevelAssist {
+                        reached_level: 2,
+                        giver: 2
+                    },
+                    LevelAssist {
+                        reached_level: 3,
+                        giver: 3
+                    }
+                ]
+            );
+            assert!(w.players[&unrelated].level_assists_prepared.is_empty());
+            assert!(w.players[&a].level_assists_prepared.is_empty());
+            assert!(w.players[&b].level_assists_prepared.is_empty());
+            assert!(w.pending_progress().is_empty());
+            assert!(w.begin_departure(recipient).unwrap().is_none());
+            w.finish_progress(recipient, plans[&recipient].clone())
+                .unwrap();
+            assert!(w.players[&recipient].level_assists_prepared.is_empty());
+            let saved = w.begin_departure(recipient).unwrap().unwrap();
+            w.finish_departure(recipient).unwrap();
+            let recipient = w.enter(saved, None).unwrap();
+            w.players.get_mut(&recipient).unwrap().pos = pos;
+            w.players.get_mut(&recipient).unwrap().pending = true;
+            for _ in 0..1000 {
+                let enemy = w.spawn_entity(0x600, pos, vec![]).unwrap();
+                w.damage_enemy(recipient, enemy, 1, true, &[], None)
+                    .unwrap();
+                w.damage_enemy(b, enemy, 200_000, true, &[], None).unwrap();
+                assert!(
+                    w.players[&recipient]
+                        .experience_queue
+                        .as_ref()
+                        .unwrap()
+                        .assists
+                        .iter()
+                        .map(Vec::len)
+                        .sum::<usize>()
+                        <= 38
+                );
+            }
+            assert!(w.pending_progress().is_empty());
+            w.players.get_mut(&recipient).unwrap().pending = false;
+            let plans = w.pending_progress();
+            assert_eq!(plans.len(), 1);
+            assert_eq!(plans[0].1.level, 20);
+            assert!(w.players[&recipient].level_assists_prepared.len() <= 19);
+        }
+        let mut w = world();
+        let mut c = ch(&w);
+        c.exp = 49;
+        let recipient = w.enter(c, None).unwrap();
+        let pos = w.players[&recipient].pos;
+        let enemy = w.spawn_entity(0x600, pos, vec![]).unwrap();
+        let mut contributor = ch(&w);
+        contributor.id = 2;
+        contributor.account = 2;
+        let contributor = w.enter(contributor, None).unwrap();
+        w.players.get_mut(&contributor).unwrap().pos = pos;
+        w.entities.get_mut(&enemy).unwrap().damage.insert(1, 1);
+        w.entities.get_mut(&enemy).unwrap().damage.insert(2, 100);
+        w.finish_timed_defeat(enemy).unwrap();
+        let plans: BTreeMap<_, _> = w.pending_progress().into_iter().collect();
+        assert_eq!(plans[&recipient].level, 2);
+        assert_eq!(w.players[&contributor].character.kills, 1);
+        assert!(
+            w.players[&recipient].level_assists_prepared.is_empty(),
+            "largest contributor is not an actual timed final blow"
+        );
+
+        let mut w = world();
+        let mut content = (*w.content).clone();
+        let e = content.objects.get_mut(&0x600).unwrap();
+        e.hp = 100_000;
+        e.xp_multiplier = 1.;
+        e.quest = true;
+        w.content = Arc::new(content);
+        let mut c = ch(&w);
+        c.gain_experience(&w.content, 17_999, &mut w.rng).unwrap();
+        c.xp_boost.active = true;
+        let recipient = w.enter(c, None).unwrap();
+        let pos = w.players[&recipient].pos;
+        let mut killer = ch(&w);
+        killer.id = 2;
+        killer.account = 2;
+        let killer = w.enter(killer, None).unwrap();
+        w.players.get_mut(&killer).unwrap().pos = pos;
+        for _ in 0..2 {
+            let e = w.spawn_entity(0x600, pos, vec![]).unwrap();
+            w.damage_enemy(recipient, e, 1, true, &[], None).unwrap();
+            w.damage_enemy(killer, e, 200_000, true, &[], None).unwrap();
+        }
+        let mut expected_rng = w.rng.clone();
+        let expected: BTreeMap<_, _> = w
+            .players
+            .iter()
+            .map(|(id, p)| {
+                let mut ch = p.character.clone();
+                ch.gain_experience(&w.content, p.experience_queued, &mut expected_rng)
+                    .unwrap();
+                (*id, ch)
+            })
+            .collect();
+        let plans: BTreeMap<_, _> = w.pending_progress().into_iter().collect();
+        for (id, plan) in &plans {
+            assert_eq!(
+                serde_json::to_value(plan).unwrap(),
+                serde_json::to_value(&expected[id]).unwrap()
+            );
+        }
+        assert_eq!(
+            rand::RngCore::next_u64(&mut w.rng),
+            rand::RngCore::next_u64(&mut expected_rng)
+        );
+        assert_eq!(
+            (
+                plans[&recipient].exp,
+                plans[&recipient].xp_boost.bonus_exp,
+                plans[&recipient].level
+            ),
+            (21_699, 1850, 20)
+        );
+        assert!(!plans[&recipient].xp_boost.active);
+        assert_eq!(
+            w.players[&recipient].level_assists_prepared,
+            [LevelAssist {
+                reached_level: 20,
+                giver: 2
+            }]
+        );
+        assert!(
+            w.players
+                .values()
+                .all(|p| p.level_assists_prepared.len() <= 19)
+        );
+    }
+
+    #[tokio::test]
+    async fn all_death_fame_phase1_causal_levels_a_then_b_inflight_actor() {
+        let mut d = directory();
+        d.clock.set_paused(true);
+        let mut w = world();
+        let mut content = (*w.content).clone();
+        let e = content.objects.get_mut(&0x600).unwrap();
+        e.hp = 100_000;
+        e.xp_multiplier = 1.;
+        e.quest = true;
+        w.content = Arc::new(content);
+        let mut c = ch(&w);
+        c.gain_experience(&w.content, 17_999, &mut w.rng).unwrap();
+        c.xp_boost.active = true;
+        let recipient = w.enter(c, None).unwrap();
+        let pos = w.players[&recipient].pos;
+        let mut killers = Vec::new();
+        for character in [2, 3] {
+            let mut c = ch(&w);
+            c.id = character;
+            c.account = character;
+            let id = w.enter(c, None).unwrap();
+            w.players.get_mut(&id).unwrap().pos = pos;
+            killers.push(id);
+        }
+        let (a, b) = (killers[0], killers[1]);
+        d.worlds.insert(-1, w);
+        let actor = Handle::spawn(d);
+        let first = actor
+            .call(move |w| {
+                let e = w.spawn_entity(0x600, pos, vec![])?;
+                w.damage_enemy(recipient, e, 1, true, &[], None)?;
+                w.damage_enemy(a, e, 200_000, true, &[], None)?;
+                Ok(w.pending_progress_where(|id, _| id == recipient)
+                    .pop()
+                    .unwrap()
+                    .1)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (first.level, first.exp, first.xp_boost.bonus_exp),
+            (20, 19_849, 925)
+        );
+        let second = actor
+            .call(move |w| {
+                let e = w.spawn_entity(0x600, pos, vec![])?;
+                w.damage_enemy(recipient, e, 1, true, &[], None)?;
+                w.damage_enemy(b, e, 200_000, true, &[], None)?;
+                assert_eq!(w.players[&recipient].character.level, 19);
+                assert_eq!(
+                    w.players[&recipient].level_assists_prepared,
+                    [LevelAssist {
+                        reached_level: 20,
+                        giver: 2
+                    }]
+                );
+                assert!(w.pending_progress_where(|id, _| id == recipient).is_empty());
+                w.finish_progress(recipient, first)?;
+                let plan = w
+                    .pending_progress_where(|id, _| id == recipient)
+                    .pop()
+                    .unwrap()
+                    .1;
+                assert!(w.players[&recipient].level_assists_prepared.is_empty());
+                Ok(plan)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                second.level,
+                second.exp,
+                second.xp_boost.bonus_exp,
+                second.fame
+            ),
+            (20, 20_774, 925, 19)
+        );
+        actor
+            .call(move |w| {
+                w.finish_progress(recipient, second)?;
+                assert_eq!(w.players[&recipient].character.exp, 20_774);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn all_death_fame_phase1_causal_levels_bounded_and_invalid_sources() {
+        let mut w = world();
+        let recipient = w.enter(ch(&w), None).unwrap();
+        let p = w.players.get_mut(&recipient).unwrap();
+        p.queue_experience(49, None, false).unwrap();
+        p.queue_experience(1, Some(2), true).unwrap();
+        p.queue_experience(149, None, false).unwrap();
+        p.queue_experience(1, Some(3), true).unwrap();
+        let plans = w.pending_progress();
+        assert_eq!(plans[0].1.level, 3);
+        assert_eq!(
+            w.players[&recipient].level_assists_prepared,
+            [
+                LevelAssist {
+                    reached_level: 2,
+                    giver: 2
+                },
+                LevelAssist {
+                    reached_level: 3,
+                    giver: 3
+                }
+            ]
+        );
+        w.finish_progress(recipient, plans[0].1.clone()).unwrap();
+        let mut w = world();
+        let recipient = w.enter(ch(&w), None).unwrap();
+        let p = w.players.get_mut(&recipient).unwrap();
+        p.pending = true;
+        for _ in 0..100_000 {
+            p.queue_experience(1, Some(2), true).unwrap();
+            assert!(
+                p.experience_queue
+                    .as_ref()
+                    .unwrap()
+                    .assists
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    <= 38
+            );
+        }
+        assert_eq!(
+            w.players[&recipient]
+                .experience_queue
+                .as_ref()
+                .unwrap()
+                .assists
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>(),
+            38
+        );
+        assert!(w.pending_progress().is_empty());
+        w.players.get_mut(&recipient).unwrap().pending = false;
+        let plans = w.pending_progress();
+        assert_eq!(plans[0].1.level, 20);
+        assert_eq!(w.players[&recipient].level_assists_prepared.len(), 19);
+        for corrupt in 0..4 {
+            let mut w = world();
+            let id = w.enter(ch(&w), None).unwrap();
+            let p = w.players.get_mut(&id).unwrap();
+            if corrupt != 0 {
+                p.queue_experience(50, Some(2), true).unwrap();
+            }
+            match corrupt {
+                0 => p.experience_queued = 50,
+                1 => p.experience_queued += 1,
+                2 => p.character.exp += 1,
+                3 => p.character.level = 2,
+                _ => unreachable!(),
+            }
+            assert!(w.pending_progress().is_empty());
+            let error = w.players[&id].persistence_failure.as_ref().unwrap();
+            assert!(
+                error.contains("character=1")
+                    && error.contains("scalar=")
+                    && error.contains("sources="),
+                "{error}"
+            );
+            assert!(w.begin_departure(id).is_err());
+        }
+        let mut w = world();
+        let mut c = ch(&w);
+        c.gain_experience(&w.content, i32::MAX - 1, &mut w.rng)
+            .unwrap();
+        let id = w.enter(c, None).unwrap();
+        w.players
+            .get_mut(&id)
+            .unwrap()
+            .queue_experience(1, Some(2), true)
+            .unwrap();
+        let plans = w.pending_progress();
+        assert_eq!(
+            plans[0].1.exp,
+            i32::MAX,
+            "unused boosted projection must not reject valid unboosted XP"
+        );
+    }
+
+    #[test]
     fn progress_is_invisible_until_commit_and_cannot_heal_pending_death() {
         let mut w = world();
         let id = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&id).unwrap().experience_queued = 50;
+        w.players
+            .get_mut(&id)
+            .unwrap()
+            .queue_experience(50, None, false)
+            .unwrap();
         let plans = w.pending_progress();
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].1.level, 2);
@@ -6022,7 +6595,11 @@ mod tests {
     fn committed_fame_survives_departure_and_permanent_death() {
         let mut w = world();
         let id = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&id).unwrap().experience_queued = 1000;
+        w.players
+            .get_mut(&id)
+            .unwrap()
+            .queue_experience(1000, None, false)
+            .unwrap();
         let plans = w.pending_progress();
         assert_eq!(plans[0].1.fame, 1);
         assert_eq!(w.players[&id].character.fame, 0);
@@ -6040,7 +6617,11 @@ mod tests {
     fn departure_waits_for_earned_progress() {
         let mut w = world();
         let id = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&id).unwrap().experience_queued = 50;
+        w.players
+            .get_mut(&id)
+            .unwrap()
+            .queue_experience(50, None, false)
+            .unwrap();
         assert!(w.begin_departure(id).unwrap().is_none());
         let plans = w.pending_progress();
         w.finish_progress(id, plans[0].1.clone()).unwrap();
@@ -7756,7 +8337,11 @@ mod tests {
         let mut w = world();
         let character = ch(&w);
         let player = w.enter(character, None).unwrap();
-        w.players.get_mut(&player).unwrap().experience_queued = 20;
+        w.players
+            .get_mut(&player)
+            .unwrap()
+            .queue_experience(20, None, false)
+            .unwrap();
         assert!(!w.settled().unwrap());
         let (id, progress) = w.pending_progress().pop().unwrap();
         assert!(!w.settled().unwrap());

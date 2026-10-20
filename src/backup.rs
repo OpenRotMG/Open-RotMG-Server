@@ -18,14 +18,18 @@ fn known_fields(value: &Value, saved: &Value) -> bool {
     }
 }
 
-fn validate(values: Vec<Value>) -> Result<()> {
+fn validate(values: Vec<Value>, legacy: bool) -> Result<()> {
     for (index, value) in values.iter().enumerate() {
         ensure!(
             value.is_object(),
             "Unsupported character payload at record {index}"
         );
-        let character = store::decode_character(&value.to_string(), [0; 8])
-            .map_err(|_| anyhow::anyhow!("Unsupported character payload at record {index}"))?;
+        let character = if legacy {
+            store::decode_legacy_character(&value.to_string(), [0; 8])
+        } else {
+            store::decode_character(&value.to_string(), [0; 8])
+        }
+        .map_err(|_| anyhow::anyhow!("Unsupported character payload at record {index}"))?;
         ensure!(
             character.items.len() == 12
                 && character.base.iter().all(|n| *n >= 0)
@@ -47,7 +51,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
         .collect::<Vec<_>>()
         .as_slice()
     {
-        ["--backup-validate"] => {
+        ["--backup-validate"] | ["--backup-validate", "legacy"] => {
             let mut input = Vec::new();
             std::io::stdin()
                 .take(32 * 1024 * 1024 + 1)
@@ -56,7 +60,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 input.len() <= 32 * 1024 * 1024,
                 "Backup character input exceeds 32 MiB"
             );
-            validate(serde_json::from_slice(&input)?)?;
+            validate(serde_json::from_slice(&input)?, args.len() == 2)?;
         }
         ["--backup-validate-pictures"] => {
             use base64::Engine;
@@ -528,6 +532,31 @@ async fn exercise_death(database: &Path, data: &Path) -> Result<()> {
         |r| r.get(0),
     )?;
     let mut ch = store.create(account, content.get(content::WIZARD)?).await?;
+    let givers = {
+        let mut q = db.prepare(
+            "SELECT id FROM characters WHERE alive=1 AND account<>?1 ORDER BY id LIMIT 2",
+        )?;
+        q.query_map([account], |r| r.get::<_, i32>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    ensure!(
+        givers.len() == 2,
+        "restored credit exercise requires two retained living givers"
+    );
+    ch.gain_experience(&content, 200, &mut rand::thread_rng())?;
+    let credits = vec![
+        store::LevelAssist {
+            reached_level: 2,
+            giver: givers[0],
+        },
+        store::LevelAssist {
+            reached_level: 3,
+            giver: givers[1],
+        },
+    ];
+    store
+        .progress_with_assists(ch.clone(), credits.clone())
+        .await?;
     ch.items[0] = 0xaa2;
     ch.items[3] = 0xabf;
     ch.revision = store
@@ -549,11 +578,24 @@ async fn exercise_death(database: &Path, data: &Path) -> Result<()> {
         .await?;
     drop(store);
     let reopened = store::Store::open(database, &content)?;
-    let archived: (String, i32, i64) = db.query_row(
-        "SELECT snapshot,equipment_fame,died_at FROM deaths WHERE character=?1",
+    let archived: (String, i32, i64, String) = db.query_row(
+        "SELECT snapshot,equipment_fame,died_at,receipt FROM deaths WHERE character=?1",
         [ch.id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     )?;
+    let receipt = store::death_awards::decode_receipt(&archived.3)?;
+    ensure!(
+        receipt.policy == store::death_awards::ReceiptPolicy::EquipmentOnly
+            && receipt.base == 19
+            && receipt.total == 20,
+        "restored paid JSON receipt mismatch"
+    );
+    for credit in &credits {
+        ensure!(
+            reopened.assist_count(credit.giver).await? >= 1,
+            "restored causal credit missing"
+        );
+    }
     ensure!(
         archived.0 == serde_json::to_string(&ch)? && archived.1 == 1 && archived.2 > 0,
         "restored death archive mismatch"
@@ -607,7 +649,7 @@ async fn exercise_death(database: &Path, data: &Path) -> Result<()> {
     );
     println!(
         "{}",
-        serde_json::json!({"exercised_death": ch.id, "base_fame":19,"equipment_fame":1,"total_fame":20})
+        serde_json::json!({"exercised_death": ch.id, "base_fame":19,"equipment_fame":1,"total_fame":20,"receipt":receipt,"level_credits":credits.iter().map(|c|serde_json::json!({"recipient":ch.id,"reached_level":c.reached_level,"giver":c.giver})).collect::<Vec<_>>()})
     );
     Ok(())
 }

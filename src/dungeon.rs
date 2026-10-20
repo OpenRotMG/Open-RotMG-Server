@@ -5,6 +5,38 @@ pub mod sprite;
 pub mod trench;
 pub mod undead;
 
+// Exit identities are historical rule inputs, not registrations of playable worlds.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoricalDungeon {
+    PirateCave,
+    SpiderDen,
+    ForbiddenJungle,
+    SnakePit,
+    SpriteWorld,
+    UndeadLair,
+    AbyssOfDemons,
+    TombOfTheAncients,
+    OceanTrench,
+    ManorOfTheImmortals,
+}
+impl HistoricalDungeon {
+    pub const ALL: [Self; 10] = [
+        Self::PirateCave,
+        Self::SpiderDen,
+        Self::ForbiddenJungle,
+        Self::SnakePit,
+        Self::SpriteWorld,
+        Self::UndeadLair,
+        Self::AbyssOfDemons,
+        Self::TombOfTheAncients,
+        Self::OceanTrench,
+        Self::ManorOfTheImmortals,
+    ];
+}
+
 pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),

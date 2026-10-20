@@ -1878,7 +1878,7 @@ async fn native_spell_cast_during_xp_save_commits_progress_without_refunding_man
         .world
         .call(move |w| {
             let p = w.players.get_mut(&player).unwrap();
-            p.experience_queued = 1;
+            p.queue_experience(1, None, false).unwrap();
             let (kind, pos, mana) = (p.character.items[1], p.pos, p.character.mp);
             let (owner, snapshot) = w.pending_progress().pop().unwrap();
             assert_eq!(owner, player);

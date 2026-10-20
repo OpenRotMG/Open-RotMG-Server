@@ -229,6 +229,7 @@ CREATE TABLE vaults(account INTEGER PRIMARY KEY REFERENCES accounts(id),items TE
 INSERT INTO vaults SELECT account,items,revision FROM current_vaults WHERE account=1;
 DROP TABLE current_vaults;
 ALTER TABLE accounts DROP COLUMN vault_mask;
+DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt;
 ALTER TABLE deaths DROP COLUMN equipment_fame;
 DROP TABLE pictures; DROP TABLE picture_sequence;
 PRAGMA user_version=12;").unwrap();
@@ -380,7 +381,7 @@ async fn vault_schema_current_column_key_and_foreign_key_metadata_are_required()
 #[tokio::test]
 async fn vault_current_schema_rejects_missing_unknown_or_malformed_state() {
     for mutation in [
-        "PRAGMA user_version=16",
+        "PRAGMA user_version=17",
         "PRAGMA user_version=-1",
         "ALTER TABLE vaults ADD COLUMN hidden_saved_record TEXT GENERATED ALWAYS AS ('saved') VIRTUAL",
         "ALTER TABLE accounts DROP COLUMN vault_mask; ALTER TABLE accounts ADD COLUMN vault_mask BLOB NOT NULL DEFAULT 1",

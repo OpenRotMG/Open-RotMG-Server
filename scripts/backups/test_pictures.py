@@ -49,7 +49,7 @@ class PicturesBackup(unittest.TestCase):
 
     def test_artwork_bytes_ownership_high_water_restore_and_usable_reload(self):
         bundle = self.bundle
-        self.assertEqual(bundle['schema'], 15)
+        self.assertEqual(bundle['schema'], 16)
         self.assertEqual(len(bundle['game']['pictures']), 2)
         self.assertEqual(bundle['game']['picture_sequence'], [{'id': 1, 'next_id': 4}])
         with closing(sqlite3.connect(self.root / 'written/game.db')) as db:

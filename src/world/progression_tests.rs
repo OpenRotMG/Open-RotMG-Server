@@ -187,7 +187,11 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
                 w.enter(second, None).unwrap(),
             )
         };
-        w.players.get_mut(&b).unwrap().experience_queued = 1;
+        w.players
+            .get_mut(&b)
+            .unwrap()
+            .queue_experience(1, None, false)
+            .unwrap();
         w.players.get_mut(&a).unwrap().pos = position;
         w.players.get_mut(&b).unwrap().pos = position;
         w.entities.get_mut(&boss).unwrap().damage.insert(401, 2000);

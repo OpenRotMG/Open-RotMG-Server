@@ -36,6 +36,7 @@ impl Store {
                 && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens
                 && serde_json::from_str::<Vec<i32>>(&items)? == previous_items,
                 "resurrection reservation changed");
+            ch.lifetime.follows(&saved.lifetime)?;
             ch.revision += 1;
             let n = tx.execute(
                 "UPDATE characters SET stats=?4,items=?5,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",

@@ -12,7 +12,41 @@ import unittest
 from release_contract import check
 
 
+def legacy_copy(bundle):
+    old = deepcopy(bundle)
+    old['schema'] = 15
+    del old['game']['legacy_claims'], old['game']['level_credits']
+    for row in old['game']['deaths']:
+        del row['receipt']
+    for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
+        for row in old['game'][table]:
+            payload = json.loads(row[field])
+            del payload['lifetime']
+            row[field] = json.dumps(payload)
+    return old
+
+
 class ReleaseContract(unittest.TestCase):
+    def check_fame_migration(self, migrated, original):
+        self.assertEqual(migrated.pop('legacy_claims'), [])
+        self.assertEqual(migrated.pop('level_credits'), [])
+        for row, old in zip(migrated['deaths'], original['deaths']):
+            base = json.loads(old['snapshot'])['fame']
+            equipment = old.get('equipment_fame', 0)
+            self.assertEqual(json.loads(row.pop('receipt')), {'version': 1, 'policy': 'legacy_paid',
+                'base': base, 'rows': [{'kind': 'well_equipped', 'amount': equipment}] if equipment else [],
+                'total': base + equipment})
+        for row, old in zip(migrated['characters'], original['characters']):
+            payload = json.loads(row['stats'])
+            lifetime = payload.pop('lifetime')
+            self.assertEqual(lifetime, {'version': 1, 'completeness': 'known_only', 'shots': 0,
+                'projectile_hits': 0, 'kills': 0, 'god_kills': 0, 'cube_kills': 0, 'oryx_kills': 0,
+                'inventory_potion_used': False, 'ability_used': False, 'teleported': False,
+                'tiles': json.loads(old['stats']).get('tiles', 0), 'level_assists': 0,
+                'qualified_quests': 0, 'realm_exits': []})
+            self.assertEqual(payload, json.loads(old['stats']))
+            row['stats'] = old['stats']
+
     def test_actual_writer_backup_restore_and_reload(self):
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as temporary:
@@ -31,7 +65,7 @@ class ReleaseContract(unittest.TestCase):
                 self.assertIsNone(rewards[0][1])
                 self.assertIsNone(rewards[1][1])
                 self.assertGreater(rewards[2][1], 0)
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 15)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 16)
                 for table, column, default in [('characters', 'revision', '0'), ('characters', 'alive', '1'), ('deaths', 'died_at', 'unixepoch()')]:
                     with self.subTest(default=table + '.' + column):
                         self.assertEqual(db.execute('SELECT dflt_value FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone(), (default,))
@@ -46,7 +80,7 @@ class ReleaseContract(unittest.TestCase):
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
             bundle = json.loads(gzip.decompress((Path(temporary) / 'contract/state.json.gz').read_bytes()))
-            self.assertEqual(bundle['schema'], 15)
+            self.assertEqual(bundle['schema'], 16)
             self.assertEqual([r['equipment_fame'] for r in bundle['game']['deaths']], [0, 750])
             for award in [None, True, -1, 1.5, '750', 2147483648, 751]:
                 malformed = deepcopy(bundle)
@@ -54,13 +88,13 @@ class ReleaseContract(unittest.TestCase):
                 with self.subTest(award=award), self.assertRaisesRegex(ValueError, 'death|Death'):
                     backup.validate(malformed)
             for version in [13, 14]:
-                malformed = deepcopy(bundle)
+                malformed = legacy_copy(bundle)
                 malformed['schema'] = version
                 del malformed['game']['pictures'], malformed['game']['picture_sequence']
                 del malformed['game']['deaths'][1]['equipment_fame']
                 with self.subTest(missing_award_version=version), self.assertRaisesRegex(ValueError, 'fields'):
                     backup.validate(malformed)
-            disguised = deepcopy(bundle)
+            disguised = legacy_copy(bundle)
             disguised['schema'] = 13
             del disguised['game']['pictures'], disguised['game']['picture_sequence']
             for row in disguised['game']['deaths']:
@@ -95,7 +129,7 @@ class ReleaseContract(unittest.TestCase):
                 malformed['game']['vaults'] = rows
                 with self.assertRaises(ValueError):
                     backup.validate(malformed)
-            malformed = deepcopy(bundle)
+            malformed = legacy_copy(bundle)
             malformed['schema'] = 12
             del malformed['game']['pictures'], malformed['game']['picture_sequence']
             with self.assertRaisesRegex(ValueError, 'fields'):
@@ -152,14 +186,14 @@ class ReleaseContract(unittest.TestCase):
                     backup.export(malformed_db, Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'malformed-death.gz', revision, revision, revision)
                 self.assertEqual(malformed_db.read_bytes(), original)
                 self.assertFalse((Path(temporary) / 'malformed-death.gz').exists())
-            for version in [0, 11, 12, 13, 14, 16]:
+            for version in [0, 11, 12, 13, 14, 15, 17]:
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')
                 with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'schema version'):
                     backup.export(Path(temporary) / 'future.db', Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'future.gz', revision, revision, revision)
                 self.assertFalse((Path(temporary) / 'future.gz').exists())
-            legacy = deepcopy(bundle)
+            legacy = legacy_copy(bundle)
             del legacy['game']['pictures'], legacy['game']['picture_sequence']
             paid = sum(row.pop('equipment_fame') for row in legacy['game']['deaths'])
             self.assertEqual(paid, 750)
@@ -177,6 +211,7 @@ class ReleaseContract(unittest.TestCase):
             backup.restore(archive13, restored13)
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored13 / 'game.db'), str(root / 'data')], check=True)
             migrated13 = backup.snapshot(restored13 / 'game.db', backup.RELOADED_GAME)
+            self.check_fame_migration(migrated13, legacy['game'])
             self.assertEqual(migrated13.pop('pictures'), [])
             self.assertEqual(migrated13.pop('picture_sequence'), [{'id': 1, 'next_id': 1}])
             for row in migrated13['deaths']:
@@ -204,6 +239,7 @@ class ReleaseContract(unittest.TestCase):
             backup.restore(archive12, restored12)
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored12 / 'game.db'), str(root / 'data')], check=True)
             migrated12 = backup.snapshot(restored12 / 'game.db', backup.RELOADED_GAME)
+            self.check_fame_migration(migrated12, legacy['game'])
             self.assertEqual(migrated12.pop('pictures'), [])
             self.assertEqual(migrated12.pop('picture_sequence'), [{'id': 1, 'next_id': 1}])
             for row in migrated12['deaths']:
@@ -232,6 +268,7 @@ class ReleaseContract(unittest.TestCase):
             self.assertEqual(reexported11['game'], legacy11['game'])
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored11 / 'game.db'), str(root / 'data')], check=True)
             migrated = backup.snapshot(restored11 / 'game.db', backup.RELOADED_GAME)
+            self.check_fame_migration(migrated, legacy11['game'])
             self.assertEqual(migrated.pop('pictures'), [])
             self.assertEqual(migrated.pop('picture_sequence'), [{'id': 1, 'next_id': 1}])
             for row in migrated['deaths']:

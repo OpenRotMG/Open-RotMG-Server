@@ -735,10 +735,16 @@ pub(crate) async fn inventory(
 }
 
 async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Character) -> Result<()> {
+    let reservation = snapshot.clone();
+    let assists = a
+        .world
+        .for_player(id)
+        .call(move |w| w.progress_assists(id, &reservation))
+        .await?;
     lifecycle::stage(Stage::Store);
     let result = a
         .store
-        .progress(snapshot.clone())
+        .progress_with_assists(snapshot.clone(), assists)
         .await
         .context("progress persistence failed");
     lifecycle::stage(Stage::Publication);

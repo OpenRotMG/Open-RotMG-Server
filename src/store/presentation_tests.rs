@@ -228,12 +228,16 @@ async fn presentation_decodes_legacy_committed_snapshots_without_birth_metadata(
     ch.alive = false;
     s.death(ch.clone(), "fixture".into()).await.unwrap();
     let mut raw = serde_json::to_value(ch).unwrap();
-    for key in ["schema", "class", "base", "created_at"] {
+    for key in ["schema", "class", "base", "created_at", "lifetime"] {
         raw.as_object_mut().unwrap().remove(key);
     }
     let raw = serde_json::to_string(&raw).unwrap();
     s.call(move |db| {
-        db.execute("UPDATE deaths SET snapshot=?1", [raw])?;
+        // This fixture represents an old already-paid archive, not missing metadata in a current receipt.
+        db.execute(
+            "UPDATE deaths SET snapshot=?1,receipt=json_set(receipt,'$.policy','legacy_paid')",
+            [raw],
+        )?;
         Ok(())
     })
     .await

@@ -70,7 +70,7 @@ async fn save_load_roundtrip_reopen_ownership_and_overwrite_identity() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        15
+        16
     );
 }
 

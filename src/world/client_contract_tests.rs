@@ -111,7 +111,11 @@ fn living_class_star_thresholds_publish_after_progress_commit_without_wallet_cre
         };
         let old_stars = presentation.stars();
         let id = w.enter_at(ch, None, None, presentation).unwrap();
-        w.players.get_mut(&id).unwrap().experience_queued = 1;
+        w.players
+            .get_mut(&id)
+            .unwrap()
+            .queue_experience(1, None, false)
+            .unwrap();
         let (_, snapshot) = w.pending_progress().pop().unwrap();
         assert_eq!(snapshot.fame, threshold);
         assert_eq!(numbers(&w, id, id)[&30], old_stars);

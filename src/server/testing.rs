@@ -668,6 +668,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
     );
     let mut preview = Character {
         schema: 1,
+        lifetime: crate::store::FameLifetime::complete(),
         class: spec.class,
         base: a.content.classes[&spec.class].base,
         tex1: 0,

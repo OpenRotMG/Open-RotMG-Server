@@ -47,7 +47,7 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
             bind(id)?;
             let p = w.players.get_mut(&id).unwrap();
             if progress {
-                p.experience_queued = 50;
+                p.queue_experience(50, None, false).unwrap();
                 p.clears_queued[0] = 1;
             }
             if dying {

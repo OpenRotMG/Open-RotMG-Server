@@ -570,7 +570,11 @@ async fn lifecycle_owned_diagnostic_sink_panic_during_uncertain_collector_handof
     a.world
         .for_player(id)
         .call(move |w| {
-            w.players.get_mut(&id).unwrap().experience_queued = 50;
+            w.players
+                .get_mut(&id)
+                .unwrap()
+                .queue_experience(50, None, false)
+                .unwrap();
             Ok(())
         })
         .await

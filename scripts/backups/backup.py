@@ -31,7 +31,12 @@ FAME_GAME = {**VAULTS_GAME, 'deaths': (*LEGACY_GAME['deaths'], 'equipment_fame')
 PICTURES_GAME = {**FAME_GAME, 'pictures': ('id', 'account', 'name', 'data_type', 'tags', 'png'), 'picture_sequence': ('id', 'next_id')}
 PICTURES_SQL = "CREATE TABLE pictures(id INTEGER PRIMARY KEY CHECK(id BETWEEN 1 AND 2147483647),account INTEGER NOT NULL REFERENCES accounts(id),name TEXT NOT NULL,data_type INTEGER NOT NULL CHECK(data_type BETWEEN 1 AND 7),tags TEXT NOT NULL,png BLOB NOT NULL CHECK(typeof(png)='blob' AND length(png)<=16384),UNIQUE(account,name))"
 PICTURE_SEQUENCE_SQL = "CREATE TABLE picture_sequence(id INTEGER PRIMARY KEY CHECK(id=1),next_id INTEGER NOT NULL CHECK(typeof(next_id)='integer' AND next_id BETWEEN 1 AND 2147483648))"
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME}
+DEATH_FAME_GAME = {**PICTURES_GAME, 'deaths': (*FAME_GAME['deaths'], 'receipt'), 'legacy_claims': ('account', 'class', 'character'), 'level_credits': ('recipient', 'reached_level', 'giver')}
+DEATHS_SQL = "CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()),equipment_fame INTEGER NOT NULL CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647),receipt TEXT NOT NULL CHECK(json_valid(receipt)))"
+CLAIMS_SQL = "CREATE TABLE legacy_claims(account INTEGER NOT NULL REFERENCES accounts(id),class INTEGER NOT NULL CHECK(typeof(class)='integer' AND class BETWEEN 0 AND 65535),character INTEGER NOT NULL UNIQUE REFERENCES deaths(character),PRIMARY KEY(account,class))"
+CREDITS_SQL = "CREATE TABLE level_credits(recipient INTEGER NOT NULL REFERENCES characters(id),reached_level INTEGER NOT NULL CHECK(typeof(reached_level)='integer' AND reached_level BETWEEN 2 AND 20),giver INTEGER NOT NULL REFERENCES characters(id),PRIMARY KEY(recipient,reached_level),CHECK(recipient<>giver))"
+CREDITS_INDEX_SQL = 'CREATE INDEX level_credits_by_giver ON level_credits(giver)'
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: DEATH_FAME_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -45,15 +50,16 @@ AUTH_REWARDS_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewa
 AUTH_SLOTS_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'character_slot_purchases': SLOTS_GAME['character_slot_purchases']}
 AUTH_VAULTS_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vaults': VAULTS_GAME['vaults']}
 RELOADED_FAME_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
-RELOADED_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
+RELOADED_PICTURES_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
+RELOADED_GAME = {**RELOADED_PICTURES_GAME, 'deaths': DEATH_FAME_GAME['deaths'], 'legacy_claims': DEATH_FAME_GAME['legacy_claims'], 'level_credits': DEATH_FAME_GAME['level_credits']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
-def characters(values):
+def characters(values, *, legacy=False):
     binary = os.environ.get('OPENROTMG_BACKUP_BINARY')
     if not binary:
         raise RuntimeError('OPENROTMG_BACKUP_BINARY must name the matching release binary')
-    result = subprocess.run([binary, '--backup-validate'], input=json.dumps(values),
+    result = subprocess.run([binary, '--backup-validate'] + (['legacy'] if legacy else []), input=json.dumps(values),
                             text=True, capture_output=True, timeout=30)
     if result.returncode:
         raise ValueError('Release character validation failed: ' + result.stderr.strip())
@@ -119,7 +125,7 @@ def snapshot(path, schema, *, include_schema=False):
             tuple(r[1] for r in db.execute('PRAGMA table_xinfo(' + table + ')')) == columns
             for table, columns in candidate.items())]
         if not matched or any(candidate != matched[0] for candidate in matched):
-            raise ValueError('Unsupported database tables or columns; update and test the export schema before backing up')
+            raise ValueError('Unsupported database tables or columns/metadata; update and test the export schema before backing up')
         schema = matched[0]
         if 'vaults' in schema:
             references = db.execute('SELECT "table","from","to",seq,on_update,on_delete FROM pragma_foreign_key_list(\'vaults\') ORDER BY id,seq').fetchall()
@@ -136,7 +142,7 @@ def snapshot(path, schema, *, include_schema=False):
                     actual = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone()
                     if actual != (kind, 1, default, key, 0):
                         raise ValueError('Unsupported canonical Vault metadata: ' + table + '.' + column)
-        if schema.get('deaths') == FAME_GAME['deaths']:
+        if schema.get('deaths') in (FAME_GAME['deaths'], DEATH_FAME_GAME['deaths']):
             references = db.execute('SELECT "table","from","to",seq,on_update,on_delete FROM pragma_foreign_key_list(\'deaths\') ORDER BY id,seq').fetchall()
             if references != [('characters', 'character', 'id', 0, 'NO ACTION', 'NO ACTION')]:
                 raise ValueError('Unsupported death character foreign key')
@@ -150,6 +156,10 @@ def snapshot(path, schema, *, include_schema=False):
                 metadata = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(\'deaths\') WHERE name=?', (column,)).fetchone()
                 if metadata != (kind, not_null, default, key, 0):
                     raise ValueError('Unsupported canonical death metadata: ' + column)
+        if 'legacy_claims' in schema:
+            for table, expected in [('deaths', DEATHS_SQL), ('legacy_claims', CLAIMS_SQL), ('level_credits', CREDITS_SQL), ('level_credits_by_giver', CREDITS_INDEX_SQL)]:
+                if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (table,)).fetchone() != (expected,):
+                    raise ValueError('Unsupported canonical death fame metadata: ' + table)
         if 'pictures' in schema:
             for table, expected in [('pictures', PICTURES_SQL), ('picture_sequence', PICTURE_SEQUENCE_SQL)]:
                 if db.execute("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() != (expected,):
@@ -247,6 +257,64 @@ def validate_vaults(game):
         raise ValueError('Vault ownership/count/rows disagree')
 
 
+BONUS_KINDS = ('ancestor', 'legacy_builder', 'pacifist', 'thirsty', 'mundane', 'boots_on_the_ground', 'tunnel_rat', 'enemy_of_the_gods', 'slayer_of_the_gods', 'oryx_slayer', 'accurate', 'sharpshooter', 'sniper', 'explorer', 'cartographer', 'team_player', 'leader_of_men', 'doer_of_deeds', 'friend_of_the_cubes', 'well_equipped', 'first_born')
+
+
+def paid_receipt(raw):
+    if type(raw) is not str:
+        raise ValueError('Invalid death receipt JSON')
+    def unique_fields(fields):
+        result = dict(fields)
+        if len(result) != len(fields):
+            raise ValueError('Duplicate death receipt JSON field')
+        return result
+    receipt = json.loads(raw, object_pairs_hook=unique_fields)
+    if (type(receipt) is not dict or set(receipt) != {'version', 'policy', 'base', 'rows', 'total'}
+            or type(receipt['version']) is not int or receipt['version'] != 1
+            or receipt['policy'] not in ('legacy_paid', 'equipment_only', 'historical')
+            or any(type(receipt[k]) is not int or not 0 <= receipt[k] <= 2147483647 for k in ('base', 'total'))
+            or type(receipt['rows']) is not list or len(receipt['rows']) > 21):
+        raise ValueError('Invalid death receipt version, policy or bounds')
+    previous, total = -1, receipt['base']
+    for row in receipt['rows']:
+        if (type(row) is not dict or set(row) != {'kind', 'amount'}
+                or row['kind'] not in BONUS_KINDS or BONUS_KINDS.index(row['kind']) <= previous
+                or type(row['amount']) is not int or not 0 <= row['amount'] <= 2147483647
+                or (receipt['policy'] != 'historical' and (row['kind'] != 'well_equipped' or row['amount'] == 0))):
+            raise ValueError('Invalid death receipt kind, order or amount')
+        previous = BONUS_KINDS.index(row['kind'])
+        total += row['amount']
+    if total != receipt['total'] or total > 2147483647:
+        raise ValueError('Death receipt base plus rows disagrees with total')
+    return receipt
+
+
+def validate_fame_records(game, saved):
+    required, seen = set(), set()
+    for row in game['deaths']:
+        receipt = paid_receipt(row['receipt'])
+        if any(r['kind'] == 'legacy_builder' for r in receipt['rows']):
+            ch = json.loads(row['snapshot'])
+            required.add((ch['account'], ch['class'], row['character']))
+    for row in game['legacy_claims']:
+        if (any(type(row[k]) is not int for k in ('account', 'class', 'character'))
+                or not 0 <= row['class'] <= 65535 or (row['account'], row['class']) in seen
+                or (row['account'], row['class'], row['character']) not in required):
+            raise ValueError('Invalid Legacy claim ownership or receipt binding')
+        seen.add((row['account'], row['class']))
+        required.remove((row['account'], row['class'], row['character']))
+    if required:
+        raise ValueError('Paid Legacy receipt lacks its claim')
+    seen = set()
+    for row in game['level_credits']:
+        recipient, level, giver = row['recipient'], row['reached_level'], row['giver']
+        if (any(type(v) is not int for v in (recipient, level, giver)) or recipient not in saved
+                or giver not in saved or recipient == giver or not 2 <= level <= 20
+                or level > json.loads(saved[recipient]['stats'])['level'] or (recipient, level) in seen):
+            raise ValueError('Invalid level credit identity, binding or reached level')
+        seen.add((recipient, level))
+
+
 def validate_deaths(game, version):
     accounts = {row['id'] for row in game['accounts']}
     saved = {row['id']: row for row in game['characters']}
@@ -263,14 +331,25 @@ def validate_deaths(game, version):
         character = row['character']
         snapshot = json.loads(row['snapshot'])
         bonus = row['equipment_fame'] if version >= 14 else 0
+        # The explicit legacy decoder recognizes the version-zero Wizard-only writer.
         if (type(character) is not int or character not in saved or character in seen
                 or saved[character]['alive'] != 0 or snapshot['id'] != character
+                or (snapshot['class'] if 'schema' in snapshot else 782) != (json.loads(saved[character]['stats'])['class'] if 'schema' in json.loads(saved[character]['stats']) else 782)
                 or snapshot['account'] != saved[character]['account'] or snapshot['alive'] is not False
                 or snapshot['hp'] != 0 or type(snapshot['fame']) is not int or snapshot['fame'] < 0
                 or type(bonus) is not int or bonus < 0 or snapshot['fame'] + bonus > 2147483647):
             raise ValueError('Invalid archived death award or ownership')
+        total = snapshot['fame'] + bonus
+        if version >= 16:
+            receipt = paid_receipt(row['receipt'])
+            equipment = next((r['amount'] for r in receipt['rows'] if r['kind'] == 'well_equipped'), 0)
+            if receipt['base'] != snapshot['fame'] or equipment != bonus:
+                raise ValueError('Death receipt disagrees with archived base or equipment')
+            total = receipt['total']
         seen.add(character)
-        earned[snapshot['account']] += snapshot['fame'] + bonus
+        earned[snapshot['account']] += total
+    if version >= 16:
+        validate_fame_records(game, saved)
     if version >= 5:
         for row in game['account_fame']:
             if earned[row['account']] != row['earned']:
@@ -296,8 +375,18 @@ def validate(bundle):
             allowed = set(columns) - {'guid'}
             if not isinstance(data[table], list) or any(not isinstance(r, dict) or set(r) != allowed for r in data[table]):
                 raise ValueError('Unsupported backup fields: ' + table)
-    characters([json.loads(row['stats']) for row in bundle['game']['characters']]
-               + [json.loads(row['snapshot']) for row in bundle['game']['deaths']])
+    current = [json.loads(row['stats']) for row in bundle['game']['characters']]
+    legacy = []
+    if bundle['schema'] < 16:
+        legacy = current + [json.loads(row['snapshot']) for row in bundle['game']['deaths']]
+        current = []
+    else:
+        for row in bundle['game']['deaths']:
+            receipt = paid_receipt(row['receipt'])
+            (legacy if receipt['policy'] == 'legacy_paid' else current).append(json.loads(row['snapshot']))
+    characters(current)
+    if legacy:
+        characters(legacy, legacy=True)
     for row in bundle['game']['characters']:
         items = json.loads(row['items'])
         if not isinstance(items, list) or len(items) != 12 or any(type(i) is not int for i in items):
@@ -372,7 +461,7 @@ def validate(bundle):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if (stored_version > max(GAME_SCHEMAS) or (max(versions) >= 12 and stored_version != max(versions))
             or (stored_version >= 12 and stored_version not in versions)):
@@ -453,6 +542,8 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += "\nALTER TABLE deaths ADD COLUMN equipment_fame INTEGER NOT NULL CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647);"
     if bundle['schema'] >= 15:
         definitions['game'] += '\n' + PICTURES_SQL + ';\n' + PICTURE_SEQUENCE_SQL + ';'
+    if bundle['schema'] >= 16:
+        definitions['game'] += '\nDROP TABLE deaths;\n' + DEATHS_SQL + ';\n' + CLAIMS_SQL + ';\n' + CREDITS_SQL + ';\n' + CREDITS_INDEX_SQL + ';\nCREATE INDEX deaths_by_time ON deaths(died_at);'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')
