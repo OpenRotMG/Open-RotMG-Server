@@ -171,7 +171,7 @@ export async function runCase(scenario, options) {
         try{await call('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await connection.call('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}
         await evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
       };
-      await call('Emulation.setFocusEmulationEnabled',{enabled:true});await capture('title');await click();await capture('character-select');await click();
+      await call('Emulation.setFocusEmulationEnabled',{enabled:true});await click();await click();
       await waitFor(async()=>{const s=await api({op:'native_state',actors:[actor]});assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');return s.actors.length===1&&s.actors[0].stage==='ready';},'Normal character LOAD did not complete');
       await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:[{port:chromePort,target:browser.target,actor}]}),{mode:0o600});
       await driver({op:'pause'});report.actor=actor;report.account=account;
@@ -193,7 +193,7 @@ export async function runCase(scenario, options) {
   } catch(error) {
     primary=error;report.status='failed';report.failure={phase,error:String(error),stack:error.stack};
     await save();
-    if(connection)try{const image=await connection.call('Page.captureScreenshot',{format:'png'});await writeFile(join(out,'failure.png'),Buffer.from(image.data,'base64'),{mode:0o600});}catch(error){report.failure.captureError=String(error);}
+    if(connection)try{const image=await connection.call('Page.captureScreenshot',{format:'png'});await writeFile(join(out,'failure.png'),Buffer.from(image.data,'base64'),{mode:0o600});report.failure.capture=join(out,'failure.png');}catch(error){report.failure.captureError=String(error);}
   } finally {
     clearTimeout(timer);closing=true;report.cleanupErrors=[];controller.abort(Error('Native test closing'));const cleanup=performance.now();
     for(const row of children)row.stopping=true;
