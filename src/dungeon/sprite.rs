@@ -5,7 +5,6 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 const TREES: [u16; 5] = [0x175, 0x176, 0x177, 0x178, 0x179];
 const SPRITES: [u16; 5] = [0xd00, 0xd01, 0xd02, 0xd03, 0xd04];
 
-// Preserve seeded routes while matching classic rectangular platforms and conveyor lanes.
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let directions = [(1i32, 0), (-1, 0), (0, 1), (0, -1)];
@@ -64,11 +63,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         ],
         spawns: vec![],
     };
+    // Leave void between unlinked platforms; smaller rooms/two-tile bridges match the preserved map:
+    // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
     for (i, &(cx, cy)) in centers.iter().enumerate() {
-        let radius = if i == 0 || i == boss {
+        let radius = if i == boss {
             8
+        } else if i == 0 {
+            6
         } else {
-            rng.gen_range(5..=7)
+            rng.gen_range(3..=5)
         };
         for y in cy - radius..=cy + radius {
             for x in cx - radius..=cx + radius {
@@ -78,8 +81,8 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     }
     for &(a, b) in &edges {
         let ((x0, y0), (x1, y1)) = (centers[a], centers[b]);
-        for y in y0.min(y1) - 1..=y0.max(y1) + 1 {
-            for x in x0.min(x1) - 1..=x0.max(x1) + 1 {
+        for y in y0.min(y1)..=y0.max(y1) + 1 {
+            for x in x0.min(x1)..=x0.max(x1) + 1 {
                 paint(&mut map, x, y);
             }
         }
@@ -162,5 +165,95 @@ fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
     let cell = &mut map.cells[(y * map.width + x) as usize];
     if (0xa0..=0xa4).contains(&cell.ground) && cell.object.is_none() {
         cell.object = Some(kind);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn compact_platforms_have_only_two_tile_bridges() {
+        let content = Content::load(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data"
+        )))
+        .unwrap();
+        for seed in 0..48 {
+            let map = generate(&content, seed).unwrap();
+            assert_eq!(
+                serde_json::to_vec(&map).unwrap(),
+                serde_json::to_vec(&generate(&content, seed).unwrap()).unwrap()
+            );
+            let floor = |x: i32, y: i32| {
+                (0xa0..=0xa4).contains(&map.cells[(y * map.width + x) as usize].ground)
+            };
+            let mut rooms = Vec::new();
+            for cy in (12..map.height).step_by(16) {
+                for cx in (12..map.width).step_by(16) {
+                    if !floor(cx, cy) {
+                        continue;
+                    }
+                    let radius = (1..=9).take_while(|r| floor(cx + r, cy + r)).count() as i32;
+                    let kind = map.cells[(cy * map.width + cx) as usize].object;
+                    match kind {
+                        Some(0x70d) => assert_eq!(radius, 6, "seed {seed}: oversized entrance"),
+                        Some(0xd06) => assert_eq!(radius, 8, "seed {seed}: boss arena changed"),
+                        _ => assert!(
+                            (3..=5).contains(&radius),
+                            "seed {seed}: oversized ordinary platform radius {radius}"
+                        ),
+                    }
+                    assert_eq!(map.cells[(cy * map.width + cx) as usize].ground, 0xa0);
+                    rooms.push((cx, cy, radius));
+                }
+            }
+            assert!((8..=14).contains(&rooms.len()));
+            for &(x, y, radius) in &rooms {
+                for (dx, dy) in [(1, 0), (0, 1)] {
+                    let Some(&(_, _, other)) = rooms
+                        .iter()
+                        .find(|&&(cx, cy, _)| (cx, cy) == (x + 16 * dx, y + 16 * dy))
+                    else {
+                        continue;
+                    };
+                    assert!(
+                        radius + other < 15,
+                        "seed {seed}: unlinked platforms can touch"
+                    );
+                    let linked = floor(x + dx * (radius + 1), y + dy * (radius + 1));
+                    for along in radius + 1..16 - other {
+                        for across in -1..=2 {
+                            assert_eq!(
+                                floor(x + dx * along + dy * across, y + dy * along + dx * across),
+                                linked && (0..=1).contains(&across),
+                                "seed {seed}: bridge width or unintended room join"
+                            );
+                        }
+                    }
+                }
+            }
+            let start = (map.spawns[0].0 as i32, map.spawns[0].1 as i32);
+            let mut seen = BTreeSet::from([start]);
+            let mut todo = vec![start];
+            while let Some((x, y)) = todo.pop() {
+                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let p = (x + dx, y + dy);
+                    if floor(p.0, p.1) && seen.insert(p) {
+                        todo.push(p);
+                    }
+                }
+            }
+            assert_eq!(
+                seen.len(),
+                map.cells
+                    .iter()
+                    .filter(|c| (0xa0..=0xa4).contains(&c.ground))
+                    .count(),
+                "seed {seed}: disconnected floor/boss"
+            );
+            assert!(map.cells.iter().filter(|c| c.object == Some(0xd05)).count() <= 5);
+        }
     }
 }
