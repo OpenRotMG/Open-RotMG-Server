@@ -622,7 +622,7 @@ async fn all_death_fame_phase1_ordered_rules() {
         );
         lifetime.realm_exits.insert(dungeon);
     }
-    assert_eq!(crate::dungeon::DUNGEONS.len(), 7);
+    assert_eq!(crate::dungeon::DUNGEONS.len(), 8);
     lifetime = FameLifetime::known_only();
     lifetime.oryx_kills = 1;
     lifetime.kills = 1;
