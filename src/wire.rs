@@ -1,4 +1,5 @@
 use anyhow::{Result, bail, ensure};
+pub(crate) mod outbox;
 
 pub const HELLO: u8 = 17;
 pub const CREATE: u8 = 36;

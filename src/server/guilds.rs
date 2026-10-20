@@ -111,7 +111,7 @@ pub(super) async fn native(
     id: i32,
     kind: u8,
     r: &mut Reader<'_>,
-    tx: &mpsc::Sender<Packet>,
+    tx: &wire::outbox::Sender,
     now: Instant,
 ) -> Result<()> {
     let request = match kind {

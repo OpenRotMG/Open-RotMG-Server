@@ -542,6 +542,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         })
     }
     #[cfg(test)]
+    pub(crate) fn lifecycle_test_job_count(&self) -> usize {
+        self.lifecycle_jobs
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(test)]
     pub(crate) fn lifecycle_test_pause_reply(&self) -> (oneshot::Receiver<()>, mpsc::Sender<()>) {
         let (entered, ready) = oneshot::channel();
         let (release, wait) = mpsc::channel();

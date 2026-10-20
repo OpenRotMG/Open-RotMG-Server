@@ -61,7 +61,7 @@ fn geometry_is_shared_but_discovery_snapshots_and_world_revisions_are_isolated()
     assert_eq!(serde_json::to_value(&updated.tiles).unwrap(), serialized);
     assert_ne!(latest.tiles.version(), updated.tiles.version());
     let w = &d.worlds[&-1];
-    let expected: Vec<_> = w.players[&a].tiles.iter().map(|&(x,y)| {
+    let expected: Vec<_> = w.players[&a].tiles.points().map(|(x,y)| {
         let ground = w.map.cells[y as usize*w.map.width as usize+x as usize].ground;
         serde_json::json!({"x":x,"y":y,"ground":ground,"ground_speed":w.content.grounds[&ground]})
     }).collect();

@@ -234,7 +234,7 @@ impl Directory {
                 let geometry = w.navigation_geometry.borrow_mut().get(&w.map, &w.content);
                 cache.tiles = Arc::new(crate::navigation::Tiles::new(
                     geometry.clone(),
-                    p.tiles.iter().copied(),
+                    p.tiles.points(),
                 ));
                 cache.geometry = Some(geometry);
                 cache.map = map;

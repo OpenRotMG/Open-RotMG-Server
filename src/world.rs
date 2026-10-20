@@ -102,7 +102,7 @@ pub(crate) mod view;
 pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
-    pub packets: mpsc::Sender<Packet>,
+    pub packets: wire::outbox::Sender,
     pub lost: watch::Sender<bool>,
 }
 
@@ -309,7 +309,7 @@ pub struct Player {
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
-    tiles: BTreeSet<(i16, i16)>,
+    tiles: crate::navigation::Scratch,
     tile_scan: Option<(i32, i32)>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
@@ -1393,8 +1393,14 @@ impl Handle {
     pub fn spawn(directory: Directory) -> Self {
         let (tx, mut rx) = mpsc::channel::<Job>(256);
         let clock = directory.clock.clone();
-        tokio::spawn(async move {
+        let tracing = tracing::dispatcher::get_default(Clone::clone);
+        // Simulation stays serial, but cannot occupy the executor that drains native sockets.
+        std::thread::Builder::new().name("world".into()).spawn(move || {
+            let _tracing = tracing::dispatcher::set_default(&tracing);
+            tokio::runtime::Builder::new_current_thread().enable_time().build()
+                .expect("world actor runtime").block_on(async move {
             let mut directory = directory;
+            let mut jobs = Vec::with_capacity(256);
             let mut timer = tokio::time::interval(std::time::Duration::from_millis(50));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
@@ -1421,10 +1427,24 @@ impl Handle {
                                 memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
                     },
-                    job=rx.recv()=>match job{Some(f)=>f(&mut directory),None=>break}
+                    count=rx.recv_many(&mut jobs,256)=>{ if count==0 {break;} }
+                }
+                // Even consecutive overdue ticks must release ready native and persistence continuations.
+                let until=Instant::now()+Duration::from_millis(5);
+                let mut processed=jobs.len();
+                loop {
+                    for job in jobs.drain(..) { job(&mut directory); }
+                    if processed>=4096 || Instant::now()>=until { break; }
+                    while jobs.len()<256 && processed+jobs.len()<4096 {
+                        let Ok(job)=rx.try_recv() else {break;};
+                        jobs.push(job);
+                    }
+                    if jobs.is_empty() {break;}
+                    processed+=jobs.len();
                 }
             }
-        });
+            });
+        }).expect("world actor thread");
         Self {
             #[cfg(test)]
             lifecycle_lost_reply: Default::default(),
@@ -1571,11 +1591,14 @@ impl Handle {
 }
 pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
     if let Some(tx) = &p.tx
-        && tx.packets.try_send(Packet { id, body }).is_err()
+        && let Err(error) = tx.packets.try_send(Packet { id, body })
     {
         tx.lost.send_replace(true);
         tracing::warn!(
             character = p.character.id,
+            packet = id,
+            remaining_bytes = tx.packets.available_bytes(),
+            error = %error,
             "slow/closed connection; packet queue full"
         );
     }
@@ -2196,7 +2219,7 @@ impl World {
                 visible_projectiles: BTreeMap::new(),
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
-                tiles: BTreeSet::new(),
+                tiles: crate::navigation::Scratch::new((self.map.width, self.map.height)),
                 tile_scan: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
@@ -2551,7 +2574,7 @@ impl World {
                 self.performance.borrow_mut().work("terrain_update", adding);
             }
             o.i16(added.len() as i16);
-            for entity in added {
+            for &entity in &added {
                 let kind = if self.players.contains_key(&entity) {
                     self.players[&entity].character.class
                 } else {
@@ -2561,15 +2584,17 @@ impl World {
                 o.0.extend(self.stats(entity, id)?);
             }
             o.i16(dropped.len() as i16);
-            for entity in dropped {
+            for &entity in &dropped {
                 o.i32(entity);
             }
             send(&self.players[&id], wire::UPDATE, o.0);
         }
         let p = self.players.get_mut(&id).unwrap();
-        p.known_since.retain(|entity, _| visible.contains(entity));
-        for entity in &visible {
-            p.known_since.entry(*entity).or_insert(self.now);
+        for entity in dropped {
+            p.known_since.remove(&entity);
+        }
+        for entity in added {
+            p.known_since.entry(entity).or_insert(self.now);
         }
         p.known = visible;
         let p = self.players.get_mut(&id).unwrap();
@@ -5457,6 +5482,8 @@ impl World {
                 .expect("NEW_TICK interval exceeds i32 milliseconds")
                 .max(100);
             self.new_tick_at = now;
+            // State is frozen during publication; self-only player fields still need a distinct encoding.
+            let mut encoded = BTreeMap::new();
             for id in ids {
                 if let Err(e) = self.updates(id, false) {
                     tracing::error!(player=id,error=%e,"visibility update failed");
@@ -5480,7 +5507,10 @@ impl World {
                 let mut o = Writer::new();
                 o.i32(p.tick).i32(tick_ms).i16(dynamic.len() as i16);
                 for entity in dynamic {
-                    o.0.extend(self.stats(entity, id).expect("visible entity must exist"));
+                    let bytes = encoded.entry((entity, entity == id)).or_insert_with(|| {
+                        self.stats(entity, id).expect("visible entity must exist")
+                    });
+                    o.0.extend_from_slice(bytes);
                 }
                 send(p, wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
@@ -5520,6 +5550,8 @@ mod cover_example;
 #[path = "../examples/testing/timing.rs"]
 mod timing_example;
 
+#[cfg(test)]
+mod publication_tests;
 #[cfg(test)]
 mod view_navigation_tests;
 
@@ -5608,6 +5640,48 @@ mod tests {
         .unwrap()
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn command_bursts_release_capacity_together_and_keep_fifo_order() {
+        let d = directory();
+        d.clock.set_paused(true);
+        let h = Handle::spawn(d);
+        let (entered, wait) = oneshot::channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        h.tx.send(Box::new(move |_| {
+            entered.send(()).unwrap();
+            gate.recv().unwrap();
+        }))
+        .await
+        .unwrap();
+        wait.await.unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (done, finished) = oneshot::channel();
+        let mut done = Some(done);
+        for index in 0..128 {
+            let (seen, sender) = (seen.clone(), h.tx.clone());
+            let complete = (index == 127).then(|| done.take().unwrap());
+            h.tx.send(Box::new(move |_| {
+                seen.lock().unwrap().push((index, sender.capacity()));
+                if let Some(complete) = complete {
+                    complete.send(()).unwrap();
+                }
+            }))
+            .await
+            .unwrap();
+        }
+        release.send(()).unwrap();
+        finished.await.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.iter().map(|(index, _)| *index).collect::<Vec<_>>(),
+            (0..128).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            seen[0].1, 256,
+            "a ready burst must leave the queue before its first command executes"
+        );
+    }
+
     #[test]
     fn one_owner_and_no_teleport() {
         let mut w = world();
@@ -5620,7 +5694,7 @@ mod tests {
     #[test]
     fn control_cannot_steal_browser_input() {
         let mut w = world();
-        let (packets, _rx) = mpsc::channel(64);
+        let (packets, _rx) = wire::outbox::channel(64);
         let (lost, _watch) = watch::channel(false);
         let id = w.enter(ch(&w), Some(Output { packets, lost })).unwrap();
         assert!(

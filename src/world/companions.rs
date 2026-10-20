@@ -576,7 +576,7 @@ mod tests {
             commit(&mut w, plan);
             assert_eq!(w.entities[&entity].pos.distance(origin), 0.);
             assert_eq!(w.players[&id].character.items[5], -1);
-            let (packets, mut rx) = tokio::sync::mpsc::channel(128);
+            let (packets, mut rx) = crate::wire::outbox::channel(128);
             let (lost, _) = tokio::sync::watch::channel(false);
             let p = w.players.get_mut(&id).unwrap();
             p.tx = Some(Output { packets, lost });
@@ -804,7 +804,7 @@ mod tests {
                 .is_err()
             );
             assert_eq!(w.players[&id].character.items[5], item);
-            let (packets, mut rx) = tokio::sync::mpsc::channel(32);
+            let (packets, mut rx) = crate::wire::outbox::channel(32);
             let (lost, _) = tokio::sync::watch::channel(false);
             let p = w.players.get_mut(&id).unwrap();
             p.tx = Some(Output { packets, lost });

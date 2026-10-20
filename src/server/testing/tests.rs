@@ -311,7 +311,7 @@ async fn committed_native_death_is_not_reconnect_and_halts_the_owned_cohort() {
     let account = app.store.list("qa-interface-unit".into()).await.unwrap();
     let mut ch = app.store.load(account.id, actor).await.unwrap();
     let living = ch.clone();
-    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let (tx, _rx) = crate::wire::outbox::channel(64);
     let lost = tokio::sync::watch::channel(false).0;
     let player = app
         .world
@@ -441,7 +441,7 @@ async fn dropped_native_renewal_keeps_deadline_and_traces_late_read() {
     let actor = created["result"]["actor"].as_i64().unwrap() as i32;
     let account = app.store.list("qa-interface-unit".into()).await.unwrap();
     let ch = app.store.load(account.id, actor).await.unwrap();
-    let (tx, _packets) = tokio::sync::mpsc::channel(64);
+    let (tx, _packets) = crate::wire::outbox::channel(64);
     let lost = tokio::sync::watch::channel(false).0;
     app.world
         .in_world(-1)

@@ -1,9 +1,9 @@
 use super::tests::{ch, world};
 use super::*;
 
-fn native() -> (World, i32, mpsc::Receiver<Packet>, watch::Receiver<bool>) {
+fn native() -> (World, i32, wire::outbox::Receiver, watch::Receiver<bool>) {
     let mut w = world();
-    let (packets, rx) = mpsc::channel(4096);
+    let (packets, rx) = wire::outbox::channel(4096);
     let (lost, loss) = watch::channel(false);
     let id = w.enter(ch(&w), Some(Output { packets, lost })).unwrap();
     (w, id, rx, loss)
@@ -253,7 +253,7 @@ fn native_shoot_ack_bug_context_labels_and_freezes_pause_excluding_age() {
     std::thread::sleep(std::time::Duration::from_millis(25));
     d.clock.set_paused(false);
     let w = d.worlds.get_mut(&-1).unwrap();
-    let (packets, _rx) = mpsc::channel(4096);
+    let (packets, _rx) = wire::outbox::channel(4096);
     let (lost, _loss) = watch::channel(false);
     let id = w.enter(ch(w), Some(Output { packets, lost })).unwrap();
     offer(w, id, None, 3, 20);

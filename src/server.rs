@@ -1,4 +1,10 @@
 mod input;
+mod native_world;
+mod output;
+#[cfg(test)]
+mod output_tests;
+#[cfg(test)]
+mod progress_tests;
 
 #[cfg(test)]
 mod password_tests;
@@ -874,8 +880,7 @@ impl std::fmt::Display for ReplyQueueError {
 }
 impl std::error::Error for ReplyQueueError {}
 
-fn enqueue_reply(tx: &mpsc::Sender<Packet>, packet: Packet) -> Result<()> {
-    // This handler's caller is also the only consumer, so waiting for capacity deadlocks.
+fn enqueue_reply(tx: &wire::outbox::Sender, packet: Packet) -> Result<()> {
     tx.try_send(packet).map_err(|error| {
         match error {
             mpsc::error::TrySendError::Full(_) => ReplyQueueError::Full,
@@ -889,7 +894,7 @@ async fn handle(
     a: &mut App,
     packet: Packet,
     session: &mut Session,
-    tx: &mpsc::Sender<Packet>,
+    tx: &wire::outbox::Sender,
     lost: &tokio::sync::watch::Sender<bool>,
     received: std::time::Instant,
 ) -> Result<()> {
@@ -945,11 +950,45 @@ async fn handle(
     Ok(())
 }
 
+async fn handle_world_batch(
+    a: &App,
+    owner: &Owner,
+    player: i32,
+    packets: Vec<(Packet, std::time::Instant)>,
+) -> Result<()> {
+    let testing = a.testing.is_some();
+    let entry = lifecycle::drain::entry(a)?;
+    owner.bind(player)?;
+    let account = owner.id;
+    lifecycle::account(
+        a,
+        vec![account],
+        "native_world_batch",
+        move |a| async move {
+            let result = entry
+                .scope(a.world.call(move |w| {
+                    for (packet, received) in packets {
+                        let kind = packet.id;
+                        native_world::apply(w, player, packet, received, testing)
+                            .with_context(|| format!("native world packet {kind} in batch"))?;
+                    }
+                    Ok(())
+                }))
+                .await;
+            if let Err(error) = &result {
+                lifecycle::observe(&a, account, "native_world_batch", error);
+            }
+            Ok(result)
+        },
+    )
+    .await?
+}
+
 async fn handle_inner(
     a: &mut App,
     packet: Packet,
     session: &mut Session,
-    tx: &mpsc::Sender<Packet>,
+    tx: &wire::outbox::Sender,
     lost: &tokio::sync::watch::Sender<bool>,
     received: std::time::Instant,
 ) -> Result<()> {
@@ -971,6 +1010,7 @@ async fn handle_inner(
     }
     // Resurrection is alive again, but its old scene must stay inert until the owned RECONNECT.
     if let Some(id) = *player
+        && !native_world::accepts(packet.id)
         && a.world
             .call(move |w| {
                 let p = w.players.get(&id).context("player missing")?;
@@ -1157,79 +1197,17 @@ async fn handle_inner(
                 testing.native_entered(account)?;
             }
         }
-        wire::UPDATE_ACK => {
-            r.done()?;
-            if a.testing.is_some()
-                && let Some(id) = player
-            {
-                let id = *id;
+        kind if native_world::accepts(kind) => {
+            if let Some(id) = *player {
+                let testing = a.testing.is_some();
                 a.world
-                    .for_player(id)
-                    .call(move |w| {
-                        w.players
-                            .get_mut(&id)
-                            .context("native UPDATE_ACK player missing")?
-                            .native_update_acked = true;
-                        Ok(())
-                    })
+                    .call(move |w| native_world::apply(w, id, packet, received, testing))
                     .await?;
+            } else if kind == wire::UPDATE_ACK {
+                r.done()?;
+            } else {
+                return Err(lifecycle::protocol("native game packet before character"));
             }
-        }
-        wire::MOVE => {
-            let tick = r.i32()?;
-            let time = r.i32()?;
-            let pos = Pos {
-                x: r.f32()?,
-                y: r.f32()?,
-            };
-            let count = r.i16()?;
-            ensure_protocol!((0..=128).contains(&count), "movement history too long");
-            for _ in 0..count {
-                r.i32()?;
-                r.f32()?;
-                r.f32()?;
-            }
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("MOVE before character"))?;
-            a.world
-                .call(move |w| {
-                    w.acknowledge_tick(id, tick)?;
-                    match w.native_move_received(id, pos, (time, received)) {
-                        Ok(_) => Ok(()),
-                        Err(e) if lifecycle::rule_rejection(&e) => {
-                            w.correct_position(id, time, &e.to_string())
-                        }
-                        Err(error) => Err(error),
-                    }
-                })
-                .await?;
-        }
-        wire::PLAYER_SHOOT => {
-            let time = r.i32()?;
-            let bullet = r.u8()?;
-            let kind = r.i16()? as u16;
-            let pos = Pos {
-                x: r.f32()?,
-                y: r.f32()?,
-            };
-            let angle = r.f32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("shoot before character"))?;
-            a.world
-                .call(move |w| {
-                    match w.native_shoot_received(id, (time, received), bullet, kind, pos, angle) {
-                        Ok(_) => Ok(()),
-                        Err(error)
-                            if error
-                                .downcast_ref::<crate::world::RejectedNativeShot>()
-                                .is_some() =>
-                        {
-                            w.correct_native_shot(id, time, bullet, kind, &format!("{error:#}"))
-                        }
-                        Err(error) => Err(error),
-                    }
-                })
-                .await?;
         }
         wire::CREATE_GUILD
         | wire::GUILD_INVITE
@@ -1489,39 +1467,12 @@ async fn handle_inner(
                 testing.acknowledge_native(nonce, *player);
             }
         }
-        64 => {
-            let time = r.i32()?;
-            let pos = Pos {
-                x: r.f32()?,
-                y: r.f32()?,
-            };
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("ground damage before character"))?;
-            a.world
-                .call(move |w| w.ground_damage(id, time, pos))
-                .await?;
-        }
-        22 => {
-            let time = r.i32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("SHOOT ACK before character"))?;
-            a.world.call(move |w| w.acknowledge_shoot(id, time)).await?;
-        }
         76 => {
             r.i32()?;
             r.u8()?;
             r.i32()?;
             r.u8()?;
             r.done()?;
-        }
-        24 => {
-            let bullet = r.u8()?;
-            let owner = r.i32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("hit report before character"))?;
-            a.world
-                .call(move |w| w.native_player_hit(id, owner, bullet))
-                .await?;
         }
         59 => {
             player.ok_or_else(|| lifecycle::protocol("area acknowledgement before character"))?;
@@ -1616,12 +1567,6 @@ async fn handle_inner(
             lifecycle::stage(Stage::Reservation);
             let plan = a.world.call(move |w| w.swap(id, from, to)).await?;
             persist(a, plan).await?;
-        }
-        14 => {
-            let time = r.i32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("GOTO ACK before character"))?;
-            a.world.call(move |w| w.acknowledge_goto(id, time)).await?;
         }
         48 => {
             r.done()?;
@@ -1816,13 +1761,13 @@ async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
 }
 
 async fn connection_io<S, I>(
-    mut wsout: S,
+    wsout: S,
     wsin: I,
     mut a: App,
     user_agent: Option<String>,
     browser: Option<Arc<Mutex<diagnostics::Browser>>>,
 ) where
-    S: futures_util::Sink<Message> + Unpin,
+    S: futures_util::Sink<Message> + Unpin + Send + 'static,
     I: futures_util::Stream<Item = std::result::Result<Message, axum::Error>>
         + Send
         + Unpin
@@ -1832,14 +1777,21 @@ async fn connection_io<S, I>(
     let Ok(_connection) = lifecycle::drain::entry(&a) else {
         return;
     };
-    let (tx, mut rx) = mpsc::channel::<Packet>(64);
+    let (tx, rx) = wire::outbox::channel(4096);
     let (lost, mut lost_rx) = tokio::sync::watch::channel(false);
+    let mut output = output::Writer::start(
+        wsout,
+        rx,
+        lost.clone(),
+        a.shutdown.subscribe(),
+        lifecycle::drain::stopping(&a),
+        a.testing.clone(),
+    );
     // Actor work and output backpressure must not manufacture late, clustered input receipts.
     let (mut incoming, input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
     let mut shutdown = a.shutdown.subscribe();
     let deadline = tokio::time::sleep(std::time::Duration::from_secs(10));
     tokio::pin!(deadline);
-    let mut codec = Codec::server();
     let mut session = Session {
         runtime: Some(tokio::runtime::Handle::current()),
         ..Session::default()
@@ -1852,20 +1804,12 @@ async fn connection_io<S, I>(
     let mut transfers = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut testing_stop = a.testing.as_ref().map(|t| t.stopped.subscribe());
     let mut terminal_drain = false;
+    let mut pending_input = None;
     let mut close_reason = CloseReason::Transport;
     macro_rules! send {
-        ($message:expr) => {
-            send_frame(
-                &mut wsout,
-                $message,
-                &mut lost_rx,
-                &mut shutdown,
-                session.account.as_ref().and_then(|o| o.cancel.clone()),
-                &mut drain,
-            )
-            .await
-            .map_err(|reason| {
-                close_reason = reason;
+        ($packet:expr) => {
+            enqueue_reply(&tx, $packet).map_err(|_| {
+                close_reason = CloseReason::Output;
             })
         };
     }
@@ -1890,6 +1834,7 @@ async fn connection_io<S, I>(
             close_reason = CloseReason::Controller;
             break;
         }
+        output.owner(session.account.as_ref().and_then(|o| o.cancel.clone()));
         tokio::select! {
             _=async { match testing_stop.as_mut() { Some(stop) => { if stop.borrow().is_none() { let _ = stop.changed().await; } }, None => std::future::pending::<()>().await } } => {
                 let player=session.player;
@@ -1904,19 +1849,36 @@ async fn connection_io<S, I>(
                     Err(error) => {tracing::error!(%error,"terminal native drain inspection failed");break;}
                 }
             },
-            event=incoming.recv()=>match event {
+            event=async { if pending_input.is_some() { pending_input.take() } else { incoming.recv().await } }=>match event {
                 Some(Incoming::Command(packet, received, _bytes))=>{
                     if incoming.is_closed() { break; }
                     if a.testing.as_ref().is_some_and(|t| t.stopped.borrow().is_some()) { if terminal_drain {continue;} break; }
                     if !session.reconnecting {
                         let id=packet.id;
-                        session.diagnostics.packets_in += 1;
+                        let mut packets = vec![(packet,received)];
+                        let mut receipt_bytes = Vec::new();
+                        if native_world::accepts(id) && session.player.is_some() {
+                            while packets.len() < 32 {
+                                match incoming.try_recv() {
+                                    Ok(Incoming::Command(next, received, bytes)) if native_world::accepts(next.id) => { packets.push((next,received)); receipt_bytes.push(bytes); },
+                                    Ok(next) => { pending_input = Some(next); break; },
+                                    Err(_) => break,
+                                }
+                            }
+                        }
+                        session.diagnostics.packets_in += packets.len() as u64;
                         session.diagnostics.processed(id);
                         let handling = std::time::Instant::now();
                         let queued=a.world.clock.now().saturating_duration_since(received);
                         let queue_before=incoming.len();
                         let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
-                        let result=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packet,&mut session,&tx,&lost,received)).await;
+                        let result=crate::performance::REQUEST.scope(requests.clone(),async {
+                            if native_world::accepts(id) && let Some(player) = session.player {
+                                handle_world_batch(&a,session.account.as_ref().expect("loaded native owner"),player,packets).await
+                            } else {
+                                handle(&mut a,packets.pop().expect("native input").0,&mut session,&tx,&lost,received).await
+                            }
+                        }).await;
                         session.diagnostics.handled(diagnostics::CommandSample {packet:id,queued,handling:handling.elapsed(),queue_before,queue_after:incoming.len(),failed:result.is_err(),requests:requests.lock().expect("request timings poisoned").clone()});
                         if let Err(e)=result {
                             let rejected = lifecycle::rule_rejection(&e);
@@ -1929,27 +1891,28 @@ async fn connection_io<S, I>(
                             if e.downcast_ref::<CloseReason>() == Some(&CloseReason::Protocol) {
                                 close_reason=CloseReason::Protocol;
                                 let f=fail(&e.to_string());
-                                let _=send!(Message::Binary(codec.frame(f.id,f.body).into()));
+                                let _=send!(f);
                                 break 'connection;
                             }
                             if rejected && matches!(id,1|21|37|57) && let Some(player) = session.player {
                                 let reason = e.to_string();
                                 let closed = a.world.for_player(player).call(move |w| Ok(w.cancel_trade(player, &reason))).await;
-                                match closed { Ok(true) => {}, Ok(false) => { let mut out = Writer::new(); out.i32(1).utf(&e.to_string()); if send!(Message::Binary(codec.frame(12,out.0).into())).is_err() {break 'connection;} }, Err(error) => { tracing::error!(%error,"trade rejection notification failed"); break 'connection; } }
+                                match closed { Ok(true) => {}, Ok(false) => { let mut out = Writer::new(); out.i32(1).utf(&e.to_string()); if send!(Packet {id:12,body:out.0}).is_err() {break 'connection;} }, Err(error) => { tracing::error!(%error,"trade rejection notification failed"); break 'connection; } }
                                 continue;
                             }
                             if rejected && matches!(id,30|35|65) {
                                 let mut o=Writer::new();o.i32(1);
-                                if send!(Message::Binary(codec.frame(4,o.0).into())).is_err(){break 'connection;}
+                                if send!(Packet {id:4,body:o.0}).is_err(){break 'connection;}
                                 continue;
                             }
                             let f=fail(&e.to_string());
-                            let _=send!(Message::Binary(codec.frame(f.id,f.body).into()));
+                            let _=send!(f);
                             break 'connection;
                         }
                     }
                 },
-                Some(Incoming::Ping(bytes))=>{if send!(Message::Pong(bytes)).is_err(){break}},
+                Some(Incoming::Ping(bytes))=>{if output.pong(bytes).is_err(){close_reason=CloseReason::Output;break}},
+
                 None=>break,
             },
             _=transfers.tick(),if session.player.is_some() && !session.reconnecting=>{
@@ -1965,16 +1928,14 @@ async fn connection_io<S, I>(
                         session.account.take();
                         let packet = transfer.packet();
                         // Retired-world frames must not follow RECONNECT into a replacement scene.
-                        while rx.try_recv().is_ok() {}
-                        if send!(Message::Binary(codec.frame(packet.id,packet.body).into())).is_err(){break;}
-                        reconnect_sent=true;
-                        deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));
+                        output.owner(None);
+                        if output.retire(packet).is_err(){close_reason=CloseReason::Output;break;}
                     }
                     Ok(None) => {}
                     Err(error) => {
                         tracing::error!(player,%error,"automatic durable transfer failed");
                         let f=fail(&error.to_string());
-                        let _=send!(Message::Binary(codec.frame(f.id,f.body).into()));
+                        let _=send!(f);
                         break;
                     }
                 }
@@ -1989,24 +1950,15 @@ async fn connection_io<S, I>(
             _=drain.changed()=>{close_reason=CloseReason::Shutdown;break;},
             _=lost_rx.changed()=>{close_reason=CloseReason::Output;tracing::warn!(player=session.player,"closing slow game connection before its state diverges");break;},
             _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{close_reason=CloseReason::Deadline;tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
-            outgoing=rx.recv()=>{
-                let Some(packet)=outgoing else {break};
-                let reconnect=packet.id==39;
-                session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(rx.len()+1);
-                let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
-                let frame = codec.frame(packet.id,packet.body);
-                if let (Some(testing),Some(player),Some(nonce)) = (&a.testing,session.player,nonce) { testing.note_native_frame(nonce,player,&frame); }
-                let sending = std::time::Instant::now();
-                if send!(Message::Binary(frame.into())).is_err(){break;}
-                session.diagnostics.packets_out += 1;
-                session.diagnostics.last_socket_send=Some(std::time::Instant::now());
-                session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
-                // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
-                if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
+            changed=output.reconnected.changed()=>{
+                if changed.is_err() { break; }
+                // The reconnect-close deadline starts after its bytes actually reach the socket.
+                reconnect_sent=true;
+                deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));
             },
             _=ping.tick()=>{if session.account.is_some() && !a.world.clock.paused(){serial+=1;let mut o=Writer::new();o.i32(serial);
                 session.diagnostics.sent(serial);
-                if send!(Message::Binary(codec.frame(wire::PING,o.0).into())).is_err(){break;}}}
+                if send!(Packet{id:wire::PING,body:o.0}).is_err(){break;}}}
         }
     }
     input_task.abort();
@@ -2015,13 +1967,20 @@ async fn connection_io<S, I>(
         .account
         .take()
         .map(|owner| owner.close(&a, close_reason));
+    output.stop().await;
+    let sent = output.stats();
+    session.diagnostics.packets_out += sent.packets;
+    session.diagnostics.queue_high_water =
+        session.diagnostics.queue_high_water.max(sent.high_water);
+    session.diagnostics.last_socket_send = sent.last_send;
+    session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sent.max_send_ms);
     if let Some(id) = session.player {
         let diagnostic = diagnostics::disconnect(
             &a,
             id,
             &session.diagnostics,
             serde_json::json!({"reason":close_reason.to_string(),
-            "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()}),
+            "input_queue_packets":incoming.len(),"output_queue_packets":sent.queued_at_stop,"last_frame_age_ms":input_task.last_frame_age_ms()}),
         );
         if std::panic::AssertUnwindSafe(diagnostic)
             .catch_unwind()
@@ -2449,15 +2408,14 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
                 .collect::<Vec<_>>())
         })
         .await?;
-    for (guard, id, snapshot) in progress {
+    // Reserving the whole cohort then awaiting each account serially creates a lock convoy.
+    futures_util::future::join_all(progress.into_iter().map(|(guard,id,snapshot)| async move {
         if let Err(error) = lifecycle::complete(guard, move |a| async move {
             persist_progress_inner(&a, id, snapshot).await
-        })
-        .await
-        {
+        }).await {
             tracing::error!(player=id,error=%format_args!("{error:#}"),"progress completion failed");
         }
-    }
+    })).await;
     let app = a.clone();
     let pending = a
         .world
@@ -2499,15 +2457,13 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
                 .collect::<Vec<_>>())
         })
         .await?;
-    for (guard, id, ch, killer) in pending {
+    futures_util::future::join_all(pending.into_iter().map(|(guard,id,ch,killer)| async move {
         if let Err(error) = lifecycle::complete(guard, move |a| async move {
             persist_death_inner(&a, id, ch, killer).await
-        })
-        .await
-        {
+        }).await {
             tracing::error!(player=id,error=%format_args!("{error:#}"),"death completion failed");
         }
-    }
+    })).await;
     Ok(())
 }
 fn client_assets(client: &std::path::Path) -> Router<App> {

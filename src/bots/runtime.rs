@@ -1,4 +1,5 @@
 use super::*;
+use crate::wire::outbox;
 use crate::{
     server::{
         self, App, Owner,
@@ -8,7 +9,7 @@ use crate::{
     world::Output,
 };
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 
 async fn enter(
     app: &App,
@@ -16,7 +17,7 @@ async fn enter(
     character: Character,
     world: i32,
     position: Option<Pos>,
-) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
+) -> Result<(i32, outbox::Receiver, outbox::Sender, Brain)> {
     let world = if world == -3 && position.is_none() {
         app.world.directory(|d| d.initial(-3)).await?
     } else {
@@ -35,7 +36,7 @@ async fn enter(
     tracing::info!(name = profile.name, saved = %serde_json::to_string(&character)?,
         "autonomous saved character loaded");
     // Concurrent novas and hit receipts must fit between bounded perception updates.
-    let (packets, output) = mpsc::channel(OUTPUT_CAPACITY);
+    let (packets, output) = outbox::channel(OUTPUT_CAPACITY);
     let sender = packets.clone();
     let (lost, _) = watch::channel(false);
     let presentation = app.store.presentation(character.account).await?;
@@ -79,7 +80,7 @@ async fn enter(
     Ok((id, output, sender, Brain::new(profile, &view)))
 }
 
-type Entry = (i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain);
+type Entry = (i32, outbox::Receiver, outbox::Sender, Brain);
 
 enum Reentry {
     Collective {
