@@ -266,6 +266,47 @@ fn manor_returns_on_timer_with_four_living_coffins_and_owned_bat_groups() {
     assert!(!w.cleared);
 }
 #[test]
+fn manor_live_party_join_and_reconnect_do_not_restart_or_duplicate_the_fight() {
+    let (mut w, boss) = arena();
+    let first = w.enter(tests::ch(&w), None).unwrap();
+    w.players.get_mut(&first).unwrap().pos = Pos { x: 40.5, y: 45.5 };
+    w.npc_step();
+    w.entities.get_mut(&boss).unwrap().hp = 14900;
+    w.now = 16750;
+    w.npc_step();
+    let formation: BTreeSet<_> = w
+        .actors()
+        .filter(|e| e.parent.is_some())
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(formation.len(), 49);
+    let mut second = tests::ch(&w);
+    second.id = 2;
+    second.account = 2;
+    let second = w.enter(second, None).unwrap();
+    w.players.get_mut(&second).unwrap().pos = Pos { x: 40.5, y: 45.5 };
+    let saved = w.leave(first).unwrap();
+    let rejoined = w.enter(saved, None).unwrap();
+    w.players.get_mut(&rejoined).unwrap().pos = Pos { x: 40.5, y: 45.5 };
+    w.now = 17000;
+    w.npc_step();
+    assert_eq!(w.entities[&boss].activated, Some(0));
+    assert_eq!(w.entities[&boss].stage, Some(2));
+    assert_eq!(w.entities[&boss].hp, 14900);
+    assert_eq!(
+        w.actors()
+            .filter(|e| e.parent.is_some())
+            .map(|e| e.id)
+            .collect::<BTreeSet<_>>(),
+        formation
+    );
+    w.now = 21750;
+    w.npc_step();
+    assert_eq!(w.entities[&boss].stage, Some(3));
+    assert!(!w.actors().any(|e| e.parent.is_some()));
+}
+
+#[test]
 fn manor_corridor_ritual_uses_the_lured_position_and_failed_tosses_do_not_softlock_bats() {
     let (mut w, boss) = arena();
     let map = Arc::make_mut(&mut w.map);
@@ -734,4 +775,10 @@ fn manor_clear_is_committed_once_and_does_not_disappear_in_counter_zip() {
     assert!(w.pending_progress_where(|_, _| true).is_empty());
     assert!(w.clear_exit.is_none());
     assert!(w.entities[&exit].published);
+    let mut late = tests::ch(&w);
+    late.id = 2;
+    late.account = 2;
+    let late = w.enter(late, None).unwrap();
+    assert_eq!(w.players[&late].character.manors, 0);
+    assert!(w.pending_progress_where(|_, _| true).is_empty());
 }
