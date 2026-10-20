@@ -5,6 +5,7 @@ pub use abilities::Ability;
 mod consumables;
 pub use consumables::{Companion, ConsumableEffect};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const WIZARD: u16 = 0x030e;
@@ -199,6 +200,7 @@ pub struct Hazard {
 }
 #[derive(Clone)]
 pub struct Content {
+    pub(crate) xml_sha256: [String; 2],
     pub objects: BTreeMap<u16, Object>,
     pub grounds: BTreeMap<u8, f32>,
     pub pushes: BTreeMap<u8, (f32, f32)>,
@@ -289,6 +291,7 @@ fn fame_bonus(n: Node<'_, '_>) -> Result<u32> {
 impl Content {
     pub fn load(dir: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(dir.join("objects.xml"))?;
+        let objects_sha256 = format!("{:x}", Sha256::digest(data.as_bytes()));
         let doc = roxmltree::Document::parse(&data)?;
         let mut objects = BTreeMap::new();
         for n in doc.root_element().children().filter(|n| n.is_element()) {
@@ -578,6 +581,7 @@ impl Content {
         }
         ensure!(classes.len() == 13, "unexpected player class count");
         let data = std::fs::read_to_string(dir.join("grounds.xml"))?;
+        let grounds_sha256 = format!("{:x}", Sha256::digest(data.as_bytes()));
         let doc = roxmltree::Document::parse(&data)?;
         let mut grounds = BTreeMap::new();
         let mut pushes = BTreeMap::new();
@@ -628,6 +632,7 @@ impl Content {
             "unexpected 123.5.1 content counts"
         );
         let out = Self {
+            xml_sha256: [objects_sha256, grounds_sha256],
             objects,
             grounds,
             pushes,
