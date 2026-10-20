@@ -795,7 +795,21 @@ fn manor_clear_is_committed_once_and_does_not_disappear_in_counter_zip() {
     let mut late = tests::ch(&w);
     late.id = 2;
     late.account = 2;
+    let initial_lifetime = late.lifetime.clone();
     let late = w.enter(late, None).unwrap();
     assert_eq!(w.players[&late].character.manors, 0);
+    let mut progress = w.pending_progress_where(|_, _| true);
+    assert_eq!(progress.len(), 1);
+    let (id, snapshot) = progress.pop().unwrap();
+    assert_eq!(id, late);
+    assert_eq!((snapshot.id, snapshot.account, snapshot.manors), (2, 2, 0));
+    assert!(snapshot.lifetime.realm_exits.is_empty());
+    assert!(snapshot.lifetime.tiles > initial_lifetime.tiles);
+    let mut expected_lifetime = initial_lifetime;
+    expected_lifetime.tiles = snapshot.lifetime.tiles;
+    assert_eq!(snapshot.lifetime, expected_lifetime);
+    assert_eq!(w.players[&player].character.manors, 1);
+    w.finish_progress(late, snapshot).unwrap();
     assert!(w.pending_progress_where(|_, _| true).is_empty());
+    assert_eq!(w.players[&player].character.manors, 1);
 }
