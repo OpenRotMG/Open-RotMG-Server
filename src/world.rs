@@ -5665,136 +5665,160 @@ mod tests {
     #[test]
     fn tomb_connections_reach_stat41_without_inventing_blank_defaults() {
         use super::entity_store::EntityState;
-        let binding: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../data/realms/world01/tomb-connections.json"
-        ))
-        .unwrap();
-        let mut map = Map {
-            width: 30,
-            height: 31,
-            cells: vec![
-                crate::content::Cell {
-                    ground: 247,
-                    object: None,
-                    config: String::new(),
-                    terrain: 0,
-                    region: 0
-                };
-                930
-            ],
-            spawns: vec![(15.5, 15.5)],
-        };
-        let mut expected = BTreeMap::new();
-        for row in binding["supports"].as_array().unwrap() {
-            let config = row["cell"]["config"].as_str().unwrap();
-            let value = config
-                .strip_prefix("conn:")
-                .unwrap()
-                .parse::<i32>()
-                .unwrap();
-            for source in row["positions_le_u32_values"].as_array().unwrap() {
-                let source = source.as_u64().unwrap() as usize;
-                let x = source % 2100 - 1526;
-                let y = source / 2100 - 1118;
-                assert!(x < 30 && y < 31);
-                assert!(map.cells[y * 30 + x].object.is_none());
-                map.cells[y * 30 + x].object = Some(477);
-                map.cells[y * 30 + x].config = config.into();
-                assert!(expected.insert((x, y), value).is_none());
-            }
-        }
-        assert_eq!(expected.len(), 19);
-        map.cells[31].object = Some(477);
-        for x in [2, 3] {
-            map.cells[30 + x].object = Some(256);
-            map.cells[30 + x].config = "size:150".into();
-        }
-        let mut w = World::new(world().content, Arc::new(map)).unwrap();
-        assert!(w.actor_ids.is_empty());
-        let mut expected_ids = BTreeMap::new();
-        for (&id, e) in w.entities.iter().filter(|(_, e)| e.kind == 477) {
-            assert!(matches!(&e.state, EntityState::Owned(_)));
-            let bytes = w.stats(id, 0).unwrap();
-            let mut reader = wire::Reader::new(&bytes);
-            assert_eq!(reader.i32().unwrap(), id);
-            assert_eq!(reader.f32().unwrap(), e.pos.x);
-            assert_eq!(reader.f32().unwrap(), e.pos.y);
-            let count = reader.i16().unwrap();
-            let mut stats = BTreeMap::new();
-            for _ in 0..count {
-                let key = reader.u8().unwrap();
-                assert!(stats.insert(key, reader.i32().unwrap()).is_none());
-            }
-            reader.done().unwrap();
-            assert!(!stats.contains_key(&61));
-            if e.pos.x == 1.5 && e.pos.y == 1.5 {
-                assert_eq!(count, 4);
-                assert_eq!(bytes.len(), 34);
-                assert!(!stats.contains_key(&41));
-            } else {
-                let value = expected[&(e.pos.x as usize, e.pos.y as usize)];
-                assert_eq!(count, 5);
-                assert_eq!(bytes.len(), 39);
-                assert_eq!(stats[&41], value);
-                expected_ids.insert(id, value);
-            }
-        }
-        assert_eq!(expected_ids.len(), 19);
-        let shared: Vec<_> = w.entities.values().filter(|e| e.kind == 256).collect();
-        let (EntityState::Shared(a), EntityState::Shared(b)) = (&shared[0].state, &shared[1].state)
-        else {
-            panic!("ordinary scenery sharing changed")
-        };
-        assert!(Arc::ptr_eq(a, b));
-        let (packets, mut rx) = mpsc::channel(4096);
-        let (lost, _loss) = watch::channel(false);
-        let player = w.enter(ch(&w), Some(Output { packets, lost })).unwrap();
-        let update = std::iter::from_fn(|| rx.try_recv().ok())
-            .find(|p| p.id == wire::UPDATE)
-            .unwrap();
-        let mut reader = wire::Reader::new(&update.body);
-        let tiles = reader.i16().unwrap();
-        assert!(tiles > 0);
-        for _ in 0..tiles {
-            let x = reader.i16().unwrap();
-            let y = reader.i16().unwrap();
-            assert!((0..30).contains(&x) && (0..31).contains(&y));
-            assert_eq!(reader.u8().unwrap(), 247);
-        }
-        let added = reader.i16().unwrap();
-        let mut seen = BTreeMap::new();
-        let mut self_seen = false;
-        for _ in 0..added {
-            let kind = reader.i16().unwrap();
-            let id = reader.i32().unwrap();
-            let x = reader.f32().unwrap();
-            let y = reader.f32().unwrap();
-            let count = reader.i16().unwrap();
-            let mut numeric = BTreeMap::new();
-            for _ in 0..count {
-                let key = reader.u8().unwrap();
-                if matches!(key, 31 | 62) {
-                    reader.utf().unwrap();
-                } else {
-                    assert!(numeric.insert(key, reader.i32().unwrap()).is_none());
+        for (raw, source_width, offset_x, offset_y, expected_count) in [
+            (
+                &include_bytes!("../data/realms/world01/tomb-connections.json")[..],
+                2100,
+                1526,
+                1118,
+                19,
+            ),
+            (
+                &include_bytes!("../data/realms/world04/tomb-connections.json")[..],
+                2000,
+                419,
+                926,
+                24,
+            ),
+        ] {
+            let binding: serde_json::Value = serde_json::from_slice(raw).unwrap();
+            let mut map = Map {
+                width: 30,
+                height: 31,
+                cells: vec![
+                    crate::content::Cell {
+                        ground: 247,
+                        object: None,
+                        config: String::new(),
+                        terrain: 0,
+                        region: 0
+                    };
+                    930
+                ],
+                spawns: vec![(15.5, 15.5)],
+            };
+            let mut expected = BTreeMap::new();
+            for row in binding["supports"].as_array().unwrap() {
+                let config = row["cell"]["config"].as_str().unwrap();
+                let value = config
+                    .strip_prefix("conn:")
+                    .unwrap()
+                    .parse::<i32>()
+                    .unwrap();
+                for source in row["positions_le_u32_values"].as_array().unwrap() {
+                    let source = source.as_u64().unwrap() as usize;
+                    let x = source % source_width - offset_x;
+                    let y = source / source_width - offset_y;
+                    assert!(x < 30 && y < 31);
+                    assert!(map.cells[y * 30 + x].object.is_none());
+                    assert_eq!(row["cell"]["object"], 477);
+                    map.cells[y * 30 + x] = crate::content::Cell {
+                        ground: u8::try_from(row["cell"]["ground"].as_u64().unwrap()).unwrap(),
+                        object: Some(477),
+                        config: config.into(),
+                        terrain: u8::try_from(row["cell"]["terrain"].as_u64().unwrap()).unwrap(),
+                        region: u8::try_from(row["cell"]["region"].as_u64().unwrap()).unwrap(),
+                    };
+                    assert!(expected.insert((x, y), value).is_none());
                 }
             }
-            if id == player {
-                self_seen = true;
+            assert_eq!(expected.len(), expected_count);
+            map.cells[31].object = Some(477);
+            for x in [2, 3] {
+                map.cells[30 + x].object = Some(256);
+                map.cells[30 + x].config = "size:150".into();
             }
-            if kind == 477 && expected_ids.contains_key(&id) {
-                assert_eq!(x, w.entities[&id].pos.x);
-                assert_eq!(y, w.entities[&id].pos.y);
-                assert_eq!(count, 5);
-                assert_eq!(numeric[&41], expected_ids[&id]);
-                assert!(!numeric.contains_key(&61));
-                assert!(seen.insert(id, numeric[&41]).is_none());
+            let mut w = World::new(world().content, Arc::new(map)).unwrap();
+            assert!(w.actor_ids.is_empty());
+            let mut expected_ids = BTreeMap::new();
+            for (&id, e) in w.entities.iter().filter(|(_, e)| e.kind == 477) {
+                assert!(matches!(&e.state, EntityState::Owned(_)));
+                let bytes = w.stats(id, 0).unwrap();
+                let mut reader = wire::Reader::new(&bytes);
+                assert_eq!(reader.i32().unwrap(), id);
+                assert_eq!(reader.f32().unwrap(), e.pos.x);
+                assert_eq!(reader.f32().unwrap(), e.pos.y);
+                let count = reader.i16().unwrap();
+                let mut stats = BTreeMap::new();
+                for _ in 0..count {
+                    let key = reader.u8().unwrap();
+                    assert!(stats.insert(key, reader.i32().unwrap()).is_none());
+                }
+                reader.done().unwrap();
+                assert!(!stats.contains_key(&61));
+                if e.pos.x == 1.5 && e.pos.y == 1.5 {
+                    assert_eq!(count, 4);
+                    assert_eq!(bytes.len(), 34);
+                    assert!(!stats.contains_key(&41));
+                } else {
+                    let value = expected[&(e.pos.x as usize, e.pos.y as usize)];
+                    assert_eq!(count, 5);
+                    assert_eq!(bytes.len(), 39);
+                    assert_eq!(stats[&41], value);
+                    expected_ids.insert(id, value);
+                }
             }
+            assert_eq!(expected_ids.len(), expected_count);
+            let shared: Vec<_> = w.entities.values().filter(|e| e.kind == 256).collect();
+            let (EntityState::Shared(a), EntityState::Shared(b)) =
+                (&shared[0].state, &shared[1].state)
+            else {
+                panic!("ordinary scenery sharing changed")
+            };
+            assert!(Arc::ptr_eq(a, b));
+            let (packets, mut rx) = mpsc::channel(4096);
+            let (lost, _loss) = watch::channel(false);
+            let player = w.enter(ch(&w), Some(Output { packets, lost })).unwrap();
+            let update = std::iter::from_fn(|| rx.try_recv().ok())
+                .find(|p| p.id == wire::UPDATE)
+                .unwrap();
+            let mut reader = wire::Reader::new(&update.body);
+            let tiles = reader.i16().unwrap();
+            assert!(tiles > 0);
+            for _ in 0..tiles {
+                let x = reader.i16().unwrap();
+                let y = reader.i16().unwrap();
+                assert!((0..30).contains(&x) && (0..31).contains(&y));
+                assert_eq!(
+                    reader.u8().unwrap(),
+                    w.map.cells[(y * 30 + x) as usize].ground
+                );
+            }
+            let added = reader.i16().unwrap();
+            let mut seen = BTreeMap::new();
+            let mut self_seen = false;
+            for _ in 0..added {
+                let kind = reader.i16().unwrap();
+                let id = reader.i32().unwrap();
+                let x = reader.f32().unwrap();
+                let y = reader.f32().unwrap();
+                let count = reader.i16().unwrap();
+                let mut numeric = BTreeMap::new();
+                for _ in 0..count {
+                    let key = reader.u8().unwrap();
+                    if matches!(key, 31 | 62) {
+                        reader.utf().unwrap();
+                    } else {
+                        assert!(numeric.insert(key, reader.i32().unwrap()).is_none());
+                    }
+                }
+                if id == player {
+                    self_seen = true;
+                }
+                if kind == 477 && expected_ids.contains_key(&id) {
+                    assert_eq!(x, w.entities[&id].pos.x);
+                    assert_eq!(y, w.entities[&id].pos.y);
+                    assert_eq!(count, 5);
+                    assert_eq!(numeric[&41], expected_ids[&id]);
+                    assert!(!numeric.contains_key(&61));
+                    assert!(seen.insert(id, numeric[&41]).is_none());
+                }
+            }
+            assert_eq!(reader.i16().unwrap(), 0);
+            reader.done().unwrap();
+            assert!(self_seen);
+            assert_eq!(seen, expected_ids);
         }
-        assert_eq!(reader.i16().unwrap(), 0);
-        reader.done().unwrap();
-        assert!(self_seen);
-        assert_eq!(seen, expected_ids);
     }
 
     #[test]

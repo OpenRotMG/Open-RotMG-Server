@@ -775,7 +775,8 @@ fn entry(
                 || kind == 0x1dd
                     && matches!(
                         c.config.as_str(),
-                        "conn:16843265"
+                        "conn:16843010"
+                            | "conn:16843265"
                             | "conn:16908545"
                             | "conn:16908802"
                             | "conn:33620225"
@@ -2040,7 +2041,7 @@ mod tests {
             "../../data/realms/world01/tomb-connections.json"
         ))
         .unwrap();
-        let allowed: BTreeSet<u32> = binding["supports"]
+        let source1: BTreeSet<u32> = binding["supports"]
             .as_array()
             .unwrap()
             .iter()
@@ -2054,8 +2055,31 @@ mod tests {
                     .unwrap()
             })
             .collect();
-        assert_eq!(allowed.len(), 8);
+        assert_eq!(source1.len(), 8);
+        let source4: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world04/tomb-connections.json"
+        ))
+        .unwrap();
+        let allowed: BTreeSet<u32> = source1
+            .iter()
+            .copied()
+            .chain(source4["supports"].as_array().unwrap().iter().map(|r| {
+                r["cell"]["config"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("conn:")
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            }))
+            .collect();
+        assert_eq!(allowed.len(), 9);
+        assert_eq!(
+            allowed.difference(&source1).copied().collect::<Vec<_>>(),
+            [16843010]
+        );
         assert!(allowed.is_subset(&connections));
+        assert_eq!(connections.difference(&allowed).count(), 7);
         let cell = |kind, config: String| Cell {
             ground: 247,
             object: Some(kind),
@@ -2064,7 +2088,7 @@ mod tests {
             region: 0,
         };
         let map = Map {
-            width: 8,
+            width: 9,
             height: 1,
             cells: allowed
                 .iter()
@@ -2091,6 +2115,10 @@ mod tests {
             "conn:50529027",
             "conn:302121474",
             "conn:-2113797630",
+            "conn:285278466",
+            "conn:-2130640638",
+            "conn:016843010",
+            "conn:+16843010",
             "conn:033686018",
             "conn:+33686018",
             "conn:0x02020202",
@@ -2126,6 +2154,97 @@ mod tests {
         let mut blank = map;
         blank.cells[0].config.clear();
         encode(&blank, &content).unwrap();
+    }
+
+    #[test]
+    fn realm_prepare_world04_connections_preserve_source_topology_and_fields() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let binding: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world04/tomb-connections.json"
+        ))
+        .unwrap();
+        let source = "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5";
+        assert_eq!(binding["source_sha256"], source);
+        assert_eq!(
+            binding["source_dimensions"],
+            serde_json::json!([2000, 2000])
+        );
+        assert_eq!(binding["original_stat41"], "UNKNOWN");
+        let mut cells = BTreeMap::new();
+        for row in binding["supports"].as_array().unwrap() {
+            assert_eq!(row["source_sha256"], source);
+            assert_eq!(row["rgb"], "ffd56e");
+            let cell = dictionary(
+                &serde_json::to_vec(&[row["cell"].clone()]).unwrap(),
+                &content,
+            )
+            .unwrap()
+            .pop()
+            .unwrap();
+            assert!([245, 247].contains(&cell.ground));
+            assert_eq!((cell.object, cell.terrain, cell.region), (Some(477), 5, 0));
+            let positions: Vec<u32> = row["positions_le_u32_values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| u32::try_from(i.as_u64().unwrap()).unwrap())
+                .collect();
+            assert_eq!(row["pixels"], positions.len() as u64);
+            assert!(positions.windows(2).all(|p| p[0] < p[1]));
+            assert_eq!(
+                sha256(
+                    &positions
+                        .iter()
+                        .flat_map(|i| i.to_le_bytes())
+                        .collect::<Vec<_>>()
+                ),
+                row["support_sha256_le_u32"].as_str().unwrap()
+            );
+            for i in positions {
+                assert!(
+                    i < 4_000_000
+                        && i % 2000 > 0
+                        && i % 2000 < 1999
+                        && i / 2000 > 0
+                        && i / 2000 < 1999
+                );
+                assert!(cells.insert(i, cell.clone()).is_none());
+            }
+        }
+        assert_eq!(cells.len(), 24);
+        assert_eq!(binding["changed_source_pixels"], 24);
+        let support = sha256(
+            &cells
+                .keys()
+                .flat_map(|i| i.to_le_bytes())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            support,
+            "7c6c9ecb892a99dc47f44404a7255045a423afd5d818cc77b598af3cf7c8d906"
+        );
+        assert_eq!(binding["support_sha256_le_u32"], support);
+        for (&i, cell) in &cells {
+            let value = u32::from_be_bytes(
+                [i - 2000, i + 1, i + 2000, i - 1]
+                    .map(|n| if cells.contains_key(&n) { 1 } else { 2 }),
+            );
+            assert_eq!(cell.config, format!("conn:{value}"));
+        }
+        assert_eq!(cells[&1_882_447].config, "conn:16843010");
+        let map = Map {
+            width: 24,
+            height: 1,
+            cells: cells.into_values().collect(),
+            spawns: vec![],
+        };
+        let (bytes, _) = encode(&map, &content).unwrap();
+        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        let decoded = Map::decode_cells(&bytes, &content).unwrap();
+        assert_eq!(
+            serde_json::to_value(&map.cells).unwrap(),
+            serde_json::to_value(&decoded.cells).unwrap()
+        );
     }
 
     #[test]
