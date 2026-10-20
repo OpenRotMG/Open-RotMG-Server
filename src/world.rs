@@ -47,6 +47,7 @@ mod lair;
 mod landmark_ai;
 
 mod lost_lands;
+mod manor;
 mod midlands;
 #[cfg(test)]
 mod movement_tests;
@@ -862,6 +863,11 @@ impl Directory {
                     None => rand::random(),
                 };
                 Arc::new(crate::dungeon::abyss::generate(&self.content, seed)?)
+            } else if template == "manor-of-the-immortals" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::manor::generate(&self.content, seed)?)
             } else if template == "ocean-trench" {
                 let seed = self
                     .prepared_seed
@@ -1645,7 +1651,8 @@ impl World {
                             orbit: None,
                             hp: o.hp,
                             size: o.size,
-                            condition: crate::dungeon::abyss::initial_condition(kind)
+                            condition: crate::dungeon::manor::initial_condition(kind)
+                                | crate::dungeon::abyss::initial_condition(kind)
                                 | crate::dungeon::spider::initial_condition(kind)
                                 | crate::dungeon::snake::initial_condition(kind)
                                 | crate::dungeon::jungle::initial_condition(kind)
@@ -1973,7 +1980,8 @@ impl World {
                     orbit: None,
                     hp: definition.hp,
                     size: definition.size,
-                    condition: crate::dungeon::abyss::initial_condition(kind)
+                    condition: crate::dungeon::manor::initial_condition(kind)
+                        | crate::dungeon::abyss::initial_condition(kind)
                         | crate::dungeon::spider::initial_condition(kind)
                         | crate::dungeon::snake::initial_condition(kind)
                         | crate::dungeon::jungle::initial_condition(kind)
@@ -3833,6 +3841,7 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.trenches))
                     .chain(std::iter::once(&mut snapshot.spider_dens))
                     .chain(std::iter::once(&mut snapshot.jungles))
+                    .chain(std::iter::once(&mut snapshot.manors))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3871,7 +3880,8 @@ impl World {
             || snapshot.jungles > p.character.jungles
             || snapshot.abysses > p.character.abysses
             || snapshot.trenches > p.character.trenches
-            || snapshot.spider_dens > p.character.spider_dens;
+            || snapshot.spider_dens > p.character.spider_dens
+            || snapshot.manors > p.character.manors;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
@@ -3890,6 +3900,7 @@ impl World {
         p.character.jungles = snapshot.jungles;
         p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
+        p.character.manors = snapshot.manors;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -4277,6 +4288,10 @@ impl World {
             0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | 0x1705
         ) {
             self.content.objects[&defeated.kind].hp / 100
+        } else if defeated.kind == crate::dungeon::manor::BOSS {
+            100
+        } else if defeated.kind == crate::dungeon::manor::COFFIN {
+            800
         } else if defeated.kind == 0x927 {
             100
         } else {
@@ -4593,7 +4608,9 @@ impl World {
                     && !p.paused
                     && pos.distance(p.pos) < radius
             });
-            if !burst && target.is_none() && !nearby {
+            let manor_clock =
+                crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
+            if !burst && target.is_none() && !nearby && !manor_clock {
                 self.suspend_npc(id, delta);
                 continue;
             }
@@ -4643,6 +4660,8 @@ impl World {
                     current.stage.expect("Jungle movement phase"),
                     current.parent.is_some(),
                 )
+            } else if crate::dungeon::manor::ROSTER.contains(&kind) {
+                self.manor_movement(id, elapsed)
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
@@ -5548,6 +5567,8 @@ mod cover_example;
 mod timing_example;
 
 #[cfg(test)]
+mod manor_tests;
+#[cfg(test)]
 mod view_navigation_tests;
 
 #[cfg(test)]
@@ -5624,6 +5645,7 @@ mod tests {
             abysses: 0,
             trenches: 0,
             spider_dens: 0,
+            manors: 0,
         }
     }
 

@@ -200,6 +200,9 @@ impl World {
         if crate::dungeon::jungle::ROSTER.contains(&self.entities[&id].kind) {
             return self.jungle_mechanics(id, elapsed);
         }
+        if crate::dungeon::manor::ROSTER.contains(&self.entities[&id].kind) {
+            return self.manor_mechanics(id, target, elapsed);
+        }
         if self.entities[&id].kind == crate::dungeon::snake::BOSS {
             return self.snake_mechanics(id, elapsed);
         }
@@ -517,10 +520,12 @@ impl World {
             .copied()
             .collect();
         for id in expired {
-            if matches!(self.entities[&id].kind, 0x91a | 0xd50)
-                && self.entities[&id]
-                    .expires
-                    .is_some_and(|deadline| deadline <= self.now)
+            if matches!(
+                self.entities[&id].kind,
+                0x91a | 0xd50 | crate::dungeon::manor::CREATURE
+            ) && self.entities[&id]
+                .expires
+                .is_some_and(|deadline| deadline <= self.now)
             {
                 if let Err(error) = self.finish_timed_defeat(id) {
                     tracing::error!(entity=id,%error,"timed enemy defeat failed");
@@ -535,6 +540,9 @@ impl World {
         if crate::dungeon::jungle::ROSTER.contains(&defeated.kind) {
             self.jungle_death(defeated);
             return Ok(());
+        }
+        if crate::dungeon::manor::ROSTER.contains(&defeated.kind) {
+            return self.manor_death(defeated);
         }
         if crate::dungeon::trench::ROSTER.contains(&defeated.kind) {
             return self.ocean_death(defeated);

@@ -170,6 +170,7 @@ pub struct Object {
     pub cooldown_ms: u64,
     pub enemy: bool,
     pub stasis_immune: bool,
+    pub leach_health: bool,
     pub terrain: u8,
     pub spawn_weight: Option<f32>,
     pub spawn_group: Option<SpawnGroup>,
@@ -454,6 +455,7 @@ impl Content {
                     .try_into()?,
                 enemy: child(n, "Enemy").is_some(),
                 stasis_immune: child(n, "StasisImmune").is_some(),
+                leach_health: child(n, "LeachHealth").is_some(),
                 terrain: match text(n, "Terrain").as_str() {
                     "" => 0,
                     "Mountains" => 1,
