@@ -9,14 +9,13 @@ are not file dependencies; source_commit is prior authorship, not the current bi
 Image/derivative redistribution rights remain unverified, not granted by public hosting,
 attribution, code licenses or omission of the PNG. World2 is not the MIT Perlin export.
 
-World3: frozen 84542-1 numeric Perlin export from Amit J Patel's legacy demo
-https://theory.stanford.edu/~amitp/_test/mapgen2-13.swf, linked in
-https://simblob.blogspot.com/2012/02/polygon-map-generation-faq.html.
-world03.json pins hashes/orientation/Ruffle identity; exact exporter revision is unverified.
-Map generation project, Copyright 2010 Amit J Patel; MIT notice in MAPGEN2-LICENSE.
-Habitats/scenery/mainland policy are reconstruction; detached islands/structures omitted;
-generic lava/ice become safe water and snow becomes Snowy Rock. Neither notice relicenses
-selected-client content. No client dump, exporter or sprites are bundled.
+World3: image-guided reconstruction, not authenticated.
+Source: https://www.redblobgames.com/x/1745-rotmg-maps-webgl/images/world3.png
+world03.json pins the source audit; above rebuild and unverified image-derived rights
+limits apply.
+
+Retained classic-v1 generator only: Amit J Patel, Copyright 2010; MIT notice:
+MAPGEN2-LICENSE.
 
 Offline rebuild without client/state/network: openrotmg build-realm --data data --id ID
 IDs: classic-world-02-reconstruction, classic-world-03-reconstruction. Add --check to compare.
