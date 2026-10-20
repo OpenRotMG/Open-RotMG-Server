@@ -65,7 +65,7 @@ fn manor_life_steal_requires_an_acknowledged_once_only_hit_and_living_owner() {
 
 fn arena() -> (World, i32) {
     let content = tests::world().content;
-    let map = Map {
+    let mut map = Map {
         width: 80,
         height: 80,
         cells: vec![
@@ -80,21 +80,24 @@ fn arena() -> (World, i32) {
         ],
         spawns: vec![(5.5, 5.5)],
     };
+    map.cells[40 * 80 + 40].object = Some(BOSS);
     let mut w = World::new(content, Arc::new(map)).unwrap();
     w.encounter = true;
     w.name = "Manor of the Immortals".into();
-    let boss = w
-        .spawn_entity(BOSS, Pos { x: 40.5, y: 40.5 }, vec![])
-        .unwrap();
+    let boss = w.actors().find(|e| e.kind == BOSS).unwrap().id;
     w.entities.get_mut(&boss).unwrap().activated = Some(0);
     (w, boss)
 }
 #[test]
-fn manor_kage_defeat_binds_an_earned_portal_and_instances_do_not_share_bosses() {
+fn manor_kage_drop_requests_bind_portals_and_instances_do_not_share_bosses() {
     let mut d = tests::directory();
     let realm = d.worlds.get_mut(&-3).unwrap();
     let p = realm.map.spawns[0];
     let pos = Pos { x: p.0, y: p.1 };
+    let seed = (0..256)
+        .find(|seed| rand::rngs::StdRng::seed_from_u64(*seed).gen_bool(0.5))
+        .unwrap();
+    realm.rng = rand::rngs::StdRng::seed_from_u64(seed);
     let kage = realm.spawn_entity(0x6db, pos, vec![]).unwrap();
     realm.defeat_entity(kage).unwrap();
     d.step();
@@ -103,7 +106,7 @@ fn manor_kage_defeat_binds_an_earned_portal_and_instances_do_not_share_bosses() 
         .iter()
         .find(|(id, p)| p.origin == -3 && d.worlds[&-3].entities[id].kind == 0x739)
         .map(|(_, p)| p.destination.unwrap())
-        .expect("Kage's earned Manor portal must be bound");
+        .expect("successful Kage portal drop must be bound");
     assert_eq!(d.worlds[&portal].name, "Manor of the Immortals");
     let second = d.instance("manor-of-the-immortals", None).unwrap();
     assert_ne!(second, portal);
@@ -143,7 +146,7 @@ fn manor_selected_content_and_every_attack_channel_are_valid() {
         crate::encounter::validate(&w.content, kind).unwrap();
         crate::loot::validate(&w.content, kind).unwrap();
     }
-    assert_eq!(crate::dungeon::portal_drop(0x6db), Some((0x739, 1.)));
+    assert_eq!(crate::dungeon::portal_drop(0x6db), Some((0x739, 0.5)));
     assert!(crate::loot::private(BOSS) && crate::loot::private(COFFIN));
     assert!(!crate::loot::collectibles(&w.content).is_empty());
 }
@@ -262,6 +265,155 @@ fn manor_returns_on_timer_with_four_living_coffins_and_owned_bat_groups() {
     assert!(!w.cleared);
 }
 #[test]
+fn manor_corridor_ritual_uses_the_lured_position_and_failed_tosses_do_not_softlock_bats() {
+    let (mut w, boss) = arena();
+    let map = Arc::make_mut(&mut w.map);
+    for c in &mut map.cells {
+        c.ground = 0xff;
+    }
+    for y in 1..79 {
+        for x in 39..42 {
+            map.cells[y * 80 + x].ground = 0x61;
+        }
+    }
+    w.move_entity(boss, Pos { x: 40.5, y: 60.5 }, 20.).unwrap();
+    w.manor_mechanics(boss, None, 0).unwrap();
+    assert_eq!(w.entities[&boss].home.y, 40.5);
+    w.now = 9100;
+    w.manor_mechanics(boss, None, 9100).unwrap();
+    assert!(!condition::protected(w.entities[&boss].condition));
+    w.now = 9850;
+    w.manor_mechanics(boss, None, 9850).unwrap();
+    assert_ne!(
+        w.entities[&boss].condition & condition::bit(condition::INVULNERABLE),
+        0
+    );
+    assert!(matches!(
+        w.manor_movement(boss, None, 9850).0,
+        crate::encounter::Motion::Stationary
+    ));
+    w.now = 11750;
+    w.manor_mechanics(boss, None, 11750).unwrap();
+    let mut ys: Vec<_> = w
+        .actors()
+        .filter(|e| e.kind == CREATURE)
+        .map(|e| e.pos.y)
+        .collect();
+    ys.sort_by(f32::total_cmp);
+    assert_eq!(ys, vec![48.5, 72.5]);
+    w.now = 16750;
+    w.manor_mechanics(boss, None, 16750).unwrap();
+    assert_ne!(
+        w.entities[&boss].condition & condition::bit(condition::INVINCIBLE),
+        0
+    );
+    assert_eq!(
+        w.entities[&boss].condition & condition::bit(condition::INVULNERABLE),
+        0
+    );
+    assert_eq!(
+        w.actors()
+            .filter(|e| matches!(e.kind, ESCORT | CHASER))
+            .count(),
+        45
+    );
+    assert!(w.actors().all(|e| w.walkable(e.pos)));
+    assert!(
+        w.actors()
+            .filter(|e| matches!(e.kind, SWARM | DECOY))
+            .all(|e| e.condition & condition::bit(condition::INVINCIBLE) != 0
+                && e.condition & condition::bit(condition::INVULNERABLE) == 0)
+    );
+    w.now = 21750;
+    w.manor_mechanics(boss, None, 21750).unwrap();
+    assert_eq!(w.entities[&boss].home.y, 40.5);
+    assert!(!condition::protected(w.entities[&boss].condition));
+}
+
+#[test]
+fn manor_skipped_room_broods_leave_capacity_for_ruthven() {
+    let (mut w, boss) = arena();
+    for y in 0..7 {
+        for x in 0..16 {
+            let id = w
+                .spawn_entity(
+                    0x1727,
+                    Pos {
+                        x: 5.5 + x as f32 * 4.,
+                        y: 5.5 + y as f32 * 4.,
+                    },
+                    vec![],
+                )
+                .unwrap();
+            w.manor_mechanics(id, None, 0).unwrap();
+        }
+    }
+    assert!(w.actors().filter(|e| e.parent.is_some()).count() > 256);
+    w.manor_mechanics(boss, None, 0).unwrap();
+    w.now = 11750;
+    w.manor_mechanics(boss, None, 11750).unwrap();
+    w.now = 16750;
+    w.manor_mechanics(boss, None, 16750).unwrap();
+    assert_eq!(
+        w.actors()
+            .filter(|e| e.kind == ESCORT || e.kind == CHASER)
+            .count(),
+        45
+    );
+    assert!(w.actors().filter(|e| e.parent.is_some()).count() <= SUMMON_LIMIT);
+    assert_eq!(tests::world().summon_limit(), 256);
+}
+
+#[test]
+fn manor_corner_coffin_death_releases_only_walkable_feratus() {
+    let (mut w, _) = arena();
+    let map = Arc::make_mut(&mut w.map);
+    for (x, y) in [(9, 9), (9, 10), (10, 9)] {
+        map.cells[y * 80 + x].ground = 0xff;
+    }
+    let coffin = w
+        .spawn_entity(CREATURE, Pos { x: 10.01, y: 10.01 }, vec![])
+        .unwrap();
+    w.defeat_entity(coffin).unwrap();
+    let children: Vec<_> = w.actors().filter(|e| e.kind == FERATU).collect();
+    assert!((1..=4).contains(&children.len()));
+    assert!(children.iter().all(|e| w.walkable(e.pos)));
+    assert_eq!(
+        attacks::schedule(CREATURE, 1000, 1500).unwrap().attacks[0].range,
+        4.
+    );
+    assert_eq!(
+        attacks::schedule(ESCORT, 200, 0).unwrap().attacks[0].interval,
+        Some(900)
+    );
+    assert_eq!(
+        attacks::schedule(0x1727, 125, 0).unwrap().attacks[0].interval,
+        Some(100)
+    );
+}
+
+#[test]
+fn manor_room_swarm_is_once_only_and_clear_exit_stays_in_the_arena_after_luring() {
+    let (mut w, boss) = arena();
+    let swarmer = w
+        .spawn_entity(0x1727, Pos { x: 10.5, y: 10.5 }, vec![])
+        .unwrap();
+    w.manor_mechanics(swarmer, None, 0).unwrap();
+    let n = w
+        .actors()
+        .filter(|e| e.parent == Some(swarmer) && e.kind == BAT)
+        .count();
+    assert!((15..=20).contains(&n));
+    w.manor_mechanics(swarmer, None, 50).unwrap();
+    assert_eq!(w.actors().filter(|e| e.parent == Some(swarmer)).count(), n);
+    w.move_entity(boss, Pos { x: 40.5, y: 60.5 }, 20.).unwrap();
+    w.defeat_entity(boss).unwrap();
+    let exit = &w.entities[&w.clear_exit.unwrap()];
+    assert_eq!((exit.pos.x, exit.pos.y), (42.5, 40.5));
+    assert!(!exit.published);
+}
+
+#[test]
 fn manor_treasure_coffin_waves_are_once_only_and_impostors_do_not_clear_the_dungeon() {
     let mut real = false;
     let mut fake = false;
@@ -281,13 +433,27 @@ fn manor_treasure_coffin_waves_are_once_only_and_impostors_do_not_clear_the_dung
                     .count(),
                 15
             );
+            let culled = if seed % 2 == 0 {
+                let bats: Vec<_> = w
+                    .actors()
+                    .filter(|e| e.parent == Some(id) && e.kind == BAT)
+                    .map(|e| e.id)
+                    .collect();
+                let n = bats.len();
+                for bat in bats {
+                    w.remove_entity(bat);
+                }
+                n
+            } else {
+                0
+            };
             w.entities.get_mut(&id).unwrap().hp = 7999;
             w.manor_mechanics(id, None, 50).unwrap();
             assert_eq!(
                 w.actors()
                     .filter(|e| e.parent == Some(id) && e.kind == BAT)
                     .count(),
-                23
+                23 - culled
             );
             assert_eq!(
                 w.actors()
@@ -318,7 +484,23 @@ fn manor_treasure_coffin_waves_are_once_only_and_impostors_do_not_clear_the_dung
 fn manor_blade_escalation_and_rock_burst_use_selected_indices_once() {
     assert_eq!(crate::dungeon::manor::blades(15000), 3);
     assert_eq!(crate::dungeon::manor::blades(13000), 5);
-    assert_eq!(crate::dungeon::manor::blades(1), 18);
+    assert_eq!(crate::dungeon::manor::blades(14999), 3);
+    assert_eq!(crate::dungeon::manor::blades(1), 17);
+    assert_eq!(crate::dungeon::manor::profile(BAT).speed, 8. / 1.5);
+    let mut clocks = attacks::Clocks::default();
+    assert_eq!(
+        clocks.due(&attacks::schedule(BOSS, 15000, 0).unwrap(), 0),
+        vec![0]
+    );
+    assert!(
+        clocks
+            .due(&attacks::schedule(BOSS, 13999, 50).unwrap(), 50)
+            .is_empty()
+    );
+    assert_eq!(
+        clocks.due(&attacks::schedule(BOSS, 13999, 700).unwrap(), 700),
+        vec![0]
+    );
     let before = attacks::schedule(ROCK, 400, 2950).unwrap();
     assert!(before.snapshot(0.).is_empty());
     let burst = attacks::schedule(ROCK, 400, 3000).unwrap();

@@ -4266,7 +4266,27 @@ impl World {
                 } else {
                     0x71d
                 };
-                let exit = self.spawn_exit(kind, defeated.pos)?;
+                let pos = if defeated.kind == crate::dungeon::manor::BOSS {
+                    let sites: Vec<_> = self
+                        .map
+                        .cells
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| c.object == Some(crate::dungeon::manor::BOSS))
+                        .map(|(i, _)| Pos {
+                            x: (i % self.map.width as usize) as f32 + 0.5,
+                            y: (i / self.map.width as usize) as f32 + 0.5,
+                        })
+                        .collect();
+                    ensure!(
+                        sites.len() == 1,
+                        "Manor completion requires one authored arena marker"
+                    );
+                    sites[0]
+                } else {
+                    defeated.pos
+                };
+                let exit = self.spawn_exit(kind, pos)?;
                 self.entities.get_mut(&exit).unwrap().published = false;
                 self.clear_exit = Some(exit);
             }
@@ -4581,6 +4601,10 @@ impl World {
                 .chain(self.decoy_positions())
                 .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
             let wake = match kind {
+                crate::dungeon::manor::BAT
+                | crate::dungeon::manor::CHASER
+                | crate::dungeon::manor::DECOY
+                | 0x1727 => 20.,
                 0x953 | 0x954 => 6.,
                 0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
@@ -4661,7 +4685,7 @@ impl World {
                     current.parent.is_some(),
                 )
             } else if crate::dungeon::manor::ROSTER.contains(&kind) {
-                self.manor_movement(id, elapsed)
+                self.manor_movement(id, target, elapsed)
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {

@@ -5,6 +5,10 @@ use crate::{
 use anyhow::{Result, ensure};
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 
+const MAX_ROOMS: usize = 30;
+// Skipped bat rooms retain their broods; leave headroom for Ruthven's overlapping cohorts.
+pub const SUMMON_LIMIT: usize = (MAX_ROOMS + 2) * 4 * 20;
+
 pub const BOSS: u16 = 0x1720;
 pub const BAT: u16 = 0x1721;
 pub const CREATURE: u16 = 0x1722;
@@ -35,24 +39,25 @@ pub fn phase(elapsed: u64) -> (u64, u64) {
     (elapsed / 21750 * 3 + part, t - start)
 }
 pub fn blades(hp: i32) -> usize {
-    (3 + ((15000 - hp).max(0) as usize).div_ceil(1000)).min(18)
+    (3 + (15000 - hp).max(0) as usize / 1000).min(18)
 }
 pub fn initial_condition(kind: u16) -> i32 {
-    use crate::condition::{ARMORED, INVULNERABLE, bit};
+    use crate::condition::{ARMORED, INVINCIBLE, bit};
     match kind {
         0x1729 => bit(ARMORED),
-        SWARM | DECOY => bit(INVULNERABLE),
+        // Size-zero anchors must not absorb native shots or show protection icons.
+        SWARM | DECOY => bit(INVINCIBLE),
         _ => 0,
     }
 }
 pub fn profile(kind: u16) -> Profile {
     use Motion::*;
     let (motion, speed, range) = match kind {
-        BOSS => (WanderHome { radius: 3. }, 2., 30.),
+        BOSS => (WanderHome { radius: 1. }, 1., 30.),
         BAT | CHASER | 0x1727 => (
             Chase {
                 sight: 20.,
-                stop: 0.,
+                stop: if kind == BAT { 2. } else { 0. },
             },
             8.,
             1.,
@@ -60,7 +65,7 @@ pub fn profile(kind: u16) -> Profile {
         ESCORT => (
             Protect {
                 anchor: Anchor::Parent,
-                distance: 2.,
+                distance: 4.,
             },
             8.,
             1.,
@@ -98,34 +103,24 @@ pub fn profile(kind: u16) -> Profile {
             2.,
             10.,
         ),
-        0x172b => (
+        0x172b | 0x172c => (
             Charge {
                 sight: 6.,
-                cooldown: 1500,
+                cooldown: 0,
                 delay: 0,
-                stop: 0.,
-                idle: 2.,
+                stop: 1.,
+                idle: 0.,
             },
             6.,
-            10.,
+            if kind == 0x172b { 10. } else { 9. },
         ),
-        0x172c => (
-            Charge {
-                sight: 6.,
-                cooldown: 1500,
-                delay: 0,
-                stop: 0.,
-                idle: 2.,
-            },
-            6.,
-            9.,
-        ),
-        FERATU => (WanderHome { radius: 3. }, 1., 8.),
+        FERATU => (WanderHome { radius: 1. }, 1., 8.),
         _ => unreachable!("unregistered Manor actor {kind:#x}"),
     };
     Profile {
         motion,
-        speed,
+        // Phoenix integrates legacy speed/1.5; these are not NR-Core movement rates.
+        speed: speed / 1.5,
         range,
         interval: 100,
     }
@@ -159,7 +154,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         radius: 6,
         secret: false,
     }];
-    for _ in 1..rng.gen_range(24..=30) {
+    for _ in 1..rng.gen_range(24..=MAX_ROOMS) {
         let mut frontier = vec![];
         for (i, r) in rooms.iter().enumerate() {
             for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
@@ -195,6 +190,13 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         rooms[i].secret = true;
         rooms[i].radius = 5;
     }
+    tracing::info!(
+        seed,
+        rooms = rooms.len(),
+        boss_depth = rooms[boss].depth,
+        secret_rooms = rooms.iter().filter(|r| r.secret).count(),
+        "Manor layout generated"
+    );
     let mut map = Map {
         width: 224,
         height: 224,

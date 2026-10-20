@@ -131,6 +131,14 @@ impl World {
         }
     }
 
+    pub(super) fn summon_limit(&self) -> usize {
+        if self.name == "Manor of the Immortals" {
+            crate::dungeon::manor::SUMMON_LIMIT
+        } else {
+            256
+        }
+    }
+
     pub(super) fn spawn_children(
         &mut self,
         parent: i32,
@@ -148,14 +156,15 @@ impl World {
         if missing == 0 {
             return Ok(());
         }
+        let occupied = self
+            .actors()
+            .filter(|e| e.parent.is_some() || e.quest.is_some())
+            .count()
+            + self.named_births.len();
+        let limit = self.summon_limit();
         ensure!(
-            self.actors()
-                .filter(|e| e.parent.is_some() || e.quest.is_some())
-                .count()
-                + self.named_births.len()
-                + missing
-                <= 256,
-            "summon budget exhausted"
+            occupied + missing <= limit,
+            "summon budget exhausted: {occupied}+{missing} exceeds {limit}"
         );
         let home = self.entities[&parent].pos;
         let positions: Vec<_> = (0..32)

@@ -14,7 +14,7 @@ impl World {
         lifetime: Option<u64>,
     ) -> Result<i32> {
         ensure!(
-            self.actors().filter(|e| e.parent.is_some()).count() < 256,
+            self.actors().filter(|e| e.parent.is_some()).count() < self.summon_limit(),
             "Manor summon budget exhausted"
         );
         ensure!(
@@ -53,7 +53,7 @@ impl World {
         elapsed: u64,
     ) -> Result<()> {
         let e = &self.entities[&id];
-        let (kind, pos, home, hp) = (e.kind, e.pos, e.home, e.hp);
+        let (kind, pos, hp) = (e.kind, e.pos, e.hp);
         if kind == BOSS {
             let (stage, age) = manor::phase(elapsed);
             let part = stage % 3;
@@ -63,40 +63,49 @@ impl World {
                 }
                 if part == 2 {
                     ensure!(
-                        self.actors().filter(|e| e.parent.is_some()).count() + 49 <= 256,
+                        self.actors().filter(|e| e.parent.is_some()).count() + 49
+                            <= self.summon_limit(),
                         "Ruthven bat formation exceeds summon budget"
                     );
-                    let mut groups = vec![(SWARM, ESCORT, 15, pos)];
-                    for i in 0..3 {
-                        let a = i as f32 * std::f32::consts::TAU / 3.;
-                        groups.push((
-                            DECOY,
-                            CHASER,
-                            10,
-                            Pos {
-                                x: home.x + 3. * a.cos(),
-                                y: home.y + 3. * a.sin(),
-                            },
-                        ));
+                    let mut sites = vec![];
+                    let mut cells = BTreeSet::new();
+                    for i in 0..33 {
+                        let a = i as f32 * std::f32::consts::TAU / 32.;
+                        let r = if i == 0 { 0. } else { 2. };
+                        let tile = (
+                            (pos.x + r * a.cos()).floor() as i32,
+                            (pos.y + r * a.sin()).floor() as i32,
+                        );
+                        let site = Pos {
+                            x: tile.0 as f32 + 0.5,
+                            y: tile.1 as f32 + 0.5,
+                        };
+                        if cells.insert(tile) && self.walkable(site) {
+                            sites.push(site);
+                        }
                     }
                     ensure!(
-                        groups.iter().all(|(_, _, _, p)| (0..32).all(|i| {
-                            let a = i as f32 * std::f32::consts::TAU / 32.;
-                            self.walkable(Pos {
-                                x: p.x + 1.5 * a.cos(),
-                                y: p.y + 1.5 * a.sin(),
-                            })
-                        })),
-                        "Ruthven bat formation lacks clear arena"
+                        sites.len() >= 4,
+                        "Ruthven bat formation requires four walkable nearby cells"
                     );
-                    for (root, bat, count, site) in groups {
+                    for i in 0..4 {
+                        let (root, bat, count, site) = if i == 0 {
+                            (SWARM, ESCORT, 15, sites[0])
+                        } else {
+                            (
+                                DECOY,
+                                CHASER,
+                                10,
+                                sites[1 + (i - 1) * (sites.len() - 1) / 3],
+                            )
+                        };
                         let group = self.manor_child(id, root, site, None)?;
-                        self.spawn_children(group, bat, count, 1.5)?;
-                        self.entities.get_mut(&group).unwrap().stage = Some(0);
+                        self.spawn_children(group, bat, count, 0.4)?;
                     }
                 }
                 let e = self.entities.get_mut(&id).unwrap();
                 e.stage = Some(stage);
+                e.goal = None;
                 e.next_aux = 0;
                 tracing::info!(
                     entity = id,
@@ -109,8 +118,10 @@ impl World {
             let e = self.entities.get_mut(&id).unwrap();
             e.condition &=
                 !(condition::bit(condition::INVULNERABLE) | condition::bit(condition::INVINCIBLE));
-            if part != 0 {
+            if part == 1 && age >= 750 {
                 e.condition |= condition::bit(condition::INVULNERABLE);
+            } else if part == 2 {
+                e.condition |= condition::bit(condition::INVINCIBLE);
             }
             e.extra_stats = vec![(
                 61,
@@ -123,36 +134,37 @@ impl World {
                 },
             )];
             if part == 1 && age >= 2650 && e.next_aux == 0 {
+                let sites = [(12., 0.), (-12., 0.), (0., 12.), (0., -12.)].map(|(dx, dy)| Pos {
+                    x: pos.x + dx,
+                    y: pos.y + dy,
+                });
+                let landed = sites.iter().filter(|p| self.walkable(**p)).count();
                 ensure!(
-                    self.actors().filter(|e| e.parent.is_some()).count() + 4 <= 256,
+                    self.actors().filter(|e| e.parent.is_some()).count() + landed
+                        <= self.summon_limit(),
                     "Ruthven coffin formation exceeds summon budget"
                 );
-                ensure!(
-                    [(12., 0.), (-12., 0.), (0., 12.), (0., -12.)]
-                        .iter()
-                        .all(|(dx, dy)| self.walkable(Pos {
-                            x: home.x + dx,
-                            y: home.y + dy
-                        })),
-                    "Ruthven coffin formation lacks clear arena"
-                );
-                for (dx, dy) in [(12., 0.), (-12., 0.), (0., 12.), (0., -12.)] {
-                    let site = Pos {
-                        x: home.x + dx,
-                        y: home.y + dy,
-                    };
+                // The period corridor tactic relies on wall-bound throws failing, not being relocated.
+                // https://www.reddit.com/r/RotMG/comments/u6lp3/damn_those_lil_feratu/
+                for site in sites {
                     self.telegraph_throw(id, site, 0xff8f3030);
-                    self.manor_child(id, CREATURE, site, Some(20000))?;
+                    if self.walkable(site) {
+                        self.manor_child(id, CREATURE, site, Some(20000))?;
+                    }
                 }
                 self.entities.get_mut(&id).unwrap().next_aux = 1;
+                tracing::info!(
+                    entity = id,
+                    attempted = 4,
+                    landed,
+                    x = pos.x,
+                    y = pos.y,
+                    "Ruthven coffin tosses resolved"
+                );
             }
-        } else if matches!(kind, SWARM | DECOY) && e.stage.is_none() {
-            let (bat, n) = if kind == SWARM {
-                (ESCORT, 15)
-            } else {
-                (CHASER, 10)
-            };
-            self.spawn_children(id, bat, n, 1.5)?;
+        } else if kind == 0x1727 && e.stage.is_none() {
+            let count = self.rng.gen_range(15..=20);
+            self.spawn_children(id, BAT, count, 0.4)?;
             self.entities.get_mut(&id).unwrap().stage = Some(0);
         } else if kind == COFFIN {
             if hp < self.content.objects[&COFFIN].hp && e.next_aux == 0 {
@@ -185,7 +197,11 @@ impl World {
                 self.spawn_children(id, BAT, 15, 1.5)?;
             }
             if old < 2 && stage == 2 {
-                self.spawn_children(id, BAT, 23, 2.)?;
+                let alive = self
+                    .actors()
+                    .filter(|e| e.parent == Some(id) && e.kind == BAT)
+                    .count();
+                self.spawn_children(id, BAT, alive + 8, 2.)?;
                 self.spawn_children(id, 0x1728, 2, 3.)?;
             }
             self.entities.get_mut(&id).unwrap().stage = Some(stage);
@@ -213,28 +229,51 @@ impl World {
         }
         Ok(())
     }
-    pub(super) fn manor_movement(&self, id: i32, elapsed: u64) -> (Motion, f32) {
+    pub(super) fn manor_movement(
+        &mut self,
+        id: i32,
+        target: Option<Pos>,
+        elapsed: u64,
+    ) -> (Motion, f32) {
         let e = &self.entities[&id];
         if e.kind == BOSS {
             match manor::phase(elapsed).0 % 3 {
-                0 => (Motion::WanderHome { radius: 3. }, 2.),
-                1 => (
-                    Motion::Protect {
-                        anchor: crate::encounter::Anchor::Home,
-                        distance: 0.1,
-                    },
-                    8.,
+                0 => (
+                    Motion::WanderHome { radius: 1. },
+                    manor::profile(BOSS).speed,
                 ),
+                1 => (Motion::Stationary, 0.),
                 2 => (
                     Motion::Chase {
-                        sight: 8.,
+                        sight: 20.,
                         stop: 2.,
                     },
-                    6.,
+                    manor::profile(BAT).speed,
                 ),
                 _ => unreachable!(),
             }
         } else {
+            let idle = match e.kind {
+                BAT => target.is_none_or(|p| e.pos.distance(p) <= 2.),
+                CHASER => target.is_none(),
+                ESCORT => {
+                    e.pos.distance(
+                        self.entities[&e.parent.expect("Manor escort requires its swarm")].pos,
+                    ) <= 4.
+                }
+                _ => false,
+            };
+            if idle {
+                let e = self.entities.get_mut(&id).unwrap();
+                if e.stage.is_none() {
+                    e.home = e.pos;
+                    e.stage = Some(0);
+                }
+                return (Motion::WanderHome { radius: 2. }, 1. / 1.5);
+            }
+            if matches!(e.kind, 0x1727..=0x1729) && target.is_none() {
+                return (Motion::Stationary, 0.);
+            }
             let p = manor::profile(e.kind);
             (p.motion, p.speed)
         }
@@ -252,12 +291,26 @@ impl World {
             }
         } else if e.kind == CREATURE {
             let count = self.rng.gen_range(1..=4);
+            let sites: Vec<_> = (0..32)
+                .map(|i| {
+                    let a = i as f32 * std::f32::consts::TAU / 32.;
+                    Pos {
+                        x: e.pos.x + 0.2 * a.cos(),
+                        y: e.pos.y + 0.2 * a.sin(),
+                    }
+                })
+                .filter(|p| self.walkable(*p))
+                .collect();
+            ensure!(
+                sites.len() >= count,
+                "Coffin Creature brood has insufficient walkable positions"
+            );
+            ensure!(
+                self.actors().filter(|e| e.parent.is_some()).count() + count <= self.summon_limit(),
+                "Coffin Creature brood exceeds summon budget"
+            );
             for i in 0..count {
-                let a = i as f32 * std::f32::consts::TAU / count as f32;
-                let pos = Pos {
-                    x: e.pos.x + 0.2 * a.cos(),
-                    y: e.pos.y + 0.2 * a.sin(),
-                };
+                let pos = sites[i * sites.len() / count];
                 if let Some(parent) = *e.parent {
                     self.manor_child(parent, FERATU, pos, Some(30000))?;
                 } else {

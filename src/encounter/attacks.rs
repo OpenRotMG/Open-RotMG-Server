@@ -169,7 +169,7 @@ fn manor_schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
         BOSS => {
             let (phase, t) = crate::dungeon::manor::phase(elapsed);
             age = t;
-            state = phase * 32 + blades(hp) as u64;
+            state = phase;
             match phase % 3 {
                 0 => vec![fan(0, blades(hp), 10., 700, 30.)],
                 1 => [(750, 20), (1450, 6), (2250, 15), (2650, 25)]
@@ -180,8 +180,9 @@ fn manor_schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
                 _ => unreachable!(),
             }
         }
-        BAT | ESCORT | CHASER | 0x1727 => vec![fan(0, 1, 0., 100, 1.)],
-        CREATURE => vec![fan(0, 1, 0., 200, 10.).delay(1500)],
+        BAT | ESCORT | CHASER => vec![fan(0, 1, 0., 900, 1.)],
+        0x1727 => vec![fan(0, 1, 0., 100, 1.)],
+        CREATURE => vec![fan(0, 1, 0., 200, 4.).delay(1500)],
         FERATU => vec![fan(0, 5, 9., 1200, 8.)],
         0x1728 => vec![fan(0, 3, 20., 1500, 8.), fan(1, 5, 5., 1700, 9.)],
         0x1729 => vec![fan(0, 2, 180., 1500, 10.), fan(1, 1, 0., 750, 8.)],
