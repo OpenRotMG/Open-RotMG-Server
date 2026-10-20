@@ -52,6 +52,7 @@ export async function runCase(scenario, options) {
   assert(options.browserTools && isAbsolute(options.browserTools),'Set PI_BROWSER_TOOLS to the installed managed-browser directory');
   assert(options.chrome && isAbsolute(options.chrome),'Set PI_NATIVE_TEST_CHROME to the Chrome executable');
   assert(Array.isArray(options.chromeArgs) && options.chromeArgs.every(x=>typeof x==='string'),'Chrome arguments must be an explicit JSON array');
+  if(options.client!==undefined)assert(isAbsolute(options.client),'--client must be an absolute checkout path');
   const timeout=options.timeoutMs;assert(Number.isInteger(timeout)&&timeout>=180000&&timeout<=3600000,'Timeout must be 180000–3600000ms, including 120 seconds for cleanup');
   assert(!activeCase,'Only one native case may own this process');
   const out=options.runDir;assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
@@ -105,7 +106,7 @@ export async function runCase(scenario, options) {
     await bounded('prepareBuildStart',async()=>{
       const began=performance.now();let buildStart,buildEnd,ready;
       const args=[String(port),'--test-state',join(out,'state'),'--no-shore-bots','--release'];if(options.client)args.push('--client',options.client);
-      const server=launch('server',join(root,'run.sh'),args,['ignore','pipe','pipe']);
+      const server=launch('server',join(root,'run.sh'),args,['ignore','pipe','pipe'],{...process.env,CARGO_TERM_COLOR:'never'});
       for(const [stream,name] of [[server.child.stdout,'server.log'],[server.child.stderr,'build.log']]){
         const fd=await log(name);let pending='';
         stream.on('data',bytes=>{
@@ -218,7 +219,9 @@ export async function runCase(scenario, options) {
   return {...report,wallMs:elapsed(),report:join(out,'result.json')};
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
-  try {
+  if(process.argv.length===3&&process.argv[2]==='--help'){
+    console.log('Usage: node scripts/native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY\nLinux: Node22.15+, Xvfb, xauth, Openbox and managed browser helpers.\nSet PI_BROWSER_TOOLS and PI_NATIVE_TEST_CHROME, or --browser-tools and --chrome.\nOptional --chrome-args JSON, --client ABSOLUTE_CHECKOUT, --timeout-ms (default900000; includes120000 cleanup reserve).\nFresh prepared fixtures only. Existing directories are refused; state/logs are preserved.');
+  }else try {
     const {values,positionals}=parseArgs({allowPositionals:true,options:{'run-dir':{type:'string'},'browser-tools':{type:'string'},chrome:{type:'string'},'chrome-args':{type:'string'},client:{type:'string'},'timeout-ms':{type:'string',default:'900000'}}});
     assert.equal(positionals.length,1,'Usage: native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY');
     const result=await runCase(positionals[0],{runDir:values['run-dir'],browserTools:values['browser-tools']??process.env.PI_BROWSER_TOOLS,chrome:values.chrome??process.env.PI_NATIVE_TEST_CHROME,chromeArgs:JSON.parse(values['chrome-args']??process.env.PI_NATIVE_TEST_CHROME_ARGS??'[]'),client:values.client,timeoutMs:Number(values['timeout-ms'])});
