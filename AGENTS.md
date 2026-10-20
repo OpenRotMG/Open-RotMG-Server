@@ -21,7 +21,7 @@ Before researching or implementing gameplay, read `docs/reference-sources.md`. S
 
 For gameplay or visual changes, capture screenshots before editing and after verification through normal client gameplay. PRs do not require video. Nonvisual changes need test evidence.
 
-Develop in a separate worktree with distinct port, state directory and browser profile; see the development instructions for launcher options. Copy the four testing recipes into scratch experiments before long gameplay runs. Verify observed outcomes, not merely dispatched input. Keep experimental helpers out of feature commits; expanding shared testing infrastructure requires explicit approval.
+Develop in a separate worktree with distinct port, state directory and browser profile; see the development instructions for launcher options. For prepared native tests, use the shared scenario runner and testing guide in `examples/testing/README.md`, not copied browser/setup scripts. Keep feature cases small and assert observed outcomes, not merely dispatched input. Keep the regression suite lean; expanding shared testing infrastructure requires explicit approval.
 
 Native browser QA must use a private virtual display/compositor; see `examples/testing/README.md`. CDP input and page-local focus must not activate host windows or switch the user's desktops. Never use host `Page.bringToFront`, target activation or desktop input as a rendering repair.
 
