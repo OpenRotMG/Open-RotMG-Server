@@ -3,6 +3,7 @@ import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {nativeClock} from './native-clock.mjs';
+import {AsyncLocalStorage} from 'node:async_hooks';
 
 const help=`Usage: node scripts/game.mjs CONFIG.json REQUEST.json
 Start a new isolated prepared server with ./run.sh PORT --test-state NEW_DIRECTORY --no-shore-bots.
@@ -45,22 +46,34 @@ if(mutating) {
 }
 const save=async result=>{if(ownsIntent){await writeFile(`${path}.tmp`,JSON.stringify({command,status:'complete',result}),{flag:'wx',mode:0o600,flush:true});await rename(`${path}.tmp`,path);await syncDirectory();}};
 const api = async (value, requestId=`${id}-ctl${++sequence}`) => {
-  const response = await fetch(new URL('/dev/testing', origin), {
-    method: 'POST', headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
-    body: JSON.stringify({id:requestId, command:value}),
-    signal: AbortSignal.timeout(value.op==='run'?660000:value.op==='native_sync'?45000:value.op==='native_lease'&&value.operation==='renew'?500:10000),
-  });
-  const result = await response.json();
-  if (!response.ok || result.status === 'failed') throw new Error(JSON.stringify(result));
-  return result;
+  const started=performance.now();
+  try {
+    const response = await fetch(new URL('/dev/testing', origin), {
+      method: 'POST', headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
+      body: JSON.stringify({id:requestId, command:value}),
+      signal: AbortSignal.timeout(value.op==='run'?660000:value.op==='native_sync'?45000:value.op==='native_lease'&&value.operation==='renew'?500:10000),
+    });
+    const result = await response.json();
+    if (!response.ok || result.status === 'failed') throw new Error(JSON.stringify(result));
+    return result;
+  } finally {console.error(JSON.stringify({event:'native_http_timing',op:value.op,wall_ms:performance.now()-started}));}
 };
 const clients = [];
 async function connect(spec) {
   if (!config.browserTools) throw new Error('Native control requires the installed managed browser helper path');
   if(!Number.isInteger(spec.port)||spec.port<1024||spec.port>65535||typeof spec.target!=='string'||!Number.isInteger(spec.actor))throw new Error('Each native target requires an explicit local port, target id and durable actor id');
   const {managedCDP, scriptOwner} = await import(pathToFileURL(config.browserTools).href);
-  let send;
-  const call=await managedCDP(spec.port,spec.target,scriptOwner(),(method,params)=>send(method,params));
+  let send;const spans=new AsyncLocalStorage();
+  const managed=await managedCDP(spec.port,spec.target,scriptOwner(),(method,params)=>{
+    const span=spans.getStore();if(span)span.rawStart=performance.now();
+    return send(method,params).finally(()=>{if(span)span.rawEnd=performance.now();});
+  });
+  const call=(method,params={})=>{
+    const span={start:performance.now()};
+    return spans.run(span,async()=>{try{return await managed(method,params);}finally{
+      const end=performance.now();console.error(JSON.stringify({event:'native_cdp_timing',method,wall_ms:end-span.start,before_raw_ms:span.rawStart===undefined?null:span.rawStart-span.start,raw_roundtrip_ms:span.rawEnd===undefined?null:span.rawEnd-span.rawStart,after_raw_ms:span.rawEnd===undefined?null:end-span.rawEnd}));
+    }});
+  };
   const pages = await (await fetch(`http://127.0.0.1:${spec.port}/json/list`,{signal:AbortSignal.timeout(5000)})).json();
   const page = pages.find(p => p.id === spec.target);
   if (!page || new URL(page.url).origin !== origin.origin) throw new Error(`Native target ${spec.target} is missing or on the wrong origin`);

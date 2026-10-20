@@ -79,6 +79,11 @@ test('native request releases keys, coordinates pause, and replays without repea
   const f=await fixture(t), first=await f.run('move-once',move);
   assert.equal(first.code,0,first.stderr);
   assert.equal(JSON.parse(first.stdout).pause_scope,'server_and_native');
+  const timings=first.stderr.split('\n').filter(x=>x.startsWith('{')).map(JSON.parse).filter(x=>x.event?.endsWith('_timing'));
+  assert.ok(timings.some(x=>x.event==='native_http_timing'&&x.op==='native_sync'));
+  assert.ok(timings.some(x=>x.event==='native_cdp_timing'&&x.method==='Input.dispatchKeyEvent'&&x.before_raw_ms>=0&&x.raw_roundtrip_ms>=0&&x.after_raw_ms>=0));
+  assert.ok(timings.every(x=>Number.isFinite(x.wall_ms)&&x.wall_ms>=0));
+  assert.ok(!JSON.stringify(timings).includes('fixture-control')&&!JSON.stringify(timings).includes('getBoundingClientRect'));
   const events=await f.events();
   assert.deepEqual(events.filter(e=>e.method==='Input.dispatchKeyEvent').map(e=>e.params.type),['keyDown','keyUp']);
   assert.ok(!events.some(e=>/bringToFront|activateTarget|setWindowBounds/.test(e.method)));
@@ -91,6 +96,7 @@ test('native request releases keys, coordinates pause, and replays without repea
 test('failed native CDP setup closes its still-live socket',async t=>{
   const f=await fixture(t),result=await f.run('failed-network',{op:'pause'},'network-enable');
   assert.equal(result.code,1,result.stderr);assert.match(result.stderr,/fixture Network.enable failure/);
+  assert.ok(result.stderr.split('\n').filter(x=>x.startsWith('{')).map(JSON.parse).some(x=>x.event==='native_cdp_timing'&&x.method==='Network.enable'&&Number.isFinite(x.raw_roundtrip_ms)));
   assert.ok((await f.events()).some(e=>e.method==='socket.close'));
 });
 test('cross-world coordinates never report a physical movement distance',async t=>{

@@ -76,3 +76,14 @@ test('prepared fixture cancellation bounds a pending hook and fences subsequent 
   const abort=new AbortController();let api;const pending=prepared({prepare:command=>{api=command;return new Promise(()=>{});}},()=>assert.fail('cancelled API executed'),abort.signal);
   await new Promise(ok=>setImmediate(ok));abort.abort(Error('preparation deadline'));await assert.rejects(pending,/preparation deadline/);await assert.rejects(api({op:'inspect',actor:1}),/preparation deadline/);
 });
+test('prepared fixture seals escaped API access after success and error',async()=>{
+  for(const failure of [false,true]){
+    let access,calls=0;const module={prepare:api=>{access=api;if(failure)throw Error('preparation failed');return explicitFixture;}};
+    if(failure)await assert.rejects(prepared(module,()=>calls++),/preparation failed/);else await prepared(module,()=>calls++);
+    await assert.rejects(access({op:'inspect',actor:1}),/preparation phase is closed/);assert.equal(calls,0);
+  }
+});
+test('prepared fixture seals an in-flight API reply after hook settlement',async()=>{
+  let release,pending;await prepared({prepare:api=>{pending=api({op:'inspect',actor:1});return explicitFixture;}},()=>new Promise(ok=>release=ok));
+  release({paused:true});await assert.rejects(pending,/preparation phase is closed/);
+});

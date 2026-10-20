@@ -24,11 +24,11 @@ export function browserDiagnostic(line, closing=false) {
 }
 export {startChild,stopChild} from './native-test-process.mjs';
 export async function prepareFixture(module, api, signal) {
-  signal.throwIfAborted();
+  signal.throwIfAborted();let open=true;
   const access=async command=>{
-    signal.throwIfAborted();
+    signal.throwIfAborted();assert(open,'Fixture preparation phase is closed');
     assert(['capabilities','catalog','world_info','observe','inspect'].includes(command.op)||(command.op==='spawn'&&command.spec?.controller==='direct'&&command.spec.profile===null),'Fixture preparation allows only paused reads and explicit direct scout spawn');
-    const result=await api(command);signal.throwIfAborted();return result;
+    const result=await api(command);signal.throwIfAborted();assert(open,'Fixture preparation phase is closed');return result;
   };
   let abort;
   const cancelled=new Promise((_,reject)=>{abort=()=>reject(signal.reason);signal.addEventListener('abort',abort,{once:true});});
@@ -39,7 +39,7 @@ export async function prepareFixture(module, api, signal) {
     const items=(values,n)=>Array.isArray(values)&&values.length===n&&values.every(v=>Number.isInteger(v)&&v>=-1&&v<=65535);
     assert(Number.isInteger(spec.class)&&spec.class>=0&&spec.class<=65535&&Number.isInteger(spec.level)&&spec.level>=1&&spec.level<=20&&Number.isSafeInteger(spec.seed)&&spec.seed>=0&&Number.isInteger(spec.world)&&(spec.position==='spawn'||(spec.position&&Number.isFinite(spec.position.x)&&Number.isFinite(spec.position.y)))&&items(spec.equipment,4)&&items(spec.backpack,8)&&(spec.stats===null||(Array.isArray(spec.stats)&&spec.stats.length===8&&spec.stats.every(v=>Number.isInteger(v)&&v>=0&&v<=2147483647))),'Invalid explicit fixture bounds');
     return spec;
-  } finally {signal.removeEventListener('abort',abort);}
+  } finally {open=false;signal.removeEventListener('abort',abort);}
 }
 async function freePort() {
   const server=createServer();await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
