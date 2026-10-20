@@ -64,7 +64,15 @@ struct Session {
     transfer_generation: Option<i32>,
     tutorial_exit: bool,
 }
+struct PendingMove {
+    packet: Packet,
+    received: Instant,
+    due: Instant,
+    boundary: Instant,
+}
+// MOVE shares the established one-reply slot; it must never bypass weapon backpressure.
 struct DeferredWeapon {
+    movement: Option<PendingMove>,
     world: i32,
     avatar: i32,
     generation: i32,
@@ -257,9 +265,15 @@ impl Simulation {
         }
         let s = self.sessions.remove(&session)?;
         if let Some(waiting) = self.deferred_weapons.remove(&session) {
+            let action = if waiting.movement.is_some() {
+                "MOVE"
+            } else {
+                "weapon"
+            };
+            tracing::debug!(target: "build100_move", session, action, "deferred input cancelled: owner detached");
             let _ = waiting
                 .reply
-                .send(Err("weapon cancelled: owner detached".into()));
+                .send(Err(format!("{action} cancelled: owner detached")));
         }
         if self.owners.get(&s.guid) == Some(&session) {
             self.owners.remove(&s.guid);
@@ -709,7 +723,8 @@ impl Simulation {
             .filter(|(session, w)| {
                 w.reply.is_closed()
                     || !self.waiting_owner(**session, w)
-                    || self.worlds[&w.world].weapon_deadline(w.avatar).is_none()
+                    || (w.movement.is_none()
+                        && self.worlds[&w.world].weapon_deadline(w.avatar).is_none())
             })
             .map(|(&id, _)| id)
             .collect();
@@ -718,7 +733,8 @@ impl Simulation {
                 .deferred_weapons
                 .remove(&session)
                 .expect("waiting weapon");
-            if let Some(room) = self.worlds.get_mut(&w.world)
+            if w.movement.is_none()
+                && let Some(room) = self.worlds.get_mut(&w.world)
                 && room
                     .players
                     .get(&w.avatar)
@@ -726,20 +742,35 @@ impl Simulation {
             {
                 room.cancel_weapon(w.avatar);
             }
+            let action = if w.movement.is_some() {
+                "MOVE"
+            } else {
+                "weapon"
+            };
             tracing::warn!(
                 session,
                 avatar = w.avatar,
-                "build100 waiting weapon cancelled: owner/life changed"
+                action,
+                "build100 waiting input cancelled: owner/life changed"
             );
+            if w.movement.is_some() {
+                tracing::debug!(target: "build100_move", session, avatar=w.avatar, "MOVE wait cancelled: reply/owner/life changed");
+            }
             let _ = w
                 .reply
-                .send(Err("weapon cancelled: owner/life changed".into()));
+                .send(Err(format!("{action} cancelled: owner/life changed")));
+        }
+    }
+    fn deferred_deadline(&self, w: &DeferredWeapon) -> Option<Instant> {
+        match &w.movement {
+            Some(m) => Some(m.due),
+            None => self.worlds.get(&w.world)?.weapon_deadline(w.avatar),
         }
     }
     fn weapon_deadline(&self) -> Option<Instant> {
         self.deferred_weapons
             .values()
-            .filter_map(|w| self.worlds.get(&w.world)?.weapon_deadline(w.avatar))
+            .filter_map(|w| self.deferred_deadline(w))
             .min()
     }
     fn release_weapons(&mut self, now: Instant) -> Result<()> {
@@ -747,13 +778,12 @@ impl Simulation {
         let due = self
             .deferred_weapons
             .iter()
-            .find(|(_, w)| {
-                self.worlds[&w.world]
-                    .weapon_deadline(w.avatar)
-                    .is_some_and(|d| now >= d)
-            })
+            .find(|(_, w)| self.deferred_deadline(w).is_some_and(|d| now >= d))
             .map(|(&id, _)| id);
         if let Some(session) = due {
+            if self.deferred_weapons[&session].movement.is_some() {
+                return self.release_move(session);
+            }
             let w = &self.deferred_weapons[&session];
             let (world, avatar) = (w.world, w.avatar);
             let mut candidate = self.worlds[&world].clone();
@@ -778,6 +808,97 @@ impl Simulation {
         }
         Ok(())
     }
+    fn release_move(&mut self, session: u64) -> Result<()> {
+        let m = self.deferred_weapons[&session]
+            .movement
+            .as_ref()
+            .expect("waiting MOVE");
+        let (packet, received, boundary) = (
+            Packet {
+                id: m.packet.id,
+                body: m.packet.body.clone(),
+            },
+            m.received,
+            m.boundary,
+        );
+        tracing::debug!(target: "build100_move", session, due=?m.due, boundary=?boundary, wake=?Instant::now(), "MOVE wait wake; fresh validation required");
+        let result = self.input(session, packet, received);
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(|e| e.is::<StorageFailure>())
+        {
+            return result;
+        }
+        if let Some(due) = result
+            .as_ref()
+            .err()
+            .and_then(|e| e.downcast_ref::<crate::world::MoveBudget>())
+            .and_then(|budget| budget.deadline(boundary))
+        {
+            self.deferred_weapons
+                .get_mut(&session)
+                .expect("waiting MOVE")
+                .movement
+                .as_mut()
+                .expect("waiting MOVE")
+                .due = due;
+            tracing::debug!(target: "build100_move", session, ?due, ?boundary, "MOVE still unfunded; retry within original boundary");
+            return Ok(());
+        }
+        if let Some(w) = self.deferred_weapons.remove(&session) {
+            tracing::debug!(target: "build100_move", session, success=result.is_ok(), error=?result.as_ref().err(), "MOVE wait finished; replying");
+            let _ = w.reply.send(result.map_err(|e| format!("{e:#}")));
+        }
+        Ok(())
+    }
+    fn submit_input(
+        &mut self,
+        session: u64,
+        packet: Packet,
+        received: Instant,
+        reply: oneshot::Sender<Result<(), String>>,
+    ) -> Result<()> {
+        if self.deferred_weapons.contains_key(&session) {
+            let _ = reply.send(Err(
+                "complete action awaiting reply; session dispatcher must backpressure".into(),
+            ));
+            return Ok(());
+        }
+        let movement = (packet.id == 5 && packet.body.len() == 8).then(|| Packet {
+            id: packet.id,
+            body: packet.body.clone(),
+        });
+        let result = self.input(session, packet, received);
+        if let Some(budget) = result
+            .as_ref()
+            .err()
+            .and_then(|e| e.downcast_ref::<crate::world::MoveBudget>())
+        {
+            let boundary = budget.wait_boundary();
+            if let Some(due) = budget.deadline(boundary) {
+                let s = &self.sessions[&session];
+                self.deferred_weapons.insert(
+                    session,
+                    DeferredWeapon {
+                        movement: Some(PendingMove {
+                            packet: movement.expect("validated MOVE"),
+                            received,
+                            due,
+                            boundary,
+                        }),
+                        world: s.world,
+                        avatar: s.avatar.expect("validated avatar"),
+                        generation: s.generation.expect("validated generation"),
+                        reply,
+                    },
+                );
+                tracing::debug!(target: "build100_move", session, ?received, ?due, ?boundary, "MOVE waiting for existing elapsed budget; no install/SQL/publication");
+                return Ok(());
+            }
+        }
+        self.reply_input(session, result, reply)
+    }
     fn reply_input(
         &mut self,
         session: u64,
@@ -801,6 +922,7 @@ impl Simulation {
             self.deferred_weapons.insert(
                 session,
                 DeferredWeapon {
+                    movement: None,
                     world,
                     avatar,
                     generation,
@@ -897,12 +1019,7 @@ impl Simulation {
                 command=commands.recv()=>match command {
                     Some(Command::Join{hello,output,reply})=>{let _=reply.send(self.join(hello,output).map_err(|e|format!("{e:#}")));}
                     Some(Command::Input{session,packet,received,reply})=>{
-                        if self.deferred_weapons.contains_key(&session) {
-                            let _=reply.send(Err("complete weapon awaiting reply; session dispatcher must backpressure".into()));
-                            continue;
-                        }
-                        let result=self.input(session,packet,received);
-                        self.reply_input(session,result,reply)?;
+                        self.submit_input(session,packet,received,reply)?;
                     }
                     Some(Command::Detach{session})=>self.detach(session,true)?,
                     #[cfg(test)]
@@ -915,6 +1032,10 @@ impl Simulation {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "move_pacing_tests.rs"]
+mod move_pacing_tests;
 
 #[cfg(test)]
 #[path = "cadence_owner_tests.rs"]

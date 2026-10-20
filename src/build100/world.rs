@@ -19,6 +19,55 @@ use std::{
 #[cfg(test)]
 pub const PLAYER: i32 = 1;
 const SIZE: i32 = 32;
+const MOVE_DISTANCE_CREDIT: f32 = 0.5;
+
+#[derive(Debug)]
+pub(crate) struct MoveBudget {
+    anchor: Instant,
+    validated: Instant,
+    speed: f32,
+    credit: f32,
+    requested: f32,
+}
+impl std::fmt::Display for MoveBudget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("movement exceeds elapsed speed allowance")
+    }
+}
+impl std::error::Error for MoveBudget {}
+impl MoveBudget {
+    pub(crate) fn wait_boundary(&self) -> Instant {
+        // Round down to nanoseconds so scheduling cannot exceed one existing distance cap.
+        self.validated
+            + std::time::Duration::from_nanos(
+                (f64::from(MOVE_DISTANCE_CREDIT) / f64::from(self.speed) * 1e9).floor() as u64,
+            )
+    }
+    pub(crate) fn deadline(&self, boundary: Instant) -> Option<Instant> {
+        let funded = |at: Instant| {
+            self.requested
+                <= self.speed * at.duration_since(self.anchor).as_secs_f32() + self.credit
+        };
+        if boundary <= self.validated || !funded(boundary) {
+            return None;
+        }
+        let (mut low, mut high) = (
+            0,
+            u64::try_from(boundary.duration_since(self.validated).as_nanos()).ok()?,
+        );
+        // Find the first fundable nanosecond using the validator's exact f32 expression;
+        // this predicts a wake only, never authorizes movement at that nominal time.
+        while high - low > 1 {
+            let middle = low + (high - low) / 2;
+            if funded(self.validated + std::time::Duration::from_nanos(middle)) {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        Some(self.validated + std::time::Duration::from_nanos(high))
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Character {
     pub generation: i32,
@@ -1208,7 +1257,7 @@ impl Room {
                 move_at: Instant::now(),
                 weapon: WeaponAdmission::default(),
                 hazard_at: self.elapsed,
-                move_credit: 0.5,
+                move_credit: MOVE_DISTANCE_CREDIT,
                 known_ground: BTreeSet::new(),
                 known_objects: BTreeSet::new(),
             },
@@ -1744,11 +1793,18 @@ impl Room {
                     );
                     let speed = speed.expect("normal movement speed");
                     tracing::debug!(target: "build100_move", requested_distance=distance(x,y,from.0,from.1), allowance=speed*dt+self.players[&player].move_credit, admitted=distance(x,y,from.0,from.1)<=speed*dt+self.players[&player].move_credit, "MOVE budget decision");
-                    ensure!(
-                        distance(x, y, from.0, from.1)
-                            <= speed * dt + self.players[&player].move_credit,
-                        "movement exceeds elapsed speed allowance"
-                    );
+                    let admitted = distance(x, y, from.0, from.1)
+                        <= speed * dt + self.players[&player].move_credit;
+                    if !admitted {
+                        return Err(MoveBudget {
+                            anchor: self.players[&player].move_at,
+                            validated: now,
+                            speed,
+                            credit: self.players[&player].move_credit,
+                            requested: distance(x, y, from.0, from.1),
+                        }
+                        .into());
+                    }
                     if map.can_move(from, (x, y)) {
                         (x, y)
                     } else if map.can_move(from, (from.0, y)) {
@@ -1775,7 +1831,7 @@ impl Room {
                     let avatar = self.players.get_mut(&player).expect("attached avatar");
                     avatar.move_credit = (avatar.move_credit + speed * dt
                         - distance(x, y, from.0, from.1))
-                    .clamp(0., 0.5);
+                    .clamp(0., MOVE_DISTANCE_CREDIT);
                 }
                 self.character_mut(player).x = x;
                 self.character_mut(player).y = y;
@@ -2955,6 +3011,10 @@ fn damage_packet(target: i32, owner: i32, id: u8, damage: i32) -> Packet {
             .i32(owner);
     })
 }
+
+#[cfg(test)]
+#[path = "move_budget_tests.rs"]
+mod move_budget_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
