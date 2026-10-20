@@ -1,6 +1,7 @@
 use crate::world::view::Tile;
 use std::{
     collections::BTreeMap,
+    ops::Deref,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -67,13 +68,46 @@ impl Geometry {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct Mask {
+type Words = [u64; SIDE];
+pub(crate) trait Page: Clone + Deref<Target = Words> {
+    fn zero() -> Self;
+    fn edit(&mut self) -> &mut Words;
+}
+impl Page for Arc<Words> {
+    fn zero() -> Self {
+        Arc::new([0; SIDE])
+    }
+    fn edit(&mut self) -> &mut Words {
+        Arc::make_mut(self)
+    }
+}
+impl Page for Box<Words> {
+    fn zero() -> Self {
+        Box::new([0; SIDE])
+    }
+    fn edit(&mut self) -> &mut Words {
+        self
+    }
+}
+// Only retained knowledge needs copy-on-write; disposable search pages must not pay atomic ownership costs per tile.
+pub(crate) type Mask = Bits<Arc<Words>>;
+pub(crate) type Scratch = Bits<Box<Words>>;
+#[derive(Clone)]
+pub(crate) struct Bits<P: Page> {
     dimensions: (i32, i32),
-    pages: Vec<Option<Arc<[u64; SIDE]>>>,
+    pages: Vec<Option<P>>,
     len: usize,
 }
-impl Mask {
+impl<P: Page> Default for Bits<P> {
+    fn default() -> Self {
+        Self {
+            dimensions: (0, 0),
+            pages: vec![],
+            len: 0,
+        }
+    }
+}
+impl<P: Page> Bits<P> {
     pub(crate) fn new(dimensions: (i32, i32)) -> Self {
         Self {
             dimensions,
@@ -108,11 +142,11 @@ impl Mask {
         let (page, word, bit) = self
             .address(point)
             .expect("knowledge outside navigation geometry");
-        let p = self.pages[page].get_or_insert_with(|| Arc::new([0; SIDE]));
+        let p = self.pages[page].get_or_insert_with(P::zero);
         if p[word] & bit != 0 {
             return false;
         }
-        Arc::make_mut(p)[word] |= bit;
+        p.edit()[word] |= bit;
         self.len += 1;
         true
     }
@@ -126,7 +160,7 @@ impl Mask {
         if p[word] & bit == 0 {
             return false;
         }
-        Arc::make_mut(p)[word] &= !bit;
+        p.edit()[word] &= !bit;
         self.len -= 1;
         true
     }
@@ -160,7 +194,7 @@ impl Mask {
             })
     }
     pub(crate) fn allocated_bytes(&self) -> usize {
-        self.pages.capacity() * std::mem::size_of::<Option<Arc<[u64; SIDE]>>>()
+        self.pages.capacity() * std::mem::size_of::<Option<P>>()
             + self.pages.iter().filter(|p| p.is_some()).count() * SIDE * 8
     }
 }

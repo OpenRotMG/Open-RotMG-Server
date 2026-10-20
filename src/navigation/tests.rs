@@ -3,7 +3,11 @@ use std::collections::BTreeSet;
 
 #[test]
 fn knowledge_pages_match_ordered_set_and_isolate_snapshots() {
-    let mut mask = Mask::new((131, 129));
+    check_pages::<Arc<Words>>();
+    check_pages::<Box<Words>>();
+}
+fn check_pages<P: Page>() {
+    let mut mask = Bits::<P>::new((131, 129));
     let mut expected = BTreeSet::new();
     let mut state = 7u64;
     for step in 0..12000 {

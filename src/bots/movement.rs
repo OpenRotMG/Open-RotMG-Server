@@ -1,5 +1,5 @@
 use super::{PlayerView, Pos, TilePoint, center, tile};
-use crate::navigation::{Mask, Tiles, Walkable};
+use crate::navigation::{Scratch, Tiles, Walkable};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::{
@@ -111,7 +111,7 @@ impl Grid {
         }
         let measuring = crate::performance::Measure::start();
         let mut queue = VecDeque::from([start]);
-        let mut visited = Mask::new(self.dimensions);
+        let mut visited = Scratch::new(self.dimensions);
         visited.insert(start);
         let mut reached = vec![start];
         while let Some((x, y)) = queue.pop_front() {
@@ -158,7 +158,7 @@ impl Grid {
             return old.tiles.clone();
         }
         let measuring = crate::performance::Measure::start();
-        let mut targets = Mask::new(self.dimensions);
+        let mut targets = Scratch::new(self.dimensions);
         for x in start.0.saturating_sub(24)..=start.0.saturating_add(24) {
             for y in start.1.saturating_sub(24)..=start.1.saturating_add(24) {
                 if self.walkable.contains(&(x, y)) {
@@ -172,7 +172,7 @@ impl Grid {
         }
         let mut remaining = targets.clone();
         remaining.remove(&start);
-        let mut visited = Mask::new(self.dimensions);
+        let mut visited = Scratch::new(self.dimensions);
         visited.insert(start);
         let mut queue = VecDeque::from([start]);
         // Stop only when every requested tile is proven reachable, or the entire component is exhausted.
