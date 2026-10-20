@@ -16,8 +16,17 @@ def legacy_copy(bundle):
     old = deepcopy(bundle)
     old['schema'] = 15
     del old['game']['legacy_claims'], old['game']['level_credits']
+    # This copied fixture represents the old base+equipment writer, preserving its recorded spends.
+    old_totals = {}
+    characters = {row['id']: row for row in old['game']['characters']}
     for row in old['game']['deaths']:
+        account = characters[row['character']]['account']
+        old_totals[account] = old_totals.get(account, 0) + json.loads(row['snapshot'])['fame'] + row['equipment_fame']
         del row['receipt']
+    for wallet in old['game']['account_fame']:
+        spent = wallet['earned'] - wallet['balance']
+        wallet['earned'] = old_totals.get(wallet['account'], 0)
+        wallet['balance'] = wallet['earned'] - spent
     for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
         for row in old['game'][table]:
             payload = json.loads(row[field])

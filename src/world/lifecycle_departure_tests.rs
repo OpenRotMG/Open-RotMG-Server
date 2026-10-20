@@ -85,10 +85,9 @@ async fn departure_first(progress: bool, dying: bool, amulet: bool) {
                     if action == rusqlite::hooks::Action::SQLITE_UPDATE
                         && table == "characters"
                         && row == i64::from(actor)
+                        && let Some(written) = written.take()
                     {
-                        if let Some(written) = written.take() {
-                            written.send(hook.take().unwrap()()).unwrap();
-                        }
+                        written.send(hook.take().unwrap()()).unwrap();
                     }
                 },
             ));

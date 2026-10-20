@@ -585,7 +585,7 @@ async fn exercise_death(database: &Path, data: &Path) -> Result<()> {
     )?;
     let receipt = store::death_awards::decode_receipt(&archived.3)?;
     ensure!(
-        receipt.policy == store::death_awards::ReceiptPolicy::EquipmentOnly
+        receipt.policy == store::death_awards::ReceiptPolicy::Historical
             && receipt.base == 19
             && receipt.total == 20,
         "restored paid JSON receipt mismatch"

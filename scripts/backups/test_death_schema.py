@@ -72,16 +72,13 @@ class DeathSchema(unittest.TestCase):
                 db.execute('CREATE TABLE levels(guild_id TEXT,user_id TEXT,username TEXT,xp INTEGER,last_xp_at INTEGER,last_message_id TEXT,PRIMARY KEY(guild_id,user_id))')
             revision = directory / 'REVISION'
             revision.write_text('a' * 40)
-            # Prepared, correctly calculated historical receipt tests claim durability, not runtime earning.
-            with closing(sqlite3.connect(written / 'game.db')) as db, db:
-                character, raw = db.execute('SELECT character,snapshot FROM deaths ORDER BY character LIMIT 1').fetchone()
-                ch = json.loads(raw)
-                amount = ch['fame'] // 10 + 10
-                receipt = {'version': 1, 'policy': 'historical', 'base': ch['fame'],
-                           'rows': [{'kind': 'legacy_builder', 'amount': amount}], 'total': ch['fame'] + amount}
-                db.execute('UPDATE deaths SET receipt=? WHERE character=?', (json.dumps(receipt), character))
-                db.execute('UPDATE account_fame SET balance=balance+?,earned=earned+? WHERE account=?', (amount, amount, ch['account']))
-                db.execute('INSERT INTO legacy_claims VALUES(?,?,?)', (ch['account'], ch['class'], character))
+            # The full-policy writer itself now provides the paid Legacy/claim binding.
+            with closing(sqlite3.connect(written / 'game.db')) as db:
+                character, raw = db.execute('SELECT character,receipt FROM deaths ORDER BY character LIMIT 1').fetchone()
+                receipt = json.loads(raw)
+                self.assertEqual(receipt['policy'], 'historical')
+                self.assertTrue(any(row['kind'] == 'legacy_builder' for row in receipt['rows']))
+                self.assertEqual(db.execute('SELECT character FROM legacy_claims').fetchall(), [(character,)])
             exercise = subprocess.run([binary, '--backup-exercise-death', str(written / 'game.db'), str(root / 'data')], capture_output=True, text=True, check=True)
             proof = json.loads(exercise.stdout)
             self.assertEqual(len(proof['level_credits']), 2)

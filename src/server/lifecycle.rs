@@ -1011,7 +1011,7 @@ fn reserve(a: &App, expected: &[(i32, Arc<()>)], operation: &'static str) -> Res
 }
 
 pub(super) enum CreditAdmission {
-    Reserved(Operation),
+    Reserved(Box<Operation>),
     Waiting(std::pin::Pin<Box<dyn Future<Output = ()> + Send>>),
 }
 // Called only with an actor-verified sealed giver and its exact outstanding recipient source.
@@ -1041,13 +1041,13 @@ pub(super) fn reserve_credit_recipient(
     let generation = target.generation.clone();
     // Closing recipients permit ONLY this proven progress prerequisite, never a new controller operation.
     owners.get_mut(&recipient.0).unwrap().pending = true;
-    Ok(CreditAdmission::Reserved(Operation {
+    Ok(CreditAdmission::Reserved(Box::new(Operation {
         app: a.clone(),
         accounts: vec![(recipient.0, generation)],
         operation: "causal_progress",
         stage: Arc::new(Mutex::new(Stage::Reservation)),
         completed: false,
-    }))
+    })))
 }
 
 pub(super) fn collector_death_candidate(a: &App, account: i32, avatar: i32) -> Result<bool> {

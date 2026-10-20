@@ -46,7 +46,7 @@ def check(binary, data, directory, revision):
     character = receipt.pop('exercised_death', None)
     paid_receipt = receipt.pop('receipt', None)
     level_credits = receipt.pop('level_credits', None)
-    if paid_receipt != {'policy': 'equipment_only', 'version': 1, 'base': 19, 'rows': [{'kind': 'well_equipped', 'amount': 1}], 'total': 20}:
+    if paid_receipt != {'policy': 'historical', 'version': 1, 'base': 19, 'rows': [{'kind': 'well_equipped', 'amount': 1}], 'total': 20}:
         raise RuntimeError('Release immutable paid receipt mismatch')
     givers = [row['id'] for row in before_death['characters'] if row['alive'] == 1 and row['account'] != next(r['account'] for r in before_death['guild_members'] if r['rank'] == 40)][:2]
     expected_credits = [{'recipient': character, 'reached_level': level, 'giver': giver} for level, giver in zip((2, 3), givers)]

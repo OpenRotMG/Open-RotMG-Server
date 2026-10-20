@@ -103,11 +103,11 @@ async fn equipment_death_waits_for_final_inventory_and_boost_excluded_queued_pro
         .await
         .unwrap();
     assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|packet| packet.id == 41));
-    assert_eq!(a.store.presentation(account.id).await.unwrap().fame, 19);
+    assert_eq!(a.store.presentation(account.id).await.unwrap().fame, 160);
     let xml = a.store.fame(account.id, character).await.unwrap();
     assert!(xml.contains("<BaseFame>18</BaseFame>"));
-    assert!(xml.contains("<TotalFame>19</TotalFame>"));
-    assert!(xml.contains("<Bonus id=\"Well Equipped\" desc=\"Bonus for equipment\">1</Bonus>"));
+    assert!(xml.contains("<TotalFame>160</TotalFame>"));
+    assert!(xml.contains("<Bonus id=\"Well Equipped\" desc=\"Bonus for equipment\">8</Bonus>"));
     let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
     let raw: String = db
         .query_row(
@@ -913,4 +913,83 @@ async fn all_death_fame_phase3_potion_sources_and_replays() {
     let saved = a.store.load(account, character).await.unwrap();
     assert!(!saved.lifetime.inventory_potion_used);
     assert_eq!(saved.items[5], 0xa1f);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_death_fame_phase5_no_publication_before_commit() {
+    struct Release(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            if let Some(reply) = self.0.take() {
+                let _ = reply.send(());
+            }
+        }
+    }
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let account = a.store.list("phase5-publish".into()).await.unwrap().id;
+    let _owner = a.claim(account).unwrap();
+    let mut ch = a
+        .store
+        .create(account, a.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.fame = 100;
+    a.store.progress(ch.clone()).await.unwrap();
+    let character = ch.id;
+    let bind = lifecycle::binding(&a, account).unwrap();
+    let (tx, mut rx) = mpsc::channel(4096);
+    let (lost, _) = tokio::sync::watch::channel(false);
+    let (id, snapshot) = a
+        .world
+        .call(move |w| {
+            let id = w.enter(ch, Some(crate::world::Output { packets: tx, lost }))?;
+            bind(id)?;
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.hp = 0;
+            p.death_pending = true;
+            let snapshot = w.pending_deaths().pop().unwrap().1;
+            Ok((id, snapshot))
+        })
+        .await
+        .unwrap();
+    let (entered, release) = a.store.lifecycle_test_pause_reply();
+    let release = Release(Some(release));
+    let app = a.clone();
+    let work = tokio::spawn(async move {
+        persist_death(&app, id, snapshot, "phase5 actual held reply".into()).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!std::iter::from_fn(|| rx.try_recv().ok()).any(|p| p.id == 41));
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    let raw: String = db
+        .query_row(
+            "SELECT receipt FROM deaths WHERE character=?",
+            [character],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let paid = crate::store::death_awards::decode_receipt(&raw).unwrap();
+    assert_eq!(paid.total, 143);
+    assert_eq!(
+        paid.policy,
+        crate::store::death_awards::ReceiptPolicy::Historical
+    );
+    assert!(a.claim(account).is_err());
+    drop(release);
+    tokio::time::timeout(std::time::Duration::from_secs(5), work)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .filter(|p| p.id == 41)
+            .count(),
+        1
+    );
+    assert_eq!(a.store.presentation(account).await.unwrap().fame, 143);
 }

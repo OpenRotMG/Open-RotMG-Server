@@ -1232,6 +1232,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     ) -> Result<()> {
         self.write_progress(vec![(ch, assists)]).await
     }
+    #[cfg(test)]
     pub async fn progress_batch(&self, characters: Vec<Character>) -> Result<()> {
         self.write_progress(characters.into_iter().map(|ch| (ch, vec![])).collect())
             .await
@@ -1312,27 +1313,38 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "death snapshot lost committed progress or equipment");
             ch.lifetime.follows(&saved.lifetime)?;
-            let bonus = death_awards::equipment(&ch, &content)?;
-            let receipt = death_awards::DeathFameReceipt::paid(&ch,bonus,death_awards::ReceiptPolicy::EquipmentOnly)?;
+            ch.lifetime.level_assists=ch.lifetime.level_assists.max(tx.query_row("SELECT count(*) FROM level_credits WHERE giver=?1",[ch.id],|r|r.get::<_,u64>(0))?);
+            let history=death_awards::history(&tx,&ch)?;
+            let wallet=tx.query_row("SELECT balance,earned FROM account_fame WHERE account=?1",[ch.account],|r|Ok((r.get(0)?,r.get(1)?))).context("account fame wallet missing")?;
+            let guild=guilds::membership(&tx,ch.account)?.map(|m|tx.query_row("SELECT fame,earned FROM guilds WHERE id=?1",[m.id],|r|Ok((r.get(0)?,r.get(1)?)))).transpose()?;
+            let receipt=death_awards::evaluate(&ch,&ch.lifetime,history,&content,death_awards::PayoutBalances{wallet,guild})?;
+            let bonus=receipt.rows.iter().find(|r|r.kind==death_awards::BonusKind::WellEquipped).map_or(0,|r|r.amount);
             let total = receipt.total;
+            let awards=serde_json::to_string(&receipt.rows)?;
             let snapshot = serde_json::to_string(&ch)?;
             let n = tx.execute("UPDATE characters SET alive=0,stats=?3,items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND alive=1 AND revision=?5",
                 params![ch.id,ch.account,snapshot,serde_json::to_string(&[-1;12])?,ch.revision])?;
             ensure!(n == 1, "death lost its reservation");
             tx.execute("INSERT INTO deaths(character,snapshot,killed_by,equipment_fame,receipt) VALUES(?1,?2,?3,?4,?5)",
                 params![ch.id,snapshot,killed_by,bonus,serde_json::to_string(&receipt)?])?;
+            if receipt.rows.iter().any(|r|r.kind==death_awards::BonusKind::LegacyBuilder){tx.execute("INSERT INTO legacy_claims(account,class,character) VALUES(?1,?2,?3)",params![ch.account,ch.class,ch.id])?;}
             ensure!(tx.execute("UPDATE account_fame SET balance=balance+?2,earned=earned+?2 WHERE account=?1",params![ch.account,total])? == 1,
                 "account fame wallet missing");
             guilds::credit_death(&tx,ch.account,total)?;
             tx.commit()?;
-            tracing::info!(account=ch.account, character=ch.id, base_fame=ch.fame, equipment_fame=bonus, total_fame=total, "permanent death award committed");
+            tracing::info!(account=ch.account, character=ch.id, policy=?receipt.policy, completeness=?ch.lifetime.completeness, base_fame=ch.fame, awards=%awards, equipment_fame=bonus, total_fame=total, "permanent death award committed");
             Ok(())
         }).await
     }
     pub async fn fame(&self, account: i32, id: i32) -> Result<String> {
         let legacy_base = self.legacy_base;
         // The legacy field is called CreatedOn, but the client labels it as the death date.
-        self.call(move|db|{let (snapshot,killer,died_at,paid):(String,String,u64,String)=db.query_row("SELECT snapshot,killed_by,died_at,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;let receipt=death_awards::decode_receipt(&paid)?;let c = receipt.character(&snapshot,legacy_base)?;ensure!(receipt.base==c.fame,"receipt base disagreement");ensure!(c.id==id && c.account==account && !c.alive && c.hp==0 && c.items.len()==12,"invalid archived death snapshot");let total=receipt.total;let equipment=receipt.rows.iter().map(|r|format!("<Bonus id=\"{}\" desc=\"{}\">{}</Bonus>",r.kind.id(),r.kind.description(),r.amount)).collect::<String>();ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame>{}</Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),total,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],c.fame,equipment))}).await
+        self.call(move|db|{let (snapshot,killer,died_at,paid):(String,String,u64,String)=db.query_row("SELECT snapshot,killed_by,died_at,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;let receipt=death_awards::decode_receipt(&paid)?;let c = receipt.character(&snapshot,legacy_base)?;ensure!(receipt.base==c.fame,"receipt base disagreement");ensure!(c.id==id && c.account==account && !c.alive && c.hp==0 && c.items.len()==12,"invalid archived death snapshot");let total=receipt.total;
+        let [shots,hits,tiles,kills,gods,oryx,quests,assists]=match receipt.policy {
+            death_awards::ReceiptPolicy::Historical=>{let l=&c.lifetime;[l.shots,l.projectile_hits,l.tiles,l.kills,l.god_kills,l.oryx_kills,l.qualified_quests,l.level_assists]},
+            death_awards::ReceiptPolicy::LegacyPaid|death_awards::ReceiptPolicy::EquipmentOnly=>[c.shots,c.hits,c.tiles,c.kills,0,0,c.quests,0],
+        };
+        let equipment=receipt.rows.iter().map(|r|format!("<Bonus id=\"{}\" desc=\"{}\">{}</Bonus>",r.kind.id(),r.kind.description(),r.amount)).collect::<String>();ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>{}</GodKills><OryxKills>{}</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>{}</LevelUpAssists><BaseFame>{}</BaseFame>{}</Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),total,shots,hits,tiles,kills,gods,oryx,quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],assists,c.fame,equipment))}).await
     }
     #[cfg(test)]
     pub async fn rename(&self, account: i32, name: String) -> Result<()> {
@@ -2371,6 +2383,8 @@ mod tests {
                 "UPDATE deaths SET snapshot=?2 WHERE character=?1",
                 params![dead_id, dead_raw],
             )?;
+            // Explicit version-zero base-only history predates all restored bonuses.
+            db.execute("UPDATE account_fame SET balance=0,earned=0 WHERE account=(SELECT account FROM characters WHERE id=?1)",[dead_id])?;
             db.execute_batch("DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; PRAGMA user_version=15")?;
             Ok(())
         })

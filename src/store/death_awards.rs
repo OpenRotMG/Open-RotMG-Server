@@ -290,6 +290,36 @@ pub(super) fn save_assists(
     Ok(())
 }
 
+pub(super) fn history(db: &Connection, ch: &Character) -> Result<DeathHistory> {
+    let mut history = DeathHistory {
+        retained_deaths: 0,
+        other_same_class_max_level: 0,
+        legacy_claimed: db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM legacy_claims WHERE account=?1 AND class=?2)",
+            params![ch.account, ch.class],
+            |r| r.get(0),
+        )?,
+        prior_paid_max: 0,
+    };
+    let mut q=db.prepare("SELECT d.receipt FROM deaths d JOIN characters c ON c.id=d.character WHERE c.account=?1 AND c.id<>?2")?;
+    for row in q.query_map(params![ch.account, ch.id], |r| r.get::<_, String>(0))? {
+        let receipt = decode_receipt(&row?)?;
+        history.retained_deaths = history
+            .retained_deaths
+            .checked_add(1)
+            .context("retained death count overflow")?;
+        history.prior_paid_max = history.prior_paid_max.max(receipt.total);
+    }
+    let mut q=db.prepare("SELECT stats FROM characters WHERE account=?1 AND id<>?2 AND json_extract(stats,'$.class')=?3")?;
+    for row in q.query_map(params![ch.account, ch.id, ch.class], |r| {
+        r.get::<_, String>(0)
+    })? {
+        let other: Character = serde_json::from_str(&row?)?;
+        history.other_same_class_max_level = history.other_same_class_max_level.max(other.level);
+    }
+    Ok(history)
+}
+
 fn equipment_percent(ch: &Character, content: &Content) -> Result<u64> {
     ensure!(
         ch.items.len() == 12 && ch.fame >= 0,
@@ -314,6 +344,7 @@ fn equipment_percent(ch: &Character, content: &Content) -> Result<u64> {
     Ok(percent)
 }
 
+#[cfg(test)]
 pub(super) fn equipment(ch: &Character, content: &Content) -> Result<i32> {
     let percent = equipment_percent(ch, content)?;
     // The May2012 calculator applies the combined percent once to the running death subtotal.

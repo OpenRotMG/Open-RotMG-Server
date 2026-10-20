@@ -723,11 +723,10 @@ async fn all_death_fame_phase4_transfer_cancellation_cutoff() {
                             if action == rusqlite::hooks::Action::SQLITE_UPDATE
                                 && table == "characters"
                                 && row == i64::from(ch.id)
+                                && let Some(entered) = entered.take()
                             {
-                                if let Some(entered) = entered.take() {
-                                    entered.send(()).unwrap();
-                                    wait.recv().unwrap();
-                                }
+                                entered.send(()).unwrap();
+                                wait.recv().unwrap();
                             }
                         },
                     ));
@@ -1145,11 +1144,10 @@ async fn all_death_fame_phase4_capacity_acceptance_boundaries() {
                             if action == rusqlite::hooks::Action::SQLITE_UPDATE
                                 && table == "characters"
                                 && row == i64::from(ch.id)
+                                && let Some(entered) = entered.take()
                             {
-                                if let Some(entered) = entered.take() {
-                                    entered.send(()).unwrap();
-                                    wait.recv().unwrap();
-                                }
+                                entered.send(()).unwrap();
+                                wait.recv().unwrap();
                             }
                         },
                     ));

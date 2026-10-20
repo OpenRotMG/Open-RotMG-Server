@@ -748,7 +748,7 @@ pub(crate) async fn inventory(
 enum CreditStep {
     Done,
     Waiting(std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>),
-    Progress(lifecycle::Operation, i32, crate::store::Character),
+    Progress(Box<(lifecycle::Operation, i32, crate::store::Character)>),
 }
 async fn settle_giver_credits(a: &App, id: i32) -> Result<()> {
     let account = a
@@ -802,7 +802,9 @@ async fn settle_giver_credits(a: &App, id: i32) -> Result<()> {
                                     "causal recipient has no admissible progress; source retained",
                                 )?
                                 .1;
-                            Ok(CreditStep::Progress(guard, recipient, snapshot))
+                            Ok(CreditStep::Progress(Box::new((
+                                *guard, recipient, snapshot,
+                            ))))
                         }
                     }
                 })
@@ -810,7 +812,8 @@ async fn settle_giver_credits(a: &App, id: i32) -> Result<()> {
             match step {
                 CreditStep::Done => return Ok(()),
                 CreditStep::Waiting(wait) => wait.await,
-                CreditStep::Progress(guard, recipient, snapshot) => {
+                CreditStep::Progress(progress) => {
+                    let (guard, recipient, snapshot) = *progress;
                     lifecycle::complete(guard, move |a| async move {
                         persist_progress_inner(&a, recipient, snapshot).await
                     })

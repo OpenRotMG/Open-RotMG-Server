@@ -112,7 +112,7 @@ async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
         store.load(ch.account, ch.id).await.unwrap().items,
         saved.items
     );
-    assert_eq!(store.presentation(ch.account).await.unwrap().fame, 0);
+    assert_eq!(store.presentation(ch.account).await.unwrap().fame, 232);
     assert_eq!(
         db.query_row(
             "SELECT count(*) FROM deaths WHERE character=?1",
@@ -130,10 +130,10 @@ async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
         other.death(ch.clone(), "two".into())
     );
     assert_ne!(a.is_ok(), b.is_ok());
-    assert_eq!(store.presentation(ch.account).await.unwrap().fame, 20);
+    assert_eq!(store.presentation(ch.account).await.unwrap().fame, 252);
     assert_eq!(
         store.list("death-awards".into()).await.unwrap().earned_fame,
-        1020
+        1252
     );
     let guild = store.guild(ch.account).await.unwrap();
     assert_eq!((guild.fame, guild.earned), (20, 20));
@@ -194,7 +194,7 @@ async fn equipment_death_rejects_stale_gear_foreign_owner_and_lost_progress() {
         .death(ch.clone(), "final canonical equipment".into())
         .await
         .unwrap();
-    assert_eq!(store.presentation(ch.account).await.unwrap().fame, 21);
+    assert_eq!(store.presentation(ch.account).await.unwrap().fame, 48);
 }
 
 #[tokio::test]
@@ -243,10 +243,22 @@ async fn equipment_death_legacy_migration_preserves_snapshots_wallet_and_paid_va
         .await
         .unwrap()[0];
     fatal(&mut ch, 19);
-    store
-        .death(ch.clone(), "old base-only death".into())
-        .await
-        .unwrap();
+    // Explicit base-only paid fixture preserves the pre-policy schema13 migration contract.
+    let raw = serde_json::to_string(&ch).unwrap();
+    let paid = DeathFameReceipt::paid(&ch, 0, ReceiptPolicy::EquipmentOnly).unwrap();
+    let tx = db.unchecked_transaction().unwrap();
+    tx.execute(
+        "UPDATE characters SET alive=0,stats=?2,items=?3,revision=revision+1 WHERE id=?1",
+        params![ch.id, raw, serde_json::to_string(&[-1; 12]).unwrap()],
+    )
+    .unwrap();
+    tx.execute("INSERT INTO deaths(character,snapshot,killed_by,equipment_fame,receipt) VALUES(?1,?2,'old base-only fixture',0,?3)",params![ch.id,raw,serde_json::to_string(&paid).unwrap()]).unwrap();
+    tx.execute(
+        "UPDATE account_fame SET balance=19,earned=19 WHERE account=?1",
+        [ch.account],
+    )
+    .unwrap();
+    tx.commit().unwrap();
     let snapshot: String = db
         .query_row(
             "SELECT snapshot FROM deaths WHERE character=?1",
@@ -910,7 +922,7 @@ async fn all_death_fame_phase2_schema16_roundtrip_corruption() {
         )
         .unwrap();
     let receipt: DeathFameReceipt = serde_json::from_str(&original).unwrap();
-    assert_eq!(receipt.policy, ReceiptPolicy::EquipmentOnly);
+    assert_eq!(receipt.policy, ReceiptPolicy::Historical);
     receipt.validate().unwrap();
     let reopened = Store::open(&path, &content).unwrap();
     assert_eq!(reopened.fame(ch.account, ch.id).await.unwrap(), before);
@@ -978,7 +990,7 @@ async fn all_death_fame_phase2_schema16_roundtrip_corruption() {
     db.execute("DELETE FROM level_credits", []).unwrap();
     db.pragma_update(None, "foreign_keys", true).unwrap();
     assert!(Store::open(&path, &content).is_ok());
-    // Prepared evaluator receipt exercises claim storage; the runtime writer remains equipment-only.
+    // An explicit prepared receipt isolates claim storage from the runtime history comparator.
     ch.level = 2;
     ch.exp = 50;
     let paid = evaluate(
@@ -1007,11 +1019,8 @@ async fn all_death_fame_phase2_schema16_roundtrip_corruption() {
     .unwrap();
     db.execute("UPDATE characters SET stats=?1", [&snapshot])
         .unwrap();
-    db.execute(
-        "UPDATE account_fame SET balance=balance+20,earned=earned+20",
-        [],
-    )
-    .unwrap();
+    db.execute("UPDATE account_fame SET balance=120,earned=120", [])
+        .unwrap();
     db.execute(
         "INSERT INTO legacy_claims(account,class,character) VALUES(?1,?2,?3)",
         params![ch.account, ch.class, ch.id],
@@ -1083,9 +1092,15 @@ async fn all_death_fame_phase2_old_paid_bytes_unchanged() {
     .await;
     fatal(&mut ch, 19);
     store.death(ch.clone(), "old paid".into()).await.unwrap();
-    let wallet = store.presentation(ch.account).await.unwrap().fame;
+    let wallet = 20;
     drop(store);
     let db = Connection::open(&path).unwrap();
+    // This is a schema15 equipment-only paid fixture, not a downgrade of a runtime payment.
+    db.execute(
+        "UPDATE account_fame SET balance=20,earned=20 WHERE account=?",
+        [ch.account],
+    )
+    .unwrap();
     let snapshot: String = db
         .query_row("SELECT snapshot FROM deaths", [], |r| r.get(0))
         .unwrap();
@@ -1093,8 +1108,11 @@ async fn all_death_fame_phase2_old_paid_bytes_unchanged() {
     old.as_object_mut().unwrap().remove("lifetime");
     old["tiles"] = serde_json::json!(4_000_001_u64);
     let old = serde_json::to_string_pretty(&old).unwrap();
-    db.execute("UPDATE deaths SET snapshot=?1,died_at=1700000000", [&old])
-        .unwrap();
+    db.execute(
+        "UPDATE deaths SET snapshot=?1,died_at=1700000000,equipment_fame=1",
+        [&old],
+    )
+    .unwrap();
     db.execute("UPDATE characters SET stats=?1", [&old])
         .unwrap();
     db.execute_batch("DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; PRAGMA user_version=15;").unwrap();
@@ -1141,4 +1159,383 @@ async fn all_death_fame_phase2_old_paid_bytes_unchanged() {
         assert_eq!(migrated.lifetime.tiles, 4_000_001);
         drop(reopened);
     }
+}
+
+fn phase5_receipt(db: &Connection, id: i32) -> DeathFameReceipt {
+    decode_receipt(
+        &db.query_row("SELECT receipt FROM deaths WHERE character=?", [id], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap(),
+    )
+    .unwrap()
+}
+fn phase5_state(db: &Connection) -> Vec<String> {
+    ["SELECT json_array(id,alive,stats,items,revision) FROM characters ORDER BY id","SELECT json_array(character,snapshot,receipt,died_at,equipment_fame) FROM deaths ORDER BY character","SELECT json_array(account,class,character) FROM legacy_claims ORDER BY account,class","SELECT json_array(account,balance,earned) FROM account_fame ORDER BY account","SELECT json_array(id,fame,earned) FROM guilds ORDER BY id","SELECT json_array(account,fame) FROM guild_members ORDER BY account"].into_iter().flat_map(|sql|db.prepare(sql).unwrap().query_map([],|r|r.get::<_,String>(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()).collect()
+}
+
+#[tokio::test]
+async fn all_death_fame_phase5_atomic_claims_receipt() {
+    let (path, content, store, mut funding) = setup().await;
+    store
+        .rename(funding.account, "Fullchief".into())
+        .await
+        .unwrap();
+    fatal(&mut funding, 1000);
+    store
+        .death(funding.clone(), "funding".into())
+        .await
+        .unwrap();
+    store
+        .change_guild(funding.account, GuildAction::Create("Full Guild".into()))
+        .await
+        .unwrap();
+    let mut ch = store
+        .create(funding.account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    equip(&store, &mut ch, vec![-1; 12]).await;
+    ch.level = 2;
+    ch.exp = 50;
+    fatal(&mut ch, 100);
+    let db = Connection::open(&path).unwrap();
+    let initial = phase5_state(&db);
+    let mut overflow = ch.clone();
+    overflow.fame = i32::MAX;
+    assert!(store.death(overflow, "overflow".into()).await.is_err());
+    assert_eq!(phase5_state(&db), initial);
+    let mut invalid = ch.clone();
+    invalid.lifetime.projectile_hits = 1;
+    assert!(
+        store
+            .death(invalid, "invalid collision history".into())
+            .await
+            .is_err()
+    );
+    assert_eq!(phase5_state(&db), initial);
+    for (table, event) in [
+        ("deaths", "INSERT"),
+        ("legacy_claims", "INSERT"),
+        ("account_fame", "UPDATE"),
+        ("guilds", "UPDATE"),
+        ("guild_members", "UPDATE"),
+    ] {
+        db.execute_batch(&format!("CREATE TRIGGER fail_full BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT,'injected {table} failure'); END;")).unwrap();
+        assert!(
+            store.death(ch.clone(), "rollback".into()).await.is_err(),
+            "{table}"
+        );
+        assert_eq!(phase5_state(&db), initial, "{table}");
+        db.execute_batch("DROP TRIGGER fail_full").unwrap();
+    }
+    let other = Store::open(&path, &content).unwrap();
+    let (a, b) = tokio::join!(
+        store.death(ch.clone(), "one".into()),
+        other.death(ch.clone(), "two".into())
+    );
+    assert_ne!(a.is_ok(), b.is_ok());
+    let paid = phase5_receipt(&db, ch.id);
+    assert_eq!(paid.policy, ReceiptPolicy::Historical);
+    assert_eq!(paid.total, 120);
+    assert_eq!(
+        paid.rows,
+        vec![BonusRow {
+            kind: BonusKind::LegacyBuilder,
+            amount: 20
+        }]
+    );
+    assert_eq!(store.guild(ch.account).await.unwrap().fame, 120);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM legacy_claims WHERE account=?",
+            [ch.account],
+            |r| r.get::<_, i32>(0)
+        )
+        .unwrap(),
+        1
+    );
+    let old = phase5_state(&db);
+    assert!(store.death(ch.clone(), "duplicate".into()).await.is_err());
+    assert_eq!(phase5_state(&db), old);
+    // Prepared final level-two snapshots compete against retained level-one records.
+    let account = store
+        .list("full-concurrent-history".into())
+        .await
+        .unwrap()
+        .id;
+    store
+        .register(
+            "full-concurrent-history".into(),
+            "concurrent@example.invalid".into(),
+            "fixture-password".into(),
+        )
+        .await
+        .unwrap();
+    db.execute("UPDATE accounts SET credits=1100 WHERE id=?", [account])
+        .unwrap();
+    store.purchase_character_slot(account, 1).await.unwrap();
+    let mut left = store
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut right = store
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    for c in [&mut left, &mut right] {
+        equip(&store, c, vec![-1; 12]).await;
+        c.level = 2;
+        c.exp = 50;
+        fatal(c, 100);
+    }
+    let (a, b) = tokio::join!(
+        store.death(left.clone(), "left".into()),
+        other.death(right.clone(), "right".into())
+    );
+    if let Err(error) = &a {
+        assert!(
+            format!("{error:#}").contains("database is locked"),
+            "unexpected concurrent failure: {error:#}"
+        );
+        store
+            .death(left.clone(), "retry-left".into())
+            .await
+            .unwrap();
+    }
+    if let Err(error) = &b {
+        assert!(
+            format!("{error:#}").contains("database is locked"),
+            "unexpected concurrent failure: {error:#}"
+        );
+        store
+            .death(right.clone(), "retry-right".into())
+            .await
+            .unwrap();
+    }
+    let receipts = [phase5_receipt(&db, left.id), phase5_receipt(&db, right.id)];
+    for kind in [BonusKind::Ancestor, BonusKind::LegacyBuilder] {
+        assert_eq!(
+            receipts
+                .iter()
+                .flat_map(|r| r.rows.iter())
+                .filter(|r| r.kind == kind)
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        store.presentation(account).await.unwrap().fame,
+        receipts.iter().map(|r| r.total).sum::<i32>()
+    );
+}
+
+#[tokio::test]
+async fn all_death_fame_phase5_prior_paid_first_born() {
+    let (path, content, store, mut first) = setup().await;
+    equip(&store, &mut first, vec![-1; 12]).await;
+    fatal(&mut first, 100);
+    store
+        .death(first.clone(), "prior paid".into())
+        .await
+        .unwrap();
+    let db = Connection::open(&path).unwrap();
+    assert_eq!(phase5_receipt(&db, first.id).total, 143);
+    for (base, expected, first_born) in [(140, 140, false), (144, 158, true), (158, 158, false)] {
+        let mut ch = store
+            .create_prepared(
+                first.account,
+                content.get(crate::content::PRIEST).unwrap(),
+                None,
+            )
+            .await
+            .unwrap();
+        equip(&store, &mut ch, vec![-1; 12]).await;
+        fatal(&mut ch, base);
+        store.death(ch.clone(), "cross class".into()).await.unwrap();
+        let r = phase5_receipt(&db, ch.id);
+        assert_eq!(r.total, expected);
+        assert_eq!(
+            r.rows.iter().any(|r| r.kind == BonusKind::FirstBorn),
+            first_born
+        );
+    }
+    let mut deleted = store
+        .create(first.account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    deleted.level = 3;
+    deleted.exp = 200;
+    store.progress(deleted.clone()).await.unwrap();
+    store
+        .delete_character(deleted.account, deleted.id)
+        .await
+        .unwrap();
+    let mut ch = store
+        .create(first.account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.level = 2;
+    ch.exp = 50;
+    fatal(&mut ch, 1);
+    store
+        .death(ch.clone(), "deleted record".into())
+        .await
+        .unwrap();
+    assert!(
+        !phase5_receipt(&db, ch.id)
+            .rows
+            .iter()
+            .any(|r| r.kind == BonusKind::LegacyBuilder)
+    );
+}
+
+#[tokio::test]
+async fn all_death_fame_phase5_paid_readers_and_sort() {
+    let (path, content, store, mut high_base) = setup().await;
+    equip(&store, &mut high_base, vec![-1; 12]).await;
+    fatal(&mut high_base, 100);
+    store
+        .death(high_base.clone(), "higher base".into())
+        .await
+        .unwrap();
+    let account = store.list("full-low-base".into()).await.unwrap().id;
+    let mut low_base = store
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    equip(&store, &mut low_base, vec![-1; 12]).await;
+    low_base.level = 20;
+    low_base.exp = 200000;
+    fatal(&mut low_base, 90);
+    store
+        .death(low_base.clone(), "higher paid".into())
+        .await
+        .unwrap();
+    let db = Connection::open(&path).unwrap();
+    let paid = phase5_receipt(&db, low_base.id);
+    assert_eq!(paid.total, 411);
+    assert_eq!(store.presentation(account).await.unwrap().fame, 411);
+    let detail = store.fame(account, low_base.id).await.unwrap();
+    assert!(detail.contains("<TotalFame>411</TotalFame>"));
+    for row in &paid.rows {
+        assert!(detail.contains(&format!(
+            "<Bonus id=\"{}\" desc=\"{}\">{}</Bonus>",
+            row.kind.id(),
+            row.kind.description(),
+            row.amount
+        )));
+    }
+    let list = store
+        .legends("all".into(), account, low_base.id)
+        .await
+        .unwrap();
+    assert!(
+        list.find(&format!("charId=\"{}\"", low_base.id)).unwrap()
+            < list.find(&format!("charId=\"{}\"", high_base.id)).unwrap()
+    );
+    let mut zero = store
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    equip(&store, &mut zero, vec![-1; 12]).await;
+    zero.level = 20;
+    zero.exp = 200000;
+    fatal(&mut zero, 0);
+    store
+        .death(zero.clone(), "eligible zeros".into())
+        .await
+        .unwrap();
+    let receipt = phase5_receipt(&db, zero.id);
+    assert_eq!(receipt.total, 0);
+    assert_eq!(receipt.rows.len(), 5);
+    assert!(receipt.rows.iter().all(|r| r.amount == 0));
+    let xml = store.fame(account, zero.id).await.unwrap();
+    assert_eq!(xml.matches("<Bonus ").count(), 5);
+    drop(store);
+    let reopened = Store::open(&path, &content).unwrap();
+    assert_eq!(reopened.fame(account, low_base.id).await.unwrap(), detail);
+}
+
+#[tokio::test]
+async fn all_death_fame_phase5_archived_counter_policy() {
+    let (path, content, store, mut ch) = setup().await;
+    ch.shots = 101;
+    ch.hits = 102;
+    ch.tiles = 103;
+    ch.kills = 104;
+    ch.quests = 105;
+    ch.lifetime.shots = 7;
+    ch.lifetime.projectile_hits = 3;
+    ch.lifetime.tiles = 12;
+    ch.lifetime.kills = 8;
+    ch.lifetime.god_kills = 4;
+    ch.lifetime.oryx_kills = 1;
+    ch.lifetime.qualified_quests = 13;
+    ch.lifetime.level_assists = 14;
+    fatal(&mut ch, 10);
+    store
+        .death(ch.clone(), "counter policy".into())
+        .await
+        .unwrap();
+    let db = Connection::open(&path).unwrap();
+    let fields = [
+        "Shots",
+        "ShotsThatDamage",
+        "TilesUncovered",
+        "MonsterKills",
+        "GodKills",
+        "OryxKills",
+        "QuestsCompleted",
+        "LevelUpAssists",
+    ];
+    let before = phase5_state(&db);
+    let xml = store.fame(ch.account, ch.id).await.unwrap();
+    for (tag, value) in fields.iter().zip([7, 3, 12, 8, 4, 1, 13, 14]) {
+        assert!(xml.contains(&format!("<{tag}>{value}</{tag}>")));
+    }
+    assert_eq!(phase5_state(&db), before);
+    for policy in [ReceiptPolicy::LegacyPaid, ReceiptPolicy::EquipmentOnly] {
+        // Explicit historical paid fixtures, not new payments or policy conversion.
+        let mut old = store
+            .create(ch.account, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        old.shots = 101;
+        old.hits = 102;
+        old.tiles = 103;
+        old.kills = 104;
+        old.quests = 105;
+        old.lifetime = ch.lifetime.clone();
+        fatal(&mut old, 10);
+        let receipt = DeathFameReceipt::paid(&old, 0, policy).unwrap();
+        let raw = serde_json::to_string(&old).unwrap();
+        let tx = db.unchecked_transaction().unwrap();
+        tx.execute(
+            "UPDATE characters SET alive=0,stats=?2,items=?3 WHERE id=?1",
+            params![old.id, raw, serde_json::to_string(&[-1; 12]).unwrap()],
+        )
+        .unwrap();
+        tx.execute("INSERT INTO deaths(character,snapshot,killed_by,equipment_fame,receipt) VALUES(?1,?2,'labelled old paid fixture',0,?3)",params![old.id,raw,serde_json::to_string(&receipt).unwrap()]).unwrap();
+        tx.execute(
+            "UPDATE account_fame SET balance=balance+10,earned=earned+10 WHERE account=?1",
+            [old.account],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let before = phase5_state(&db);
+        let xml = store.fame(old.account, old.id).await.unwrap();
+        for (tag, value) in fields.iter().zip([101, 102, 103, 104, 0, 0, 105, 0]) {
+            assert!(xml.contains(&format!("<{tag}>{value}</{tag}>")));
+        }
+        assert_eq!(phase5_state(&db), before);
+    }
+    db.execute(
+        "UPDATE deaths SET snapshot=json_set(snapshot,'$.lifetime.version',999) WHERE character=?",
+        [ch.id],
+    )
+    .unwrap();
+    assert!(
+        store.fame(ch.account, ch.id).await.is_err(),
+        "malformed Historical must not substitute generic counters"
+    );
 }
