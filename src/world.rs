@@ -516,6 +516,7 @@ struct Spawn {
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
+    navigation_geometry: std::cell::RefCell<view::GeometryCache>,
     pub(crate) realm_layout: Option<String>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
@@ -1721,6 +1722,7 @@ impl World {
         Ok(Self {
             content,
             map,
+            navigation_geometry: std::cell::RefCell::default(),
             realm_layout: None,
             timed_ids: BTreeSet::new(),
             gun_ids,
@@ -5346,7 +5348,7 @@ impl World {
                 qa_actors=self.players.values().filter(|p| p.controller==Controller::Qa).count(),
                 discovered_tiles=self.players.values().map(|p|p.tiles.len()).sum::<usize>(),
                 cached_view_tiles=self.players.values().map(|p|p.view_tiles.borrow().tiles.len()).sum::<usize>(),
-                cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.capacity()*std::mem::size_of::<view::Tile>()).sum::<usize>(),
+                cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.allocated_bytes()).sum::<usize>(),
                 terrain_rebuilds=self.players.values().map(|p|p.view_tiles.borrow().rebuilds).sum::<u64>(),
                 incremental_terrain_tiles=self.players.values().map(|p|p.view_tiles.borrow().incremental_tiles).sum::<u64>(),
                 cloned_snapshot_tiles=self.players.values().map(|p|p.view_tiles.borrow().cloned_snapshot_tiles).sum::<u64>(),
@@ -5364,6 +5366,18 @@ mod cover_example;
 #[cfg(test)]
 #[path = "../examples/testing/timing.rs"]
 mod timing_example;
+
+#[cfg(test)]
+mod view_navigation_tests;
+
+#[cfg(test)]
+impl World {
+    fn view_geometry_for_test(&self) -> Arc<crate::navigation::Geometry> {
+        self.navigation_geometry
+            .borrow_mut()
+            .get_for_test(&self.map, &self.content)
+    }
+}
 
 #[cfg(test)]
 mod tests {

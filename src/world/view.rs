@@ -4,7 +4,8 @@ use super::*;
 pub(super) struct Terrain {
     map: std::sync::Weak<Map>,
     content: std::sync::Weak<Content>,
-    pub(super) tiles: Arc<Vec<Tile>>,
+    pub(super) tiles: Arc<crate::navigation::Tiles>,
+    geometry: Option<Arc<crate::navigation::Geometry>>,
     pub(super) rebuilds: u64,
     pub(super) incremental_tiles: u64,
     pub(super) cloned_snapshot_tiles: u64,
@@ -20,24 +21,55 @@ impl Terrain {
         if points.is_empty()
             || !self.map.ptr_eq(&Arc::downgrade(map))
             || !self.content.ptr_eq(&Arc::downgrade(content))
-            || self.tiles.len() + points.len() != known
         {
             return;
         }
-        if Arc::strong_count(&self.tiles) > 1 {
-            self.cloned_snapshot_tiles += self.tiles.len() as u64;
-        }
-        let tiles = Arc::make_mut(&mut self.tiles);
-        // Bound each bot's retained payload instead of doubling a large explored snapshot's capacity.
-        tiles.reserve_exact(points.len());
-        tiles.extend(points.iter().map(|&(x, y, ground)| Tile {
-            x,
-            y,
-            ground,
-            ground_speed: content.grounds[&ground],
-        }));
-        tiles.sort_unstable_by_key(|t| (t.x, t.y));
+        assert_eq!(
+            self.tiles.len() + points.len(),
+            known,
+            "navigation discovery delta missing"
+        );
+        Arc::make_mut(&mut self.tiles).discover(
+            self.geometry
+                .as_ref()
+                .expect("navigation producer missing geometry"),
+            points.iter().map(|&(x, y, _)| (x, y)),
+        );
         self.incremental_tiles += points.len() as u64;
+    }
+}
+
+#[derive(Default)]
+pub(super) struct GeometryCache {
+    map: std::sync::Weak<Map>,
+    content: std::sync::Weak<Content>,
+    geometry: Option<Arc<crate::navigation::Geometry>>,
+}
+impl GeometryCache {
+    #[cfg(test)]
+    pub(super) fn get_for_test(
+        &mut self,
+        map: &Arc<Map>,
+        content: &Arc<Content>,
+    ) -> Arc<crate::navigation::Geometry> {
+        self.get(map, content)
+    }
+
+    fn get(&mut self, map: &Arc<Map>, content: &Arc<Content>) -> Arc<crate::navigation::Geometry> {
+        if !self.map.ptr_eq(&Arc::downgrade(map)) || !self.content.ptr_eq(&Arc::downgrade(content))
+        {
+            self.geometry = Some(crate::navigation::Geometry::new(
+                (map.width, map.height),
+                map.cells.iter().map(|c| c.ground).collect(),
+                &content.grounds,
+            ));
+            self.map = Arc::downgrade(map);
+            self.content = Arc::downgrade(content);
+        }
+        self.geometry
+            .as_ref()
+            .expect("navigation geometry not initialized")
+            .clone()
     }
 }
 
@@ -60,7 +92,7 @@ pub struct PlayerView {
     pub map: MapInfo,
     pub character: OwnCharacter,
     pub lifecycle: Lifecycle,
-    pub tiles: Arc<Vec<Tile>>,
+    pub tiles: Arc<crate::navigation::Tiles>,
     pub objects: Vec<VisibleObject>,
     pub projectiles: Vec<VisibleProjectile>,
 }
@@ -196,33 +228,25 @@ impl Directory {
             let map = Arc::downgrade(&w.map);
             let content = Arc::downgrade(&w.content);
             // Discovery only grows within a session. Weak identities invalidate copy-on-write changes without retaining an old map.
-            if cache.tiles.len() != p.tiles.len()
-                || !cache.map.ptr_eq(&map)
-                || !cache.content.ptr_eq(&content)
-            {
+            if !cache.map.ptr_eq(&map) || !cache.content.ptr_eq(&content) {
                 let refreshing = crate::performance::Measure::start();
                 cache.rebuilds += 1;
-                cache.tiles = Arc::new(
-                    p.tiles
-                        .iter()
-                        .map(|(x, y)| {
-                            let cell =
-                                &w.map.cells[*y as usize * w.map.width as usize + *x as usize];
-                            Tile {
-                                x: *x,
-                                y: *y,
-                                ground: cell.ground,
-                                ground_speed: w.content.grounds[&cell.ground],
-                            }
-                        })
-                        .collect(),
-                );
+                let geometry = w.navigation_geometry.borrow_mut().get(&w.map, &w.content);
+                cache.tiles = Arc::new(crate::navigation::Tiles::new(
+                    geometry.clone(),
+                    p.tiles.iter().copied(),
+                ));
+                cache.geometry = Some(geometry);
                 cache.map = map;
                 cache.content = content;
                 w.performance
                     .borrow_mut()
                     .work("terrain_rebuild", refreshing);
             }
+            ensure!(
+                cache.tiles.len() == p.tiles.len(),
+                "navigation knowledge missed discovery delta"
+            );
             cache.tiles.clone()
         };
         // A newly discovered shooter does not reveal its earlier, unreceived shots.

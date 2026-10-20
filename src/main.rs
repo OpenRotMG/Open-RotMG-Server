@@ -9,6 +9,7 @@ mod dungeon;
 mod encounter;
 mod endgame;
 mod loot;
+mod navigation;
 mod performance;
 mod quest;
 mod server;
