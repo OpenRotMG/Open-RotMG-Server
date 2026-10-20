@@ -71,6 +71,7 @@ mod tests {
         let proof = store.browser_identity(id).await.unwrap();
         let discord = "12345678901234567".to_string();
         store.choose_name(id, "BrowserQA".into()).await.unwrap();
+        let legacy_code = store.issue_discord_code(id).await.unwrap();
         assert_eq!(
             store
                 .link_browser_discord(proof.clone(), discord.clone())
@@ -123,7 +124,60 @@ mod tests {
             .link_browser_discord(proof.clone(), discord.clone())
             .await
             .unwrap();
-        store.issue_reset(discord.clone(), None).await.unwrap();
+        let reset = store.issue_reset(discord.clone(), None).await.unwrap();
+        let consent = store.issue_recovery_code(id).await.unwrap();
+        let peer_discord = "12345678901234569".to_string();
+        store
+            .link_browser_discord(
+                store.browser_identity(other).await.unwrap(),
+                peer_discord.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.unlink_discord(discord.clone()).await.unwrap(),
+            Some(id)
+        );
+        assert_eq!(store.unlink_discord(discord.clone()).await.unwrap(), None);
+        assert!(store.linked_account(discord.clone()).await.is_err());
+        assert!(store.reset_account(reset.clone()).await.is_err());
+        let prepared = store
+            .prepare_password("unused-password".into())
+            .await
+            .unwrap();
+        assert!(store.finish_reset(reset, prepared).await.is_err());
+        assert!(
+            store
+                .issue_reset(discord.clone(), Some(consent))
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .redeem_discord_code(legacy_code, discord.clone())
+                .await
+                .is_err()
+        );
+        assert_eq!(store.linked_account(peer_discord).await.unwrap(), other);
+        assert_eq!(store.browser_identity(id).await.unwrap(), proof);
+        store
+            .link_browser_discord(proof.clone(), discord.clone())
+            .await
+            .unwrap();
+        store
+            .call(move |db| {
+                let credits: i32 =
+                    db.query_row("SELECT credits FROM accounts WHERE id=?1", [id], |r| {
+                        r.get(0)
+                    })?;
+                assert_eq!(
+                    credits, 200,
+                    "Unlink/relink must not repeat the Gold reward"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         let verifier = store
             .prepare_password("changed-password".into())
             .await

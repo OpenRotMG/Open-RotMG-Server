@@ -543,13 +543,13 @@ impl World {
             0x6c2 => (Motion::Stationary, 0.),
             0x92d => (Motion::Pace { distance: 3. }, 5.),
             0x928 if e.stage == Some(0) => (Motion::Pace { distance: 3. }, 3.),
-            0x928 if e.stage.unwrap_or(0) >= 7 && elapsed % 4000 >= 2000 => {
-                (Motion::Stationary, 0.)
-            }
             0x928 if e.stage.unwrap_or(0) >= 7 => (
-                Motion::Chase {
+                Motion::Follow {
                     sight: 10.,
                     stop: 2.,
+                    idle: 0.,
+                    duration: 2000,
+                    cooldown: 2000,
                 },
                 6.,
             ),

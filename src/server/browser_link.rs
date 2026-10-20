@@ -2,7 +2,7 @@ use super::hiscores::{json_error, json_result, private_denial};
 use super::*;
 use crate::store::browser_link::BrowserIdentity;
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
@@ -142,6 +142,7 @@ impl OAuth {
 
 struct Pending {
     discord: String,
+    account: AtomicI32,
     expires: Instant,
     used: AtomicU8,
 }
@@ -160,7 +161,7 @@ struct Browser {
     flow: Option<Flow>,
     // A newer flow must cancel callbacks already waiting on Discord's network response.
     authorization: Option<String>,
-    completion: Option<(String, String)>,
+    completion: Option<(String, String, Arc<Pending>)>,
 }
 impl Browser {
     fn touch(&mut self, tab: &str) -> Result<&mut Tab> {
@@ -440,6 +441,7 @@ pub(super) async fn issue(
                 hash(&token),
                 Arc::new(Pending {
                     discord: request.discord_id,
+                    account: AtomicI32::new(0),
                     expires: Instant::now() + TTL,
                     used: AtomicU8::new(0),
                 }),
@@ -454,6 +456,71 @@ pub(super) async fn issue(
 pub(super) struct StartRequest {
     token: String,
 }
+pub(super) async fn status(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<StartRequest>,
+) -> Response {
+    // Read-only polling must not exhaust the bot's shared mutation-attempt limit.
+    if super::hiscores::authorize(&a, peer, &headers).is_err() {
+        return json_error(StatusCode::FORBIDDEN, "account API authorization denied");
+    }
+    json_result(
+        async {
+            token(&request.token)?;
+            let registry = a
+                .browser_links
+                .registry
+                .lock()
+                .expect("browser registry poisoned");
+            let state = match registry.pending.get(&hash(&request.token)) {
+                Some(p) if p.used.load(Ordering::SeqCst) == 3 => "linked",
+                Some(p) if p.expires > Instant::now() && p.used.load(Ordering::SeqCst) < 2 => {
+                    "pending"
+                }
+                _ => "expired",
+            };
+            Ok(serde_json::json!({"state":state}))
+        }
+        .await,
+    )
+}
+
+pub(super) async fn unlink(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<DiscordRequest>,
+) -> Response {
+    if let Some(denied) = private_denial(&a, peer, &headers) {
+        return denied;
+    }
+    json_result(
+        async {
+            // Fence in-flight OAuth callbacks and resets before revoking their grants.
+            let _authentication = a.authentication.write().await;
+            let account = a.store.unlink_discord(request.discord_id.clone()).await?;
+            a.browser_links
+                .registry
+                .lock()
+                .expect("browser registry poisoned")
+                .pending
+                .retain(|_, p| {
+                    if p.discord != request.discord_id
+                        && account != Some(p.account.load(Ordering::SeqCst))
+                    {
+                        return true;
+                    }
+                    p.used.store(2, Ordering::SeqCst);
+                    false
+                });
+            Ok(serde_json::json!({"unlinked":account.is_some()}))
+        }
+        .await,
+    )
+}
+
 pub(super) async fn start(
     State(a): State<App>,
     headers: HeaderMap,
@@ -496,6 +563,7 @@ pub(super) async fn start(
                 a.store.browser_identity(identity.account).await? == identity,
                 "game authentication changed; sign in again"
             );
+            pending.account.store(identity.account, Ordering::SeqCst);
             let oauth = a
                 .browser_links
                 .oauth
@@ -561,11 +629,16 @@ pub(super) async fn callback(
         ensure!(browser.identity()?.as_ref() == Some(&flow.identity), "game account changed; run /link again");
         let _authentication = a.authentication.read().await;
         ensure!(flow.pending.expires > Instant::now() && flow.pending.used.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok(), "link expired or already used; run /link again");
-        let name = a.store.link_browser_discord(flow.identity.clone(), discord).await?;
-        gold::sync(&a, flow.identity.account).await?;
+        let linked: Result<String> = async {
+            let name = a.store.link_browser_discord(flow.identity.clone(), discord).await?;
+            gold::sync(&a, flow.identity.account).await?;
+            Ok(name)
+        }.await;
+        flow.pending.used.store(if linked.is_ok() { 3 } else { 2 }, Ordering::SeqCst);
+        let name = linked?;
         let receipt = random();
         browser.authorization = None;
-        browser.completion = Some((hash(&receipt), name));
+        browser.completion = Some((hash(&receipt), name, flow.pending));
         Ok(receipt)
     }.await;
     let mut url =
@@ -597,15 +670,21 @@ pub(super) async fn complete(
             token(&request.token)?;
             let browser = a.browser_links.browser(&headers)?;
             let mut browser = browser.lock().await;
-            let (expected, _) = browser
+            let (expected, _, pending) = browser
                 .completion
                 .as_ref()
                 .context("link completion could not be confirmed; run /link again")?;
             ensure!(
-                *expected == hash(&request.token),
+                *expected == hash(&request.token) && pending.used.load(Ordering::SeqCst) == 3,
                 "link completion receipt rejected"
             );
-            let (_, name) = browser.completion.take().unwrap();
+            let _authentication = a.authentication.read().await;
+            ensure!(
+                a.store.linked_account(pending.discord.clone()).await?
+                    == pending.account.load(Ordering::SeqCst),
+                "account was unlinked; run /link again"
+            );
+            let (_, name, _) = browser.completion.take().unwrap();
             Ok(serde_json::json!({"name":name}))
         }
         .await,

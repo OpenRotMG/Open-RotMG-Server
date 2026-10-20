@@ -69,7 +69,7 @@ fn configure(a: &mut App, provider: &str) {
         ..Service::default()
     });
 }
-async fn grant(a: &App, discord: &str) -> String {
+fn private_headers(a: &App) -> HeaderMap {
     let mut h = HeaderMap::new();
     h.insert(
         "authorization",
@@ -77,6 +77,50 @@ async fn grant(a: &App, discord: &str) -> String {
             .parse()
             .unwrap(),
     );
+    h
+}
+async fn private_request(a: &App, path: &str, body: serde_json::Value) -> serde_json::Value {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}{path}", listener.local_addr().unwrap());
+    let router = super::super::routes(a, PathBuf::new());
+    let serving = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let response = reqwest::Client::new()
+        .post(url)
+        .headers(private_headers(a))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json().await.unwrap();
+    serving.abort();
+    body
+}
+async fn link_status(a: &App, token: &str) -> serde_json::Value {
+    private_request(
+        a,
+        "/internal/discord/link/status",
+        serde_json::json!({"token":token}),
+    )
+    .await
+}
+async fn unlink_caller(a: &App, discord: &str) -> serde_json::Value {
+    private_request(
+        a,
+        "/internal/discord/unlink",
+        serde_json::json!({"discord_id":discord}),
+    )
+    .await
+}
+async fn grant(a: &App, discord: &str) -> String {
+    let h = private_headers(a);
     let v = value(
         issue(
             State(a.clone()),
@@ -314,6 +358,17 @@ async fn automatic_link_requires_both_identities_and_enables_recovery_without_an
         .await
         .unwrap();
     let token = grant(&a, "12345678901234567").await;
+    for _ in 0..25 {
+        assert_eq!(link_status(&a, &token).await["state"], "pending");
+    }
+    let pending = a.browser_links.registry.lock().unwrap().pending[&hash(&token)].clone();
+    pending.used.store(1, Ordering::SeqCst);
+    assert_eq!(
+        link_status(&a, &token).await["state"],
+        "pending",
+        "A claim is not committed success"
+    );
+    pending.used.store(0, Ordering::SeqCst);
     let (cookie, tab) = browser_tab(&a, None).await;
     assert_eq!(begin(&a, &cookie, &token).await["state"], "signed_out");
     native_login(&a, &cookie, &tab, "flow@example.test", "test-password").await;
@@ -353,6 +408,42 @@ async fn automatic_link_requires_both_identities_and_enables_recovery_without_an
             .contains("already used")
     );
     assert!(finish(&a, &cookie, &auth).await["error"].is_string());
+    assert_eq!(link_status(&a, &token).await["state"], "linked");
+    let new_grant = grant(&a, "12345678901234567").await;
+    let auth = begin(&a, &cookie, &new_grant).await;
+    let response = authorization_response(&a, &cookie, &auth).await;
+    let location = reqwest::Url::parse(response.headers()["location"].to_str().unwrap()).unwrap();
+    let receipt = location
+        .fragment()
+        .unwrap()
+        .strip_prefix("result=")
+        .unwrap()
+        .to_owned();
+    // The browser can retain its receipt after the expired grant registry was pruned.
+    a.browser_links.registry.lock().unwrap().pending.clear();
+    assert_eq!(
+        unlink_caller(&a, "12345678901234567").await["unlinked"],
+        true
+    );
+    assert!(
+        value(
+            complete(
+                State(a.clone()),
+                headers(&a, Some(&cookie)),
+                Json(StartRequest { token: receipt })
+            )
+            .await
+        )
+        .await["error"]
+            .is_string()
+    );
+    assert_eq!(link_status(&a, &token).await["state"], "expired");
+    assert!(
+        a.store
+            .issue_reset("12345678901234567".into(), None)
+            .await
+            .is_err()
+    );
     provider.abort();
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -555,4 +646,115 @@ async fn superseded_in_flight_oauth_cannot_link_the_previous_discord_identity() 
         .unwrap();
     provider.abort();
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn unlink_fences_a_delayed_oauth_callback_and_private_routes_reject_public_callers() {
+    for linked in [false, true] {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let router = Router::new()
+        .route("/token", post(|| async { Json(serde_json::json!({"access_token":"fixture-access","token_type":"Bearer","scope":"identify"})) }))
+        .route("/user", get({
+            let entered=entered.clone(); let release=release.clone();
+            move || { let entered=entered.clone(); let release=release.clone(); async move {
+                entered.notify_one(); release.notified().await;
+                Json(serde_json::json!({"id":"12345678901234567"}))
+            }}
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let provider = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let (dir, mut a) = super::super::account_actions::tests::fixture();
+        configure(&mut a, &origin);
+        let account = a
+            .store
+            .register(
+                "unlink-race".into(),
+                "unlink@example.test".into(),
+                "test-password".into(),
+            )
+            .await
+            .unwrap();
+        if linked {
+            a.store
+                .link_browser_discord(
+                    a.store.browser_identity(account).await.unwrap(),
+                    "12345678901234568".into(),
+                )
+                .await
+                .unwrap();
+        }
+        let (cookie, tab) = browser_tab(&a, None).await;
+        native_login(&a, &cookie, &tab, "unlink@example.test", "test-password").await;
+        let token = grant(&a, "12345678901234567").await;
+        let auth = begin(&a, &cookie, &token).await;
+        let callback = tokio::spawn({
+            let a = a.clone();
+            let cookie = cookie.clone();
+            async move { finish(&a, &cookie, &auth).await }
+        });
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
+        assert_eq!(
+            unlink_caller(
+                &a,
+                if linked {
+                    "12345678901234568"
+                } else {
+                    "12345678901234567"
+                }
+            )
+            .await["unlinked"],
+            linked
+        );
+        release.notify_one();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), callback)
+                .await
+                .unwrap()
+                .unwrap()["error"]
+                .is_string()
+        );
+        assert!(
+            a.store
+                .linked_account("12345678901234567".into())
+                .await
+                .is_err()
+        );
+        for response in [
+            status(
+                State(a.clone()),
+                ConnectInfo("127.0.0.1:1".parse().unwrap()),
+                HeaderMap::new(),
+                Json(StartRequest {
+                    token: token.clone(),
+                }),
+            )
+            .await,
+            unlink(
+                State(a.clone()),
+                ConnectInfo("127.0.0.1:1".parse().unwrap()),
+                HeaderMap::new(),
+                Json(DiscordRequest {
+                    discord_id: "12345678901234567".into(),
+                }),
+            )
+            .await,
+            unlink(
+                State(a.clone()),
+                ConnectInfo("192.0.2.1:1".parse().unwrap()),
+                private_headers(&a),
+                Json(DiscordRequest {
+                    discord_id: "12345678901234567".into(),
+                }),
+            )
+            .await,
+        ] {
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        }
+        provider.abort();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

@@ -80,6 +80,7 @@ pub(super) async fn discord_recover(
     if let Some(response) = private_denial(&a, peer, &headers) {
         return response;
     }
+    let _authentication = a.authentication.read().await;
     json_result(
         a.store
             .issue_reset(request.discord_id, request.code)

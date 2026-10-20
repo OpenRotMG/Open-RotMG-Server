@@ -160,6 +160,8 @@ impl World {
                         sight: 20.,
                         stop: 3.,
                         idle: nr_speed(0.4),
+                        duration: 0,
+                        cooldown: 0,
                     },
                     nr_speed(1.),
                 ),

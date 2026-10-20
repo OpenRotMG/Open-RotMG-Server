@@ -183,14 +183,14 @@ impl World {
                 direction: -1.,
             });
         }
+        if matches!(kind, 0x67e..=0x682) {
+            self.entities.get_mut(&id).unwrap().stage.get_or_insert(0);
+        }
         if finale::HEROES.contains(&kind) {
             let initial = self.entities[&id].stage.is_none();
             if initial {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.stage = Some(0);
-                if kind == 0x668 {
-                    e.reaction_until = self.now + 5000;
-                }
             }
             if initial || self.now >= self.entities[&id].next_aux {
                 self.entities.get_mut(&id).unwrap().next_aux = self.now + 2000;
@@ -298,6 +298,106 @@ impl World {
             elapsed,
         ))
     }
+    pub(super) fn hero_movement(
+        &mut self,
+        id: i32,
+        target: Option<Pos>,
+        delta: u64,
+    ) -> Result<(crate::encounter::Motion, f32, bool)> {
+        use crate::encounter::{Anchor, Motion};
+        let e = &self.entities[&id];
+        let paralyzed = e.conditions(self.now) & condition::bit(condition::PARALYZED) != 0;
+        let stage = e
+            .stage
+            .context("activated Realm hero movement phase missing")?;
+        let distance = target.map(|p| e.pos.distance(p));
+        let (motion, speed, completed, next) = match e.kind {
+            0x668 => match stage {
+                0 => (Motion::WanderHome { radius: 1. }, 3., false, 1),
+                1 => (
+                    if paralyzed || distance.is_some_and(|d| d > 2. && d < 10.) {
+                        Motion::Chase {
+                            sight: 10.,
+                            stop: 2.,
+                        }
+                    } else {
+                        Motion::Stationary
+                    },
+                    3.,
+                    !paralyzed && distance.is_none_or(|d| d <= 2. || d >= 10.),
+                    2,
+                ),
+                2 => (
+                    Motion::Protect {
+                        anchor: Anchor::Home,
+                        distance: 1.,
+                    },
+                    3.,
+                    !paralyzed
+                        && (e.pos.x - e.home.x).abs() <= 1.
+                        && (e.pos.y - e.home.y).abs() <= 1.,
+                    0,
+                ),
+                _ => bail!("invalid Red Demon movement phase {stage}"),
+            },
+            0x67e..=0x682 => {
+                if distance.is_none_or(|d| d >= 10.) {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    if e.reaction_until > self.now.saturating_sub(delta) {
+                        e.reaction_until += delta;
+                    }
+                    return Ok((Motion::Wander, 10., false));
+                }
+                match stage {
+                    0 => (
+                        Motion::Chase {
+                            sight: 10.,
+                            stop: 2.,
+                        },
+                        10.,
+                        !paralyzed && distance.is_some_and(|d| d <= 2.),
+                        1,
+                    ),
+                    1 => (Motion::Retreat { distance: 8. }, 8., false, 0),
+                    _ => bail!("invalid Cyclops movement phase {stage}"),
+                }
+            }
+            _ => bail!("unsupported queued Realm hero {:#x}", e.kind),
+        };
+        let timed: Option<u64> = if e.kind == 0x668 && stage < 2 {
+            Some(5000)
+        } else if e.kind != 0x668 && stage == 1 {
+            Some(1000)
+        } else {
+            None
+        };
+        let e = self.entities.get_mut(&id).unwrap();
+        if let Some(duration) = timed
+            && e.reaction_until == 0
+        {
+            e.reaction_until = self.now + duration.saturating_sub(delta);
+        }
+        let completed = completed || timed.is_some() && self.now >= e.reaction_until;
+        e.stage = Some(if completed { next } else { stage });
+        if completed {
+            e.reaction_until = 0;
+            tracing::debug!(
+                entity = id,
+                stage = next,
+                "Realm hero movement child completed"
+            );
+        }
+        // ReturnSpawn's axis-aligned completion must not move again before the next child.
+        Ok((
+            if completed && timed.is_none() {
+                Motion::Stationary
+            } else {
+                motion
+            },
+            speed,
+            completed,
+        ))
+    }
     pub(super) fn finale_movement(
         &mut self,
         id: i32,
@@ -307,72 +407,6 @@ impl World {
         use crate::encounter::{Anchor, Motion, nr_speed};
         let e = &self.entities[&id];
         match e.kind {
-            0x668 => {
-                let old = e
-                    .stage
-                    .context("activated Red Demon movement phase missing")?;
-                let stage = match old {
-                    0 if self.now >= e.reaction_until => 1,
-                    1 if self.now >= e.reaction_until
-                        || e.conditions(self.now) & condition::bit(condition::PARALYZED) == 0
-                            && target.is_none_or(|p| {
-                                e.pos.distance(p) <= 2. || e.pos.distance(p) >= 10.
-                            }) =>
-                    {
-                        2
-                    }
-                    2 if e.conditions(self.now) & condition::bit(condition::PARALYZED) == 0
-                        && (e.pos.x - e.home.x).abs() <= 1.
-                        && (e.pos.y - e.home.y).abs() <= 1. =>
-                    {
-                        0
-                    }
-                    _ => old,
-                };
-                if stage != old {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    e.stage = Some(stage);
-                    e.reaction_until = if stage < 2 { self.now + 5000 } else { 0 };
-                    tracing::debug!(entity = id, stage, "Red Demon movement phase entered");
-                }
-                return Ok(match stage {
-                    0 => (Motion::WanderHome { radius: 1. }, 3.),
-                    1 if target.is_some() => (
-                        Motion::Chase {
-                            sight: 10.,
-                            stop: 2.,
-                        },
-                        3.,
-                    ),
-                    1 => (Motion::WanderHome { radius: 1. }, 3.),
-                    2 => (
-                        Motion::Protect {
-                            anchor: Anchor::Home,
-                            distance: 1.,
-                        },
-                        3.,
-                    ),
-                    _ => bail!("invalid Red Demon movement phase"),
-                });
-            }
-            0x67e..=0x682 => {
-                let Some(target) = target.filter(|p| e.pos.distance(*p) < 10.) else {
-                    return Ok((Motion::Wander, 10.));
-                };
-                if self.now < e.reaction_until || e.pos.distance(target) <= 2. {
-                    if self.now >= e.reaction_until {
-                        self.entities.get_mut(&id).unwrap().reaction_until = self.now + 1000;
-                    }
-                    return Ok((Motion::Retreat { distance: 8. }, 8.));
-                }
-                return Ok((
-                    Motion::Chase {
-                        sight: 10.,
-                        stop: 2.,
-                    },
-                    10.,
-                ));
-            }
             0xd7e if e.stage == Some(2) => return Ok((Motion::Stationary, 0.)),
             0xd7e => {
                 return Ok((
@@ -380,6 +414,8 @@ impl World {
                         sight: 10.,
                         stop: 2.,
                         idle: nr_speed(0.2),
+                        duration: 0,
+                        cooldown: 0,
                     },
                     nr_speed(0.4),
                 ));
@@ -391,6 +427,8 @@ impl World {
                         sight: 10.,
                         stop: 1.,
                         idle: nr_speed(if charge { 0.3 } else { 0.2 }),
+                        duration: 0,
+                        cooldown: 0,
                     },
                     nr_speed(if charge { 1.2 } else { 0.4 }),
                 ));
@@ -401,6 +439,8 @@ impl World {
                         sight: 10.,
                         stop: 3.,
                         idle: nr_speed(0.2),
+                        duration: 0,
+                        cooldown: 0,
                     },
                     nr_speed(if elapsed % 7500 >= 5000 { 0.7 } else { 0.6 }),
                 ));
@@ -438,6 +478,8 @@ impl World {
                         sight: 8.,
                         stop: 3.,
                         idle: nr_speed(0.2),
+                        duration: 0,
+                        cooldown: 0,
                     },
                     nr_speed(0.2),
                 ));

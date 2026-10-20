@@ -60,7 +60,7 @@ impl Store {
         Ok(code)
     }
     pub async fn issue_reset(&self, discord: String, code: Option<String>) -> Result<String> {
-        let account = self.linked_account(discord).await?;
+        discord_id(&discord)?;
         let consent_hash = code.map(|c| code_hash(&c)).transpose()?;
         let time = now()?;
         let token = format!(
@@ -69,8 +69,9 @@ impl Store {
             rand::random::<u128>()
         );
         let hash = reset_hash(&token)?;
-        self.call(move |db| {
+        let account = self.call(move |db| {
             let tx = db.transaction()?;
+            let account: i32 = tx.query_row("SELECT l.account FROM discord_links l JOIN credentials c ON c.account=l.account JOIN accounts a ON a.id=l.account WHERE l.discord_id=?1 AND a.guid IS NOT NULL AND NOT EXISTS(SELECT 1 FROM shore_bots b WHERE b.account=l.account)", [discord], |r| r.get(0)).optional()?.context("no authenticated game account linked to your Discord identity")?;
             if let Some(consent_hash) = consent_hash {
                 let valid: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM recovery_codes WHERE account=?1 AND hash=?2 AND expires_at>?3)", params![account,consent_hash,time], |r| r.get(0))?;
                 ensure!(valid, "invalid or expired recovery consent code");
@@ -83,10 +84,38 @@ impl Store {
             tx.execute("INSERT INTO password_resets(account,hash,issued_at,expires_at) VALUES(?1,?2,?3,?4) ON CONFLICT(account) DO UPDATE SET hash=excluded.hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at", params![account,hash,time,time+900])?;
             tx.execute("UPDATE discord_recovery SET last_issued_at=?2 WHERE account=?1", params![account,time])?;
             tx.commit()?;
-            Ok(())
+            Ok(account)
         }).await?;
         tracing::info!(account, "private password reset link issued");
         Ok(token)
+    }
+    pub async fn unlink_discord(&self, discord: String) -> Result<Option<i32>> {
+        discord_id(&discord)?;
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let account: Option<i32> = tx
+                .query_row(
+                    "SELECT account FROM discord_links WHERE discord_id=?1",
+                    [&discord],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(account) = account {
+                for table in [
+                    "password_resets",
+                    "recovery_codes",
+                    "discord_codes",
+                    "discord_recovery",
+                    "discord_links",
+                ] {
+                    tx.execute(&format!("DELETE FROM {table} WHERE account=?1"), [account])?;
+                }
+            }
+            tx.commit()?;
+            tracing::info!(account, "Discord association and recovery revoked");
+            Ok(account)
+        })
+        .await
     }
     pub async fn disable_recovery(&self, account: i32) -> Result<()> {
         self.call(move |db| {

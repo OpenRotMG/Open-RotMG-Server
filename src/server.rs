@@ -2784,6 +2784,8 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/internal/discord/announce", post(discord_announce))
         .route("/internal/discord/link", post(discord_link))
         .route("/internal/discord/link/start", post(browser_link::issue))
+        .route("/internal/discord/link/status", post(browser_link::status))
+        .route("/internal/discord/unlink", post(browser_link::unlink))
         .route("/api/account/browser", post(browser_link::browser))
         .route("/api/account/browser/close", post(browser_link::close))
         .route("/api/account/link/start", post(browser_link::start))
