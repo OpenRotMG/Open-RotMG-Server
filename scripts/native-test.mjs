@@ -181,6 +181,10 @@ export async function runCase(scenario, options) {
           await call('Fetch.continueRequest',{requestId:e.requestId});guestDone=true;resolveGuest();
         })().catch(error=>{rejectGuest(error);fail(error);});
       }});
+      if(controller.signal.aborted){
+        try{connection.close();}catch(error){throw new AggregateError([controller.signal.reason,error],'Aborted native join: '+String(controller.signal.reason)+'; connection close failed: '+String(error));}
+        check();
+      }
       openedConnections.push(connection);
       const window=await call('Browser.getWindowForTarget',{targetId:browser.target}),bounds=(await call('Browser.getWindowBounds',{windowId:window.windowId})).bounds;
       assert(bounds.left>=0&&bounds.left+bounds.width<=1400&&bounds.width<=1300,'Owned native windows must remain unoccluded on the private display');
