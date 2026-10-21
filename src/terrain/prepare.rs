@@ -13,7 +13,7 @@ const CELLS: usize = SIDE * SIDE;
 const OBJECTS: &str = "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad91534b72";
 const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7";
 
-const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 6] = [
+const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 10] = [
     (
         "classic-world-04-reconstruction",
         "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5",
@@ -42,6 +42,26 @@ const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 6] = [
     (
         "classic-world-05-reconstruction",
         "9f57488fdccf12fc1ad5f8970d1feec746ea4e1bbc5ed6718fee7d3d4dbd55c0",
+        2100,
+    ),
+    (
+        "classic-world-07-reconstruction",
+        "f449de66330c98caf611c8575a2d731baa27b47a2eac96d043a232de2ab00372",
+        2100,
+    ),
+    (
+        "classic-world-09-reconstruction",
+        "726aa16890f7caaa73dc642b64901e94ed4f44cb974e5001c98897f1b8a89736",
+        2100,
+    ),
+    (
+        "classic-world-11-reconstruction",
+        "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11cea6f65976bcb20",
+        2100,
+    ),
+    (
+        "classic-world-12-reconstruction",
+        "fe91b3e5ecd63110f30455c6f63ff66b575483d2e39d40a5d4aaa33b838b73a0",
         2100,
     ),
 ];
@@ -1689,6 +1709,13 @@ mod tests {
     #[test]
     fn realm_source_open_world05_synthetic_shape_policy_and_baseline_rejection() {
         source_local_open(5);
+    }
+
+    #[test]
+    fn realm_source_open_remaining_2100_synthetic_shape_policy_and_baseline_rejection() {
+        for index in 6..SOURCE_LOCAL_IDENTITIES.len() {
+            source_local_open(index);
+        }
     }
 
     fn source_local_open(index: usize) {
