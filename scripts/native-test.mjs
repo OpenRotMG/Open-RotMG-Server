@@ -57,7 +57,7 @@ export async function runCase(scenario, options) {
   const out=options.runDir;assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
   const previousOwner=process.env.PI_BROWSER_OWNER;
   const controller=new AbortController(), children=[], files=[], participants=[], openedConnections=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
-  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
+  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,joining=false,guardian,registryState;
   const elapsed=()=>Math.round(performance.now()-started);
   const save=async()=>{await writeFile(join(out,'result.tmp'),JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',{mode:0o600});await rename(join(out,'result.tmp'),join(out,'result.json'));};
   const register=()=>{registryState.children=children.filter(r=>r.identity).map(r=>({...r.identity,name:r.name}));registry(join(out,'children.json'),registryState);};
@@ -147,8 +147,10 @@ export async function runCase(scenario, options) {
       return env;
     }
     async function addClient(spec){
-      check();assert(participants.length<3,'At most three prepared native clients');
-      assert(Number.isInteger(spec.world)||typeof spec.world==='string','Fixture requires world ID or explicit prepared template');
+      check();assert(!joining,'A native client join is already pending');joining=true;
+      try{
+      spec=await prepareFixture({fixture:spec},api,controller.signal);check();
+      assert(participants.length<3,'At most three prepared native clients');
       const worldId=typeof spec.world==='string'?(await api({op:'world',template:spec.world})).result.world:spec.world;
       check();assert(Number.isInteger(worldId),'Prepared fixture must resolve to an explicit world ID');
       const chromePort=await freePort();check();
@@ -210,7 +212,7 @@ export async function runCase(scenario, options) {
       await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
       return participants.at(-1);
-
+      }finally{joining=false;}
     }
     const first=await bounded('browserAndFixture',()=>addClient(spec));
     ({actor,account,connection,browser,chromePort}=first);report.actor=actor;report.account=account;
@@ -226,9 +228,9 @@ export async function runCase(scenario, options) {
           const results=await Promise.allSettled([action,shot]);for(const r of results)if(r.status==='rejected')throw r.reason;return results[0].value;
         }};};
       const game=gameFor(first);
-      report.before=await game.observe();await fixtureModule.run(game);report.after=await game.observe();report.activeGameMs=report.after.game_ms-report.before.game_ms;
+      report.before=await game.observe();await fixtureModule.run(game);assert(!joining,'Native case returned with a pending join');report.after=await game.observe();report.activeGameMs=report.after.game_ms-report.before.game_ms;
     });
-    check();report.status='passed';
+    check();assert(!joining,'Native case ended with a pending join');report.status='passed';
   } catch(error) {
     primary=error;report.status='failed';report.failure={phase,error:String(error),stack:error.stack};
     await save();
