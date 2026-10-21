@@ -36,6 +36,7 @@ mod fauna_births;
 mod fauna_special;
 mod ghost_ship;
 mod gods;
+mod ground_dye;
 
 mod gold;
 mod golems;
@@ -493,6 +494,7 @@ impl PortalPlan {
 }
 #[derive(Clone)]
 pub struct InventoryPlan {
+    ground_dye: Option<ground_dye::Reservation>,
     pub player: i32,
     pub items: Vec<i32>,
     pub revision: i32,
@@ -3309,7 +3311,7 @@ impl World {
         }
         if matches!(
             item.activate.as_str(),
-            "Dye" | "Pet" | "PermaPet" | "Create" | "UnlockPortal"
+            "Pet" | "PermaPet" | "Create" | "UnlockPortal"
         ) {
             ensure!(
                 slot.object == id,
@@ -3332,7 +3334,13 @@ impl World {
                 if let Some(value) = item.textures[1] {
                     tex2 = value;
                 }
+                let source = if slot.object == id {
+                    None
+                } else {
+                    Some(self.reserve_ground_dye(id, slot)?)
+                };
                 let mut plan = self.consumable_plan(id, slot, -1)?;
+                plan.ground_dye = source;
                 plan.appearance = Some((slot, tex1, tex2));
                 Ok(Some(plan))
             }
@@ -3392,6 +3400,7 @@ impl World {
     fn plan(&self, id: i32, items: Vec<i32>, bag: Option<(i32, Vec<i32>)>) -> InventoryPlan {
         let p = &self.players[&id];
         InventoryPlan {
+            ground_dye: None,
             player: id,
             items,
             revision: p.character.revision,
@@ -3629,8 +3638,15 @@ impl World {
         let player = plan.player;
         let source = (plan.character, plan.revision);
         let companion = plan.companion.clone();
+        let ground_dye = plan.ground_dye.as_ref().map(|source| source.bag_id());
         let result = self.publish_inventory(plan, result);
         if let Err(error) = &result {
+            if let Some(id) = ground_dye
+                && let Some(bag) = self.entities.get_mut(&id)
+            {
+                // An error may conceal COMMIT; retain even a damaged reservation, never refund the source.
+                bag.reserved = true;
+            }
             self.discard_consumable(source);
             if let Err(cleanup) = self.discard_companion(&companion) {
                 tracing::error!(player,%cleanup,"companion cleanup failed after rejected publication");
@@ -3641,6 +3657,9 @@ impl World {
     }
     fn publish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
         let revision = result?;
+        if plan.ground_dye.is_some() {
+            self.validate_ground_dye(&plan)?;
+        }
         let p = self
             .players
             .get_mut(&plan.player)
@@ -3708,7 +3727,7 @@ impl World {
                 "permanent stat potion committed"
             );
         }
-        if let Some((_, tex1, tex2)) = plan.appearance {
+        if let Some((slot, tex1, tex2)) = plan.appearance {
             p.character.tex1 = tex1;
             p.character.tex2 = tex2;
             tracing::info!(
@@ -3716,6 +3735,9 @@ impl World {
                 tex1,
                 tex2,
                 revision,
+                source = slot.object,
+                slot = slot.slot,
+                item = slot.kind,
                 "appearance consumable committed"
             );
         }
@@ -5687,6 +5709,8 @@ mod cover_example;
 #[path = "../examples/testing/timing.rs"]
 mod timing_example;
 
+#[cfg(test)]
+mod ground_dye_tests;
 #[cfg(test)]
 mod manor_tests;
 #[cfg(test)]

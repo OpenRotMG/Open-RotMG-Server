@@ -12,7 +12,7 @@ pub struct TeleportReceipt {
     pub tick: u64,
 }
 
-fn ready(p: &Player) -> bool {
+pub(super) fn ready(p: &Player) -> bool {
     p.active()
         && p.character.hp > 0
         && !p.pending
