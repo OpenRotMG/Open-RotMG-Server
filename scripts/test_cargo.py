@@ -44,15 +44,17 @@ class BuildStorageTests(unittest.TestCase):
             code = guard.main(args or ['build', '--locked'])
         return code, execute
 
-    def test_worktrees_share_targets_and_configuration_changes_separate_them(self):
+    def test_targets_isolate_checkouts_and_configuration_but_reuse_commands(self):
         with patch.object(guard, 'ROOT', self.root / 'worktree-a'):
             code, first = self.build()
+            _, same = self.build(['test', '--locked'])
+            with patch.dict(os.environ, RUSTFLAGS='-C debuginfo=1'):
+                _, changed = self.build()
         with patch.object(guard, 'ROOT', self.root / 'worktree-b'):
-            code2, second = self.build(['test', '--locked'])
+            code2, second = self.build()
         self.assertEqual((code, code2), (0, 0))
-        self.assertEqual(first.call_args.args[1], second.call_args.args[1])
-        with patch.dict(os.environ, RUSTFLAGS='-C debuginfo=1'):
-            _, changed = self.build()
+        self.assertEqual(first.call_args.args[1], same.call_args.args[1])
+        self.assertNotEqual(first.call_args.args[1], second.call_args.args[1])
         self.assertNotEqual(first.call_args.args[1], changed.call_args.args[1])
 
     def test_low_space_and_cache_budget_stop_before_rust_or_cargo(self):
@@ -145,21 +147,22 @@ class BuildStorageTests(unittest.TestCase):
             execute.assert_called_once()
         self.assertIn('Build completed over budget', self.stderr.getvalue())
 
-    def test_real_cargo_preserves_first_binary_when_second_worktree_builds(self):
-        outputs = []
-        targets = []
+    def test_real_cargo_retains_each_older_checkout_and_reuses_the_first(self):
         for name in ['first', 'second']:
             repo = self.root / name
             (repo / 'src').mkdir(parents=True)
+            shutil.copyfile(Path(__file__).resolve().parents[1] / 'rust-toolchain.toml', repo / 'rust-toolchain.toml')
             (repo / 'Cargo.toml').write_text('[package]\nname="openrotmg"\nversion="0.1.0"\nedition="2021"\n')
             (repo / 'src/main.rs').write_text(f'fn main() {{ println!("{name}"); }}')
-            output = repo / 'retained/openrotmg'
-            with patch.object(guard, 'ROOT', repo):
+            for source in [repo / 'Cargo.toml', repo / 'src/main.rs']:
+                os.utime(source, (1, 1))
+        outputs = []
+        for index, name in enumerate(['first', 'second', 'first']):
+            output = self.root / f'retained-{index}'
+            with patch.object(guard, 'ROOT', self.root / name):
                 self.assertEqual(guard.main(['--output', str(output), 'build', '--offline']), 0)
             outputs.append(output)
-            targets.append(next(path for path in guard.cache_root().iterdir() if path.is_dir()))
-        self.assertEqual(targets[0], targets[1])
-        self.assertEqual([subprocess.check_output([str(path)], text=True).strip() for path in outputs], ['first', 'second'])
+        self.assertEqual([subprocess.check_output([str(path)], text=True).strip() for path in outputs], ['first', 'second', 'first'])
         self.assertEqual(guard.main(['clean']), 0)
         self.assertEqual(subprocess.check_output([str(outputs[0])], text=True).strip(), 'first')
 
