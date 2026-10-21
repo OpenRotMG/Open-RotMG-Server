@@ -1047,6 +1047,7 @@ pub(super) fn reserve_credit_recipient(
     recipient: (i32, i32),
 ) -> Result<CreditAdmission> {
     let mut owners = a.owners.lock().expect("ownership registry poisoned");
+    a.world.supervisor.ensure_running()?;
     let source = owners.get(&giver.0).context("causal giver claim missing")?;
     ensure!(
         source.matches_avatar(giver.1) && source.failure.is_none(),
@@ -1248,6 +1249,9 @@ pub(super) fn retirement(
         Ok(())
     })
 }
+
+#[cfg(test)]
+mod supervision_tests;
 
 #[cfg(test)]
 static LIVE_TASKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

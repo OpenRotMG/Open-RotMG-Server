@@ -22,6 +22,7 @@ class BuildStorageTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.source = self.root / 'source'
         (self.source / 'scripts').mkdir(parents=True)
+        shutil.copyfile(Path(__file__).resolve().parents[1] / 'rust-toolchain.toml', self.source / 'rust-toolchain.toml')
         shutil.copyfile(guard.__file__, self.source / 'scripts/cargo.py')
         source = patch.object(guard, 'ROOT', self.source)
         source.start()
@@ -151,6 +152,7 @@ class BuildStorageTests(unittest.TestCase):
         for name in ['first', 'second']:
             repo = self.root / name
             (repo / 'src').mkdir(parents=True)
+            shutil.copyfile(self.source / 'rust-toolchain.toml', repo / 'rust-toolchain.toml')
             (repo / 'Cargo.toml').write_text('[package]\nname="openrotmg"\nversion="0.1.0"\nedition="2021"\n')
             (repo / 'src/main.rs').write_text(f'fn main() {{ println!("{name}"); }}')
             output = repo / 'retained/openrotmg'
