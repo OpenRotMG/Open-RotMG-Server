@@ -80,6 +80,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 Some([0x1fc, 0x1fd, 0x1fe, 0x1800][rng.gen_range(0..4)]);
         }
     }
+    // Build 122 documents surrounding pillars, but their material and spacing are reconstructed.
+    for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
+        let cell = &mut map.cells[((16 + dy) * size + 72 + dx) as usize];
+        ensure!(
+            cell.ground == 0x2f && cell.object.is_none(),
+            "Spider Den boss pillar requires empty Spider Dirt at offset ({dx}, {dy})"
+        );
+        cell.object = Some(0x17b);
+    }
     map.cells[(16 * size + 72) as usize].object = Some(BOSS);
     let spawn = &mut map.cells[(74 * size + 12) as usize];
     spawn.region = 1;
@@ -172,5 +181,87 @@ pub fn profile(kind: u16) -> Profile {
         speed,
         interval,
         range,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn boss_pillars_preserve_routes_and_egg_identities() {
+        let content = Content::load(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data"
+        )))
+        .unwrap();
+        let pillar = content.get(0x17b).unwrap();
+        assert!(pillar.static_object && pillar.blocks && pillar.enemy_occupy_square);
+        assert!(!pillar.enemy && !pillar.destructible);
+        let prop = content.get(0x1fe).unwrap();
+        assert!(prop.static_object && !prop.blocks && !prop.enemy);
+        assert!(content.get(EGG).unwrap().enemy);
+        let expected = BTreeSet::from([(68, 12), (76, 12), (68, 20), (76, 20)]);
+        let mut saw_prop = false;
+        for seed in 0..48 {
+            let map = generate(&content, seed).unwrap();
+            let cell = |x, y| &map.cells[(y * map.width + x) as usize];
+            let pillars: BTreeSet<_> = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.object == Some(0x17b))
+                .map(|(i, _)| (i as i32 % map.width, i as i32 / map.width))
+                .collect();
+            assert_eq!(pillars, expected, "seed {seed}");
+            assert!(pillars.iter().all(|&(x, y)| cell(x, y).ground == 0x2f));
+            assert_eq!(map.spawns, vec![(12.5, 74.5)]);
+            assert_eq!(cell(12, 74).object, Some(0x703));
+            assert_eq!(cell(72, 16).object, Some(BOSS));
+            assert_eq!(
+                map.cells.iter().filter(|c| c.object == Some(BOSS)).count(),
+                1
+            );
+            assert_eq!(
+                map.cells.iter().filter(|c| c.object == Some(EGG)).count(),
+                5
+            );
+            saw_prop |= map.cells.iter().any(|c| c.object == Some(0x1fe));
+            let walkable = |x, y| {
+                (0..map.width).contains(&x)
+                    && (0..map.height).contains(&y)
+                    && cell(x, y).ground == 0x2f
+                    && cell(x, y)
+                        .object
+                        .is_none_or(|k| !content.objects[&k].blocks)
+            };
+            let mut reached = BTreeSet::from([(12, 74)]);
+            let mut todo = vec![(12, 74)];
+            while let Some((x, y)) = todo.pop() {
+                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let p = (x + dx, y + dy);
+                    if walkable(p.0, p.1) && reached.insert(p) {
+                        todo.push(p);
+                    }
+                }
+            }
+            assert_eq!(
+                reached.len(),
+                map.cells
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| walkable(*i as i32 % map.width, *i as i32 / map.width))
+                    .count(),
+                "seed {seed}: disconnected walkable floor"
+            );
+            for p in [(72, 16), (72, 28), (60, 16), (84, 16), (72, 4)] {
+                assert!(
+                    reached.contains(&p),
+                    "seed {seed}: blocked boss approach {p:?}"
+                );
+            }
+        }
+        assert!(saw_prop);
     }
 }

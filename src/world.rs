@@ -6120,6 +6120,8 @@ mod tests {
             (0x120, true, 100),
             (0x100, false, 100),
             (0x100, true, 92),
+            (0x17b, false, 100),
+            (0x17b, true, 100),
         ] {
             let mut w = world();
             for id in w.entities.keys().copied().collect::<Vec<_>>() {
