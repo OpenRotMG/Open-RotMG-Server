@@ -175,7 +175,7 @@ class LauncherTests(unittest.TestCase):
             launcher.main()
         self.assertIn('Cannot listen on 127.0.0.1:8081', launcher.LOG.read_text())
 
-    def test_storage_refusal_happens_before_client_download_or_build(self):
+    def test_cache_access_failure_stops_before_client_download_or_build(self):
         with patch('sys.argv', ['run.py', '8081']), \
                 patch.object(launcher.shutil, 'which', return_value='/cargo'), \
                 patch.object(launcher, 'prepare_client') as prepare, \
@@ -184,7 +184,7 @@ class LauncherTests(unittest.TestCase):
         prepare.assert_not_called()
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[0][-1], 'status')
-        self.assertIn('Build storage check exited', launcher.LOG.read_text())
+        self.assertIn('Build cache access failed', launcher.LOG.read_text())
 
     def test_failed_build_never_starts_a_stale_retained_binary(self):
         (self.client / 'scripts').mkdir(parents=True)
