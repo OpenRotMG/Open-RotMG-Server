@@ -542,7 +542,20 @@ fn manor_spectral_mine_triggers_its_four_shots_on_a_cloaked_player() {
     w.npc_step();
     assert_eq!(w.entities[&mine].stage, Some(1));
     assert_eq!(w.bullets.iter().filter(|b| b.owner == mine).count(), 4);
+    w.npc_step();
+    assert_eq!(w.bullets.iter().filter(|b| b.owner == mine).count(), 4);
     w.now = 50;
+    w.mechanic_expiry();
+    assert!(!w.entities.contains_key(&mine));
+    w.finish_departure(player).unwrap();
+    let mine = w
+        .spawn_entity(MINE, Pos { x: 20.5, y: 20.5 }, vec![])
+        .unwrap();
+    w.entities.get_mut(&mine).unwrap().activated = Some(w.now);
+    w.manor_mechanics(mine, None, 4000).unwrap();
+    w.npc_step();
+    assert_eq!(w.bullets.iter().filter(|b| b.owner == mine).count(), 0);
+    w.now += 50;
     w.mechanic_expiry();
     assert!(!w.entities.contains_key(&mine));
 }
