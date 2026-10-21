@@ -302,12 +302,7 @@ impl Directory {
                 inventory_revision: p.character.revision,
                 pirate_caves: p.character.pirate_caves,
                 snake_pits: p.character.dungeons[0],
-                ability_ready_ms: match (p.last_ability, p.character.items[1]) {
-                    (Some(last), item) if item >= 0 => last
-                        .checked_add(w.content.get(item as u16)?.cooldown_ms)
-                        .context("own ability cooldown overflow")?,
-                    _ => 0,
-                },
+                ability_ready_ms: p.ability_ready_ms,
             },
             lifecycle: Lifecycle {
                 alive: p.character.alive,
