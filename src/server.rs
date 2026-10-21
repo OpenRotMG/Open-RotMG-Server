@@ -464,6 +464,24 @@ async fn swf(State(a): State<App>) -> Response {
     )
         .into_response()
 }
+async fn critical_incident(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = hiscores::private_denial(&a, peer, &headers) {
+        return response;
+    }
+    match a.world.supervisor.latest() {
+        // The durable record also contains private account fences.
+        Ok(incident) => Json(serde_json::json!({"incident":incident.map(|i| serde_json::json!({
+            "id":i.id,"unix_ms":i.unix_ms,"process":i.process,"revision":i.revision,
+            "component":i.component,"failure":i.failure,"location":i.location,"context":i.context,
+            "fences_preserved":i.fences_preserved,
+        }))})).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, self::error(error)).into_response(),
+    }
+}
 async fn health(State(a): State<App>) -> Response {
     let started = a.started;
     match a.world.directory(move |d| Ok(d.health(started))).await {
@@ -2597,6 +2615,10 @@ fn routes(a: &App, client: PathBuf) -> Router {
         ))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
+        .route(
+            "/internal/discord/critical-incident",
+            get(critical_incident),
+        )
         .merge(client_assets(&client))
         .layer(DefaultBodyLimit::max(1_048_576))
         .with_state(a.clone())
@@ -2604,16 +2626,10 @@ fn routes(a: &App, client: PathBuf) -> Router {
 
 pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
     let deaths = a.clone();
-    tokio::spawn(async move {
-        let result: Result<()> = async {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                persistence_tick(&deaths).await?;
-            }
-        }
-        .await;
-        if let Err(error) = result {
-            tracing::error!(error=%format_args!("{error:#}"), "persistence coordinator stopped");
+    a.world.supervisor.spawn("persistence", async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            persistence_tick(&deaths).await?;
         }
     });
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
@@ -2653,6 +2669,11 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         stopped.send_replace(true);
     });
     tokio::select! {
+        mut incident = a.world.supervisor.failed() => {
+            a.shutdown.send_replace(true);
+            lifecycle::preserve_uncertain(&a, &mut incident)?;
+            bail!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id);
+        },
         result = serving => result?,
         _ = async { let _ = stop.changed().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } => {
             let failure = failure.lock().expect("shutdown report poisoned").clone();
