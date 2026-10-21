@@ -169,9 +169,10 @@ def main(argv=None):
             toolchain = ['+' + args.toolchain] if args.toolchain else []
             version = subprocess.check_output(['rustc', *toolchain, '-vV'], cwd=ROOT, text=True)
             settings = {key: value for key, value in os.environ.items() if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))}
-            key = hashlib.sha256(json.dumps([version, settings], sort_keys=True).encode()).hexdigest()[:20]
+            # Cargo can treat an older sibling checkout's different inputs as fresh.
+            key = hashlib.sha256(json.dumps([str(ROOT), version, settings], sort_keys=True).encode()).hexdigest()[:20]
             target = root / key
-            print(f'Cargo target: {target}', flush=True)
+            print(f'Cargo target: {target}; checkout={ROOT}', flush=True)
             code = execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output, lock)
             if code:
                 return code
