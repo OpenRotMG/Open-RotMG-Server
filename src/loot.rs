@@ -1,4 +1,4 @@
-use crate::content::Content;
+use crate::{content::Content, dungeon::beach};
 use anyhow::{Result, ensure};
 use rand::{Rng, seq::SliceRandom};
 #[derive(Clone, Copy)]
@@ -13,6 +13,13 @@ pub(crate) const RINGS: &[i32] = &[9];
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        beach::BOSS => &[
+            (0.1, Item(beach::DRINKS[0])),
+            (0.1, Item(beach::DRINKS[1])),
+            (0.1, Item(beach::DRINKS[2])),
+            (0.1, Item(beach::DRINKS[3])),
+        ],
+        crate::dungeon::beach::BUM => &[(1., Item(0xc2e))],
         crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN => &[
             (0.5, Item(0xc21)),
             (0.01, Item(0xc1d)),
@@ -514,6 +521,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | 0xd79
                 | crate::dungeon::spider::BOSS
                 | crate::dungeon::jungle::BOSS
+                | crate::dungeon::beach::BOSS
                 | crate::dungeon::manor::BOSS
                 | crate::dungeon::manor::COFFIN
                 | crate::dungeon::manor::KAGE
@@ -551,7 +559,7 @@ pub fn private(kind: u16) -> bool {
         )
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
-        | crate::dungeon::jungle::BOSS
+        | crate::dungeon::jungle::BOSS | crate::dungeon::beach::BOSS
         | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)

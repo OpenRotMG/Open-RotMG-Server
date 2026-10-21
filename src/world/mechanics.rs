@@ -210,6 +210,12 @@ impl World {
         elapsed: u64,
     ) -> Result<()> {
         let target = target.into();
+        if matches!(
+            self.entities[&id].kind,
+            crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
+        ) {
+            return self.beach_mechanics(id);
+        }
         if crate::dungeon::jungle::ROSTER.contains(&self.entities[&id].kind) {
             return self.jungle_mechanics(id, elapsed);
         }
@@ -552,6 +558,9 @@ impl World {
     }
 
     pub(super) fn encounter_death(&mut self, defeated: &Entity) -> Result<()> {
+        if defeated.kind == crate::dungeon::beach::BUM {
+            self.broadcast_text("Oryx the Mad God", "");
+        }
         if crate::dungeon::jungle::ROSTER.contains(&defeated.kind) {
             self.jungle_death(defeated);
             return Ok(());

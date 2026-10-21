@@ -78,6 +78,7 @@ mod tracked;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+mod beach;
 mod coil;
 mod jungle;
 #[cfg(test)]
@@ -871,6 +872,8 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::manor::generate(&self.content, seed)?)
+            } else if template == "beachzone" {
+                Arc::new(crate::dungeon::beach::generate(&self.content)?)
             } else if template == "ocean-trench" {
                 let seed = self
                     .prepared_seed
@@ -931,7 +934,12 @@ impl Directory {
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
             let started = Instant::now();
+            // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
+            let beach_bum = world.rng.gen_ratio(1, 200);
             world.populate_coil_snakes()?;
+            if beach_bum {
+                world.populate_beach_bum()?;
+            }
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
@@ -3847,6 +3855,7 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.spider_dens))
                     .chain(std::iter::once(&mut snapshot.jungles))
                     .chain(std::iter::once(&mut snapshot.manors))
+                    .chain(std::iter::once(&mut snapshot.beaches))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3886,7 +3895,8 @@ impl World {
             || snapshot.abysses > p.character.abysses
             || snapshot.trenches > p.character.trenches
             || snapshot.spider_dens > p.character.spider_dens
-            || snapshot.manors > p.character.manors;
+            || snapshot.manors > p.character.manors
+            || snapshot.beaches > p.character.beaches;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
@@ -3906,6 +3916,7 @@ impl World {
         p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
         p.character.manors = snapshot.manors;
+        p.character.beaches = snapshot.beaches;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -4265,7 +4276,9 @@ impl World {
                     0x71c
                 } else if matches!(
                     defeated.kind,
-                    crate::dungeon::snake::BOSS | crate::dungeon::jungle::BOSS
+                    crate::dungeon::snake::BOSS
+                        | crate::dungeon::jungle::BOSS
+                        | crate::dungeon::beach::BOSS
                 ) {
                     0x704
                 } else {
@@ -4337,6 +4350,10 @@ impl World {
         eligible.sort_by_key(|(_, damage)| std::cmp::Reverse(*damage));
         if eligible.is_empty() {
             return Ok(());
+        }
+        if defeated.kind == crate::dungeon::beach::BUM {
+            // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
+            return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
         // Private boss rewards belong to every eligible character, not only the first eight.
@@ -4554,6 +4571,7 @@ impl World {
         if !self.encounter || self.safe {
             return packets;
         }
+        self.beach_notice();
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
         let audience: Vec<_> = self
@@ -5678,6 +5696,7 @@ mod tests {
             trenches: 0,
             spider_dens: 0,
             manors: 0,
+            beaches: 0,
         }
     }
 

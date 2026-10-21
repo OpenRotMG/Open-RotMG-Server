@@ -698,6 +698,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         trenches: 0,
         spider_dens: 0,
         manors: 0,
+        beaches: 0,
     };
     preview.gain_experience(
         &a.content,

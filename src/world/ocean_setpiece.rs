@@ -158,6 +158,13 @@ mod tests {
                 let mut w = World::new(content.clone(), map.clone()).unwrap();
                 w.rng = rand::rngs::StdRng::seed_from_u64(seed);
                 w.populate_coil_snakes().unwrap();
+                w.populate_beach_bum().unwrap();
+                assert_eq!(
+                    w.actors()
+                        .filter(|e| e.kind == crate::dungeon::beach::BUM)
+                        .count(),
+                    1
+                );
                 w.populate_realm_heroes().unwrap();
                 w.populate_named_quests().unwrap();
                 w.populate_realm_events().unwrap();
