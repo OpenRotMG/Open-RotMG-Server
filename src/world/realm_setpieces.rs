@@ -467,6 +467,8 @@ impl World {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
                             c.region == 0
+                                && c.object
+                                    .is_none_or(|kind| !self.content.objects[&kind].full_occupy)
                                 && self.content.grounds[&c.ground] > 0.
                                 && !matches!(c.ground, 0x72 | 0x73)
                         })
@@ -525,5 +527,68 @@ impl World {
         );
         self.setpieces.push(area);
         Ok(pos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setpiece_preflight_preserves_map_only_solid_walls() {
+        for hermit in [false, true] {
+            for object in [None, Some(379), Some(288), Some(498)] {
+                let width = 64;
+                let center = (32, 32);
+                let mut map = Map {
+                    width,
+                    height: 64,
+                    cells: vec![
+                        crate::content::Cell {
+                            ground: 190,
+                            object: None,
+                            config: String::new(),
+                            terrain: 0,
+                            region: 0,
+                        };
+                        64 * 64
+                    ],
+                    spawns: vec![],
+                };
+                map.cells[(center.1 * width + center.0) as usize].terrain = 4;
+                let mut w =
+                    World::new(super::super::tests::world().content, Arc::new(map)).unwrap();
+                let map = Arc::make_mut(&mut w.map);
+                map.cells[((center.1 + 1) * width + center.0 + 2) as usize].object = object;
+                let before: Vec<_> = map
+                    .cells
+                    .iter()
+                    .map(|c| (c.ground, c.object, c.config.clone(), c.terrain, c.region))
+                    .collect();
+                assert!(w.entities.is_empty());
+                let result = if hermit {
+                    w.populate_hermit()
+                } else {
+                    w.place_named_setpiece(0x91f, &[4]).map(|_| ())
+                };
+                if object.is_some_and(|kind| w.content.objects[&kind].full_occupy) {
+                    assert!(
+                        result.is_err(),
+                        "map-only FullOccupy {object:?} was overwritten (Hermit: {hermit})"
+                    );
+                    assert!(w.entities.is_empty() && w.setpieces.is_empty());
+                    let after: Vec<_> = w
+                        .map
+                        .cells
+                        .iter()
+                        .map(|c| (c.ground, c.object, c.config.clone(), c.terrain, c.region))
+                        .collect();
+                    assert_eq!(before, after);
+                } else {
+                    result.unwrap();
+                    assert_eq!(w.setpieces.len(), 1);
+                }
+            }
+        }
     }
 }

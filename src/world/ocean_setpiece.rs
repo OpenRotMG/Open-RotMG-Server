@@ -50,8 +50,12 @@ impl World {
                         .iter()
                         .all(|&(x, y)| a.distance(Pos { x, y }) >= 64.)
                     && (a.y..a.y + 29).all(|y| {
-                        (a.x..a.x + 32)
-                            .all(|x| self.map.cells[(y * self.map.width + x) as usize].region == 0)
+                        (a.x..a.x + 32).all(|x| {
+                            let c = &self.map.cells[(y * self.map.width + x) as usize];
+                            c.region == 0
+                                && c.object
+                                    .is_none_or(|kind| !self.content.objects[&kind].full_occupy)
+                        })
                     })
             })
             .context("Realm has no unoccupied inland site for the Hermit landmark")?;

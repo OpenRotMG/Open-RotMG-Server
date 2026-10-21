@@ -5833,6 +5833,18 @@ mod tests {
                 .filter(|s| s.name() == name)
                 .collect();
             assert_eq!(sources.len(), 1);
+            let opened = sources[0].open(&content).unwrap();
+            let solid_cells: Vec<_> = opened
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    c.object
+                        .is_some_and(|kind| content.objects[&kind].full_occupy)
+                })
+                .map(|(i, c)| (i, c.clone()))
+                .collect();
+            drop(opened);
             let directory = Directory::configured(
                 Path::new("data"),
                 content.clone(),
@@ -5844,6 +5856,40 @@ mod tests {
             .unwrap();
             let w = &directory.worlds[&-3];
             assert_eq!(w.realm_layout.as_deref(), Some(name.as_str()));
+            let solid_entities: BTreeSet<_> = w
+                .entities
+                .values()
+                .filter(|e| content.objects[&e.kind].full_occupy)
+                .map(|e| (e.pos.x as usize, e.pos.y as usize, e.kind))
+                .collect();
+            assert!(!solid_cells.is_empty());
+            for (i, original) in &solid_cells {
+                let actual = &w.map.cells[*i];
+                assert_eq!(
+                    (
+                        actual.ground,
+                        actual.object,
+                        &actual.config,
+                        actual.terrain,
+                        actual.region
+                    ),
+                    (
+                        original.ground,
+                        original.object,
+                        &original.config,
+                        original.terrain,
+                        original.region
+                    ),
+                    "{name}: solid scenery changed at {},{}",
+                    i % w.map.width as usize,
+                    i / w.map.width as usize
+                );
+                assert!(solid_entities.contains(&(
+                    i % w.map.width as usize,
+                    i / w.map.width as usize,
+                    original.object.unwrap()
+                )));
+            }
             let ledger: serde_json::Value = serde_json::from_slice(
                 &std::fs::read(format!(
                     "data/realms/restoration/world{world:02}-passives.json"
@@ -5929,6 +5975,19 @@ mod tests {
                 .map(|id| &w.entities[&id])
                 .collect();
             assert_eq!(roots.len(), 14);
+            let mut roster = BTreeMap::new();
+            for e in &roots {
+                *roster.entry(e.kind).or_insert(0usize) += 1;
+            }
+            assert_eq!(roster.remove(&0x668), Some(3));
+            assert_eq!(roster.remove(&0x67d), Some(3));
+            assert_eq!(roster.len(), 8);
+            assert!(roster.values().all(|count| *count == 1));
+            assert_eq!(w.setpieces.len(), 14);
+            for terrain in 1..=12 {
+                let region = &w.population_regions[terrain];
+                assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
+            }
             for e in &roots {
                 assert!(
                     (-4..=4).any(|dy| (-4..=4).any(|dx| {
