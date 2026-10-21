@@ -225,8 +225,11 @@ class LauncherTests(unittest.TestCase):
 
     def test_failed_download_logs_url_and_cause(self):
         with patch('sys.argv', ['run.py', '8080']), patch.object(launcher.shutil, 'which', return_value='/cargo'), \
+                patch.object(launcher, 'run', return_value=0) as storage, \
                 patch.object(launcher, 'urlopen', side_effect=OSError('connection refused')):
             self.assertEqual(launcher.main(), 1)
+        storage.assert_called_once()
+        self.assertEqual(storage.call_args.args[0], [sys.executable, str(Path(launcher.__file__).with_name('cargo.py')), 'status'])
         self.assertIn(self.url, launcher.LOG.read_text())
         self.assertIn('connection refused', launcher.LOG.read_text())
 
