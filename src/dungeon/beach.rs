@@ -98,7 +98,7 @@ pub fn generate(content: &Content) -> Result<Map> {
         set(x, y, 0xf5, Some(0xdc6));
     }
     set(71, 66, 0xb6, Some(BOSS));
-    set(44, 65, 0xf5, Some(0x701));
+    set(44, 65, 0xf5, Some(0x703));
     for cell in &cells {
         ensure!(
             content.grounds.contains_key(&cell.ground),

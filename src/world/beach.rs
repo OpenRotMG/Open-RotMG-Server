@@ -189,6 +189,16 @@ mod tests {
         let map = crate::dungeon::beach::generate(&w.content).unwrap();
         assert_eq!((map.width, map.height), (136, 127));
         assert_eq!(
+            map.cells.iter().filter(|c| c.object == Some(0x703)).count(),
+            1
+        );
+        assert!(
+            map.cells
+                .iter()
+                .filter_map(|c| c.object)
+                .all(|k| { w.content.objects[&k].class != "Equipment" })
+        );
+        assert_eq!(
             map.cells.iter().filter(|c| c.object == Some(BOSS)).count(),
             1
         );
