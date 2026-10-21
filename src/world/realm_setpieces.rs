@@ -56,6 +56,25 @@ impl Piece {
     }
     fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
         let mut p = match kind {
+            crate::dungeon::beach::BUM => {
+                let mut p = Self::new(42, 42);
+                for y in 0..42 {
+                    for x in 0..42 {
+                        let r = (x as f32 - 21.).hypot(y as f32 - 21.);
+                        let mark = if r <= 3. {
+                            if r > 1.5 && rng.gen_ratio(1, 5) { 4 } else { 1 }
+                        } else if r <= 18. {
+                            2
+                        } else if r < 20. + rng.gen_range(0.0..2.) {
+                            3
+                        } else {
+                            0
+                        };
+                        p.set(x, y, mark);
+                    }
+                }
+                p
+            }
             crate::dungeon::manor::KAGE => {
                 let mut p = Self::new(65, 65);
                 for y in 1..64 {
@@ -441,6 +460,19 @@ impl Piece {
                 }
                 p
             }
+            // FSoD@6fd20aa realm/setpieces/GhostShip.cs authors water and beach, never its tree markers.
+            0xe37 => {
+                let mut p = Self::new(50, 50);
+                for y in 0..50 {
+                    for x in 0..50 {
+                        let radius = (x as f32 - 25.).hypot(y as f32 - 25.);
+                        if radius <= 17. {
+                            p.set(x, y, if radius <= 14. { 2 } else { 1 });
+                        }
+                    }
+                }
+                p
+            }
             0xd59 => Self::new(5, 5),
             0xd5f => {
                 let mut p = Self::new(41, 41);
@@ -471,13 +503,16 @@ impl Piece {
         if kind == 0x668 {
             p.boss = (20, 20);
         }
-        if kind != 0xd59 {
+        if !matches!(kind, 0xd59 | 0xe37) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
         }
         p
     }
     fn tile(kind: u16, mark: u8) -> (u8, Option<u16>) {
         match (kind, mark) {
+            (crate::dungeon::beach::BUM, 1 | 3) => (0x72, None),
+            (crate::dungeon::beach::BUM, 2) => (0x73, None),
+            (crate::dungeon::beach::BUM, 4) => (0x72, Some(0x18e)),
             (crate::dungeon::manor::KAGE, 1) => (0x57, None),
             (crate::dungeon::manor::KAGE, 2) => (0x56, None),
             (crate::dungeon::manor::KAGE, 3) => (0x57, Some(0x181e)),
@@ -518,6 +553,8 @@ impl Piece {
             (0xd56, 5) => (0xd6, Some(0x17d)),
             (0xd56, 6) => (0xd6, Some(0x182)),
             (0xd59, 1) => (0x60, None),
+            (0xe37, 1) => (0xed, None),
+            (0xe37, 2) => (0xfa, None),
             _ => unreachable!("setpiece marker has no selected tile"),
         }
     }
@@ -611,7 +648,7 @@ impl World {
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
-                            let untouched = kind == 0xdc2
+                            let untouched = matches!(kind, 0xdc2 | crate::dungeon::beach::BUM)
                                 && piece.cells
                                     [(y - a.y) as usize * piece.width + (x - a.x) as usize]
                                     == 0;

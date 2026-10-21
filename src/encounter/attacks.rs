@@ -234,6 +234,9 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
     if crate::dungeon::manor::ROSTER.contains(&kind) {
         return Some(manor_schedule(kind, hp, elapsed));
     }
+    if crate::dungeon::davy::profile(kind).is_some() {
+        return Some(davy_schedule(kind, 1, elapsed));
+    }
     if super::landmarks::ROSTER.contains(&kind) {
         return Some(super::landmarks::schedule(kind, hp, 0, 0, elapsed));
     }
@@ -525,6 +528,35 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
         age,
         attacks,
     })
+}
+
+pub(crate) fn davy_schedule(kind: u16, stage: u64, age: u64) -> Schedule {
+    use crate::dungeon::davy::{BOSS, LIT};
+    let fan = Attack::fan;
+    let attacks = match kind {
+        BOSS if stage == 1 => vec![fan(0, 5, 10., 2000, 10.), fan(1, 1, 0., 4000, 10.)],
+        LIT if stage == 2 => vec![fan(0, 6, 60., 1000, 10.).once().delay(100)],
+        0xe31 => vec![fan(0, 1, 0., 2000, 10.)],
+        0xe50 => vec![fan(0, 3, 10., 2000, 10.)],
+        0xe3a => vec![fan(0, 3, 10., 1750, 10.)],
+        0xe44 => vec![fan(0, 6, 60., 4000, 10.)],
+        0xe2f => vec![fan(0, 1, 0., 1750, 10.)],
+        0xe42 => vec![fan(0, 3, 10., 2500, 10.)],
+        0xe43 => vec![fan(0, 2, 10., 2000, 10.)],
+        0xe45 => vec![
+            fan(0, 1, 0., 1100, 13.),
+            fan(0, 1, 0., 1100, 13.).delay(50),
+            fan(0, 1, 0., 1100, 13.).delay(100),
+            fan(1, 5, 10., 2000, 7.),
+        ],
+        0xe48 if stage == 2 => vec![fan(0, 6, 60., 1000, 10.).once()],
+        _ => vec![],
+    };
+    Schedule {
+        state: stage,
+        age,
+        attacks,
+    }
 }
 
 pub(crate) fn armor_schedule(stage: u64, age: u64) -> Schedule {

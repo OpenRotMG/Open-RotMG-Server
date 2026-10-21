@@ -287,6 +287,10 @@ pub struct Character {
     pub jungles: u64,
     #[serde(default)]
     pub manors: u64,
+    #[serde(default)]
+    pub beaches: u64,
+    #[serde(default)]
+    pub davy_lockers: u64,
 }
 // Keep one field declaration while validating every direct Character decode, not just Store readers.
 impl<'de> Deserialize<'de> for Character {
@@ -1037,6 +1041,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 trenches: 0,
                 spider_dens: 0,
                 manors: 0,
+                beaches: 0,
+                davy_lockers: 0,
             };
             tx.execute(
                 "INSERT INTO characters(account,stats,items) VALUES(?1,?2,?3)",
@@ -1210,7 +1216,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let saved: Character = serde_json::from_str(&raw)?;
             ensure!(saved.schema == ch.schema && saved.class == ch.class && saved.base == ch.base
                 && saved.level == ch.level && saved.exp == ch.exp && saved.fame == ch.fame
-                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors
+                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors && saved.beaches == ch.beaches && saved.davy_lockers == ch.davy_lockers
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "permanent potion reservation changed");
             ch.lifetime.follows(&saved.lifetime)?;
@@ -1527,16 +1533,24 @@ mod tests {
         let mut value = serde_json::to_value(&character).unwrap();
         value["lifetime"]["shots"] = serde_json::json!(89);
         value["lifetime"]["projectile_hits"] = serde_json::json!(30);
-        for field in ["jungles", "manors"] {
+        for field in ["jungles", "manors", "beaches", "davy_lockers"] {
             value.as_object_mut().unwrap().remove(field);
         }
         let old = decode_character(&value.to_string(), [0; 8]).unwrap();
-        assert_eq!([old.jungles, old.manors], [0, 0]);
+        assert_eq!(
+            [old.jungles, old.manors, old.beaches, old.davy_lockers],
+            [0; 4]
+        );
         assert_eq!(
             serde_json::to_value(&old.lifetime).unwrap(),
             value["lifetime"]
         );
-        for (field, count) in [("jungles", 7), ("manors", 8)] {
+        for (field, count) in [
+            ("jungles", 7),
+            ("manors", 8),
+            ("beaches", 9),
+            ("davy_lockers", 10),
+        ] {
             value[field] = serde_json::json!(count);
             let current = decode_character(&value.to_string(), [0; 8]).unwrap();
             assert_eq!(serde_json::to_value(&current).unwrap()[field], value[field]);
@@ -1888,6 +1902,8 @@ mod tests {
             ch.spider_dens = 5;
             ch.jungles = 6;
             ch.manors = 7;
+            ch.beaches = 8;
+            ch.davy_lockers = 9;
             characters.push(ch);
         }
         characters[1].revision = 1;
@@ -1901,6 +1917,8 @@ mod tests {
             assert_eq!(saved.spider_dens, 0);
             assert_eq!(saved.jungles, 0);
             assert_eq!(saved.manors, 0);
+            assert_eq!(saved.beaches, 0);
+            assert_eq!(saved.davy_lockers, 0);
         }
         characters[1].revision = 0;
         s.progress_batch(characters.clone()).await.unwrap();
@@ -1913,6 +1931,8 @@ mod tests {
             assert_eq!(saved.spider_dens, 5);
             assert_eq!(saved.jungles, 6);
             assert_eq!(saved.manors, 7);
+            assert_eq!(saved.beaches, 8);
+            assert_eq!(saved.davy_lockers, 9);
             saved.alive = false;
             saved.hp = 0;
             s.death(saved, "test clear snapshot".into()).await.unwrap();

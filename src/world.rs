@@ -24,6 +24,7 @@ pub(crate) mod chat;
 
 mod companions;
 mod consumables;
+mod davy;
 mod endgame;
 mod endgame_ai;
 mod enemy_damage;
@@ -78,6 +79,7 @@ mod tracked;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+mod beach;
 mod coil;
 mod jungle;
 #[cfg(test)]
@@ -728,6 +730,7 @@ pub struct World {
     named_births: Vec<named_births::Birth>,
     manor_births: Vec<manor::Toss>,
     lava_patches: BTreeMap<usize, (u64, u8)>,
+    locker: Option<davy::Locker>,
     ability_state: abilities::State,
     companions: companions::State,
     finale: endgame_ai::Actors,
@@ -1109,6 +1112,8 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::manor::generate(&self.content, seed)?)
+            } else if template == "beachzone" {
+                Arc::new(crate::dungeon::beach::generate(&self.content)?)
             } else if template == "ocean-trench" {
                 let seed = self
                     .prepared_seed
@@ -1135,6 +1140,11 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
+            } else if template == crate::dungeon::davy::TEMPLATE {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::davy::generate(&self.content, seed)?)
             } else if template == "undead-lair" {
                 let seed = self
                     .prepared_seed
@@ -1169,12 +1179,18 @@ impl Directory {
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
             let started = Instant::now();
+            // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
+            let beach_bum = world.rng.gen_ratio(1, 200);
             world.populate_coil_snakes()?;
+            if beach_bum {
+                world.populate_beach_bum()?;
+            }
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
             world.populate_hermit()?;
             world.populate_manor_entry()?;
+            world.populate_ghost_ship()?;
             world.populate_realm_population()?;
             tracing::info!(
                 layout = world.realm_layout,
@@ -1185,6 +1201,9 @@ impl Directory {
             );
         }
         world.prepare_endgame()?;
+        if template == crate::dungeon::davy::TEMPLATE {
+            world.prepare_locker()?;
+        }
         if template == "sprite-world" {
             let exits: Vec<_> = world
                 .entities
@@ -1895,6 +1914,14 @@ impl Directory {
     }
 }
 type Job = Box<dyn FnOnce(&mut Directory) + Send>;
+async fn service_queued_jobs(directory: &mut Directory, rx: &mut mpsc::Receiver<Job>) {
+    for _ in 0..16 {
+        // Serial packet handlers must receive their replies before they can enqueue the next acknowledgement.
+        tokio::task::yield_now().await;
+        let Ok(job) = rx.try_recv() else { break };
+        job(directory);
+    }
+}
 #[cfg(test)]
 type LifecycleJobGate = Arc<
     std::sync::Mutex<
@@ -1948,6 +1975,8 @@ impl Handle {
                                 diagnostic_tick_samples=directory.diagnostic_ticks.len(),queued_jobs=rx.len(),
                                 memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
+                        // Over-budget ticks must not repeatedly win select and starve queued input or lease renewals.
+                        service_queued_jobs(&mut directory, &mut rx).await;
                     },
                     job=rx.recv()=>match job{Some(f)=>f(&mut directory),None=>break}
                 }
@@ -2195,6 +2224,7 @@ impl World {
                                 | crate::dungeon::spider::initial_condition(kind)
                                 | crate::dungeon::snake::initial_condition(kind)
                                 | crate::dungeon::jungle::initial_condition(kind)
+                                | crate::dungeon::davy::initial_condition(kind)
                                 | if o.stasis_immune {
                                     crate::condition::bit(crate::condition::STASIS_IMMUNE)
                                 } else {
@@ -2312,6 +2342,7 @@ impl World {
             named_births: Vec::new(),
             manor_births: Vec::new(),
             lava_patches: BTreeMap::new(),
+            locker: None,
             ability_state: abilities::State::default(),
             companions: companions::State::default(),
             finale: endgame_ai::Actors::default(),
@@ -2525,6 +2556,7 @@ impl World {
                         | crate::dungeon::spider::initial_condition(kind)
                         | crate::dungeon::snake::initial_condition(kind)
                         | crate::dungeon::jungle::initial_condition(kind)
+                        | crate::dungeon::davy::initial_condition(kind)
                         | (if kind == 0x91a {
                             crate::condition::bit(crate::condition::INVULNERABLE)
                         } else {
@@ -2811,6 +2843,7 @@ impl World {
         o.i32(id).i32(char_id);
         send(&self.players[&id], wire::CREATE_SUCCESS, o.0);
         self.updates(id, true)?;
+        self.locker_key_ui(id);
         tracing::info!(
             player = id,
             character = char_id,
@@ -4468,6 +4501,8 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.spider_dens))
                     .chain(std::iter::once(&mut snapshot.jungles))
                     .chain(std::iter::once(&mut snapshot.manors))
+                    .chain(std::iter::once(&mut snapshot.beaches))
+                    .chain(std::iter::once(&mut snapshot.davy_lockers))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -4517,7 +4552,9 @@ impl World {
             || snapshot.abysses > p.character.abysses
             || snapshot.trenches > p.character.trenches
             || snapshot.spider_dens > p.character.spider_dens
-            || snapshot.manors > p.character.manors;
+            || snapshot.manors > p.character.manors
+            || snapshot.beaches > p.character.beaches
+            || snapshot.davy_lockers > p.character.davy_lockers;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
@@ -4537,6 +4574,8 @@ impl World {
         p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
         p.character.manors = snapshot.manors;
+        p.character.beaches = snapshot.beaches;
+        p.character.davy_lockers = snapshot.davy_lockers;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -4973,7 +5012,10 @@ impl World {
                     0x71c
                 } else if matches!(
                     defeated.kind,
-                    crate::dungeon::snake::BOSS | crate::dungeon::jungle::BOSS
+                    crate::dungeon::snake::BOSS
+                        | crate::dungeon::jungle::BOSS
+                        | crate::dungeon::beach::BOSS
+                        | crate::dungeon::davy::BOSS
                 ) {
                     0x704
                 } else {
@@ -5025,7 +5067,7 @@ impl World {
             100
         } else if defeated.kind == crate::dungeon::manor::COFFIN {
             800
-        } else if defeated.kind == 0x927 {
+        } else if matches!(defeated.kind, 0x927 | crate::dungeon::davy::BOSS) {
             100
         } else {
             (self.content.objects[&defeated.kind].hp / 10).max(1)
@@ -5045,6 +5087,10 @@ impl World {
         eligible.sort_by_key(|(_, damage)| std::cmp::Reverse(*damage));
         if eligible.is_empty() {
             return Ok(());
+        }
+        if defeated.kind == crate::dungeon::beach::BUM {
+            // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
+            return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
         // Private boss rewards belong to every eligible character, not only the first eight.
@@ -5262,6 +5308,7 @@ impl World {
         if !self.encounter || self.safe {
             return packets;
         }
+        self.beach_notice();
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
         let audience: Vec<_> = self
@@ -5310,9 +5357,23 @@ impl World {
                                 & crate::condition::bit(crate::condition::INVISIBLE)
                                 == 0)
                 })
-                .map(|p| p.pos)
-                .chain(self.decoy_positions())
-                .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
+                .map(|p| {
+                    (
+                        kind == crate::dungeon::davy::BOSS
+                            && entity.reaction_until > self.now
+                            && pos.distance(p.pos) < 12.
+                            && p.conditions(self.now)
+                                & crate::condition::bit(crate::condition::PARALYZED)
+                                != 0,
+                        p.pos,
+                    )
+                })
+                .chain(self.decoy_positions().map(|p| (false, p)))
+                .min_by(|(ap, a), (bp, b)| {
+                    bp.cmp(ap)
+                        .then_with(|| pos.distance(*a).total_cmp(&pos.distance(*b)))
+                })
+                .map(|(_, p)| p);
             let wake = match kind {
                 crate::dungeon::manor::KAGE
                 | crate::dungeon::manor::BAT
@@ -5392,6 +5453,8 @@ impl World {
                         continue;
                     }
                 }
+            } else if crate::dungeon::davy::profile(kind).is_some() {
+                self.locker_movement(id, elapsed)
             } else if kind == 0x909 && current.stage == Some(1) {
                 (Motion::Stationary, 0.)
             } else if crate::dungeon::jungle::ROSTER.contains(&kind) {
@@ -6075,6 +6138,9 @@ impl World {
         let mechanics_started = crate::performance::Measure::start();
         self.mechanic_expiry();
         self.abyss_step();
+        if let Err(error) = self.locker_step() {
+            tracing::error!(%error, "Davy Locker progression refused");
+        }
         self.ground_step();
         self.ocean_step();
         self.event_step();
@@ -6404,6 +6470,8 @@ mod tests {
             trenches: 0,
             spider_dens: 0,
             manors: 0,
+            beaches: 0,
+            davy_lockers: 0,
         }
     }
 
@@ -6414,6 +6482,38 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn simulation_ticks_service_a_bounded_fifo_batch_of_serial_packet_jobs() {
+        let mut directory = directory();
+        let (tx, mut rx) = mpsc::channel::<Job>(256);
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = observed.clone();
+        let record = move |n, completed: oneshot::Sender<()>| -> Job {
+            let seen = seen.clone();
+            Box::new(move |_| {
+                seen.lock().unwrap().push(n);
+                completed.send(()).unwrap();
+            })
+        };
+        let (completed, mut reply) = oneshot::channel();
+        assert!(tx.try_send(record(0, completed)).is_ok());
+        let packets = tokio::spawn(async move {
+            for n in 1..17 {
+                reply.await.unwrap();
+                let (completed, next) = oneshot::channel();
+                assert!(tx.send(record(n, completed)).await.is_ok());
+                reply = next;
+            }
+            reply.await.unwrap();
+        });
+        service_queued_jobs(&mut directory, &mut rx).await;
+        assert_eq!(*observed.lock().unwrap(), (0..16).collect::<Vec<_>>());
+        assert!(!packets.is_finished());
+        service_queued_jobs(&mut directory, &mut rx).await;
+        packets.await.unwrap();
+        assert_eq!(*observed.lock().unwrap(), (0..17).collect::<Vec<_>>());
     }
 
     #[test]

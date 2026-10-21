@@ -86,7 +86,8 @@ impl World {
         let lethal = e.hp <= 0;
         let transform =
             lethal && e.quest.is_some() && matches!(e.kind, 0x675 | 0x6c2 | 0x92a | 0x92b);
-        let kill = lethal && !transform;
+        let lantern = lethal && e.kind == crate::dungeon::davy::UNLIT && self.locker.is_some();
+        let kill = lethal && !transform && !lantern;
 
         let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
         if let Some(p) = self.players.get_mut(&owner) {
@@ -120,7 +121,9 @@ impl World {
                 send(p, 47, o.0.clone());
             }
         }
-        if transform {
+        if lantern {
+            self.light_locker_lantern(target)?;
+        } else if transform {
             self.quest_lethal_transform(target)?;
         } else if kill {
             // Terminal authority seals NEW credit sources; damage and shared XP still resolve normally.

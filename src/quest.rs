@@ -4,7 +4,9 @@ use anyhow::{Result, ensure};
 pub const ROOTS: [u16; 4] = [0x91f, 0x91b, 0x928, 0x675];
 pub const EVENTS: [u16; 3] = [0xd56, 0xd59, 0xd5f];
 pub fn root(kind: u16) -> bool {
-    ROOTS.contains(&kind) || EVENTS.contains(&kind) || kind == crate::dungeon::trench::HERMIT
+    ROOTS.contains(&kind)
+        || EVENTS.contains(&kind)
+        || matches!(kind, crate::dungeon::trench::HERMIT | 0xe37)
 }
 
 /// Character level windows of the quest monsters, as (kind, first level, last level).
@@ -64,7 +66,15 @@ pub const ROSTER: &[u16] = &[
 pub fn final_root(kind: u16) -> bool {
     matches!(
         kind,
-        0x920 | 0x91c | 0x92d | 0x6c1 | 0xd56 | 0xd59 | 0xd5f | crate::dungeon::trench::HERMIT
+        0x920
+            | 0x91c
+            | 0x92d
+            | 0x6c1
+            | 0xd56
+            | 0xd59
+            | 0xd5f
+            | crate::dungeon::trench::HERMIT
+            | 0xe37
     )
 }
 pub fn profile(kind: u16) -> Option<Profile> {

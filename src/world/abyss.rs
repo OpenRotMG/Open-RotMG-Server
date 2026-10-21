@@ -5,7 +5,7 @@ use crate::{
 };
 
 impl World {
-    fn change_ground(&mut self, i: usize, ground: u8) {
+    pub(super) fn change_ground(&mut self, i: usize, ground: u8) {
         Arc::make_mut(&mut self.map).cells[i].ground = ground;
         let tile = (
             (i % self.map.width as usize) as i16,

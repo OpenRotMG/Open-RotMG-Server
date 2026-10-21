@@ -1,4 +1,6 @@
 pub mod abyss;
+pub mod beach;
+pub mod davy;
 pub mod jungle;
 pub mod manor;
 pub mod snake;
@@ -53,7 +55,7 @@ impl HistoricalDungeon {
     ];
 }
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 9] = [
+pub const DUNGEONS: [(u16, &str, &str, u16); 11] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
@@ -68,10 +70,13 @@ pub const DUNGEONS: [(u16, &str, &str, u16); 9] = [
         "Manor of the Immortals",
         manor::BOSS,
     ),
+    (0x742, "beachzone", "Beachzone", beach::BOSS),
+    (0x741, davy::TEMPLATE, davy::NAME, davy::BOSS),
 ];
 
 pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
     match enemy {
+        beach::BUM => Some((0x742, 0.5)),
         trench::HERMIT => Some((0x730, 1.)),
         0xdc2 => Some((0x733, 0.2)),
         0x6db => Some((0x739, 0.5)),
