@@ -486,7 +486,7 @@ impl World {
             if p.pos.distance(position) < radius + 20. {
                 send(p, 68, out.0.clone());
             }
-            if p.pos.distance(position) >= radius {
+            if p.paused || p.pos.distance(position) >= radius {
                 continue;
             }
             let damage =
@@ -639,5 +639,134 @@ impl World {
             self.spawn_entity(kind, pos, vec![])?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::tests::{arena, ch};
+
+    const CENTER: Pos = Pos { x: 10., y: 10. };
+    const SOURCE: u16 = 0x654;
+
+    fn actor(w: &mut World, paused: bool, position: Pos) -> i32 {
+        let mut character = ch(w);
+        character.id = w.players.len() as i32 + 1;
+        character.account = character.id;
+        character.items.fill(-1);
+        character.base[3] = 20;
+        let id = w.enter(character, None).unwrap();
+        let p = w.players.get_mut(&id).unwrap();
+        p.paused = paused;
+        p.pos = position;
+        id
+    }
+
+    #[test]
+    fn area_damage_paused_players_keep_life_and_visuals_with_strict_radius() {
+        let mut w = arena(1);
+        let paused = actor(&mut w, true, CENTER);
+        let active = actor(&mut w, false, CENTER);
+        let boundary = actor(&mut w, false, Pos { x: 13., y: 10. });
+        let outside = actor(&mut w, false, Pos { x: 13.01, y: 10. });
+        let (packets, mut rx) = mpsc::channel(32);
+        let (lost, _) = watch::channel(false);
+        let p = w.players.get_mut(&paused).unwrap();
+        p.tx = Some(Output { packets, lost });
+        p.character.hp = 1;
+        p.killer = "unchanged".into();
+        w.area_damage(SOURCE, CENTER, 3., 50).unwrap();
+        let p = &w.players[&paused];
+        assert_eq!(p.character.hp, 1);
+        assert!(p.character.alive && !p.death_pending);
+        assert_eq!(p.killer, "unchanged");
+        assert_eq!(w.players[&active].character.hp, 70);
+        for id in [boundary, outside] {
+            assert_eq!(w.players[&id].character.hp, 100);
+        }
+        assert!(w.pending_deaths().is_empty());
+        assert_eq!(rx.try_recv().unwrap().id, 68);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn area_damage_grenade_checks_pause_at_impact_and_resolves_once() {
+        for paused_at_launch in [false, true] {
+            let mut w = arena(1);
+            let target = actor(&mut w, paused_at_launch, CENTER);
+            let control = actor(&mut w, false, CENTER);
+            let owner = w.spawn_entity(SOURCE, CENTER, vec![]).unwrap();
+            w.now = 100;
+            w.throw_grenade(owner, CENTER, 3., 50).unwrap();
+            w.players.get_mut(&target).unwrap().paused = !paused_at_launch;
+            w.now = 1599;
+            w.grenade_step();
+            assert_eq!(w.grenades.len(), 1);
+            for id in [target, control] {
+                assert_eq!(w.players[&id].character.hp, 100);
+            }
+            w.now = 1600;
+            w.grenade_step();
+            let expected = if paused_at_launch { 70 } else { 100 };
+            assert_eq!(w.players[&target].character.hp, expected);
+            assert_eq!(w.players[&control].character.hp, 70);
+            assert!(w.grenades.is_empty());
+            w.now = 1601;
+            w.grenade_step();
+            assert_eq!(w.players[&target].character.hp, expected);
+            assert_eq!(w.players[&control].character.hp, 70);
+        }
+    }
+
+    #[test]
+    fn area_damage_preserves_defense_protection_and_once_only_death_gates() {
+        use condition::{ARMOR_BROKEN, ARMORED, INVINCIBLE, INVULNERABLE, STASIS};
+        for (effects, raw, expected) in [
+            (vec![], 50, 30),
+            (vec![ARMORED], 50, 10),
+            (vec![ARMOR_BROKEN], 50, 50),
+            (vec![ARMORED, ARMOR_BROKEN], 50, 50),
+            (vec![], 20, 3),
+            (vec![INVINCIBLE], 50, 0),
+            (vec![INVULNERABLE], 50, 0),
+            (vec![STASIS], 50, 0),
+        ] {
+            let mut w = arena(1);
+            let id = actor(&mut w, false, CENTER);
+            for effect in effects {
+                w.apply_condition(id, effect, 10_000).unwrap();
+            }
+            w.area_damage(SOURCE, CENTER, 3., raw).unwrap();
+            assert_eq!(w.players[&id].character.hp, 100 - expected);
+            assert!(!w.players[&id].death_pending);
+        }
+        let mut w = arena(1);
+        let lethal = actor(&mut w, false, CENTER);
+        let skipped = [
+            actor(&mut w, false, CENTER),
+            actor(&mut w, false, CENTER),
+            actor(&mut w, false, CENTER),
+        ];
+        w.players.get_mut(&skipped[0]).unwrap().character.alive = false;
+        w.players.get_mut(&skipped[1]).unwrap().death_pending = true;
+        w.players.get_mut(&skipped[2]).unwrap().departing = true;
+        w.area_damage(SOURCE, CENTER, 3., 500).unwrap();
+        let p = &w.players[&lethal];
+        assert_eq!(p.character.hp, 0);
+        assert!(p.character.alive && p.death_pending);
+        assert_eq!(p.killer, w.content.objects[&SOURCE].name);
+        for id in skipped {
+            assert_eq!(w.players[&id].character.hp, 100);
+            assert!(w.players[&id].killer.is_empty());
+        }
+        w.players.get_mut(&skipped[1]).unwrap().death_pending = false;
+        let deaths = w.pending_deaths();
+        assert_eq!(deaths.len(), 1);
+        assert_eq!(deaths[0].0, lethal);
+        assert!(!deaths[0].1.alive);
+        assert!(w.pending_deaths().is_empty());
+        w.finish_death(lethal).unwrap();
+        assert!(!w.players[&lethal].character.alive);
     }
 }

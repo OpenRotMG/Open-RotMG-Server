@@ -10,6 +10,12 @@ pub(crate) const WEAPONS: &[i32] = &[1, 2, 3, 8, 17];
 pub(crate) const ABILITIES: &[i32] = &[4, 5, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23];
 pub(crate) const ARMOR: &[i32] = &[6, 7, 14];
 pub(crate) const RINGS: &[i32] = &[9];
+fn gray_blob_private_table(kind: u16) -> &'static [(f64, Pick)] {
+    match kind {
+        0x20d => &[(0.005, Pick::Item(0xa51))],
+        _ => &[],
+    }
+}
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
@@ -163,6 +169,13 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.15, Tier(3, ARMOR)),
             (0.15, Tier(1, ABILITIES)),
             (0.15, Tier(1, RINGS)),
+        ],
+        // Trapped 593e490 engineering tables, not authenticated 123.5.1 probabilities.
+        0x205 | 0x20d | 0x20f | 0x202 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
+        0x204 => &[
+            (0.01, Tier(2, ARMOR)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
         ],
         // Behavior coverage alone does not establish new drop probabilities.
         kind if crate::encounter::fauna::ROSTER.contains(&kind)
@@ -486,6 +499,7 @@ pub fn collectibles(content: &Content) -> std::collections::BTreeSet<u16> {
         .flat_map(|kind| {
             table(kind)
                 .iter()
+                .chain(gray_blob_private_table(kind))
                 .flat_map(|(_, pick)| candidates(content, *pick))
                 .chain(bonus(kind).iter().map(|(_, item)| *item))
         })
@@ -532,7 +546,7 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
             );
         }
     }
-    for (_, pick) in table(kind) {
+    for (_, pick) in table(kind).iter().chain(gray_blob_private_table(kind)) {
         let items = candidates(content, *pick);
         ensure!(
             !items.is_empty(),
@@ -549,7 +563,10 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
     Ok(())
 }
 pub fn roll(content: &Content, kind: u16, rng: &mut impl Rng) -> Option<u16> {
-    for (chance, pick) in table(kind) {
+    roll_table(content, table(kind), rng)
+}
+fn roll_table(content: &Content, picks: &[(f64, Pick)], rng: &mut impl Rng) -> Option<u16> {
+    for (chance, pick) in picks {
         if rng.gen_bool(*chance) {
             return Some(
                 *candidates(content, *pick)
@@ -602,6 +619,28 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
         }
     }
     items
+}
+pub fn gray_blob_rewards(
+    content: &Content,
+    contributors_by_damage: &[(i32, i32)],
+    rng: &mut impl Rng,
+) -> Vec<(i32, u16)> {
+    let owners: Vec<_> = contributors_by_damage
+        .iter()
+        .filter(|(_, damage)| *damage > 1)
+        .map(|(account, _)| *account)
+        .collect();
+    let mut rewards = Vec::new();
+    for _ in 0..owners.len() {
+        if let Some(item) = roll_table(content, gray_blob_private_table(0x20d), rng) {
+            // Successful rolls advance allocation, not failed attempts or independent player rolls.
+            rewards.push((owners[rewards.len()], item));
+            if rewards.len() == 8 {
+                break;
+            }
+        }
+    }
+    rewards
 }
 pub fn private(kind: u16) -> bool {
     crate::quest::final_root(kind)
@@ -684,6 +723,97 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+    struct Branch(Vec<u64>);
+    impl rand::RngCore for Branch {
+        fn next_u32(&mut self) -> u32 {
+            0
+        }
+        fn next_u64(&mut self) -> u64 {
+            self.0.remove(0)
+        }
+        fn fill_bytes(&mut self, _: &mut [u8]) {
+            panic!("unexpected byte draw")
+        }
+        fn try_fill_bytes(&mut self, _: &mut [u8]) -> Result<(), rand::Error> {
+            panic!("unexpected byte draw")
+        }
+    }
+    #[test]
+    fn starter_gray_private_rolls_use_strict_threshold_success_order_and_eight_success_cap() {
+        let mut content = Content::load(std::path::Path::new("data")).unwrap();
+        assert_eq!(
+            gray_blob_private_table(0x20d)
+                .iter()
+                .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+                .collect::<Vec<_>>(),
+            vec![(0.005, vec![0xa51])]
+        );
+        let mut second_roll = Branch(vec![u64::MAX, 0]);
+        assert_eq!(
+            gray_blob_rewards(&content, &[(1, 3), (2, 2), (3, 1)], &mut second_roll),
+            vec![(1, 0xa51)]
+        );
+        assert!(second_roll.0.is_empty());
+        let owners: Vec<_> = (1..=12).map(|account| (account, 2)).collect();
+        let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+        assert_eq!(
+            gray_blob_rewards(&content, &owners, &mut hits),
+            (1..=8).map(|account| (account, 0xa51)).collect::<Vec<_>>()
+        );
+        let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(gray_blob_rewards(&content, &owners, &mut misses).is_empty());
+        content.objects.get_mut(&0xa51).unwrap().bag_type = 5;
+        assert!(validate(&content, 0x20d).is_err());
+        validate(&content, 0x205).unwrap();
+    }
+    #[test]
+    fn starter_enemy_tables_use_the_reconstructed_ordered_public_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, name) in [
+            (0x205, "Pink Blob"),
+            (0x20d, "Gray Blob"),
+            (0x20f, "Little Green Slime"),
+            (0x202, "Red Spider"),
+            (0x204, "Black Bat"),
+        ] {
+            assert_eq!(content.get(kind).unwrap().name, name);
+            let mut expected = vec![(0.03, vec![0xa22]), (0.02, vec![0xa23])];
+            if kind == 0x204 {
+                expected.insert(0, (0.01, vec![0xa0d, 0xa0f, 0xa7e]));
+            }
+            let actual: Vec<_> = table(kind)
+                .iter()
+                .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+                .collect();
+            assert_eq!(actual, expected, "{name}");
+            for (branch, (_, items)) in expected.iter().enumerate() {
+                let mut rng = Branch(vec![u64::MAX; branch]);
+                rng.0.push(0);
+                let result = rewards(&content, kind, &mut rng);
+                assert_eq!(result.len(), 1);
+                assert!(items.contains(&result[0]));
+                assert!(rng.0.is_empty(), "first success ends the attempt");
+            }
+            let mut rng = Branch(vec![u64::MAX; expected.len()]);
+            assert!(rewards(&content, kind, &mut rng).is_empty());
+            assert!(rng.0.is_empty());
+            assert!(!private(kind) && bonus(kind).is_empty());
+            validate(&content, kind).unwrap();
+        }
+        assert!(collectibles(&content).contains(&0xa51));
+        let mushroom = content.get(0xa51).unwrap();
+        assert_eq!(
+            (
+                mushroom.name.as_str(),
+                mushroom.bag_type,
+                mushroom.soulbound
+            ),
+            ("Magic Mushroom", 1, false)
+        );
+        for kind in [0x20e, 0x206, 0x620, 0x622, 0x947, 0x948, 0x949, 0x952] {
+            assert!(table(kind).is_empty() && bonus(kind).is_empty() && !private(kind));
+        }
+    }
     #[test]
     fn abyss_bosses_always_drop_the_vitality_and_defense_potions() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
@@ -739,7 +869,7 @@ mod tests {
         let first = content.get(first[0]).unwrap();
         assert_eq!(first.tier, Some(3));
         assert!(WEAPONS.contains(&first.slot_type));
-        for kind in [0x620, 0x622, 0x205] {
+        for kind in [0x620, 0x622, 0x20e] {
             assert!(rewards(&content, kind, &mut hits).is_empty());
         }
         assert!(!private(0x623));

@@ -152,7 +152,7 @@ def main():
             guard = str(Path(__file__).with_name('cargo.py'))
             code = run([sys.executable, guard, 'status'], ROOT, log)
             if code:
-                raise RuntimeError(f'Build storage check exited with status {code}. See {LOG}.')
+                raise RuntimeError(f'Build cache access failed with status {code}. See {LOG}.')
             if args.local_client is not None:
                 client = args.local_client.resolve()
             else:

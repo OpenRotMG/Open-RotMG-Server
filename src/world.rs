@@ -36,6 +36,7 @@ mod fauna_births;
 mod fauna_special;
 mod ghost_ship;
 mod gods;
+mod ground_dye;
 
 mod gold;
 mod golems;
@@ -375,7 +376,7 @@ pub struct Player {
     discarded_attack: Option<(i32, i32)>,
     tick: i32,
     last_motion: Option<(f32, u64)>,
-    last_ability: Option<u64>,
+    ability_ready_ms: u64,
     boosts: Vec<consumables::Boost>,
     last_companion: Option<u64>,
     ability_shot: Option<(u16, i32, bool, i32)>,
@@ -669,6 +670,7 @@ impl PortalPlan {
 }
 #[derive(Clone)]
 pub struct InventoryPlan {
+    ground_dye: Option<ground_dye::Reservation>,
     pub player: i32,
     pub items: Vec<i32>,
     pub revision: i32,
@@ -1193,6 +1195,9 @@ impl Directory {
             world.populate_manor_entry()?;
             world.populate_ghost_ship()?;
             world.populate_realm_population()?;
+            // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+            let crystal = world.place_named_setpiece(0x935, &[1])?;
+            world.spawn_entity(0x935, crystal, vec![])?;
             tracing::info!(
                 layout = world.realm_layout,
                 entities = world.entities.len(),
@@ -2844,7 +2849,7 @@ impl World {
                 discarded_attack: None,
                 tick: 0,
                 last_motion: None,
-                last_ability: None,
+                ability_ready_ms: 0,
                 boosts: Vec::new(),
                 last_companion: None,
                 ability_shot: None,
@@ -3876,7 +3881,7 @@ impl World {
         }
         if matches!(
             item.activate.as_str(),
-            "Dye" | "Pet" | "PermaPet" | "Create" | "UnlockPortal"
+            "Pet" | "PermaPet" | "Create" | "UnlockPortal"
         ) {
             ensure!(
                 slot.object == id,
@@ -3899,7 +3904,13 @@ impl World {
                 if let Some(value) = item.textures[1] {
                     tex2 = value;
                 }
+                let source = if slot.object == id {
+                    None
+                } else {
+                    Some(self.reserve_ground_dye(id, slot)?)
+                };
                 let mut plan = self.consumable_plan(id, slot, -1)?;
+                plan.ground_dye = source;
                 plan.appearance = Some((slot, tex1, tex2));
                 Ok(Some(plan))
             }
@@ -3959,6 +3970,7 @@ impl World {
     fn plan(&self, id: i32, items: Vec<i32>, bag: Option<(i32, Vec<i32>)>) -> InventoryPlan {
         let p = &self.players[&id];
         InventoryPlan {
+            ground_dye: None,
             player: id,
             items,
             revision: p.character.revision,
@@ -4197,8 +4209,15 @@ impl World {
         let player = plan.player;
         let source = (plan.character, plan.revision);
         let companion = plan.companion.clone();
+        let ground_dye = plan.ground_dye.as_ref().map(|source| source.bag_id());
         let result = self.publish_inventory(plan, result);
         if let Err(error) = &result {
+            if let Some(id) = ground_dye
+                && let Some(bag) = self.entities.get_mut(&id)
+            {
+                // An error may conceal COMMIT; retain even a damaged reservation, never refund the source.
+                bag.reserved = true;
+            }
             self.discard_consumable(source);
             if let Err(cleanup) = self.discard_companion(&companion) {
                 tracing::error!(player,%cleanup,"companion cleanup failed after rejected publication");
@@ -4209,6 +4228,9 @@ impl World {
     }
     fn publish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
         let revision = result?;
+        if plan.ground_dye.is_some() {
+            self.validate_ground_dye(&plan)?;
+        }
         let p = self
             .players
             .get_mut(&plan.player)
@@ -4284,7 +4306,7 @@ impl World {
             committed.inventory_potion_used = true;
             p.acknowledge_lifetime(committed)?;
         }
-        if let Some((_, tex1, tex2)) = plan.appearance {
+        if let Some((slot, tex1, tex2)) = plan.appearance {
             p.character.tex1 = tex1;
             p.character.tex2 = tex2;
             tracing::info!(
@@ -4292,6 +4314,9 @@ impl World {
                 tex1,
                 tex2,
                 revision,
+                source = slot.object,
+                slot = slot.slot,
+                item = slot.kind,
                 "appearance consumable committed"
             );
         }
@@ -5128,6 +5153,13 @@ impl World {
                 if !items.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
                     items.push(item as i32);
                 }
+            }
+        }
+        if defeated.kind == 0x20d {
+            for (owner, item) in
+                crate::loot::gray_blob_rewards(&self.content, &eligible, &mut self.rng)
+            {
+                drops.entry(owner).or_default().push(i32::from(item));
             }
         }
         for (owner, items) in drops {
@@ -6403,7 +6435,11 @@ mod cover_example;
 mod timing_example;
 
 #[cfg(test)]
+mod ground_dye_tests;
+#[cfg(test)]
 mod manor_tests;
+#[cfg(test)]
+mod starter_loot_tests;
 #[cfg(test)]
 mod view_navigation_tests;
 

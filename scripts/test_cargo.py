@@ -1,3 +1,4 @@
+import errno
 import importlib.util
 import io
 import json
@@ -28,7 +29,7 @@ class BuildStorageTests(unittest.TestCase):
         source.start()
         self.addCleanup(source.stop)
         env = {key: value for key, value in os.environ.items() if not key.startswith(('CARGO_', 'RUSTFLAGS', 'RUSTUP_TOOLCHAIN'))}
-        env.update(XDG_CACHE_HOME=str(self.root / 'cache'), OPENROTMG_BUILD_MIN_FREE_GIB='0.001', OPENROTMG_BUILD_MAX_GIB='1')
+        env.update(XDG_CACHE_HOME=str(self.root / 'cache'))
         self.env = patch.dict(os.environ, env, clear=True)
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -45,37 +46,39 @@ class BuildStorageTests(unittest.TestCase):
             code = guard.main(args or ['build', '--locked'])
         return code, execute
 
-    def test_worktrees_share_targets_and_configuration_changes_separate_them(self):
+    def test_targets_isolate_checkouts_and_configuration_but_reuse_commands(self):
         with patch.object(guard, 'ROOT', self.root / 'worktree-a'):
             code, first = self.build()
+            _, same = self.build(['test', '--locked'])
+            with patch.dict(os.environ, RUSTFLAGS='-C debuginfo=1'):
+                _, changed = self.build()
         with patch.object(guard, 'ROOT', self.root / 'worktree-b'):
-            code2, second = self.build(['test', '--locked'])
+            code2, second = self.build()
         self.assertEqual((code, code2), (0, 0))
-        self.assertEqual(first.call_args.args[1], second.call_args.args[1])
-        with patch.dict(os.environ, RUSTFLAGS='-C debuginfo=1'):
-            _, changed = self.build()
+        self.assertEqual(first.call_args.args[1], same.call_args.args[1])
+        self.assertNotEqual(first.call_args.args[1], second.call_args.args[1])
         self.assertNotEqual(first.call_args.args[1], changed.call_args.args[1])
 
-    def test_low_space_and_cache_budget_stop_before_rust_or_cargo(self):
-        for free, used in [(0, 0), (2 * guard.GIB, guard.GIB)]:
+    def test_zero_free_space_and_large_caches_do_not_block_builds_or_status(self):
+        for free, used in [(0, 0), (0, 100 * guard.GIB), (2 * guard.GIB, 100 * guard.GIB)]:
             with self.subTest(free=free, used=used), \
-                    patch.object(guard.shutil, 'disk_usage', return_value=shutil._ntuple_diskusage(10, 9, free)), \
-                    patch.object(guard, 'allocation', return_value=used), \
-                    patch.object(guard.subprocess, 'check_output') as rustc:
+                    patch.object(guard.shutil, 'disk_usage', return_value=shutil._ntuple_diskusage(200 * guard.GIB, 200 * guard.GIB - free, free)), \
+                    patch.object(guard, 'allocation', return_value=used):
                 code, execute = self.build()
-                self.assertEqual(code, 1)
-                execute.assert_not_called()
-                rustc.assert_not_called()
-        self.assertIn('Build refused', self.stderr.getvalue())
-        self.assertIn(str(guard.cache_root()), self.stderr.getvalue())
-        self.assertIn('No files were deleted', self.stderr.getvalue())
+                self.assertEqual(code, 0)
+                execute.assert_called_once()
+                self.assertEqual(guard.main(['status']), 0)
+        self.assertIn(str(guard.cache_root()), self.stdout.getvalue())
+        self.assertIn('free=0.00GiB; cache=100.00GiB', self.stdout.getvalue())
+        self.assertEqual(self.stderr.getvalue(), '')
 
-    def test_invalid_limits_fail_closed(self):
-        for bad in ['0', '-1', 'nan', 'inf', 'not-a-number']:
-            with self.subTest(bad=bad), patch.dict(os.environ, OPENROTMG_BUILD_MAX_GIB=bad):
-                code, execute = self.build()
-                self.assertEqual(code, 1)
-                execute.assert_not_called()
+    def test_real_allocation_failures_are_reported_as_failures(self):
+        for number in [errno.ENOSPC, errno.EDQUOT]:
+            with self.subTest(errno=number), \
+                    patch.object(guard.subprocess, 'check_output', return_value='rustc'), \
+                    patch.object(guard, 'execute', side_effect=OSError(number, os.strerror(number))):
+                self.assertEqual(guard.main(['build']), 1)
+                self.assertIn(os.strerror(number), self.stderr.getvalue())
 
     def test_storage_overrides_and_worktree_local_cache_are_rejected(self):
         for args in [['build', '--target-dir=x'], ['build', '--config', 'build.target-dir="x"'], ['build', '--manifest-path=x']]:
@@ -94,7 +97,7 @@ class BuildStorageTests(unittest.TestCase):
             rustc.assert_not_called()
         self.assertIn(str(guard.cache_root()), self.stdout.getvalue())
 
-    def test_cleanup_preserves_binary_codegen_and_adjacent_evidence_even_over_budget(self):
+    def test_cleanup_preserves_binary_codegen_and_adjacent_evidence(self):
         root = guard.cache_root()
         with guard.locked(root):
             pass
@@ -105,8 +108,7 @@ class BuildStorageTests(unittest.TestCase):
             path = target / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(name)
-        with patch.dict(os.environ, OPENROTMG_BUILD_MIN_FREE_GIB='100000'):
-            self.assertEqual(guard.main(['clean']), 0)
+        self.assertEqual(guard.main(['clean']), 0)
         for name in deleted:
             self.assertFalse((target / name).exists())
         for name in kept:
@@ -138,30 +140,32 @@ class BuildStorageTests(unittest.TestCase):
             self.assertEqual(guard.main(['--output', str(output), 'build']), 37)
         self.assertEqual(output.read_text(), 'old')
 
-    def test_build_growth_past_budget_is_reported_after_completion(self):
+    def test_successful_build_stays_successful_when_space_reaches_zero(self):
         with patch.object(guard.subprocess, 'check_output', return_value='rustc'), \
-                patch.object(guard, 'allocation', side_effect=[0, 2 * guard.GIB]), \
+                patch.object(guard.shutil, 'disk_usage', side_effect=[shutil._ntuple_diskusage(100, 80, 20), shutil._ntuple_diskusage(100, 100, 0)]), \
+                patch.object(guard, 'allocation', side_effect=[0, 100 * guard.GIB]), \
                 patch.object(guard, 'execute', return_value=0) as execute:
-            self.assertEqual(guard.main(['build']), 1)
+            self.assertEqual(guard.main(['build']), 0)
             execute.assert_called_once()
-        self.assertIn('Build completed over budget', self.stderr.getvalue())
+        self.assertIn('free=0.00GiB; cache=100.00GiB', self.stdout.getvalue())
+        self.assertEqual(self.stderr.getvalue(), '')
 
-    def test_real_cargo_preserves_first_binary_when_second_worktree_builds(self):
-        outputs = []
-        targets = []
+    def test_real_cargo_retains_each_older_checkout_and_reuses_the_first(self):
         for name in ['first', 'second']:
             repo = self.root / name
             (repo / 'src').mkdir(parents=True)
             shutil.copyfile(self.source / 'rust-toolchain.toml', repo / 'rust-toolchain.toml')
             (repo / 'Cargo.toml').write_text('[package]\nname="openrotmg"\nversion="0.1.0"\nedition="2021"\n')
             (repo / 'src/main.rs').write_text(f'fn main() {{ println!("{name}"); }}')
-            output = repo / 'retained/openrotmg'
-            with patch.object(guard, 'ROOT', repo):
+            for source in [repo / 'Cargo.toml', repo / 'src/main.rs']:
+                os.utime(source, (1, 1))
+        outputs = []
+        for index, name in enumerate(['first', 'second', 'first']):
+            output = self.root / f'retained-{index}'
+            with patch.object(guard, 'ROOT', self.root / name):
                 self.assertEqual(guard.main(['--output', str(output), 'build', '--offline']), 0)
             outputs.append(output)
-            targets.append(next(path for path in guard.cache_root().iterdir() if path.is_dir()))
-        self.assertEqual(targets[0], targets[1])
-        self.assertEqual([subprocess.check_output([str(path)], text=True).strip() for path in outputs], ['first', 'second'])
+        self.assertEqual([subprocess.check_output([str(path)], text=True).strip() for path in outputs], ['first', 'second', 'first'])
         self.assertEqual(guard.main(['clean']), 0)
         self.assertEqual(subprocess.check_output([str(outputs[0])], text=True).strip(), 'first')
 

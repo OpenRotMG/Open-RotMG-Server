@@ -64,6 +64,8 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+#[cfg(test)]
+pub(crate) use account_actions::tests::fixture as test_app;
 pub(crate) mod browser_link;
 pub(crate) mod diagnostics;
 mod gold;
@@ -667,19 +669,29 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
             )
             .await
     } else if let Some((slot, tex1, tex2)) = plan.appearance {
-        a.store
-            .consume_dye(
-                InventoryWrite {
-                    id: plan.character,
-                    account: plan.account,
-                    revision: plan.revision,
-                    items: plan.items.clone(),
-                },
-                slot.slot,
-                u16::try_from(slot.kind)?,
-                [tex1, tex2],
-            )
-            .await
+        let write = InventoryWrite {
+            id: plan.character,
+            account: plan.account,
+            revision: plan.revision,
+            items: plan.items.clone(),
+        };
+        let kind = u16::try_from(slot.kind)?;
+        if slot.object == plan.player {
+            a.store
+                .consume_dye(write, slot.slot, kind, [tex1, tex2])
+                .await
+        } else {
+            let reserved = plan.clone();
+            match a
+                .world
+                .for_player(plan.player)
+                .call(move |w| w.validate_ground_dye(&reserved))
+                .await
+            {
+                Ok(()) => a.store.consume_ground_dye(write, kind, [tex1, tex2]).await,
+                Err(error) => Err(error),
+            }
+        }
     } else if let Some((snapshot, slot, index, amount)) = &plan.stat_growth {
         a.store
             .consume_stat(
