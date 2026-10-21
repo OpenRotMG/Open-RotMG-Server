@@ -14,11 +14,7 @@ const OBJECTS: &str = "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad9
 const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7";
 
 const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 10] = [
-    (
-        "classic-world-04-reconstruction",
-        "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5",
-        2000,
-    ),
+    ("classic-world-04-reconstruction", WORLD04_SOURCE, 2000),
     (
         "classic-world-08-reconstruction",
         "d0a544f4943991aa1265b7ebdfecb3a846215f297c1317ffb718ddd89e8d92bc",
@@ -135,45 +131,91 @@ const WORLD01_SOURCE: &str = "7404dfa562627e015160a88820017cfbcfb2c6de3676a18dcc
 const WORLD01_LAVA_SUPPORT: &str =
     "93f3410a461d0daa70d6efc79938a5a0938f69018bd32e9c5667bf6ee25a2b17";
 
-struct World01Lava;
-impl World01Lava {
+const WORLD04_SOURCE: &str = "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5";
+const WORLD04_LAVA_SUPPORT: &str =
+    "db7fa56ca8a4ea4396a75483b894262b66fe611b7fdf72b4b574f0999c1e8494";
+
+struct ScopedLava {
+    world: u8,
+    side: usize,
+    source_side: usize,
+    offset: usize,
+    pixels: usize,
+    support: &'static str,
+}
+impl ScopedLava {
     fn for_recipe(
         r: &ReviewedRecipe,
         policy: &serde_json::Value,
         content: &Content,
     ) -> Result<Option<Self>> {
-        let id = "classic-world-01-reconstruction";
-        if r.id != id
-            && r.provenance.source_sha256 != WORLD01_SOURCE
-            && policy.get("world01_lava").is_none()
-        {
+        let world01 = r.id == "classic-world-01-reconstruction"
+            || r.provenance.source_sha256 == WORLD01_SOURCE
+            || policy.get("world01_lava").is_some();
+        let world04 = policy.get("world04_lava").is_some();
+        ensure!(!(world01 && world04), "mixed World1/World4 lava scopes");
+        let (scope, id, source, key, schema, transform) = if world01 {
+            (
+                Self {
+                    world: 1,
+                    side: SIDE,
+                    source_side: 2100,
+                    offset: 26,
+                    pixels: 703,
+                    support: WORLD01_LAVA_SUPPORT,
+                },
+                "classic-world-01-reconstruction",
+                WORLD01_SOURCE,
+                "world01_lava",
+                2,
+                serde_json::json!({"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN","source_dimensions":[2100,2100],"tile":"source_pixel-26"}),
+            )
+        } else if world04 {
+            (
+                Self {
+                    world: 4,
+                    side: 2000,
+                    source_side: 2000,
+                    offset: 0,
+                    pixels: 506,
+                    support: WORLD04_LAVA_SUPPORT,
+                },
+                "classic-world-04-reconstruction",
+                WORLD04_SOURCE,
+                "world04_lava",
+                3,
+                source_local_transform([2000, 2000]),
+            )
+        } else {
             return Ok(None);
-        }
+        };
         ensure!(
             r.id == id
-                && r.provenance.source_sha256 == WORLD01_SOURCE
-                && r.width == SIDE
-                && r.height == SIDE
+                && r.provenance.source_sha256 == source
+                && r.schema == schema
+                && r.width == scope.side
+                && r.height == scope.side
                 && r.content.objects == OBJECTS
                 && r.content.grounds == GROUNDS
-                && policy["source_sha256"] == WORLD01_SOURCE
+                && policy["source_sha256"] == source
                 && policy["selected_client"] == "123.5.1"
-                && policy["transform"]
-                    == serde_json::json!({"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN","source_dimensions":[2100,2100],"tile":"source_pixel-26"})
-                && policy["world01_lava"]
-                    == serde_json::json!({"rgb":"d44a00","pixels":703,"support_sha256_le_u32":WORLD01_LAVA_SUPPORT,"cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}}),
-            "unapproved World1 lava source/content/transform/cell support"
+                && policy["transform"] == transform
+                && policy[key]
+                    == serde_json::json!({"rgb":"d44a00","pixels":scope.pixels,"support_sha256_le_u32":scope.support,"cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}}),
+            "unapproved World{} lava source/content/transform/cell support",
+            scope.world
         );
         ensure!(
             matches!(content.hazards.get(&244), Some(h) if h.name == "Lava Blend" && h.min == 30 && h.max == 60)
                 && content.grounds.get(&244) == Some(&0.666)
                 && content.pushes.get(&244) == Some(&(0.0, 0.0)),
-            "selected World1 Lava Blend definition drift: hazard={:?}, speed={:?}, push={:?}",
+            "selected World{} Lava Blend definition drift: hazard={:?}, speed={:?}, push={:?}",
+            scope.world,
             content.hazards.get(&244).map(|h| (&h.name, h.min, h.max)),
             content.grounds.get(&244),
             content.pushes.get(&244)
         );
-        Ok(Some(Self))
+        Ok(Some(scope))
     }
     fn accepts(&self, c: &Cell) -> bool {
         c.ground == 244
@@ -184,8 +226,11 @@ impl World01Lava {
     }
     fn validate_support(&self, map: &Map) -> Result<()> {
         ensure!(
-            map.width == SIDE as i32 && map.height == SIDE as i32 && map.cells.len() == CELLS,
-            "invalid World1 lava map dimensions"
+            map.width == self.side as i32
+                && map.height == self.side as i32
+                && map.cells.len() == self.side * self.side,
+            "invalid World{} lava map dimensions",
+            self.world
         );
         let mut support = Sha256::new();
         let mut count = 0;
@@ -197,16 +242,27 @@ impl World01Lava {
         {
             ensure!(
                 self.accepts(c),
-                "unapproved World1 lava cell at {},{}",
-                i % SIDE,
-                i / SIDE
+                "unapproved World{} lava cell at {},{}",
+                self.world,
+                i % self.side,
+                i / self.side
             );
-            support.update((((i / SIDE + 26) * 2100 + i % SIDE + 26) as u32).to_le_bytes());
+            support.update(
+                (((i / self.side + self.offset) * self.source_side + i % self.side + self.offset)
+                    as u32)
+                    .to_le_bytes(),
+            );
             count += 1;
         }
+        let actual = format!("{:x}", support.finalize());
         ensure!(
-            count == 703 && format!("{:x}", support.finalize()) == WORLD01_LAVA_SUPPORT,
-            "World1 lava support differs from approved source positions"
+            count == self.pixels && actual == self.support,
+            "World{} lava support differs from approved source positions: expected {}/{}, actual {}/{}",
+            self.world,
+            self.pixels,
+            self.support,
+            count,
+            actual
         );
         Ok(())
     }
@@ -788,7 +844,7 @@ fn entry(
     c: &Cell,
     content: &Content,
     validated_objects: &mut BTreeSet<u16>,
-    lava: Option<&World01Lava>,
+    lava: Option<&ScopedLava>,
 ) -> Result<Entry> {
     ensure!(
         content.grounds.contains_key(&c.ground)
@@ -870,14 +926,14 @@ fn encode(map: &Map, content: &Content) -> Result<(Vec<u8>, usize)> {
 fn encode_scoped(
     map: &Map,
     content: &Content,
-    lava: Option<&World01Lava>,
+    lava: Option<&ScopedLava>,
 ) -> Result<(Vec<u8>, usize)> {
     encode_reviewed(map, content, lava, None)
 }
 fn encode_reviewed(
     map: &Map,
     content: &Content,
-    lava: Option<&World01Lava>,
+    lava: Option<&ScopedLava>,
     recipe: Option<&ReviewedRecipe>,
 ) -> Result<(Vec<u8>, usize)> {
     let shape_matches = match recipe {
@@ -957,7 +1013,7 @@ fn dictionary(bytes: &[u8], content: &Content) -> Result<Vec<Cell>> {
 fn dictionary_scoped(
     bytes: &[u8],
     content: &Content,
-    lava: Option<&World01Lava>,
+    lava: Option<&ScopedLava>,
 ) -> Result<Vec<Cell>> {
     ensure!(
         bytes.len() <= 64 * 1024,
@@ -1138,7 +1194,7 @@ fn reviewed_map(
     root: &Path,
     recipe: &ReviewedRecipe,
     content: &Content,
-) -> Result<(Map, Option<World01Lava>)> {
+) -> Result<(Map, Option<ScopedLava>)> {
     let dimensions = recipe.dimensions()?;
     let bytes = index_bytes(dimensions)?;
     let inputs = &recipe.inputs;
@@ -1155,7 +1211,7 @@ fn reviewed_map(
         )
     })?;
     let policy: serde_json::Value = serde_json::from_slice(&policy)?;
-    let lava = World01Lava::for_recipe(recipe, &policy, content)?;
+    let lava = ScopedLava::for_recipe(recipe, &policy, content)?;
     let dictionary = match lava.as_ref() {
         Some(lava) => dictionary_scoped(&cells, content, Some(lava))?,
         None => dictionary(&cells, content)?,
@@ -1718,18 +1774,76 @@ mod tests {
         }
     }
 
+    #[test]
+    fn realm_source_open_world04_lava_exact_support_and_loaded_xml_identity() {
+        source_local_open_scoped(0, true);
+    }
+
     fn source_local_open(index: usize) {
+        source_local_open_scoped(index, false);
+    }
+
+    fn source_local_open_scoped(index: usize, with_lava: bool) {
         let side = SOURCE_LOCAL_IDENTITIES[index].2;
         let root =
             std::env::temp_dir().join(format!("source-local-open-{}", rand::random::<u64>()));
         let realms = root.join("realms");
-        let (mut value, policy, annotations) = source_local_values(index);
-        let cells = serde_json::json!([
+        let (mut value, mut policy, mut annotations) = source_local_values(index);
+        let mut cells = serde_json::json!([
             {"ground":190,"object":null,"config":"","terrain":11,"region":0},
             {"ground":190,"object":null,"config":"","terrain":1,"region":0}
         ]);
         let mut raw = vec![0; side * side * 2];
         raw[(side / 2 * side + side / 2) * 2] = 1;
+        if with_lava {
+            assert_eq!(SOURCE_LOCAL_IDENTITIES[index].1, WORLD04_SOURCE);
+            let binding: serde_json::Value = serde_json::from_slice(include_bytes!(
+                "../../data/realms/world04/lava-support.json"
+            ))
+            .unwrap();
+            value["provenance"]["status"] = serde_json::json!(
+                "Approximate image-guided reconstruction: SYNTHETIC Source4 optional-lava loader control; only506 source positions authored, all other cells artificial."
+            );
+            policy["world04_lava"] = serde_json::json!({"rgb":"d44a00","pixels":506,
+                "support_sha256_le_u32":WORLD04_LAVA_SUPPORT,"cell":binding["cell"]});
+            cells.as_array_mut().unwrap().push(binding["cell"].clone());
+            for run in binding["source_positions_row_runs"].as_array().unwrap() {
+                let y = run[0].as_u64().unwrap() as usize;
+                for x in run[1].as_u64().unwrap() as usize..run[2].as_u64().unwrap() as usize {
+                    assert_eq!(raw[(y * side + x) * 2], 0);
+                    raw[(y * side + x) * 2] = 2;
+                }
+            }
+            let rows: Vec<_> = (0..3)
+                .map(|entry| {
+                    let mut support = Sha256::new();
+                    let mut count = 0;
+                    for (i, pair) in raw.chunks_exact(2).enumerate() {
+                        if pair == [entry, 0] {
+                            support.update((i as u32).to_le_bytes());
+                            count += 1;
+                        }
+                    }
+                    let mut row = annotations["unknown"][0].clone();
+                    for field in ["ground", "object", "config", "terrain", "region"] {
+                        row[field] = cells[entry as usize][field].clone();
+                    }
+                    row["support"] = serde_json::json!(entry + 1);
+                    row["pixels"] = serde_json::json!(count);
+                    row["support_sha256"] = serde_json::json!(format!("{:x}", support.finalize()));
+                    row
+                })
+                .collect();
+            assert_eq!(rows[2]["pixels"], 506);
+            assert_eq!(rows[2]["support_sha256"], WORLD04_LAVA_SUPPORT);
+            policy["audit"]["supports"] = serde_json::json!(3);
+            annotations["unknown"] = serde_json::json!(rows);
+            value["provenance"]["policy"]["sha256"] =
+                serde_json::json!(sha256(&serde_json::to_vec(&policy).unwrap()));
+            annotations["policy_sha256"] = value["provenance"]["policy"]["sha256"].clone();
+            value["provenance"]["annotations"]["sha256"] =
+                serde_json::json!(sha256(&serde_json::to_vec(&annotations).unwrap()));
+        }
         let compressed = zipped(&raw);
         value["inputs"]["dictionary"]["sha256"] =
             serde_json::json!(sha256(&serde_json::to_vec(&cells).unwrap()));
@@ -1751,11 +1865,13 @@ mod tests {
             panic!()
         };
         let (map, lava) = reviewed_map(&realms, &r, &content).unwrap();
-        assert!(lava.is_none());
-        let (bytes, _) = encode_reviewed(&map, &content, None, Some(&r)).unwrap();
+        assert_eq!(lava.is_some(), with_lava);
+        let (bytes, _) = encode_reviewed(&map, &content, lava.as_ref(), Some(&r)).unwrap();
         assert_eq!(
             bytes,
-            encode_reviewed(&map, &content, None, Some(&r)).unwrap().0
+            encode_reviewed(&map, &content, lava.as_ref(), Some(&r))
+                .unwrap()
+                .0
         );
         if side > SIDE {
             assert!(encode(&map, &content).is_err());
@@ -1770,7 +1886,6 @@ mod tests {
             );
         }
         drop(decoded);
-        drop(map);
         for field in ["sha256", "expanded_sha256"] {
             let mut bad = value.clone();
             bad["inputs"]["indices"][field] = serde_json::json!("0".repeat(64));
@@ -1791,7 +1906,26 @@ mod tests {
         assert_eq!([opened.width, opened.height], [side as i32, side as i32]);
         assert_eq!(opened.cells.len(), side * side);
         assert_eq!(opened.spawns.len(), 4);
+        let mut arrival_changes = 0;
+        for (before, after) in map.cells.iter().zip(&opened.cells) {
+            assert_eq!(
+                (before.ground, before.object, &before.config, before.terrain),
+                (after.ground, after.object, &after.config, after.terrain)
+            );
+            if before.region != after.region {
+                assert_eq!(
+                    (before.region, after.region, before.ground, before.terrain),
+                    (0, 1, 190, 11)
+                );
+                arrival_changes += 1;
+            }
+        }
+        assert_eq!(arrival_changes, 36);
+        if let Some(lava) = lava.as_ref() {
+            lava.validate_support(&opened).unwrap();
+        }
         drop(opened);
+        drop(map);
         let originals = [
             std::fs::read_to_string("data/objects.xml").unwrap(),
             std::fs::read_to_string("data/grounds.xml").unwrap(),
@@ -1996,25 +2130,68 @@ mod tests {
 
     #[test]
     fn realm_prepare_world01_lava_requires_source_cells_and_exact_positions() {
+        check_scoped_lava(false);
+    }
+
+    #[test]
+    fn realm_prepare_world04_lava_requires_explicit_source_exact_scope() {
+        check_scoped_lava(true);
+    }
+
+    fn check_scoped_lava(world04: bool) {
         let mut content = Content::load(Path::new("data")).unwrap();
-        let mut value = reviewed_value();
-        value["id"] = serde_json::json!("classic-world-01-reconstruction");
-        value["output"] = serde_json::json!("classic-world-01-reconstruction.wmap");
-        value["provenance"]["source_sha256"] = serde_json::json!(WORLD01_SOURCE);
+        let (mut value, id, source, key, support, binding_bytes, transform) = if world04 {
+            (
+                source_local_values(0).0,
+                "classic-world-04-reconstruction",
+                WORLD04_SOURCE,
+                "world04_lava",
+                WORLD04_LAVA_SUPPORT,
+                include_bytes!("../../data/realms/world04/lava-support.json").as_slice(),
+                source_local_transform([2000, 2000]),
+            )
+        } else {
+            (
+                reviewed_value(),
+                "classic-world-01-reconstruction",
+                WORLD01_SOURCE,
+                "world01_lava",
+                WORLD01_LAVA_SUPPORT,
+                include_bytes!("../../data/realms/world01/lava-support.json").as_slice(),
+                serde_json::json!({"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN","source_dimensions":[2100,2100],"tile":"source_pixel-26"}),
+            )
+        };
+        value["id"] = serde_json::json!(id);
+        value["output"] = serde_json::json!(format!("{id}.wmap"));
+        value["provenance"]["source_sha256"] = serde_json::json!(source);
         let Recipe::ReviewedCellsV1(recipe) = serde_json::from_value(value.clone()).unwrap() else {
             panic!()
         };
-        let binding: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../../data/realms/world01/lava-support.json"
-        ))
-        .unwrap();
-        assert_eq!(binding["source_sha256"], WORLD01_SOURCE);
-        assert_eq!(binding["support_sha256_le_u32"], WORLD01_LAVA_SUPPORT);
-        let policy = serde_json::json!({"source_sha256":WORLD01_SOURCE,"selected_client":"123.5.1",
-            "transform":{"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN","source_dimensions":[2100,2100],"tile":"source_pixel-26"},
-            "world01_lava":{"rgb":"d44a00","pixels":703,"support_sha256_le_u32":WORLD01_LAVA_SUPPORT,"cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}}});
-        assert_eq!(binding["cell"], policy["world01_lava"]["cell"]);
-        let lava = World01Lava::for_recipe(&recipe, &policy, &content)
+        let binding: serde_json::Value = serde_json::from_slice(binding_bytes).unwrap();
+        assert_eq!(binding["source_sha256"], source);
+        assert_eq!(binding["support_sha256_le_u32"], support);
+        assert_eq!(binding["pixels"], if world04 { 506 } else { 703 });
+        let mut policy = serde_json::json!({"source_sha256":source,
+            "selected_client":"123.5.1", "transform":transform});
+        if world04 {
+            assert!(
+                ScopedLava::for_recipe(&recipe, &policy, &content)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        policy[key] = serde_json::json!({"rgb":"d44a00","pixels":binding["pixels"],
+            "support_sha256_le_u32":support,
+            "cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}});
+        assert_eq!(binding["cell"], policy[key]["cell"]);
+        let mut mixed = policy.clone();
+        mixed[if world04 {
+            "world01_lava"
+        } else {
+            "world04_lava"
+        }] = serde_json::Value::Null;
+        assert!(ScopedLava::for_recipe(&recipe, &mixed, &content).is_err());
+        let lava = ScopedLava::for_recipe(&recipe, &policy, &content)
             .unwrap()
             .unwrap();
         let c = Cell {
@@ -2032,9 +2209,9 @@ mod tests {
             region: 0,
         };
         let mut map = Map {
-            width: SIDE as i32,
-            height: SIDE as i32,
-            cells: vec![safe.clone(); CELLS],
+            width: lava.side as i32,
+            height: lava.side as i32,
+            cells: vec![safe.clone(); lava.side * lava.side],
             spawns: vec![],
         };
         let mut positions = Vec::new();
@@ -2044,15 +2221,16 @@ mod tests {
                 run[1].as_u64().unwrap() as usize,
                 run[2].as_u64().unwrap() as usize,
             );
-            assert!((26..2074).contains(&y) && (26..2074).contains(&x0) && x1 <= 2074 && x0 < x1);
+            let extent = lava.offset..lava.offset + lava.side;
+            assert!(extent.contains(&y) && extent.contains(&x0) && x1 <= extent.end && x0 < x1);
             for x in x0..x1 {
-                let target = (y - 26) * SIDE + x - 26;
-                positions.push((target, y * 2100 + x));
+                let target = (y - lava.offset) * lava.side + x - lava.offset;
+                positions.push((target, y * lava.source_side + x));
                 assert_eq!(map.cells[target].ground, 190);
                 map.cells[target] = c.clone();
             }
         }
-        assert_eq!(positions.len(), 703);
+        assert_eq!(positions.len(), lava.pixels);
         assert!(positions.windows(2).all(|p| p[0].1 < p[1].1));
         let source_le: Vec<_> = positions
             .iter()
@@ -2062,15 +2240,22 @@ mod tests {
             .iter()
             .flat_map(|p| (p.1 as u32).to_be_bytes())
             .collect();
-        assert_eq!(sha256(&source_le), WORLD01_LAVA_SUPPORT);
-        assert_ne!(sha256(&source_be), WORLD01_LAVA_SUPPORT);
-        assert_eq!(map.cells[(1086 - 26) * SIDE + 1129 - 26].ground, 244);
-        assert_eq!(map.cells[(1086 - 26) * SIDE + 1128 - 26].ground, 190);
+        assert_eq!(sha256(&source_le), support);
+        assert_ne!(sha256(&source_be), support);
+        if !world04 {
+            assert_eq!(map.cells[(1086 - 26) * SIDE + 1129 - 26].ground, 244);
+            assert_eq!(map.cells[(1086 - 26) * SIDE + 1128 - 26].ground, 190);
+        }
         let dict = serde_json::to_vec(&vec![safe.clone(), c.clone()]).unwrap();
         assert!(dictionary(&dict, &content).is_err());
         dictionary_scoped(&dict, &content, Some(&lava)).unwrap();
-        let (bytes, _) = encode_scoped(&map, &content, Some(&lava)).unwrap();
-        assert_eq!(bytes, encode_scoped(&map, &content, Some(&lava)).unwrap().0);
+        let (bytes, _) = encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).unwrap();
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, Some(&lava), Some(&recipe))
+                .unwrap()
+                .0
+        );
         let decoded = Map::decode_cells(&bytes, &content).unwrap();
         for (a, b) in map.cells.iter().zip(&decoded.cells) {
             assert_eq!(
@@ -2081,6 +2266,7 @@ mod tests {
         assert!(encode(&map, &content).is_err());
         for (field, val) in [
             ("id", serde_json::json!("other-world")),
+            ("schema", serde_json::json!(if world04 { 2 } else { 3 })),
             ("width", serde_json::json!(1024)),
             ("height", serde_json::json!(1024)),
         ] {
@@ -2090,7 +2276,7 @@ mod tests {
                 panic!()
             };
             assert!(
-                World01Lava::for_recipe(&r, &policy, &content).is_err(),
+                ScopedLava::for_recipe(&r, &policy, &content).is_err(),
                 "{field}"
             );
         }
@@ -2104,29 +2290,43 @@ mod tests {
             let Recipe::ReviewedCellsV1(r) = serde_json::from_value(bad).unwrap() else {
                 panic!()
             };
-            assert!(World01Lava::for_recipe(&r, &policy, &content).is_err());
+            assert!(ScopedLava::for_recipe(&r, &policy, &content).is_err());
         }
-        for field in [
-            "source_sha256",
-            "selected_client",
-            "transform",
-            "world01_lava",
-        ] {
+        for field in ["source_sha256", "selected_client", "transform", key] {
             let mut bad = policy.clone();
             bad.as_object_mut().unwrap().remove(field);
-            assert!(
-                World01Lava::for_recipe(&recipe, &bad, &content).is_err(),
-                "{field}"
-            );
+            if world04 && field == key {
+                assert!(
+                    ScopedLava::for_recipe(&recipe, &bad, &content)
+                        .unwrap()
+                        .is_none()
+                );
+                dictionary(&serde_json::to_vec(&vec![safe.clone()]).unwrap(), &content).unwrap();
+                assert!(dictionary(&dict, &content).is_err());
+            } else {
+                assert!(
+                    ScopedLava::for_recipe(&recipe, &bad, &content).is_err(),
+                    "{field}"
+                );
+            }
+        }
+        for flag in [serde_json::Value::Null, serde_json::json!(false)] {
+            let mut bad = policy.clone();
+            bad[key] = flag;
+            assert!(ScopedLava::for_recipe(&recipe, &bad, &content).is_err());
         }
         for (field, val) in [
             ("rgb", serde_json::json!("d44a01")),
             ("pixels", serde_json::json!(704)),
+            (
+                "pixels",
+                serde_json::json!(binding["pixels"].as_u64().unwrap() as f64),
+            ),
             ("support_sha256_le_u32", serde_json::json!("0".repeat(64))),
         ] {
             let mut bad = policy.clone();
-            bad["world01_lava"][field] = val;
-            assert!(World01Lava::for_recipe(&recipe, &bad, &content).is_err());
+            bad[key][field] = val;
+            assert!(ScopedLava::for_recipe(&recipe, &bad, &content).is_err());
         }
         let first = positions[0].0;
         for (field, val) in [
@@ -2137,10 +2337,10 @@ mod tests {
             ("region", serde_json::json!(1)),
         ] {
             let mut bad = policy.clone();
-            bad["world01_lava"]["cell"][field] = val;
-            assert!(World01Lava::for_recipe(&recipe, &bad, &content).is_err());
+            bad[key]["cell"][field] = val;
+            assert!(ScopedLava::for_recipe(&recipe, &bad, &content).is_err());
             let mut cell = serde_json::to_value(&c).unwrap();
-            cell[field] = bad["world01_lava"]["cell"][field].clone();
+            cell[field] = bad[key]["cell"][field].clone();
             let cell: ReviewedCell = serde_json::from_value(cell).unwrap();
             let cell = Cell {
                 ground: cell.ground,
@@ -2161,14 +2361,23 @@ mod tests {
             assert!(encode_scoped(&map, &content, Some(&lava)).is_err());
             map.cells[first] = c.clone();
         }
+        let alternate = (first + 1..map.cells.len())
+            .find(|&i| map.cells[i].ground == 190)
+            .unwrap();
+        if !world04 {
+            assert_eq!(alternate, first + 1);
+        }
         map.cells[first] = safe.clone();
         assert!(encode_scoped(&map, &content, Some(&lava)).is_err());
-        assert_eq!(map.cells[first + 1].ground, 190);
-        map.cells[first + 1] = c.clone();
+        map.cells[alternate] = c.clone();
         assert!(encode_scoped(&map, &content, Some(&lava)).is_err());
         map.cells[first] = c.clone();
         assert!(encode_scoped(&map, &content, Some(&lava)).is_err());
-        map.cells[first + 1] = safe;
+        map.cells[alternate] = safe.clone();
+        for &(i, _) in &positions {
+            map.cells[i] = safe.clone();
+        }
+        assert!(encode_scoped(&map, &content, Some(&lava)).is_err());
         for &kind in content.hazards.keys().filter(|&&g| g != 244) {
             let mut bad = c.clone();
             bad.ground = kind;
@@ -2189,13 +2398,13 @@ mod tests {
         };
         assert!(encode_scoped(&small, &content, Some(&lava)).is_err());
         content.hazards.get_mut(&244).unwrap().max = 61;
-        assert!(World01Lava::for_recipe(&recipe, &policy, &content).is_err());
+        assert!(ScopedLava::for_recipe(&recipe, &policy, &content).is_err());
         content.hazards.get_mut(&244).unwrap().max = 60;
         content.grounds.insert(244, 1.0);
-        assert!(World01Lava::for_recipe(&recipe, &policy, &content).is_err());
+        assert!(ScopedLava::for_recipe(&recipe, &policy, &content).is_err());
         content.grounds.insert(244, 0.666);
         content.pushes.insert(244, (0.33, 0.33));
-        assert!(World01Lava::for_recipe(&recipe, &policy, &content).is_err());
+        assert!(ScopedLava::for_recipe(&recipe, &policy, &content).is_err());
     }
 
     #[test]
