@@ -460,6 +460,7 @@ impl App {
     pub(crate) fn claim(&self, id: i32) -> Result<Owner> {
         let _admission = drain::admission(self)?;
         let mut owners = self.owners.lock().expect("ownership registry poisoned");
+        self.world.supervisor.check_account(id)?;
         ensure!(owners.len() < self.max_players, "development world full");
         ensure!(
             !owners.contains_key(&id),
@@ -922,8 +923,33 @@ impl std::fmt::Display for Fenced {
 }
 impl std::error::Error for Fenced {}
 
+pub(super) fn preserve_uncertain(
+    a: &App,
+    incident: &mut crate::supervision::Incident,
+) -> Result<()> {
+    let owners = a.owners.lock().map_err(|_| {
+        anyhow::anyhow!("ownership registry poisoned; restart checkpoint incomplete")
+    })?;
+    let accounts: Vec<_> = owners
+        .iter()
+        .filter(|(_, claim)| {
+            claim.pending
+                || claim.failure.is_some()
+                || claim
+                    .finalization
+                    .as_ref()
+                    .is_some_and(|f| !matches!(*f.done.borrow(), Some(Ok(()))))
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    a.world.supervisor.preserve_accounts(incident, &accounts)?;
+    tracing::error!(accounts=accounts.len(), incident=%incident.id, "uncertain account fences preserved before restart");
+    Ok(())
+}
+
 fn reserve(a: &App, expected: &[(i32, Arc<()>)], operation: &'static str) -> Result<Operation> {
     let mut owners = a.owners.lock().expect("ownership registry poisoned");
+    a.world.supervisor.ensure_running()?;
     for (account, generation) in expected {
         let claim = owners
             .get(account)

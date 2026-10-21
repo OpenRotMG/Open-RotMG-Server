@@ -643,6 +643,18 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         self.vaults(account.id).await?;
         Ok(account)
     }
+    pub async fn shore_account(&self, identity: String) -> Result<Option<i32>> {
+        self.call(move |db| {
+            Ok(db
+                .query_row(
+                    "SELECT account FROM shore_bots WHERE name=?1",
+                    [identity],
+                    |r| r.get(0),
+                )
+                .optional()?)
+        })
+        .await
+    }
     pub async fn shore_character(
         &self,
         identity: String,
