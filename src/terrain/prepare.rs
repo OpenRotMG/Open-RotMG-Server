@@ -1546,7 +1546,32 @@ mod tests {
     }
 
     fn reviewed_value() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../data/realms/world02.json")).unwrap()
+        // Legacy parser fixtures must not inherit a published Realm's changing extent.
+        serde_json::from_str(include_str!("prepare-fixtures/legacy-world02-recipe.json")).unwrap()
+    }
+
+    fn legacy_audit_values() -> (ReviewedRecipe, serde_json::Value, serde_json::Value) {
+        let Recipe::ReviewedCellsV1(mut r) = recipe(reviewed_value()).unwrap() else {
+            panic!("legacy reviewed fixture");
+        };
+        let policy = serde_json::json!({"schema":1,"selected_client":"123.5.1",
+            "source_sha256":r.provenance.source_sha256,
+            "transform":{"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN",
+                "source_dimensions":[2100,2100],"tile":"source_pixel-26"}});
+        r.provenance.policy.sha256 = sha256(&serde_json::to_vec(&policy).unwrap());
+        let rows = (1..=101)
+            .map(|component| {
+                serde_json::json!({
+            "component":component,"pixels":if component == 101 {20471} else {1},
+            "support_sha256":"0".repeat(64),"status":"REVIEWED_RECONSTRUCTION",
+            "reason":"Synthetic legacy audit only","ground":190,"object":null,
+            "config":"","terrain":11,"region":0})
+            })
+            .collect::<Vec<_>>();
+        let annotations = serde_json::json!({"source_sha256":r.provenance.source_sha256,
+            "policy_sha256":r.provenance.policy.sha256,"transform":policy["transform"],
+            "unknown":rows});
+        (r, policy, annotations)
     }
 
     // These metadata and cell fixtures are synthetic, not approved source payloads.
@@ -3293,20 +3318,22 @@ mod tests {
 
     #[test]
     fn realm_prepare_reviewed_audit_rejects_unreviewed_or_inconsistent_source() {
-        let Recipe::ReviewedCellsV1(r) = recipe(reviewed_value()).unwrap() else {
-            panic!("reviewed fixture");
+        let Recipe::ReviewedCellsV1(r) =
+            read_recipe(Path::new("data/realms"), "world02.json").unwrap()
+        else {
+            panic!("actual full-source World2");
         };
         let policy = include_bytes!("../../data/realms/world02/source-policy.json");
         let annotations: serde_json::Value = serde_json::from_slice(include_bytes!(
             "../../data/realms/world02/source-annotations.json"
         ))
         .unwrap();
-        audit(
-            policy,
-            &serde_json::to_vec(&annotations).unwrap(),
-            &r.provenance,
-        )
-        .unwrap();
+        let check = |annotations: &serde_json::Value| -> Result<()> {
+            let bytes = serde_json::to_vec(annotations)?;
+            strict_source_audit(policy, &bytes, &r)?;
+            audit_scoped(policy, &bytes, &r.provenance, Some(r.dimensions()?))
+        };
+        check(&annotations).unwrap();
         for (field, value) in [
             ("policy_sha256", serde_json::json!("0".repeat(64))),
             ("source_sha256", serde_json::json!("0".repeat(64))),
@@ -3315,11 +3342,11 @@ mod tests {
         ] {
             let mut v = annotations.clone();
             v[field] = value;
-            assert!(audit(policy, &serde_json::to_vec(&v).unwrap(), &r.provenance).is_err());
+            assert!(check(&v).is_err(), "{field}");
         }
         for (field, value) in [
             ("status", serde_json::json!("UNKNOWN")),
-            ("component", serde_json::json!(102)),
+            ("support", serde_json::json!(102)),
             ("support_sha256", serde_json::json!("UNKNOWN")),
             ("reason", serde_json::json!("")),
             ("pixels", serde_json::json!(0)),
@@ -3327,26 +3354,23 @@ mod tests {
         ] {
             let mut v = annotations.clone();
             v["unknown"][0][field] = value;
-            assert!(audit(policy, &serde_json::to_vec(&v).unwrap(), &r.provenance).is_err());
+            assert!(check(&v).is_err(), "{field}");
         }
     }
 
     #[test]
     fn realm_prepare_versioned_support_audit_requires_explicit_consistent_contract() {
-        let Recipe::ReviewedCellsV1(r) = recipe(reviewed_value()).unwrap() else {
-            panic!("reviewed fixture");
-        };
-        let mut p: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../../data/realms/world02/source-policy.json"
-        ))
-        .unwrap();
-        let mut a: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../../data/realms/world02/source-annotations.json"
-        ))
+        let (mut r, mut p, mut a) = legacy_audit_values();
+        audit(
+            &serde_json::to_vec(&p).unwrap(),
+            &serde_json::to_vec(&a).unwrap(),
+            &r.provenance,
+        )
         .unwrap();
         p["schema"] = serde_json::json!(2);
-        p["source_sha256"] = serde_json::json!(r.provenance.source_sha256);
         p["audit"] = serde_json::json!({"kind":"reviewed-supports-v1","supports":1,"pixels":3});
+        r.provenance.policy.sha256 = sha256(&serde_json::to_vec(&p).unwrap());
+        a["policy_sha256"] = serde_json::json!(r.provenance.policy.sha256);
         let mut row = a["unknown"][0].clone();
         row.as_object_mut().unwrap().remove("component");
         row["support"] = serde_json::json!(1);
@@ -3403,14 +3427,21 @@ mod tests {
         };
         let (map, lava) = reviewed_map(root, &r, &content).unwrap();
         assert!(lava.is_none());
-        let (bytes, actual_count) = encode(&map, &content).unwrap();
+        let dimensions = r.dimensions().unwrap();
+        let (bytes, actual_count) =
+            encode_reviewed(&map, &content, lava.as_ref(), Some(&r)).unwrap();
         assert_eq!(actual_count, count);
         assert_eq!(bytes.len(), size);
         assert_eq!(sha256(&bytes), hash);
-        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, lava.as_ref(), Some(&r))
+                .unwrap()
+                .0
+        );
         assert_eq!(bytes, std::fs::read(root.join(&r.output)).unwrap());
-        let decoded = Map::decode_cells(&bytes, &content).unwrap();
-        assert_eq!(decoded.cells.len(), CELLS);
+        let decoded = Map::decode_realm_cells(&bytes, &content, dimensions).unwrap();
+        assert_eq!(decoded.cells.len(), dimensions[0] * dimensions[1]);
         for (i, (a, b)) in decoded.cells.iter().zip(&map.cells).enumerate() {
             assert_eq!(
                 (a.ground, a.object, &a.config, a.terrain, a.region),
@@ -3442,8 +3473,25 @@ mod tests {
             else {
                 panic!()
             };
-            let mut map =
-                Map::decode_cells(&std::fs::read(root.join(&r.output)).unwrap(), &content).unwrap();
+            let mut map = Map::decode_realm_cells(
+                &std::fs::read(root.join(&r.output)).unwrap(),
+                &content,
+                r.dimensions().unwrap(),
+            )
+            .unwrap();
+            if world == 2 {
+                assert_eq!([map.width, map.height], [2100, 2100]);
+                // The immutable restoration ledger describes the historical crop, not the new frame.
+                map.cells = (26..2074)
+                    .flat_map(|y| map.cells[y * 2100 + 26..y * 2100 + 2074].iter().cloned())
+                    .collect();
+                map.width = 2048;
+                map.height = 2048;
+                assert_eq!(
+                    sha256(&encode(&map, &content).unwrap().0),
+                    "7f911d27fd4b28640cab696ab5ac817020640480ac66992976fe66a6141fed30"
+                );
+            }
             let ledger: serde_json::Value = serde_json::from_slice(
                 &std::fs::read(root.join(format!("restoration/world{world:02}-passives.json")))
                     .unwrap(),
@@ -3528,22 +3576,38 @@ mod tests {
         let (content, map, r) = reviewed_roundtrip(
             "world02.json",
             55,
-            452520,
-            "7f911d27fd4b28640cab696ab5ac817020640480ac66992976fe66a6141fed30",
+            456061,
+            "c409996bc3a4bbe46ae872998a69ff5491cfdd8371eb06d6324707119f0f846b",
         );
-        let source = super::super::realms::sources(Path::new("data"))
-            .unwrap()
-            .into_iter()
-            .find(|s| s.name() == r.id)
-            .unwrap();
+        assert_eq!(r.schema, 4);
+        assert_eq!([map.width, map.height], [2100, 2100]);
+        assert!(
+            Map::decode_cells(
+                &std::fs::read(Path::new("data/realms").join(&r.output)).unwrap(),
+                &content
+            )
+            .is_err()
+        );
+        let sources = super::super::realms::sources(Path::new("data")).unwrap();
+        assert_eq!(
+            sources.iter().map(|s| s.name()).collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "realm-fsod-1",
+                "realm-fsod-2",
+                "realm-fsod-3",
+                "classic-world-02-reconstruction",
+                "classic-world-03-reconstruction"
+            ])
+        );
+        let source = sources.into_iter().find(|s| s.name() == r.id).unwrap();
         let arrived = source.open(&content).unwrap();
         assert_eq!(
             arrived.spawns,
             [
-                (1024.5, 1676.5),
-                (1942.5, 1024.5),
-                (1024.5, 226.5),
-                (93.5, 1024.5)
+                (1050.5, 1702.5),
+                (1968.5, 1050.5),
+                (1050.5, 252.5),
+                (119.5, 1050.5)
             ]
         );
         assert_eq!(

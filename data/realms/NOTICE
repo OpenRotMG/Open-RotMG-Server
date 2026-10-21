@@ -1,10 +1,12 @@
 World2: approximate image-guided reconstruction, not an authenticated original.
 Catalogue: https://www.realmeye.com/wiki/maps-of-the-realm (https://imgur.com/UsSpU3r.png).
 world02.json pins image and canonical cell/audit identities; no source PNG is bundled.
-Centered 2100->2048 crop at 26; inferred substrates/tiers; 20,571 reviewed unknown pixels,
-including 17,561 unidentified magenta footprints; 864 safe lava visuals. A source-bound
-699-cell revision restores previously chosen selected passive types; original identities,
-instance/cache/loot and hidden metadata remain unproven. Normal arrivals/setpieces still apply.
+Full 2100-square extent retains the prior 2048-square interior at coordinates +26.
+The 215,696 outside cells newly choose quiet, blocking Dark Water188, not recovered depth/flow.
+Interior authorship retains inferred substrates/tiers, 20,571 reviewed unknown pixels,
+17,561 unidentified magenta footprints and 864 safe lava visuals. The historical crop's
+699-cell passive restoration ledger remains unchanged; original identities, instance/cache/loot
+and hidden metadata remain unproven. Normal arrivals/setpieces still apply.
 Canonical cells -> WMAP is reproducible, not PNG interpretation. Historical approval labels
 are not file dependencies; source_commit is prior authorship, not the current binary.
 Image/derivative redistribution rights remain unverified, not granted by public hosting,

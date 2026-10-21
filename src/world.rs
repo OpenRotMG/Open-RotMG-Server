@@ -5825,7 +5825,7 @@ mod tests {
     fn restored_passives_survive_normal_realm_construction_and_connected_approaches() {
         use super::entity_store::EntityState;
         let content = world().content;
-        for (world, count) in [(2, 699), (3, 922)] {
+        for (world, count, side, source_offset) in [(2, 699, 2100, 0), (3, 922, 2048, 26)] {
             let name = format!("classic-world-{world:02}-reconstruction");
             let sources: Vec<_> = crate::terrain::realms::sources(Path::new("data"))
                 .unwrap()
@@ -5834,6 +5834,7 @@ mod tests {
                 .collect();
             assert_eq!(sources.len(), 1);
             let opened = sources[0].open(&content).unwrap();
+            assert_eq!([opened.width, opened.height], [side, side]);
             let solid_cells: Vec<_> = opened
                 .cells
                 .iter()
@@ -5913,9 +5914,9 @@ mod tests {
             for row in ledger["cohorts"].as_array().unwrap() {
                 let kind = row["after"]["object"].as_u64().unwrap() as u16;
                 for run in row["runs"].as_array().unwrap() {
-                    let y = run[0].as_i64().unwrap() as i32 - 26;
-                    for x in
-                        run[1].as_i64().unwrap() as i32 - 26..run[2].as_i64().unwrap() as i32 - 26
+                    let y = run[0].as_i64().unwrap() as i32 - source_offset;
+                    for x in run[1].as_i64().unwrap() as i32 - source_offset
+                        ..run[2].as_i64().unwrap() as i32 - source_offset
                     {
                         let e = source_props[&(x, y)];
                         assert_eq!(e.kind, kind);
