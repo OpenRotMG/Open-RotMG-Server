@@ -3454,15 +3454,17 @@ mod tests {
 
     #[test]
     fn realm_prepare_passive_revisions_reverse_to_exact_published_payloads() {
-        for (world, count, baseline) in [
+        for (world, count, restored, baseline) in [
             (
                 2,
                 699,
+                "7f911d27fd4b28640cab696ab5ac817020640480ac66992976fe66a6141fed30",
                 "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594",
             ),
             (
                 3,
                 922,
+                "0b960c072c0544e9a911842edf36e1afffa91c9c12e410fb9d598fcfb72357a2",
                 "a6621e55c6a3d603bce33767051936f56aba6b6ba3eccab5251f931934b153af",
             ),
         ] {
@@ -3479,19 +3481,14 @@ mod tests {
                 r.dimensions().unwrap(),
             )
             .unwrap();
-            if world == 2 {
-                assert_eq!([map.width, map.height], [2100, 2100]);
-                // The immutable restoration ledger describes the historical crop, not the new frame.
-                map.cells = (26..2074)
-                    .flat_map(|y| map.cells[y * 2100 + 26..y * 2100 + 2074].iter().cloned())
-                    .collect();
-                map.width = 2048;
-                map.height = 2048;
-                assert_eq!(
-                    sha256(&encode(&map, &content).unwrap().0),
-                    "7f911d27fd4b28640cab696ab5ac817020640480ac66992976fe66a6141fed30"
-                );
-            }
+            assert_eq!([map.width, map.height], [2100, 2100]);
+            // The immutable restoration ledgers describe the historical crops, not the new frames.
+            map.cells = (26..2074)
+                .flat_map(|y| map.cells[y * 2100 + 26..y * 2100 + 2074].iter().cloned())
+                .collect();
+            map.width = 2048;
+            map.height = 2048;
+            assert_eq!(sha256(&encode(&map, &content).unwrap().0), restored);
             let ledger: serde_json::Value = serde_json::from_slice(
                 &std::fs::read(root.join(format!("restoration/world{world:02}-passives.json")))
                     .unwrap(),
@@ -3625,11 +3622,46 @@ mod tests {
 
     #[test]
     fn realm_prepare_reviewed_world03_exact_two_encodes_and_all_fields() {
-        reviewed_roundtrip(
+        let (content, map, r) = reviewed_roundtrip(
             "world03.json",
             55,
-            442591,
-            "0b960c072c0544e9a911842edf36e1afffa91c9c12e410fb9d598fcfb72357a2",
+            446160,
+            "a95371cbee6852c4b6f885a05418ba37db1b586ce866798a4fe11c656eed198f",
         );
+        assert_eq!(r.schema, 4);
+        assert_eq!([map.width, map.height], [2100, 2100]);
+        assert!(
+            Map::decode_cells(
+                &std::fs::read(Path::new("data/realms").join(&r.output)).unwrap(),
+                &content
+            )
+            .is_err()
+        );
+        let source = super::super::realms::sources(Path::new("data"))
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name() == r.id)
+            .unwrap();
+        let arrived = source.open(&content).unwrap();
+        assert_eq!(
+            arrived.spawns,
+            [
+                (1050.5, 1621.5),
+                (1998.5, 1050.5),
+                (1050.5, 292.5),
+                (302.5, 1050.5)
+            ]
+        );
+        let mut changes = 0;
+        for (a, b) in map.cells.iter().zip(&arrived.cells) {
+            if (a.ground, a.object, &a.config, a.terrain, a.region)
+                != (b.ground, b.object, &b.config, b.terrain, b.region)
+            {
+                changes += 1;
+                assert_eq!((a.ground, a.terrain), (b.ground, b.terrain));
+                assert_eq!((b.object, b.config.as_str(), b.region), (None, "", 1));
+            }
+        }
+        assert_eq!(changes, 36);
     }
 }

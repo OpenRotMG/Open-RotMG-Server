@@ -5825,7 +5825,7 @@ mod tests {
     fn restored_passives_survive_normal_realm_construction_and_connected_approaches() {
         use super::entity_store::EntityState;
         let content = world().content;
-        for (world, count, side, source_offset) in [(2, 699, 2100, 0), (3, 922, 2048, 26)] {
+        for (world, count, side, source_offset) in [(2, 699, 2100, 0), (3, 922, 2100, 0)] {
             let name = format!("classic-world-{world:02}-reconstruction");
             let sources: Vec<_> = crate::terrain::realms::sources(Path::new("data"))
                 .unwrap()
@@ -5845,7 +5845,7 @@ mod tests {
                 })
                 .map(|(i, c)| (i, c.clone()))
                 .collect();
-            drop(opened);
+            let before_cells = &opened.cells;
             let directory = Directory::configured(
                 Path::new("data"),
                 content.clone(),
@@ -5857,6 +5857,26 @@ mod tests {
             .unwrap();
             let w = &directory.worlds[&-3];
             assert_eq!(w.realm_layout.as_deref(), Some(name.as_str()));
+            let mut changes = [0usize; 6];
+            for (a, b) in before_cells.iter().zip(&w.map.cells) {
+                let fields = [
+                    a.ground != b.ground,
+                    a.object != b.object,
+                    a.config != b.config,
+                    a.terrain != b.terrain,
+                    a.region != b.region,
+                ];
+                changes[0] += usize::from(fields.iter().any(|v| *v));
+                for (i, changed) in fields.into_iter().enumerate() {
+                    changes[i + 1] += usize::from(changed);
+                }
+            }
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"realm_constructor_fields",
+                "layout":name,"changed_cells":changes[0],"ground":changes[1],
+                "object":changes[2],"config":changes[3],"terrain":changes[4],"region":changes[5]})
+            );
             let solid_entities: BTreeSet<_> = w
                 .entities
                 .values()

@@ -14,9 +14,12 @@ attribution, code licenses or omission of the PNG. World2 is not the MIT Perlin 
 
 World3: image-guided reconstruction, not authenticated.
 Source: https://www.redblobgames.com/x/1745-rotmg-maps-webgl/images/world3.png
-world03.json pins the source audit; above rebuild and unverified image-derived rights
-limits apply. A 922-cell object-only revision restores previously chosen passive types;
+world03.json pins image and canonical cell/audit identities; no source PNG is bundled.
+Full 2100-square extent retains the prior 2048-square interior at coordinates +26.
+The 215,696 outside cells newly choose quiet, blocking Dark Water188, not recovered depth/flow.
+The historical crop's 922-cell passive restoration ledger remains unchanged;
 original Tombstone variants/cache and other hidden fields are not recovered.
+The same rebuild and unverified image-derived rights limits apply.
 
 Retained classic-v1 generator only: Amit J Patel, Copyright 2010; MIT notice:
 MAPGEN2-LICENSE.
