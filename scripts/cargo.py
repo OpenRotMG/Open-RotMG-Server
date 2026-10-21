@@ -44,18 +44,10 @@ def allocation(root):
     return total
 
 
-def limits(root, completed=False):
-    minimum = float(os.environ.get('OPENROTMG_BUILD_MIN_FREE_GIB', '30'))
-    maximum = float(os.environ.get('OPENROTMG_BUILD_MAX_GIB', '40'))
-    if not 0 < minimum < float('inf') or not 0 < maximum < float('inf'):
-        raise RuntimeError('Build limits must be finite positive GiB values')
+def report(root):
     free = shutil.disk_usage(root).free / GIB
     used = allocation(root) / GIB
-    receipt = f'Build storage: path={root}; free={free:.2f}GiB minimum={minimum:g}GiB; cache={used:.2f}GiB maximum={maximum:g}GiB'
-    print(receipt, flush=True)
-    if free < minimum or used >= maximum:
-        outcome = 'Build completed over budget' if completed else 'Build refused'
-        raise RuntimeError(f'{receipt}. {outcome}; inspect this cache with scripts/cargo.py status and explicitly retire inactive intermediates with scripts/cargo.py clean. No files were deleted.')
+    print(f'Build storage: path={root}; free={free:.2f}GiB; cache={used:.2f}GiB', flush=True)
 
 
 @contextmanager
@@ -140,8 +132,8 @@ def execute(command, target, output, lock):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Serialized, budget-checked Cargo builds. Limits are admission checks, not filesystem quotas.',
-                                     epilog='User-wide cache: $XDG_CACHE_HOME/openrotmg/cargo (default ~/.cache/openrotmg/cargo). Host limits: OPENROTMG_BUILD_MIN_FREE_GIB=30 and OPENROTMG_BUILD_MAX_GIB=40. clean removes only managed deps/incremental, never SDK/build data or binaries.')
+    parser = argparse.ArgumentParser(description='Serialized Cargo builds with storage reporting, not free-space or cache-size admission gates.',
+                                     epilog='User-wide cache: $XDG_CACHE_HOME/openrotmg/cargo (default ~/.cache/openrotmg/cargo). clean removes only managed deps/incremental, never SDK/build data or binaries.')
     parser.add_argument('--toolchain', help='Explicit rustup toolchain, e.g. 1.94.1')
     parser.add_argument('--output', type=Path, help='Atomically retain the server executable outside the cache (build only)')
     parser.add_argument('command', choices=['build', 'check', 'test', 'clippy', 'fmt', 'status', 'clean'])
@@ -163,7 +155,7 @@ def main(argv=None):
             if args.command == 'clean':
                 clean(root)
                 return 0
-            limits(root)
+            report(root)
             if args.command == 'status':
                 return 0
             toolchain = ['+' + args.toolchain] if args.toolchain else []
@@ -176,7 +168,7 @@ def main(argv=None):
             code = execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output, lock)
             if code:
                 return code
-            limits(root, completed=True)
+            report(root)
             return 0
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f'Build storage error: {error}', file=sys.stderr)
