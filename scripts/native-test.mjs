@@ -182,7 +182,10 @@ export async function runCase(scenario, options) {
         })().catch(error=>{rejectGuest(error);fail(error);});
       }});
       if(controller.signal.aborted){
-        try{connection.close();}catch(error){throw new AggregateError([controller.signal.reason,error],'Aborted native join: '+String(controller.signal.reason)+'; connection close failed: '+String(error));}
+        try{connection.close();}catch(error){
+          const failure=new AggregateError([controller.signal.reason,error],'Aborted native join: '+String(controller.signal.reason)+'; connection close failed: '+String(error));
+          console.error(String(failure));if(closing)report.cleanupErrors.push(String(failure));throw failure;
+        }
         check();
       }
       openedConnections.push(connection);
