@@ -13,7 +13,7 @@ const CELLS: usize = SIDE * SIDE;
 const OBJECTS: &str = "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad91534b72";
 const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7";
 
-const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 5] = [
+const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 6] = [
     (
         "classic-world-04-reconstruction",
         "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5",
@@ -37,6 +37,11 @@ const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 5] = [
     (
         "classic-world-06-reconstruction",
         "f5dcb4af75cce476d80bc59760df78ec880211ba9d3d2847225fc3d3a6b1b30a",
+        2100,
+    ),
+    (
+        "classic-world-05-reconstruction",
+        "9f57488fdccf12fc1ad5f8970d1feec746ea4e1bbc5ed6718fee7d3d4dbd55c0",
         2100,
     ),
 ];
@@ -1343,6 +1348,18 @@ mod tests {
                 bad["output"] = serde_json::json!(format!("{id}.wmap"));
                 assert!(recipe(bad).is_err(), "{id}");
             }
+            for &(other_id, other_hash, _) in &SOURCE_LOCAL_IDENTITIES {
+                if other_id == value["id"].as_str().unwrap() {
+                    continue;
+                }
+                let mut bad = value.clone();
+                bad["id"] = serde_json::json!(other_id);
+                bad["output"] = serde_json::json!(format!("{other_id}.wmap"));
+                assert!(recipe(bad).is_err(), "cross-source ID {other_id}");
+                let mut bad = value.clone();
+                bad["provenance"]["source_sha256"] = serde_json::json!(other_hash);
+                assert!(recipe(bad).is_err(), "cross-source hash {other_hash}");
+            }
             for (parent, field) in [
                 ("content", "objects"),
                 ("content", "grounds"),
@@ -1667,6 +1684,11 @@ mod tests {
     #[test]
     fn realm_source_open_world06_synthetic_shape_policy_and_baseline_rejection() {
         source_local_open(4);
+    }
+
+    #[test]
+    fn realm_source_open_world05_synthetic_shape_policy_and_baseline_rejection() {
+        source_local_open(5);
     }
 
     fn source_local_open(index: usize) {
