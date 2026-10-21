@@ -548,6 +548,7 @@ fn manor_spectral_mine_triggers_its_four_shots_on_a_cloaked_player() {
     w.now = 50;
     w.mechanic_expiry();
     assert!(!w.entities.contains_key(&mine));
+    assert!(w.begin_departure(player).unwrap().is_some());
     w.finish_departure(player).unwrap();
     let mine = w
         .spawn_entity(MINE, Pos { x: 20.5, y: 20.5 }, vec![])
