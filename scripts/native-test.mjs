@@ -41,6 +41,58 @@ export async function prepareFixture(module, api, signal) {
     return spec;
   } finally {open=false;signal.removeEventListener('abort',abort);}
 }
+export function nativeJoins({signal,api,participants,freePort,privateDisplay,openClient}) {
+  let joining=false;
+  const check=()=>signal.throwIfAborted();
+  return {
+    idle(){assert(!joining,'Native case returned with a pending join');},
+    async add(spec){
+      check();assert(!joining,'A native client join is already pending');joining=true;
+      try {
+        spec=await prepareFixture({fixture:spec},api,signal);check();
+        assert(participants.length<3,'At most three prepared native clients');
+        const world=typeof spec.world==='string'?(await api({op:'world',template:spec.world})).result.world:spec.world;
+        check();assert(Number.isInteger(world),'Prepared fixture must resolve to an explicit world ID');
+        const port=await freePort();check();
+        const env=await privateDisplay(participants.length);check();
+        return await openClient(spec,world,port,env);
+      } finally {joining=false;}
+    },
+  };
+}
+export function nativeConnections({signal,closing,cleanupError,diagnose}) {
+  const owned=new Set();
+  return {
+    async open(connect,use){
+      const connection=await connect();
+      if(signal.aborted){
+        try{connection.close();}catch(error){
+          const failure=new AggregateError([signal.reason,error],'Aborted native join: '+String(signal.reason)+'; connection close failed: '+String(error));
+          diagnose(String(failure));if(closing())cleanupError(failure);throw failure;
+        }
+        signal.throwIfAborted();
+      }
+      owned.add(connection);
+      return await use(connection);
+    },
+    close(){for(const connection of owned){owned.delete(connection);try{connection.close();}catch(error){cleanupError(error);}}},
+  };
+}
+export async function spawnNativeFixture(api,spec,worldId,guid) {
+  assert(Number.isInteger(worldId),'Prepared fixture must resolve to an explicit world ID');
+  const world=await api({op:'world_info',world:worldId});const point=spec.position==='spawn'?world.spawn_points[0]:null;
+  if(spec.position==='spawn')assert(Array.isArray(point)&&point.length===2&&point.every(Number.isFinite),'Invalid observed spawn tuple');
+  const position=spec.position==='spawn'?{x:point[0],y:point[1]}:typeof spec.position==='function'?spec.position(world):spec.position;
+  assert(position&&Number.isFinite(position.x)&&Number.isFinite(position.y),'Prepared fixture must resolve to an explicit finite position');
+  const created=await api({op:'spawn',spec:{...spec,world:worldId,guid,position,controller:'native',profile:null}});
+  return {created,position};
+}
+export async function runNativeScenario(run,game,idle,report) {
+  report.before=await game.observe();await run(game);idle();report.after=await game.observe();idle();
+}
+export async function nativeXauth(exec,auth,display,cookie,signal) {
+  signal.throwIfAborted();return await exec('xauth',['-f',auth,'add',display,'MIT-MAGIC-COOKIE-1',cookie],{signal});
+}
 async function freePort() {
   const server=createServer();await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
   const port=server.address().port;await new Promise((ok,bad)=>server.close(error=>error?bad(error):ok()));return port;
@@ -56,8 +108,8 @@ export async function runCase(scenario, options) {
   assert(!activeCase,'Only one native case may own this process');
   const out=options.runDir;assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
   const previousOwner=process.env.PI_BROWSER_OWNER;
-  const controller=new AbortController(), children=[], files=[], participants=[], openedConnections=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
-  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,joining=false,guardian,registryState;
+  const controller=new AbortController(), children=[], files=[], participants=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
+  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
   const elapsed=()=>Math.round(performance.now()-started);
   const save=async()=>{await writeFile(join(out,'result.tmp'),JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',{mode:0o600});await rename(join(out,'result.tmp'),join(out,'result.json'));};
   const register=()=>{registryState.children=children.filter(r=>r.identity).map(r=>({...r.identity,name:r.name}));registry(join(out,'children.json'),registryState);};
@@ -68,6 +120,7 @@ export async function runCase(scenario, options) {
   let rejectStop;const stopped=new Promise((_,bad)=>{rejectStop=bad;});stopped.catch(()=>{});
   controller.signal.addEventListener('abort',()=>rejectStop(controller.signal.reason),{once:true});
   const check=()=>controller.signal.throwIfAborted();
+  const connections=nativeConnections({signal:controller.signal,closing:()=>closing,cleanupError:error=>report.cleanupErrors.push(String(error)),diagnose:message=>console.error(message)});
   const bounded=async(name,work)=>{check();phase=name;report.phase=name;await save();check();const t=performance.now();try{return await Promise.race([work(),stopped]);}finally{report.phases[name]=(report.phases[name]??0)+Math.round(performance.now()-t);}};
   const log=async name=>{const f=await open(join(out,name),'a',0o600);files.push(f);return f.fd;};
   const launch=(name,command,args,stdio,env=process.env)=>{
@@ -138,23 +191,17 @@ export async function runCase(scenario, options) {
     async function privateDisplay(index){
       check();const auth=join(out,'Xauthority-'+index);await writeFile(auth,'',{mode:0o600,signal:controller.signal});const cookie=randomBytes(16).toString('hex');
       check();
-      await exec('xauth',['-f',auth,'add',':99','MIT-MAGIC-COOKIE-1',cookie],{signal:controller.signal});
+      await nativeXauth(exec,auth,':99',cookie,controller.signal);
       const xvfb=launch('Xvfb','Xvfb',['-displayfd','3','-screen','0','1400x1000x24','-nolisten','tcp','-auth',auth],['ignore','ignore',await log('display.log'),'pipe']);
       let display='';xvfb.child.stdio[3].on('data',b=>display+=b);await waitFor(()=>display.includes('\n'),'Private display did not start',10000);display=':'+display.trim();
-      check();await exec('xauth',['-f',auth,'add',display,'MIT-MAGIC-COOKIE-1',cookie],{signal:controller.signal});
+      check();await nativeXauth(exec,auth,display,cookie,controller.signal);
       const env={...process.env,DISPLAY:display,XAUTHORITY:auth,PI_BROWSER_OWNER:owner,PI_BROWSER_TAB_POLICY:'agent_only',CHROME_REAL_BINARY:options.chrome};delete env.WAYLAND_DISPLAY;
       const box=launch('openbox','openbox',['--sm-disable'],['ignore',await log('window-manager.log'),await log('window-manager.log')],env);await box.started;
       return env;
     }
-    async function addClient(spec){
-      check();assert(!joining,'A native client join is already pending');joining=true;
-      try{
-      spec=await prepareFixture({fixture:spec},api,controller.signal);check();
-      assert(participants.length<3,'At most three prepared native clients');
-      const worldId=typeof spec.world==='string'?(await api({op:'world',template:spec.world})).result.world:spec.world;
-      check();assert(Number.isInteger(worldId),'Prepared fixture must resolve to an explicit world ID');
-      const chromePort=await freePort();check();
-      const env=await privateDisplay(participants.length);
+    const joins=nativeJoins({signal:controller.signal,api,participants,freePort,privateDisplay,openClient});
+    const addClient=spec=>joins.add(spec);
+    async function openClient(spec,worldId,chromePort,env){
       let connection,browser,actor,account;
       const call=(method,params={})=>{check();return connection.call(method,params);};
       const evaluate=expression=>{check();return connection.eval(expression);};
@@ -166,7 +213,7 @@ export async function runCase(scenario, options) {
       let receipt='';chrome.child.stdout.on('data',b=>receipt+=b);await waitFor(()=>receipt.includes('\n'),'Managed browser did not return its receipt',30000);browser=JSON.parse(receipt.split('\n')[0]);assert(browser.target&&browser.owner===owner&&browser.pid===chrome.child.pid,'Invalid managed browser receipt');
       ownedBrowsers.push({...browser,port:chromePort});report.browser={owner,port:chromePort,target:browser.target,pid:browser.pid};
       let resolveGuest,rejectGuest;const guest=new Promise((ok,bad)=>{resolveGuest=ok;rejectGuest=bad;});guest.catch(()=>{});let requests=0,guestDone=false;
-      connection=await connect({port:chromePort,target:browser.target,url:'about:blank',helper:join(options.browserTools,'direct-cdp.mjs'),onEvent:event=>{
+      return await connections.open(()=>connect({port:chromePort,target:browser.target,url:'about:blank',helper:join(options.browserTools,'direct-cdp.mjs'),onEvent:event=>{
         if(event.method==='Runtime.exceptionThrown'){fail(Error('Browser exception: '+JSON.stringify(event.params.exceptionDetails)));return;}
         if(event.method==='Runtime.consoleAPICalled'&&event.params.type==='error'){fail(Error('Browser console error: '+JSON.stringify(event.params.args)));return;}
         if(event.method!=='Fetch.requestPaused')return;
@@ -174,23 +221,12 @@ export async function runCase(scenario, options) {
           assert.equal(++requests,1,'Only one normal fresh guest per client is permitted');const e=event.params;
           assert.equal(e.request.url,report.origin+'/legacy-api/char/list');assert.equal(e.request.method,'POST');
           const form=new URLSearchParams(e.request.postData),guid=form.get('guid');assert(guid&&/^[A-Za-z0-9_.-]{1,128}$/.test(guid)&&!form.get('password'),'Expected a UI-generated disposable guest');
-          const world=await api({op:'world_info',world:worldId});const point=spec.position==='spawn'?world.spawn_points[0]:null;
-          if(spec.position==='spawn')assert(Array.isArray(point)&&point.length===2&&point.every(Number.isFinite),'Invalid observed spawn tuple');
-          const position=spec.position==='spawn'?{x:point[0],y:point[1]}:typeof spec.position==='function'?spec.position(world):spec.position;
-          assert(position&&Number.isFinite(position.x)&&Number.isFinite(position.y),'Prepared fixture must resolve to an explicit finite position');
-          const result=await api({op:'spawn',spec:{...spec,world:worldId,guid,position,controller:'native',profile:null}});actor=result.result.actor;account=result.result.account;
+          const {created,position}=await spawnNativeFixture(api,spec,worldId,guid);actor=created.result.actor;account=created.result.account;
           await writeFile(join(out,participants.length?'fixture-'+participants.length+'.json':'fixture.json'),JSON.stringify({actor,account,spec:{...spec,world:worldId,position},prepared:true}),{mode:0o600});
           await call('Fetch.continueRequest',{requestId:e.requestId});guestDone=true;resolveGuest();
         })().catch(error=>{rejectGuest(error);fail(error);});
-      }});
-      if(controller.signal.aborted){
-        try{connection.close();}catch(error){
-          const failure=new AggregateError([controller.signal.reason,error],'Aborted native join: '+String(controller.signal.reason)+'; connection close failed: '+String(error));
-          console.error(String(failure));if(closing)report.cleanupErrors.push(String(failure));throw failure;
-        }
-        check();
-      }
-      openedConnections.push(connection);
+      }}),async opened=>{
+      connection=opened;
       const window=await call('Browser.getWindowForTarget',{targetId:browser.target}),bounds=(await call('Browser.getWindowBounds',{windowId:window.windowId})).bounds;
       assert(bounds.left>=0&&bounds.left+bounds.width<=1400&&bounds.width<=1300,'Owned native windows must remain unoccluded on the private display');
       await call('Runtime.enable');
@@ -212,7 +248,7 @@ export async function runCase(scenario, options) {
       await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
       return participants.at(-1);
-      }finally{joining=false;}
+      });
     }
     const first=await bounded('browserAndFixture',()=>addClient(spec));
     ({actor,account,connection,browser,chromePort}=first);report.actor=actor;report.account=account;
@@ -228,9 +264,9 @@ export async function runCase(scenario, options) {
           const results=await Promise.allSettled([action,shot]);for(const r of results)if(r.status==='rejected')throw r.reason;return results[0].value;
         }};};
       const game=gameFor(first);
-      report.before=await game.observe();await fixtureModule.run(game);assert(!joining,'Native case returned with a pending join');report.after=await game.observe();report.activeGameMs=report.after.game_ms-report.before.game_ms;
+      await runNativeScenario(fixtureModule.run,game,()=>joins.idle(),report);report.activeGameMs=report.after.game_ms-report.before.game_ms;
     });
-    check();assert(!joining,'Native case ended with a pending join');report.status='passed';
+    check();joins.idle();report.status='passed';
   } catch(error) {
     primary=error;report.status='failed';report.failure={phase,error:String(error),stack:error.stack};
     await save();
@@ -245,7 +281,7 @@ export async function runCase(scenario, options) {
         const tab={...b,target:page.targetId};await managed.ensureTarget(tab);managed.assertOwner(tab,owner);tabs.push(tab);
       }
     }catch(error){report.cleanupErrors.push(String(error));}
-    for(const connection of openedConnections)try{connection.close();}catch(error){report.cleanupErrors.push(String(error));}
+    connections.close();
     // One graceful browser shutdown drains renderer work before retiring its owned targets.
     for(const row of children.reverse()){
       row.stopping=true;

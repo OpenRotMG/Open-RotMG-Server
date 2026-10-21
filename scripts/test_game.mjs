@@ -10,17 +10,17 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 
 const exec=promisify(execFile), script=fileURLToPath(new URL('./game.mjs',import.meta.url));
-async function fixture(t,transfer=false) {
+async function fixture(t,transfer=false,actors=[1]) {
   const dir=await mkdtemp(join(tmpdir(),'openrotmg-game-test-')), calls=[];
   await mkdir(join(dir,'testing'));
   await writeFile(join(dir,'control.token'),'fixture-control');
   await writeFile(join(dir,'testing.json'),JSON.stringify({schema:1,provenance:'prepared'}));
   let paused=true,world=-1,tick=0,lease,activeFault='',handoffChecks=0;
-  const view=()=>({actor:1,controller:'native',paused,position:{x:1,y:1},session:{world,player:1},world:world===-1?'Tutorial':'Nexus',lifecycle:{alive:true},character:{hp:100,mp:50,items:[]},verification:{shots:0}});
+  const view=(actor=1)=>({actor,controller:'native',paused,position:{x:1,y:1},session:{world,player:actor},world:world===-1?'Tutorial':'Nexus',lifecycle:{alive:true},character:{hp:100,mp:50,items:[]},verification:{shots:0}});
   let origin;
   const server=createServer(async(req,res)=>{
     res.setHeader('Content-Type','application/json');
-    if(req.url==='/json/list')return res.end(JSON.stringify([{id:'owned-fixture',url:origin+'/',webSocketDebuggerUrl:'ws://127.0.0.1/fixture'}]));
+    if(req.url==='/json/list')return res.end(JSON.stringify(actors.map(actor=>({id:'owned-fixture-'+actor,url:origin+'/',webSocketDebuggerUrl:'ws://127.0.0.1/'+actor}))));
     assert.equal(req.headers.authorization,'Bearer fixture-control');
     const chunks=[];for await(const chunk of req)chunks.push(chunk);
     const request=JSON.parse(Buffer.concat(chunks));calls.push(request);
@@ -28,11 +28,11 @@ async function fixture(t,transfer=false) {
     const handoff=activeFault==='post-input-handoff'&&(await readFile(log,'utf8')).includes('keyUp');
     if(handoff&&c.op==='native_state'&&++handoffChecks<3)return res.end(JSON.stringify({runtime:'fixture-runtime',paused,actors:[{actor:1,stage:'transferring'}]}));
     if(handoff&&c.op==='observe'&&handoffChecks<3)return res.end(JSON.stringify({status:'failed',error:'selected character is not connected; no replacement was selected'}));
-    if(c.op==='native_state')return res.end(JSON.stringify({runtime:'fixture-runtime',paused,actors:[{actor:1,player:1,stage:activeFault==='loading'?'disconnected':'ready',world,world_name:world===-1?'Tutorial':'Nexus',client_time:++tick}]}));
+    if(c.op==='native_state')return res.end(JSON.stringify({runtime:'fixture-runtime',paused,actors:c.actors.map(actor=>({actor,player:actor,stage:activeFault==='loading'?'disconnected':'ready',world,world_name:world===-1?'Tutorial':'Nexus',client_time:++tick}))}));
     if(c.op==='inspect')return res.end(JSON.stringify({view:{position:{x:1,y:1},objects:[{id:2,hp:100,position:{x:3,y:1}}]},diagnostic:{own_projectiles:[]}}));
     if(c.op==='native_sync'){
       if(activeFault==='binding-renew-timeout'&&!paused)await new Promise(resolve=>setTimeout(resolve,900));
-      return res.end(JSON.stringify({acknowledged:[{actor:1,player:1,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('000000090600000001','hex')).digest('hex')}]}));
+      return res.end(JSON.stringify({acknowledged:c.actors.map(actor=>({actor,player:actor,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('0000000906'+actor.toString(16).padStart(8,'0'),'hex')).digest('hex')}))}));
     }
     if(c.op==='native_lease'&&c.operation==='renew'&&['binding-renew-timeout','layout-renew-timeout'].includes(activeFault)){
       await new Promise(resolve=>setTimeout(resolve,1000));
@@ -40,8 +40,9 @@ async function fixture(t,transfer=false) {
     }
     if(c.op==='native_lease'&&c.operation==='renew'&&activeFault==='terminal'){paused=true;return res.end(JSON.stringify({status:'failed',error:'native participant is terminal during control'}));}
     if(c.op==='native_lease'){clearTimeout(lease);if(c.operation!=='end')lease=setTimeout(()=>{paused=true;},1500);}
+    if(c.op==='pause'&&actors.length>1)request.releasesAtPause=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse).filter(e=>e.method==='Input.dispatchKeyEvent'&&e.params.type==='keyUp').map(e=>e.actor);
     if(c.op==='pause'||c.op==='native_lease'&&c.operation==='halt')paused=true;if(c.op==='resume'){paused=false;if(transfer)world=-2;}
-    res.end(JSON.stringify(c.op==='observe'?view():c.op==='run'?{status:'succeeded',result:{goal_reached:true,state:view()}}:{status:'succeeded',paused}));
+    res.end(JSON.stringify(c.op==='observe'?view(c.actor):c.op==='run'?{status:'succeeded',result:{goal_reached:true,state:view()}}:{status:'succeeded',paused}));
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const port=server.address().port;origin=`http://127.0.0.1:${port}`;
@@ -50,11 +51,11 @@ async function fixture(t,transfer=false) {
   await writeFile(bootstrap,`
     import {appendFileSync} from 'node:fs';
     globalThis.WebSocket=class {
-      constructor(){this.binding=null;if(process.env.FIXTURE_FAULT==='network-enable')this.openSocket=setInterval(()=>{},1000);queueMicrotask(()=>this.onopen());}
-      send(raw){const row=JSON.parse(raw);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({...row,at:Date.now()})+'\\n');
+      constructor(url){this.actor=Number(new URL(url).pathname.slice(1));this.binding=null;if(process.env.FIXTURE_FAULT==='network-enable')this.openSocket=setInterval(()=>{},1000);queueMicrotask(()=>this.onopen());}
+      send(raw){const row=JSON.parse(raw);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({...row,actor:this.actor,at:Date.now()})+'\\n');
         let value=true,error;
         if(row.method==='Network.enable'&&process.env.FIXTURE_FAULT==='network-enable')error={message:'fixture Network.enable failure'};
-        if(row.method==='Network.enable')setTimeout(()=>{const frame=payloadData=>this.onmessage({data:JSON.stringify({method:'Network.webSocketFrameReceived',params:{response:{opcode:2,payloadData}}})});frame(Buffer.from('000000090600000001','hex').toString('base64'));if(process.env.FIXTURE_FAULT==='combat-frames')for(let n=0;n<256;n++)frame(Buffer.from('000000094a00000001','hex').toString('base64'));},0);
+        if(row.method==='Network.enable')setTimeout(()=>{const frame=payloadData=>this.onmessage({data:JSON.stringify({method:'Network.webSocketFrameReceived',params:{response:{opcode:2,payloadData}}})});frame(Buffer.from('0000000906'+this.actor.toString(16).padStart(8,'0'),'hex').toString('base64'));if(process.env.FIXTURE_FAULT==='combat-frames')for(let n=0;n<256;n++)frame(Buffer.from('000000094a00000001','hex').toString('base64'));},0);
         if(row.method==='Runtime.evaluate'&&row.params.expression.includes('playing:'))value={playing:true,binding:this.binding};
         if(row.method==='Runtime.evaluate'&&row.params.expression.startsWith('globalThis[Symbol.for("openrotmg.testing.binding.v1")]=')){this.binding=JSON.parse(row.params.expression.split(']=')[1]);value=this.binding;}
         if(row.method==='Runtime.evaluate'&&row.params.expression.endsWith(')(null)'))value={initialized:false,paused:true,clock_ms:100};
@@ -67,7 +68,7 @@ async function fixture(t,transfer=false) {
     };
   `);
   const config=join(dir,'config.json');
-  await writeFile(config,JSON.stringify({origin,state:dir,browserTools:helper,native:[{port,target:'owned-fixture',actor:1}]}));
+  await writeFile(config,JSON.stringify({origin,state:dir,browserTools:helper,native:actors.map(actor=>({port,target:'owned-fixture-'+actor,actor}))}));
   t.after(async()=>{clearTimeout(lease);await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true});});
   async function run(id,command,fault='') {
     activeFault=fault;
@@ -279,4 +280,20 @@ test('grouped native inputs retain the total ten-second and release gates',async
  assert.equal(bad.code,1);assert.match(bad.stderr,/sequence duration/);assert.ok(!f.calls.some(c=>c.command.op==='resume'));
  const good=await f.run('grouped',{op:'act',actor:1,sequence:[[{actor:1,input:{keys:['d'],duration_ms:20}}],[{actor:1,input:{keys:['a'],duration_ms:20}}]]});
  assert.equal(good.code,0,good.stderr);assert.equal(JSON.parse(good.stdout).steps.length,2);assert(f.paused());
+});
+
+test('distinct native participants release parallel inputs before one bound cohort pause',async t=>{
+  const f=await fixture(t,false,[1,2]),result=await f.run('two-participants',{op:'act',actor:1,sequence:[[{actor:1,input:{keys:['d'],duration_ms:100}},{actor:2,input:{keys:['a'],duration_ms:100}}]]});
+  assert.equal(result.code,0,result.stderr);assert(f.paused());
+  const parsed=JSON.parse(result.stdout);assert.deepEqual(parsed.steps.map(s=>s.actor).sort(),[1,2]);
+  const keys=(await f.events()).filter(e=>e.method==='Input.dispatchKeyEvent');
+  for(const actor of [1,2])assert.deepEqual(keys.filter(e=>e.actor===actor).map(e=>e.params.type),['keyDown','keyUp']);
+  assert.equal(keys.filter(e=>e.params.type==='keyDown').length,2);assert.equal(keys.filter(e=>e.params.type==='keyUp').length,2);
+  assert.ok(Math.max(...keys.filter(e=>e.params.type==='keyDown').map(e=>e.at))<Math.min(...keys.filter(e=>e.params.type==='keyUp').map(e=>e.at)),'Both holds must be active before either release');
+  assert.equal(f.calls.filter(c=>c.command.op==='resume').length,1);assert.equal(f.calls.filter(c=>c.command.op==='pause').length,1);
+  const pause=f.calls.find(c=>c.command.op==='pause');assert.deepEqual(pause.releasesAtPause.sort(),[1,2]);assert.deepEqual(pause.command.native_paused,[1,2]);assert.deepEqual(pause.command.native_sessions,[[1,1],[2,2]]);
+  const lease=f.calls.find(c=>c.command.op==='native_lease'&&c.command.operation==='begin');assert.deepEqual(lease.command.actors,[1,2]);
+  assert.equal(f.calls.filter(c=>c.command.op==='native_lease'&&c.command.operation==='end').length,1);
+  const events=await f.events();assert.ok(!events.some(e=>/bringToFront|activateTarget|setWindowBounds/.test(e.method)));
+  for(const actor of [1,2])assert.ok(events.some(e=>e.actor===actor&&e.method==='Runtime.evaluate'&&e.params.expression.includes('binding.v1')&&e.params.expression.includes('"player":'+actor)));
 });
