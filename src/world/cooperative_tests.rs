@@ -40,6 +40,14 @@ fn all_death_fame_phase3_teleport_facts() {
         .get_mut(&a)
         .unwrap()
         .paused = false;
+    let world = d.worlds.get_mut(&-2).unwrap();
+    world
+        .apply_condition(b, crate::condition::INVISIBLE, 1000)
+        .unwrap();
+    let error = d.teleport(a, b, Instant::now()).unwrap_err();
+    assert!(error.to_string().contains("invisible"));
+    assert!(!d.worlds[&-2].players[&a].character.lifetime.teleported);
+    d.worlds.get_mut(&-2).unwrap().now += 1000;
     d.teleport(a, b, Instant::now()).unwrap();
     assert!(d.worlds[&-2].players[&a].character.lifetime.teleported);
     assert!(!d.worlds[&-2].players[&b].character.lifetime.teleported);
