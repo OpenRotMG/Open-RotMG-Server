@@ -565,3 +565,52 @@ impl World {
         Ok((profile.motion, profile.speed))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finite_crystal_releases_a_prisoner_with_three_steeds() {
+        let mut directory = Directory::fixture(
+            std::path::Path::new("data"),
+            super::super::tests::world().content.clone(),
+            16,
+            0,
+            Some(12351),
+        )
+        .unwrap();
+        let w = directory.worlds.get_mut(&-3).unwrap();
+        let crystals: Vec<_> = w.entities.values().filter(|e| e.kind == 0x935).collect();
+        assert_eq!(crystals.len(), 1);
+        let (id, pos, max) = (crystals[0].id, crystals[0].pos, crystals[0].hp);
+        assert_eq!(w.map.cell(pos.x, pos.y).unwrap().terrain, 1);
+        assert!(w.walkable(pos));
+        assert!(crystals[0].population_slot.is_none());
+        assert!(!w.population.iter().any(|s| s.kind == 0x935));
+        w.landmark_mechanics(id, Some(pos), 0).unwrap();
+        w.entities.get_mut(&id).unwrap().hp -= max / 500 + 1;
+        w.landmark_mechanics(id, Some(pos), 0).unwrap();
+        w.landmark_mechanics(id, Some(pos), 0).unwrap();
+        assert_eq!(w.entities[&id].hp, max);
+        w.entities.get_mut(&id).unwrap().hp -= max / 20 + 1;
+        w.landmark_mechanics(id, Some(pos), 0).unwrap();
+        assert_eq!(w.entities[&id].stage, Some(4));
+        w.now += 4000;
+        w.landmark_mechanics(id, Some(pos), 4000).unwrap();
+        w.now += 50;
+        w.landmark_mechanics(id, Some(pos), 4050).unwrap();
+        assert!(!w.entities.contains_key(&id));
+        assert!(!w.entities.values().any(|e| e.kind == 0x935));
+        let prisoners: Vec<_> = w.entities.values().filter(|e| e.kind == 0x941).collect();
+        assert_eq!(prisoners.len(), 1);
+        let prisoner = prisoners[0].id;
+        for elapsed in [200, 400, 600, 800] {
+            w.now += 200;
+            w.landmark_mechanics(prisoner, None, elapsed).unwrap();
+        }
+        let steeds: Vec<_> = w.entities.values().filter(|e| e.kind == 0x943).collect();
+        assert_eq!(steeds.len(), 3);
+        assert!(steeds.iter().all(|e| e.quest == Some(id)));
+    }
+}
