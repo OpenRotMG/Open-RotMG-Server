@@ -67,6 +67,9 @@ pub struct Request {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
     Capabilities,
+    PrepareRealmCapacity {
+        limit: usize,
+    },
     Catalog {
         search: String,
         limit: usize,
@@ -677,6 +680,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         abysses: 0,
         trenches: 0,
         spider_dens: 0,
+        mad_labs: 0,
     };
     preview.gain_experience(
         &a.content,
@@ -718,6 +722,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         );
         None
     };
+    a.begin_admission();
     let account = a.store.list(spec.guid.clone()).await?;
     ensure!(
         account.characters.is_empty(),
@@ -809,6 +814,48 @@ async fn resume(a: &App, t: &Testing) -> Result<()> {
         })
         .await
 }
+async fn prepare_realm_capacity(a: &App, t: &Testing, limit: usize) -> Result<Value> {
+    ensure!(
+        a.world.clock.paused(),
+        "capacity setup requires a paused prepared session"
+    );
+    ensure!(
+        (1..a.max_players).contains(&limit),
+        "capacity limit must be at least one and below global capacity"
+    );
+    let path = t.root.join("prepared-realm-capacity.json");
+    ensure!(!path.exists(), "active Realm capacity was already prepared");
+    ensure!(
+        !fs::read_dir(&t.root)?
+            .collect::<std::io::Result<Vec<_>>>()?
+            .iter()
+            .any(|e| e.file_name().as_encoded_bytes().ends_with(b".spawn.json")),
+        "capacity setup must precede enrollment"
+    );
+    let owners = a.owners.clone();
+    let admission_started = a.admission_started.clone();
+    let global = a.max_players;
+    let receipt = a
+        .world
+        .directory(move |d| {
+            let claims = owners.lock().expect("ownership registry poisoned");
+            ensure!(
+                claims.is_empty(),
+                "capacity setup requires no ownership claims"
+            );
+            ensure!(
+                !admission_started.load(Ordering::Relaxed),
+                "capacity setup must precede admission"
+            );
+            let world = d.prepare_realm_capacity(limit)?;
+            let receipt =
+                json!({"world":world,"limit":limit,"global_limit":global,"provenance":"prepared"});
+            write_json(&path, &receipt)?;
+            Ok(receipt)
+        })
+        .await?;
+    Ok(receipt)
+}
 async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Value> {
     ensure!(
         t.stopped.borrow().is_none()
@@ -825,7 +872,8 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         "native control lease expired; this prepared session is terminal"
     );
     match command {
-        Command::Capabilities => Ok(json!({"schema":1,"provenance":"prepared","pause_scope":"isolated server and all registered native clients","controllers":["direct","native","game_bot"],"game_bot_profiles":crate::bots::profiles(),"goals":["time","level","kills","pirate_caves"],"max_game_ms":600000,"trace_page_limit":40,"request_bytes_limit":MAX_REQUEST_BYTES,"mutation_limit":MAX_MUTATIONS})),
+        Command::Capabilities => Ok(json!({"schema":1,"provenance":"prepared","pause_scope":"isolated server and all registered native clients","controllers":["direct","native","game_bot"],"game_bot_profiles":crate::bots::profiles(),"goals":["time","level","kills","pirate_caves"],"max_game_ms":600000,"trace_page_limit":40,"request_bytes_limit":MAX_REQUEST_BYTES,"mutation_limit":MAX_MUTATIONS,"starting_context_operations":["prepare_realm_capacity"],"prepared_realm_capacity":if t.root.join("prepared-realm-capacity.json").exists(){serde_json::from_slice::<Value>(&fs::read(t.root.join("prepared-realm-capacity.json"))?)?}else{Value::Null}})),
+        Command::PrepareRealmCapacity{limit} => prepare_realm_capacity(a,t,limit).await,
         Command::Catalog{search,limit} => {ensure!(!search.is_empty() && search.len()<=80 && (1..=20).contains(&limit),"catalog needs search and limit 1–20");let matches=a.content.objects.values().filter(|o|o.name.to_lowercase().contains(&search.to_lowercase())).collect::<Vec<_>>();Ok(json!({"items":matches.iter().take(limit).map(|o|json!({"id":o.kind,"name":o.name,"class":o.class,"slot_type":o.slot_type,"unsupported_equipment":o.unsupported_equipment})).collect::<Vec<_>>(),"omitted":matches.len().saturating_sub(limit)}))},
         Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed,"privileged":true,"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0xd7a|0xd7b|0x721|0x700)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos})).collect::<Vec<_>>()}))).await,
         Command::Spawn{spec} => spawn(a,t,spec).await,

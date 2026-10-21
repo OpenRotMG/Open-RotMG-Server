@@ -28,6 +28,7 @@ pub struct PlayerView {
     pub lifecycle: Lifecycle,
     pub tiles: Arc<Vec<Tile>>,
     pub objects: Vec<VisibleObject>,
+    pub player_markers: Vec<PlayerMarker>,
     pub projectiles: Vec<VisibleProjectile>,
 }
 #[derive(Serialize)]
@@ -35,6 +36,7 @@ pub struct MapInfo {
     pub name: String,
     pub width: i32,
     pub height: i32,
+    pub allow_teleport: bool,
 }
 #[derive(Serialize)]
 pub struct OwnCharacter {
@@ -74,6 +76,13 @@ pub struct Tile {
     pub y: i16,
     pub ground: u8,
     pub ground_speed: f32,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct PlayerMarker {
+    pub id: i32,
+    pub account: i32,
+    pub name: String,
+    pub position: Pos,
 }
 #[derive(Serialize)]
 pub struct VisibleObject {
@@ -228,6 +237,7 @@ impl Directory {
                 name: w.name.clone(),
                 width: w.map.width,
                 height: w.map.height,
+                allow_teleport: w.allow_teleport(),
             },
             character: OwnCharacter {
                 conditions: p.conditions(w.now) | if p.paused { 1 << 20 } else { 0 },
@@ -263,6 +273,15 @@ impl Directory {
             },
             tiles,
             objects,
+            player_markers: w
+                .player_markers(id)
+                .map(|(id, q)| PlayerMarker {
+                    id,
+                    account: q.character.account,
+                    name: q.character.name.clone(),
+                    position: q.pos,
+                })
+                .collect(),
             projectiles,
         })
     }

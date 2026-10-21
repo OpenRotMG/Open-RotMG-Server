@@ -99,17 +99,29 @@ async fn guild_native_creation_invite_accept_rank_and_removal_use_committed_runt
     let (alice, _ar) = enter(&a, alice).await;
     let (bob, mut br) = enter(&a, bob).await;
     let (carol, mut cr) = enter(&a, carol).await;
-    for _ in 0..40 {
-        if a.world
-            .for_player(alice)
-            .call(move |w| Ok(w.players[&alice].known.contains(&bob)))
-            .await
-            .unwrap()
-        {
-            break;
+    let publication_start = Instant::now();
+    let publication = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let observed = a.world.directory(move |d| {
+                let world = d.location(alice)?;
+                let w = &d.worlds[&world];
+                let actors = [alice, bob, carol];
+                let ready = actors.iter().all(|id| {
+                    d.location(*id).ok() == Some(world) && d.guild_actor(*id).is_ok() && w.players.get(id).is_some_and(|p| actors.iter().all(|peer| peer == id || p.known.contains(peer)))
+                });
+                Ok(ready.then(|| serde_json::json!({"actors":actors.map(|id| {
+                    let p = &w.players[&id];
+                    serde_json::json!({"player":id,"account":p.character.account,"position":p.pos,"known_peers":actors.into_iter().filter(|peer| *peer != id && p.known.contains(peer)).collect::<Vec<_>>()})
+                }),"world":w.name})))
+            }).await.unwrap();
+            if let Some(observed) = observed { break observed; }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    }).await.expect("all guild participants must observe both peers before pausing within two seconds");
+    println!(
+        "guild initial mutual publication: {}",
+        serde_json::json!({"snapshot":publication,"elapsed_wall_ms":publication_start.elapsed().as_millis(),"max_wall_ms":2000,"poll_ms":50})
+    );
     // These transaction-only clients do not ACK simulation output; wall time must not fill their queues.
     a.world.clock.set_paused(true);
     let malformed = text("Alpha");

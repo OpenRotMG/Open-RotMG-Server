@@ -199,6 +199,7 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
             match defeated.kind {
                 crate::dungeon::trench::THESSAL => plans[0].1.trenches,
                 crate::dungeon::spider::BOSS => plans[0].1.spider_dens,
+                crate::dungeon::lab::BOSS => plans[0].1.mad_labs,
                 crate::dungeon::abyss::MALPHAS => plans[0].1.abysses,
                 _ => plans[0].1.dungeons[index - 1],
             },
@@ -214,6 +215,7 @@ fn selected_dungeons_credit_character_identity_once_and_publish_exits_after_comm
             match defeated.kind {
                 crate::dungeon::trench::THESSAL => w.players[&a].character.trenches,
                 crate::dungeon::spider::BOSS => w.players[&a].character.spider_dens,
+                crate::dungeon::lab::BOSS => w.players[&a].character.mad_labs,
                 crate::dungeon::abyss::MALPHAS => w.players[&a].character.abysses,
                 _ => w.players[&a].character.dungeons[index - 1],
             },

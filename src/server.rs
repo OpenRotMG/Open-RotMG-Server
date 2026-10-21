@@ -44,7 +44,10 @@ use std::{
     collections::{BTreeMap, HashMap},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 #[derive(Clone)]
 pub struct SessionControl {
@@ -120,6 +123,7 @@ impl App {
             "account already has an active session"
         );
         owners.insert(id, None);
+        self.admission_started.store(true, Ordering::Relaxed);
         Ok(Owner {
             registry: self.owners.clone(),
             id,
@@ -128,6 +132,11 @@ impl App {
             done: None,
             acknowledged: false,
         })
+    }
+    pub(crate) fn begin_admission(&self) {
+        // The owners lock orders this irreversible latch against capacity preparation.
+        let _owners = self.owners.lock().expect("ownership registry poisoned");
+        self.admission_started.store(true, Ordering::Relaxed);
     }
     fn claim_session(&self, id: i32) -> Result<Owner> {
         let mut owner = self.claim(id)?;
@@ -209,6 +218,7 @@ pub struct App {
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
     pub owners: Arc<Mutex<BTreeMap<i32, Option<SessionControl>>>>,
+    pub(crate) admission_started: Arc<AtomicBool>,
     pub authentication: Arc<tokio::sync::RwLock<()>>,
     pub guild_actions: Arc<tokio::sync::Mutex<()>>,
     pub gold_updates: Arc<tokio::sync::Mutex<()>>,
@@ -751,7 +761,7 @@ async fn persist_death(
             .await
     }
 }
-async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
+pub(crate) async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
     let id = plan.plans[0].player;
     let writes = plan
         .plans
@@ -763,7 +773,10 @@ async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
             items: p.items.clone(),
         })
         .collect();
-    let result = a.store.exchange(writes, None).await;
+    let result = a
+        .store
+        .exchange_trade(plan.transaction.clone(), writes, plan.delivery.clone())
+        .await;
     a.world
         .for_player(id)
         .call(move |w| w.finish_trade(plan, result))
@@ -789,6 +802,7 @@ struct Session {
     account: Option<Owner>,
     player: Option<i32>,
     expected: Option<i32>,
+    admission: Option<Vec<u8>>,
     reconnecting: bool,
     diagnostics: diagnostics::ConnectionDiagnostics,
 }
@@ -840,6 +854,7 @@ async fn handle(
         account,
         player,
         expected,
+        admission,
         reconnecting,
         diagnostics,
     } = session;
@@ -905,6 +920,7 @@ async fn handle(
                 .map(|t| t.native_entry(id))
                 .transpose()?
                 .flatten();
+            let transfer_key = (!key.is_empty()).then(|| key.clone());
             let (destination, character) = a
                 .world
                 .directory(move |d| {
@@ -924,6 +940,7 @@ async fn handle(
                 })
                 .await?;
             *expected = character;
+            *admission = transfer_key;
             a.world = a.world.in_world(destination);
             let body = a.world.call(|w| Ok(w.map_info())).await?;
             enqueue_reply(
@@ -981,17 +998,19 @@ async fn handle(
                 .map(|t| t.native_entry(account))
                 .transpose()?
                 .flatten();
+            let ticket = admission.clone();
             *player = Some(
                 a.world
                     .call(move |w| {
                         if let Some(vault) = vault {
                             w.load_vault(vault)?;
                         }
-                        let id = w.enter_at(
+                        let id = w.enter_admitted(
                             ch,
                             Some(output),
                             prepared.map(|(_, pos)| pos),
                             presentation,
+                            ticket,
                         )?;
                         w.sync_account_lists(id, Some(lists))?;
                         Ok(id)
@@ -1537,7 +1556,7 @@ async fn reconnect(
                 }
             };
             let world = &d.worlds[&destination];
-            if world.players.len() >= world.max_players {
+            if world.players.len() + world.reserved_slots() >= world.max_players {
                 let message = crate::world::chat_info("Destination is full.");
                 crate::world::send(
                     &d.worlds[&d.location(id)?].players[&id],
@@ -1553,8 +1572,19 @@ async fn reconnect(
     let Some((destination, keytime, key, name)) = transfer else {
         return Ok(());
     };
-    depart(a, id).await?;
+    if let Err(error) = depart(a, id).await {
+        let account = session
+            .account
+            .as_ref()
+            .context("transfer owner missing")?
+            .id;
+        a.world
+            .directory(move |d| d.cancel_admission(account, key))
+            .await?;
+        return Err(error);
+    }
     session.player = None;
+    let cancellation = key.clone();
     let mut o = Writer::new();
     o.utf(&name)
         .utf("")
@@ -1563,7 +1593,17 @@ async fn reconnect(
         .i32(keytime)
         .i16(key.len() as i16);
     o.0.extend(key);
-    enqueue_reply(tx, Packet { id: 39, body: o.0 })?;
+    if let Err(error) = enqueue_reply(tx, Packet { id: 39, body: o.0 }) {
+        let account = session
+            .account
+            .as_ref()
+            .context("transfer owner missing")?
+            .id;
+        a.world
+            .directory(move |d| d.cancel_admission(account, cancellation))
+            .await?;
+        return Err(error);
+    }
     session.reconnecting = true;
     session
         .account
@@ -1740,6 +1780,18 @@ async fn connection_io<S, I>(
                 .push(owner);
         }
     }
+    if let Some(key) = session.admission.take()
+        && let Some(owner) = &session.account
+    {
+        let account = owner.id;
+        if let Err(error) = a
+            .world
+            .directory(move |d| d.cancel_admission(account, key))
+            .await
+        {
+            tracing::error!(account,%error,"disconnected admission cancellation failed");
+        }
+    }
     if let Some(owner) = session.account.take() {
         owner.release();
     }
@@ -1749,8 +1801,17 @@ pub(crate) async fn automatic_transfer(
     id: i32,
 ) -> Result<Option<crate::world::ForcedTransfer>> {
     let transfer = a.world.directory(move |d| d.forced_transfer(id)).await?;
-    if transfer.is_some() {
-        depart(a, id).await?;
+    if let Some(t) = &transfer
+        && let Err(error) = depart(a, id).await
+    {
+        let key = t.key.clone();
+        a.world
+            .directory(move |d| {
+                let account = d.player_view(id)?.session.account;
+                d.cancel_admission(account, key)
+            })
+            .await?;
+        return Err(error);
     }
     Ok(transfer)
 }
@@ -2182,6 +2243,9 @@ async fn shutdown_signal() -> Result<()> {
     tokio::signal::ctrl_c().await?;
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) use account_actions::tests::fixture;
 
 #[cfg(test)]
 mod tests {

@@ -1,9 +1,10 @@
 pub mod abyss;
+pub mod lab;
 pub mod snake;
 pub mod spider;
 pub mod trench;
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
+pub const DUNGEONS: [(u16, &str, &str, u16); 8] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
@@ -11,6 +12,7 @@ pub const DUNGEONS: [(u16, &str, &str, u16); 7] = [
     (0x71b, "abyss-of-demons", "Abyss of Demons", abyss::MALPHAS),
     (0x730, "ocean-trench", "Ocean Trench", trench::THESSAL),
     (0x719, "spider-den", "Spider Den", spider::BOSS),
+    (0x890, "mad-lab", "Mad Lab", lab::BOSS),
 ];
 
 pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
@@ -22,6 +24,8 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
         0x640 | 0x645 | 0x649 | 0x650 | 0x654 => Some((0x718, 0.17)),
         0x653 => Some((0x70c, 0.11)),
         0x659 => Some((0x71a, 0.17)),
+        // Flying Brain matches the retained 123.5.0 announcement; 17% is from the later pinned comparator.
+        0x657 => Some((0x890, 0.17)),
         _ => None,
     }
 }
@@ -74,6 +78,8 @@ pub(crate) mod tests {
                 trench::generate(&content, 12351).unwrap()
             } else if name == "spider-den" {
                 spider::generate(&content, 12351).unwrap()
+            } else if name == "mad-lab" {
+                lab::generate(&content, 12351).unwrap()
             } else if name == "snake-pit" {
                 snake_pit(&content, 12351).unwrap()
             } else {

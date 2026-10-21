@@ -10,7 +10,12 @@ pub(super) struct VisibleProjectile {
 // Five seconds of Arachna's webs need ~1,900 units; include each queue entry as well as its snapshots.
 pub(super) const MAX_PENDING_SHOOT_UNITS: usize = 4096;
 
-pub(super) fn expect_shoot_ack(p: &mut Player, bullets: Vec<Bullet>) -> bool {
+// Suspended native clients cannot acknowledge volleys while the shared game clock is paused.
+pub(super) fn expect_shoot_ack(
+    p: &mut Player,
+    bullets: Vec<Bullet>,
+    clock: &crate::clock::Clock,
+) -> bool {
     if p.controller != Controller::Human {
         return true;
     }
@@ -26,7 +31,7 @@ pub(super) fn expect_shoot_ack(p: &mut Player, bullets: Vec<Bullet>) -> bool {
             oldest_ms = p
                 .shoot_acks
                 .front()
-                .map(|(sent, _)| sent.elapsed().as_millis()),
+                .map(|(sent, _)| clock.now().duration_since(*sent).as_millis()),
             owner = oldest.map(|b| b.owner),
             source_kind = oldest.map(|b| b.source_kind),
             born_ms = oldest.map(|b| b.born),
@@ -38,7 +43,7 @@ pub(super) fn expect_shoot_ack(p: &mut Player, bullets: Vec<Bullet>) -> bool {
         }
         return false;
     }
-    p.shoot_acks.push_back((Instant::now(), bullets));
+    p.shoot_acks.push_back((clock.now(), bullets));
     true
 }
 
@@ -68,13 +73,14 @@ impl World {
             .values_mut()
             .filter(|p| p.known.contains(&owner))
         {
-            if expect_shoot_ack(p, bullets.clone()) {
+            if expect_shoot_ack(p, bullets.clone(), &self.clock) {
                 send(p, 19, body.clone());
             }
         }
     }
 
     pub fn acknowledge_shoot(&mut self, id: i32, time: i32) -> Result<()> {
+        let now = self.clock.now();
         let p = self
             .players
             .get_mut(&id)
@@ -85,7 +91,7 @@ impl World {
             .pop_front()
             .context("unsolicited SHOOT acknowledgement")?;
         ensure!(
-            sent.elapsed() <= Duration::from_secs(5),
+            now.duration_since(sent) <= Duration::from_secs(5),
             "SHOOT acknowledgement timed out"
         );
         for bullet in bullets {
@@ -108,7 +114,7 @@ impl World {
         tracing::debug!(
             player = id,
             client_time = time,
-            ack_ms = sent.elapsed().as_millis(),
+            ack_ms = now.duration_since(sent).as_millis(),
             pending_volleys = p.shoot_acks.len(),
             "native volley acknowledged"
         );
@@ -162,13 +168,14 @@ impl World {
     }
 
     pub(super) fn expire_native_projectiles(&mut self) {
+        let now = self.clock.now();
         for (id, p) in &mut self.players {
             p.visible_projectiles
                 .retain(|_, report| self.now <= report.expires);
             if !p.departing
                 && p.shoot_acks
                     .front()
-                    .is_some_and(|(sent, _)| sent.elapsed() > Duration::from_secs(5))
+                    .is_some_and(|(sent, _)| now.duration_since(*sent) > Duration::from_secs(5))
             {
                 if let Some(output) = &p.tx {
                     output.lost.send_replace(true);
@@ -178,7 +185,7 @@ impl World {
                 tracing::error!(
                     player = id,
                     pending = p.shoot_acks.len(),
-                    oldest_ms = sent.elapsed().as_millis(),
+                    oldest_ms = now.duration_since(*sent).as_millis(),
                     shooter = ?bullets.first().map(|b|b.owner),
                     volley = bullets.len(),
                     source_kind = bullets.first().map(|b| b.source_kind),

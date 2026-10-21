@@ -1,6 +1,63 @@
 use super::*;
 use crate::world::view::{VisibleObject, VisibleProjectile};
 
+pub(super) struct Perception {
+    attended: Vec<(i32, u8)>,
+    step: f32,
+    directions: usize,
+}
+impl Perception {
+    pub(super) fn attend(v: &PlayerView, cognition: &pursuits::Cognition, occupied: bool) -> Self {
+        let budget = if occupied {
+            cognition.attention.saturating_sub(1).max(1)
+        } else {
+            cognition.attention
+        };
+        let mut candidates: Vec<_> = v
+            .projectiles
+            .iter()
+            .filter(|b| hostile(v, b.owner))
+            .collect();
+        if events::shared(&v.map.name) {
+            let approaching = |b: &VisibleProjectile| {
+                (0..=3)
+                    .filter_map(|step| predicted(b, step as f32 * 0.2))
+                    .map(|p| p.distance(v.position))
+                    .fold(f32::INFINITY, f32::min)
+            };
+            candidates.sort_by(|a, b| approaching(a).total_cmp(&approaching(b)));
+        }
+        let attended: Vec<_> = candidates
+            .into_iter()
+            .take(budget)
+            .map(|b| (b.owner, b.id))
+            .collect();
+        if occupied || !attended.is_empty() {
+            tracing::info!(
+                account = v.session.account,
+                player = v.session.player,
+                tick = v.tick,
+                occupied,
+                ?attended,
+                budget,
+                velocity_step = cognition.velocity_step,
+                directions = cognition.directions,
+                "autonomous attended threat estimates"
+            );
+        }
+        Self {
+            attended,
+            step: cognition.velocity_step,
+            directions: cognition.directions,
+        }
+    }
+    pub(super) fn velocity(&self, v: Pos) -> Pos {
+        Pos {
+            x: (v.x / self.step).round() * self.step,
+            y: (v.y / self.step).round() * self.step,
+        }
+    }
+}
 pub(super) fn predicted(b: &VisibleProjectile, seconds: f32) -> Option<Pos> {
     let direction = Pos {
         x: b.angle.cos(),
@@ -51,7 +108,7 @@ pub(super) fn speed(v: &PlayerView) -> f32 {
     speed * ground
 }
 
-pub(super) fn clearance(v: &PlayerView, destination: Pos) -> f32 {
+pub(super) fn clearance(v: &PlayerView, destination: Pos, perception: &Perception) -> f32 {
     let speed = speed(v);
     let distance = v.position.distance(destination);
     let mut minimum = 20_f32;
@@ -66,7 +123,11 @@ pub(super) fn clearance(v: &PlayerView, destination: Pos) -> f32 {
             x: v.position.x + (destination.x - v.position.x) * fraction,
             y: v.position.y + (destination.y - v.position.y) * fraction,
         };
-        for bullet in v.projectiles.iter().filter(|b| hostile(v, b.owner)) {
+        for bullet in v
+            .projectiles
+            .iter()
+            .filter(|b| perception.attended.contains(&(b.owner, b.id)))
+        {
             if let Some(pos) = predicted(bullet, seconds) {
                 minimum = minimum.min(player.distance(pos));
             }
@@ -122,6 +183,7 @@ pub(super) fn attack(
     grid: &Grid,
     enemy: &VisibleObject,
     velocity: Pos,
+    perception: &Perception,
     decision: &mut Decision,
 ) -> Result<()> {
     if !progression::vulnerable(enemy) {
@@ -132,7 +194,16 @@ pub(super) fn attack(
         .projectiles
         .get(&0)
         .context("weapon projectile missing")?;
-    let point = lead(v, enemy, velocity, projectile);
+    let lead = lead(v, enemy, perception.velocity(velocity), projectile);
+    let estimate = perception.velocity(Pos {
+        x: lead.x - v.position.x,
+        y: lead.y - v.position.y,
+    });
+    let point = Pos {
+        x: v.position.x + estimate.x,
+        y: v.position.y + estimate.y,
+    };
+    tracing::info!(player=v.session.player,target=enemy.id,velocity=?velocity,estimate=?estimate,aim=angle(v.position,point),"autonomous execution aim estimate");
     let range = projectile.speed * projectile.lifetime / 10000.;
     if v.character.conditions & crate::content::STUNNED == 0
         && v.position.distance(point) < range
@@ -173,13 +244,14 @@ pub(super) fn movement(
     target: Option<Pos>,
     range: f32,
     retreat: bool,
+    perception: &Perception,
 ) -> Option<Pos> {
     if v.character.conditions & crate::content::PARALYZED != 0 {
         return None;
     }
     let mut best = None;
-    for index in 0..16 {
-        let direction = index as f32 * std::f32::consts::TAU / 16.;
+    for index in 0..perception.directions {
+        let direction = index as f32 * std::f32::consts::TAU / perception.directions as f32;
         let point = Pos {
             x: v.position.x + direction.cos() * 1.25,
             y: v.position.y + direction.sin() * 1.25,
@@ -187,7 +259,7 @@ pub(super) fn movement(
         if !grid.segment(v.position, point) {
             continue;
         }
-        let safety = clearance(v, point);
+        let safety = clearance(v, point, perception);
         let separation = enemies
             .iter()
             .map(|e| point.distance(e.position))

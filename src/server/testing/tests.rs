@@ -1,4 +1,6 @@
 use super::*;
+mod community_crowd;
+mod community_social;
 
 fn fixture() -> (PathBuf, App) {
     let (dir, mut app) = crate::server::account_actions::tests::fixture();

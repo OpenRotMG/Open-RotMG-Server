@@ -46,6 +46,9 @@ mod guilds;
 mod inventory_safety_tests;
 #[cfg(test)]
 mod key_tests;
+mod lab;
+#[cfg(test)]
+mod lab_tests;
 mod lair;
 mod landmark_ai;
 #[cfg(test)]
@@ -239,6 +242,7 @@ pub struct Player {
     quest: Option<i32>,
     statuses: BTreeMap<u8, (u64, u64)>,
     native_motion_condition: i32,
+    lab_conditions: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32)>,
@@ -371,7 +375,7 @@ pub struct Bullet {
 }
 impl Player {
     pub(crate) fn conditions(&self, now: u64) -> i32 {
-        crate::condition::mask(&self.statuses, now)
+        self.lab_conditions | crate::condition::mask(&self.statuses, now)
     }
 }
 impl Bullet {
@@ -440,6 +444,12 @@ struct Spawn {
     ready: u64,
     camp: Option<usize>,
 }
+struct Admission {
+    account: i32,
+    character: i32,
+    expires: u64,
+    consumed: bool,
+}
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
@@ -453,6 +463,7 @@ pub struct World {
     grenades: Vec<mechanics::Grenade>,
     fauna_births: Vec<fauna_births::Birth>,
     named_births: Vec<named_births::Birth>,
+    lab_tosses: Vec<lab::Toss>,
     lava_patches: BTreeMap<usize, (u64, u8)>,
     ability_state: abilities::State,
     companions: companions::State,
@@ -472,6 +483,7 @@ pub struct World {
     pub safe: bool,
     pub owner: Option<i32>,
     pub max_players: usize,
+    admissions: BTreeMap<Vec<u8>, Admission>,
     encounter: bool,
     population: Vec<Spawn>,
     camps: Vec<population::Camp>,
@@ -555,7 +567,7 @@ impl Directory {
             "world_players": world.players.len(), "world_entities": world.entities.len(), "world_projectiles": world.bullets.len(),
             "native_acknowledgements": {"weapon_tick_records":p.weapon_ticks.len(),"goto":p.goto_acks.len(),"shoot":p.shoot_acks.len(),
                 "oldest_goto_ms":p.goto_acks.front().map(|(_,at)|at.elapsed().as_millis()),
-                "oldest_shoot_ms":p.shoot_acks.front().map(|(at,_)|at.elapsed().as_millis())},
+                "oldest_shoot_ms":p.shoot_acks.front().map(|(at,_)|world.clock.now().duration_since(*at).as_millis())},
             "tick_interval_ms": 50, "recent_ticks": ticks, "tick": self.tick,
             "total_worlds": self.worlds.len(), "total_players": self.worlds.values().map(|w| w.players.len()).sum::<usize>(),
             "total_entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
@@ -783,6 +795,11 @@ impl Directory {
                     None => rand::random(),
                 };
                 Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
+            } else if template == "mad-lab" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::lab::generate(&self.content, seed)?)
             } else if template == "snake-pit" {
                 let seed = self
                     .prepared_seed
@@ -1031,6 +1048,17 @@ impl Directory {
             "private destination belongs to another account"
         );
         ensure!(world.admission_open, "Realm is closed");
+        ensure!(
+            world.players.len() + world.reserved_slots() < world.max_players,
+            "transfer destination full"
+        );
+        ensure!(
+            !self.worlds.values().any(|w| w
+                .admissions
+                .values()
+                .any(|a| a.account == account && a.expires > w.now)),
+            "account already has a reserved admission"
+        );
         let name = world.name.clone();
         let mut key = vec![0; 16];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
@@ -1039,6 +1067,19 @@ impl Directory {
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs(),
         )?;
+        let world = self
+            .worlds
+            .get_mut(&destination)
+            .context("transfer destination missing")?;
+        world.admissions.insert(
+            key.clone(),
+            Admission {
+                account,
+                character,
+                expires: world.now + 120000,
+                consumed: false,
+            },
+        );
         self.grants.insert(
             key.clone(),
             Grant {
@@ -1082,12 +1123,47 @@ impl Directory {
         );
         ensure!(self.worlds[&destination].admission_open, "Realm is closed");
         let character = grant.character;
+        let world = self
+            .worlds
+            .get_mut(&destination)
+            .context("transfer destination missing")?;
+        let admission = world
+            .admissions
+            .get_mut(&key)
+            .context("transfer admission expired or cancelled")?;
+        ensure!(
+            admission.account == account
+                && admission.character == character
+                && admission.expires > world.now
+                && !admission.consumed,
+            "transfer admission binding/expiry changed"
+        );
+        admission.consumed = true;
         self.grants.remove(&key);
         if destination > 0 {
             self.idle.insert(destination, self.tick);
         }
         tracing::info!(account, character, destination, "transfer grant consumed");
         Ok(character)
+    }
+    pub(crate) fn cancel_admission(&mut self, account: i32, key: Vec<u8>) -> Result<()> {
+        if let Some(grant) = self.grants.get(&key) {
+            ensure!(
+                grant.account == account,
+                "cannot cancel another account's grant"
+            );
+        }
+        for world in self.worlds.values_mut() {
+            if let Some(admission) = world.admissions.get(&key) {
+                ensure!(
+                    admission.account == account,
+                    "cannot cancel another account's admission"
+                );
+                world.admissions.remove(&key);
+            }
+        }
+        self.grants.remove(&key);
+        Ok(())
     }
     #[cfg(test)]
     fn drop_portal(&mut self, origin: i32, pos: Pos) -> Result<i32> {
@@ -1348,6 +1424,7 @@ impl World {
                         hp: o.hp,
                         size: o.size,
                         condition: crate::dungeon::abyss::initial_condition(kind)
+                            | crate::dungeon::lab::initial_condition(kind)
                             | crate::dungeon::spider::initial_condition(kind)
                             | crate::dungeon::snake::initial_condition(kind)
                             | if o.stasis_immune {
@@ -1437,6 +1514,7 @@ impl World {
             grenades: Vec::new(),
             fauna_births: Vec::new(),
             named_births: Vec::new(),
+            lab_tosses: Vec::new(),
             lava_patches: BTreeMap::new(),
             ability_state: abilities::State::default(),
             companions: companions::State::default(),
@@ -1457,6 +1535,7 @@ impl World {
             safe: false,
             owner: None,
             max_players: 85,
+            admissions: BTreeMap::new(),
             encounter: false,
             population: vec![],
             camps: vec![],
@@ -1573,6 +1652,7 @@ impl World {
                 hp: definition.hp,
                 size: definition.size,
                 condition: crate::dungeon::abyss::initial_condition(kind)
+                    | crate::dungeon::lab::initial_condition(kind)
                     | crate::dungeon::spider::initial_condition(kind)
                     | crate::dungeon::snake::initial_condition(kind)
                     | (if kind == 0x91a {
@@ -1695,6 +1775,35 @@ impl World {
         position: Option<Pos>,
         presentation: AccountPresentation,
     ) -> Result<i32> {
+        self.enter_admitted(ch, tx, position, presentation, None)
+    }
+    pub(crate) fn reserved_slots(&self) -> usize {
+        self.admissions
+            .values()
+            .filter(|a| a.expires > self.now)
+            .count()
+    }
+    pub(crate) fn enter_admitted(
+        &mut self,
+        ch: Character,
+        tx: Option<Output>,
+        position: Option<Pos>,
+        presentation: AccountPresentation,
+        admission: Option<Vec<u8>>,
+    ) -> Result<i32> {
+        if let Some(key) = &admission {
+            let reserved = self
+                .admissions
+                .get(key)
+                .context("entry admission missing")?;
+            ensure!(
+                reserved.account == ch.account
+                    && reserved.character == ch.id
+                    && reserved.consumed
+                    && reserved.expires > self.now,
+                "entry admission binding/expiry changed"
+            );
+        }
         if let Some(pos) = position {
             ensure!(
                 pos.x.is_finite() && pos.y.is_finite() && self.walkable(pos),
@@ -1714,7 +1823,8 @@ impl World {
             "Guild Hall membership has been revoked."
         );
         ensure!(
-            self.players.len() < self.max_players,
+            self.players.len() + self.reserved_slots()
+                < self.max_players + usize::from(admission.is_some()),
             "development world full"
         );
         ensure!(
@@ -1760,6 +1870,7 @@ impl World {
                 quest: None,
                 statuses: BTreeMap::new(),
                 native_motion_condition: 0,
+                lab_conditions: 0,
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
@@ -1806,6 +1917,9 @@ impl World {
                 ability_shot: None,
             },
         );
+        if let Some(key) = admission {
+            self.admissions.remove(&key);
+        }
         let mut o = Writer::new();
         o.i32(id).i32(char_id);
         send(&self.players[&id], wire::CREATE_SUCCESS, o.0);
@@ -2058,6 +2172,12 @@ impl World {
                     .map(|(i, _)| *i),
             )
             .collect()
+    }
+    fn player_markers(&self, id: i32) -> impl Iterator<Item = (i32, &Player)> {
+        self.players
+            .iter()
+            .filter(move |(peer, _)| **peer != id && self.players[&id].known.contains(peer))
+            .map(|(peer, player)| (*peer, player))
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
         let started = Instant::now();
@@ -3291,6 +3411,7 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.abysses))
                     .chain(std::iter::once(&mut snapshot.trenches))
                     .chain(std::iter::once(&mut snapshot.spider_dens))
+                    .chain(std::iter::once(&mut snapshot.mad_labs))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3328,7 +3449,8 @@ impl World {
             || snapshot.dungeons != p.character.dungeons
             || snapshot.abysses > p.character.abysses
             || snapshot.trenches > p.character.trenches
-            || snapshot.spider_dens > p.character.spider_dens;
+            || snapshot.spider_dens > p.character.spider_dens
+            || snapshot.mad_labs > p.character.mad_labs;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
@@ -3340,6 +3462,7 @@ impl World {
         p.character.abysses = snapshot.abysses;
         p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
+        p.character.mad_labs = snapshot.mad_labs;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -3682,6 +3805,9 @@ impl World {
         if defeated.kind == crate::dungeon::spider::BOSS {
             return self.spider_loot(defeated);
         }
+        if defeated.kind == crate::dungeon::lab::BOSS {
+            return self.lab_loot(defeated);
+        }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if matches!(defeated.kind, 0xd56 | 0xd59) {
@@ -3886,7 +4012,7 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 0x617 | 0x61a | 0x6d8 => 12.,
                 0x91a => 7.,
-                crate::dungeon::spider::BOSS => 12.,
+                crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
                 _ => 20.,
@@ -3930,6 +4056,8 @@ impl World {
             let flags = current.conditions(self.now);
             let (mut motion, mut speed) = if kind == 0x909 && current.stage == Some(1) {
                 (Motion::Stationary, 0.)
+            } else if crate::dungeon::lab::ROSTER.contains(&kind) {
+                self.lab_movement(id)
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
@@ -4413,7 +4541,9 @@ impl World {
     pub fn step(&mut self) {
         let started = Instant::now();
         self.now += 50;
+        self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
+        self.lab_step();
         self.expire_consumable_boosts();
         self.companion_step()
             .expect("validated companion simulation");
@@ -4796,6 +4926,17 @@ mod loot_interactions_tests;
 mod timing_example;
 
 #[cfg(test)]
+impl World {
+    pub(crate) fn bind_fixture_clock(&mut self, clock: &crate::clock::Clock) {
+        assert!(self.tick == 0 && self.now == 0 && self.players.is_empty() && clock.paused());
+        // Raw fixture replacements need the same paused epoch attachment as Directory::make.
+        self.clock = clock.clone();
+        self.attack_epoch = clock.now();
+        assert_eq!(self.clock.now(), self.attack_epoch);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -4920,6 +5061,7 @@ mod tests {
             abysses: 0,
             trenches: 0,
             spider_dens: 0,
+            mad_labs: 0,
         }
     }
     pub(super) fn receive(
@@ -4986,7 +5128,46 @@ mod tests {
         assert!(d.consume(1, -2, time, key.clone()).is_err());
         assert!(d.consume(1, vault, time + 1, key.clone()).is_err());
         assert_eq!(d.consume(1, vault, time, key.clone()).unwrap(), 42);
-        assert!(d.consume(1, vault, time, key).is_err());
+        assert!(d.consume(1, vault, time, key.clone()).is_err());
+        assert!(
+            d.issue(1, 42, -2).is_err(),
+            "consumption still reserves the destination until entry"
+        );
+        let w = d.worlds.get_mut(&vault).unwrap();
+        let mut character = ch(w);
+        character.id = 42;
+        character.account = 1;
+        let id = w
+            .enter_admitted(
+                character,
+                None,
+                None,
+                AccountPresentation {
+                    guild: None,
+                    credits: 0,
+                    fame: 0,
+                    best_fame: BTreeMap::new(),
+                },
+                Some(key.clone()),
+            )
+            .unwrap();
+        assert_eq!(w.reserved_slots(), 0);
+        assert!(
+            w.enter_admitted(
+                w.players[&id].character.clone(),
+                None,
+                None,
+                AccountPresentation {
+                    guild: None,
+                    credits: 0,
+                    fame: 0,
+                    best_fame: BTreeMap::new()
+                },
+                Some(key)
+            )
+            .is_err(),
+            "entry admission is one-use too"
+        );
         let (time, key, _) = d.issue(1, 42, -2).unwrap();
         d.tick += 2400;
         assert!(d.consume(1, -2, time, key).is_err());
@@ -5221,7 +5402,7 @@ mod tests {
         }
     }
     #[test]
-    fn native_minimap_keeps_distant_players_without_revealing_perception_or_fog() {
+    fn community_crowd_native_minimap_keeps_distant_players_without_revealing_perception_or_fog() {
         let mut d = directory();
         let (observer, mut rx) = receive(&mut d, -3, 1, WIZARD);
         let w = d.worlds.get_mut(&-3).unwrap();
@@ -5284,6 +5465,29 @@ mod tests {
         for (actor, hidden) in [(observer, peer), (peer, observer)] {
             let view = d.player_view(actor).unwrap();
             assert!(!view.objects.iter().any(|o| o.id == hidden));
+            let json = serde_json::to_value(&view).unwrap();
+            let markers = json["player_markers"]
+                .as_array()
+                .expect("separate native minimap publication");
+            let marker = markers.iter().find(|m| m["id"] == hidden).unwrap();
+            assert_eq!(
+                marker
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                vec!["account", "id", "name", "position"]
+            );
+            if actor == observer {
+                assert!(
+                    !view
+                        .tiles
+                        .iter()
+                        .any(|t| t.x == marker["position"]["x"].as_f64().unwrap() as i16
+                            && t.y == marker["position"]["y"].as_f64().unwrap() as i16)
+                );
+            }
             if actor == observer {
                 assert!(view.objects.iter().any(|o| o.id == quest));
                 let target = view
@@ -5310,6 +5514,9 @@ mod tests {
         w.leave(peer).unwrap();
         w.updates(observer, false).unwrap();
         assert!(!w.players[&observer].known.contains(&peer));
+        let markers = d.player_view(observer).unwrap().player_markers;
+        assert!(markers.iter().all(|p| p.id != peer && p.id != foreign));
+        assert!(d.player_view(peer).is_err());
         let update = rx.try_recv().unwrap();
         assert_eq!(update.id, wire::UPDATE);
         let mut r = crate::wire::Reader::new(&update.body);

@@ -154,6 +154,7 @@ async fn main() -> Result<()> {
             Err(error) => return Err(error.into()),
         },
         owners: Arc::default(),
+        admission_started: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),

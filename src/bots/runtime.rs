@@ -7,12 +7,33 @@ use crate::{
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
+// The inclusive interval also awaits policy/Store; these elapsed (not CPU) subspans leave clone/log/bookkeeping outside.
+fn record_decision_phase_elapsed<T>(
+    window: &mut crate::performance::Window,
+    phase: &'static str,
+    elapsed: Duration,
+    outcome: Result<T>,
+) -> Result<T> {
+    window.record(phase, elapsed);
+    outcome
+}
+
 async fn enter(
     app: &App,
     profile: Profile,
     character: Character,
     world: i32,
     position: Option<Pos>,
+) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
+    enter_admitted(app, profile, character, world, position, None).await
+}
+async fn enter_admitted(
+    app: &App,
+    profile: Profile,
+    character: Character,
+    world: i32,
+    position: Option<Pos>,
+    admission: Option<Vec<u8>>,
 ) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
     let world = if world == -3 && position.is_none() {
         app.world.directory(|d| d.initial(-3)).await?
@@ -36,6 +57,8 @@ async fn enter(
     let sender = packets.clone();
     let (lost, _) = watch::channel(false);
     let presentation = app.store.presentation(character.account).await?;
+    let own_name = character.name.clone();
+    let own_guild = presentation.guild.is_some();
     let id = app
         .world
         .in_world(world)
@@ -43,11 +66,12 @@ async fn enter(
             if let Some(vault) = vault {
                 w.load_vault(vault)?;
             }
-            let id = w.enter_at(
+            let id = w.enter_admitted(
                 character,
                 Some(Output { packets, lost }),
                 position,
                 presentation,
+                admission,
             )?;
             w.players
                 .get_mut(&id)
@@ -71,7 +95,61 @@ async fn enter(
         revision = view.character.inventory_revision,
         "autonomous character entered"
     );
-    Ok((id, output, sender, Brain::new(profile, &view)))
+    let mut brain = Brain::new(profile, &view);
+    if let Some(mind) = app.store.bot_mind(view.session.account).await? {
+        brain.mind = mind;
+    }
+    brain.mind.market.name = own_name;
+    brain.mind.market.guild = own_guild;
+    brain.mind.market.observe(&view);
+    if let Some(b) = &brain.mind.market.bargain {
+        let receipts = app
+            .store
+            .market_receipts(view.session.account, b.terms.version)
+            .await?;
+        brain.mind.market.recover(receipts)?;
+    }
+    brain.mind.future_class = Some(if profile.healer {
+        crate::content::PRIEST
+    } else {
+        crate::content::WIZARD
+    });
+    let mut generation = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&app.started, &mut generation);
+    brain
+        .mind
+        .bind(&view, std::hash::Hasher::finish(&generation))?;
+    brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
+    Ok((id, output, sender, brain))
+}
+
+async fn rebuild_character(
+    app: &App,
+    profile: Profile,
+    dead: &crate::world::view::Session,
+) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
+    let character = app
+        .store
+        .shore_character(
+            profile.identity.into(),
+            profile.name.into(),
+            &app.content,
+            profile.healer,
+        )
+        .await?;
+    ensure!(
+        character.account == dead.account && character.id != dead.character,
+        "replacement did not preserve account and replace the dead character"
+    );
+    // A fresh life rebuilds in Nexus; its dead character's Realm slot may already belong to a waiter.
+    tracing::info!(
+        account = character.account,
+        dead_character = dead.character,
+        character = character.id,
+        destination = -2,
+        "autonomous replacement rebuilding arrival selected"
+    );
+    enter(app, profile, character, -2, None).await
 }
 
 async fn continue_character(
@@ -97,7 +175,7 @@ async fn continue_character(
     let destination = if character.id == session.character {
         destination
     } else {
-        -3
+        -2
     };
     Ok((character, destination))
 }
@@ -142,7 +220,7 @@ async fn selected_character_death_never_creates_a_replacement() {
 }
 #[cfg(test)]
 #[tokio::test]
-async fn death_committed_during_departure_rebuilds_in_realm_without_resurrection() {
+async fn death_committed_during_departure_rebuilds_in_nexus_without_resurrection() {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let profile = PROFILES[0];
@@ -181,7 +259,7 @@ async fn death_committed_during_departure_rebuilds_in_realm_without_resurrection
     let (replacement, destination) = continue_character(&store, &content, profile, &session, -2)
         .await
         .unwrap();
-    assert_eq!(destination, -3);
+    assert_eq!(destination, -2);
     assert_eq!(replacement.account, session.account);
     assert_ne!(replacement.id, session.character);
     assert_eq!(
@@ -261,6 +339,8 @@ async fn launch(
         let mut shutdown = app.shutdown.subscribe();
         let mut next_bank = app.world.clock.now();
         let mut pending: Option<dialogue::Pending> = None;
+        let mut deferred_market: Option<(Packet, Arc<PlayerView>)> = None;
+        let mut admission: Option<Vec<u8>> = None;
         let mut last_dialogue: Option<std::time::Instant> = None;
         let mut phase = adventures::Phase::Seeking;
         let result: Result<()> = async {
@@ -275,15 +355,18 @@ async fn launch(
                         dialogue::end_agreement(&app, &mut brain, "world changed").await;
                         ensure!(transfer.player == id && transfer.output.packets.same_channel(&sender), "collective transfer does not belong to autonomous output");
                         while output.try_recv().is_ok() {}
+                        deferred_market = None;
                         let destination = transfer.destination;
+                        admission = Some(transfer.key.clone());
                         let character_id = app.world.directory(move |d| d.consume(account, destination, transfer.key_time, transfer.key)).await?;
                         ensure!(character_id == brain.session.2, "collective transfer character binding changed");
                         let character = app.store.load(account, character_id).await?;
-                        (id, output, sender, brain) = enter(&app, profile, character, destination, None).await?;
+                        (id, output, sender, brain) = enter_admitted(&app, profile, character, destination, None, admission.clone()).await?;
+                        admission = None;
                         tracing::info!(player=id,account,character=character_id,destination,"autonomous collective transfer completed");
                         continue;
                     }
-                    let view = app.world.directory(move |d| d.player_view(id)).await?;
+                    let view = Arc::new(app.world.directory(move |d| d.player_view(id)).await?);
                     ensure!(view.session.account == account, "autonomous account binding changed");
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }
                     if view.map.name=="Nexus" && brain.agreement.as_ref().is_none_or(|a|a.waiting.is_none()) && brain.group_lost_since.is_some_and(|since|view.time_ms.saturating_sub(since)>=30000) {
@@ -319,16 +402,17 @@ async fn launch(
                         app.society.lock().expect("adventure registry poisoned").leave(account);
                         dialogue::cancel(&app, &mut pending).await;
                         dialogue::end_agreement(&app, &mut brain, "character died").await;
+                        brain.mind.end(&view, "character_died_steps_invalidated");
+                        brain.mind.market.finish("character_died_remaining_balance_unenforced");
+                        brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
                         server::depart(&app, id).await?;
                         if selected.is_some() { return Ok(()); }
                         tokio::select! {
                             _=tokio::time::sleep(Duration::from_secs(3))=>{},
                             _=shutdown.changed()=>return Ok(()),
                         }
-                        let character = app.store.shore_character(profile.identity.into(), profile.name.into(), &app.content, profile.healer).await?;
-                        ensure!(character.account == account && character.id != view.session.character,
-                            "replacement did not preserve account and replace the dead character");
-                        (id, output, sender, brain) = enter(&app, profile, character, -3, None).await?;
+                        (id, output, sender, brain) = rebuild_character(&app, profile, &view.session).await?;
+                        deferred_market = None;
                         continue;
                     }
                     ensure!(matches!(view.lifecycle.output, OutputState::Live)
@@ -341,10 +425,24 @@ async fn launch(
                         } else { None };
                         if let Some(reason) = reason { dialogue::end_agreement(&app, &mut brain, reason).await; }
                     }
-                    while let Ok(packet) = output.try_recv() {
+                    while let Some((packet, received_view)) = deferred_market.take().or_else(||output.try_recv().ok().map(|p|(p,view.clone()))) {
                         if packet.id == crate::wire::GOTO {
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
                             continue;
+                        }
+                        let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.directory(move |d|d.player_view(id)).await?) } else { None };
+                        let social_view = settled_view.as_ref().unwrap_or(&received_view);
+                        let event_before = brain.mind.events.clone();
+                        brain.mind.events.receive(&packet, social_view, profile.name)?;
+                        if brain.mind.events != event_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                        let social_before = brain.mind.social.clone();
+                        let socially_handled = social::receive_life(&app, &mut brain, &packet, social_view).await?;
+                        if brain.mind.social != social_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                        if socially_handled { continue; }
+                        match social::receive_market(&app,&mut brain,&packet,social_view).await? {
+                            social::MarketUptake::Applied => continue,
+                            social::MarketUptake::PendingCommit => { deferred_market=Some((packet,received_view)); break; },
+                            social::MarketUptake::Unrelated => {},
                         }
                         if let Some(service) = &app.dialogue
                             && let Some(request) = brain.dialogue_request(&packet, &view, &app.content)?
@@ -365,7 +463,8 @@ async fn launch(
                             tracing::info!(player=id, companion=brain.companion, "visible invitation accepted");
                         }
                     }
-                    if pending.is_none() && app.dialogue.as_ref().is_none_or(|service|service.automatic_available()) {
+                    if deferred_market.is_some() { continue; }
+                    if pending.is_none() && brain.mind.market.outgoing.is_none() && brain.mind.market.bargain.as_ref().is_none_or(|b|b.resolution.is_some()) && app.dialogue.as_ref().is_none_or(|service|service.automatic_available()) {
                         let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
                         if let Some(plan)=plan {
                             let request=brain.adventure_request(plan,&view,&app.content)?;
@@ -405,17 +504,41 @@ async fn launch(
                         }
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
-                    if view.lifecycle.busy || view.tick < brain.next_decision { continue; }
+                    if view.lifecycle.busy { continue; }
+                    if social::life(&app, &mut brain, &view).await? { continue; }
+                    if social::market(&app, &mut brain, &view).await? { continue; }
+                    if view.tick < brain.next_decision { continue; }
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();
                     brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
                     let deciding = std::time::Instant::now();
-                    let decision = brain.decide(&view, &app.content)?;
+                    let prior_mind = brain.mind.clone();
+                    let sync_deciding = std::time::Instant::now();
+                    let decision = brain.decide(&view, &app.content);
+                    let decision = record_decision_phase_elapsed(&mut brain.performance, "decide_sync_elapsed", sync_deciding.elapsed(), decision)?;
+                    if events::shared(&view.map.name) {
+                        tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
+                            hp=view.character.hp,max_hp=view.character.stats[0],mp=view.character.mp,recovery=profile.recovery,
+                            held_health=view.character.items.iter().skip(4).filter(|k|**k==0xa22).count(),
+                            goal=?decision.goal,journey=?decision.journey,movement=?decision.movement,
+                            "autonomous event action selected");
+                    }
+                    let revoking = std::time::Instant::now();
+                    let revoked = social::revoke_market(&app,&mut brain).await;
+                    if !record_decision_phase_elapsed(&mut brain.performance, "market_revoke_await_elapsed", revoking.elapsed(), revoked)? {
+                        brain.mind=prior_mind;
+                        continue;
+                    }
+                    if brain.mind != prior_mind {
+                        let saving_mind = std::time::Instant::now();
+                        let revision = app.store.save_bot_mind(brain.mind.clone()).await;
+                        brain.mind.revision = record_decision_phase_elapsed(&mut brain.performance, "mind_store_await_elapsed", saving_mind.elapsed(), revision)?;
+                    }
                     brain.performance.record("decision", deciding.elapsed());
                     if let Some(timings)=brain.performance.report() {
                         tracing::info!(name=profile.name,world=%view.map.name,known_tiles=view.tiles.len(),
                             cover_tiles=brain.cover.len(),visited_tiles=brain.visits.len(),
-                            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),contacts=brain.contacts.len(),
+                            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),crowd_contacts=brain.crowd.len(),
                             navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
                             navigation=%serde_json::json!(brain.navigation.as_ref().map(|g|g.metrics())),timings=%timings,"bot performance");
                     }
@@ -428,8 +551,9 @@ async fn launch(
                         }
                     }
                     if decision.goal != brain.goal {
-                        tracing::info!(player=id,name=profile.name,tick=view.tick,hp=view.character.hp,
+                        tracing::info!(account,character=view.session.character,world=view.session.world,player=id,name=profile.name,tick=view.tick,hp=view.character.hp,
                             experience=view.character.experience,x=view.position.x,y=view.position.y,
+                            cognition=%serde_json::to_string(&brain.mind.cognition)?,aim=?decision.aim,movement=?decision.movement,
                             goal=?decision.goal,"autonomous decision");
                     }
                     brain.goal = decision.goal;
@@ -448,9 +572,19 @@ async fn launch(
                         }
                         Ok(plan)
                     }).await {
-                        Ok(Some(plan)) => server::persist(&app, plan).await?,
-                        Ok(None) => {},
+                        Ok(Some(plan)) => {
+                            server::persist(&app, plan).await?;
+                            let after = app.world.directory(move |d| d.player_view(id)).await?;
+                            let prior_events = brain.mind.events.clone();
+                            brain.mind.events.committed(&after)?;
+                            if brain.mind.events != prior_events { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                            tracing::info!(account, character=after.session.character, world=after.session.world,
+                                before_revision=view.character.inventory_revision, revision=after.character.inventory_revision,
+                                items=?after.character.items, actions=diagnostic, "autonomous inventory outcome");
+                        },
+                        Ok(None) => { brain.mind.events.rejected(); },
                         Err(error) => {
+                            brain.mind.events.rejected();
                             if let Some(pos) = brain.destination { brain.blocked.insert(tile(pos), view.tick + 100); }
                             tracing::warn!(player=id,%error,actions=diagnostic,"autonomous commands rejected; route excluded and will reassess");
                             continue;
@@ -480,6 +614,7 @@ async fn launch(
                                         continue;
                                     }
                                 };
+                                admission = Some(key.clone());
                                 dialogue::cancel(&app, &mut pending).await;
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 server::depart(&app, id).await?;
@@ -493,14 +628,30 @@ async fn launch(
                                 if current_character != character_id {
                                     tracing::info!(account,character=character_id,replacement=current_character,"autonomous transfer interrupted by permanent death");
                                 }
-                                (id, output, sender, brain) = enter(&app, profile, character, destination, None).await?;
+                                if current_character != character_id {
+                                    let key=admission.take().context("replaced character admission missing")?;
+                                    app.world.directory(move |d|d.cancel_admission(account,key)).await?;
+                                }
+                                (id, output, sender, brain) = enter_admitted(&app, profile, character, destination, None, admission.clone()).await?;
+                                admission = None;
                                 tracing::info!(player=id,account,character=current_character,destination,?portal,portal_kind,"autonomous durable transfer completed");
                             }
                         }
                     }
                 }
+                let view = app.world.directory(move |d| d.player_view(id)).await?;
+                brain.mind.reconcile(&view)?;
+                brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
                 server::depart(&app, id).await
             }.await;
+        if let Some(key) = admission
+            && let Err(error) = app
+                .world
+                .directory(move |d| d.cancel_admission(account, key))
+                .await
+        {
+            tracing::error!(account,%error,"failed controller admission cancellation failed");
+        }
         app.society
             .lock()
             .expect("adventure registry poisoned")
@@ -526,3 +677,18 @@ async fn launch(
     });
     Ok(())
 }
+
+#[cfg(test)]
+mod community_crowd_tests;
+#[cfg(test)]
+mod community_events_tests;
+#[cfg(test)]
+mod community_market_tests;
+#[cfg(test)]
+mod community_resources_tests;
+#[cfg(test)]
+mod community_social_tests;
+#[cfg(test)]
+mod decision_timing_tests;
+#[cfg(test)]
+mod market_consent_tests;

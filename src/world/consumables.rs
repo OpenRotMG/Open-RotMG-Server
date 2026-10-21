@@ -242,14 +242,14 @@ impl World {
                     if check.is_none_or(|c| p.conditions(self.now) & crate::condition::bit(c) != 0)
                     {
                         p.statuses.remove(&effect);
+                        p.lab_conditions &= !crate::condition::bit(effect);
                     }
                 }
                 ConsumableEffect::Cleanse => {
-                    self.players
-                        .get_mut(&player)
-                        .unwrap()
-                        .statuses
+                    let p = self.players.get_mut(&player).unwrap();
+                    p.statuses
                         .retain(|effect, _| !matches!(effect, 2..=11 | 14 | 16 | 27 | 28));
+                    p.lab_conditions &= !(crate::condition::bit(crate::condition::HEXED) | STUNNED);
                     self.consumable_feedback(player, None, Some(1.));
                 }
                 ConsumableEffect::Boost { .. } => unreachable!(),

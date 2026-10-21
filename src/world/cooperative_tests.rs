@@ -23,7 +23,7 @@ fn setup() -> (
     (d, a, b, ar, br)
 }
 #[test]
-fn named_teleport_preserves_native_guards_and_shared_chat_throttle() {
+fn community_crowd_named_teleport_preserves_native_guards_and_shared_chat_throttle() {
     let (mut d, a, b, _ar, _br) = setup();
     let destination = d.worlds[&-2].players[&b].pos;
     let start = d.worlds[&-2].players[&a].pos;
@@ -318,7 +318,8 @@ fn teleport_cooldown_survives_transfer_reconnect_and_refills_exactly() {
     assert!(d.player_view(a).is_err());
 }
 #[test]
-fn teleport_rejects_wrong_world_unseen_self_blocked_and_lifecycle_targets_without_charging() {
+fn community_crowd_teleport_rejects_wrong_world_unseen_self_blocked_and_lifecycle_targets_without_charging()
+ {
     let (mut d, a, b, _ar, _br) = setup();
     let now = Instant::now();
     let (other, _rx) = receive(&mut d, -3, 3, WIZARD);

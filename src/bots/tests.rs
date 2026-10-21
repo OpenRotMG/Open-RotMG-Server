@@ -46,6 +46,12 @@ fn exploration_remains_available_when_a_higher_ranked_route_is_blocked() {
     ally.name = "Biceps".into();
     ally.equipped = vec![0xa97];
     v.objects.push(ally);
+    v.player_markers.push(crate::world::view::PlayerMarker {
+        id: 4,
+        account: 4,
+        name: "Biceps".into(),
+        position: v.objects[0].position,
+    });
     assert_eq!(
         on_adventure(PROFILES[2], &v).decide(&v, &c).unwrap().goal,
         Goal::Follow(4)
@@ -192,7 +198,18 @@ fn dodge_predictions_use_actual_movement_conditions_and_ground() {
         assert!((combat::speed(&v) - expected).abs() < 0.001);
     }
     let grid = Grid::new(&v);
-    assert!(combat::movement(&v, &grid, &[], Some(Pos { x: 15.5, y: 11.5 }), 7., false).is_none());
+    assert!(
+        combat::movement(
+            &v,
+            &grid,
+            &[],
+            Some(Pos { x: 15.5, y: 11.5 }),
+            7.,
+            false,
+            &combat::Perception::attend(&v, &pursuits::Cognition::default(), false)
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -240,6 +257,7 @@ pub(super) fn view(content: &Content) -> PlayerView {
             name: "Realm".into(),
             width: 40,
             height: 40,
+            allow_teleport: true,
         },
         character: OwnCharacter {
             conditions: 0,
@@ -276,6 +294,7 @@ pub(super) fn view(content: &Content) -> PlayerView {
             .collect::<Vec<_>>()
             .into(),
         objects: vec![],
+        player_markers: vec![],
         projectiles: vec![],
     }
 }
@@ -310,7 +329,7 @@ fn same_observation_produces_resource_recovery_and_companion_choices() {
         .unwrap()
         .kind;
     let mut loot = object(3, bag, 13., 11.5);
-    loot.contents = vec![0xa22];
+    loot.contents = vec![0xa23];
     v.objects.push(loot);
     let mut ally = object(4, WIZARD, 22.5, 11.5);
     ally.name = "Biceps".into();
@@ -320,7 +339,7 @@ fn same_observation_produces_resource_recovery_and_companion_choices() {
         .iter()
         .map(|p| on_adventure(*p, &v).decide(&v, &content).unwrap().goal)
         .collect();
-    assert_eq!(goals, vec![Goal::Recover, Goal::Loot(3), Goal::Follow(4)]);
+    assert_eq!(goals, vec![Goal::Recover, Goal::Loot(3), Goal::Loot(3)]);
 }
 #[test]
 fn explores_known_frontiers_toward_an_observed_distant_encounter() {
@@ -449,7 +468,7 @@ fn held_resources_compatible_upgrades_and_margin_survive_seeded_replay() {
         brain.decide(&v, &content).unwrap().item,
         Some(Action::Use { slot: 4, .. })
     ));
-    assert!(!useful(&content, &v, 0xa01).unwrap());
+    assert!(progression::priority(&v, &content, 0xa01, false, None).unwrap() == 0);
     let mut left = Brain::new(PROFILES[2], &v);
     let mut right = Brain::new(PROFILES[2], &v);
     v.character.hp = 200;
@@ -519,208 +538,11 @@ fn only_addressed_native_chat_changes_companion_memory() {
     v.character.hp = v.character.stats[0];
     v.time_ms += 60000;
     v.tick += 1200;
-    assert_eq!(brain.decide(&v, &content).unwrap().goal, Goal::Follow(2));
+    assert!(matches!(
+        brain.decide(&v, &content).unwrap().goal,
+        Goal::Explore(..)
+    ));
     assert!(brain.companion.is_none());
-}
-
-#[test]
-fn fresh_crewmate_meets_unseen_leader_in_nexus_through_expiring_public_chat() {
-    let content = content();
-    let mut v = view(&content);
-    let packet = |name: &str, actor, recipient: &str, text: &str| {
-        let mut w = crate::wire::Writer::new();
-        w.utf(name)
-            .i32(actor)
-            .i32(0)
-            .u8(5)
-            .utf(recipient)
-            .utf(text)
-            .utf("");
-        Packet {
-            id: wire::TEXT,
-            body: w.0,
-        }
-    };
-    let mut follower = on_adventure(PROFILES[2], &v);
-    assert!(follower.decide(&v, &content).unwrap().chat.is_none());
-    v.time_ms += 10000;
-    v.tick += 200;
-    assert_eq!(follower.decide(&v, &content).unwrap().chat, Some("tp?"));
-    assert_eq!(follower.next_call, v.time_ms + 30000);
-    assert_eq!(follower.requested_until, v.time_ms + 5000);
-    v.tick += 5;
-    assert!(follower.decide(&v, &content).unwrap().chat.is_none());
-    for (name, actor, recipient) in [
-        ("ExElite", 9, ""),
-        ("Biceps", -1, ""),
-        ("Biceps", 2, "Human"),
-    ] {
-        follower
-            .receive(packet(name, actor, recipient, "nexus"), &v, true)
-            .unwrap();
-        assert!(follower.regroup_call.is_none());
-    }
-    let mut leader_view = view(&content);
-    leader_view.session.player = 2;
-    let mut leader = on_adventure(PROFILES[1], &leader_view);
-    leader_view.time_ms += 10000;
-    leader_view.tick += 200;
-    leader
-        .receive(packet("Kadabu", 9, "", "tp?"), &leader_view, true)
-        .unwrap();
-    assert!(leader.regroup_call.is_none());
-    leader
-        .receive(packet("BattleCrus", 1, "", "tp?"), &leader_view, true)
-        .unwrap();
-    let reply = leader.decide(&leader_view, &content).unwrap();
-    assert_eq!(reply.chat, Some("nexus"));
-    assert!(matches!(reply.journey, Some(Journey::Nexus)));
-    follower
-        .receive(packet("Biceps", 2, "", "tp here"), &v, true)
-        .unwrap();
-    assert!(follower.regroup_call.is_none());
-    follower
-        .receive(packet("Biceps", 2, "", "nexus"), &v, true)
-        .unwrap();
-    v.tick += 5;
-    let decision = follower.decide(&v, &content).unwrap();
-    assert!(matches!(decision.journey, Some(Journey::Nexus)));
-    assert!(decision.aim.is_none() && decision.item.is_none() && decision.movement.is_none());
-    assert!(v.objects.is_empty());
-    follower
-        .receive(packet("Biceps", 2, "", "tp here"), &v, true)
-        .unwrap();
-    v.tick += 5;
-    assert!(follower.decide(&v, &content).unwrap().journey.is_none());
-    let mut unsolicited = on_adventure(PROFILES[2], &v);
-    unsolicited
-        .receive(packet("Biceps", 2, "", "tp here"), &v, true)
-        .unwrap();
-    assert!(unsolicited.regroup_call.is_none());
-    let mut occupied = on_adventure(PROFILES[2], &v);
-    occupied.requested_until = v.time_ms + 5000;
-    occupied.companion = Some(9);
-    occupied
-        .receive(packet("Biceps", 2, "", "nexus"), &v, true)
-        .unwrap();
-    assert!(occupied.regroup_call.is_none());
-    occupied.companion = None;
-    occupied.leader_seen = Some((2, v.position, v.time_ms));
-    occupied
-        .receive(packet("Biceps", 2, "", "nexus"), &v, true)
-        .unwrap();
-    assert!(matches!(
-        occupied.decide(&v, &content).unwrap().journey,
-        Some(Journey::Nexus)
-    ));
-    let mut expired = on_adventure(PROFILES[2], &v);
-    expired.requested_until = v.time_ms + 5000;
-    expired
-        .receive(packet("Biceps", 2, "", "nexus"), &v, true)
-        .unwrap();
-    v.time_ms += 5001;
-    assert!(expired.decide(&v, &content).unwrap().journey.is_none());
-    let mut injured = on_adventure(PROFILES[2], &v);
-    injured.requested_until = v.time_ms + 5000;
-    injured
-        .receive(packet("Biceps", 2, "", "nexus"), &v, true)
-        .unwrap();
-    v.character.hp = 30;
-    assert!(matches!(
-        injured.decide(&v, &content).unwrap().journey,
-        Some(Journey::Nexus)
-    ));
-    v.character.hp = 100;
-    let mut endangered = on_adventure(PROFILES[1], &leader_view);
-    endangered.next_call = leader_view.time_ms;
-    endangered
-        .receive(packet("BattleCrus", 1, "", "tp?"), &leader_view, true)
-        .unwrap();
-    let kind = content.objects.values().find(|o| o.enemy).unwrap().kind;
-    leader_view.objects.push(object(9, kind, 14.5, 11.5));
-    assert!(
-        endangered
-            .decide(&leader_view, &content)
-            .unwrap()
-            .chat
-            .is_none()
-    );
-}
-
-#[test]
-fn nexus_call_reunites_the_whole_crew_not_only_the_requester() {
-    let content = content();
-    let v = view(&content);
-    for profile in [PROFILES[0], PROFILES[2]] {
-        let mut follower = on_adventure(profile, &v);
-        let mut w = crate::wire::Writer::new();
-        w.utf("Biceps")
-            .i32(2)
-            .i32(0)
-            .u8(5)
-            .utf("")
-            .utf("nexus")
-            .utf("");
-        follower
-            .receive(
-                Packet {
-                    id: wire::TEXT,
-                    body: w.0,
-                },
-                &v,
-                true,
-            )
-            .unwrap();
-        assert!(matches!(
-            follower.decide(&v, &content).unwrap().journey,
-            Some(Journey::Nexus)
-        ));
-    }
-}
-
-#[test]
-fn observed_crew_can_teleport_and_nexus_arrivals_wait_for_peers() {
-    let content = content();
-    let mut v = view(&content);
-    let mut follower = on_adventure(PROFILES[2], &v);
-    follower.requested_until = v.time_ms + 5000;
-    let mut peer = object(2, WIZARD, 23.5, 11.5);
-    peer.name = "Biceps".into();
-    v.objects.push(peer);
-    let mut w = crate::wire::Writer::new();
-    w.utf("Biceps")
-        .i32(2)
-        .i32(0)
-        .u8(5)
-        .utf("")
-        .utf("tp here")
-        .utf("");
-    follower
-        .receive(
-            Packet {
-                id: wire::TEXT,
-                body: w.0,
-            },
-            &v,
-            true,
-        )
-        .unwrap();
-    assert!(matches!(
-        follower.decide(&v, &content).unwrap().journey,
-        Some(Journey::Regroup(2))
-    ));
-    v.map.name = "Nexus".into();
-    v.objects.clear();
-    let mut arrived = on_adventure(PROFILES[2], &v);
-    let decision = arrived.decide(&v, &content).unwrap();
-    assert_eq!(decision.goal, Goal::Wait);
-    assert!(decision.journey.is_none() && decision.movement.is_none());
-    v.time_ms += 10001;
-    v.tick += 201;
-    assert_eq!(arrived.decide(&v, &content).unwrap().goal, Goal::Wait);
-    v.time_ms += 30000;
-    v.tick += 600;
-    assert_ne!(arrived.decide(&v, &content).unwrap().goal, Goal::Wait);
 }
 
 #[test]
@@ -859,12 +681,24 @@ fn dodge_scores_the_swept_player_path_not_only_the_endpoint() {
     });
     let crossing = Pos { x: 12.75, y: 11.5 };
     let away = Pos { x: 10.25, y: 11.5 };
-    assert!(combat::clearance(&v, crossing) < 0.2);
-    assert!(combat::clearance(&v, away) > 0.6);
+    assert!(
+        combat::clearance(
+            &v,
+            crossing,
+            &combat::Perception::attend(&v, &pursuits::Cognition::default(), false)
+        ) < 0.2
+    );
+    assert!(
+        combat::clearance(
+            &v,
+            away,
+            &combat::Perception::attend(&v, &pursuits::Cognition::default(), false)
+        ) > 0.6
+    );
 }
 
 #[test]
-fn cohorts_choose_distinct_observed_leaders_not_an_uninvited_human() {
+fn community_crowd_names_do_not_create_leaders_or_an_uninvited_human_anchor() {
     let content = content();
     let mut v = view(&content);
     for (id, name, x, y) in [
@@ -877,20 +711,15 @@ fn cohorts_choose_distinct_observed_leaders_not_an_uninvited_human() {
         peer.equipped = v.character.items[..4].to_vec();
         v.objects.push(peer);
     }
-    assert_eq!(
-        on_adventure(PROFILES[2], &v)
-            .decide(&v, &content)
-            .unwrap()
-            .goal,
-        Goal::Follow(2)
-    );
-    assert_eq!(
-        on_adventure(PROFILES[3], &v)
-            .decide(&v, &content)
-            .unwrap()
-            .goal,
-        Goal::Follow(3)
-    );
+    for profile in [PROFILES[2], PROFILES[3]] {
+        assert!(
+            matches!(
+                on_adventure(profile, &v).decide(&v, &content).unwrap().goal,
+                Goal::Explore(..)
+            ),
+            "unpublished marker handles and familiar names cannot create leaders"
+        );
+    }
     v.objects.retain(|o| o.name != "Biceps");
     assert!(matches!(
         on_adventure(PROFILES[1], &v)
@@ -911,11 +740,22 @@ fn priest_heals_actual_public_injury_and_respects_range_mana_and_cooldown() {
     peer.equipped = vec![0xa97];
     peer.name = "Biceps".into();
     v.objects.push(peer);
-    let mut brain = Brain::new(PROFILES[0], &v);
+    v.character.mp = 180;
+    v.character.stats[1] = 180;
+    v.character.base_stats[1] = 180;
+    let mut brain = Brain::new(PROFILES[3], &v);
     assert!(brain.decide(&v, &content).unwrap().item.is_none());
     v.tick += 6;
     v.time_ms += 300;
     v.objects[0].hp = 40;
+    assert!(
+        Brain::new(PROFILES[0], &v)
+            .decide(&v, &content)
+            .unwrap()
+            .item
+            .is_none(),
+        "stranger injury alone does not compel an unwilling priest"
+    );
     assert!(matches!(
         brain.decide(&v, &content).unwrap().item,
         Some(Action::Use { slot: 1, .. })
@@ -934,13 +774,13 @@ fn priest_heals_actual_public_injury_and_respects_range_mana_and_cooldown() {
     assert!(brain.decide(&v, &content).unwrap().item.is_none());
     v.tick += 6;
     v.time_ms += 300;
-    v.character.mp = 100;
+    v.character.mp = 180;
     v.objects[0].position.x = 25.5;
     assert!(brain.decide(&v, &content).unwrap().item.is_none());
 }
 
 #[test]
-fn leader_waits_for_a_real_straggler_and_invitation_expires() {
+fn community_crowd_no_leader_waits_for_a_straggler_and_invitation_expires() {
     let content = content();
     let mut v = view(&content);
     let mut peer = object(2, WIZARD, 23.5, 11.5);
@@ -948,8 +788,8 @@ fn leader_waits_for_a_real_straggler_and_invitation_expires() {
     peer.equipped = v.character.items[..4].to_vec();
     v.objects.push(peer);
     let d = on_adventure(PROFILES[1], &v).decide(&v, &content).unwrap();
-    assert_eq!(d.goal, Goal::Gather(2));
-    assert!(d.movement.is_none());
+    assert!(matches!(d.goal, Goal::Explore(..)));
+    assert!(d.movement.is_some());
     let mut brain = on_adventure(PROFILES[0], &v);
     brain.companion = Some(2);
     brain.invitation_until = v.time_ms;
@@ -958,14 +798,21 @@ fn leader_waits_for_a_real_straggler_and_invitation_expires() {
 }
 
 #[test]
-fn regroup_requests_only_a_visible_healthy_peer_and_is_paced() {
+fn community_crowd_regroup_requires_a_fresh_published_peer_and_is_paced() {
     let content = content();
     let mut v = view(&content);
-    let mut leader = object(2, WIZARD, 21.5, 11.5);
+    let mut leader = object(2, WIZARD, 48.5, 11.5);
     leader.name = "Biceps".into();
     leader.equipped = v.character.items[..4].to_vec();
     v.objects.push(leader);
+    v.player_markers.push(crate::world::view::PlayerMarker {
+        id: 2,
+        account: 2,
+        name: "Biceps".into(),
+        position: v.objects[0].position,
+    });
     let mut brain = on_adventure(PROFILES[2], &v);
+    brain.crowd.knows_minimap = true;
     assert!(matches!(
         brain.decide(&v, &content).unwrap().journey,
         Some(Journey::Regroup(2))
@@ -975,11 +822,15 @@ fn regroup_requests_only_a_visible_healthy_peer_and_is_paced() {
     assert!(brain.decide(&v, &content).unwrap().journey.is_none());
     v.tick += 300;
     v.time_ms += 15000;
-    v.objects[0].hp = 40;
-    assert!(brain.decide(&v, &content).unwrap().journey.is_none());
-    v.tick += 5;
-    v.time_ms += 250;
+    v.character.hp = 20;
+    let recovering = brain.decide(&v, &content).unwrap();
+    assert_eq!(recovering.goal, Goal::Recover);
+    assert!(!matches!(recovering.journey, Some(Journey::Regroup(_))));
+    v.tick += 100;
+    v.time_ms += 5000;
+    v.character.hp = 100;
     v.objects.clear();
+    v.player_markers.clear();
     assert!(brain.decide(&v, &content).unwrap().journey.is_none());
 }
 
@@ -1083,51 +934,12 @@ fn quiet_exploration_revisits_only_an_actually_observed_hunting_ground() {
 }
 
 #[test]
-fn crews_search_recent_observed_contacts_without_teleporting_to_hidden_peers() {
-    let content = content();
-    let mut v = view(&content);
-    let mut peer = object(2, WIZARD, 19.5, 11.5);
-    peer.name = "Biceps".into();
-    peer.equipped = v.character.items[..4].to_vec();
-    v.objects.push(peer);
-    let mut follower = on_adventure(PROFILES[2], &v);
-    follower.decide(&v, &content).unwrap();
-    v.objects.clear();
-    v.tick += 5;
-    v.time_ms += 250;
-    let search = follower.decide(&v, &content).unwrap();
-    assert_eq!(search.goal, Goal::Follow(2));
-    assert!(search.movement.is_some());
-    assert!(search.journey.is_none());
-    v.tick += 300;
-    v.time_ms += 15000;
-    assert!(matches!(
-        follower.decide(&v, &content).unwrap().journey,
-        Some(Journey::Nexus)
-    ));
-
-    let mut peer = object(2, WIZARD, 19.5, 11.5);
-    peer.name = "BattleCrus".into();
-    peer.equipped = v.character.items[..4].to_vec();
-    v.objects.push(peer);
-    let mut leader = on_adventure(PROFILES[1], &v);
-    leader.decide(&v, &content).unwrap();
-    v.objects.clear();
-    v.position.x = 25.5;
-    v.tick += 4;
-    v.time_ms += 200;
-    let search = leader.decide(&v, &content).unwrap();
-    assert_eq!(search.goal, Goal::Gather(2));
-    assert!(search.movement.is_some());
-}
-
-#[test]
 fn earned_stat_potions_are_worth_collecting() {
     let c = content();
     let v = view(&c);
-    assert!(useful(&c, &v, 0xa21).unwrap());
-    assert!(useful(&c, &v, 0xa35).unwrap());
-    assert!(useful(&c, &v, 0xa4c).unwrap());
+    assert!(progression::priority(&v, &c, 0xa21, false, None).unwrap() > 0);
+    assert!(progression::priority(&v, &c, 0xa35, false, None).unwrap() > 0);
+    assert!(progression::priority(&v, &c, 0xa4c, false, None).unwrap() > 0);
 }
 
 #[test]
@@ -1173,10 +985,11 @@ fn equipped_crews_accept_snake_pit_but_starters_do_not() {
     );
     assert_eq!(c.objects[&2714].tier, Some(3));
     v.objects[1].equipped[0] = 2714;
-    assert!(!matches!(
+    assert_eq!(
         on_adventure(PROFILES[1], &v).decide(&v, &c).unwrap().goal,
-        Goal::Portal(2)
-    ));
+        Goal::Portal(2),
+        "a less-equipped peer cannot veto another account's eligible travel"
+    );
 }
 
 #[test]
@@ -1219,7 +1032,7 @@ fn dungeon_rewards_are_collected_before_the_committed_exit() {
     ));
     v.character.items[4..].fill(2594);
     assert!(
-        progression::pickup(&v, &c, &v.objects[1])
+        progression::pickup(&v, &c, &v.objects[1], None)
             .unwrap()
             .is_none()
     );
@@ -1284,10 +1097,26 @@ fn banking_uses_only_observed_chest_slots_and_full_vault_does_not_discard_items(
     let mut brain = Brain::new(PROFILES[1], &v);
     let d = brain.decide(&v, &c).unwrap();
     assert!(d.item.is_none());
+    assert!(d.journey.is_none());
+    assert!(
+        d.aim.is_some(),
+        "private equipment trial precedes renewed purpose"
+    );
+    let retained_items = v.character.items.clone();
+    v.elapsed_ms += 1500;
+    v.time_ms += 1500;
+    v.tick += 30;
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(d.item.is_none());
     assert!(matches!(d.journey, Some(Journey::Nexus)));
+    assert_eq!(v.character.items, retained_items);
     assert!(brain.next_bank > v.time_ms);
     v.objects.clear();
-    assert!(progression::bank(&v, &c, &Grid::new(&v)).unwrap().is_none());
+    assert!(
+        progression::bank(&v, &c, &Grid::new(&v), None)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -1541,7 +1370,7 @@ fn dungeon_push_fires_at_visible_threats_without_camping_endless_reinforcements(
 }
 
 #[test]
-fn a_visible_crews_destination_outweighs_the_followers_different_quest_marker() {
+fn community_crowd_an_own_quest_outweighs_a_visible_crews_destination() {
     let c = content();
     let mut v = view(&c);
     v.character.level = 20;
@@ -1554,7 +1383,7 @@ fn a_visible_crews_destination_outweighs_the_followers_different_quest_marker() 
     v.objects.extend([leader, target]);
     v.quest = Some(3);
     let mut brain = on_adventure(PROFILES[0], &v);
-    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Follow(2));
+    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Hunt(3));
     v.objects.remove(0);
     v.tick += 300;
     v.time_ms += 15000;
@@ -1562,7 +1391,7 @@ fn a_visible_crews_destination_outweighs_the_followers_different_quest_marker() 
 }
 
 #[test]
-fn a_leader_gathers_an_observed_straggler_before_pursuing_another_distant_quest() {
+fn community_crowd_an_observed_straggler_does_not_halt_an_own_quest() {
     let c = content();
     let mut v = view(&c);
     v.character.level = 20;
@@ -1574,8 +1403,8 @@ fn a_leader_gathers_an_observed_straggler_before_pursuing_another_distant_quest(
     v.objects.extend([peer, object(3, 0x609, 150.5, 150.5)]);
     v.quest = Some(3);
     let d = on_adventure(PROFILES[1], &v).decide(&v, &c).unwrap();
-    assert_eq!(d.goal, Goal::Gather(2));
-    assert!(d.movement.is_none());
+    assert_eq!(d.goal, Goal::Hunt(3));
+    assert!(d.movement.is_some());
 }
 
 #[test]
@@ -1670,7 +1499,7 @@ fn carried_mana_is_used_without_fabricating_resources_or_bypassing_quiet() {
     v.character.mp = 0;
     assert!(progression::mana(&v, &c).unwrap().is_none());
     v.character.items[5] = 0xa23;
-    assert!(useful(&c, &v, 0xa23).unwrap());
+    assert!(progression::priority(&v, &c, 0xa23, false, None).unwrap() > 0);
     assert!(matches!(
         progression::mana(&v, &c).unwrap(),
         Some(Action::Use { slot: 5, .. })
@@ -1754,7 +1583,16 @@ fn moving_enemies_need_weapon_lead_but_nova_originates_at_the_observed_target() 
         journey: None,
         chat: None,
     };
-    combat::attack(&v, &c, &grid, &enemy, Pos { x: 0., y: 2. }, &mut d).unwrap();
+    combat::attack(
+        &v,
+        &c,
+        &grid,
+        &enemy,
+        Pos { x: 0., y: 2. },
+        &combat::Perception::attend(&v, &pursuits::Cognition::default(), false),
+        &mut d,
+    )
+    .unwrap();
     assert!(d.aim.is_some_and(|aim| aim > 0.));
     assert!(
         matches!(d.item, Some(Action::Use {slot:1,x,y}) if x==enemy.position.x && y==enemy.position.y)
@@ -1869,4 +1707,609 @@ fn a_dungeon_objective_advances_through_reinforcements_while_returning_fire() {
     let d = Brain::new(PROFILES[1], &v).decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Hunt(2));
     assert!(d.movement.is_some() && d.aim.is_some());
+}
+
+#[test]
+fn community_pursuit_unfamiliar_equipment_requires_assessment_before_swap() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.items[4] = 0xa9a;
+    let mut brain = Brain::new(PROFILES[1], &v);
+    let decision = brain.decide(&v, &c).unwrap();
+    assert!(
+        !matches!(decision.item, Some(Action::Swap { .. })),
+        "unfamiliar equipment was equipped without assessment"
+    );
+}
+
+#[test]
+fn community_pursuit_supply_reconciles_holdings_and_invalidates_missing_dead_and_old_session_steps()
+{
+    let c = content();
+    let mut v = view(&c);
+    v.character.items[4..].fill(-1);
+    let mut bag = object(2, 0x500, 12.5, 11.5);
+    bag.contents = vec![0xa22, 0xa22];
+    v.objects.push(bag);
+    let mut b = Brain::new(PROFILES[1], &v);
+    assert!(matches!(
+        b.decide(&v, &c).unwrap().item,
+        Some(Action::Swap { .. })
+    ));
+    assert_eq!(b.mind.history.back().unwrap().carried, 0);
+    v.tick += 4;
+    v.time_ms += 200;
+    v.character.items[4] = 0xa22;
+    v.character.inventory_revision += 1;
+    b.decide(&v, &c).unwrap();
+    assert!(b.mind.history.iter().any(|h| h.carried == 1));
+    let prior = b.mind.clone();
+    // A failed action/output without a new committed view earns no pickup credit.
+    v.tick += 4;
+    v.time_ms += 200;
+    b.decide(&v, &c).unwrap();
+    assert_eq!(b.mind, prior);
+    v.objects.clear();
+    v.tick += 4;
+    v.time_ms += 200;
+    b.decide(&v, &c).unwrap();
+    assert_eq!(
+        b.mind.history.back().unwrap().reason,
+        "observed_opportunity_missing_or_expired"
+    );
+    v.objects.push({
+        let mut bag = object(22, 0x500, 12.5, 11.5);
+        bag.contents = vec![0xa22];
+        bag
+    });
+    v.tick += 4;
+    v.time_ms += 200;
+    b.decide(&v, &c).unwrap();
+    let next = b.mind.history.back().unwrap().activity;
+    assert_eq!(next, 1);
+    let continuing = serde_json::to_value(&b.mind).unwrap();
+    assert_eq!(continuing["activity"]["id"], 1);
+    assert_eq!(continuing["activity"]["carried"], 1);
+    assert_eq!(continuing["activity"]["opportunity"]["observed_object"], 22);
+    v.session.character += 1;
+    v.character.items[4] = -1;
+    v.character.inventory_revision = 0;
+    b.mind.bind(&v, 0).unwrap();
+    assert!(
+        b.mind
+            .history
+            .iter()
+            .any(|h| h.activity == next && h.reason == "character_changed_old_steps_invalidated")
+    );
+    assert_eq!(
+        b.mind.history.back().unwrap().reason,
+        "account_session_bound"
+    );
+    assert_eq!(
+        b.mind.history.back().unwrap().binding[1],
+        v.session.character
+    );
+    assert_eq!(b.mind.history.back().unwrap().carried, 0);
+    v.session.player += 1;
+    assert!(b.decide(&v, &c).is_err());
+    let mut satisfied = view(&c);
+    satisfied.character.items[4] = 0xa22;
+    satisfied.character.items[5] = 0xa22;
+    satisfied.objects = v.objects;
+    let mut b = Brain::new(PROFILES[1], &satisfied);
+    b.decide(&satisfied, &c).unwrap();
+    assert!(b.mind.history.iter().all(|h| h.activity == 0));
+}
+
+#[test]
+fn community_pursuit_knowledge_assessment_ends_and_reconsiders_supported_equal_tier_equipment() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.items[3] = 0xa28;
+    v.character.items[4] = 0xa27;
+    let mut b = Brain::new(PROFILES[1], &v);
+    b.mind.facts.push(pursuits::ItemFact {
+        kind: 0xa27,
+        assessments: 2,
+    });
+    let swap = b.mind.assess(&v, &c).unwrap().unwrap();
+    assert!(matches!(swap, Action::Swap { .. }));
+    // The same-tier health ring is justified by public bonuses, not a tier shortcut.
+    v.character.items.swap(3, 4);
+    v.character.inventory_revision += 1;
+    b.mind.facts.push(pursuits::ItemFact {
+        kind: 0xa28,
+        assessments: 2,
+    });
+    v.character.mp = 10;
+    assert!(
+        matches!(b.mind.assess(&v, &c).unwrap(), Some(Action::Swap { .. })),
+        "mana depletion should support reconsidering the health-ring swap"
+    );
+    v.character.items.swap(3, 4);
+    v.character.mp = 100;
+    v.character.hp = 45;
+    assert!(b.mind.assess(&v, &c).unwrap().is_some());
+    let mut unknown = Brain::new(PROFILES[1], &v);
+    assert!(unknown.mind.assess(&v, &c).unwrap().is_none());
+    assert!(unknown.mind.assess(&v, &c).unwrap().is_none());
+    assert!(unknown.mind.assess(&v, &c).unwrap().is_some());
+}
+
+#[test]
+fn community_pursuit_attention_execution_and_risk_change_real_scoring_inputs_not_cadence() {
+    let c = content();
+    let mut v = view(&c);
+    v.character.items[4] = 0xa9a;
+    for (id, y) in [(0, 18.), (1, 11.5)] {
+        v.projectiles.push(VisibleProjectile {
+            owner: 99,
+            id,
+            start: Pos { x: 14., y },
+            position: Pos { x: 14., y },
+            angle: std::f32::consts::PI,
+            speed: 50.,
+            lifetime_ms: 2000.,
+            amplitude: 0.,
+            frequency: 0.,
+            passes_cover: false,
+        });
+    }
+    let broad = pursuits::Cognition::default();
+    let mut narrow = broad.clone();
+    narrow.attention = 2;
+    let attended = combat::Perception::attend(&v, &broad, true);
+    let occupied = combat::Perception::attend(&v, &narrow, true);
+    assert!(combat::clearance(&v, v.position, &attended) < 0.2);
+    assert!(combat::clearance(&v, v.position, &occupied) > 4.);
+    let grid = Grid::new(&v);
+    let broad_path = combat::movement(
+        &v,
+        &grid,
+        &[],
+        Some(Pos { x: 18.35, y: 11.5 }),
+        7.,
+        false,
+        &attended,
+    )
+    .unwrap();
+    let narrow_path = combat::movement(
+        &v,
+        &grid,
+        &[],
+        Some(Pos { x: 18.35, y: 11.5 }),
+        7.,
+        false,
+        &occupied,
+    )
+    .unwrap();
+    assert!(broad_path.distance(narrow_path) > 0.1);
+    let alone = {
+        v.projectiles.remove(0);
+        combat::Perception::attend(&v, &narrow, false)
+    };
+    assert!(combat::clearance(&v, v.position, &alone) < 0.2);
+    let mut coarse = broad.clone();
+    coarse.velocity_step = 4.;
+    coarse.directions = 4;
+    let coarse = combat::Perception::attend(&v, &coarse, false);
+    assert!(
+        attended
+            .velocity(Pos { x: 0., y: 1.6 })
+            .distance(coarse.velocity(Pos { x: 0., y: 1.6 }))
+            > 1.
+    );
+    assert_eq!(
+        coarse
+            .velocity(Pos { x: 0., y: 0. })
+            .distance(Pos { x: 0., y: 0. }),
+        0.
+    );
+    let mut bag = object(8, 0x500, 12.5, 11.5);
+    bag.contents = vec![0xa22];
+    v.objects.push(bag);
+    v.projectiles[0].angle = 0.;
+    v.projectiles[0].position.x = 9.;
+    v.projectiles[0].start.x = 9.;
+    v.projectiles[0].position.y = 12.;
+    v.projectiles[0].start.y = 12.;
+    let mut cautious = Brain::new(PROFILES[1], &v);
+    cautious.mind.cognition.pickup_clearance = 1.2;
+    let mut bold = Brain::new(PROFILES[1], &v);
+    bold.mind.cognition.pickup_clearance = 0.1;
+    assert!(matches!(
+        cautious.decide(&v, &c).unwrap().journey,
+        Some(Journey::Nexus)
+    ));
+    assert!(bold.decide(&v, &c).unwrap().journey.is_none());
+    assert_eq!(cautious.next_decision, bold.next_decision);
+}
+
+#[tokio::test]
+async fn community_pursuit_pending_and_failed_results_do_not_complete_the_activity() {
+    use crate::store::{InventoryWrite, Store};
+    for lost_publication in [false, true] {
+        let c = Arc::new(content());
+        let dir = std::env::temp_dir().join(format!("community-pending-{}", rand::random::<u64>()));
+        std::fs::create_dir(&dir).unwrap();
+        let store = Store::open(&dir.join("game.db"), &c).unwrap();
+        let account = store.list("community-pending".into()).await.unwrap();
+        let mut ch = store
+            .create(account.id, c.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        ch.items[4..].fill(-1);
+        ch.revision = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: ch.id,
+                    account: ch.account,
+                    revision: ch.revision,
+                    items: ch.items.clone(),
+                }],
+                None,
+            )
+            .await
+            .unwrap()[0];
+        let character = ch.id;
+        let mut d = crate::world::Directory::test_with_seed(
+            std::path::Path::new("data"),
+            c.clone(),
+            16,
+            42,
+        )
+        .unwrap();
+        let map = Arc::new(crate::content::Map {
+            width: 32,
+            height: 32,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x61,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0
+                };
+                32 * 32
+            ],
+            spawns: vec![(10.5, 10.5)],
+        });
+        let mut w = crate::world::World::new(c.clone(), map).unwrap();
+        w.name = "Realm".into();
+        w.spawn_entity(
+            0x500,
+            Pos { x: 10.5, y: 11.5 },
+            vec![0xa22, 0xa22, -1, -1, -1, -1, -1, -1],
+        )
+        .unwrap();
+        let (packets, _receiver) = tokio::sync::mpsc::channel(OUTPUT_CAPACITY);
+        let (lost, _) = tokio::sync::watch::channel(false);
+        let player = w
+            .enter_autonomous(ch, crate::world::Output { packets, lost })
+            .unwrap();
+        d.worlds.insert(-3, w);
+        let v = d.player_view(player).unwrap();
+        let mut brain = Brain::new(PROFILES[1], &v);
+        let decision = brain.decide(&v, &c).unwrap();
+        let plan = d
+            .worlds
+            .get_mut(&-3)
+            .unwrap()
+            .autonomous_action(player, decision.item.unwrap())
+            .unwrap()
+            .unwrap();
+        d.worlds.get_mut(&-3).unwrap().step();
+        let pending = d.player_view(player).unwrap();
+        assert!(pending.lifecycle.busy);
+        assert_eq!(
+            pending
+                .character
+                .items
+                .iter()
+                .filter(|k| **k == 0xa22)
+                .count(),
+            0
+        );
+        brain.decide(&pending, &c).unwrap();
+        let revision = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                }],
+                plan.vault.clone(),
+            )
+            .await
+            .unwrap()[0];
+        d.worlds
+            .get_mut(&-3)
+            .unwrap()
+            .finish_inventory(plan, Ok(revision))
+            .unwrap();
+        for _ in 0..4 {
+            d.worlds.get_mut(&-3).unwrap().step();
+        }
+        let v = d.player_view(player).unwrap();
+        let decision = brain.decide(&v, &c).unwrap();
+        assert_eq!(brain.mind.history.back().unwrap().carried, 1);
+        let plan = d
+            .worlds
+            .get_mut(&-3)
+            .unwrap()
+            .autonomous_action(player, decision.item.unwrap())
+            .unwrap()
+            .unwrap();
+        brain.mind.revision = store.save_bot_mind(brain.mind.clone()).await.unwrap();
+        let revision = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                }],
+                plan.vault.clone(),
+            )
+            .await
+            .unwrap()[0];
+        if lost_publication {
+            assert!(
+                d.worlds
+                    .get_mut(&-3)
+                    .unwrap()
+                    .finish_inventory(
+                        plan,
+                        Err(anyhow::anyhow!(
+                            "offline fixture: committed result lost before World publication"
+                        ))
+                    )
+                    .is_err()
+            );
+        } else {
+            d.worlds
+                .get_mut(&-3)
+                .unwrap()
+                .finish_inventory(plan, Ok(revision))
+                .unwrap();
+            // The pending drop could invalidate the apparent reserve before its result is known.
+            let reserved = d
+                .worlds
+                .get_mut(&-3)
+                .unwrap()
+                .drop_item(
+                    player,
+                    Slot {
+                        object: player,
+                        slot: 4,
+                        kind: 0xa22,
+                    },
+                )
+                .unwrap();
+            for _ in 0..4 {
+                d.worlds.get_mut(&-3).unwrap().step();
+            }
+            let pending = d.player_view(player).unwrap();
+            assert!(pending.lifecycle.busy);
+            assert_eq!(
+                pending
+                    .character
+                    .items
+                    .iter()
+                    .filter(|k| **k == 0xa22)
+                    .count(),
+                2
+            );
+            assert_eq!(reserved.items.iter().filter(|k| **k == 0xa22).count(), 1);
+            brain.decide(&pending, &c).unwrap();
+            std::fs::write(
+                dir.join("pending-view.json"),
+                serde_json::to_vec_pretty(&pending).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("pending-mind.json"),
+                serde_json::to_vec_pretty(&brain.mind).unwrap(),
+            )
+            .unwrap();
+            println!("community pending-result evidence: {}", dir.display());
+            assert!(
+                !brain
+                    .mind
+                    .history
+                    .iter()
+                    .any(|h| h.reason == "reserve_carried_satisfied"),
+                "busy reservation completed the project before its result settled"
+            );
+            let error = store
+                .exchange(
+                    vec![InventoryWrite {
+                        id: reserved.character,
+                        account: reserved.account,
+                        revision: reserved.revision - 1,
+                        items: reserved.items.clone(),
+                    }],
+                    None,
+                )
+                .await
+                .unwrap_err();
+            std::fs::write(dir.join("failed-store-result.txt"), format!("{error:#}")).unwrap();
+            assert!(
+                d.worlds
+                    .get_mut(&-3)
+                    .unwrap()
+                    .finish_inventory(reserved, Err(error))
+                    .is_err()
+            );
+        }
+        let failed = d.player_view(player).unwrap();
+        assert!(failed.lifecycle.quarantined && failed.lifecycle.busy);
+        brain.mind.reconcile(&failed).unwrap();
+        let prior = brain.mind.clone();
+        for _ in 0..2 {
+            assert!(
+                !brain
+                    .receive(
+                        Packet {
+                            id: 4,
+                            body: vec![0, 0, 0, 0]
+                        },
+                        &failed,
+                        false
+                    )
+                    .unwrap()
+            );
+        }
+        assert_eq!(brain.mind, prior);
+        assert!(
+            !brain
+                .mind
+                .history
+                .iter()
+                .any(|h| h.reason == "reserve_carried_satisfied")
+        );
+        assert_eq!(
+            serde_json::to_value(&brain.mind).unwrap()["activity"]["carried"],
+            1
+        );
+        let reopened = Store::open(&dir.join("game.db"), &c).unwrap();
+        let committed = reopened.load(account.id, character).await.unwrap();
+        assert_eq!(committed.items.iter().filter(|k| **k == 0xa22).count(), 2);
+        assert_eq!(committed.revision, revision);
+        assert_eq!(
+            failed
+                .character
+                .items
+                .iter()
+                .filter(|k| **k == 0xa22)
+                .count(),
+            if lost_publication { 1 } else { 2 }
+        );
+        assert_eq!(
+            failed.character.inventory_revision,
+            if lost_publication {
+                revision - 1
+            } else {
+                revision
+            }
+        );
+        std::fs::write(
+            dir.join("failed-view.json"),
+            serde_json::to_vec_pretty(&failed).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("committed-character.json"),
+            serde_json::to_vec_pretty(&committed).unwrap(),
+        )
+        .unwrap();
+        let map = d.worlds[&-3].map.clone();
+        drop(d);
+        let mut d = crate::world::Directory::test_with_seed(
+            std::path::Path::new("data"),
+            c.clone(),
+            16,
+            101,
+        )
+        .unwrap();
+        let mut w = crate::world::World::new(c.clone(), map).unwrap();
+        w.name = "Realm".into();
+        let (packets, _fresh_receiver) = tokio::sync::mpsc::channel(OUTPUT_CAPACITY);
+        let (lost, _) = tokio::sync::watch::channel(false);
+        let player = w
+            .enter_autonomous(committed, crate::world::Output { packets, lost })
+            .unwrap();
+        d.worlds.insert(-3, w);
+        let view = d.player_view(player).unwrap();
+        let mut resumed = Brain::new(PROFILES[1], &view);
+        resumed.mind = reopened.bot_mind(account.id).await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&resumed.mind).unwrap()["activity"]["carried"],
+            1
+        );
+        resumed.mind.bind(&view, 1).unwrap();
+        assert!(
+            resumed.destination.is_none()
+                && resumed.tracks.is_empty()
+                && resumed.last_tick.is_none()
+        );
+        assert!(serde_json::to_value(&resumed.mind).unwrap()["activity"].is_null());
+        assert_eq!(
+            resumed
+                .mind
+                .history
+                .iter()
+                .filter(|h| h.activity == 1
+                    && h.reason == "reserve_carried_satisfied"
+                    && h.carried == 2)
+                .count(),
+            1
+        );
+        resumed.mind.revision = reopened.save_bot_mind(resumed.mind.clone()).await.unwrap();
+        let settled = resumed.mind.clone();
+        for _ in 0..2 {
+            assert!(
+                !resumed
+                    .receive(
+                        Packet {
+                            id: 4,
+                            body: vec![0, 0, 0, 0]
+                        },
+                        &view,
+                        false
+                    )
+                    .unwrap()
+            );
+        }
+        assert_eq!(resumed.mind, settled);
+        assert_eq!(
+            reopened.load(account.id, character).await.unwrap().items,
+            view.character.items
+        );
+        std::fs::write(
+            dir.join("reconciled-mind.json"),
+            serde_json::to_vec_pretty(&resumed.mind).unwrap(),
+        )
+        .unwrap();
+        println!(
+            "community failed-result reconciliation lost_publication={lost_publication}: {}",
+            dir.display()
+        );
+    }
+}
+
+#[test]
+fn community_market_local_advertisement_enters_recipient_policy() {
+    let c = content();
+    let mut v = view(&c);
+    let mut peer = object(4, WIZARD, 12.5, 11.5);
+    peer.name = "Biceps".into();
+    peer.account = Some(4);
+    peer.equipped = vec![0xa97];
+    v.objects.push(peer);
+    let mut b = Brain::new(PROFILES[0], &v);
+    let mut out = wire::Writer::new();
+    out.utf("Biceps")
+        .i32(4)
+        .i32(0)
+        .u8(0)
+        .utf("")
+        .utf("sell 2595x2; want 2594")
+        .utf("");
+    assert!(
+        b.mind
+            .market
+            .receive(
+                &Packet {
+                    id: wire::TEXT,
+                    body: out.0
+                },
+                &v,
+                &c,
+                b.mind.future_class
+            )
+            .unwrap(),
+        "market messages must reach recipient policy even with dialogue disabled"
+    );
 }
