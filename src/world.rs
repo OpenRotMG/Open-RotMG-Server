@@ -955,6 +955,9 @@ impl Directory {
             world.populate_manor_entry()?;
             world.populate_ghost_ship()?;
             world.populate_realm_population()?;
+            // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+            let crystal = world.place_named_setpiece(0x935, &[1])?;
+            world.spawn_entity(0x935, crystal, vec![])?;
             tracing::info!(
                 layout = world.realm_layout,
                 entities = world.entities.len(),
