@@ -386,9 +386,11 @@ impl World {
             self.players.is_empty() && self.now == 0,
             "setpieces require an unentered Realm"
         );
-        // Source1's authored lava must remain bare through normal construction.
-        let retain_source1_lava =
-            self.realm_layout.as_deref() == Some("classic-world-01-reconstruction");
+        // These reconstructions deliberately retain bare lava through normal construction.
+        let retain_authored_lava = matches!(
+            self.realm_layout.as_deref(),
+            Some("classic-world-01-reconstruction" | "classic-world-09-reconstruction")
+        );
         let piece = Piece::build(kind, &mut self.rng);
         for mark in piece.cells.iter().copied().filter(|m| *m != 0) {
             let (ground, object) = Piece::tile(kind, mark);
@@ -470,7 +472,7 @@ impl World {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
                             c.region == 0
-                                && !(retain_source1_lava && c.ground == 0xf4)
+                                && !(retain_authored_lava && c.ground == 0xf4)
                                 && c.object
                                     .is_none_or(|kind| !self.content.objects[&kind].full_occupy)
                                 && self.content.grounds[&c.ground] > 0.
@@ -480,7 +482,7 @@ impl World {
             })
             .with_context(|| {
                 format!(
-                    "Realm cannot place {kind:#x} setpiece {}x{} in its selected habitat (layout={:?}, retain_source1_lava={retain_source1_lava})",
+                    "Realm cannot place {kind:#x} setpiece {}x{} in its selected habitat (layout={:?}, retain_authored_lava={retain_authored_lava})",
                     piece.width, piece.height, self.realm_layout
                 )
             })?;
@@ -524,7 +526,7 @@ impl World {
         tracing::info!(
             kind,
             layout = ?self.realm_layout,
-            retain_source1_lava,
+            retain_authored_lava,
             x = area.x,
             y = area.y,
             width = area.width,
@@ -599,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn source1_lava_footprints_are_scoped_atomic_and_relocate() {
+    fn source1_and_source9_lava_footprints_are_scoped_atomic_and_relocate() {
         let content = super::super::tests::world().content;
         for hermit in [false, true] {
             for corner in [false, true] {
@@ -607,8 +609,18 @@ mod tests {
                     for layout in [
                         None,
                         Some("classic-world-02-reconstruction"),
+                        Some("classic-world-04-reconstruction"),
                         Some("classic-world-01-reconstruction"),
+                        Some("classic-world-09-reconstruction"),
+                        Some("classic-world-09-reconstruction-extra"),
                     ] {
+                        let retain_lava = matches!(
+                            layout,
+                            Some(
+                                "classic-world-01-reconstruction"
+                                    | "classic-world-09-reconstruction"
+                            )
+                        );
                         let mut map = Map {
                             width: 176,
                             height: 96,
@@ -648,9 +660,13 @@ mod tests {
                         } else {
                             w.place_named_setpiece(0x91f, &[4]).map(|_| ())
                         };
-                        if layout == Some("classic-world-01-reconstruction") && !alternate {
+                        if retain_lava && !alternate {
+                            assert!(
+                                result.is_err(),
+                                "lava candidate was admitted (layout={layout:?}, Hermit={hermit}, corner={corner})"
+                            );
                             let error = result.unwrap_err().to_string();
-                            assert!(error.contains("retain_source1_lava=true"), "{error}");
+                            assert!(error.contains("retain_authored_lava=true"), "{error}");
                             assert!(
                                 w.entities.is_empty()
                                     && w.actor_ids.is_empty()
@@ -673,7 +689,7 @@ mod tests {
                         } else {
                             result.unwrap();
                             assert_eq!(w.setpieces.len(), 1);
-                            if layout == Some("classic-world-01-reconstruction") {
+                            if retain_lava {
                                 let a = &w.setpieces[0];
                                 assert!(
                                     !(x as i32 >= a.x
@@ -717,14 +733,20 @@ mod tests {
             spawns: vec![],
         };
         map.cells[48 * 96 + 48].terrain = 1;
-        let mut w = World::new(content, Arc::new(map)).unwrap();
-        w.realm_layout = Some("classic-world-01-reconstruction".into());
-        w.place_named_setpiece(0x668, &[1]).unwrap();
-        assert!(
-            w.map
-                .cells
-                .iter()
-                .any(|c| c.ground == 244 && c.object == Some(339))
-        );
+        let map = Arc::new(map);
+        for layout in [
+            "classic-world-01-reconstruction",
+            "classic-world-09-reconstruction",
+        ] {
+            let mut w = World::new(content.clone(), map.clone()).unwrap();
+            w.realm_layout = Some(layout.into());
+            w.place_named_setpiece(0x668, &[1]).unwrap();
+            assert!(
+                w.map
+                    .cells
+                    .iter()
+                    .any(|c| c.ground == 244 && c.object == Some(339))
+            );
+        }
     }
 }

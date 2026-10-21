@@ -9,8 +9,10 @@ impl World {
             self.players.is_empty() && self.now == 0,
             "Hermit landmark requires an unentered Realm"
         );
-        let retain_source1_lava =
-            self.realm_layout.as_deref() == Some("classic-world-01-reconstruction");
+        let retain_authored_lava = matches!(
+            self.realm_layout.as_deref(),
+            Some("classic-world-01-reconstruction" | "classic-world-09-reconstruction")
+        );
         let protected: Vec<_> = self
             .population
             .iter()
@@ -55,14 +57,14 @@ impl World {
                         (a.x..a.x + 32).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
                             c.region == 0
-                                && !(retain_source1_lava && c.ground == 0xf4)
+                                && !(retain_authored_lava && c.ground == 0xf4)
                                 && c.object
                                     .is_none_or(|kind| !self.content.objects[&kind].full_occupy)
                         })
                     })
             })
             .with_context(|| format!(
-                "Realm has no unoccupied inland site for the Hermit landmark (layout={:?}, retain_source1_lava={retain_source1_lava})",
+                "Realm has no unoccupied inland site for the Hermit landmark (layout={:?}, retain_authored_lava={retain_authored_lava})",
                 self.realm_layout
             ))?;
         // Reconstruct the source island's rings without erasing generated waterways.
@@ -148,7 +150,7 @@ impl World {
         tracing::info!(
             root,
             layout = ?self.realm_layout,
-            retain_source1_lava,
+            retain_authored_lava,
             x = area.x,
             y = area.y,
             "inland Hermit landmark placed"
