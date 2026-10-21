@@ -196,3 +196,8 @@ test('native scenario preserves the required run callback module receiver and ga
   const module={async run(actual){assert.equal(this,module);assert.equal(actual,game);ran=true;}};
   await runNativeScenario(game=>module.run(game),game,()=>idle++,report);assert(ran);assert.equal(idle,2);assert.deepEqual(report.before,report.after);
 });
+test('already cancelled native connection scope invokes neither connect nor use',async()=>{
+  const reason=Error('scope cancelled before connect');let calls=0;
+  const owned=nativeConnections({signal:AbortSignal.abort(reason),closing:()=>true,cleanupError:()=>assert.fail('unexpected cleanup'),diagnose:()=>assert.fail('unexpected diagnostic')});
+  await assert.rejects(owned.open(()=>{calls++;},()=>{calls++;}),error=>error===reason);assert.equal(calls,0);owned.close();
+});

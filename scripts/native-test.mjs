@@ -64,7 +64,7 @@ export function nativeConnections({signal,closing,cleanupError,diagnose}) {
   const owned=new Set();
   return {
     async open(connect,use){
-      const connection=await connect();
+      signal.throwIfAborted();const connection=await connect();
       if(signal.aborted){
         try{connection.close();}catch(error){
           const failure=new AggregateError([signal.reason,error],'Aborted native join: '+String(signal.reason)+'; connection close failed: '+String(error));
