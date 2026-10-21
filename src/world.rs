@@ -940,6 +940,7 @@ impl Directory {
             "entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
             "projectiles": self.worlds.values().map(|w| w.bullets.len()).sum::<usize>(),
             "tick": self.tick, "max_tick_us": self.max_tick_us,
+            "paused": self.clock.paused(), "process": std::process::id(), "revision": option_env!("GITHUB_SHA"),
         })
     }
     #[cfg(test)]
@@ -1854,6 +1855,7 @@ impl Directory {
                         .any(|p| p.character.account == g.account && p.character.id == g.character))
         });
         for (id, world) in &mut self.worlds {
+            let _context = crate::supervision::world(*id, self.tick);
             world.step();
             world.report_performance(*id);
             if *id > 0 && *id != self.endgame.active {
@@ -1943,12 +1945,17 @@ pub struct Handle {
     tx: mpsc::Sender<Job>,
     target: Target,
     pub clock: crate::clock::Clock,
+    pub supervisor: crate::supervision::Supervisor,
 }
 impl Handle {
+    #[cfg(test)]
     pub fn spawn(directory: Directory) -> Self {
+        Self::supervised(directory, crate::supervision::Supervisor::default())
+    }
+    pub fn supervised(directory: Directory, supervisor: crate::supervision::Supervisor) -> Self {
         let (tx, mut rx) = mpsc::channel::<Job>(256);
         let clock = directory.clock.clone();
-        tokio::spawn(async move {
+        supervisor.spawn("world", async move {
             let mut directory = directory;
             let mut timer = tokio::time::interval(std::time::Duration::from_millis(50));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1981,6 +1988,7 @@ impl Handle {
                     job=rx.recv()=>match job{Some(f)=>f(&mut directory),None=>break}
                 }
             }
+            Ok(())
         });
         Self {
             #[cfg(test)]
@@ -1990,6 +1998,7 @@ impl Handle {
             tx,
             target: Target::World(-1),
             clock,
+            supervisor,
         }
     }
     pub fn in_world(&self, id: i32) -> Self {
@@ -2001,6 +2010,7 @@ impl Handle {
             tx: self.tx.clone(),
             target: Target::World(id),
             clock: self.clock.clone(),
+            supervisor: self.supervisor.clone(),
         }
     }
     pub fn for_player(&self, id: i32) -> Self {
@@ -2012,6 +2022,7 @@ impl Handle {
             tx: self.tx.clone(),
             target: Target::Player(id),
             clock: self.clock.clone(),
+            supervisor: self.supervisor.clone(),
         }
     }
 
@@ -5324,6 +5335,7 @@ impl World {
                 continue;
             };
             let kind = entity.kind;
+            let _context = crate::supervision::npc(id, kind);
             let pos = entity.pos;
             if entity.hp == self.content.objects[&kind].hp
                 && (kind == crate::dungeon::abyss::IDOL || kind == 0xd7e && entity.stage.is_none())
