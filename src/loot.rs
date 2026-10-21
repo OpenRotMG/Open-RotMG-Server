@@ -53,6 +53,57 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         {
             &[]
         }
+        crate::dungeon::davy::BOSS => &[
+            (0.2, Tier(3, RINGS)),
+            (0.2, Tier(7, ARMOR)),
+            (0.2, Tier(8, WEAPONS)),
+            (0.1, Tier(4, ABILITIES)),
+            (0.1, Tier(8, ARMOR)),
+            (0.05, Tier(4, RINGS)),
+            (0.03, Tier(9, ARMOR)),
+            (0.03, Tier(5, ABILITIES)),
+            (0.03, Tier(9, WEAPONS)),
+            (0.02, Tier(10, ARMOR)),
+            (0.02, Tier(10, WEAPONS)),
+            (0.01, Tier(11, ARMOR)),
+            (0.01, Tier(11, WEAPONS)),
+            (0.01, Tier(5, RINGS)),
+            (0.01, Item(0xc29)),
+            (0.01, Item(0xc28)),
+            (0.01, Item(0xc2a)),
+            (0.01, Item(0xc27)),
+            (0.01, Item(0x722)),
+            (0.5, Item(0xa35)),
+        ],
+        0xe31 | 0xe3a | 0xe42 => &[
+            (0.03, Item(0xa22)),
+            (0.03, Item(0xa23)),
+            (0.01, Item(0xc25)),
+        ],
+        0xe43 => &[
+            (0.05, Tier(7, WEAPONS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.02, Tier(3, RINGS)),
+            (0.03, Item(0xa23)),
+            (0.01, Item(0xc25)),
+        ],
+        0xe44 => &[
+            (0.05, Tier(7, WEAPONS)),
+            (0.03, Tier(8, WEAPONS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.02, Tier(3, RINGS)),
+            (0.03, Item(0xa23)),
+        ],
+        0xe45 => &[
+            (0.03, Tier(4, RINGS)),
+            (0.05, Tier(8, WEAPONS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.03, Tier(3, ABILITIES)),
+            (0.03, Tier(3, RINGS)),
+            (0.03, Item(0xa23)),
+            (0.01, Item(0xc25)),
+        ],
+        kind if crate::dungeon::davy::ROSTER.contains(&kind) || kind == 0x182e => &[],
         0x6c4 => &[
             (0.10, Tier(2, WEAPONS)),
             (0.10, Tier(2, ARMOR)),
@@ -525,6 +576,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | crate::dungeon::manor::BOSS
                 | crate::dungeon::manor::COFFIN
                 | crate::dungeon::manor::KAGE
+                | crate::dungeon::davy::BOSS
                 | crate::dungeon::abyss::MALPHAS
                 | crate::dungeon::abyss::IDOL
                 | crate::endgame::ORYX
@@ -553,6 +605,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
 }
 pub fn private(kind: u16) -> bool {
     crate::quest::final_root(kind)
+        || kind == crate::dungeon::davy::BOSS
         || matches!(
             kind,
             0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL

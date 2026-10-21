@@ -222,6 +222,9 @@ impl World {
         if crate::dungeon::manor::ROSTER.contains(&self.entities[&id].kind) {
             return self.manor_mechanics(id, target, elapsed);
         }
+        if crate::dungeon::davy::profile(self.entities[&id].kind).is_some() {
+            return self.locker_mechanics(id, target, elapsed);
+        }
         if self.entities[&id].kind == crate::dungeon::snake::BOSS {
             return self.snake_mechanics(id, elapsed);
         }
@@ -541,7 +544,11 @@ impl World {
             .copied()
             .collect();
         for id in expired {
-            if matches!(
+            if self.entities[&id].kind == 0xe38 && matches!(self.entities[&id].stage, Some(2 | 4)) {
+                if let Err(error) = self.ghost_ship_mechanics(id, None, 0) {
+                    tracing::error!(entity=id,%error,"earned Locker portal deadline refused");
+                }
+            } else if matches!(
                 self.entities[&id].kind,
                 0x91a | 0xd50 | crate::dungeon::manor::CREATURE
             ) && self.entities[&id]
@@ -567,6 +574,9 @@ impl World {
         }
         if crate::dungeon::manor::ROSTER.contains(&defeated.kind) {
             return self.manor_death(defeated);
+        }
+        if defeated.kind == 0xe37 {
+            self.ghost_ship_locker_reward(defeated)?;
         }
         if crate::dungeon::trench::ROSTER.contains(&defeated.kind) {
             return self.ocean_death(defeated);

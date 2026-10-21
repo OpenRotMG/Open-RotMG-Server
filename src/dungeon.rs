@@ -1,5 +1,6 @@
 pub mod abyss;
 pub mod beach;
+pub mod davy;
 pub mod jungle;
 pub mod manor;
 pub mod snake;
@@ -8,7 +9,7 @@ pub mod sprite;
 pub mod trench;
 pub mod undead;
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 10] = [
+pub const DUNGEONS: [(u16, &str, &str, u16); 11] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
@@ -24,6 +25,7 @@ pub const DUNGEONS: [(u16, &str, &str, u16); 10] = [
         manor::BOSS,
     ),
     (0x742, "beachzone", "Beachzone", beach::BOSS),
+    (0x741, davy::TEMPLATE, davy::NAME, davy::BOSS),
 ];
 
 pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {

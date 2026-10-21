@@ -460,6 +460,19 @@ impl Piece {
                 }
                 p
             }
+            // FSoD@6fd20aa realm/setpieces/GhostShip.cs authors water and beach, never its tree markers.
+            0xe37 => {
+                let mut p = Self::new(50, 50);
+                for y in 0..50 {
+                    for x in 0..50 {
+                        let radius = (x as f32 - 25.).hypot(y as f32 - 25.);
+                        if radius <= 17. {
+                            p.set(x, y, if radius <= 14. { 2 } else { 1 });
+                        }
+                    }
+                }
+                p
+            }
             0xd59 => Self::new(5, 5),
             0xd5f => {
                 let mut p = Self::new(41, 41);
@@ -490,7 +503,7 @@ impl Piece {
         if kind == 0x668 {
             p.boss = (20, 20);
         }
-        if kind != 0xd59 {
+        if !matches!(kind, 0xd59 | 0xe37) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
         }
         p
@@ -540,6 +553,8 @@ impl Piece {
             (0xd56, 5) => (0xd6, Some(0x17d)),
             (0xd56, 6) => (0xd6, Some(0x182)),
             (0xd59, 1) => (0x60, None),
+            (0xe37, 1) => (0xed, None),
+            (0xe37, 2) => (0xfa, None),
             _ => unreachable!("setpiece marker has no selected tile"),
         }
     }

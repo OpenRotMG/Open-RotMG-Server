@@ -90,6 +90,9 @@ pub fn profile(kind: u16) -> Option<Profile> {
     if crate::dungeon::manor::ROSTER.contains(&kind) {
         return Some(crate::dungeon::manor::profile(kind));
     }
+    if let Some(profile) = crate::dungeon::davy::profile(kind) {
+        return Some(profile);
+    }
     if let Some(profile) = crate::dungeon::trench::profile(kind) {
         return Some(profile);
     }

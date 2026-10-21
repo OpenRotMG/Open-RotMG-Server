@@ -38,7 +38,7 @@ export async function runCase(scenario, options) {
   assert(!activeCase,'Only one native case may own this process');
   const out=options.runDir;assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
   const previousOwner=process.env.PI_BROWSER_OWNER;
-  const controller=new AbortController(), children=[], files=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
+  const controller=new AbortController(), children=[], files=[], participants=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
   const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
   const elapsed=()=>Math.round(performance.now()-started);
   const save=async()=>{await writeFile(join(out,'result.tmp'),JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',{mode:0o600});await rename(join(out,'result.tmp'),join(out,'result.json'));};
@@ -77,9 +77,9 @@ export async function runCase(scenario, options) {
     try{await row.started;status=await Promise.race([row.closed,stopped]);}finally{clearTimeout(deadline);}
     await writeFile(join(out,id+'.result.json'),text,{mode:0o600});assert.equal(status.code,0,'Controller failed; see controller.stderr');check();return JSON.parse(text);
   }
-  async function capture(name) {
+  async function capture(name,source=connection) {
     assert(/^[A-Za-z0-9_-]+$/.test(name),'Capture name must be a filename');
-    const image=await call('Page.captureScreenshot',{format:'png'});const path=join(out,name+'.png');await writeFile(path,Buffer.from(image.data,'base64'),{mode:0o600});report.captures.push(path);return path;
+    const image=await source.call('Page.captureScreenshot',{format:'png'});const path=join(out,name+'.png');await writeFile(path,Buffer.from(image.data,'base64'),{mode:0o600});report.captures.push(path);return path;
   }
   try {
     await save();
@@ -89,7 +89,7 @@ export async function runCase(scenario, options) {
     report.guardian=guardian.child.pid;
     report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]])report.inputs[name]=createHash('sha256').update(await readFile(path)).digest('hex');
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);assert(typeof fixtureModule.run==='function'&&fixtureModule.fixture,'Case must export fixture and run(game)');
-    const spec=fixtureModule.fixture;assert(Number.isInteger(spec.world),'Fixture needs an explicit world ID');
+    const spec=fixtureModule.fixture;assert(Number.isInteger(spec.world)||typeof spec.world==='string','Fixture needs an explicit world ID or prepared template');
     port=await freePort();chromePort=await freePort();assert.notEqual(port,chromePort,'Ports collided; no launch attempted');
     owner='native-test:'+randomUUID();process.env.PI_BROWSER_OWNER=owner;
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
@@ -115,44 +115,55 @@ export async function runCase(scenario, options) {
       report.client=options.client?{mode:'local',path:options.client,lock:JSON.parse(await readFile(join(options.client,'ruffle/lock.json'),'utf8'))}:{mode:'deployed',selection:JSON.parse(await readFile(join(out,'state/client-selection.json'),'utf8'))};
     });
     delete report.phases.prepareBuildStart;
-    await bounded('browserAndFixture',async()=>{
-      const auth=join(out,'Xauthority');await writeFile(auth,'',{mode:0o600});const cookie=randomBytes(16).toString('hex');
+    async function privateDisplay(index){
+      const auth=join(out,'Xauthority-'+index);await writeFile(auth,'',{mode:0o600});const cookie=randomBytes(16).toString('hex');
       await exec('xauth',['-f',auth,'add',':99','MIT-MAGIC-COOKIE-1',cookie]);
       const xvfb=launch('Xvfb','Xvfb',['-displayfd','3','-screen','0','1400x1000x24','-nolisten','tcp','-auth',auth],['ignore','ignore',await log('display.log'),'pipe']);
       let display='';xvfb.child.stdio[3].on('data',b=>display+=b);await waitFor(()=>display.includes('\n'),'Private display did not start',10000);display=':'+display.trim();
       await exec('xauth',['-f',auth,'add',display,'MIT-MAGIC-COOKIE-1',cookie]);
       const env={...process.env,DISPLAY:display,XAUTHORITY:auth,PI_BROWSER_OWNER:owner,PI_BROWSER_TAB_POLICY:'agent_only',CHROME_REAL_BINARY:options.chrome};delete env.WAYLAND_DISPLAY;
       const box=launch('openbox','openbox',['--sm-disable'],['ignore',await log('window-manager.log'),await log('window-manager.log')],env);await box.started;
-      const chrome=launch('Chrome',process.execPath,[join(options.browserTools,'launch-browser.mjs'),`--remote-debugging-port=${chromePort}`,`--user-data-dir=${join(out,'profile')}`,'--ozone-platform=x11','--window-size=1280,960','--no-first-run','--no-default-browser-check',...options.chromeArgs,'about:blank'],['ignore','pipe','pipe'],env);
+      return env;
+    }
+    async function addClient(spec){
+      assert(participants.length<3,'At most three prepared native clients');
+      assert(Number.isInteger(spec.world)||typeof spec.world==='string','Fixture requires world ID or explicit prepared template');
+      const worldId=typeof spec.world==='string'?(await api({op:'world',template:spec.world})).result.world:spec.world;
+      const chromePort=await freePort(),env=await privateDisplay(participants.length);
+      let connection,browser,actor,account;
+      const call=(method,params={})=>{check();return connection.call(method,params);};
+      const evaluate=expression=>{check();return connection.eval(expression);};
+      const chrome=launch('Chrome',process.execPath,[join(options.browserTools,'launch-browser.mjs'),`--remote-debugging-port=${chromePort}`,`--user-data-dir=${join(out,'profile-'+participants.length)}`,'--ozone-platform=x11','--window-size=1280,960','--window-position=0,0','--no-first-run','--no-default-browser-check',...options.chromeArgs,'about:blank'],['ignore','pipe','pipe'],env);
       const browserLog=await log('browser.log');let browserLines='';
       const inspectLine=line=>{const kind=browserDiagnostic(line,closing);if(kind==='fatal')fail(Error('Browser ERROR: '+line));else if(kind)(report.browserDiagnostics??=[]).push({kind,line});};
       chrome.child.stderr.on('data',bytes=>{try{writeSync(browserLog,bytes);browserLines+=bytes;let n;while((n=browserLines.indexOf('\n'))>=0){inspectLine(browserLines.slice(0,n));browserLines=browserLines.slice(n+1);}}catch(error){fail(error);}});
       chrome.child.stderr.on('end',()=>{if(browserLines)inspectLine(browserLines);});
       let receipt='';chrome.child.stdout.on('data',b=>receipt+=b);await waitFor(()=>receipt.includes('\n'),'Managed browser did not return its receipt',30000);browser=JSON.parse(receipt.split('\n')[0]);assert(browser.target&&browser.owner===owner&&browser.pid===chrome.child.pid,'Invalid managed browser receipt');
-      report.browser={owner,port:chromePort,target:browser.target,pid:browser.pid};
+      ownedBrowsers.push({...browser,port:chromePort});report.browser={owner,port:chromePort,target:browser.target,pid:browser.pid};
       let resolveGuest,rejectGuest;const guest=new Promise((ok,bad)=>{resolveGuest=ok;rejectGuest=bad;});guest.catch(()=>{});let requests=0,guestDone=false;
       connection=await connect({port:chromePort,target:browser.target,url:'about:blank',helper:join(options.browserTools,'direct-cdp.mjs'),onEvent:event=>{
         if(event.method==='Runtime.exceptionThrown'){fail(Error('Browser exception: '+JSON.stringify(event.params.exceptionDetails)));return;}
         if(event.method==='Runtime.consoleAPICalled'&&event.params.type==='error'){fail(Error('Browser console error: '+JSON.stringify(event.params.args)));return;}
         if(event.method!=='Fetch.requestPaused')return;
         (async()=>{
-          assert.equal(++requests,1,'Only one normal fresh guest is permitted');const e=event.params;
+          assert.equal(++requests,1,'Only one normal fresh guest per client is permitted');const e=event.params;
           assert.equal(e.request.url,report.origin+'/legacy-api/char/list');assert.equal(e.request.method,'POST');
           const form=new URLSearchParams(e.request.postData),guid=form.get('guid');assert(guid&&/^[A-Za-z0-9_.-]{1,128}$/.test(guid)&&!form.get('password'),'Expected a UI-generated disposable guest');
-          const world=await api({op:'world_info',world:spec.world});const point=spec.position==='spawn'?world.spawn_points[0]:null;
+          const world=await api({op:'world_info',world:worldId});const point=spec.position==='spawn'?world.spawn_points[0]:null;
           if(spec.position==='spawn')assert(Array.isArray(point)&&point.length===2&&point.every(Number.isFinite),'Invalid observed spawn tuple');
-          const position=spec.position==='spawn'?{x:point[0],y:point[1]}:spec.position;
-          const result=await api({op:'spawn',spec:{...spec,guid,position,controller:'native',profile:null}});actor=result.result.actor;account=result.result.account;
-          await writeFile(join(out,'fixture.json'),JSON.stringify({actor,account,spec,prepared:true}),{mode:0o600});
+          const position=spec.position==='spawn'?{x:point[0],y:point[1]}:typeof spec.position==='function'?spec.position(world):spec.position;
+          const result=await api({op:'spawn',spec:{...spec,world:worldId,guid,position,controller:'native',profile:null}});actor=result.result.actor;account=result.result.account;
+          await writeFile(join(out,participants.length?'fixture-'+participants.length+'.json':'fixture.json'),JSON.stringify({actor,account,spec:{...spec,world:worldId,position},prepared:true}),{mode:0o600});
           await call('Fetch.continueRequest',{requestId:e.requestId});guestDone=true;resolveGuest();
         })().catch(error=>{rejectGuest(error);fail(error);});
       }});
+      const window=await call('Browser.getWindowForTarget',{targetId:browser.target}),bounds=(await call('Browser.getWindowBounds',{windowId:window.windowId})).bounds;
+      assert(bounds.left>=0&&bounds.left+bounds.width<=1400&&bounds.width<=1300,'Owned native windows must remain unoccluded on the private display');
       await call('Runtime.enable');
       await call('Fetch.enable',{patterns:[{urlPattern:report.origin+'/legacy-api/char/list',requestStage:'Request'}]});
       await call('Page.navigate',{url:report.origin});
       await Promise.race([guest,waitFor(()=>guestDone,'Normal fresh guest char/list missing',60000),stopped]);await call('Fetch.disable');
-    });
-    await bounded('clientUI',async()=>{
+
       await waitFor(()=>evaluate('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Ruffle did not start');
       await evaluate('(()=>{const p=document.querySelector("ruffle-player");const modal=p.shadowRoot.querySelector("#hardware-acceleration-modal");if(modal&&!modal.classList.contains("hidden"))modal.querySelector(".close-modal").click();})()');
       const click=async()=>{
@@ -162,21 +173,27 @@ export async function runCase(scenario, options) {
         await evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
       };
       await call('Emulation.setFocusEmulationEnabled',{enabled:true});await click();await click();
-      await waitFor(async()=>{const s=await api({op:'native_state',actors:[actor]});assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');return s.actors.length===1&&s.actors[0].stage==='ready';},'Normal character LOAD did not complete');
-      await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:[{port:chromePort,target:browser.target,actor}]}),{mode:0o600});
-      await driver({op:'pause'});report.actor=actor;report.account=account;
-    });
+      await waitFor(async()=>{const actors=[...participants.map(c=>c.actor),actor],s=await api({op:'native_state',actors});assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');return s.actors.length===actors.length&&s.actors.every(a=>a.stage==='ready');},'Normal character LOAD did not complete');
+      participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
+      await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
+      await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
+      return participants.at(-1);
+
+    }
+    const first=await bounded('browserAndFixture',()=>addClient(spec));
+    ({actor,account,connection,browser,chromePort}=first);report.actor=actor;report.account=account;
     await bounded('scenario',async()=>{
-      const game={actor,observe:()=>api({op:'observe',actor}),check(name,condition){assert(condition,name);report.assertions.push(name);},
+      const gameFor=client=>{const {actor,evaluate}=client;return {actor,join:async spec=>gameFor(await addClient(spec)),observe:()=>api({op:'observe',actor}),check(name,condition){assert(condition,name);report.assertions.push(name);},
         async act(input,captureSpec){
-          check();let complete=false;const action=driver({op:'act',actor,input,pauseAfter:true}).finally(()=>complete=true);
+          check();let complete=false;const action=driver({op:'act',actor,...(Array.isArray(input)?{sequence:input}:{input}),pauseAfter:true}).finally(()=>complete=true);
           if(!captureSpec)return await action;
           const shot=(async()=>{
-            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor});return !view.paused&&captureSpec.when(view);},'Screenshot condition not observed',input.duration_ms+10000);
-            assert(await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying'),'Client paused before capture');await capture(captureSpec.name);
+            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor});return !view.paused&&captureSpec.when(view);},'Screenshot condition not observed',(Array.isArray(input)?input.flat().reduce((sum,s)=>sum+s.input.duration_ms,0):input.duration_ms)+10000);
+            assert(await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying'),'Client paused before capture');await capture(captureSpec.name,client.connection);
           })();
           const results=await Promise.allSettled([action,shot]);for(const r of results)if(r.status==='rejected')throw r.reason;return results[0].value;
-        }};
+        }};};
+      const game=gameFor(first);
       report.before=await game.observe();await fixtureModule.run(game);report.after=await game.observe();report.activeGameMs=report.after.game_ms-report.before.game_ms;
     });
     check();report.status='passed';
@@ -188,17 +205,17 @@ export async function runCase(scenario, options) {
     clearTimeout(timer);closing=true;report.cleanupErrors=[];controller.abort(Error('Native test closing'));const cleanup=performance.now();
     for(const row of children)row.stopping=true;
     let managed,tabs=[];
-    if(browser)try{
+    if(ownedBrowsers.length)try{
       managed=await import(pathToFileURL(join(options.browserTools,'tabs.mjs')).href);
-      for(const page of (await managed.liveTargets(chromePort)).targets.filter(p=>p.type==='page')){
-        const tab={...browser,target:page.targetId};await managed.ensureTarget(tab);managed.assertOwner(tab,owner);tabs.push(tab);
+      for(const b of ownedBrowsers)for(const page of (await managed.liveTargets(b.port)).targets.filter(p=>p.type==='page')){
+        const tab={...b,target:page.targetId};await managed.ensureTarget(tab);managed.assertOwner(tab,owner);tabs.push(tab);
       }
     }catch(error){report.cleanupErrors.push(String(error));}
-    if(connection)try{connection.close();}catch(error){report.cleanupErrors.push(String(error));}
+    for(const c of participants)try{c.connection.close();}catch(error){report.cleanupErrors.push(String(error));}
     // One graceful browser shutdown drains renderer work before retiring its owned targets.
     for(const row of children.reverse()){
       row.stopping=true;
-      try{report.children.push({name:row.name,...await stopChild(row)});if(row.name==='Chrome')for(const tab of tabs)managed.released(tab);}catch(error){report.cleanupErrors.push(String(error));}
+      try{report.children.push({name:row.name,...await stopChild(row)});if(row.name==='Chrome')for(const tab of tabs.filter(t=>t.pid===row.child.pid))managed.released(tab);}catch(error){report.cleanupErrors.push(String(error));}
     }
     if(registryState){registryState.done=true;register();}
     if(guardian)try{const end=setTimeout(()=>guardian.child.kill('SIGTERM'),5000);try{const value=await guardian.closed;report.children.push({name:'guardian',...value});assert.equal(value.code,0,'Cleanup guardian failed');}finally{clearTimeout(end);}}catch(error){report.cleanupErrors.push(String(error));}

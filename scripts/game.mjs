@@ -55,6 +55,11 @@ const api = async (value, requestId=`${id}-ctl${++sequence}`) => {
   return result;
 };
 const clients = [];
+async function eachClient(selected, action) {
+  const results=await Promise.allSettled(selected.map(action));
+  for(const result of results)if(result.status==='rejected')throw result.reason;
+  return results.map(result=>result.value);
+}
 async function connect(spec) {
   if (!config.browserTools) throw new Error('Native control requires the installed managed browser helper path');
   if(!Number.isInteger(spec.port)||spec.port<1024||spec.port>65535||typeof spec.target!=='string'||!Number.isInteger(spec.actor))throw new Error('Each native target requires an explicit local port, target id and durable actor id');
@@ -95,14 +100,15 @@ async function connect(spec) {
   async function hold(keys,mouse,ms,dragTo){
     if(holdState)throw Error('Concurrent native hold is forbidden');
     const key=(type,k)=>call('Input.dispatchKeyEvent',{type,key:k,code:bindings[k][0],windowsVirtualKeyCode:bindings[k][1]});
-    let resolveRelease,rejectRelease,timer,dragTimer;
+    let resolveRelease,rejectRelease,timer,dragTimer,releasedAt;
     const released=new Promise((ok,bad)=>{resolveRelease=ok;rejectRelease=bad;});
-    const release=async()=>{const results=await Promise.allSettled([...keys.map(k=>key('keyUp',k)),...(mouse?[call('Input.dispatchMouseEvent',{type:'mouseReleased',...(dragTo??mouse),button:'left',buttons:0,clickCount:1})]:[])]);const errors=results.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(errors.length)throw Error(errors.join('; '));};
+    const release=async()=>{releasedAt=Date.now();const results=await Promise.allSettled([...keys.map(k=>key('keyUp',k)),...(mouse?[call('Input.dispatchMouseEvent',{type:'mouseReleased',...(dragTo??mouse),button:'left',buttons:0,clickCount:1})]:[])]);const errors=results.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(errors.length)throw Error(errors.join('; '));};
     holdState={ms,started:0,abort(error){clearTimeout(timer);clearTimeout(dragTimer);release().then(()=>rejectRelease(error),failure=>rejectRelease(Error(String(error)+'; input release unconfirmed: '+failure)));},start(){this.started=Date.now();timer=setTimeout(()=>release().then(resolveRelease,rejectRelease),ms);if(dragTo)dragTimer=setTimeout(()=>call('Input.dispatchMouseEvent',{type:'mouseMoved',...dragTo,button:'left',buttons:1}).catch(error=>this.abort(error)),ms/2);}};
-    const down=Promise.allSettled([...keys.map(k=>key('keyDown',k)),...(mouse?[call('Input.dispatchMouseEvent',{type:'mousePressed',...mouse,button:'left',buttons:1,clickCount:1})]:[])]);
+    // Ruffle's map click establishes Flash focus before movement keys are delivered.
+    const down=(async()=>{const results=mouse?await Promise.allSettled([call('Input.dispatchMouseEvent',{type:'mousePressed',...mouse,button:'left',buttons:1,clickCount:1})]):[];if(results.every(r=>r.status==='fulfilled'))results.push(...await Promise.allSettled(keys.map(k=>key('keyDown',k))));return results;})();
     if(!keys.length&&!mouse)holdState.start();
-    const noDispatch=setTimeout(()=>rejectRelease(Error('Native DOWN was not dispatched before its deadline')),10000);
-    try{await released;return {down};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);holdState=null;}
+    const noDispatch=setTimeout(()=>{if(!holdState.started)rejectRelease(Error('Native DOWN was not dispatched before its deadline'));},10000);
+    try{await released;return {down,started:holdState.started,released:releasedAt};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);holdState=null;}
   }
   try { await call('Network.enable'); }
   catch(error) { closing=true;ws.close();throw error; }
@@ -145,21 +151,21 @@ async function states(waitForReady=false,expect,previous){
 }
 async function bind(state){
   const fresh=[];
-  for(const c of clients){
+  const pages=await eachClient(clients,async c=>({c,page:await c.evaluate('({playing:document.querySelector("ruffle-player").ruffle().isPlaying,binding:globalThis[Symbol.for("openrotmg.testing.binding.v1")]})')}));
+  for(const {c,page} of pages){
     const actual=state.actors.find(a=>a.actor===c.actor);
-    const page=await c.evaluate('({playing:document.querySelector("ruffle-player").ruffle().isPlaying,binding:globalThis[Symbol.for("openrotmg.testing.binding.v1")]})');
     if(!page.playing){
       if(page.binding?.runtime!==state.runtime||page.binding.actor!==c.actor||page.binding.player!==actual.player)throw Error('Paused native target has no matching character/session binding');
     }else fresh.push(c);
   }
   if(fresh.length){
     const proof=await api({op:'native_sync',actors:fresh.map(c=>c.actor)});
-    for(const c of fresh){
+    await eachClient(fresh,async c=>{
       const acknowledgment=proof.acknowledged.find(a=>a.actor===c.actor),actual=state.actors.find(a=>a.actor===c.actor),deadline=Date.now()+1000;
       while(!c.frames.includes(acknowledgment.frame_sha256)&&Date.now()<deadline)await wait(10);
       if(actual.player!==acknowledgment.player||!c.frames.includes(acknowledgment.frame_sha256))throw Error('Native browser/character binding mismatch for actor '+c.actor);
       await c.evaluate('globalThis[Symbol.for("openrotmg.testing.binding.v1")]='+JSON.stringify({runtime:state.runtime,actor:c.actor,player:actual.player}));
-    }
+    });
   }
 }
 async function initializeClock(c) {
@@ -170,9 +176,8 @@ async function pauseAll(expect) {
   if(!clients.length)return api({op:'pause',native_paused:[],native_sessions:[]});
   const state=await states(mayProgress,expect);
   await bind(state);
-  for(const c of clients)await initializeClock(c);
-  const confirmed=[];
-  for(const c of clients){await c.clock(true);confirmed.push(c.actor);}
+  await eachClient(clients,initializeClock);
+  const confirmed=await eachClient(clients,async c=>{await c.clock(true);return c.actor;});
   const result=await api({op:'pause',native_paused:confirmed,native_sessions:state.actors.map(c=>[c.actor,c.player])});
   return {...result,pause_scope:'server_and_native'};
 }
@@ -180,13 +185,13 @@ async function resumeAll() {
   if(!clients.length){mayProgress=true;await api({op:'resume'});return;}
   const before=await states();
   await bind(before);
-  for(const c of clients)await initializeClock(c);
+  await eachClient(clients,initializeClock);
   await startLease();mayProgress=true;
   await api({op:'resume'});
-  for(const c of clients)await c.clock(false);
+  await eachClient(clients,c=>c.clock(false));
   const after=await states(true,undefined,before);
   await bind(after);
-  for(const c of clients)await c.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');
+  await eachClient(clients,c=>c.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))'));
   if(leaseError)throw leaseError;
 }
 const bindings = {
@@ -195,49 +200,78 @@ const bindings = {
   '1':['Digit1',49],'2':['Digit2',50],'3':['Digit3',51],'4':['Digit4',52],
   '5':['Digit5',53],'6':['Digit6',54],'7':['Digit7',55],'8':['Digit8',56],
 };
-async function nativeAct(value) {
-  if(value.pauseAfter===false)throw Error('Standalone native actions must pause before returning; capture during a bounded action instead');
-  if(Object.keys(value).some(k=>!['op','actor','input','pauseAfter','expect','require'].includes(k)))throw Error('Unknown native action field');
-  if(value.expect&&(!value.expect.world||typeof value.expect.world!=='string'||Object.keys(value.expect).some(k=>!['world','items','inventory_revision'].includes(k))))throw Error('Native expect requires world and optional items/inventory_revision');
-  const client=clients.find(c=>c.actor===value.actor);
+function nativeStep(actor,input){
+  const client=clients.find(c=>c.actor===actor);
   if(!client)throw Error('Native act requires the configured owned target for this actor');
-  const input=value.input;
-  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['duration_ms','keys','mouse','drag'].includes(k)))throw Error('Native input supports only duration_ms, keys and optional mouse or drag');
+  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['duration_ms','keys','mouse','drag','target'].includes(k)))throw Error('Native input supports only duration_ms, keys and optional mouse or drag');
   if(!Number.isInteger(input.duration_ms)||input.duration_ms<1||input.duration_ms>10000)throw Error('Native duration_ms must be 1–10000');
   const keys=input.keys;
   if(!Array.isArray(keys)||new Set(keys).size!==keys.length||keys.some(k=>!Object.hasOwn(bindings,k)))throw Error('Native keys must be a unique array of supported keys');
   if(input.mouse&&(Object.keys(input.mouse).some(k=>!['x','y'].includes(k))||!Number.isFinite(input.mouse.x)||!Number.isFinite(input.mouse.y)||input.mouse.x<0||input.mouse.y<0||input.mouse.x>=800||input.mouse.y>=600))throw Error('Native mouse must be inside the 800×600 client');
+  if(input.target&&(input.mouse||input.drag||!Number.isInteger(input.target.entity)||!Number.isFinite(input.target.camera_angle)||typeof input.target.fire!=='boolean'||Object.keys(input.target).some(k=>!['entity','camera_angle','fire'].includes(k))))throw Error('Native target requires entity, camera_angle and explicit fire, without mouse/drag');
   if(input.drag&&(input.mouse||keys.length||input.duration_ms<100||Object.keys(input.drag).some(k=>!['from','to'].includes(k))||['from','to'].some(k=>!input.drag[k]||Object.keys(input.drag[k]).some(v=>!['x','y'].includes(v))||!Number.isFinite(input.drag[k].x)||!Number.isFinite(input.drag[k].y)||input.drag[k].x<0||input.drag[k].y<0||input.drag[k].x>=800||input.drag[k].y>=600)))throw Error('Native drag requires only bounded from/to canvas points, no keys/mouse, and at least 100ms');
+  return {client,input};
+}
+async function nativeAct(value) {
+  if(value.pauseAfter===false)throw Error('Standalone native actions must pause before returning; capture during a bounded action instead');
+  if(Object.keys(value).some(k=>!['op','actor','input','pauseAfter','expect','require','sequence'].includes(k)))throw Error('Unknown native action field');
+  if(value.expect&&(!value.expect.world||typeof value.expect.world!=='string'||Object.keys(value.expect).some(k=>!['world','items','inventory_revision'].includes(k))))throw Error('Native expect requires world and optional items/inventory_revision');
+  if(value.sequence&&value.input)throw Error('Choose one input or a bounded sequence');
+  const sequence=value.sequence??[{actor:value.actor,input:value.input}];
+  if(!Array.isArray(sequence)||!sequence.length||sequence.length>32)throw Error('Native sequence requires 1–32 explicit actor/input steps');
+  const groups=sequence.map(v=>(Array.isArray(v)?v:[v]).map(v=>{if(!v||Object.keys(v).some(k=>!['actor','input'].includes(k)))throw Error('Native sequence supports only actor/input');return nativeStep(v.actor,v.input);}));
+  for(const group of groups)if(!group.length||new Set(group.map(s=>s.client.actor)).size!==group.length)throw Error('Parallel native inputs require distinct configured actors');
+  const steps=groups.flat();if(steps.length>32)throw Error('Native sequence exceeds 32 inputs');
+  if(steps.reduce((sum,s)=>sum+s.input.duration_ms,0)>10000)throw Error('Native sequence duration exceeds 10 seconds');
   const before=await api({op:'observe',actor:value.actor});
   if(before.controller!=='native'||!before.lifecycle.alive)throw Error('Native input requires the same living native actor');
   if(value.require&&(value.require.world!==before.world||value.require.inventory_revision!==undefined&&value.require.inventory_revision!==before.character.inventory_revision))throw Error('Native action precondition changed');
-  await client.call('Emulation.setFocusEmulationEnabled',{enabled:true});
-  await client.evaluate('document.querySelector("ruffle-player").focus({preventScroll:true})');
-  if(keys.includes('Insert')&&before.world==='Nexus')throw Error('Native escape is already in Nexus');
+
   await resumeAll();
   if(value.require){const current=await api({op:'observe',actor:value.actor});if(current.world!==value.require.world||value.require.inventory_revision!==undefined&&current.character.inventory_revision!==value.require.inventory_revision)throw Error('Native action precondition changed during resume');}
-  let primary,press;const cleanup=[];
+  let primary;const cleanup=[],stepEvidence=[];
   try{
+   await eachClient(clients,async client=>{await client.call('Emulation.setFocusEmulationEnabled',{enabled:true});await client.evaluate('document.querySelector("ruffle-player").focus({preventScroll:true})');});
+   for(const group of groups){const prepared=await Promise.allSettled(group.map(async({client,input})=>{
+    const current=await api({op:'observe',actor:client.actor});
+    if(current.controller!=='native'||!current.lifecycle.alive)throw Error('Native sequence requires living configured participants');
+    const keys=input.keys;
+    if(keys.includes('Insert')&&current.world==='Nexus')throw Error('Native escape is already in Nexus');
     let mouse,dragTo;
-    if(input.mouse||input.drag){
+    if(input.mouse||input.drag||input.target){
       const rect=await client.evaluate('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight}})()');
       if(rect.width!==800||rect.height!==600||rect.x<0||rect.y<0||rect.x+800>rect.viewportWidth||rect.y+600>rect.viewportHeight)throw Error('Native client is clipped or scaled');
-      const from=input.drag?input.drag.from:input.mouse;
+      let from=input.drag?input.drag.from:input.mouse;
+      if(input.target){
+        const known=(await api({op:'inspect',actor:client.actor})).view;
+        const target=known.objects.find(e=>e.id===input.target.entity&&e.hp>0);
+        if(!target)throw Error('Native target is not in the actual client neighborhood');
+        const a=input.target.camera_angle,dx=target.position.x-known.position.x,dy=target.position.y-known.position.y,x=50*(dx*Math.cos(a)+dy*Math.sin(a)),y=50*(-dx*Math.sin(a)+dy*Math.cos(a)),scale=Math.max(1,Math.hypot(x,y)/270);
+        from={x:300+x/scale,y:325+y/scale};
+      }
       mouse={x:rect.x+from.x,y:rect.y+from.y};
       if(input.drag)dragTo={x:rect.x+input.drag.to.x,y:rect.y+input.drag.to.y};
       await client.call('Input.dispatchMouseEvent',{type:'mouseMoved',...mouse});
+      await client.evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
     }
-    press=await client.hold(keys,mouse,input.duration_ms,dragTo);
-  }catch(error){primary=error;}
+    return async()=>{
+    const press=await client.hold(keys,input.target?.fire===false?undefined:mouse,input.duration_ms,dragTo);
+    for(const result of await press.down)if(result.status==='rejected')throw result.reason;
+    await client.evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
+    await states(true);
+    const observed=await api({op:'observe',actor:client.actor});
+    stepEvidence.push({actor:client.actor,before_ms:current.game_ms,game_ms:observed.game_ms,input_started_wall_ms:press.started,input_release_wall_ms:press.released,position:observed.position,character:observed.character,own_projectiles:input.target?(await api({op:'inspect',actor:client.actor})).diagnostic.own_projectiles:[]});
+    };
+  }));for(const result of prepared)if(result.status==='rejected')throw result.reason;
+  const results=await Promise.allSettled(prepared.map(result=>result.value()));for(const result of results)if(result.status==='rejected')throw result.reason;}}catch(error){primary=error;}
   try{await pauseAll(value.expect);}catch(error){cleanup.push(String(error));}
-  if(press)for(const result of await press.down)if(result.status==='rejected')cleanup.push(String(result.reason));
-  if(primary||cleanup.length)throw Error(JSON.stringify({primary:primary?String(primary):null,cleanup}));
+  if(primary||cleanup.length)throw Error(JSON.stringify({primary:primary?String(primary):null,cleanup,steps:stepEvidence}));
   const after=await api({op:'observe',actor:value.actor});
   if(value.expect?.items)for(const[slot,item]of Object.entries(value.expect.items))if(!/^(?:[0-9]|1[01])$/.test(slot)||after.character.items[Number(slot)]!==item)throw Error('Expected native inventory slot did not commit: '+slot);
   if(value.expect?.inventory_revision!==undefined&&after.character.inventory_revision!==value.expect.inventory_revision)throw Error('Expected native inventory revision did not commit');
   const world_changed=after.session.world!==before.session.world;
   const effects={distance:world_changed?null:Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y),shots:after.verification.shots-before.verification.shots,hp:after.character.hp-before.character.hp,mp:after.character.mp-before.character.mp,inventory_changed:JSON.stringify(after.character.items)!==JSON.stringify(before.character.items),world_changed};
-  return {id,status:value.expect?'outcome_complete':'input_complete',execution:'native',effects,paused:after.paused,pause_scope:'server_and_native',native_clock:'pause_adjusted_page_time',actor:value.actor,state:after};
+  return {id,steps:stepEvidence,status:value.expect?'outcome_complete':'input_complete',execution:'native',effects,paused:after.paused,pause_scope:'server_and_native',native_clock:'pause_adjusted_page_time',actor:value.actor,state:after};
 }
 let result;
 try {
@@ -252,7 +286,7 @@ try {
   const started=performance.now();
   if(command.op==='pause') result=await pauseAll();
   else if(command.op==='resume') {if(clients.length)throw Error('Native resume requires a bounded action with automatic pause');await resumeAll();result={paused:false};}
-  else if(command.op==='act'&&command.input) result=await nativeAct(command);
+  else if(command.op==='act'&&(command.input||command.sequence)) result=await nativeAct(command);
   else if(['act','run'].includes(command.op)&&clients.length&&command.pauseAfter!==false) {
     await resumeAll();
     let primary;
