@@ -4447,6 +4447,13 @@ impl World {
                 }
             }
         }
+        if defeated.kind == 0x20d {
+            for (owner, item) in
+                crate::loot::gray_blob_rewards(&self.content, &eligible, &mut self.rng)
+            {
+                drops.entry(owner).or_default().push(i32::from(item));
+            }
+        }
         for (owner, items) in drops {
             self.loot_bags(
                 self.ocean_reward_position(defeated)?,
@@ -5706,6 +5713,8 @@ mod timing_example;
 mod ground_dye_tests;
 #[cfg(test)]
 mod manor_tests;
+#[cfg(test)]
+mod starter_loot_tests;
 #[cfg(test)]
 mod view_navigation_tests;
 

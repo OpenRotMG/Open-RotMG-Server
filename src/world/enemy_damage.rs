@@ -48,6 +48,7 @@ impl World {
             lethal && e.quest.is_some() && matches!(e.kind, 0x675 | 0x6c2 | 0x92a | 0x92b);
         let lantern = lethal && e.kind == crate::dungeon::davy::UNLIT && self.locker.is_some();
         let kill = lethal && !transform && !lantern;
+        let kind = e.kind;
 
         let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
         if let Some(p) = self.players.get_mut(&owner) {
@@ -84,7 +85,7 @@ impl World {
             self.quest_lethal_transform(target)?;
         } else if kill {
             self.defeat_entity(target)?;
-            tracing::info!(entity = target, owner = owner, "enemy defeated");
+            tracing::info!(entity = target, kind, owner = owner, "enemy defeated");
         }
         Ok(actual)
     }
