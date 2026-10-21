@@ -264,7 +264,7 @@ export async function runCase(scenario, options) {
           const results=await Promise.allSettled([action,shot]);for(const r of results)if(r.status==='rejected')throw r.reason;return results[0].value;
         }};};
       const game=gameFor(first);
-      await runNativeScenario(fixtureModule.run,game,()=>joins.idle(),report);report.activeGameMs=report.after.game_ms-report.before.game_ms;
+      await runNativeScenario(game=>fixtureModule.run(game),game,()=>joins.idle(),report);report.activeGameMs=report.after.game_ms-report.before.game_ms;
     });
     check();joins.idle();report.status='passed';
   } catch(error) {

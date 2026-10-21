@@ -191,3 +191,8 @@ test('native case rejects a join started during final observation before any pas
   await assert.rejects(runNativeScenario(async()=>{},{observe:async()=>{if(++observations===2){pending=f.joins.add(explicitFixture);pending.catch(()=>{});}return{game_ms:observations};}},()=>f.joins.idle(),report),/pending join/);
   assert.equal(report.status,'running');f.abort.abort(Error('case rejected'));held.resolve(12345);await assert.rejects(pending,/case rejected/);
 });
+test('native scenario preserves the required run callback module receiver and game identity',async()=>{
+  const report={},game={observe:async()=>({game_ms:1})};let ran=false,idle=0;
+  const module={async run(actual){assert.equal(this,module);assert.equal(actual,game);ran=true;}};
+  await runNativeScenario(game=>module.run(game),game,()=>idle++,report);assert(ran);assert.equal(idle,2);assert.deepEqual(report.before,report.after);
+});
