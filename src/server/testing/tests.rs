@@ -1,6 +1,8 @@
 use super::*;
 #[path = "finalize_tests.rs"]
 mod finalize_tests;
+#[path = "native_pause_tests.rs"]
+mod native_pause_tests;
 
 fn fixture() -> (PathBuf, App) {
     let (dir, mut app) = crate::server::account_actions::tests::fixture();

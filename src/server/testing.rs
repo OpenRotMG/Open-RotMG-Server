@@ -580,11 +580,14 @@ async fn pause(a: &App, native: &[i32], sessions: &[(i32, i32)]) -> Result<()> {
         "native pause requires at most eight unique actor/session pairs"
     );
     let sessions: BTreeMap<_, _> = sessions.iter().copied().collect();
+    let app = a.clone();
     a.world.directory(move |d| {
         for (id,p) in d.worlds.values().flat_map(|w|w.players.iter()).filter(|(_,p)|p.controller == crate::world::Controller::Human) {
             ensure!(native.contains(&p.character.id), "native character {} needs coordinated Ruffle pause through the managed native client",p.character.id);
             ensure!(sessions.get(&p.character.id)==Some(id), "native pause session changed; complete the actual reconnect before suspending");
-            ensure!(!p.departing && !p.pending && !p.progress_started && !p.death_pending, "native pause requires a settled current session, not an in-flight handoff");
+            if let Some(snapshot) = p.native_pause_progress()? {
+                lifecycle::require_progress_owner(&app, snapshot.account, *id)?;
+            }
         }
         d.clock.set_paused(true);
         Ok(())

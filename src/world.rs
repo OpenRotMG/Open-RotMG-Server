@@ -540,6 +540,54 @@ impl Player {
     pub(crate) fn native_time(&self) -> i32 {
         self.last_move
     }
+    fn validate_progress_reservation(&self, snapshot: &Character) -> Result<()> {
+        ensure!(
+            self.pending
+                && self.progress_started
+                && self.character.id == snapshot.id
+                && self.character.account == snapshot.account
+                && self.character.revision == snapshot.revision
+                && self.progress_snapshot.as_ref() == Some(snapshot),
+            "progress reservation changed"
+        );
+        Ok(())
+    }
+    pub(crate) fn native_pause_progress(&self) -> Result<Option<&Character>> {
+        ensure!(
+            self.active() && self.character.hp > 0,
+            "native pause player is not active: alive={} hp={} departing={} death_pending={} persistence_failure={:?}",
+            self.character.alive,
+            self.character.hp,
+            self.departing,
+            self.death_pending,
+            self.persistence_failure
+        );
+        if self.pending || self.progress_started {
+            ensure!(
+                self.pending && self.progress_started,
+                "native pause has non-progress pending or malformed progress flags: pending={} progress_started={}",
+                self.pending,
+                self.progress_started
+            );
+            let snapshot = self
+                .progress_snapshot
+                .as_ref()
+                .context("native pause ordinary progress snapshot missing")?;
+            self.validate_progress_reservation(snapshot)
+                .context("native pause ordinary progress snapshot mismatch")?;
+            ensure!(
+                snapshot.alive,
+                "native pause progress snapshot is not living"
+            );
+            Ok(Some(snapshot))
+        } else {
+            ensure!(
+                self.progress_snapshot.is_none() && self.level_assists_prepared.is_empty(),
+                "native pause has an unowned progress snapshot"
+            );
+            Ok(None)
+        }
+    }
     pub(crate) fn native_transferring(&self) -> bool {
         self.departing && self.persistence_failure.is_none()
     }
@@ -4453,15 +4501,7 @@ impl World {
             .players
             .get(&id)
             .context("progress assist owner missing")?;
-        ensure!(
-            p.pending
-                && p.progress_started
-                && p.character.id == snapshot.id
-                && p.character.account == snapshot.account
-                && p.character.revision == snapshot.revision
-                && p.progress_snapshot.as_ref() == Some(snapshot),
-            "progress assist reservation changed"
-        );
+        p.validate_progress_reservation(snapshot)?;
         Ok(p.level_assists_prepared.clone())
     }
     pub fn finish_progress(&mut self, id: i32, snapshot: Character) -> Result<()> {
@@ -4469,14 +4509,7 @@ impl World {
             .players
             .get_mut(&id)
             .context("progress owner missing")?;
-        ensure!(
-            p.pending
-                && p.progress_started
-                && p.character.id == snapshot.id
-                && p.character.revision == snapshot.revision
-                && p.progress_snapshot.as_ref() == Some(&snapshot),
-            "progress reservation changed"
-        );
+        p.validate_progress_reservation(&snapshot)?;
         p.acknowledge_lifetime(snapshot.lifetime.clone())?;
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons

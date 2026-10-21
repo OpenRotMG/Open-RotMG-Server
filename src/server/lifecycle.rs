@@ -1058,6 +1058,22 @@ pub(super) fn collector_death_candidate(a: &App, account: i32, avatar: i32) -> R
     ensure!(claim.matches_avatar(avatar), "stale death candidate avatar");
     Ok(!claim.pending && claim.failure.is_none() && claim.finalization.is_none())
 }
+pub(super) fn require_progress_owner(a: &App, account: i32, player: i32) -> Result<()> {
+    let owners = a.owners.lock().expect("ownership registry poisoned");
+    let claim = owners
+        .get(&account)
+        .context("native pause progress has no account claim")?;
+    ensure!(
+        claim.avatar == Some(player)
+            && claim.owner_present
+            && claim.pending
+            && claim.failure.is_none()
+            && claim.finalization.is_none(),
+        "native pause progress owner is stale, unreserved, closing or fenced"
+    );
+    Ok(())
+}
+
 pub(super) fn reserve_player(
     a: &App,
     account: i32,
