@@ -3419,6 +3419,7 @@ mod tests {
         count: usize,
         size: usize,
         hash: &str,
+        expected_lava_pixels: Option<usize>,
     ) -> (Content, Map, ReviewedRecipe) {
         let content = Content::load(Path::new("data")).unwrap();
         let root = Path::new("data/realms");
@@ -3426,7 +3427,10 @@ mod tests {
             panic!("reviewed fixture");
         };
         let (map, lava) = reviewed_map(root, &r, &content).unwrap();
-        assert!(lava.is_none());
+        assert_eq!(
+            lava.as_ref().map(|scope| scope.pixels),
+            expected_lava_pixels
+        );
         let dimensions = r.dimensions().unwrap();
         let (bytes, actual_count) =
             encode_reviewed(&map, &content, lava.as_ref(), Some(&r)).unwrap();
@@ -3569,12 +3573,100 @@ mod tests {
     }
 
     #[test]
+    fn realm_prepare_reviewed_world01_exact_two_encodes_and_all_fields() {
+        let (content, map, r) = reviewed_roundtrip(
+            "world01.json",
+            65,
+            457347,
+            "91386e05ae2a99bbb05a3d7ccefdf68eaf60b3e107ca630d30974779e90aa06e",
+            Some(703),
+        );
+        assert_eq!(r.schema, 4);
+        assert_eq!([map.width, map.height], [2100, 2100]);
+        assert!(
+            Map::decode_cells(
+                &std::fs::read(Path::new("data/realms").join(&r.output)).unwrap(),
+                &content
+            )
+            .is_err()
+        );
+        for c in map.cells.iter().filter(|c| c.ground == 244) {
+            assert_eq!(
+                (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                (244, None, "", 1, 0)
+            );
+        }
+        for (ground, object, expected_count, expected_hash) in [
+            (
+                244,
+                None,
+                703,
+                "93f3410a461d0daa70d6efc79938a5a0938f69018bd32e9c5667bf6ee25a2b17",
+            ),
+            (
+                247,
+                Some(477),
+                19,
+                "8800a59eabb0cc59c63e23cb1123c59b425be0361dfdc8142de81a2e761ecc3e",
+            ),
+        ] {
+            let positions: Vec<_> = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.ground == ground && c.object == object)
+                .map(|(i, _)| i as u32)
+                .collect();
+            assert_eq!(positions.len(), expected_count);
+            assert_eq!(
+                sha256(
+                    &positions
+                        .iter()
+                        .flat_map(|i| i.to_le_bytes())
+                        .collect::<Vec<_>>()
+                ),
+                expected_hash
+            );
+        }
+        let source = super::super::realms::sources(Path::new("data"))
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name() == r.id)
+            .unwrap();
+        let arrived = source.open(&content).unwrap();
+        assert_eq!(
+            arrived.spawns,
+            [
+                (1050.5, 1859.5),
+                (1971.5, 1050.5),
+                (1050.5, 521.5),
+                (385.5, 1050.5)
+            ]
+        );
+        let mut changes = 0;
+        for (a, b) in map.cells.iter().zip(&arrived.cells) {
+            if (a.ground, a.object, &a.config, a.terrain, a.region)
+                != (b.ground, b.object, &b.config, b.terrain, b.region)
+            {
+                changes += 1;
+                assert_eq!(
+                    (a.ground, a.object, &a.config, a.terrain),
+                    (b.ground, b.object, &b.config, b.terrain)
+                );
+                assert_eq!((a.region, b.region), (0, 1));
+            }
+        }
+        assert_eq!(changes, 36);
+    }
+
+    #[test]
     fn realm_prepare_reviewed_world02_exact_two_encodes_and_all_fields() {
         let (content, map, r) = reviewed_roundtrip(
             "world02.json",
             55,
             456061,
             "c409996bc3a4bbe46ae872998a69ff5491cfdd8371eb06d6324707119f0f846b",
+            None,
         );
         assert_eq!(r.schema, 4);
         assert_eq!([map.width, map.height], [2100, 2100]);
@@ -3592,6 +3684,7 @@ mod tests {
                 "realm-fsod-1",
                 "realm-fsod-2",
                 "realm-fsod-3",
+                "classic-world-01-reconstruction",
                 "classic-world-02-reconstruction",
                 "classic-world-03-reconstruction"
             ])
@@ -3627,6 +3720,7 @@ mod tests {
             55,
             446160,
             "a95371cbee6852c4b6f885a05418ba37db1b586ce866798a4fe11c656eed198f",
+            None,
         );
         assert_eq!(r.schema, 4);
         assert_eq!([map.width, map.height], [2100, 2100]);

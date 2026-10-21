@@ -9,6 +9,8 @@ impl World {
             self.players.is_empty() && self.now == 0,
             "Hermit landmark requires an unentered Realm"
         );
+        let retain_source1_lava =
+            self.realm_layout.as_deref() == Some("classic-world-01-reconstruction");
         let protected: Vec<_> = self
             .population
             .iter()
@@ -53,12 +55,16 @@ impl World {
                         (a.x..a.x + 32).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
                             c.region == 0
+                                && !(retain_source1_lava && c.ground == 0xf4)
                                 && c.object
                                     .is_none_or(|kind| !self.content.objects[&kind].full_occupy)
                         })
                     })
             })
-            .context("Realm has no unoccupied inland site for the Hermit landmark")?;
+            .with_context(|| format!(
+                "Realm has no unoccupied inland site for the Hermit landmark (layout={:?}, retain_source1_lava={retain_source1_lava})",
+                self.realm_layout
+            ))?;
         // Reconstruct the source island's rings without erasing generated waterways.
         for y in 0..29 {
             for x in 0..32 {
@@ -141,6 +147,8 @@ impl World {
         self.setpieces.push(area);
         tracing::info!(
             root,
+            layout = ?self.realm_layout,
+            retain_source1_lava,
             x = area.x,
             y = area.y,
             "inland Hermit landmark placed"
@@ -160,6 +168,7 @@ mod tests {
             let map = source.open(&content).unwrap();
             for seed in [0, 12351] {
                 let mut w = World::new(content.clone(), map.clone()).unwrap();
+                w.realm_layout = Some(source.name().to_owned());
                 w.rng = rand::rngs::StdRng::seed_from_u64(seed);
                 w.populate_realm_heroes().unwrap();
                 w.populate_named_quests().unwrap();

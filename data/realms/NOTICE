@@ -1,3 +1,10 @@
+World1: approximate image-guided reconstruction, not an authenticated original.
+world01.json pins the full 2100-square image and explicit NEW five-field choices;
+no PNG is bundled. Original substrates, protection, metadata and registration remain unproven.
+Normal Source1 setpieces relocate or fail rather than cover authored bare lava;
+this retention rule is NEW engineering, not recovered original placement behavior.
+Image-derived redistribution rights remain unverified; code licenses do not grant them.
+
 World2: approximate image-guided reconstruction, not an authenticated original.
 Catalogue: https://www.realmeye.com/wiki/maps-of-the-realm (https://imgur.com/UsSpU3r.png).
 world02.json pins image and canonical cell/audit identities; no source PNG is bundled.
@@ -25,4 +32,5 @@ Retained classic-v1 generator only: Amit J Patel, Copyright 2010; MIT notice:
 MAPGEN2-LICENSE.
 
 Offline rebuild without client/state/network: openrotmg build-realm --data data --id ID
-IDs: classic-world-02-reconstruction, classic-world-03-reconstruction. Add --check to compare.
+IDs: classic-world-01-reconstruction, classic-world-02-reconstruction, classic-world-03-reconstruction.
+Add --check to compare.

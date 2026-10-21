@@ -5822,6 +5822,73 @@ mod tests {
     }
 
     #[test]
+    fn source1_lava_and_scenery_survive_normal_realm_construction() {
+        fn state(c: &crate::content::Cell) -> (u8, Option<u16>, &str, u8, u8) {
+            (c.ground, c.object, &c.config, c.terrain, c.region)
+        }
+        let content = world().content;
+        let sources: Vec<_> = crate::terrain::realms::sources(Path::new("data"))
+            .unwrap()
+            .into_iter()
+            .filter(|s| s.name() == "classic-world-01-reconstruction")
+            .collect();
+        assert_eq!(sources.len(), 1);
+        let opened = sources[0].open(&content).unwrap();
+        assert_eq!([opened.width, opened.height], [2100, 2100]);
+        let protected: Vec<_> = opened
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                c.ground == 244
+                    || c.object
+                        .is_some_and(|kind| content.objects[&kind].full_occupy || kind == 6175)
+            })
+            .map(|(i, c)| (i, c.clone()))
+            .collect();
+        assert_eq!(
+            protected.iter().filter(|(_, c)| c.ground == 244).count(),
+            703
+        );
+        assert_eq!(
+            protected
+                .iter()
+                .filter(|(_, c)| c.object == Some(477))
+                .count(),
+            19
+        );
+        let directory =
+            Directory::configured(Path::new("data"), content, 16, 51403, Some(51403), sources)
+                .unwrap();
+        let w = &directory.worlds[&-3];
+        assert_eq!(
+            w.realm_layout.as_deref(),
+            Some("classic-world-01-reconstruction")
+        );
+        assert_eq!(w.map.spawns, opened.spawns);
+        let entities: BTreeSet<_> = w
+            .entities
+            .values()
+            .map(|e| (e.pos.x as usize, e.pos.y as usize, e.kind))
+            .collect();
+        for (i, c) in protected {
+            assert_eq!(
+                state(&w.map.cells[i]),
+                state(&c),
+                "Source1 protected index {i}"
+            );
+            if let Some(kind) = c.object {
+                assert!(entities.contains(&(i % 2100, i / 2100, kind)));
+            }
+        }
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (14, 14));
+        for terrain in 1..=12 {
+            let region = &w.population_regions[terrain];
+            assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
+        }
+    }
+
+    #[test]
     fn restored_passives_survive_normal_realm_construction_and_connected_approaches() {
         use super::entity_store::EntityState;
         let content = world().content;
