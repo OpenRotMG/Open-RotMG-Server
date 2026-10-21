@@ -3,7 +3,9 @@ use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
-use super::prepare::{bounded_read, read_recipe, safe_path, valid_hash, valid_id};
+use super::prepare::{
+    ScopedLava, WORLD09_ID, bounded_read, read_recipe, safe_path, valid_hash, valid_id,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -28,6 +30,22 @@ pub(crate) struct Asset {
     contract: String,
     expected_dimensions: [usize; 2],
     expected_content: Option<[String; 2]>,
+    lava: Option<Box<ScopedLava>>,
+}
+impl Asset {
+    fn validate_lava(&self, map: &Map, content: &Content, phase: &str) -> Result<()> {
+        if let Some(lava) = &self.lava {
+            lava.validate_loaded(map, content)
+                .with_context(|| format!("{} lava support {phase}", self.contract))
+        } else {
+            ensure!(
+                self.id != WORLD09_ID || !map.cells.iter().any(|c| c.ground == 244),
+                "{} requires its exact World9 lava capability {phase}",
+                self.contract
+            );
+            Ok(())
+        }
+    }
 }
 
 pub(crate) enum Source {
@@ -77,8 +95,10 @@ impl Source {
                     [map.width, map.height],
                     map.cells.len()
                 );
+                asset.validate_lava(&map, content, "before arrivals")?;
                 prepare_arrivals(&mut map, content)
                     .with_context(|| format!("prepare Realm layout {name}"))?;
+                asset.validate_lava(&map, content, "after arrivals")?;
                 tracing::info!(
                     layout = name,
                     sha256 = asset.sha256,
@@ -111,41 +131,55 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
         .enumerate()
         .map(|(index, entry)| {
             let load = || -> Result<Source> {
-                let (id, file, expected, profile, contract, expected_dimensions, expected_content) =
-                    match entry {
-                        Entry::Baseline {
+                let (
+                    id,
+                    file,
+                    expected,
+                    profile,
+                    contract,
+                    expected_dimensions,
+                    expected_content,
+                    lava,
+                ) = match entry {
+                    Entry::Baseline {
+                        id,
+                        path: relative,
+                        sha256,
+                    } => {
+                        ensure!(
+                            id != WORLD09_ID,
+                            "World9 requires its reviewed source recipe"
+                        );
+                        let contract = format!("{id} fsod baseline");
+                        (
                             id,
-                            path: relative,
+                            safe_path(path, &relative)?,
                             sha256,
-                        } => {
-                            let contract = format!("{id} fsod baseline");
-                            (
-                                id,
-                                safe_path(path, &relative)?,
-                                sha256,
-                                "fsod".to_owned(),
-                                contract,
-                                [2048, 2048],
-                                None,
-                            )
-                        }
-                        Entry::Reconstruction { recipe, sha256 } => {
-                            let root = safe_path(path, "realms")?;
-                            let metadata = read_recipe(&root, &recipe).with_context(|| {
-                                format!("Realm recipe {recipe} expected output SHA-256 {sha256}")
-                            })?;
-                            let file = safe_path(&root, metadata.output())?;
-                            (
-                                metadata.id().to_owned(),
-                                file,
-                                sha256,
-                                metadata.profile().to_owned(),
-                                metadata.contract(),
-                                metadata.dimensions(),
-                                metadata.content_identity(),
-                            )
-                        }
-                    };
+                            "fsod".to_owned(),
+                            contract,
+                            [2048, 2048],
+                            None,
+                            None,
+                        )
+                    }
+                    Entry::Reconstruction { recipe, sha256 } => {
+                        let root = safe_path(path, "realms")?;
+                        let metadata = read_recipe(&root, &recipe).with_context(|| {
+                            format!("Realm recipe {recipe} expected output SHA-256 {sha256}")
+                        })?;
+                        let file = safe_path(&root, metadata.output())?;
+                        (
+                            metadata.id().to_owned(),
+                            file,
+                            sha256,
+                            metadata.profile().to_owned(),
+                            metadata.contract(),
+                            metadata.dimensions(),
+                            metadata.content_identity(),
+                            metadata.lava_scope(&root)?.map(Box::new),
+                        )
+                    }
+                };
                 ensure!(valid_id(&id), "invalid Realm catalog ID {id:?}");
                 ensure!(ids.insert(id.clone()), "duplicate Realm catalog ID {id}");
                 ensure!(
@@ -171,6 +205,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                     contract,
                     expected_dimensions,
                     expected_content,
+                    lava,
                 }))
             };
             load().with_context(|| format!("Realm catalog {} entry {index}", catalog.display()))
