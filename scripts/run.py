@@ -149,6 +149,10 @@ def main():
                 raise RuntimeError(f"Cannot listen on 127.0.0.1:{args.port}: {error}") from error
             revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
             dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
+            guard = str(Path(__file__).with_name('cargo.py'))
+            code = run([sys.executable, guard, 'status'], ROOT, log)
+            if code:
+                raise RuntimeError(f'Build storage check exited with status {code}. See {LOG}.')
             if args.local_client is not None:
                 client = args.local_client.resolve()
             else:
@@ -165,10 +169,14 @@ def main():
             if code:
                 raise RuntimeError(f"Client preparation exited with status {code}. See the error above and {LOG}.")
             print(f"Building and starting your local game. Logs: {LOG}", flush=True)
-            command = ["cargo", "run", "--locked"]
+            binary = state / 'server-build' / 'openrotmg'
+            build = [sys.executable, guard, '--output', str(binary), 'build', '--locked']
             if args.release:
-                command.append("--release")
-            command += ["--", "--client", str(client), "--port", str(args.port), "--test-state" if args.test_state is not None else "--state", str(state)]
+                build.append('--release')
+            code = run(build, ROOT, log)
+            if code:
+                raise RuntimeError(f'Server build exited with status {code}. See {LOG}.')
+            command = [str(binary), "--client", str(client), "--port", str(args.port), "--test-state" if args.test_state is not None else "--state", str(state)]
             if args.dev_control:
                 command.append("--dev-control")
             if args.shore_bots:

@@ -125,8 +125,8 @@ class LauncherTests(unittest.TestCase):
                     patch.object(launcher, 'prepare_client', return_value=self.client) as download, \
                     patch.object(launcher, 'run', return_value=0) as run:
                 self.assertEqual(launcher.main(), 0)
-                self.assertEqual(run.call_count, 2)
-                self.assertEqual(run.call_args.args[0], ['cargo', 'run', '--locked', '--', '--client', str(self.client), *expected[:2], '--state', str(self.root / '.local'), *expected[2:]])
+                self.assertEqual(run.call_count, 4)
+                self.assertEqual(run.call_args.args[0], [str(self.root / '.local/server-build/openrotmg'), '--client', str(self.client), *expected[:2], '--state', str(self.root / '.local'), *expected[2:]])
                 if '--local-client' in args:
                     download.assert_not_called()
 
@@ -139,7 +139,8 @@ class LauncherTests(unittest.TestCase):
                     patch.object(launcher.shutil, 'which', return_value='/cargo'), \
                     patch.object(launcher, 'run', return_value=0) as run:
                 self.assertEqual(launcher.main(), 0)
-            self.assertEqual(run.call_args.args[0], ['cargo', 'run', '--locked', '--release', '--', '--client', str(self.client), '--port', '8081', '--state', str(state), flag])
+            self.assertIn('--release', run.call_args_list[2].args[0])
+            self.assertEqual(run.call_args.args[0], [str(state / 'server-build/openrotmg'), '--client', str(self.client), '--port', '8081', '--state', str(state), flag])
         with patch('sys.argv', ['run.py', '8081', '--shore-bots', '--no-shore-bots']), self.assertRaises(SystemExit) as error:
             launcher.main()
         self.assertEqual(error.exception.code, 2)
@@ -173,6 +174,29 @@ class LauncherTests(unittest.TestCase):
                 patch.object(launcher, 'prepare_client', side_effect=AssertionError('must fail before download')):
             launcher.main()
         self.assertIn('Cannot listen on 127.0.0.1:8081', launcher.LOG.read_text())
+
+    def test_storage_refusal_happens_before_client_download_or_build(self):
+        with patch('sys.argv', ['run.py', '8081']), \
+                patch.object(launcher.shutil, 'which', return_value='/cargo'), \
+                patch.object(launcher, 'prepare_client') as prepare, \
+                patch.object(launcher, 'run', return_value=1) as run:
+            self.assertEqual(launcher.main(), 1)
+        prepare.assert_not_called()
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][-1], 'status')
+        self.assertIn('Build storage check exited', launcher.LOG.read_text())
+
+    def test_failed_build_never_starts_a_stale_retained_binary(self):
+        (self.client / 'scripts').mkdir(parents=True)
+        (self.client / 'scripts/run.py').touch()
+        with patch('sys.argv', ['run.py', '8081']), \
+                patch.object(launcher.shutil, 'which', return_value='/cargo'), \
+                patch.object(launcher, 'prepare_client', return_value=self.client), \
+                patch.object(launcher, 'run', side_effect=[0, 0, 37]) as run:
+            self.assertEqual(launcher.main(), 1)
+        self.assertEqual(run.call_count, 3)
+        self.assertIn('build', run.call_args.args[0])
+        self.assertIn('Server build exited with status 37', launcher.LOG.read_text())
 
     def test_missing_port_fails_before_setup(self):
         for args in [[], ['--dev-control'], ['--local-client', str(self.client)]]:
@@ -210,9 +234,9 @@ class LauncherTests(unittest.TestCase):
         (self.client / 'scripts').mkdir(parents=True)
         (self.client / 'scripts/run.py').touch()
         with patch('sys.argv', ['run.py', '8080']), patch.object(launcher.shutil, 'which', return_value='/cargo'), \
-                patch.object(launcher, 'prepare_client', return_value=self.client), patch.object(launcher, 'run', return_value=37) as run:
+                patch.object(launcher, 'prepare_client', return_value=self.client), patch.object(launcher, 'run', side_effect=[0, 37]) as run:
             self.assertEqual(launcher.main(), 1)
-            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_count, 2)
         self.assertIn('status 37', launcher.LOG.read_text())
 
     def test_manifest_failure_never_uses_a_stale_cached_client(self):
@@ -299,7 +323,7 @@ class LauncherTests(unittest.TestCase):
         backend.wait.return_value = 1
         with patch('sys.argv', ['run.py', '8080']), patch.object(launcher.shutil, 'which', return_value='/cargo'), \
                 patch.object(launcher, 'prepare_client', return_value=self.client), \
-                patch.object(launcher.subprocess, 'Popen', side_effect=[prepare, backend]):
+                patch.object(launcher.subprocess, 'Popen', side_effect=[prepare, prepare, prepare, backend]):
             self.assertEqual(launcher.main(), 1)
         self.assertIn('cannot listen', launcher.LOG.read_text())
         self.assertIn('status 1', launcher.LOG.read_text())
