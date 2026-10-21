@@ -5174,7 +5174,7 @@ impl World {
                 };
             }
             let e = &self.entities[&id];
-            let schedule = if burst {
+            let schedule = if burst && kind != crate::dungeon::manor::MINE {
                 None
             } else {
                 match self.npc_attack_schedule(id, elapsed) {
@@ -5198,7 +5198,8 @@ impl World {
             let result = if let Some(schedule) = &schedule {
                 self.scheduled_attacks(id, target, schedule)
             } else {
-                self.legacy_enemy_shots(id, target.expect("legacy attack target acquired"), elapsed)
+                let Some(target) = target else { continue };
+                self.legacy_enemy_shots(id, target, elapsed)
             };
             let shots = match result {
                 Ok(shots) => shots,
