@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {hasNativeEntry,nativeEntry} from './native-test.mjs';
+import {readFile} from 'node:fs/promises';
+import {runInNewContext} from 'node:vm';
 
 function entryFixture(module){
   const abort=new AbortController(),calls={automatic:0};
@@ -63,4 +65,24 @@ test('native entry abort unwinds outer cleanup despite a noncooperating hook',as
   let cleaned=false;const pending=(async()=>{try{await f.enter();}finally{cleaned=true;}})();
   await entered.promise;f.abort.abort(reason);await assert.rejects(pending,error=>error===reason);
   assert.equal(cleaned,true);assert.equal(f.calls.automatic,0);
+});
+
+test('native gameFor inspect uses only closure actor and existing API abort and HTTP bounds',async()=>{
+  const source=await readFile(new URL('./native-test.mjs',import.meta.url),'utf8');
+  const api=source.slice(source.indexOf('  const api=async command=>{'),source.indexOf('  const call='));
+  const gameFor=source.slice(source.indexOf('      const gameFor=client=>'),source.indexOf('      const game=gameFor(first);'));
+  assert(api.includes('AbortSignal.timeout(10000)')&&gameFor.includes("inspect:()=>api({op:'inspect',actor})"),'Production read boundaries must be present');
+  const abort=new AbortController(),commands=[],timeout=Symbol('HTTP deadline');let tokenReads=0;
+  const factory=runInNewContext(`(()=>{${api}${gameFor}return gameFor;})()`,{
+    controller:abort,check:()=>abort.signal.throwIfAborted(),out:'/synthetic',port:8000,
+    join:(...parts)=>parts.join('/'),randomUUID:()=>String(commands.length),assert,
+    readFile:async()=>{tokenReads++;return 'synthetic-token';},
+    fetch:async(url,options)=>{assert.equal(url,'http://127.0.0.1:8000/dev/testing');assert.equal(options.signal,abort.signal);commands.push(JSON.parse(options.body).command);return{ok:true,json:async()=>({status:'ok',view:{known:true}})};},
+    AbortSignal:{timeout(ms){assert.equal(ms,10000);return timeout;},any(signals){assert.equal(signals.length,2);assert.equal(signals[0],abort.signal);assert.equal(signals[1],timeout);return abort.signal;}}
+  });
+  const game=factory({actor:7,evaluate(){assert.fail('inspect evaluated browser code');}}),inspect=game.inspect;
+  assert.deepEqual(await inspect.call({actor:999},{actor:123,op:'act'}),{status:'ok',view:{known:true}});
+  await game.inspect('unrelated actor');assert.deepEqual(commands,[{op:'inspect',actor:7},{op:'inspect',actor:7}]);assert.equal(tokenReads,2);
+  const reason=Error('inspection cancelled');abort.abort(reason);await assert.rejects(inspect(),error=>error===reason);
+  assert.equal(tokenReads,2);assert.equal(commands.length,2);
 });

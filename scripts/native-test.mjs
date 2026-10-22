@@ -279,7 +279,7 @@ export async function runCase(scenario, options) {
     const first=await bounded('browserAndFixture',()=>addClient(spec));
     ({actor,account,connection,browser,chromePort}=first);report.actor=actor;report.account=account;
     await bounded('scenario',async()=>{
-      const gameFor=client=>{const {actor,evaluate}=client;return {actor,join:async spec=>gameFor(await addClient(spec)),observe:()=>api({op:'observe',actor}),check(name,condition){assert(condition,name);report.assertions.push(name);},
+      const gameFor=client=>{const {actor,evaluate}=client;return {actor,join:async spec=>gameFor(await addClient(spec)),observe:()=>api({op:'observe',actor}),inspect:()=>api({op:'inspect',actor}),check(name,condition){assert(condition,name);report.assertions.push(name);},
         async act(input,captureSpec){
           check();let complete=false;const action=driver({op:'act',actor,...(Array.isArray(input)?{sequence:input}:{input}),pauseAfter:true}).finally(()=>complete=true);
           if(!captureSpec)return await action;

@@ -12,4 +12,4 @@ Prepared fixtures do not prove earned progression; keep normal journeys separate
 
 A case may export `enter({actor, account, browser, signal})` for observed menu entry after fresh guest/Ruffle preparation. The context and `{owner, port, target, pid}` browser data are frozen; no CDP/API/controller is supplied. Respect the existing AbortSignal and capture/read before input; normal LOAD/READY/pause follows. Only an absent export uses automatic entry: explicit invalid values, hook errors or cancellation fail without automatic-input recovery or clock extension.
 
-`result.json` records timings and assertions. Failures exit nonzero and retain state/logs. Discover controller operations and limits with `node scripts/game.mjs --help`.
+`run(game)` can read its actor's fresh client-known `(await game.inspect()).view`; privileged diagnostics are not native passability evidence. `result.json` records timings and assertions. Failures exit nonzero and retain state/logs. Discover controller operations and limits with `node scripts/game.mjs --help`.
