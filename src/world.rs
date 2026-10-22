@@ -5840,6 +5840,71 @@ mod tests {
     }
 
     #[test]
+    fn classic_highland_leaders_earn_snake_portals_but_followers_do_not() {
+        for kind in [
+            0x640, 0x645, 0x646, 0x649, 0x650, 0x63e, 0x642, 0x647, 0x64f,
+        ] {
+            let eligible = matches!(kind, 0x640 | 0x645 | 0x646 | 0x649 | 0x650);
+            assert_eq!(
+                crate::dungeon::portal_drop(kind),
+                eligible.then_some((0x718, 0.17))
+            );
+            let family = population::FAMILIES.iter().find(|f| f.leader == kind);
+            let mut w = arena(family.map_or(6, |f| f.terrain));
+            w.name = "Realm".into();
+            let owner = w.enter(ch(&w), None).unwrap();
+            let pos = Pos { x: 12.5, y: 12.5 };
+            if let Some(family) = family {
+                let positions = w.family_layout(pos, family, &[]).unwrap();
+                w.place_camp(family, positions).unwrap();
+            }
+            let mut drops = 0;
+            for seed in 0..64 {
+                let enemy = if family.is_some() {
+                    let slot = w.camps[0].start;
+                    if w.population[slot].entity.is_none() {
+                        w.place_member(0, slot, pos).unwrap();
+                    }
+                    let id = w.population[slot].entity.unwrap();
+                    assert_eq!(w.entities[&id].camp, Some(0));
+                    id
+                } else {
+                    w.spawn_entity(kind, pos, vec![]).unwrap()
+                };
+                let hp = w.entities[&enemy].hp;
+                let defense = w.content.objects[&kind].defense;
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.damage_enemy(owner, enemy, defense + 1, false, &[], None)
+                    .unwrap();
+                assert!(w.portal_requests.is_empty(), "nonlethal hit: {kind:#x}");
+                w.damage_enemy(owner, enemy, hp + defense, false, &[], None)
+                    .unwrap();
+                assert!(!w.entities.contains_key(&enemy));
+                assert!(
+                    w.portal_requests
+                        .iter()
+                        .all(|(portal, p)| *portal == 0x718 && p.distance(pos) < 0.01)
+                );
+                assert!(w.portal_requests.len() <= 1);
+                let count = w.portal_requests.len();
+                w.damage_enemy(owner, enemy, hp, false, &[], None).unwrap();
+                assert_eq!(
+                    w.portal_requests.len(),
+                    count,
+                    "duplicate defeat: {kind:#x}"
+                );
+                drops += w.portal_requests.len();
+                w.portal_requests.clear();
+                for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                    w.remove_entity(bag);
+                }
+            }
+            assert_eq!(drops > 0, eligible, "observed drops for {kind:#x}: {drops}");
+            assert!(drops < 64, "drops are not guaranteed for {kind:#x}");
+        }
+    }
+
+    #[test]
     fn one_owner_and_no_teleport() {
         let mut w = world();
         let c = ch(&w);
