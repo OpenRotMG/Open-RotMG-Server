@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
-import {startChild,stopChild,browserDiagnostic,runCase} from './native-test.mjs';
+import {startChild,stopChild,browserDiagnostic,runCase,nativeConnections} from './native-test.mjs';
 import {mkdtemp,writeFile,readFile,rename,rm,open,stat} from 'node:fs/promises';
 import {setImmediate as nextTurn} from 'node:timers/promises';
 import {runInNewContext} from 'node:vm';
@@ -29,7 +29,7 @@ async function publication(out,report,io={}) {
         const {actor,account,connection,browser,chromePort,call,evaluate,bounds,display}=client,env={DISPLAY:display};
         ${tail}
       }};
-  })()`,{out,report,participants,join,AbortController,Error,setTimeout:()=>null,clearTimeout(){},performance:{now:()=>123},process:{once(){},removeListener(){},env:{}},options:{browserTools:'/synthetic/browser-tools'},writeFile,rename,driver:async command=>assert.deepEqual(JSON.parse(JSON.stringify(command)),{op:'pause'}),...io});
+  })()`,{out,report,participants,join,AbortController,Error,setTimeout:()=>null,clearTimeout(){},performance:{now:()=>123},process:{once(){},removeListener(){},env:{}},options:{browserTools:'/synthetic/browser-tools'},writeFile,rename,nativeConnections,driver:async command=>assert.deepEqual(JSON.parse(JSON.stringify(command)),{op:'pause'}),...io});
 }
 const participant=index=>({actor:index+1,account:'account-'+index,connection:{},browser:{owner:'native-test:synthetic',port:9000+index,target:'target-'+index,pid:100+index,browser:'browser-'+index,tabPolicy:'agent_only'},chromePort:9000+index,call(){},evaluate(){},bounds:{left:0,top:0,width:1280,height:960},display:':'+(index+100)});
 const participantRecord=({actor,account,browser,bounds,display})=>({actor,account,browser,bounds,display});
@@ -246,7 +246,7 @@ test('prepared fixture seals an in-flight API reply after hook settlement',async
   release({paused:true});await assert.rejects(pending,/preparation phase is closed/);
 });
 
-const {nativeJoins,nativeConnections,spawnNativeFixture,runNativeScenario,nativeXauth}=await import('./native-test.mjs');
+const {nativeJoins,spawnNativeFixture,runNativeScenario,nativeXauth}=await import('./native-test.mjs');
 const deferred=()=>Promise.withResolvers();
 function joinFixture(t){
   const abort=new AbortController(),events=[],participants=[],cleanup=[],diagnostics=[];let closing=false,next=0;
