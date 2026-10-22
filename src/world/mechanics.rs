@@ -399,13 +399,6 @@ impl World {
                     self.spawn_children(id, kind, 2, 2.)?;
                 }
             }
-            0xda2 | 0xda3 if target.is_some_and(|p| pos.distance(p) < 3.) => {
-                self.entities.get_mut(&id).unwrap().expires.set(
-                    Some(self.now + 50),
-                    id,
-                    &mut self.timed_ids,
-                );
-            }
             0xdae => {
                 self.escort_anchor(id, 0xd90)?;
                 let allies: Vec<_> = self
@@ -591,7 +584,7 @@ impl World {
             return self.event_tower_death(defeated);
         }
         if defeated.kind == crate::dungeon::abyss::IDOL {
-            self.idol_bridge(defeated.home, true)?;
+            self.idol_entrance(defeated.home, true)?;
         }
         if let Some(tag) = defeated.quest {
             if defeated.kind == 0x929 {

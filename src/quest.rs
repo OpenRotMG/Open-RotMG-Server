@@ -3,10 +3,9 @@ use anyhow::{Result, ensure};
 
 pub const ROOTS: [u16; 4] = [0x91f, 0x91b, 0x928, 0x675];
 pub const EVENTS: [u16; 3] = [0xd56, 0xd59, 0xd5f];
+pub const EVENT_BOSSES: [u16; 7] = [0xd56, 0xd59, 0xd5f, 0xd50, 0xd54, 0xd61, 0xe37];
 pub fn root(kind: u16) -> bool {
-    ROOTS.contains(&kind)
-        || EVENTS.contains(&kind)
-        || matches!(kind, crate::dungeon::trench::HERMIT | 0xe37)
+    ROOTS.contains(&kind) || EVENT_BOSSES.contains(&kind) || kind == 0x678
 }
 
 /// Character level windows of the quest monsters, as (kind, first level, last level).
