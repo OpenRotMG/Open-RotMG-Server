@@ -2436,6 +2436,16 @@ mod tests {
             {"ground":190,"object":null,"config":"","terrain":1,"region":0}
         ]);
         let mut raw = vec![0; side * side * 2];
+        let source7_dark_panel = value["id"] == "classic-world-07-reconstruction";
+        if source7_dark_panel {
+            // Synthetic row-boundary sentinels do not claim actual panel membership.
+            for (n, ground) in [232, 25, 1].into_iter().enumerate() {
+                cells.as_array_mut().unwrap().push(serde_json::json!({
+                    "ground":ground,"object":null,"config":"","terrain":0,"region":0
+                }));
+                raw[(side - 1 + n) * 2] = n as u8 + 2;
+            }
+        }
         raw[(side / 2 * side + side / 2) * 2] = 1;
         if schema == 4 {
             for (x, y) in [
@@ -2567,6 +2577,16 @@ mod tests {
         assert_eq!([opened.width, opened.height], [side as i32, side as i32]);
         assert_eq!(opened.cells.len(), side * side);
         assert_eq!(opened.spawns.len(), 4);
+        if source7_dark_panel {
+            for (n, ground) in [232, 25, 1].into_iter().enumerate() {
+                let c = &opened.cells[side - 1 + n];
+                assert_eq!(
+                    (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                    (ground, None, "", 0, 0),
+                    "Source7 synthetic dark-panel sentinel {n}"
+                );
+            }
+        }
         let mut arrival_changes = 0;
         for (before, after) in map.cells.iter().zip(&opened.cells) {
             assert_eq!(
@@ -3360,6 +3380,17 @@ mod tests {
             serde_json::json!({"ground":190,"object":null,"config":"","terrain":11,"region":0});
         let parse = |v: serde_json::Value| dictionary(&serde_json::to_vec(&v).unwrap(), &content);
         parse(serde_json::json!([valid.clone(), valid.clone()])).unwrap();
+        for ground in [232, 25, 1] {
+            let cells = parse(serde_json::json!([
+                {"ground":ground,"object":null,"config":"","terrain":0,"region":0}
+            ]))
+            .unwrap();
+            let c = &cells[0];
+            assert_eq!(
+                (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                (ground, None, "", 0, 0)
+            );
+        }
         for field in ["ground", "object", "config", "terrain", "region"] {
             let mut v = valid.clone();
             v.as_object_mut().unwrap().remove(field);
