@@ -1331,7 +1331,7 @@ impl Directory {
             .worlds
             .get_mut(&origin)
             .unwrap()
-            .spawn_entity(kind, pos, vec![])?;
+            .spawn_exit(kind, pos)?;
         self.portals.insert(
             id,
             Portal {
@@ -1346,6 +1346,8 @@ impl Directory {
             kind,
             origin,
             destination,
+            x = self.worlds[&origin].entities[&id].pos.x,
+            y = self.worlds[&origin].entities[&id].pos.y,
             "earned dungeon portal dropped"
         );
         Ok(id)
@@ -1385,7 +1387,7 @@ impl Directory {
             .collect();
         for (origin, (kind, pos)) in requests {
             if let Err(error) = self.drop_dungeon_portal(origin, kind, pos) {
-                tracing::error!(origin,%error,"earned dungeon portal creation failed");
+                tracing::error!(origin,kind,x=pos.x,y=pos.y,%error,"earned dungeon portal creation failed");
             }
         }
         let expired_portals: Vec<_> = self
@@ -2113,7 +2115,7 @@ impl World {
         }
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
-        // Native interaction picks one nearest object; an exit on a bag makes that loot unreachable.
+        // Nearest-only interaction masks co-located loot or portals: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/game/GameSprite.as#L195-L225
         let pos = (0..8)
             .map(|i| {
                 let angle = i as f32 * std::f32::consts::TAU / 8.;
@@ -2125,8 +2127,7 @@ impl World {
             .find(|pos| {
                 self.walkable(*pos)
                     && self
-                        .entities
-                        .values()
+                        .entities_near(*pos, 2.)
                         .filter(|e| {
                             matches!(
                                 self.content.objects[&e.kind].class.as_str(),
@@ -2135,7 +2136,7 @@ impl World {
                         })
                         .all(|e| e.pos.distance(*pos) > 1.5)
             })
-            .context("boss exit has no walkable position clear of loot and interactions")?;
+            .context("portal has no walkable position clear of loot and interactions")?;
         self.spawn_entity(kind, pos, vec![])
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
@@ -5368,6 +5369,20 @@ impl World {
                 }
                 self.bullets.push(bullet);
             }
+            // Shoot then retire, independent of the proximity poll; keep the owner until publication: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.UndeadLair.cs#L462-L480
+            if matches!(kind, 0xda2 | 0xda3) && !notices.is_empty() {
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
+                tracing::debug!(
+                    entity = id,
+                    kind,
+                    shots = notices.len(),
+                    "Lair trap detonated"
+                );
+            }
             packets.extend(
                 enemy_shots::packets(id, &notices)
                     .into_iter()
@@ -5755,6 +5770,8 @@ mod timing_example;
 #[cfg(test)]
 mod ground_dye_tests;
 #[cfg(test)]
+mod lair_trap_tests;
+#[cfg(test)]
 mod manor_tests;
 #[cfg(test)]
 mod starter_loot_tests;
@@ -5875,6 +5892,47 @@ mod tests {
             assert_eq!(r.i16().unwrap(), 0);
             assert_eq!(r.i16().unwrap(), 0);
             r.done().unwrap();
+        }
+    }
+
+    #[test]
+    fn earned_portals_leave_loot_and_other_portals_individually_reachable() {
+        let mut d = directory();
+        let mut origin = arena(1);
+        origin.name = "Realm".into();
+        origin.ids = d.ids.clone();
+        d.worlds.insert(-3, origin);
+        let w = d.worlds.get_mut(&-3).unwrap();
+        let (x, y) = (10.5, 10.5);
+        let pos = Pos { x, y };
+        let public = w.loot_bag(pos, None, vec![0xa23, 0xa22]).unwrap();
+        let private = w
+            .loot_bag(Pos { x: x + 3.5, y }, Some(17), vec![0xa23])
+            .unwrap();
+        let mut expected_rng = w.rng.clone();
+        let snake = d.drop_dungeon_portal(-3, 0x718, pos).unwrap();
+        let sprite = d.drop_dungeon_portal(-3, 0x70c, pos).unwrap();
+        let w = &d.worlds[&-3];
+        let objects = [public, private, snake, sprite];
+        for id in objects {
+            let at = w.entities[&id].pos;
+            assert!(w.walkable(at));
+            for other in objects.into_iter().filter(|other| *other != id) {
+                assert!(
+                    at.distance(w.entities[&other].pos) > 1.5,
+                    "interaction {id} overlaps {other}"
+                );
+            }
+        }
+        assert_eq!(&w.entities[&public].items[..2], &[0xa23, 0xa22]);
+        assert_eq!(w.entities[&private].extra_stats, vec![(54, 17)]);
+        assert_eq!(w.bag_expiry[&public], 60000);
+        assert_eq!(w.rng.clone().r#gen::<u64>(), expected_rng.r#gen::<u64>());
+        for (id, name, lifetime) in [(snake, "Snake Pit", 600), (sprite, "Sprite World", 300)] {
+            let portal = &d.portals[&id];
+            assert_eq!(portal.origin, -3);
+            assert_eq!(portal.expires, d.tick + lifetime);
+            assert_eq!(d.worlds[&portal.destination.unwrap()].name, name);
         }
     }
 
