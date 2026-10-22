@@ -5822,6 +5822,201 @@ mod tests {
     }
 
     #[test]
+    fn source5_exact_lava_survives_normal_realm_construction() {
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+        let hash = |raw: &[u8]| format!("{:x}", Sha256::digest(raw));
+        let zipped = |raw: &[u8]| {
+            let mut encoder =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+            encoder.write_all(raw).unwrap();
+            encoder.finish().unwrap()
+        };
+        let binding: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../data/realms/world05/lava-support.json"))
+                .unwrap();
+        let mut cells: Vec<_> = (1..=12)
+            .map(|terrain| {
+                serde_json::json!({
+                    "ground":190,"object":null,"config":"","terrain":terrain,"region":0
+                })
+            })
+            .collect();
+        cells.push(binding["cell"].clone());
+        let mut indices = vec![10u16; 2100 * 2100];
+        for y in 100..2000 {
+            for x in 100..2000 {
+                indices[y * 2100 + x] = (((y - 100) / 634) * 4 + (x - 100) / 475) as u16;
+            }
+        }
+        let mut lava = Vec::new();
+        for run in binding["source_positions_row_runs"].as_array().unwrap() {
+            let y = run[0].as_u64().unwrap() as usize;
+            for x in run[1].as_u64().unwrap() as usize..run[2].as_u64().unwrap() as usize {
+                let i = y * 2100 + x;
+                assert_ne!(indices[i], 12);
+                indices[i] = 12;
+                lava.push(i);
+            }
+        }
+        assert_eq!(lava.len(), 112);
+        let source_le: Vec<_> = lava
+            .iter()
+            .flat_map(|&i| (i as u32).to_le_bytes())
+            .collect();
+        assert_eq!(hash(&source_le), binding["support_sha256_le_u32"]);
+        let raw_indices: Vec<_> = indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+        let compressed_indices = zipped(&raw_indices);
+        let dictionary = serde_json::to_vec(&cells).unwrap();
+        // Artificial habitats isolate normal construction from any claim of a complete Source5 map.
+        let mut recipe: serde_json::Value =
+            serde_json::from_slice(&std::fs::read("data/realms/world01.json").unwrap()).unwrap();
+        recipe["schema"] = 3.into();
+        recipe["id"] = "classic-world-05-reconstruction".into();
+        recipe["output"] = "classic-world-05-reconstruction.wmap".into();
+        recipe["provenance"]["source_sha256"] = binding["source_sha256"].clone();
+        recipe["provenance"]["status"] = "Approximate image-guided reconstruction: SYNTHETIC Source5 construction fixture; exact112 lava only, all other cells artificial; not full-map adoption or original fidelity.".into();
+        for (kind, extension) in [("dictionary", "json"), ("indices", "zlib")] {
+            recipe["inputs"][kind]["path"] = format!("world05/cells.{kind}.{extension}").into();
+        }
+        recipe["inputs"]["dictionary"]["sha256"] = hash(&dictionary).into();
+        recipe["inputs"]["indices"]["sha256"] = hash(&compressed_indices).into();
+        recipe["inputs"]["indices"]["expanded_sha256"] = hash(&raw_indices).into();
+        let transform = serde_json::json!({
+            "kind":"source-local-v1","source_dimensions":[2100,2100],"target_dimensions":[2100,2100],
+            "mapping":"tile_xy=source_xy","historical_coordinates":"UNKNOWN",
+            "status":"One source pixel per engineered cell does not prove original extent, pitch or origin."
+        });
+        let policy = serde_json::json!({"schema":2,"selected_client":"123.5.1",
+            "source_sha256":binding["source_sha256"],"transform":transform,
+            "audit":{"kind":"reviewed-supports-v1","supports":13,"pixels":4410000},
+            "world05_lava":{"rgb":binding["rgb"],"pixels":binding["pixels"],
+                "support_sha256_le_u32":binding["support_sha256_le_u32"],"cell":binding["cell"]}});
+        let policy_bytes = serde_json::to_vec(&policy).unwrap();
+        let rows: Vec<_> = cells
+            .iter()
+            .enumerate()
+            .map(|(n, cell)| {
+                let support: Vec<_> = indices
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| **v == n as u16)
+                    .flat_map(|(i, _)| (i as u32).to_le_bytes())
+                    .collect();
+                let mut row = cell.clone();
+                row["support"] = (n + 1).into();
+                row["pixels"] = (support.len() / 4).into();
+                row["support_sha256"] = hash(&support).into();
+                row["status"] = "REVIEWED_RECONSTRUCTION".into();
+                row["reason"] =
+                    "SYNTHETIC constructor fixture, not Source5 source geography.".into();
+                row
+            })
+            .collect();
+        let annotations = serde_json::json!({"source_sha256":binding["source_sha256"],
+            "policy_sha256":hash(&policy_bytes),"transform":transform,"unknown":rows});
+        let annotations_bytes = serde_json::to_vec(&annotations).unwrap();
+        for (kind, name, bytes) in [
+            ("policy", "world05/source-policy.json", &policy_bytes),
+            (
+                "annotations",
+                "world05/source-annotations.json",
+                &annotations_bytes,
+            ),
+        ] {
+            recipe["provenance"][kind]["path"] = name.into();
+            recipe["provenance"][kind]["sha256"] = hash(bytes).into();
+        }
+        let mut wire = (cells.len() as i16).to_le_bytes().to_vec();
+        for cell in &cells {
+            wire.extend((cell["ground"].as_u64().unwrap() as i16).to_le_bytes());
+            wire.extend([0, 0, cell["terrain"].as_u64().unwrap() as u8, 0]);
+        }
+        wire.extend(2100i32.to_le_bytes());
+        wire.extend(2100i32.to_le_bytes());
+        wire.extend(&raw_indices);
+        let encoded = zipped(&wire);
+        let root = std::env::temp_dir().join(format!(
+            "source5-normal-constructor-{}",
+            rand::random::<u64>()
+        ));
+        let realms = root.join("realms");
+        std::fs::create_dir_all(realms.join("world05")).unwrap();
+        for (path, bytes) in [
+            ("world05/cells.dictionary.json", &dictionary),
+            ("world05/cells.indices.zlib", &compressed_indices),
+            ("world05/source-policy.json", &policy_bytes),
+            ("world05/source-annotations.json", &annotations_bytes),
+            ("classic-world-05-reconstruction.wmap", &encoded),
+        ] {
+            std::fs::write(realms.join(path), bytes).unwrap();
+        }
+        std::fs::write(
+            realms.join("world05.json"),
+            serde_json::to_vec(&recipe).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("realm-catalog.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"kind":"reconstruction","recipe":"world05.json","sha256":hash(&encoded)}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        let content = world().content;
+        let sources = crate::terrain::realms::sources(&root).unwrap();
+        let opened = sources[0].open(&content).unwrap();
+        let area1 = opened.cells.iter().filter(|c| c.terrain == 1).count();
+        let mut tier0 = World::new(content.clone(), opened.clone()).unwrap();
+        tier0.configure_population().unwrap();
+        assert_eq!(tier0.population_regions[0].target, 0);
+        assert_eq!(tier0.population_regions[1].target, area1 / 100);
+        let mut tier1_cells = opened.cells.clone();
+        for &i in &lava {
+            tier1_cells[i].terrain = 1;
+        }
+        let mut tier1 = World::new(
+            content.clone(),
+            Arc::new(crate::content::Map {
+                width: 2100,
+                height: 2100,
+                cells: tier1_cells,
+                spawns: opened.spawns.clone(),
+            }),
+        )
+        .unwrap();
+        tier1.configure_population().unwrap();
+        assert_eq!(tier1.population_regions[1].target, (area1 + 112) / 100);
+        drop(tier0);
+        drop(tier1);
+        let directory =
+            Directory::configured(Path::new("data"), content, 16, 51403, Some(51403), sources)
+                .unwrap();
+        let w = &directory.worlds[&-3];
+        assert_eq!(
+            w.realm_layout.as_deref(),
+            Some("classic-world-05-reconstruction")
+        );
+        assert_eq!(w.map.spawns, opened.spawns);
+        for i in lava {
+            let c = &w.map.cells[i];
+            assert_eq!(
+                (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                (244, None, "", 0, 0)
+            );
+        }
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (14, 14));
+        assert_eq!(w.population_counts[0], 0);
+        for terrain in 1..=12 {
+            let region = &w.population_regions[terrain];
+            assert!(region.target > 0);
+            assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn source1_lava_and_scenery_survive_normal_realm_construction() {
         fn state(c: &crate::content::Cell) -> (u8, Option<u16>, &str, u8, u8) {
             (c.ground, c.object, &c.config, c.terrain, c.region)

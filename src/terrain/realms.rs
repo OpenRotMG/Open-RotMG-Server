@@ -4,7 +4,8 @@ use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use super::prepare::{
-    ScopedLava, WORLD09_ID, WORLD11_ID, bounded_read, read_recipe, safe_path, valid_hash, valid_id,
+    ScopedLava, WORLD05_ID, WORLD09_ID, WORLD11_ID, bounded_read, read_recipe, safe_path,
+    valid_hash, valid_id,
 };
 use serde::Deserialize;
 
@@ -39,7 +40,7 @@ impl Asset {
                 .with_context(|| format!("{} lava support {phase}", self.contract))
         } else {
             ensure!(
-                !matches!(self.id.as_str(), WORLD09_ID | WORLD11_ID)
+                !matches!(self.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)
                     || !map.cells.iter().any(|c| c.ground == 244),
                 "{} requires its source-exact lava capability {phase}",
                 self.contract
@@ -148,7 +149,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                         sha256,
                     } => {
                         ensure!(
-                            !matches!(id.as_str(), WORLD09_ID | WORLD11_ID),
+                            !matches!(id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID),
                             "{id} requires its reviewed source recipe"
                         );
                         let contract = format!("{id} fsod baseline");

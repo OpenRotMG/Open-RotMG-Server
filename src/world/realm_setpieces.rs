@@ -391,6 +391,7 @@ impl World {
             self.realm_layout.as_deref(),
             Some(
                 "classic-world-01-reconstruction"
+                    | "classic-world-05-reconstruction"
                     | "classic-world-09-reconstruction"
                     | "classic-world-11-reconstruction"
             )
@@ -605,25 +606,29 @@ mod tests {
     }
 
     #[test]
-    fn source1_source9_source11_lava_footprints_are_scoped_atomic_and_relocate() {
+    fn source1_source5_source9_source11_lava_footprints_are_scoped_atomic_and_relocate() {
         let content = super::super::tests::world().content;
         for hermit in [false, true] {
             for corner in [false, true] {
                 for alternate in [false, true] {
-                    for layout in [
-                        None,
-                        Some("classic-world-02-reconstruction"),
-                        Some("classic-world-04-reconstruction"),
-                        Some("classic-world-01-reconstruction"),
-                        Some("classic-world-09-reconstruction"),
-                        Some("classic-world-09-reconstruction-extra"),
-                        Some("classic-world-11-reconstruction"),
-                        Some("classic-world-11-reconstruction-extra"),
+                    for (layout, lava_terrain, lava_object) in [
+                        (None, 0, None),
+                        (Some("classic-world-02-reconstruction"), 0, None),
+                        (Some("classic-world-04-reconstruction"), 0, None),
+                        (Some("classic-world-05-reconstruction"), 0, None),
+                        (Some("classic-world-05-reconstruction"), 1, Some(339)),
+                        (Some("classic-world-05-reconstruction-extra"), 0, None),
+                        (Some("classic-world-01-reconstruction"), 0, None),
+                        (Some("classic-world-09-reconstruction"), 0, None),
+                        (Some("classic-world-09-reconstruction-extra"), 0, None),
+                        (Some("classic-world-11-reconstruction"), 0, None),
+                        (Some("classic-world-11-reconstruction-extra"), 0, None),
                     ] {
                         let retain_lava = matches!(
                             layout,
                             Some(
                                 "classic-world-01-reconstruction"
+                                    | "classic-world-05-reconstruction"
                                     | "classic-world-09-reconstruction"
                                     | "classic-world-11-reconstruction"
                             )
@@ -654,8 +659,21 @@ mod tests {
                         };
                         let i = y * 176 + x;
                         map.cells[i].ground = 244;
+                        map.cells[i].terrain = lava_terrain;
+                        map.cells[i].object = lava_object;
                         let mut w = World::new(content.clone(), Arc::new(map)).unwrap();
                         w.realm_layout = layout.map(str::to_owned);
+                        let entity_states = |world: &World| {
+                            world
+                                .entities
+                                .iter()
+                                .map(|(&id, e)| {
+                                    (id, e.kind, e.pos.x.to_bits(), e.pos.y.to_bits(), e.hp)
+                                })
+                                .collect::<BTreeSet<_>>()
+                        };
+                        let before_entities = entity_states(&w);
+                        let before_actors = w.actor_ids.clone();
                         let before: Vec<_> = w
                             .map
                             .cells
@@ -674,11 +692,9 @@ mod tests {
                             );
                             let error = result.unwrap_err().to_string();
                             assert!(error.contains("retain_authored_lava=true"), "{error}");
-                            assert!(
-                                w.entities.is_empty()
-                                    && w.actor_ids.is_empty()
-                                    && w.setpieces.is_empty()
-                            );
+                            assert!(w.setpieces.is_empty());
+                            assert_eq!(entity_states(&w), before_entities);
+                            assert_eq!(w.actor_ids, before_actors);
                             assert_eq!(
                                 before,
                                 w.map
@@ -697,6 +713,7 @@ mod tests {
                             result.unwrap();
                             assert_eq!(w.setpieces.len(), 1);
                             if retain_lava {
+                                assert!(before_entities.is_subset(&entity_states(&w)));
                                 let a = &w.setpieces[0];
                                 assert!(
                                     !(x as i32 >= a.x
@@ -743,6 +760,7 @@ mod tests {
         let map = Arc::new(map);
         for layout in [
             "classic-world-01-reconstruction",
+            "classic-world-05-reconstruction",
             "classic-world-09-reconstruction",
             "classic-world-11-reconstruction",
         ] {

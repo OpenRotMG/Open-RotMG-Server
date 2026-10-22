@@ -13,6 +13,7 @@ impl World {
             self.realm_layout.as_deref(),
             Some(
                 "classic-world-01-reconstruction"
+                    | "classic-world-05-reconstruction"
                     | "classic-world-09-reconstruction"
                     | "classic-world-11-reconstruction"
             )
