@@ -41,7 +41,14 @@ export async function runCase(scenario, options) {
   const controller=new AbortController(), children=[], files=[], participants=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
   const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
   const elapsed=()=>Math.round(performance.now()-started);
-  const save=async()=>{await writeFile(join(out,'result.tmp'),JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',{mode:0o600});await rename(join(out,'result.tmp'),join(out,'result.json'));};
+  let saveTurn=Promise.resolve();
+  const save=async()=>{
+    const bytes=JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',previous=saveTurn;
+    let release;saveTurn=new Promise(ok=>{release=ok;});
+    await previous;
+    // Aborted bounded work can still be publishing when failure/cleanup requests the next save.
+    try{await writeFile(join(out,'result.tmp'),bytes,{mode:0o600});await rename(join(out,'result.tmp'),join(out,'result.json'));}finally{release();}
+  };
   const register=()=>{registryState.children=children.filter(r=>r.identity).map(r=>({...r.identity,name:r.name}));registry(join(out,'children.json'),registryState);};
   const fail=error=>{if(closing)report.cleanupErrors.push(String(error));else if(!controller.signal.aborted)controller.abort(error);};
   const interrupted=()=>fail(Error('Native test interrupted'));
@@ -177,6 +184,7 @@ export async function runCase(scenario, options) {
       participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
       await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
+      await save();check();
       return participants.at(-1);
 
     }
