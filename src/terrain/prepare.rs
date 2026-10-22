@@ -46,11 +46,7 @@ const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 10] = [
         2100,
     ),
     (WORLD09_ID, WORLD09_SOURCE, 2100),
-    (
-        "classic-world-11-reconstruction",
-        "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11cea6f65976bcb20",
-        2100,
-    ),
+    (WORLD11_ID, WORLD11_SOURCE, 2100),
     (
         "classic-world-12-reconstruction",
         "fe91b3e5ecd63110f30455c6f63ff66b575483d2e39d40a5d4aaa33b838b73a0",
@@ -84,6 +80,9 @@ fn source_local_transform(dimensions: [usize; 2]) -> serde_json::Value {
 }
 
 impl ReviewedRecipe {
+    fn strict_source(&self) -> bool {
+        self.schema == 4 || matches!(self.id.as_str(), WORLD09_ID | WORLD11_ID)
+    }
     fn dimensions(&self) -> Result<[usize; 2]> {
         let source = SOURCE_LOCAL_IDENTITIES
             .iter()
@@ -138,7 +137,7 @@ impl ReviewedRecipe {
     fn audit_inputs(&self, root: &Path) -> Result<Vec<u8>> {
         let dimensions = self.dimensions()?;
         let p = &self.provenance;
-        if self.schema == 4 || self.id == WORLD09_ID {
+        if self.strict_source() {
             strict_source_paths(
                 root,
                 &[
@@ -153,7 +152,7 @@ impl ReviewedRecipe {
         let policy = hashed_input(root, &p.policy.path, &p.policy.sha256, 64 * 1024)?;
         let annotations =
             hashed_input(root, &p.annotations.path, &p.annotations.sha256, 64 * 1024)?;
-        if self.schema == 4 || self.id == WORLD09_ID {
+        if self.strict_source() {
             strict_source_audit(&policy, &annotations, self)?;
         }
         audit_scoped(
@@ -179,8 +178,14 @@ const WORLD09_SOURCE: &str = "726aa16890f7caaa73dc642b64901e94ed4f44cb974e5001c9
 const WORLD09_LAVA_SUPPORT: &str =
     "e1c603f40768fb8d49b945863f65d565bc944b5d2b68080cfa28ac45e0bab257";
 
+pub(super) const WORLD11_ID: &str = "classic-world-11-reconstruction";
+const WORLD11_SOURCE: &str = "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11cea6f65976bcb20";
+const WORLD11_LAVA_SUPPORT: &str =
+    "4f88fb5c98d4e7dbaa7fb6e5dde0dba336c559b9abbb99d3a8532dd2e0120b44";
+
 pub(super) struct ScopedLava {
     world: u8,
+    terrain: u8,
     side: usize,
     source_side: usize,
     offset: usize,
@@ -205,9 +210,10 @@ impl ScopedLava {
             || policy.get("world01_lava").is_some();
         let world04 = policy.get("world04_lava").is_some();
         let world09 = policy.get("world09_lava").is_some();
+        let world11 = policy.get("world11_lava").is_some();
         ensure!(
-            u8::from(world01) + u8::from(world04) + u8::from(world09) <= 1,
-            "mixed World1/World4/World9 lava scopes"
+            u8::from(world01) + u8::from(world04) + u8::from(world09) + u8::from(world11) <= 1,
+            "mixed World1/World4/World9/World11 lava scopes"
         );
         let (scope, id, source, key, schema, transform) = if world01 {
             let (side, offset, transform) = match r.schema {
@@ -222,6 +228,7 @@ impl ScopedLava {
             (
                 Self {
                     world: 1,
+                    terrain: 1,
                     side,
                     source_side: 2100,
                     offset,
@@ -238,6 +245,7 @@ impl ScopedLava {
             (
                 Self {
                     world: 4,
+                    terrain: 1,
                     side: 2000,
                     source_side: 2000,
                     offset: 0,
@@ -254,6 +262,7 @@ impl ScopedLava {
             (
                 Self {
                     world: 9,
+                    terrain: 1,
                     side: 2100,
                     source_side: 2100,
                     offset: 0,
@@ -263,6 +272,23 @@ impl ScopedLava {
                 WORLD09_ID,
                 WORLD09_SOURCE,
                 "world09_lava",
+                3,
+                source_local_transform([2100, 2100]),
+            )
+        } else if world11 {
+            (
+                Self {
+                    world: 11,
+                    terrain: 0,
+                    side: 2100,
+                    source_side: 2100,
+                    offset: 0,
+                    pixels: 577,
+                    support: WORLD11_LAVA_SUPPORT,
+                },
+                WORLD11_ID,
+                WORLD11_SOURCE,
+                "world11_lava",
                 3,
                 source_local_transform([2100, 2100]),
             )
@@ -280,11 +306,16 @@ impl ScopedLava {
                 && policy["source_sha256"] == source
                 && policy["selected_client"] == "123.5.1"
                 && policy["transform"] == transform
-                && policy[key] == lava_choice(scope.pixels, scope.support),
+                && policy[key] == scope.choice(),
             "unapproved World{} lava source/content/transform/cell support",
             scope.world
         );
         Ok(Some(scope))
+    }
+    fn choice(&self) -> serde_json::Value {
+        let mut choice = lava_choice(self.pixels, self.support);
+        choice["cell"]["terrain"] = self.terrain.into();
+        choice
     }
     fn validate_content(&self, content: &Content) -> Result<()> {
         ensure!(
@@ -307,7 +338,7 @@ impl ScopedLava {
         c.ground == 244
             && c.object.is_none()
             && c.config.is_empty()
-            && c.terrain == 1
+            && c.terrain == self.terrain
             && c.region == 0
     }
     fn validate_support(&self, map: &Map) -> Result<()> {
@@ -520,8 +551,9 @@ impl Recipe {
             }
             Self::ClassicV1(r) => {
                 ensure!(
-                    r.id != WORLD09_ID,
-                    "World9 requires its reviewed source recipe"
+                    !matches!(r.id.as_str(), WORLD09_ID | WORLD11_ID),
+                    "{} requires its reviewed source recipe",
+                    r.id
                 );
                 Ok(None)
             }
@@ -718,7 +750,7 @@ pub(super) fn read_recipe(root: &Path, relative: &str) -> Result<Recipe> {
     if let Recipe::ReviewedCellsV1(r) = &recipe
         && matches!(r.schema, 3 | 4)
     {
-        if r.schema == 4 || r.id == WORLD09_ID {
+        if r.strict_source() {
             strict_source_paths(root, &[relative])?;
         }
         r.audit_inputs(root).with_context(|| recipe.contract())?;
@@ -1248,7 +1280,8 @@ impl<'de> serde::de::Visitor<'de> for UniqueJson {
 }
 fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecipe) -> Result<()> {
     ensure!(
-        recipe.schema == 4 || (recipe.schema == 3 && recipe.id == WORLD09_ID),
+        recipe.schema == 4
+            || (recipe.schema == 3 && matches!(recipe.id.as_str(), WORLD09_ID | WORLD11_ID)),
         "strict source audit requires an admitted source identity"
     );
     let _: UniqueJson = serde_json::from_slice(policy).context("strict-source policy keys")?;
@@ -1275,6 +1308,15 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
         ensure!(
             policy["world09_lava"] == lava_choice(426, WORLD09_LAVA_SUPPORT),
             "World9 requires its exact426-cell lava capability"
+        );
+    }
+    if recipe.id == WORLD11_ID && policy.get("world11_lava").is_some() {
+        keys.push("world11_lava");
+        let mut choice = lava_choice(577, WORLD11_LAVA_SUPPORT);
+        choice["cell"]["terrain"] = 0.into();
+        ensure!(
+            policy["world11_lava"] == choice,
+            "World11 requires its exact577-cell terrain0 lava capability"
         );
     }
     strict_keys(&policy, &keys, "policy")?;
@@ -2245,6 +2287,11 @@ mod tests {
         source_open_case(source_local_values(7), Some(9));
     }
 
+    #[test]
+    fn realm_source_open_world11_lava_exact_support_and_loaded_xml_identity() {
+        source_open_case(source_local_values(8), Some(11));
+    }
+
     fn source_local_open(index: usize) {
         source_local_open_scoped(index, false);
     }
@@ -2323,6 +2370,7 @@ mod tests {
                 1 => include_bytes!("../../data/realms/world01/lava-support.json").as_slice(),
                 4 => include_bytes!("../../data/realms/world04/lava-support.json").as_slice(),
                 9 => include_bytes!("../../data/realms/world09/lava-support.json").as_slice(),
+                11 => include_bytes!("../../data/realms/world11/lava-support.json").as_slice(),
                 _ => panic!("unsupported test lava scope"),
             };
             let binding: serde_json::Value = serde_json::from_slice(bytes).unwrap();
@@ -2332,6 +2380,9 @@ mod tests {
             ));
             policy[format!("world{world:02}_lava")] = lava_choice(binding["pixels"].as_u64().unwrap() as usize,
                 binding["support_sha256_le_u32"].as_str().unwrap());
+            policy[format!("world{world:02}_lava")]["cell"]["terrain"] =
+                serde_json::json!(u8::from(world != 11));
+            assert_eq!(policy[format!("world{world:02}_lava")]["cell"], binding["cell"]);
             cells.as_array_mut().unwrap().push(binding["cell"].clone());
             for run in binding["source_positions_row_runs"].as_array().unwrap() {
                 let y = run[0].as_u64().unwrap() as usize;
@@ -2451,14 +2502,14 @@ mod tests {
         if let Some(lava) = lava.as_ref() {
             lava.validate_support(&opened).unwrap();
         }
-        if lava_world == Some(9) {
+        if let Some(world @ (9 | 11)) = lava_world {
             let mut unscoped_value = value.clone();
             let mut unscoped_policy = policy.clone();
             let mut unscoped_annotations = annotations.clone();
             unscoped_policy
                 .as_object_mut()
                 .unwrap()
-                .remove("world09_lava");
+                .remove(&format!("world{world:02}_lava"));
             bind_audit(
                 &mut unscoped_value,
                 &unscoped_policy,
@@ -2474,9 +2525,11 @@ mod tests {
             let error = unscoped[0]
                 .open(&content)
                 .map(|_| ())
-                .expect_err("Source9 loader accepted bare lava without a capability")
+                .expect_err(&format!(
+                    "Source{world} loader accepted bare lava without a capability"
+                ))
                 .to_string();
-            assert!(error.contains("World9 lava capability"), "{error}");
+            assert!(error.contains("source-exact lava capability"), "{error}");
             write_source_local(&realms, &value, &policy, &annotations);
             let first = raw.chunks_exact(2).position(|p| p == [2, 0]).unwrap();
             let alternate = raw
@@ -2497,7 +2550,7 @@ mod tests {
                     }
                     3 => dictionary[2]["object"] = serde_json::json!(339),
                     4 => dictionary[2]["config"] = serde_json::json!("size:150"),
-                    5 => dictionary[2]["terrain"] = serde_json::json!(0),
+                    5 => dictionary[2]["terrain"] = serde_json::json!(u8::from(world == 11)),
                     6 => dictionary[2]["region"] = serde_json::json!(1),
                     7 => dictionary[2]["ground"] = serde_json::json!(112),
                     _ => unreachable!(),
@@ -2512,13 +2565,13 @@ mod tests {
                     &serde_json::json!([invalid_entry]),
                 );
                 let sources = super::super::realms::sources(&root).unwrap();
-                let error = sources[0]
-                    .open(&content)
-                    .map(|_| ())
-                    .expect_err("Source9 loader accepted an invalid lava payload");
+                let error = sources[0].open(&content).map(|_| ()).expect_err(&format!(
+                    "Source{world} loader accepted an invalid lava payload"
+                ));
                 let error = format!("{error:#}");
                 assert!(
-                    error.contains("World9 lava") && error.contains("before arrivals"),
+                    error.contains(&format!("World{world} lava"))
+                        && error.contains("before arrivals"),
                     "case {case}: {error}"
                 );
             }
@@ -2760,10 +2813,31 @@ mod tests {
     }
 
     #[test]
+    fn realm_prepare_world11_lava_requires_explicit_source_exact_scope() {
+        check_scoped_lava(11, false);
+    }
+
+    #[test]
     fn realm_prepare_world09_source_metadata_rejects_duplicates_aliases_and_false_cells() {
-        let root = std::env::temp_dir().join(format!("source9-metadata-{}", rand::random::<u64>()));
-        let (mut value, mut policy, mut annotations) = source_local_values(7);
-        policy["world09_lava"] = lava_choice(426, WORLD09_LAVA_SUPPORT);
+        check_source_metadata(7, 9, 426, WORLD09_LAVA_SUPPORT);
+    }
+
+    #[test]
+    fn realm_prepare_world11_source_metadata_rejects_duplicates_aliases_and_false_cells() {
+        check_source_metadata(8, 11, 577, WORLD11_LAVA_SUPPORT);
+    }
+
+    fn check_source_metadata(index: usize, world: u8, pixels: usize, support: &str) {
+        let root =
+            std::env::temp_dir().join(format!("source{world}-metadata-{}", rand::random::<u64>()));
+        let (mut value, mut policy, mut annotations) = source_local_values(index);
+        let key = format!("world{world:02}_lava");
+        let source = value["provenance"]["source_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        policy[&key] = lava_choice(pixels, support);
+        policy[&key]["cell"]["terrain"] = serde_json::json!(u8::from(world != 11));
         bind_audit(&mut value, &policy, &mut annotations);
         write_source_local(&root, &value, &policy, &annotations);
         read_recipe(&root, "synthetic.json").unwrap();
@@ -2771,7 +2845,7 @@ mod tests {
             let mut p = policy.clone();
             match case {
                 3 => p["extra"] = serde_json::json!(false),
-                4 => p["world09_lava"]["cell"]["object"] = serde_json::json!(0),
+                4 => p[&key]["cell"]["object"] = serde_json::json!(0),
                 _ => (),
             }
             let mut policy_raw = serde_json::to_string(&p).unwrap();
@@ -2793,7 +2867,7 @@ mod tests {
             if case == 1 {
                 annotations_raw = annotations_raw.replacen(
                     "\"source_sha256\":",
-                    &format!("\"source_sha256\":\"{WORLD09_SOURCE}\",\"source_sha256\":"),
+                    &format!("\"source_sha256\":\"{source}\",\"source_sha256\":"),
                     1,
                 );
             }
@@ -2819,9 +2893,19 @@ mod tests {
     }
 
     fn check_scoped_lava(world: u8, full_source: bool) {
-        assert!(matches!(world, 1 | 4 | 9));
+        assert!(matches!(world, 1 | 4 | 9 | 11));
         let mut content = Content::load(Path::new("data")).unwrap();
-        let (mut value, id, source, key, support, binding_bytes, transform) = if world == 9 {
+        let (mut value, id, source, key, support, binding_bytes, transform) = if world == 11 {
+            (
+                source_local_values(8).0,
+                "classic-world-11-reconstruction",
+                "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11cea6f65976bcb20",
+                "world11_lava",
+                "4f88fb5c98d4e7dbaa7fb6e5dde0dba336c559b9abbb99d3a8532dd2e0120b44",
+                include_bytes!("../../data/realms/world11/lava-support.json").as_slice(),
+                source_local_transform([2100, 2100]),
+            )
+        } else if world == 9 {
             (
                 source_local_values(7).0,
                 WORLD09_ID,
@@ -2878,6 +2962,7 @@ mod tests {
                 1 => 703,
                 4 => 506,
                 9 => 426,
+                11 => 577,
                 _ => unreachable!(),
             }
         );
@@ -2893,8 +2978,14 @@ mod tests {
         policy[key] = serde_json::json!({"rgb":"d44a00","pixels":binding["pixels"],
             "support_sha256_le_u32":support,
             "cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}});
+        policy[key]["cell"]["terrain"] = serde_json::json!(u8::from(world != 11));
         assert_eq!(binding["cell"], policy[key]["cell"]);
-        for foreign in ["world01_lava", "world04_lava", "world09_lava"] {
+        for foreign in [
+            "world01_lava",
+            "world04_lava",
+            "world09_lava",
+            "world11_lava",
+        ] {
             if foreign == key {
                 continue;
             }
@@ -2907,12 +2998,12 @@ mod tests {
         }
         let lava = ScopedLava::for_recipe(&recipe, &policy, &content)
             .unwrap()
-            .unwrap();
+            .expect("source-exact lava capability was not admitted");
         let c = Cell {
             ground: 244,
             object: None,
             config: String::new(),
-            terrain: 1,
+            terrain: u8::from(world != 11),
             region: 0,
         };
         let safe = Cell {
@@ -3072,7 +3163,7 @@ mod tests {
             ("ground", serde_json::json!(112)),
             ("object", serde_json::json!(339)),
             ("config", serde_json::json!("size:150")),
-            ("terrain", serde_json::json!(8)),
+            ("terrain", serde_json::json!(u8::from(world == 11))),
             ("region", serde_json::json!(1)),
         ] {
             let mut bad = policy.clone();

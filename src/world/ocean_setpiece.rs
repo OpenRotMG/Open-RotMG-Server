@@ -11,7 +11,11 @@ impl World {
         );
         let retain_authored_lava = matches!(
             self.realm_layout.as_deref(),
-            Some("classic-world-01-reconstruction" | "classic-world-09-reconstruction")
+            Some(
+                "classic-world-01-reconstruction"
+                    | "classic-world-09-reconstruction"
+                    | "classic-world-11-reconstruction"
+            )
         );
         let protected: Vec<_> = self
             .population

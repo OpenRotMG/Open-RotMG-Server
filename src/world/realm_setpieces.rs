@@ -389,7 +389,11 @@ impl World {
         // These reconstructions deliberately retain bare lava through normal construction.
         let retain_authored_lava = matches!(
             self.realm_layout.as_deref(),
-            Some("classic-world-01-reconstruction" | "classic-world-09-reconstruction")
+            Some(
+                "classic-world-01-reconstruction"
+                    | "classic-world-09-reconstruction"
+                    | "classic-world-11-reconstruction"
+            )
         );
         let piece = Piece::build(kind, &mut self.rng);
         for mark in piece.cells.iter().copied().filter(|m| *m != 0) {
@@ -601,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn source1_and_source9_lava_footprints_are_scoped_atomic_and_relocate() {
+    fn source1_source9_source11_lava_footprints_are_scoped_atomic_and_relocate() {
         let content = super::super::tests::world().content;
         for hermit in [false, true] {
             for corner in [false, true] {
@@ -613,12 +617,15 @@ mod tests {
                         Some("classic-world-01-reconstruction"),
                         Some("classic-world-09-reconstruction"),
                         Some("classic-world-09-reconstruction-extra"),
+                        Some("classic-world-11-reconstruction"),
+                        Some("classic-world-11-reconstruction-extra"),
                     ] {
                         let retain_lava = matches!(
                             layout,
                             Some(
                                 "classic-world-01-reconstruction"
                                     | "classic-world-09-reconstruction"
+                                    | "classic-world-11-reconstruction"
                             )
                         );
                         let mut map = Map {
@@ -737,6 +744,7 @@ mod tests {
         for layout in [
             "classic-world-01-reconstruction",
             "classic-world-09-reconstruction",
+            "classic-world-11-reconstruction",
         ] {
             let mut w = World::new(content.clone(), map.clone()).unwrap();
             w.realm_layout = Some(layout.into());
