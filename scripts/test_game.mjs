@@ -31,6 +31,7 @@ async function fixture(t,transfer=false) {
     if(c.op==='native_state')return res.end(JSON.stringify({runtime:'fixture-runtime',paused,actors:[{actor:1,player:1,stage:activeFault==='loading'?'disconnected':'ready',world,world_name:world===-1?'Tutorial':'Nexus',client_time:++tick}]}));
     if(c.op==='inspect')return res.end(JSON.stringify({view:{position:{x:1,y:1},objects:[{id:2,hp:100,position:{x:3,y:1}}]},diagnostic:{own_projectiles:[]}}));
     if(c.op==='native_sync'){
+      if(activeFault==='sync-rejected')return res.end(JSON.stringify({status:'failed',error:'native input acknowledgement timed out: deadline has elapsed'}));
       if(activeFault==='binding-renew-timeout'&&!paused)await new Promise(resolve=>setTimeout(resolve,900));
       return res.end(JSON.stringify({acknowledged:[{actor:1,player:1,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('000000090600000001','hex')).digest('hex')}]}));
     }
@@ -273,4 +274,19 @@ test('grouped native inputs retain the total ten-second and release gates',async
  assert.equal(bad.code,1);assert.match(bad.stderr,/sequence duration/);assert.ok(!f.calls.some(c=>c.command.op==='resume'));
  const good=await f.run('grouped',{op:'act',actor:1,sequence:[[{actor:1,input:{keys:['d'],duration_ms:20}}],[{actor:1,input:{keys:['a'],duration_ms:20}}]]});
  assert.equal(good.code,0,good.stderr);assert.equal(JSON.parse(good.stdout).steps.length,2);assert(f.paused());
+});
+
+test('native_sync rejection retains safe held binding context without more protocol or input work',async t=>{
+  const f=await fixture(t),result=await f.run('sync-rejected',{op:'pause'},'sync-rejected');
+  assert.equal(result.code,1);assert.match(result.stderr,/native input acknowledgement timed out/);
+  const failed=JSON.parse(result.stderr.trim().split('\n').filter(line=>line.startsWith('{')).at(-1));
+  const context=JSON.parse(failed.error.slice('Error: native_sync failed: '.length));
+  assert.deepEqual(context.freshActors,[1]);
+  assert.deepEqual(context.sessions.map(c=>[c.actor,c.player,c.stage]),[[1,1,'ready']]);
+  assert.deepEqual(context.pages,[{actor:1,playing:true,bindingActor:null,bindingPlayer:null,bindingRuntimeMatches:null,pingFrameCount:1,pingFrameHashes:[createHash('sha256').update(Buffer.from('000000090600000001','hex')).digest('hex')]}]);
+  assert.deepEqual(f.calls.map(c=>c.command.op),['native_state','native_sync']);
+  assert.ok(!(await f.events()).some(e=>e.method.startsWith('Input.')||e.method==='Runtime.evaluate'&&e.params.expression.endsWith(')(null)')));
+  assert.ok(!failed.error.includes('fixture-control')&&!failed.error.includes('fixture-runtime'));
+  const receipt=JSON.parse(await readFile(join(f.dir,'testing/sync-rejected.client.json'),'utf8'));
+  assert.equal(receipt.result.error,failed.error);
 });

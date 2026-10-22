@@ -4491,10 +4491,13 @@ impl World {
                 }
             }
         }
-        if defeated.kind == 0x20d {
-            for (owner, item) in
-                crate::loot::gray_blob_rewards(&self.content, &eligible, &mut self.rng)
-            {
+        if matches!(defeated.kind, 0x20d | 0x952 | 0x949) {
+            for (owner, item) in crate::loot::fauna_private_rewards(
+                &self.content,
+                defeated.kind,
+                &eligible,
+                &mut self.rng,
+            ) {
                 drops.entry(owner).or_default().push(i32::from(item));
             }
         }
@@ -5870,6 +5873,8 @@ mod tests {
     #[test]
     fn map_info_selects_blue_only_for_nexus_and_vault() {
         let mut d = directory();
+        // Packet assertions must not depend on random dungeon generation.
+        d.prepared_seed = Some(12351);
         for (template, background) in [
             ("nexus", 2),
             ("vault", 2),
