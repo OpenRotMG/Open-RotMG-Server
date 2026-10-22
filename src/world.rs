@@ -546,7 +546,7 @@ pub struct World {
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
-    quests_by_level: BTreeMap<i32, BTreeSet<i32>>,
+    quests_by_level: BTreeMap<Option<i32>, BTreeSet<i32>>,
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
@@ -1786,8 +1786,8 @@ impl World {
                     if actor {
                         actor_ids.insert(id);
                     }
-                    if let Some(level) = o.quest_level.filter(|_| o.quest) {
-                        quests_by_level.entry(level).or_default().insert(id);
+                    if o.quest {
+                        quests_by_level.entry(o.quest_level).or_default().insert(id);
                     }
                     if !actor
                         && !o.destructible
@@ -2090,8 +2090,11 @@ impl World {
         }
         self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
-        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
-            self.quests_by_level.entry(level).or_default().insert(id);
+        if definition.quest {
+            self.quests_by_level
+                .entry(definition.quest_level)
+                .or_default()
+                .insert(id);
         }
         Ok(id)
     }
@@ -2131,14 +2134,14 @@ impl World {
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
         let definition = &self.content.objects[&entity.kind];
-        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
+        if definition.quest {
             let ids = self
                 .quests_by_level
-                .get_mut(&level)
-                .expect("quest level missing");
+                .get_mut(&definition.quest_level)
+                .expect("quest index missing");
             assert!(ids.remove(&id), "indexed quest missing");
             if ids.is_empty() {
-                self.quests_by_level.remove(&level);
+                self.quests_by_level.remove(&definition.quest_level);
             }
         }
         if let Some(slot) = entity.population_slot {
@@ -2513,20 +2516,37 @@ impl World {
         }
         let player = &self.players[&id];
         let level = player.character.level;
-        let mut lower = self.quests_by_level.range(..=level).rev().peekable();
+        let mut lower = self
+            .quests_by_level
+            .range(Some(i32::MIN)..=Some(level))
+            .rev()
+            .peekable();
         let mut upper = self
             .quests_by_level
-            .range((std::ops::Bound::Excluded(level), std::ops::Bound::Unbounded))
+            .range((
+                std::ops::Bound::Excluded(Some(level)),
+                std::ops::Bound::Unbounded,
+            ))
             .peekable();
         let levels = std::iter::from_fn(|| match (lower.peek(), upper.peek()) {
-            (Some((a, _)), Some((b, _))) if a.abs_diff(level) <= b.abs_diff(level) => lower.next(),
+            (Some((a, _)), Some((b, _)))
+                if a.map(|a| a.abs_diff(level)) <= b.map(|b| b.abs_diff(level)) =>
+            {
+                lower.next()
+            }
             (Some(_), None) => lower.next(),
             _ => upper.next(),
         });
+        let levels = self
+            .quests_by_level
+            .get_key_value(&None)
+            .into_iter()
+            .chain(levels);
         let mut best: Option<&Entity> = None;
         let mut difference = u32::MAX;
         for (&quest_level, ids) in levels {
-            if quest_level.abs_diff(level) > difference {
+            let delta = quest_level.map_or(0, |quest_level| quest_level.abs_diff(level));
+            if delta > difference {
                 break;
             }
             // Equally suitable levels on both sides must compete on distance, not iteration order.
@@ -2548,7 +2568,7 @@ impl World {
                         .is_lt()
                 }) {
                     best = Some(e);
-                    difference = quest_level.abs_diff(level);
+                    difference = delta;
                 }
             }
         }
