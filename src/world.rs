@@ -572,6 +572,7 @@ pub struct World {
     pub tick: u64,
     ids: Arc<AtomicI32>,
     pub name: String,
+    background: i32,
     pub safe: bool,
     pub owner: Option<i32>,
     pub max_players: usize,
@@ -933,6 +934,12 @@ impl Directory {
             world.prepared_seed = Some(seed);
         }
         world.name = name.into();
+        // Preserve the blue Nexus/Vault backdrop, not dungeon void: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/worlds/Vault.cs
+        world.background = if matches!(template, "nexus" | "vault") {
+            2
+        } else {
+            0
+        };
         world.safe = safe;
         world.owner = owner;
         world.max_players = self.max_players;
@@ -1841,6 +1848,7 @@ impl World {
             tick: 0,
             ids,
             name: "Development tutorial".into(),
+            background: 0,
             safe: false,
             owner: None,
             max_players: 85,
@@ -2169,7 +2177,7 @@ impl World {
             .i32(self.map.height)
             .utf(&self.name)
             .u32(1)
-            .i32(0)
+            .i32(self.background)
             .u8(u8::from(self.allow_teleport()))
             .u8(1)
             .i16(0)
@@ -5805,6 +5813,34 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn map_info_selects_blue_only_for_nexus_and_vault() {
+        let mut d = directory();
+        for (template, background) in [
+            ("nexus", 2),
+            ("vault", 2),
+            ("tutorial", 0),
+            ("nexus-limbo", 0),
+            ("guild-hall-1", 0),
+            ("pirate-cave", 0),
+            ("sprite-world", 0),
+        ] {
+            let w = d.make(template, "Renamed world", false, None).unwrap();
+            let packet = w.map_info();
+            let mut r = wire::Reader::new(&packet);
+            assert_eq!(r.i32().unwrap(), w.map.width);
+            assert_eq!(r.i32().unwrap(), w.map.height);
+            assert_eq!(r.utf().unwrap(), "Renamed world");
+            assert_eq!(r.i32().unwrap(), 1);
+            assert_eq!(r.i32().unwrap(), background, "{template}");
+            assert_eq!(r.u8().unwrap(), u8::from(w.allow_teleport()));
+            assert_eq!(r.u8().unwrap(), 1);
+            assert_eq!(r.i16().unwrap(), 0);
+            assert_eq!(r.i16().unwrap(), 0);
+            r.done().unwrap();
+        }
     }
 
     #[tokio::test]
