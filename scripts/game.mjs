@@ -159,7 +159,12 @@ async function bind(state){
     }else fresh.push(c);
   }
   if(fresh.length){
-    const proof=await api({op:'native_sync',actors:fresh.map(c=>c.actor)});
+    let proof;
+    try {proof=await api({op:'native_sync',actors:fresh.map(c=>c.actor)});}
+    catch(error) {
+      const context={cause:String(error),freshActors:fresh.map(c=>c.actor),sessions:state.actors.map(c=>({actor:c.actor,player:c.player,stage:c.stage,world:c.world})),pages:pages.map(({c,page})=>({actor:c.actor,playing:page.playing??null,bindingActor:page.binding?.actor??null,bindingPlayer:page.binding?.player??null,bindingRuntimeMatches:page.binding?page.binding.runtime===state.runtime:null,pingFrameCount:c.frames.length,pingFrameHashes:c.frames.slice(-8)}))};
+      throw Error('native_sync failed: '+JSON.stringify(context),{cause:error});
+    }
     await eachClient(fresh,async c=>{
       const acknowledgment=proof.acknowledged.find(a=>a.actor===c.actor),actual=state.actors.find(a=>a.actor===c.actor),deadline=Date.now()+1000;
       while(!c.frames.includes(acknowledgment.frame_sha256)&&Date.now()<deadline)await wait(10);
