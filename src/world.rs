@@ -5333,6 +5333,20 @@ impl World {
                 }
                 self.bullets.push(bullet);
             }
+            // Shoot then retire, independent of the proximity poll; keep the owner until publication: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.UndeadLair.cs#L462-L480
+            if matches!(kind, 0xda2 | 0xda3) && !notices.is_empty() {
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
+                tracing::debug!(
+                    entity = id,
+                    kind,
+                    shots = notices.len(),
+                    "Lair trap detonated"
+                );
+            }
             packets.extend(
                 enemy_shots::packets(id, &notices)
                     .into_iter()
@@ -5719,6 +5733,8 @@ mod timing_example;
 
 #[cfg(test)]
 mod ground_dye_tests;
+#[cfg(test)]
+mod lair_trap_tests;
 #[cfg(test)]
 mod manor_tests;
 #[cfg(test)]
