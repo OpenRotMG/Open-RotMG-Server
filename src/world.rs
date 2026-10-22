@@ -5817,7 +5817,7 @@ mod tests {
 
     #[test]
     fn map_info_selects_blue_only_for_nexus_and_vault() {
-        let d = directory();
+        let mut d = directory();
         for (template, background) in [
             ("nexus", 2),
             ("vault", 2),
