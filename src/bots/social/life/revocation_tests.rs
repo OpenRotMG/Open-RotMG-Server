@@ -72,7 +72,7 @@ async fn withdrawal(ending: Ending) {
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                vec![],
             )
             .await
             .unwrap()[0];
@@ -82,6 +82,7 @@ async fn withdrawal(ending: Ending) {
         let (lost, _) = watch::channel(false);
         rx.push(receiver);
         let presentation = app.store.presentation(a).await.unwrap();
+        let bind = crate::server::lifecycle::binding(&app, a).unwrap();
         let id = app
             .world
             .in_world(-2)
@@ -95,6 +96,7 @@ async fn withdrawal(ending: Ending) {
                     }),
                     presentation,
                 )?;
+                bind(id)?;
                 if i == 0 {
                     w.players.get_mut(&id).unwrap().controller =
                         crate::world::Controller::Autonomous;
@@ -189,6 +191,9 @@ async fn withdrawal(ending: Ending) {
                 .unwrap(),
             0
         );
+        for id in ids.iter().copied() {
+            crate::server::depart(&app, id).await.unwrap();
+        }
         app.shutdown.send_replace(true);
         drop(owners);
         std::fs::write(dir.join("gift-accept-rejection-result.json"),serde_json::to_vec_pretty(&serde_json::json!({"scope":"focused premature native Accept guard; no outcome repaired","mind":brain.mind,"owners":app.owners.lock().unwrap().len()})).unwrap()).unwrap();
@@ -450,6 +455,9 @@ async fn withdrawal(ending: Ending) {
             4
         );
     }
+    for id in ids.iter().copied() {
+        crate::server::depart(&app, id).await.unwrap();
+    }
     app.shutdown.send_replace(true);
     drop(owners);
     std::fs::write(dir.join("gift-revocation-result.json"),serde_json::to_vec_pretty(&serde_json::json!({"fixture":"focused native-acceptance authority test, not actual controller behavior evidence","commit_first":commit_first,"mind":brain.mind,"owners":app.owners.lock().unwrap().len()})).unwrap()).unwrap();
@@ -503,7 +511,7 @@ async fn community_social_gift_unrelated_pending_commit_cannot_credit_a_new_offe
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                vec![],
             )
             .await
             .unwrap()[0];
@@ -513,6 +521,7 @@ async fn community_social_gift_unrelated_pending_commit_cannot_credit_a_new_offe
         let (lost, _) = watch::channel(false);
         receivers.push(rx);
         let presentation = app.store.presentation(account).await.unwrap();
+        let bind = crate::server::lifecycle::binding(&app, account).unwrap();
         let character = ch.id;
         let player = app
             .world
@@ -527,6 +536,7 @@ async fn community_social_gift_unrelated_pending_commit_cannot_credit_a_new_offe
                     }),
                     presentation,
                 )?;
+                bind(id)?;
                 if i == 0 {
                     w.players.get_mut(&id).unwrap().controller =
                         crate::world::Controller::Autonomous;
@@ -622,6 +632,9 @@ async fn community_social_gift_unrelated_pending_commit_cannot_credit_a_new_offe
             .as_ref()
             .is_some_and(|s| s.contains("thanks"))
     );
+    for id in ids {
+        crate::server::depart(&app, id).await.unwrap();
+    }
     app.shutdown.send_replace(true);
     drop(owners);
 }

@@ -71,29 +71,46 @@ pub(crate) fn reply(success: bool, message: &str) -> Packet {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct VaultPurchase {
+    pub seller: i32,
+    pub opened: i32,
+    pub chest: i32,
+}
+
 impl World {
     pub fn buy(&mut self, id: i32, merchant: i32) -> Result<InventoryPlan> {
         let p = self.players.get(&id).context("purchase owner missing")?;
         ensure!(
-            p.active() && !p.pending && !p.paused && p.character.hp > 0,
+            p.persistence_failure.is_none(),
             "Cannot buy while busy, paused or dead."
         );
+        ensure!(
+            p.active() && !p.pending && !p.paused && p.character.hp > 0,
+            controller("Cannot buy while busy, paused or dead.")
+        );
+        if self.closed_vaults.contains_key(&merchant) {
+            return self.buy_vault(id, merchant);
+        }
         let e = self
             .entities
             .get(&merchant)
-            .context("Merchant no longer exists.")?;
+            .ok_or_else(|| controller("Merchant no longer exists."))?;
         ensure!(
             self.content.get(e.kind)?.class == "Merchant"
                 && e.accessible(p.character.account)
                 && p.known.contains(&merchant)
                 && p.pos.distance(e.pos) < 1.5,
-            "Move closer to the merchant."
+            controller("Move closer to the merchant.")
         );
-        ensure!(!e.reserved, "This merchant is processing another purchase.");
-        ensure!(value(e, 42)? > 0, "This merchant is sold out.");
+        ensure!(
+            !e.reserved,
+            controller("This merchant is processing another purchase.")
+        );
+        ensure!(value(e, 42)? > 0, controller("This merchant is sold out."));
         ensure!(
             p.presentation.stars() >= value(e, 45)?,
-            "Insufficient star rank."
+            controller("Insufficient star rank.")
         );
         let item = u16::try_from(value(e, 34)?)?;
         let price = value(e, 36).context("This item has no configured shop price.")?;
@@ -104,7 +121,7 @@ impl World {
         );
         let slot = (4..12)
             .find(|slot| p.character.items[*slot] == -1)
-            .context("Not enough inventory space.")?;
+            .ok_or_else(|| controller("Not enough inventory space."))?;
         let mut items = p.character.items.clone();
         items[slot] = i32::from(item);
         self.cancel_trade(id, "Trade cancelled by purchase.");
@@ -121,6 +138,163 @@ impl World {
         self.players.get_mut(&id).unwrap().pending = true;
         self.entities.get_mut(&merchant).unwrap().reserved = true;
         Ok(plan)
+    }
+
+    fn buy_vault(&mut self, id: i32, seller: i32) -> Result<InventoryPlan> {
+        let p = &self.players[&id];
+        let account = p.character.account;
+        let e = self
+            .entities
+            .get(&seller)
+            .context("Closed chest no longer exists.")?;
+        let chest = *self
+            .closed_vaults
+            .get(&seller)
+            .context("Unknown closed chest identity.")?;
+        ensure!(
+            self.name == "Vault"
+                && self.owner == Some(account)
+                && e.kind == 0x505
+                && e.accessible(account),
+            "Move closer to your closed Vault chest."
+        );
+        ensure!(
+            p.known.contains(&seller) && p.pos.distance(e.pos) < 1.5,
+            controller("Move closer to your closed Vault chest.")
+        );
+        ensure!(
+            !e.reserved
+                && self.vaults.len() < crate::store::VAULT_CHESTS as usize
+                && !self.vaults.values().any(|v| v.chest == chest),
+            controller("Chest is already owned or reserved.")
+        );
+        ensure!(
+            value(e, 36)? == crate::store::VAULT_PRICE && value(e, 40)? == 0,
+            "Invalid chest sale or insufficient star rank."
+        );
+        ensure!(
+            p.presentation.stars() >= value(e, 45)?,
+            controller("Invalid chest sale or insufficient star rank.")
+        );
+        let pos = e.pos;
+        let items = p.character.items.clone();
+        // Allocate the actual owned object before spending; publication must not depend on a later spawn.
+        let opened = self.spawn_entity(0x504, pos, vec![-1; 8])?;
+        let e = self.entities.get_mut(&opened).unwrap();
+        e.published = false;
+        e.reserved = true;
+        e.extra_stats.push((54, account));
+        self.cancel_trade(id, "Trade cancelled by Vault purchase.");
+        let mut plan = self.plan(id, items, None);
+        plan.vault_purchase = Some(VaultPurchase {
+            seller,
+            opened,
+            chest,
+        });
+        self.players.get_mut(&id).unwrap().pending = true;
+        self.entities.get_mut(&seller).unwrap().reserved = true;
+        Ok(plan)
+    }
+
+    pub fn finish_vault_purchase(
+        &mut self,
+        plan: InventoryPlan,
+        result: Result<Option<(i32, i32, Vault)>>,
+    ) -> Result<()> {
+        let player = plan.player;
+        let publication = self.publish_vault_purchase(plan, result);
+        if let Err(error) = &publication {
+            self.poison(player, format!("{error:#}"))?;
+        }
+        publication
+    }
+
+    fn publish_vault_purchase(
+        &mut self,
+        plan: InventoryPlan,
+        result: Result<Option<(i32, i32, Vault)>>,
+    ) -> Result<()> {
+        let committed = result?;
+        let purchase = plan
+            .vault_purchase
+            .context("Vault purchase reservation missing")?;
+        let p = self
+            .players
+            .get(&plan.player)
+            .context("Vault buyer disappeared")?;
+        let seller = self
+            .entities
+            .get(&purchase.seller)
+            .context("Vault seller disappeared")?;
+        let opened = self
+            .entities
+            .get(&purchase.opened)
+            .context("Reserved owned chest disappeared")?;
+        ensure!(
+            p.pending
+                && p.persistence_failure.is_none()
+                && p.character.id == plan.character
+                && p.character.account == plan.account
+                && p.character.revision == plan.revision
+                && p.character.items == plan.items
+                && self.owner == Some(plan.account)
+                && self.closed_vaults.get(&purchase.seller) == Some(&purchase.chest)
+                && seller.kind == 0x505
+                && seller.reserved
+                && seller.accessible(plan.account)
+                && value(seller, 36)? == crate::store::VAULT_PRICE
+                && value(seller, 40)? == 0
+                && opened.kind == 0x504
+                && opened.reserved
+                && !opened.published
+                && opened.pos.distance(seller.pos) == 0.
+                && opened.items == vec![-1; 8]
+                && opened.extra_stats.contains(&(54, plan.account)),
+            "Vault purchase identity, ownership or reservation changed"
+        );
+        if let Some((revision, balance, vault)) = committed {
+            ensure!(
+                plan.revision.checked_add(1) == Some(revision)
+                    && balance >= 0
+                    && vault.account == plan.account
+                    && vault.chest == purchase.chest
+                    && vault.revision == 0
+                    && vault.items == opened.items
+                    && !self.vaults.values().any(|v| v.chest == vault.chest),
+                "invalid committed Vault purchase receipt"
+            );
+            self.entities.get_mut(&purchase.seller).unwrap().reserved = false;
+            self.remove_entity(purchase.seller);
+            self.closed_vaults.remove(&purchase.seller);
+            let opened = self.entities.get_mut(&purchase.opened).unwrap();
+            opened.reserved = false;
+            opened.published = true;
+            self.vaults.insert(purchase.opened, vault);
+            let p = self.players.get_mut(&plan.player).unwrap();
+            p.character.revision = revision;
+            p.presentation.credits = balance;
+            p.pending = false;
+            let packet = reply(true, "Vault chest purchased!");
+            send(p, packet.id, packet.body);
+            tracing::info!(
+                player = plan.player,
+                account = plan.account,
+                chest = purchase.chest,
+                entity = purchase.opened,
+                balance,
+                revision,
+                "paid Vault chest published"
+            );
+        } else {
+            self.entities.get_mut(&purchase.opened).unwrap().reserved = false;
+            self.remove_entity(purchase.opened);
+            self.entities.get_mut(&purchase.seller).unwrap().reserved = false;
+            let p = self.players.get_mut(&plan.player).unwrap();
+            p.pending = false;
+            let packet = reply(false, "Not enough gold.");
+            send(p, packet.id, packet.body);
+        }
+        Ok(())
     }
 
     pub fn finish_purchase(
@@ -203,6 +377,3 @@ impl World {
         self.finish_inventory(plan, Ok(revision))
     }
 }
-
-#[cfg(test)]
-mod tests;

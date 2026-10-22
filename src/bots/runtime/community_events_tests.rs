@@ -308,7 +308,7 @@ async fn community_events_actual_lab_controllers_remedy_or_guarded_escape_with_i
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    None,
+                    vec![],
                 )
                 .await
                 .unwrap()[0];

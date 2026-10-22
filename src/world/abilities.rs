@@ -53,36 +53,42 @@ impl World {
     ) -> Result<()> {
         let p = &self.players[&id];
         ensure!(
-            p.character.alive
-                && !p.death_pending
-                && !p.departing
-                && !p.pending
-                && !p.paused
-                && p.persistence_failure.is_none(),
+            p.persistence_failure.is_none(),
             "ability caster is unavailable"
         );
         ensure!(
+            p.character.alive
+                && !p.death_pending
+                && !p.departing
+                && (!p.pending || p.progress_started)
+                && !p.paused
+                && p.persistence_failure.is_none(),
+            controller("ability caster is unavailable")
+        );
+        ensure!(
             slot.object == id && slot.kind == item.kind as i32 && p.character.items[1] == slot.kind,
-            "ability item does not match equipped item"
+            controller("ability item does not match equipped item")
         );
         ensure!(
             slot.slot == 1 && item.slot_type == self.content.get(p.character.class)?.slots[1],
-            "ability must be equipped by a compatible class"
+            controller("ability must be equipped by a compatible class")
         );
         ensure!(
             p.tx.as_ref()
                 .is_none_or(|tx| !*tx.lost.borrow() && !tx.packets.is_closed()),
-            "ability connection is closed"
+            controller("ability connection is closed")
         );
         ensure!(
             p.conditions(self.now) & crate::condition::bit(crate::condition::QUIET) == 0,
-            "cannot cast while Quiet"
+            controller("cannot cast while Quiet")
         );
-        ensure!(p.character.mp >= item.mana_cost, "not enough mana");
         ensure!(
-            p.last_ability
-                .is_none_or(|last| self.now >= last + item.cooldown_ms),
-            "ability cooldown"
+            p.character.mp >= item.mana_cost,
+            controller("not enough mana")
+        );
+        ensure!(
+            self.now >= p.ability_ready_ms,
+            controller("ability cooldown")
         );
         let reach = item
             .abilities
@@ -100,11 +106,15 @@ impl World {
                 && pos.y.is_finite()
                 && p.pos.distance(pos) <= reach
                 && self.map.cell(pos.x, pos.y).is_some(),
-            "invalid ability target or target too far"
+            controller("invalid ability target or target too far")
         );
+        let ability_ready_ms = self
+            .now
+            .checked_add(item.cooldown_ms)
+            .context("ability cooldown overflow")?;
         let p = self.players.get_mut(&id).unwrap();
         p.character.mp -= item.mana_cost;
-        p.last_ability = Some(self.now);
+        p.ability_ready_ms = ability_ready_ms;
         tracing::info!(
             player = id,
             item = item.kind,
@@ -169,7 +179,7 @@ impl World {
                 + self.ability_state.objects.len()
                 + item.abilities.len()
                 <= MAX_ACTIVE,
-            "active ability budget exhausted"
+            controller("active ability budget exhausted")
         );
         let origin = self.players[&id].pos;
         for effect in &item.abilities {
@@ -177,7 +187,7 @@ impl World {
                 Ability::Shoot => {
                     ensure!(
                         self.players[&id].controller == Controller::Human,
-                        "projectile abilities require native reports"
+                        controller("projectile abilities require native reports")
                     );
                     ensure!(
                         (1..=5).contains(&item.shots)
@@ -195,11 +205,11 @@ impl World {
                 Ability::Teleport { distance } => {
                     ensure!(
                         origin.distance(pos) <= *distance && self.walkable(pos),
-                        "teleport target is blocked or outside ability range"
+                        controller("teleport target is blocked or outside ability range")
                     );
                 }
                 Ability::Trap { .. } => {
-                    ensure!(self.walkable(pos), "trap target is blocked");
+                    ensure!(self.walkable(pos), controller("trap target is blocked"));
                     self.content.get(0x711)?;
                 }
                 Ability::Decoy { .. } => {
@@ -770,6 +780,175 @@ impl World {
                 }
             }
             self.ability_state.objects.insert(id, object);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::ROGUE;
+    use crate::world::tests::{ch, directory};
+
+    fn rogue() -> (Directory, i32) {
+        let mut d = directory();
+        let w = d.worlds.get_mut(&-2).unwrap();
+        let mut c = ch(w);
+        c.class = ROGUE;
+        c.base = w.content.classes[&ROGUE].caps;
+        c.mp = c.base[1];
+        c.items = vec![-1, 0xa56, -1, -1, 0xa5a, -1, -1, -1, -1, -1, -1, -1];
+        let id = w.enter(c, None).unwrap();
+        (d, id)
+    }
+    fn cast(w: &mut World, id: i32) -> Result<Option<InventoryPlan>> {
+        w.use_item(
+            id,
+            Slot {
+                object: id,
+                slot: 1,
+                kind: w.players[&id].character.items[1],
+            },
+            w.players[&id].pos,
+        )
+    }
+    fn swap(w: &mut World, id: i32) {
+        let items = &w.players[&id].character.items;
+        let plan = w
+            .swap(
+                id,
+                Slot {
+                    object: id,
+                    slot: 1,
+                    kind: items[1],
+                },
+                Slot {
+                    object: id,
+                    slot: 4,
+                    kind: items[4],
+                },
+            )
+            .unwrap();
+        let revision = plan.revision + 1;
+        w.finish_inventory(plan, Ok(revision)).unwrap();
+    }
+    fn ready(d: &Directory, id: i32) -> u64 {
+        d.player_view(id).unwrap().character.ability_ready_ms
+    }
+
+    #[test]
+    fn ability_cooldown_short_to_long_accepts_at_original_deadline() {
+        let (mut d, id) = rogue();
+        let w = d.worlds.get_mut(&-2).unwrap();
+        cast(w, id).unwrap();
+        swap(w, id);
+        w.now = 3999;
+        let mp = w.players[&id].character.mp;
+        assert!(cast(w, id).err().unwrap().to_string().contains("cooldown"));
+        assert_eq!(w.players[&id].character.mp, mp);
+        w.now = 4000;
+        cast(w, id).unwrap();
+        assert_eq!(w.players[&id].character.mp, mp - 100);
+        assert_eq!(ready(&d, id), 10500);
+    }
+
+    #[test]
+    fn ability_cooldown_long_to_short_cannot_shorten_original_deadline() {
+        let (mut d, id) = rogue();
+        let w = d.worlds.get_mut(&-2).unwrap();
+        swap(w, id);
+        cast(w, id).unwrap();
+        swap(w, id);
+        let mp = w.players[&id].character.mp;
+        for now in [4000, 6499] {
+            w.now = now;
+            assert!(cast(w, id).err().unwrap().to_string().contains("cooldown"));
+            assert_eq!(w.players[&id].character.mp, mp);
+        }
+        w.now = 6500;
+        cast(w, id).unwrap();
+        assert_eq!(w.players[&id].character.mp, mp - 60);
+        assert_eq!(ready(&d, id), 10500);
+    }
+
+    #[test]
+    fn ability_cooldown_view_survives_committed_swaps_and_same_item_boundary() {
+        let (mut d, id) = rogue();
+        assert_eq!(ready(&d, id), 0);
+        cast(d.worlds.get_mut(&-2).unwrap(), id).unwrap();
+        assert_eq!(ready(&d, id), 4000);
+        swap(d.worlds.get_mut(&-2).unwrap(), id);
+        assert_eq!(ready(&d, id), 4000);
+        swap(d.worlds.get_mut(&-2).unwrap(), id);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        w.now = 3999;
+        assert!(cast(w, id).is_err());
+        w.now = 4000;
+        cast(w, id).unwrap();
+        assert_eq!(ready(&d, id), 8000);
+    }
+
+    #[test]
+    fn ability_cooldown_pre_spend_refusals_preserve_mp_deadline_and_effects() {
+        for case in 0..12 {
+            let (mut d, id) = rogue();
+            let w = d.worlds.get_mut(&-2).unwrap();
+            cast(w, id).unwrap();
+            swap(w, id);
+            w.now = 7000;
+            let mut target = w.players[&id].pos;
+            let p = w.players.get_mut(&id).unwrap();
+            match case {
+                0 => p.character.mp = 99,
+                1 => {
+                    p.statuses.insert(crate::condition::QUIET, (0, 10000));
+                }
+                2 => p.paused = true,
+                3 => p.character.alive = false,
+                4 => p.death_pending = true,
+                5 => p.departing = true,
+                6 => p.persistence_failure = Some("test quarantine".into()),
+                7 => p.pending = true,
+                8 => target.x = f32::NAN,
+                9 => target.x += 21.,
+                10 => {
+                    let (packets, rx) = mpsc::channel(1);
+                    drop(rx);
+                    let (lost, _) = watch::channel(false);
+                    p.tx = Some(Output { packets, lost });
+                }
+                11 => w.now = u64::MAX - 1000,
+                _ => unreachable!(),
+            }
+            let mp = p.character.mp;
+            let statuses = p.statuses.clone();
+            let pos = p.pos;
+            let deadline = ready(&d, id);
+            let w = d.worlds.get_mut(&-2).unwrap();
+            let error = w
+                .use_item(
+                    id,
+                    Slot {
+                        object: id,
+                        slot: 1,
+                        kind: 0xa5a,
+                    },
+                    target,
+                )
+                .err()
+                .unwrap_or_else(|| panic!("case {case} accepted"));
+            if case == 11 {
+                assert_eq!(error.to_string(), "ability cooldown overflow");
+            }
+            assert_eq!(w.players[&id].character.mp, mp, "case {case}");
+            assert_eq!(w.players[&id].statuses, statuses, "case {case}");
+            assert_eq!((w.players[&id].pos.x, w.players[&id].pos.y), (pos.x, pos.y));
+            assert!(
+                w.ability_state.thrown.is_empty()
+                    && w.ability_state.poisons.is_empty()
+                    && w.ability_state.objects.is_empty()
+            );
+            assert_eq!(ready(&d, id), deadline, "case {case}");
         }
     }
 }

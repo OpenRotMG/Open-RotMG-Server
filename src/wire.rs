@@ -28,6 +28,7 @@ pub const BUY: u8 = 50;
 pub const BUY_RESULT: u8 = 27;
 pub const GOTO: u8 = 52;
 pub const SHOW_EFFECT: u8 = 56;
+pub const PLAY_SOUND: u8 = 44;
 pub const NOTIFICATION: u8 = 63;
 pub(crate) const MAX_FRAME: usize = 1_048_576;
 const CLIENT_OUT: &[u8] = &[

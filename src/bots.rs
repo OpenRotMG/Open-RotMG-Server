@@ -9,11 +9,8 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex},
 };
 
 pub(crate) mod adventures;
@@ -161,9 +158,12 @@ struct Brain {
     hunting: Option<Pos>,
     last_encounter: u64,
     navigation: Option<Arc<Grid>>,
+    navigation_version: Option<(u64, u64)>,
+    navigation_blockers: BTreeSet<TilePoint>,
+    navigation_removed: BTreeSet<TilePoint>,
     navigation_rebuilds: u64,
     navigation_reuses: u64,
-    performance: crate::performance::Window,
+    performance: Arc<Mutex<crate::performance::Window>>,
 }
 impl Brain {
     fn new(profile: Profile, view: &PlayerView) -> Self {
@@ -224,9 +224,12 @@ impl Brain {
             hunting: None,
             last_encounter: view.time_ms,
             navigation: None,
+            navigation_version: None,
+            navigation_blockers: BTreeSet::new(),
+            navigation_removed: BTreeSet::new(),
             navigation_rebuilds: 0,
             navigation_reuses: 0,
-            performance: crate::performance::Window::default(),
+            performance: Arc::default(),
         }
     }
     fn receive(
@@ -263,7 +266,9 @@ impl Brain {
         }
         Ok(false)
     }
-    fn grid(&mut self, v: &PlayerView, content: &Content) -> Grid {
+
+    fn navigation_grid(&mut self, v: &PlayerView, content: &Content, avoid: &[Pos]) -> Arc<Grid> {
+        let measuring = crate::performance::Measure::start();
         let observed: BTreeSet<_> = v
             .objects
             .iter()
@@ -274,14 +279,28 @@ impl Brain {
         self.cover
             .retain(|point| center(*point).distance(v.position) >= 19. || observed.contains(point));
         self.cover.extend(observed);
-        let mut grid = Grid::new(v);
-        for point in self
+        let mut blockers: BTreeSet<_> = self
             .cover
             .iter()
             .chain(self.blocked.keys())
             .filter(|point| **point != tile(v.position))
-        {
-            grid.walkable.remove(point);
+            .copied()
+            .collect();
+        blockers.extend(
+            v.objects
+                .iter()
+                .filter(|o| o.blocks)
+                .map(|o| tile(o.position)),
+        );
+        for enemy in avoid {
+            let (x, y) = tile(*enemy);
+            for x in x.saturating_sub(9)..=x.saturating_add(9) {
+                for y in y.saturating_sub(9)..=y.saturating_add(9) {
+                    if center((x, y)).distance(*enemy) < 8. {
+                        blockers.insert((x, y));
+                    }
+                }
+            }
         }
         if self.mind.events.knows_blue && v.map.name == "Mad Lab" {
             for pool in v.objects.iter().filter(|p| {
@@ -289,13 +308,83 @@ impl Brain {
                     && ((v.position.x as i32 - p.position.x as i32).abs() >= 2
                         || (v.position.y as i32 - p.position.y as i32).abs() >= 2)
             }) {
-                grid.walkable.retain(|point| {
-                    (i32::from(point.0) - pool.position.x as i32).abs() >= 2
-                        || (i32::from(point.1) - pool.position.y as i32).abs() >= 2
-                });
+                let (x, y) = tile(pool.position);
+                for x in x.saturating_sub(1)..=x.saturating_add(1) {
+                    for y in y.saturating_sub(1)..=y.saturating_add(1) {
+                        blockers.insert((x, y));
+                    }
+                }
             }
-            grid.walkable.insert(tile(v.position));
+            blockers.remove(&tile(v.position));
         }
+        let version = v.tiles.version();
+        let terrain_changed = self.navigation_version != Some(version);
+        let obstacles_changed = self.navigation_blockers != blockers;
+        let terrain_reusable = self
+            .navigation
+            .as_ref()
+            .is_some_and(|grid| !terrain_changed && grid.dimensions == (v.map.width, v.map.height));
+        let equivalent = terrain_reusable
+            && (!obstacles_changed || {
+                let grid = self
+                    .navigation
+                    .as_ref()
+                    .expect("reusable navigation missing");
+                let removed: BTreeSet<_> = blockers
+                    .iter()
+                    .filter(|p| grid.walkable.contains(p) || self.navigation_removed.contains(p))
+                    .copied()
+                    .collect();
+                removed == self.navigation_removed
+            });
+        self.performance
+            .lock()
+            .expect("bot timings poisoned")
+            .work("navigation_input", measuring);
+        if equivalent {
+            self.navigation_reuses += 1;
+            self.navigation_blockers = blockers;
+            let mut p = self.performance.lock().expect("bot timings poisoned");
+            p.count("navigation_reuses", 1);
+            p.count("equivalent_obstacle_reuses", u64::from(obstacles_changed));
+            return self
+                .navigation
+                .as_ref()
+                .expect("equivalent navigation missing")
+                .clone();
+        }
+        let measuring = crate::performance::Measure::start();
+        let mut grid = if terrain_reusable {
+            let mut grid = self.navigation.take().expect("reusable navigation missing");
+            let g = Arc::make_mut(&mut grid);
+            for point in &self.navigation_removed {
+                g.walkable.insert(*point);
+            }
+            g.invalidate();
+            grid
+        } else {
+            Arc::new(Grid::terrain(v))
+        };
+        let g = Arc::make_mut(&mut grid);
+        g.performance = self.performance.clone();
+        self.navigation_removed.clear();
+        for point in &blockers {
+            if g.walkable.remove(point) {
+                self.navigation_removed.insert(*point);
+            }
+        }
+        {
+            let mut p = self.performance.lock().expect("bot timings poisoned");
+            p.work("navigation_build", measuring);
+            p.count("navigation_tiles_built", 0);
+            p.count("navigation_terrain_reuses", u64::from(terrain_reusable));
+            p.count("terrain_invalidations", u64::from(terrain_changed));
+            p.count("obstacle_invalidations", u64::from(obstacles_changed));
+        }
+        self.navigation_rebuilds += 1;
+        self.navigation_version = Some(version);
+        self.navigation_blockers = blockers;
+        self.navigation = Some(grid.clone());
         grid
     }
     fn decide(&mut self, v: &PlayerView, content: &Content) -> Result<Decision> {
@@ -316,7 +405,7 @@ impl Brain {
             "controller is not live"
         );
         ensure!(
-            v.tiles.iter().any(|t| (t.x, t.y) == tile(v.position)),
+            v.tiles.contains(&tile(v.position)),
             "controller own terrain missing"
         );
         ensure!(
@@ -381,7 +470,7 @@ impl Brain {
             .as_ref()
             .is_some_and(|b| b.resolution.is_none())
         {
-            let grid = self.grid(v, content);
+            let grid = self.navigation_grid(v, content, &[]);
             if let Some(market) =
                 self.mind
                     .market
@@ -477,33 +566,12 @@ impl Brain {
             || v.tick < self.recover_until
             || (matches!(self.goal, Goal::Recover)
                 && health < (self.profile.recovery + 0.15).min(0.9));
-        let mut grid = self.grid(v, content);
-        if !retreat {
-            for enemy in enemies
-                .iter()
-                .filter(|enemy| !progression::can_fight(v, content, enemy))
-            {
-                grid.walkable
-                    .retain(|point| center(*point).distance(enemy.position) >= 8.);
-            }
-        }
-        // Cover, failed routes and dangerous enemies must invalidate navigation before reuse.
-        let grid = match &self.navigation {
-            Some(old)
-                if old.walkable == grid.walkable
-                    && old.known == grid.known
-                    && old.dimensions == grid.dimensions =>
-            {
-                self.navigation_reuses += 1;
-                old.clone()
-            }
-            _ => {
-                self.navigation_rebuilds += 1;
-                let grid = Arc::new(grid);
-                self.navigation = Some(grid.clone());
-                grid
-            }
-        };
+        let avoid: Vec<_> = enemies
+            .iter()
+            .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
+            .map(|e| e.position)
+            .collect();
+        let grid = self.navigation_grid(v, content, &avoid);
         let remedy = self
             .mind
             .events
@@ -930,7 +998,12 @@ impl Brain {
                 && !self.blocked.contains_key(&tile(*position))
                 && grid.segment(v.position, *position)
         }) {
-            let reachable = grid.reachable(v.position);
+            let retained = if let Goal::Explore(x, y) = self.goal {
+                Some((x, y))
+            } else {
+                None
+            };
+            let reachable = grid.nearby_reachable(v.position, retained);
             if let Goal::Explore(x, y) = self.goal {
                 let pos = center((x, y));
                 if pos.distance(v.position) > 0.7 && reachable.contains(&(x, y)) {
@@ -941,18 +1014,18 @@ impl Brain {
                 .iter()
                 .any(|(_, g, _)| matches!(g, Goal::Explore(..)))
             {
-                let next = reachable
-                    .iter()
+                let next = grid
+                    .nearby(&reachable, v.position)
                     .filter(|t| !self.blocked.contains_key(t))
                     .filter(|t| {
-                        center(**t).distance(v.position) > 3.
-                            && center(**t).distance(v.position) < 24.
+                        center(*t).distance(v.position) > 3.
+                            && center(*t).distance(v.position) < 24.
                     })
                     .max_by(|a, b| {
                         let frontier = |t| grid.frontier(t, v.map.width, v.map.height);
-                        let priority = frontier(**a)
-                            .cmp(&frontier(**b))
-                            .then_with(|| self.visits.get(*b).cmp(&self.visits.get(*a)));
+                        let priority = frontier(*a)
+                            .cmp(&frontier(*b))
+                            .then_with(|| self.visits.get(b).cmp(&self.visits.get(a)));
                         if !priority.is_eq() {
                             return priority;
                         }
@@ -966,10 +1039,10 @@ impl Brain {
                                 |enemy| -p.distance(enemy.position),
                             )
                         };
-                        value(**a).total_cmp(&value(**b))
+                        value(*a).total_cmp(&value(*b))
                     });
                 if let Some((x, y)) = next {
-                    choices.push((12., Goal::Explore(*x, *y), center((*x, *y))));
+                    choices.push((12., Goal::Explore(x, y), center((x, y))));
                 }
             }
         }
@@ -1210,181 +1283,17 @@ fn own(v: &PlayerView, slot: usize) -> Slot {
     }
 }
 type TilePoint = (i16, i16);
-#[derive(Default)]
-struct Grid {
-    walkable: BTreeSet<TilePoint>,
-    known: BTreeSet<TilePoint>,
-    dimensions: (i32, i32),
-    reached: Mutex<Option<(TilePoint, Arc<BTreeSet<TilePoint>>)>>,
-    frontiers: Mutex<BTreeMap<TilePoint, bool>>,
-    searches: AtomicU64,
-    cache_hits: AtomicU64,
-    reachable_nodes: AtomicU64,
-    route_nodes: AtomicU64,
-}
-impl Grid {
-    fn new(v: &PlayerView) -> Self {
-        let mut walkable: BTreeSet<_> = v
-            .tiles
-            .iter()
-            .filter(|t| t.ground_speed > 0.)
-            .map(|t| (t.x, t.y))
-            .collect();
-        for object in v.objects.iter().filter(|o| o.blocks) {
-            walkable.remove(&tile(object.position));
-        }
-        Self {
-            walkable,
-            known: v.tiles.iter().map(|t| (t.x, t.y)).collect(),
-            dimensions: (v.map.width, v.map.height),
-            ..Self::default()
-        }
-    }
-    fn towards(&self, from: Pos, target: Pos) -> Option<Pos> {
-        if self.walkable.contains(&tile(target)) {
-            return self.next(from, target);
-        }
-        let reachable = self.reachable(from);
-        let next = reachable
-            .iter()
-            .filter(|point| {
-                center(**point).distance(from) > 3.
-                    && self.frontier(**point, self.dimensions.0, self.dimensions.1)
-            })
-            .min_by(|a, b| {
-                center(**a)
-                    .distance(target)
-                    .total_cmp(&center(**b).distance(target))
-            })?;
-        self.next(from, center(*next))
-    }
-    fn reachable(&self, from: Pos) -> Arc<BTreeSet<TilePoint>> {
-        let start = tile(from);
-        let mut cache = self.reached.lock().expect("navigation cache poisoned");
-        if let Some((origin, reached)) = &*cache
-            && (*origin == start
-                || (self.walkable.contains(origin)
-                    && self.walkable.contains(&start)
-                    && reached.contains(&start)))
-        {
-            self.cache_hits.fetch_add(1, Ordering::Relaxed);
-            return reached.clone();
-        }
-        let mut queue = VecDeque::from([start]);
-        let mut unvisited: HashSet<_> = self.walkable.iter().copied().collect();
-        unvisited.remove(&start);
-        let mut reached = vec![start];
-        while let Some((x, y)) = queue.pop_front() {
-            for next in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)] {
-                if unvisited.remove(&next) {
-                    reached.push(next);
-                    queue.push_back(next);
-                }
-            }
-        }
-        let reached: Arc<BTreeSet<TilePoint>> = Arc::new(reached.into_iter().collect());
-        *cache = Some((start, reached.clone()));
-        self.searches.fetch_add(1, Ordering::Relaxed);
-        self.reachable_nodes
-            .fetch_add(reached.len() as u64, Ordering::Relaxed);
-        reached
-    }
-    fn frontier(&self, (x, y): TilePoint, width: i32, height: i32) -> bool {
-        assert_eq!(
-            (width, height),
-            self.dimensions,
-            "frontier dimensions changed"
-        );
-        assert!(
-            x >= 0 && y >= 0 && i32::from(x) < width && i32::from(y) < height,
-            "frontier outside map"
-        );
-        *self
-            .frontiers
-            .lock()
-            .expect("frontier cache poisoned")
-            .entry((x, y))
-            .or_insert_with(|| {
-                [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-                    .iter()
-                    .any(|n| {
-                        n.0 >= 0
-                            && n.1 >= 0
-                            && i32::from(n.0) < width
-                            && i32::from(n.1) < height
-                            && !self.known.contains(n)
-                    })
-            })
-    }
-    fn segment(&self, from: Pos, to: Pos) -> bool {
-        let steps = (from.distance(to) * 4.).ceil().max(1.) as i32;
-        self.walkable.contains(&tile(to))
-            && (0..=steps).all(|i| {
-                let f = i as f32 / steps as f32;
-                self.walkable.contains(&tile(Pos {
-                    x: from.x + (to.x - from.x) * f,
-                    y: from.y + (to.y - from.y) * f,
-                }))
-            })
-    }
-    fn metrics(&self) -> serde_json::Value {
-        let reached = self.reached.lock().expect("navigation cache poisoned");
-        serde_json::json!({"known_tiles":self.known.len(),"walkable_tiles":self.walkable.len(),
-            "reachable_tiles":reached.as_ref().map_or(0, |(_,r)|r.len()),
-            "frontier_entries":self.frontiers.lock().expect("frontier cache poisoned").len(),
-            "searches":self.searches.load(Ordering::Relaxed),"cache_hits":self.cache_hits.load(Ordering::Relaxed),
-            "reachable_nodes_visited":self.reachable_nodes.load(Ordering::Relaxed),"route_nodes_visited":self.route_nodes.load(Ordering::Relaxed)})
-    }
-    fn next(&self, from: Pos, to: Pos) -> Option<Pos> {
-        let start = tile(from);
-        let finish = tile(to);
-        if !self.walkable.contains(&finish) {
-            return None;
-        }
-        // A distant sampling grid can miss the nearby waypoint's blocked cell.
-        let fraction = 4. / from.distance(to).max(4.);
-        let waypoint = Pos {
-            x: from.x + (to.x - from.x) * fraction,
-            y: from.y + (to.y - from.y) * fraction,
-        };
-        if self.segment(from, to) && self.segment(from, waypoint) {
-            return Some(waypoint);
-        }
-        if start == finish {
-            return None;
-        }
-        let mut queue = VecDeque::from([start]);
-        let mut parent = HashMap::from([(start, start)]);
-        let mut visited = 0;
-        while let Some((x, y)) = queue.pop_front() {
-            visited += 1;
-            if (x, y) == finish {
-                break;
-            }
-            for next in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)] {
-                if self.walkable.contains(&next) && !parent.contains_key(&next) {
-                    parent.insert(next, (x, y));
-                    queue.push_back(next);
-                }
-            }
-        }
-        self.route_nodes.fetch_add(visited, Ordering::Relaxed);
-        let mut next = finish;
-        while *parent.get(&next)? != start {
-            next = *parent.get(&next)?;
-        }
-        let target = center(next);
-        if self.segment(from, target) {
-            Some(target)
-        } else {
-            self.segment(from, center(start)).then_some(center(start))
-        }
-    }
-}
+mod movement;
+use movement::Grid;
 
 #[cfg(test)]
-mod performance_tests;
+mod community_compat_tests;
 #[cfg(test)]
+mod community_pending_tests;
+#[cfg(test)]
+mod navigation_tests;
+#[cfg(test)]
+#[path = "bots/community_tests.rs"]
 mod tests;
 
 mod runtime;
@@ -1414,7 +1323,16 @@ pub async fn start_test(
     world: i32,
     position: Pos,
     profile: &str,
+    owner: crate::server::Owner,
 ) -> Result<()> {
     validate_test_class(character.class, profile)?;
-    runtime::start_selected(app, selected_profile(profile)?, character, world, position).await
+    runtime::start_selected(
+        app,
+        selected_profile(profile)?,
+        character,
+        world,
+        position,
+        owner,
+    )
+    .await
 }

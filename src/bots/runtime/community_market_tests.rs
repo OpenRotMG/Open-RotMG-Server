@@ -122,7 +122,7 @@ async fn controller_market_case(mode: &str) {
         ch.mp = ch.base[1];
         let spare = if i == 0 { 0xa21 } else { 0xa4c };
         ch.items[4..].copy_from_slice(&[0xa22, 0xa22, 0xa23, 0xa23, spare, spare, spare, spare]);
-        let mut vault = app.store.vault(ch.account).await.unwrap();
+        let mut vault = app.store.vault(ch.account, 0).await.unwrap();
         if i < 2 {
             vault.items[..6].fill(spare);
         } else {
@@ -137,13 +137,13 @@ async fn controller_market_case(mode: &str) {
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                Some(vault),
+                vec![vault],
             )
             .await
             .unwrap()[0];
         app.store.progress(ch.clone()).await.unwrap();
         // Both own Vaults are initially inspected by their actual controllers, then ordinary travel publishes them.
-        let loaded = app.store.vault(ch.account).await.unwrap();
+        let loaded = app.store.vault(ch.account, 0).await.unwrap();
         let (scope, pos) = app
             .world
             .directory(move |d| {
@@ -170,7 +170,7 @@ async fn controller_market_case(mode: &str) {
                 }
                 let scope = d.instance("vault", Some(loaded.account))?;
                 let w = d.worlds.get_mut(&scope).unwrap();
-                w.load_vault(loaded)?;
+                w.load_vaults(vec![loaded])?;
                 Ok((
                     scope,
                     w.entities.values().find(|e| e.kind == 0x504).unwrap().pos,
@@ -188,7 +188,7 @@ async fn controller_market_case(mode: &str) {
             mind.validate().unwrap();
             app.store.save_bot_mind(mind).await.unwrap();
         }
-        initial.push(json!({"character":ch,"vault":app.store.vault(ch.account).await.unwrap()}));
+        initial.push(json!({"character":ch,"vault":app.store.vault(ch.account, 0).await.unwrap()}));
         selected.push((ch.account, ch.id));
         launch(&app, *profile, ch.clone(), scope, Some(pos), Some(ch.id))
             .await

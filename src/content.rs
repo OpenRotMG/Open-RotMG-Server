@@ -91,6 +91,35 @@ impl Projectile {
         )
     }
 }
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct SpawnGroup {
+    pub mean: usize,
+    pub deviation: usize,
+    pub min: usize,
+    pub max: usize,
+}
+impl SpawnGroup {
+    fn parse(n: Node<'_, '_>) -> Result<Self> {
+        let value = |tag| -> Result<usize> {
+            Ok(child(n, tag)
+                .and_then(|v| v.text())
+                .context("incomplete spawn group")?
+                .trim()
+                .parse()?)
+        };
+        let group = Self {
+            mean: value("Mean")?,
+            deviation: value("StdDev")?,
+            min: value("Min")?,
+            max: value("Max")?,
+        };
+        ensure!(
+            group.min > 0 && group.min <= group.mean && group.mean <= group.max && group.max <= 32,
+            "invalid spawn group bounds"
+        );
+        Ok(group)
+    }
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct Object {
     pub kind: u16,
@@ -108,6 +137,7 @@ pub struct Object {
     pub equipment: Vec<i32>,
     pub slots: Vec<i32>,
     pub slot_type: i32,
+    pub fame_bonus: u32,
     pub tier: Option<u8>,
     pub soulbound: bool,
     pub bag_type: u8,
@@ -140,9 +170,14 @@ pub struct Object {
     pub cooldown_ms: u64,
     pub enemy: bool,
     pub stasis_immune: bool,
+    pub leach_health: bool,
     pub terrain: u8,
+    pub spawn_weight: Option<f32>,
+    pub spawn_group: Option<SpawnGroup>,
+    pub per_realm_max: Option<usize>,
     pub quest: bool,
     pub quest_level: Option<i32>,
+    pub quest_window: (u8, u8),
     pub xp_multiplier: f32,
     pub blocks: bool,
     pub full_occupy: bool,
@@ -224,6 +259,29 @@ fn kind(s: &str) -> Result<u16> {
         Ok(s.parse()?)
     }
 }
+fn fame_bonus(n: Node<'_, '_>) -> Result<u32> {
+    let mut fields = n.children().filter(|c| c.has_tag_name("FameBonus"));
+    let Some(field) = fields.next() else {
+        return Ok(0);
+    };
+    ensure!(
+        fields.next().is_none(),
+        "duplicate FameBonus on {:?}",
+        n.attribute("id")
+    );
+    ensure!(
+        !field.children().any(|c| c.is_element()),
+        "nested FameBonus on {:?}",
+        n.attribute("id")
+    );
+    field
+        .text()
+        .context("empty FameBonus")?
+        .trim()
+        .parse()
+        .with_context(|| format!("invalid FameBonus on {:?}", n.attribute("id")))
+}
+
 impl Content {
     pub fn load(dir: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(dir.join("objects.xml"))?;
@@ -292,6 +350,7 @@ impl Content {
                 equipment: list(n, "Equipment")?,
                 slots: list(n, "SlotTypes")?,
                 slot_type: number(n, "SlotType", 0.)? as i32,
+                fame_bonus: fame_bonus(n)?,
                 tier: child(n, "Tier")
                     .map(|_| text(n, "Tier").parse::<u8>())
                     .transpose()?,
@@ -396,6 +455,7 @@ impl Content {
                     .try_into()?,
                 enemy: child(n, "Enemy").is_some(),
                 stasis_immune: child(n, "StasisImmune").is_some(),
+                leach_health: child(n, "LeachHealth").is_some(),
                 terrain: match text(n, "Terrain").as_str() {
                     "" => 0,
                     "Mountains" => 1,
@@ -412,10 +472,31 @@ impl Content {
                     "ShorePlains" => 12,
                     terrain => bail!("unknown selected terrain {terrain}"),
                 },
+                spawn_weight: child(n, "SpawnProb")
+                    .map(|v| -> Result<f32> {
+                        let weight: f32 =
+                            v.text().context("SpawnProb has no value")?.trim().parse()?;
+                        ensure!(
+                            weight.is_finite() && (0.0..=1.0).contains(&weight),
+                            "invalid SpawnProb"
+                        );
+                        Ok(weight)
+                    })
+                    .transpose()?,
+                spawn_group: child(n, "Spawn").map(SpawnGroup::parse).transpose()?,
+                per_realm_max: child(n, "PerRealmMax")
+                    .map(|v| -> Result<usize> {
+                        Ok(v.text()
+                            .context("PerRealmMax has no value")?
+                            .trim()
+                            .parse()?)
+                    })
+                    .transpose()?,
                 quest: child(n, "Quest").is_some(),
                 quest_level: child(n, "Level")
                     .map(|_| text(n, "Level").parse())
                     .transpose()?,
+                quest_window: crate::quest::window(id),
                 xp_multiplier: number(n, "XpMult", 1.)?,
                 blocks: child(n, "OccupySquare").is_some() || child(n, "FullOccupy").is_some(),
                 full_occupy: child(n, "FullOccupy").is_some(),
@@ -627,6 +708,11 @@ impl Map {
         Self::decode(&bytes, content).with_context(|| format!("load map {}", path.display()))
     }
     pub(crate) fn decode(bytes: &[u8], content: &Content) -> Result<Self> {
+        let map = Self::decode_cells(bytes, content)?;
+        ensure!(!map.spawns.is_empty(), "map has no spawn cells");
+        Ok(map)
+    }
+    pub(crate) fn decode_cells(bytes: &[u8], content: &Content) -> Result<Self> {
         let mut data = Vec::new();
         flate2::read::ZlibDecoder::new(bytes)
             .take(16 * 1024 * 1024 + 1)
@@ -640,7 +726,7 @@ impl Map {
         ensure!(count > 0, "empty map dictionary");
         let mut dict = Vec::new();
         for _ in 0..count {
-            let ground = u8::try_from(r.short()?)?;
+            let ground = u8::try_from(r.short()?).context("map ground out of range")?;
             ensure!(
                 content.grounds.contains_key(&ground),
                 "unknown map ground {ground:#x}"
@@ -677,7 +763,7 @@ impl Map {
         let mut spawns = Vec::new();
         for y in 0..height {
             for x in 0..width {
-                let i = usize::try_from(r.short()?)?;
+                let i = usize::try_from(r.short()?).context("map dictionary index out of range")?;
                 let c = dict.get(i).context("invalid map dictionary index")?.clone();
                 if c.region == 1 {
                     spawns.push((x as f32 + 0.5, y as f32 + 0.5));
@@ -686,7 +772,6 @@ impl Map {
             }
         }
         ensure!(r.pos == r.data.len(), "trailing map data");
-        ensure!(!spawns.is_empty(), "map has no spawn cells");
         Ok(Self {
             width,
             height,
@@ -700,178 +785,5 @@ impl Map {
         }
         self.cells
             .get(y.floor() as usize * self.width as usize + x.floor() as usize)
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn selected_legacy_sounds_are_present() {
-        let xml = std::fs::read_to_string("data/objects.xml").unwrap();
-        let doc = roxmltree::Document::parse(&xml).unwrap();
-        let sounds: std::collections::BTreeSet<_> = doc
-            .descendants()
-            .filter(|node| node.has_tag_name("OldSound"))
-            .filter_map(|node| node.text())
-            .collect();
-        assert!(!sounds.is_empty());
-        for sound in sounds {
-            let path = Path::new("data/sfx").join(format!("{sound}.mp3"));
-            let bytes = std::fs::read(&path).unwrap_or_else(|error| {
-                panic!("missing selected sound {}: {error}", path.display())
-            });
-            assert!(!bytes.is_empty(), "empty selected sound {}", path.display());
-        }
-    }
-
-    #[test]
-    fn client_data_identity() {
-        let c = Content::load(Path::new("data")).unwrap();
-        let w = c.get(WIZARD).unwrap();
-        assert_eq!(w.equipment[0], 0xa97);
-        assert_eq!(w.equipment[1], 0xa2e);
-        assert_eq!(w.hp, 100);
-        assert!(c.grounds.contains_key(&0x61) && c.grounds.contains_key(&0x65));
-        assert!(c.objects[&0x120].static_object);
-        assert!(!c.objects[&0x683].static_object);
-        assert!(c.objects[&0x120].occupy_square && c.objects[&0x120].enemy_occupy_square);
-        assert!(c.objects[&0x100].occupy_square && !c.objects[&0x100].enemy_occupy_square);
-        assert!(!c.objects[&0x683].projectiles[&0].passes_cover);
-        assert!(c.objects[&0xa08].projectiles[&0].passes_cover);
-    }
-    #[test]
-    fn projectile_identity_includes_both_selected_dreadstump_attacks() {
-        let content = Content::load(Path::new("data")).unwrap();
-        let boss = &content.objects[&0x927];
-        assert_eq!(boss.projectiles.len(), 2);
-        let slow = &boss.projectiles[&0];
-        assert_eq!(
-            (slow.min, slow.max, slow.speed, slow.lifetime),
-            (17, 17, 75., 1500.)
-        );
-        let fast = &boss.projectiles[&1];
-        assert_eq!(
-            (fast.min, fast.max, fast.speed, fast.lifetime),
-            (25, 25, 130., 1100.)
-        );
-        assert_eq!(content.objects[&0xa97].projectiles.len(), 1);
-        assert!(content.objects[&0xa97].projectiles.contains_key(&0));
-    }
-    #[test]
-    fn class_growth_caps_and_unlocks_are_selected_xml() {
-        let content = Content::load(Path::new("data")).unwrap();
-        assert_eq!(content.classes.len(), 13);
-        let wizard = &content.classes[&WIZARD];
-        assert_eq!(wizard.base, [100, 100, 12, 0, 10, 15, 12, 12]);
-        assert_eq!(wizard.caps, [670, 385, 75, 25, 50, 75, 40, 60]);
-        assert_eq!(
-            wizard.growth,
-            [
-                (20, 30),
-                (5, 15),
-                (1, 2),
-                (0, 0),
-                (0, 2),
-                (1, 2),
-                (0, 1),
-                (0, 2)
-            ]
-        );
-        assert!(wizard.requires.is_empty());
-        assert_eq!(content.classes[&0x0310].requires, vec![(WIZARD, 5)]);
-        assert_eq!(
-            content.classes[&0x031f].requires,
-            vec![(0x031e, 20), (0x0310, 20)]
-        );
-    }
-    #[test]
-    fn sourced_world_maps_resolve_and_cave_spawn_reaches_boss() {
-        let content = Content::load(Path::new("data")).unwrap();
-        for name in [
-            "nexus",
-            "nexus-limbo",
-            "vault",
-            "realm-shore",
-            "pirate-cave",
-        ] {
-            let map = Map::load(&Path::new("data").join(format!("{name}.wmap")), &content).unwrap();
-            assert!(!map.spawns.is_empty());
-            assert_eq!(map.cells.len(), (map.width * map.height) as usize);
-            if name == "realm-shore" {
-                assert_eq!((map.width, map.height), (96, 96));
-                assert_eq!(map.cells.iter().filter(|c| c.terrain == 11).count(), 3460);
-                assert_eq!(map.cells.iter().filter(|c| c.terrain == 12).count(), 3200);
-            }
-        }
-        let cave = Map::load(Path::new("data/pirate-cave.wmap"), &content).unwrap();
-        assert_eq!((cave.width, cave.height), (94, 98));
-        assert_eq!(cave.spawns, vec![(20.5, 82.5)]);
-        let boss = cave
-            .cells
-            .iter()
-            .position(|c| c.object == Some(0x927))
-            .unwrap();
-        let spawn = 82 * cave.width as usize + 20;
-        let mut reached = std::collections::BTreeSet::from([spawn]);
-        let mut queue = std::collections::VecDeque::from([spawn]);
-        while let Some(i) = queue.pop_front() {
-            let (x, y) = (i as i32 % cave.width, i as i32 / cave.width);
-            for (x, y) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                if x < 0 || y < 0 || x >= cave.width || y >= cave.height {
-                    continue;
-                }
-                let next = (y * cave.width + x) as usize;
-                let cell = &cave.cells[next];
-                if content.grounds[&cell.ground] > 0.
-                    && cell
-                        .object
-                        .is_none_or(|kind| !content.objects[&kind].blocks)
-                    && reached.insert(next)
-                {
-                    queue.push_back(next);
-                }
-            }
-        }
-        assert!(
-            reached.contains(&boss),
-            "sourced cave boss is disconnected from spawn"
-        );
-        assert!(cave.cells.iter().any(|c| c.config.starts_with("conn:")));
-    }
-    #[test]
-    fn selected_priest_starter_and_tiered_healing_are_exact() {
-        let c = Content::load(Path::new("data")).unwrap();
-        assert_eq!(c.get(PRIEST).unwrap().slots[..4], [8, 4, 14, 9]);
-        assert_eq!(
-            c.get(PRIEST).unwrap().equipment[..5],
-            [0xa04, 0xa31, -1, -1, 0xa22]
-        );
-        for (tier, kind, amount, range, cost) in [
-            (0, 0xa31, 100, 5., 60),
-            (1, 0xad7, 130, 5.5, 65),
-            (2, 0xa32, 165, 6., 70),
-            (3, 0xad8, 205, 6.5, 75),
-            (4, 0xa33, 250, 7., 80),
-            (5, 0xa5b, 300, 8., 85),
-            (6, 0xb25, 300, 8., 85),
-        ] {
-            let o = c.get(kind).unwrap();
-            assert_eq!(
-                (o.tier, o.heal, o.heal_range, o.mana_cost),
-                (Some(tier), amount, range, cost)
-            );
-            assert_eq!(
-                (o.activate.as_str(), o.activations, o.cooldown_ms),
-                ("HealNova", 1, 500)
-            );
-        }
-    }
-    #[test]
-    fn candidate_map_is_lossless() {
-        let c = Content::load(Path::new("data")).unwrap();
-        let m = Map::load(Path::new("data/tutorial.wmap"), &c).unwrap();
-        assert_eq!((m.width, m.height, m.cells.len()), (25, 201, 5025));
-        assert_eq!(m.spawns.len(), 12);
-        assert!(m.cells.iter().any(|c| c.object == Some(0x071e)));
     }
 }

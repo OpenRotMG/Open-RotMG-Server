@@ -40,7 +40,7 @@ fn community_market_opposite_unit_rendezvous_boundaries_close_into_strict_native
         let b = m.bargain.as_mut().unwrap();
         b.agreed = true;
         b.own_consent = true;
-        let d = m.decide(&v, &c, None, &Grid::new(&v)).unwrap().unwrap();
+        let d = m.decide(&v, &c, None, &Grid::terrain(&v)).unwrap().unwrap();
         let movement=d.movement.expect("opposite closed unit-radius arrivals are exactly two apart; rendezvous must close further without weakening native reach");
         assert!(movement.distance(meeting) < v.position.distance(meeting));
         arrivals.push(movement);
@@ -67,9 +67,11 @@ fn community_market_rendezvous_does_not_move_inside_reach_or_bypass_blockage_exp
         if case == "refused" {
             b.resolution = Some("refused_remaining_balance_unenforced".into());
         }
-        let mut grid = Grid::new(&v);
+        let mut grid = Grid::terrain(&v);
         if case == "blocked" {
-            grid.walkable = [tile(v.position)].into();
+            for point in v.tiles.points().filter(|p| *p != tile(v.position)) {
+                grid.walkable.remove(&point);
+            }
         }
         let d = m.decide(&v, &c, None, &grid).unwrap();
         assert!(
@@ -340,7 +342,7 @@ fn community_market_changed_interests_refusal_stock_capacity_expiry_and_death() 
     m.replace(t.clone());
     v.character.items[8] = -1;
     v.character.items[9] = -1;
-    m.decide(&v, &c, None, &Grid::new(&v)).unwrap();
+    m.decide(&v, &c, None, &Grid::terrain(&v)).unwrap();
     assert!(
         m.bargain
             .as_ref()
@@ -352,7 +354,7 @@ fn community_market_changed_interests_refusal_stock_capacity_expiry_and_death() 
     );
     m.replace(t.clone());
     m.bargain.as_mut().unwrap().terms.expires = now() - 1;
-    m.decide(&v, &c, None, &Grid::new(&v)).unwrap();
+    m.decide(&v, &c, None, &Grid::terrain(&v)).unwrap();
     assert!(
         m.bargain
             .as_ref()

@@ -119,3 +119,40 @@ fn decision_phase_elapsed_preserves_error_identity_context_and_earlier_samples()
         }
     }
 }
+
+#[test]
+fn decision_sync_work_uses_real_thread_measurement_without_assigning_cpu_to_inclusive_awaits() {
+    for fail in [false, true] {
+        let mut window = reportable_window();
+        let (result, measurement) = {
+            let measure = crate::performance::Measure::start();
+            let result: anyhow::Result<()> = if fail {
+                Err(anyhow::anyhow!("declared synchronous decision error"))
+            } else {
+                Ok(())
+            };
+            (result, measure.finish())
+        };
+        window.completed("decision_sync_work", measurement);
+        let result = record_decision_phase_elapsed(
+            &mut window,
+            "decide_sync_elapsed",
+            measurement.wall,
+            result,
+        );
+        assert_eq!(result.is_err(), fail);
+        if !fail {
+            window.record("decision", Duration::from_millis(500));
+        }
+        let report = window.report().unwrap();
+        assert_eq!(report["timings"]["decision_sync_work"]["count"], 1);
+        assert_eq!(report["timings"]["decide_sync_elapsed"]["count"], 1);
+        assert_eq!(
+            report["thread_cpu"].get("decision_sync_work").is_some(),
+            cfg!(target_os = "linux")
+        );
+        assert!(report["thread_cpu"].get("decision").is_none());
+        assert!(report["thread_cpu"].get("decide_sync_elapsed").is_none());
+        assert_eq!(report["timings"].get("decision").is_none(), fail);
+    }
+}

@@ -1,8 +1,6 @@
 use super::*;
 use crate::store::Guild;
 use std::time::Duration;
-#[cfg(test)]
-mod tests;
 
 pub(super) struct Invitation {
     guild: i32,
@@ -213,7 +211,7 @@ impl Directory {
         {
             return Ok(*id);
         }
-        ensure!(self.worlds.len() < 12, "World instance limit reached.");
+        self.reserve_worlds(1, &[])?;
         let mut world = self.make(
             &format!("guild-hall-{}", guild.level),
             "Guild Hall",

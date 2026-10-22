@@ -34,26 +34,33 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
     old.level = 5;
     old.exp = crate::store::level_start(5).unwrap();
     app.store.progress(old.clone()).await.unwrap();
-    let mut owners = vec![app.claim(old.account).unwrap()];
+    let mut owner = Some(app.claim(old.account).unwrap());
+    let mut owners = vec![];
     let (old_id, old_rx, old_sender, _) = enter(&app, p, old.clone(), -3, None).await.unwrap();
     let session = app
         .world
         .directory(move |d| Ok(d.player_view(old_id)?.session))
         .await
         .unwrap();
-    let vault_before = app.store.vault(old.account).await.unwrap();
+    let vault_before = app.store.vault(old.account, 0).await.unwrap();
     old.hp = 0;
     old.alive = false;
-    app.store
-        .death(
-            old.clone(),
-            "engineering committed-death fixture, not natural controller evidence".into(),
-        )
-        .await
-        .unwrap();
     app.world
         .for_player(old_id)
-        .call(move |w| w.leave(old_id))
+        .call(move |w| {
+            let player = w
+                .players
+                .get_mut(&old_id)
+                .context("prepared old actor missing")?;
+            player.character.hp = 0;
+            player.death_pending = true;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    server::lifecycle::finalize(&app, old_id, server::lifecycle::CloseReason::Controller)
+        .unwrap()
+        .wait()
         .await
         .unwrap();
     drop((old_rx, old_sender));
@@ -76,9 +83,17 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
         (4, 4)
     );
     assert!(app.store.load(old.account, old.id).await.is_err());
-    let (id, rx, sender, brain) = rebuild_character(&app, p, &session)
-        .await
-        .expect("ordinary replacement arrival must not compete for its dead Realm slot");
+    let (id, rx, sender, brain) = reenter(
+        &app,
+        p,
+        old.account,
+        &mut owner,
+        Reentry::Replacement {
+            previous: session.character,
+        },
+    )
+    .await
+    .expect("ordinary replacement arrival must not compete for its dead Realm slot");
     let v = app
         .world
         .directory(move |d| d.player_view(id))
@@ -100,7 +115,7 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
         current.items,
         app.content.get(crate::content::PRIEST).unwrap().equipment
     );
-    let vault_after = app.store.vault(old.account).await.unwrap();
+    let vault_after = app.store.vault(old.account, 0).await.unwrap();
     assert_eq!(vault_before.revision, vault_after.revision);
     assert_eq!(vault_before.items, vault_after.items);
     let rejection = app
@@ -128,20 +143,21 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
         "replacement admission engineering evidence: {}",
         dir.display()
     );
-    app.world
-        .for_player(id)
-        .call(move |w| w.leave(id))
+    server::lifecycle::finalize(&app, id, server::lifecycle::CloseReason::Controller)
+        .unwrap()
+        .wait()
         .await
         .unwrap();
     drop((rx, sender));
     for (id, rx, sender, _) in others {
-        app.world
-            .for_player(id)
-            .call(move |w| w.leave(id))
+        server::lifecycle::finalize(&app, id, server::lifecycle::CloseReason::Controller)
+            .unwrap()
+            .wait()
             .await
             .unwrap();
         drop((rx, sender));
     }
+    drop(owner);
     drop(owners);
     app.shutdown.send_replace(true);
 }

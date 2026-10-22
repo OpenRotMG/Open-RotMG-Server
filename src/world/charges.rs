@@ -35,6 +35,7 @@ impl World {
         let pos = e.pos;
         let now = self.now;
         let slowed = e.conditions(now) & condition::bit(condition::SLOWED) != 0;
+        let e = &mut **e;
         let state = e.charge.get_or_insert(Charge {
             goal: None,
             until: 0,

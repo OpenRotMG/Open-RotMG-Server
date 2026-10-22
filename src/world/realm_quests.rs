@@ -37,7 +37,7 @@ impl World {
     }
     pub(super) fn quest_members(&self, id: i32, kinds: &[u16]) -> Vec<i32> {
         let tag = self.entities[&id].quest.expect("named quest membership");
-        self.actors()
+        self.non_population_actors()
             .filter(|e| e.quest == Some(tag) && kinds.contains(&e.kind))
             .map(|e| e.id)
             .collect()
@@ -176,14 +176,13 @@ impl World {
             e.home = home;
             e.stage = Some(0);
             e.activated = Some(self.now);
-            e.expires = Some(
-                self.now
-                    + match kind {
-                        0x91d => 130000,
-                        0x92a..=0x92c => 160000,
-                        _ => 90000,
-                    },
-            );
+            let lifetime = match kind {
+                0x91d => 130000,
+                0x92a..=0x92c => 160000,
+                _ => 90000,
+            };
+            e.expires
+                .set(Some(self.now + lifetime), child, &mut self.timed_ids);
             e.size = self.content.objects[&kind].size;
             if matches!(kind, 0x91e | 0x923 | 0x929..=0x92c) {
                 e.condition |= condition::bit(condition::INVULNERABLE);
@@ -203,22 +202,21 @@ impl World {
         let old = &self.entities[&id];
         ensure!(old.quest.is_some(), "quest transformation lacks ownership");
         let new = self.spawn_entity(kind, old.pos, vec![])?;
-        let old = self.remove_entity(id);
+        let mut old = self.remove_entity(id);
         let e = self.entities.get_mut(&new).unwrap();
         e.quest = old.quest;
         e.home = old.home;
-        e.damage = old.damage;
+        e.damage = std::mem::take(&mut old.damage);
         e.stage = None;
         e.activated = Some(self.now);
-        e.expires = match kind {
+        let expires = match kind {
+            _ if quest::final_root(kind) || kind == 0x6c2 => None,
             0x924 => Some(self.now + 60000),
             0x92b | 0x92c => Some(self.now + 160000),
-            _ => old.expires,
+            _ => *old.expires,
         };
+        e.expires.set(expires, new, &mut self.timed_ids);
         e.size = self.content.objects[&kind].size;
-        if quest::final_root(kind) || kind == 0x6c2 {
-            e.expires = None;
-        }
         if matches!(kind, 0x920 | 0x6c2 | 0x92b | 0x92c) {
             e.condition |= condition::bit(condition::INVULNERABLE);
         }
@@ -545,13 +543,13 @@ impl World {
             0x6c2 => (Motion::Stationary, 0.),
             0x92d => (Motion::Pace { distance: 3. }, 5.),
             0x928 if e.stage == Some(0) => (Motion::Pace { distance: 3. }, 3.),
-            0x928 if e.stage.unwrap_or(0) >= 7 && elapsed % 4000 >= 2000 => {
-                (Motion::Stationary, 0.)
-            }
             0x928 if e.stage.unwrap_or(0) >= 7 => (
-                Motion::Chase {
+                Motion::Follow {
                     sight: 10.,
                     stop: 2.,
+                    idle: 0.,
+                    duration: 2000,
+                    cooldown: 2000,
                 },
                 6.,
             ),

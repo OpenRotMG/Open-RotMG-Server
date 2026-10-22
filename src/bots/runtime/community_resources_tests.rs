@@ -97,7 +97,7 @@ async fn community_resources_transfer_gap_observer_rejects_loss_quarantine_timeo
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            None,
+            vec![],
         )
         .await
         .unwrap()[0];
@@ -174,12 +174,12 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                vec![],
             )
             .await
             .unwrap()[0];
         app.store.progress(ch.clone()).await.unwrap();
-        let mut vault = app.store.vault(account).await.unwrap();
+        let mut vault = app.store.vault(account, 0).await.unwrap();
         match label {
             "available" => vault.items[..3].copy_from_slice(&[0xa22, 0xa22, 0xa9a]),
             "unavailable" => {}
@@ -195,12 +195,12 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                Some(vault.clone()),
+                vec![vault.clone()],
             )
             .await
             .unwrap()[0];
-        let initial = json!({"character":ch,"vault":app.store.vault(account).await.unwrap()});
-        let loaded = app.store.vault(account).await.unwrap();
+        let initial = json!({"character":ch,"vault":app.store.vault(account, 0).await.unwrap()});
+        let loaded = app.store.vault(account, 0).await.unwrap();
         let (scope, position) = app
             .world
             .directory(move |d| {
@@ -210,7 +210,7 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
                 }
                 let scope = d.instance("vault", Some(account))?;
                 let w = d.worlds.get_mut(&scope).unwrap();
-                w.load_vault(loaded)?;
+                w.load_vaults(vec![loaded])?;
                 Ok((
                     scope,
                     w.entities.values().find(|e| e.kind == 0x504).unwrap().pos,
@@ -349,7 +349,7 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
             0
         );
         let durable = app.store.load(account, character).await.unwrap();
-        let banked = app.store.vault(account).await.unwrap();
+        let banked = app.store.vault(account, 0).await.unwrap();
         fs::write(
             dir.join("resources-sequence.json"),
             serde_json::to_vec_pretty(&sequence).unwrap(),

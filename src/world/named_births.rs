@@ -85,21 +85,29 @@ impl World {
     pub(super) fn configure_landmark_child(&mut self, id: i32) {
         let e = self.entities.get_mut(&id).unwrap();
         match e.kind {
+            0xdc0 | 0xdc1 => {
+                e.expires.set(None, id, &mut self.timed_ids);
+                e.home = e.pos;
+            }
             0xd52 => {
                 e.script
                     .get_or_insert_with(landmark_ai::Script::default)
                     .no_experience = true
             }
-            0x942 => e.expires = Some(self.now + 17000),
+            0x942 => e
+                .expires
+                .set(Some(self.now + 17000), id, &mut self.timed_ids),
             0x943 | 0xd55 => {
-                e.expires = None;
+                e.expires.set(None, id, &mut self.timed_ids);
                 e.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
             }
             0xe3b => {
-                e.expires = None;
+                e.expires.set(None, id, &mut self.timed_ids);
                 e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
             }
-            0xe4f => e.expires = Some(self.now + 10000),
+            0xe4f => e
+                .expires
+                .set(Some(self.now + 10000), id, &mut self.timed_ids),
             _ => {}
         }
     }

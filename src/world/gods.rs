@@ -9,22 +9,6 @@ pub(super) const GODS: &[u16] = &[
 pub(super) const CONSTRUCTS: &[u16] = &[0x905, 0x906, 0x907];
 
 impl World {
-    pub(super) fn populate_godlands(&mut self, candidates: &[Pos]) -> Result<()> {
-        self.populate_families(1, candidates, &[0x652, 0x652, 0x905])?;
-        self.populate_solos(
-            1,
-            candidates,
-            &[
-                0x651, 0x654, 0x655, 0x656, 0x657, 0x658, 0x659, 0x6d8, 0x651, 0x654, 0x655, 0x656,
-                0x657, 0x658, 0x659, 0x6d8, 0x91a,
-            ],
-        )?;
-        ensure!(
-            self.population_count(1) == 28,
-            "Godlands initial body budget changed"
-        );
-        Ok(())
-    }
     pub(super) fn god_movement(
         &self,
         id: i32,
@@ -102,7 +86,8 @@ impl World {
                 _ => (Motion::Tangential, 8.),
             },
             kind if GODS.contains(&kind) => {
-                if target.is_none_or(|p| e.pos.distance(p) > 7.) {
+                let sight = if kind == 0x651 { 9. } else { 7. };
+                if target.is_none_or(|p| e.pos.distance(p) > sight) {
                     (Motion::Wander, 4.)
                 } else {
                     chase(
@@ -111,7 +96,7 @@ impl World {
                             0x659 => 4.,
                             _ => 6.,
                         },
-                        7.,
+                        sight,
                         4.,
                     )
                 }
@@ -131,13 +116,14 @@ impl World {
             let dying = hp < 400;
             if dying && expiry.is_none() {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.expires = Some(self.now + 3000);
+                e.expires
+                    .set(Some(self.now + 1000), id, &mut self.timed_ids);
                 e.next_shot = self.now;
                 let mut out = Writer::new();
                 out.u8(15)
                     .i32(id)
                     .f32(0.3)
-                    .f32(10.)
+                    .f32(3.)
                     .f32(0.)
                     .f32(0.)
                     .u32(0xffff0000);
@@ -150,7 +136,7 @@ impl World {
                 }
                 tracing::debug!(
                     entity = id,
-                    deadline = self.now + 3000,
+                    deadline = self.now + 1000,
                     "Djinn self-destruction telegraphed"
                 );
             }
@@ -164,7 +150,7 @@ impl World {
         if CONSTRUCTS.contains(&kind) {
             if kind != 0x905 && hp < 400 && self.entities[&id].expires.is_none() {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.expires = Some(self.now + 50);
+                e.expires.set(Some(self.now + 50), id, &mut self.timed_ids);
                 e.next_shot = self.now;
                 tracing::debug!(entity = id, "wounded construct bursts and withdraws");
             }

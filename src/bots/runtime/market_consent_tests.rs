@@ -11,6 +11,7 @@ struct Context {
     output: mpsc::Receiver<Packet>,
     _human_output: mpsc::Receiver<Packet>,
     _owner: crate::server::Owner,
+    _human_owner: crate::server::Owner,
     ids: [i32; 2],
     terms: Terms,
 }
@@ -56,7 +57,7 @@ impl Context {
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    None,
+                    vec![],
                 )
                 .await
                 .unwrap()[0];
@@ -78,6 +79,8 @@ impl Context {
         let (packets, human_output) = mpsc::channel(512);
         let (lost, _) = watch::channel(false);
         let presentation = app.store.presentation(chars[1].account).await.unwrap();
+        let human_owner = app.claim(chars[1].account).unwrap();
+        let bind = server::lifecycle::binding(&app, chars[1].account).unwrap();
         let ch = chars[1].clone();
         let human = app
             .world
@@ -85,6 +88,7 @@ impl Context {
             .call(move |w| {
                 let human =
                     w.enter_at(ch, Some(Output { packets, lost }), Some(pos), presentation)?;
+                bind(human)?;
                 w.updates(id, true)?;
                 w.updates(human, true)?;
                 Ok(human)
@@ -118,6 +122,7 @@ impl Context {
             output,
             _human_output: human_output,
             _owner: owner,
+            _human_owner: human_owner,
             ids: [id, human],
             terms,
         }

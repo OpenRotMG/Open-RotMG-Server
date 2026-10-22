@@ -23,23 +23,29 @@ impl World {
                 crate::encounter::movement(e.kind, e.hp, elapsed)
             });
         }
+        let nearest = |a: &&Entity, b: &&Entity| {
+            e.pos
+                .distance(a.pos)
+                .total_cmp(&e.pos.distance(b.pos))
+                .then_with(|| a.id.cmp(&b.id))
+        };
         let root = self
-            .actors()
+            .camp_members(camp)
             .filter(|x| {
                 #[cfg(test)]
                 QUERY_VISITS.with(|visits| visits.set(visits.get() + 1));
-                x.camp == Some(camp) && ROOTS.contains(&x.kind)
+                ROOTS.contains(&x.kind)
             })
-            .min_by(|a, b| e.pos.distance(a.pos).total_cmp(&e.pos.distance(b.pos)));
+            .min_by(nearest);
         if matches!(e.kind, 0x6d5..=0x6d7)
             && let Some(hub) = self
-                .actors()
+                .camp_members(camp)
                 .filter(|x| {
                     #[cfg(test)]
                     QUERY_VISITS.with(|visits| visits.set(visits.get() + 1));
-                    x.camp == Some(camp) && matches!(x.kind, 0x6d2..=0x6d4)
+                    matches!(x.kind, 0x6d2..=0x6d4)
                 })
-                .min_by(|a, b| e.pos.distance(a.pos).total_cmp(&e.pos.distance(b.pos)))
+                .min_by(nearest)
         {
             return Ok((
                 Motion::StrictOrbit {
@@ -67,19 +73,21 @@ impl World {
         let Some(camp) = removed.camp else {
             return;
         };
-        if self
-            .entities
-            .values()
-            .any(|e| e.camp == Some(camp) && ROOTS.contains(&e.kind))
-        {
+        if self.camp_members(camp).any(|e| ROOTS.contains(&e.kind)) {
             return;
         }
-        for e in self
-            .entities
-            .values_mut()
-            .filter(|e| e.camp == Some(camp) && matches!(e.kind, 0x6d2..=0x6d7))
-        {
-            e.expires = Some(self.now + 30000);
+        let satellites: Vec<_> = self
+            .camp_members(camp)
+            .filter(|e| matches!(e.kind, 0x6d2..=0x6d7))
+            .map(|e| e.id)
+            .collect();
+        for id in satellites {
+            self.entities.get_mut(&id).unwrap().expires.set(
+                Some(self.now + 30000),
+                id,
+                &mut self.timed_ids,
+            );
+            self.npc_global_ids.insert(id);
         }
         tracing::debug!(
             camp,

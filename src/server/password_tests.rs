@@ -115,6 +115,18 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
         )
         .await
         .unwrap();
+    let mut funding = app
+        .store
+        .create(account, app.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    funding.fame = 5000;
+    funding.hp = 0;
+    funding.alive = false;
+    app.store
+        .death(funding, "prepared password fixture funding".into())
+        .await
+        .unwrap();
     let mut character = app
         .store
         .create(account, app.content.get(WIZARD).unwrap())
@@ -122,17 +134,12 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
         .unwrap();
     character.exp = 7;
     app.store.progress(character.clone()).await.unwrap();
-    app.store.vault(account).await.unwrap();
+    app.store.vault(account, 0).await.unwrap();
     app.store.compete(account).await.unwrap();
     let token = recovery(&app, account).await;
     app.store.issue_recovery_code(account).await.unwrap();
     let foreign_code = app.store.issue_discord_code(foreign).await.unwrap();
     let db = Connection::open(dir.join("game.db")).unwrap();
-    db.execute(
-        "UPDATE account_fame SET balance=5000,earned=5000 WHERE account=?1",
-        [account],
-    )
-    .unwrap();
     db.execute("UPDATE accounts SET credits=1200 WHERE id=?1", [account])
         .unwrap();
     db.execute(
@@ -273,9 +280,18 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
         snapshot(&db) == before_failure,
         "failed change touched unrelated durable state"
     );
-    assert!(app.owners.lock().unwrap().is_empty());
+    assert_eq!(app.owners.lock().unwrap().len(), 1);
+    assert!(app.owners.lock().unwrap().contains_key(&account));
+    assert!(
+        app.claim(account).is_err(),
+        "SQL uncertainty must retain its account claim"
+    );
     db.execute_batch("DROP TRIGGER reject_password_revocation")
         .unwrap();
+    assert!(
+        app.claim(account).is_err(),
+        "repairing the SQL trigger must not clear the fence"
+    );
     server.abort();
     std::fs::remove_dir_all(dir).unwrap();
 }

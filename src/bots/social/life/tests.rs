@@ -186,7 +186,7 @@ fn community_social_death_restart_preserves_fact_not_live_contact_or_actions() {
     );
     v.session.character += 1;
     v.objects.clear();
-    let g = Grid::new(&v);
+    let g = Grid::terrain(&v);
     assert!(
         restored.decide(&v, &g, 3., false).is_none(),
         "unavailable acquaintance is not hidden coordinates or an indefinite wait"
@@ -217,7 +217,7 @@ fn community_social_full_entrance_wait_and_reconsider_use_public_cues() {
     let mut vault = object(10, 0x720, 13.5, 11.5);
     vault.usable = true;
     v.objects.push(vault);
-    let grid = Grid::new(&v);
+    let grid = Grid::terrain(&v);
     assert_eq!(
         waiter.decide(&v, &grid, 3., false).unwrap().goal,
         Goal::Wait

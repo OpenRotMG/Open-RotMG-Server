@@ -1,7 +1,7 @@
 use super::*;
-use serde::Serialize;
 #[cfg(test)]
-mod tests;
+mod community_tests;
+use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

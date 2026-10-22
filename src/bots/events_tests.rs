@@ -106,12 +106,12 @@ fn community_events_known_green_pool_avoided_without_shared_hidden_navigation() 
     v.objects
         .push(object(9, crate::dungeon::lab::HEXXER, 15.5, 11.5));
     let mut b = Brain::new(PROFILES[0], &v);
-    assert!(!b.grid(&v, &c).walkable.contains(&(15, 11)));
+    assert!(!b.navigation_grid(&v, &c, &[]).walkable.contains(&(15, 11)));
     b.mind.events.knows_blue = false;
-    assert!(b.grid(&v, &c).walkable.contains(&(15, 11)));
+    assert!(b.navigation_grid(&v, &c, &[]).walkable.contains(&(15, 11)));
     v.objects.clear();
     b.mind.events.knows_blue = true;
-    assert!(b.grid(&v, &c).walkable.contains(&(15, 11)));
+    assert!(b.navigation_grid(&v, &c, &[]).walkable.contains(&(15, 11)));
 }
 fn clear_scene(c: &Content) -> PlayerView {
     let mut v = view(c);
@@ -133,7 +133,7 @@ fn community_events_no_loot_speech_requires_witnessed_clear_reward_site_and_audi
     v.objects.remove(0);
     e.observe(&v);
     v.time_ms += 2000;
-    let grid = Grid::new(&v);
+    let grid = Grid::terrain(&v);
     assert!(
         e.decide(&v, &c, &grid, 4).unwrap().is_none(),
         "boss disappearance fabricated a clear"
@@ -192,7 +192,7 @@ fn community_events_loot_report_requires_committed_own_pickup_not_an_observed_ba
     e.rejected();
     e.observe(&v);
     assert_ne!(
-        e.decide(&v, &c, &Grid::new(&v), 4)
+        e.decide(&v, &c, &Grid::terrain(&v), 4)
             .unwrap()
             .and_then(|d| d.chat),
         Some("got wis")
@@ -204,7 +204,10 @@ fn community_events_loot_report_requires_committed_own_pickup_not_an_observed_ba
     e.committed(&v).unwrap();
     e.observe(&v);
     assert_eq!(
-        e.decide(&v, &c, &Grid::new(&v), 4).unwrap().unwrap().chat,
+        e.decide(&v, &c, &Grid::terrain(&v), 4)
+            .unwrap()
+            .unwrap()
+            .chat,
         Some("got wis")
     );
     assert_eq!(
@@ -266,7 +269,11 @@ fn community_events_known_blue_remains_a_dodge_objective_without_forcing_status_
     let mut unknown = Brain::new(PROFILES[0], &v);
     unknown.mind.events.knows_blue = false;
     assert_ne!(unknown.decide(&v, &c).unwrap().goal, Goal::Remedy(7));
-    Arc::make_mut(&mut v.tiles).retain(|t| t.x != 13);
+    v.tiles = super::tests::tiles(
+        v.map.width,
+        v.map.height,
+        v.tiles.points().filter(|(x, _)| *x != 13),
+    );
     assert_ne!(
         Brain::new(PROFILES[0], &v).decide(&v, &c).unwrap().goal,
         Goal::Remedy(7)
@@ -427,17 +434,13 @@ fn community_events_observed_guardian_interrupts_incidental_pursuit_then_expires
         d.goal
     );
     v.objects.clear();
-    let tiles = Arc::make_mut(&mut v.tiles);
-    for y in 0..30 {
-        for x in 30..40 {
-            tiles.push(crate::world::view::Tile {
-                x,
-                y,
-                ground: 0,
-                ground_speed: 1.,
-            });
-        }
-    }
+    v.tiles = super::tests::tiles(
+        v.map.width,
+        v.map.height,
+        v.tiles
+            .points()
+            .chain((0..30).flat_map(|y| (30..40).map(move |x| (x, y)))),
+    );
     v.position.x = 35.5;
     v.tick += 1;
     v.time_ms += 300;

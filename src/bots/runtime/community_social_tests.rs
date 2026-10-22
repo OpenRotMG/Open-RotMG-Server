@@ -63,7 +63,7 @@ async fn prepare_character(app: &App, p: Profile, items: [i32; 8]) -> Character 
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            None,
+            vec![],
         )
         .await
         .unwrap()[0];

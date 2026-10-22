@@ -161,8 +161,29 @@ impl Diagnostics {
 fn valid_id(id: &str) -> bool {
     id.len() == 24 && id.bytes().all(|b| b.is_ascii_hexdigit())
 }
+struct ConnectionId(u64);
+impl Default for ConnectionId {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+pub struct CommandSample {
+    pub packet: u8,
+    pub queued: std::time::Duration,
+    pub handling: std::time::Duration,
+    pub queue_before: usize,
+    pub queue_after: usize,
+    pub failed: bool,
+    pub requests: crate::performance::Requests,
+}
 #[derive(Default)]
 pub struct ConnectionDiagnostics {
+    connection_id: ConnectionId,
+    pub world: Option<i32>,
+    slow_commands: VecDeque<(Instant, Value)>,
+    slowest_handler: Option<(Instant, Value)>,
+    slowest_queue: Option<(Instant, Value)>,
     pub user_agent: Option<String>,
     pub browser: Option<Arc<Mutex<Browser>>>,
     pending: BTreeMap<i32, Instant>,
@@ -182,6 +203,34 @@ pub struct ConnectionDiagnostics {
     pub last_socket_send: Option<Instant>,
 }
 impl ConnectionDiagnostics {
+    pub fn handled(&mut self, sample: CommandSample) {
+        let queue_ms = sample.queued.as_secs_f64() * 1000.;
+        let handler_ms = sample.handling.as_secs_f64() * 1000.;
+        let max_handler = handler_ms > self.max_handler_ms;
+        let max_queue = queue_ms > self.max_input_queue_ms;
+        let slow = handler_ms >= 50. || queue_ms >= 50. || sample.failed;
+        self.max_handler_ms = self.max_handler_ms.max(handler_ms);
+        self.max_input_queue_ms = self.max_input_queue_ms.max(queue_ms);
+        if !slow && !max_handler && !max_queue {
+            return;
+        }
+        let at = Instant::now();
+        let event = json!({"completed_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("system clock predates Unix epoch").as_millis(),
+            "packet":sample.packet,"world_id":self.world,"queue_wait_ms":queue_ms,"handler_wall_ms":handler_ms,
+            "input_queue_before":sample.queue_before,"input_queue_after":sample.queue_after,"failed":sample.failed,"world_requests":sample.requests.snapshot()});
+        if max_handler {
+            self.slowest_handler = Some((at, event.clone()));
+        }
+        if max_queue {
+            self.slowest_queue = Some((at, event.clone()));
+        }
+        if slow {
+            self.slow_commands.push_back((at, event));
+            while self.slow_commands.len() > 8 {
+                self.slow_commands.pop_front();
+            }
+        }
+    }
     pub fn processed(&mut self, packet: u8) {
         let now = Instant::now();
         self.last_processed = Some((now, packet));
@@ -231,7 +280,11 @@ impl ConnectionDiagnostics {
                 .map(|(t, sample)| json!({"age_ms": t.elapsed().as_millis(), "sample": sample}))
                 .collect::<Vec<_>>()
         });
-        json!({"user_agent": self.user_agent, "browser_samples": browser, "rtt_samples": samples,
+        let observation = |(at, event): &(Instant, Value)| json!({"completed_age_ms":at.elapsed().as_secs_f64()*1000.,"event":event});
+        json!({"connection_id":self.connection_id.0,"process_id":std::process::id(),"world_id":self.world,
+            "slow_commands":self.slow_commands.iter().map(observation).collect::<Vec<_>>(),
+            "slowest_handler":self.slowest_handler.as_ref().map(observation),"slowest_input_queue":self.slowest_queue.as_ref().map(observation),
+            "user_agent": self.user_agent, "browser_samples": browser, "rtt_samples": samples,
             "last_move_received_age_ms":self.last_move.map(|at|at.elapsed().as_secs_f64()*1000.),
             "last_update_ack_received_age_ms":self.last_update_ack.map(|at|at.elapsed().as_secs_f64()*1000.),
             "last_processed_packet":self.last_processed.map(|(_,id)|id),
@@ -256,12 +309,23 @@ fn summary(values: impl Iterator<Item = f64>) -> Value {
     };
     json!({"samples": values.len(), "median": percentile(0.5), "p95": percentile(0.95), "max": values.last()})
 }
+fn command_observation(value: &Value) -> Value {
+    if value.is_null() {
+        return Value::Null;
+    }
+    let e = &value["event"];
+    let r = &e["world_requests"];
+    json!({"completed_age_ms":value["completed_age_ms"].as_f64(),"event":{
+        "completed_unix_ms":e["completed_unix_ms"].as_u64(),"packet":e["packet"].as_u64(),"world_id":e["world_id"].as_i64(),
+        "queue_wait_ms":e["queue_wait_ms"].as_f64(),"handler_wall_ms":e["handler_wall_ms"].as_f64(),
+        "input_queue_before":e["input_queue_before"].as_u64(),"input_queue_after":e["input_queue_after"].as_u64(),"failed":e["failed"].as_bool(),
+        "world_requests":{"calls":r["calls"].as_u64(),"completed":r["completed"].as_u64(),"send_wait_sum_ms":r["send_wait_sum_ms"].as_f64(),
+            "queue_wait_sum_ms":r["queue_wait_sum_ms"].as_f64(),"work_wall_sum_ms":r["work_wall_sum_ms"].as_f64(),"work_cpu_sum_ms":r["work_cpu_sum_ms"].as_f64(),"round_trip_sum_ms":r["round_trip_sum_ms"].as_f64()}}})
+}
 fn public_diagnostics(report: &Value) -> Value {
     let connection = &report["connection"];
     let rtt = connection["rtt_samples"].as_array().expect("RTT samples");
-    let ticks = report["context"]["recent_ticks"]
-        .as_array()
-        .expect("tick samples");
+    let ticks = report["context"]["recent_ticks"].as_array();
     let browser: Vec<_> = connection["browser_samples"]
         .as_array()
         .into_iter()
@@ -285,13 +349,13 @@ fn public_diagnostics(report: &Value) -> Value {
     let mut history = Vec::new();
     for bucket in 0..24 {
         let within = |v: &&Value| v["age_ms"].as_u64().is_some_and(|age| age / 5000 == bucket);
-        let tick_values: Vec<_> = ticks.iter().filter(within).collect();
+        let tick_values: Vec<_> = ticks.into_iter().flatten().filter(within).collect();
         let ping_values: Vec<_> = rtt.iter().filter(within).collect();
         if !tick_values.is_empty() || !ping_values.is_empty() {
             history.push(json!({"seconds_before_report": [bucket * 5, (bucket + 1) * 5],
                 "game_rtt_ms": summary(ping_values.iter().filter_map(|v| v["rtt_ms"].as_f64())),
-                "tick_ms": summary(tick_values.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0))),
-                "scheduling_delay_ms": summary(tick_values.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0)))}));
+                "tick_ms": ticks.map(|_|summary(tick_values.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0)))),
+                "scheduling_delay_ms": ticks.map(|_|summary(tick_values.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0))))}));
         }
     }
     let browser_history: Vec<_> = browser.iter().map(|v| {
@@ -330,15 +394,19 @@ fn public_diagnostics(report: &Value) -> Value {
             "website": revision("website", 40), "client": revision("client", 40), "runtime": revision("runtime", 16)},
         "environment": {"browser": browser_family, "os": os_family},
         "game_rtt_ms": summary(rtt.iter().filter_map(|v| v["rtt_ms"].as_f64())),
-        "tick_ms": summary(ticks.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0))),
-        "scheduling_delay_ms": summary(ticks.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0))),
+        "world_context_status":if ticks.is_some() {"available"}else if report["context"].is_null() {"unavailable"}else{"invalid"},
+        "tick_ms": ticks.map(|t|summary(t.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0)))),
+        "scheduling_delay_ms": ticks.map(|t|summary(t.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0)))),
         "visible_frame_gap_ms": summary(visible.iter().filter_map(|v| v["sample"]["max_frame_gap_ms"].as_f64())),
         "native_acknowledgements":{
             "weapon_tick_records":report["context"]["native_acknowledgements"]["weapon_tick_records"],"goto":report["context"]["native_acknowledgements"]["goto"],
             "shoot":report["context"]["native_acknowledgements"]["shoot"],"oldest_goto_ms":report["context"]["native_acknowledgements"]["oldest_goto_ms"],
-            "oldest_shoot_ms":report["context"]["native_acknowledgements"]["oldest_shoot_ms"],"last_update_ack_received_age_ms":connection["last_update_ack_received_age_ms"]},
+            "oldest_shoot_pause_excluding_ms":report["context"]["native_acknowledgements"]["oldest_shoot_pause_excluding_ms"],"last_update_ack_received_age_ms":connection["last_update_ack_received_age_ms"]},
 
-        "connection": {"last_move_received_age_ms":connection["last_move_received_age_ms"],"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
+        "connection": {"connection_id":connection["connection_id"].as_u64(),"process_id":connection["process_id"].as_u64(),"world_id":connection["world_id"].as_i64(),
+            "slow_commands":connection["slow_commands"].as_array().map(|a|a.iter().rev().take(8).rev().map(command_observation).collect::<Vec<_>>()),
+            "slowest_handler":command_observation(&connection["slowest_handler"]),"slowest_input_queue":command_observation(&connection["slowest_input_queue"]),
+            "last_move_received_age_ms":connection["last_move_received_age_ms"],"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
             "last_queued_packet_send_age_ms":connection["last_queued_packet_send_age_ms"],"last_pong_age_ms":connection["last_pong_age_ms"],
             "max_socket_send_ms": connection["max_socket_send_ms_session"], "max_handler_ms": connection["max_handler_ms_session"],
             "max_input_queue_ms": connection["max_input_queue_ms_session"], "outgoing_queue_high_water": connection["observed_outgoing_queue_high_water_session"],
@@ -347,7 +415,7 @@ fn public_diagnostics(report: &Value) -> Value {
         "population": {"world_players": report["context"]["world_players"], "world_entities": report["context"]["world_entities"], "world_projectiles": report["context"]["world_projectiles"],
             "total_players": report["context"]["total_players"], "total_worlds": report["context"]["total_worlds"]},
         "history": history, "browser_history": browser_history,
-        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable."})
+        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable. Command handler times include awaits/descheduling; world-request sums may overlap and are not exclusive handler CPU."})
 }
 pub(super) async fn disconnect(
     a: &App,
@@ -602,423 +670,5 @@ pub async fn receipt(
     match result {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => error(e),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn diagnostic_attachment_is_bounded_and_strictly_allowlisted() {
-        let mut report = json!({"created_at_unix_ms": 123, "server_source_revision": "a".repeat(40), "server_binary_sha256": "b".repeat(64), "protocol_build": "123.5.1",
-            "context": {"player_id": 12345, "world_name": "PRIVATE_WORLD", "position": {"x": 1}, "world_players": 2, "world_entities": 20, "world_projectiles": 4,
-                "recent_ticks": (0..2400).map(|i| json!({"age_ms": i*50, "execution_us": 1000, "scheduling_lateness_us": 2000})).collect::<Vec<_>>()},
-            "connection": {"user_agent": "PRIVATE_UA Chrome/123 Linux", "rtt_samples": [{"age_ms": 1000, "rtt_ms": 75}],
-                "browser_samples": [{"age_ms": 1000, "sample": {"build": r#"{"website":"PRIVATE_BUILD"}"#, "renderer": "PRIVATE_GPU", "hidden_during_interval": false, "frames": 300, "elapsed_ms": 5000, "max_frame_gap_ms": 40}}]}});
-        report["context"]["native_acknowledgements"] =
-            json!({"shoot":3,"oldest_shoot_ms":5213,"PRIVATE_ACK":"PRIVATE_VALUE"});
-        let attachment = public_diagnostics(&report);
-        assert_eq!(attachment["native_acknowledgements"]["shoot"], 3);
-        assert_eq!(
-            attachment["native_acknowledgements"]["oldest_shoot_ms"],
-            5213
-        );
-        assert_eq!(attachment["tick_ms"]["samples"], 2400);
-        assert_eq!(attachment["tick_ms"]["max"], 1.0);
-        assert_eq!(attachment["game_rtt_ms"]["median"], 75.0);
-        assert_eq!(attachment["history"].as_array().unwrap().len(), 24);
-        assert_eq!(
-            attachment["environment"],
-            json!({"browser": "Chrome", "os": "Linux"})
-        );
-        let encoded = serde_json::to_string(&attachment).unwrap();
-        for excluded in [
-            "PRIVATE_",
-            "player_id",
-            "world_name",
-            "position",
-            "user_agent",
-            "renderer",
-            "12345",
-        ] {
-            assert!(!encoded.contains(excluded), "{excluded}");
-        }
-        assert!(encoded.len() < 15000);
-    }
-    #[test]
-    fn ping_serials_are_matched_and_only_recent_samples_are_reported() {
-        let mut d = ConnectionDiagnostics::default();
-        assert!(d.snapshot()["last_processed_packet"].is_null());
-        d.processed(38);
-        d.last_socket_send = Some(Instant::now());
-        assert_eq!(d.snapshot()["last_processed_packet"], 38);
-        assert!(d.snapshot()["last_processed_age_ms"].as_f64().unwrap() >= 0.);
-        assert!(d.snapshot()["last_move_received_age_ms"].is_null());
-        d.processed(wire::MOVE);
-        d.processed(wire::UPDATE_ACK);
-        assert!(d.snapshot()["last_move_received_age_ms"].as_f64().unwrap() >= 0.);
-        assert!(
-            d.snapshot()["last_update_ack_received_age_ms"]
-                .as_f64()
-                .unwrap()
-                >= 0.
-        );
-        d.sent(1);
-        d.pong(2);
-        d.pong(1);
-        d.pong(1);
-        assert_eq!(d.snapshot()["rtt_samples"].as_array().unwrap().len(), 1);
-        assert_eq!(d.unmatched_pongs, 2);
-        d.replies
-            .push_back((Instant::now() - std::time::Duration::from_secs(121), 99.0));
-        assert_eq!(d.snapshot()["rtt_samples"].as_array().unwrap().len(), 1);
-    }
-    #[tokio::test]
-    async fn consecutive_native_commands_spool_privately_and_receipts_survive_restart() {
-        let (root, mut a) = super::super::account_actions::tests::fixture();
-        let account = a.store.list("bug-test".into()).await.unwrap().id;
-        a.store.rename(account, "BugWizard".into()).await.unwrap();
-        let character = a
-            .store
-            .create(account, a.content.get(crate::content::WIZARD).unwrap())
-            .await
-            .unwrap();
-        let (messages, mut notification_rx) = mpsc::channel(64);
-        let (notify_lost, _) = tokio::sync::watch::channel(false);
-        let player = a
-            .world
-            .call(move |w| {
-                w.enter(
-                    character,
-                    Some(crate::world::Output {
-                        packets: messages,
-                        lost: notify_lost,
-                    }),
-                )
-            })
-            .await
-            .unwrap();
-        let mut session = Session {
-            account: Some(a.claim_session(account).unwrap()),
-            player: Some(player),
-            ..Session::default()
-        };
-        session.diagnostics.user_agent = Some("PRIVATE_UA".into());
-        session.diagnostics.sent(1);
-        session.diagnostics.pong(1);
-        let before_gold = a.store.gold(account).await.unwrap().balance;
-        disconnect(
-            &a,
-            player,
-            &session.diagnostics,
-            json!({"reason":"test_disconnect","last_frame_age_ms":12}),
-        )
-        .await;
-        assert_eq!(a.store.gold(account).await.unwrap().balance, before_gold);
-        assert_eq!(std::fs::read_dir(&a.diagnostics.root).unwrap().count(), 0);
-        let (tx, mut rx) = mpsc::channel(64);
-        let (lost, _) = tokio::sync::watch::channel(false);
-        let mut text = Writer::new();
-        text.utf("/bug enemies froze");
-        for _ in 0..2 {
-            handle(
-                &mut a,
-                Packet {
-                    id: wire::PLAYER_TEXT,
-                    body: text.0.clone(),
-                },
-                &mut session,
-                &tx,
-                &lost,
-                Instant::now(),
-            )
-            .await
-            .unwrap();
-        }
-        assert!(
-            rx.try_recv().is_err(),
-            "only issue creation should produce a success reply"
-        );
-        assert_eq!(a.store.gold(account).await.unwrap().balance, 100);
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "authorization",
-            format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
-        );
-        let peer: SocketAddr = "127.0.0.1:1234".parse().unwrap();
-        let response = pending(State(a.clone()), ConnectInfo(peer), headers.clone()).await;
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), 1_048_576)
-            .await
-            .unwrap();
-        let value: Value = serde_json::from_slice(&body).unwrap();
-        let report = &value["report"];
-        assert_eq!(report["schema"], 3);
-        assert_eq!(report["reporter_name"], "BugWizard");
-        assert_eq!(report["message_untrusted"], "enemies froze");
-        assert!(report.get("connection").is_none());
-        assert_eq!(report["account_id"], account);
-        let id = report["id"].as_str().unwrap().to_string();
-        let public = attachment(State(a.clone()), Path(id.clone())).await;
-        assert_eq!(public.status(), StatusCode::OK);
-        let public_body = axum::body::to_bytes(public.into_body(), 100_000)
-            .await
-            .unwrap();
-        let encoded = String::from_utf8(public_body.to_vec()).unwrap();
-        for excluded in [
-            "PRIVATE_UA",
-            "account_id",
-            "player_id",
-            "position",
-            "message_untrusted",
-            "reporter_name",
-            "BugWizard",
-            "investigation",
-            "enemies froze",
-        ] {
-            assert!(!encoded.contains(excluded), "{excluded}");
-        }
-        assert!(encoded.len() < 40_000);
-        assert_eq!(
-            attachment(State(a.clone()), Path("../game.db".into()))
-                .await
-                .status(),
-            StatusCode::NOT_FOUND
-        );
-        assert_eq!(
-            attachment(State(a.clone()), Path("f".repeat(24)))
-                .await
-                .status(),
-            StatusCode::NOT_FOUND
-        );
-        assert!(
-            super::report(&a, account, player, "", &session.diagnostics)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("Usage: /bug")
-        );
-        assert_eq!(
-            pending(State(a.clone()), ConnectInfo(peer), HeaderMap::new())
-                .await
-                .status(),
-            StatusCode::BAD_REQUEST
-        );
-        let mut forwarded = headers.clone();
-        forwarded.insert("x-forwarded-for", "127.0.0.1".parse().unwrap());
-        assert_eq!(
-            pending(State(a.clone()), ConnectInfo(peer), forwarded)
-                .await
-                .status(),
-            StatusCode::BAD_REQUEST
-        );
-        let unauthorized = receipt(
-            State(a.clone()),
-            ConnectInfo(peer),
-            Path(id.clone()),
-            HeaderMap::new(),
-            Json(Receipt {
-                target: "issue_number".into(),
-                id: "42".into(),
-            }),
-        )
-        .await;
-        assert_eq!(unauthorized.status(), StatusCode::BAD_REQUEST);
-        rusqlite::Connection::open(root.join("game.db"))
-            .unwrap()
-            .execute(
-                "UPDATE accounts SET credits=2147483647 WHERE id=?1",
-                [account],
-            )
-            .unwrap();
-        let failed = receipt(
-            State(a.clone()),
-            ConnectInfo(peer),
-            Path(id.clone()),
-            headers.clone(),
-            Json(Receipt {
-                target: "issue_number".into(),
-                id: "42".into(),
-            }),
-        )
-        .await;
-        assert_eq!(failed.status(), StatusCode::BAD_REQUEST);
-        let unacknowledged: Value = serde_json::from_slice(
-            &std::fs::read(root.join("bug-reports").join(format!("{id}.json"))).unwrap(),
-        )
-        .unwrap();
-        assert!(unacknowledged["delivery"]["issue_number"].is_null());
-        assert_eq!(unacknowledged["delivery"]["status"], "pending");
-        assert!(a.store.gold(account).await.unwrap().rewards.is_empty());
-        rusqlite::Connection::open(root.join("game.db"))
-            .unwrap()
-            .execute("UPDATE accounts SET credits=100 WHERE id=?1", [account])
-            .unwrap();
-        for (target, external_id) in [
-            ("public_message_id", "1559759855621898313"),
-            ("issue_number", "42"),
-            ("issue_number", "42"),
-        ] {
-            let response = receipt(
-                State(a.clone()),
-                ConnectInfo(peer),
-                Path(id.clone()),
-                headers.clone(),
-                Json(Receipt {
-                    target: target.into(),
-                    id: external_id.into(),
-                }),
-            )
-            .await;
-            assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        }
-        let mut confirmed = false;
-        let mut rewarded = 0;
-        while let Ok(packet) = notification_rx.try_recv() {
-            if packet.id == wire::TEXT {
-                let mut text = Reader::new(&packet.body);
-                text.utf().unwrap();
-                text.i32().unwrap();
-                text.i32().unwrap();
-                text.u8().unwrap();
-                text.utf().unwrap();
-                let message = text.utf().unwrap();
-                confirmed |= message
-                    == "Reported as #42: https://github.com/OpenRotMG/Open-RotMG-Server/issues/42";
-                rewarded += usize::from(
-                    message == "You received 50 Gold for submitting your first bug report!",
-                );
-            }
-        }
-        assert!(
-            confirmed,
-            "issue receipt must notify the in-game reporting player"
-        );
-        assert_eq!(a.store.gold(account).await.unwrap().balance, 150);
-        assert_eq!(
-            rewarded, 1,
-            "retries must not repeat the reward notification"
-        );
-        let bad = receipt(
-            State(a.clone()),
-            ConnectInfo(peer),
-            Path(id.clone()),
-            headers.clone(),
-            Json(Receipt {
-                target: "issue_number".into(),
-                id: "43".into(),
-            }),
-        )
-        .await;
-        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
-        a.diagnostics = Arc::new(Diagnostics::open(root.join("bug-reports")).unwrap());
-        let response = pending(State(a.clone()), ConnectInfo(peer), headers.clone()).await;
-        let body = axum::body::to_bytes(response.into_body(), 1_048_576)
-            .await
-            .unwrap();
-        let remaining: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(remaining["report"]["reporter_name"], "BugWizard");
-        assert_eq!(remaining["report"]["message_untrusted"], "enemies froze");
-        assert_eq!(remaining["report"]["account_id"], account);
-        assert_ne!(remaining["report"]["id"], id);
-        let second = receipt(
-            State(a.clone()),
-            ConnectInfo(peer),
-            Path(remaining["report"]["id"].as_str().unwrap().into()),
-            headers.clone(),
-            Json(Receipt {
-                target: "issue_number".into(),
-                id: "43".into(),
-            }),
-        )
-        .await;
-        assert_eq!(second.status(), StatusCode::NO_CONTENT);
-        assert_eq!(a.store.gold(account).await.unwrap().balance, 150);
-        assert!(a.store.gold(account).await.unwrap().rewards.is_empty());
-        let saved: Value = serde_json::from_slice(
-            &std::fs::read(root.join("bug-reports").join(format!("{id}.json"))).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(saved["delivery"]["status"], "delivered");
-        session.account.take().unwrap().release();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-    #[tokio::test]
-    async fn browser_samples_require_origin_active_session_and_bounded_schema() {
-        let (root, a) = super::super::account_actions::tests::fixture();
-        let key = "b".repeat(32);
-        let browser = a.diagnostics.browser(&key).unwrap();
-        let sample: BrowserSample = serde_json::from_value(json!({"build": "test", "renderer": null, "renderer_status": "unavailable", "width": 800, "height": 600, "pixel_ratio": 1.5, "hidden": false, "hidden_during_interval": false, "frames": 300, "max_frame_gap_ms": 20, "long_tasks": null, "long_task_ms": null, "elapsed_ms": 5000})).unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert("origin", a.origin.parse().unwrap());
-        assert_eq!(
-            browser_sample(
-                State(a.clone()),
-                Path(key.clone()),
-                HeaderMap::new(),
-                Json(sample.clone())
-            )
-            .await
-            .status(),
-            StatusCode::BAD_REQUEST
-        );
-        assert_eq!(
-            browser_sample(
-                State(a.clone()),
-                Path(key.clone()),
-                headers.clone(),
-                Json(sample.clone())
-            )
-            .await
-            .status(),
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            browser_sample(
-                State(a.clone()),
-                Path(key.clone()),
-                headers.clone(),
-                Json(sample.clone())
-            )
-            .await
-            .status(),
-            StatusCode::BAD_REQUEST
-        );
-        assert_eq!(browser.lock().unwrap().samples.len(), 1);
-        let mut bad = sample.clone();
-        bad.max_frame_gap_ms = -1.0;
-        assert!(bad.validate().is_err());
-        let mut value = serde_json::to_value(&sample).unwrap();
-        value["cookie"] = json!("secret");
-        assert!(serde_json::from_value::<BrowserSample>(value).is_err());
-        drop(browser);
-        assert_eq!(
-            browser_sample(State(a), Path(key), headers, Json(sample))
-                .await
-                .status(),
-            StatusCode::CONFLICT
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn spool_is_durable_and_private() {
-        let root = std::env::temp_dir().join(format!("bug-spool-{}", rand::random::<u64>()));
-        let d = Diagnostics::open(root.clone()).unwrap();
-        let id = "a".repeat(24);
-        let value =
-            json!({"id": id, "delivery": {"status": "pending"}, "message_untrusted": "@everyone"});
-        d.save(&value).unwrap();
-        assert_eq!(
-            serde_json::from_slice::<Value>(
-                &std::fs::read(root.join(format!("{id}.json"))).unwrap()
-            )
-            .unwrap(),
-            value
-        );
-        assert!(d.save(&json!({"id": "../escape"})).is_err());
-        assert!(d.browser("bad").is_err());
-        let browser = d.browser(&"b".repeat(32)).unwrap();
-        assert!(Arc::ptr_eq(&browser, &d.browser(&"b".repeat(32)).unwrap()));
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

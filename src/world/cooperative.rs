@@ -12,7 +12,7 @@ pub struct TeleportReceipt {
     pub tick: u64,
 }
 
-fn ready(p: &Player) -> bool {
+pub(super) fn ready(p: &Player) -> bool {
     p.active()
         && p.character.hp > 0
         && !p.pending
@@ -45,14 +45,14 @@ impl Directory {
                     .checked_duration_since(*last)
                     .context("teleport receive clock regressed")?
                     >= Duration::from_secs(10),
-                "Too soon to teleport again; wait ten seconds."
+                controller("Too soon to teleport again; wait ten seconds.")
             );
         }
         self.teleports
             .retain(|_, last| received.saturating_duration_since(*last) < Duration::from_secs(10));
         ensure!(
             self.teleports.len() < 4096,
-            "Teleport rate registry is full."
+            controller("Teleport rate registry is full.")
         );
         let world = self.resolve(Target::Player(id))?;
         let movement_received = received
@@ -102,37 +102,52 @@ impl World {
     }
 
     fn teleport_destination(&self, id: i32, target: i32) -> Result<Pos> {
-        ensure!(self.allow_teleport(), "Cannot teleport in this world.");
+        ensure!(
+            self.allow_teleport(),
+            controller("Cannot teleport in this world.")
+        );
         let p = self
             .players
             .get(&id)
             .context("Teleport sender is no longer in this world.")?;
         ensure!(
-            ready(p),
+            p.persistence_failure.is_none(),
             "Busy, dead, departing or quarantined players cannot teleport."
         );
         ensure!(
-            !p.correcting()?,
-            "Position correction awaits GOTO acknowledgement."
+            ready(p),
+            controller("Busy, dead, departing or quarantined players cannot teleport.")
         );
-        ensure!(!p.paused, "Cannot teleport while paused.");
-        ensure!(id != target, "You are already at yourself.");
+        ensure!(
+            !p.correcting()?,
+            controller("Position correction awaits GOTO acknowledgement.")
+        );
+        ensure!(!p.paused, controller("Cannot teleport while paused."));
+        ensure!(id != target, controller("You are already at yourself."));
         let q = self
             .players
             .get(&target)
-            .context("Teleport target is not a live player in this world.")?;
+            .ok_or_else(|| controller("Teleport target is not a live player in this world."))?;
         ensure!(
             ready(q),
-            "Teleport target is busy, dead, departing or quarantined."
+            controller("Teleport target is busy, dead, departing or quarantined.")
         );
-        ensure!(!q.paused, "Cannot teleport to a paused player.");
+        ensure!(!q.paused, controller("Cannot teleport to a paused player."));
+        ensure!(
+            q.conditions(self.now) & crate::condition::bit(crate::condition::INVISIBLE) == 0,
+            controller("Cannot teleport to an invisible player.")
+        );
         ensure!(
             p.known.contains(&target),
-            "Teleport target has not been observed."
+            controller("Teleport target has not been observed.")
+        );
+        ensure!(
+            q.pos.x.is_finite() && q.pos.y.is_finite() && self.map.cell(q.pos.x, q.pos.y).is_some(),
+            "Teleport target's position is blocked."
         );
         ensure!(
             self.player_position_valid(None, q.pos),
-            "Teleport target's position is blocked."
+            controller("Teleport target's position is blocked.")
         );
         Ok(q.pos)
     }
@@ -303,5 +318,72 @@ impl World {
             "area ability healing applied"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::condition::INVISIBLE;
+    use crate::world::tests::{ch, directory};
+
+    #[test]
+    fn invisible_teleport_target_preserves_position_and_successful_cooldown() {
+        for prior_success in [false, true] {
+            let mut d = directory();
+            let w = d.worlds.get_mut(&-2).unwrap();
+            let sender = w.enter(ch(w), None).unwrap();
+            let mut target_character = ch(w);
+            target_character.id = 2;
+            target_character.account = 2;
+            let target = w.enter(target_character, None).unwrap();
+            let origin = w.players[&sender].pos;
+            let landing = [1., -1.]
+                .into_iter()
+                .map(|dx| Pos {
+                    x: origin.x + dx,
+                    y: origin.y,
+                })
+                .find(|pos| w.player_position_valid(None, *pos))
+                .unwrap();
+            w.players.get_mut(&target).unwrap().pos = landing;
+            w.players.get_mut(&sender).unwrap().known.insert(target);
+            let received = w.attack_epoch + Duration::from_secs(1);
+            if prior_success {
+                let receipt = d.teleport(sender, target, received).unwrap();
+                assert_eq!(receipt.position.distance(landing), 0.);
+                let w = d.worlds.get_mut(&-2).unwrap();
+                w.players.get_mut(&sender).unwrap().pos = origin;
+            }
+            d.worlds
+                .get_mut(&-2)
+                .unwrap()
+                .apply_condition(target, INVISIBLE, 1000)
+                .unwrap();
+            let cooldowns = d.teleports.clone();
+            // An expired prior cooldown must not be pruned by a rejected destination either.
+            for attempt in [
+                received + Duration::from_secs(1),
+                received + Duration::from_secs(10),
+            ] {
+                let error = d.teleport(sender, target, attempt).unwrap_err();
+                assert!(error.to_string().contains("invisible"), "{error:#}");
+                assert_eq!(d.worlds[&-2].players[&sender].pos.distance(origin), 0.);
+                assert_eq!(d.teleports, cooldowns);
+            }
+            let w = d.worlds.get_mut(&-2).unwrap();
+            w.now += 1000;
+            // The timer remains stored: eligibility must use active conditions, not key presence.
+            assert!(w.players[&target].statuses.contains_key(&INVISIBLE));
+            let success = received + Duration::from_secs(10);
+            d.teleport(sender, target, success).unwrap();
+            assert_eq!(d.worlds[&-2].players[&sender].pos.distance(landing), 0.);
+            assert_eq!(d.teleports.get(&1), Some(&success));
+            let error = d
+                .teleport(sender, target, success + Duration::from_secs(1))
+                .unwrap_err();
+            assert!(error.to_string().contains("Too soon"), "{error:#}");
+            assert_eq!(d.teleports.get(&1), Some(&success));
+        }
     }
 }

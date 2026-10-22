@@ -1,0 +1,607 @@
+{
+  "schema": 2,
+  "selected_client": "123.5.1",
+  "source_sha256": "861351094192223962bc38def3c127b08c3cf80b663dd6bffb770b09ce47136e",
+  "status": "RECONSTRUCTION. Reviewed engineering choices, not recovered original map identities.",
+  "transform": {
+    "crop": [
+      26,
+      26,
+      2074,
+      2074
+    ],
+    "historical_coordinates": "UNKNOWN",
+    "source_dimensions": [
+      2100,
+      2100
+    ],
+    "tile": "source_pixel-26"
+  },
+  "audit": {
+    "kind": "reviewed-supports-v1",
+    "supports": 230,
+    "pixels": 220692
+  },
+  "reviewed_annotations_sha256": "10e6455c6e9f71e4fd9d678618a4da4281bf717e0e261209464458811708eca7",
+  "manual_decisions_sha256": "8e4764600743f8f5bde55c35fce8544b0b005722e988bfe05190dfffd2725df9",
+  "classes": {
+    "000000": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 232,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "00a811": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 190,
+      "object": 398,
+      "region": 0,
+      "terrain": 11
+    },
+    "0d0d0d": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 259,
+      "region": 0,
+      "terrain": 6
+    },
+    "0f6928": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 189,
+      "object": 407,
+      "region": 0,
+      "terrain": 5
+    },
+    "184a1d": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 256,
+      "region": 0,
+      "terrain": 6
+    },
+    "191919": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 100,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "1e2432": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 87,
+      "object": null,
+      "region": 0,
+      "terrain": 8
+    },
+    "216628": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 389,
+      "region": 0,
+      "terrain": 6
+    },
+    "2b4a8b": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 188,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "2c6019": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 189,
+      "object": 412,
+      "region": 0,
+      "terrain": 5
+    },
+    "2d3a1b": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 86,
+      "object": null,
+      "region": 0,
+      "terrain": 7
+    },
+    "2e2a22": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 241,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "2e4457": {
+      "config": "",
+      "evidence": "reviewed_safe_scenery_substitution",
+      "ground": 38,
+      "object": 352,
+      "region": 0,
+      "source_object": 354,
+      "terrain": 0
+    },
+    "2e4558": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 38,
+      "object": 381,
+      "region": 0,
+      "terrain": 0
+    },
+    "2f3059": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 64,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "323232": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 96,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "323242": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 25,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "35863d": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 70,
+      "object": null,
+      "region": 0,
+      "terrain": 6
+    },
+    "382210": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 6174,
+      "region": 0,
+      "terrain": 6
+    },
+    "3b240d": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 396,
+      "region": 0,
+      "terrain": 6
+    },
+    "3c1e0a": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 28,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "3d3c3c": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 1,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "415229": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 72,
+      "object": null,
+      "region": 0,
+      "terrain": 9
+    },
+    "424242": {
+      "config": "",
+      "evidence": "reviewed_safe_scenery_substitution",
+      "ground": 6,
+      "object": 288,
+      "region": 0,
+      "source_object": 290,
+      "terrain": 0
+    },
+    "434343": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 81,
+      "object": 379,
+      "region": 0,
+      "terrain": 0
+    },
+    "45455b": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 24,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "463e84": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 250,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "474c43": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 197,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "492914": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 6174,
+      "region": 0,
+      "terrain": 6
+    },
+    "4d7393": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 36,
+      "object": 352,
+      "region": 0,
+      "terrain": 0
+    },
+    "4f3118": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 71,
+      "object": 258,
+      "region": 0,
+      "terrain": 4
+    },
+    "515151": {
+      "config": "",
+      "evidence": "reviewed_safe_scenery_substitution",
+      "ground": 70,
+      "object": 263,
+      "region": 0,
+      "source_object": 6175,
+      "terrain": 6
+    },
+    "5278c5": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 114,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "59462f": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 12,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "598923": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 3529,
+      "region": 0,
+      "terrain": 6
+    },
+    "615b6b": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 214,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "633d1e": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 394,
+      "region": 0,
+      "terrain": 6
+    },
+    "6c6476": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 213,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "707070": {
+      "config": "",
+      "evidence": "reviewed_structural_collision",
+      "ground": 4,
+      "object": 288,
+      "region": 0,
+      "terrain": 0
+    },
+    "756200": {
+      "config": "size:150",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 71,
+      "object": 257,
+      "region": 0,
+      "terrain": 4
+    },
+    "7b8775": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 197,
+      "object": 500,
+      "region": 0,
+      "terrain": 0
+    },
+    "808080": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 96,
+      "object": 263,
+      "region": 0,
+      "terrain": 1
+    },
+    "888a1d": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 71,
+      "object": null,
+      "region": 0,
+      "terrain": 4
+    },
+    "9e8a38": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 71,
+      "object": 264,
+      "region": 0,
+      "terrain": 4
+    },
+    "a67c52": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 208,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "acbca4": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 197,
+      "object": 498,
+      "region": 0,
+      "terrain": 0
+    },
+    "ae8c4c": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 190,
+      "object": null,
+      "region": 0,
+      "terrain": 11
+    },
+    "b5b2b2": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 208,
+      "object": 452,
+      "region": 0,
+      "terrain": 0
+    },
+    "c2bd8c": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 189,
+      "object": null,
+      "region": 0,
+      "terrain": 5
+    },
+    "c96f6f": {
+      "config": "",
+      "evidence": "representative_object_inferred_class_substrate",
+      "ground": 70,
+      "object": 404,
+      "region": 0,
+      "terrain": 6
+    },
+    "caa378": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 237,
+      "object": null,
+      "region": 0,
+      "terrain": 0
+    },
+    "d44a00": {
+      "config": "",
+      "evidence": "safe_visual_lava_replacement",
+      "ground": 54,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "d9d9d9": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 106,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    },
+    "f7bf51": {
+      "config": "",
+      "evidence": "exact_ground_class",
+      "ground": 245,
+      "object": null,
+      "region": 0,
+      "terrain": 5
+    },
+    "ffffff": {
+      "config": "",
+      "evidence": "ambiguous_ground_choice",
+      "ground": 185,
+      "object": null,
+      "region": 0,
+      "terrain": 1
+    }
+  },
+  "source_to_canonical": {
+    "000000": "000000",
+    "00a811": "00a811",
+    "050505": "0d0d0d",
+    "066923": "0f6928",
+    "0d0d0d": "0d0d0d",
+    "0f6928": "0f6928",
+    "114917": "184a1d",
+    "181f2e": "1e2432",
+    "184a1d": "184a1d",
+    "191919": "191919",
+    "1b6623": "216628",
+    "1e2432": "1e2432",
+    "216628": "216628",
+    "27498c": "2b4a8b",
+    "293714": "2d3a1b",
+    "2a4256": "2e4457",
+    "2a4357": "2e4558",
+    "2b4a8b": "2b4a8b",
+    "2c6019": "2c6019",
+    "2d3a1b": "2d3a1b",
+    "2e2a22": "2e2a22",
+    "2e2e2e": "323232",
+    "2e4457": "2e4457",
+    "2e4558": "2e4558",
+    "2f3059": "2f3059",
+    "323232": "323232",
+    "323242": "323242",
+    "32873a": "35863d",
+    "35863d": "35863d",
+    "381f05": "3b240d",
+    "382210": "382210",
+    "391803": "3c1e0a",
+    "3a3939": "3d3c3c",
+    "3b240d": "3b240d",
+    "3d3c3c": "3d3c3c",
+    "3f5124": "415229",
+    "404040": "424242",
+    "414141": "434343",
+    "415229": "415229",
+    "424242": "424242",
+    "434343": "434343",
+    "45455b": "45455b",
+    "454b41": "474c43",
+    "474c43": "474c43",
+    "492914": "492914",
+    "4c7494": "4d7393",
+    "4d7393": "4d7393",
+    "4e2d11": "4f3118",
+    "4f3118": "4f3118",
+    "5179c6": "5278c5",
+    "5278c5": "5278c5",
+    "59462f": "59462f",
+    "615b6b": "615b6b",
+    "633d1e": "633d1e",
+    "6c6476": "6c6476",
+    "707070": "707070",
+    "717171": "707070",
+    "756200": "756200",
+    "766200": "756200",
+    "7b8775": "7b8775",
+    "7c8876": "7b8775",
+    "808080": "808080",
+    "818181": "808080",
+    "888a1d": "888a1d",
+    "898b17": "888a1d",
+    "9e8a38": "9e8a38",
+    "9f8b35": "9e8a38",
+    "a67c52": "a67c52",
+    "a77d51": "a67c52",
+    "acbca4": "acbca4",
+    "adbda5": "acbca4",
+    "ae8c4c": "ae8c4c",
+    "b5b2b2": "b5b2b2",
+    "c2bd8c": "c2bd8c",
+    "c3be8d": "c2bd8c",
+    "c96f6f": "c96f6f",
+    "d44a00": "d44a00",
+    "d9d9d9": "d9d9d9",
+    "f7bf51": "f7bf51",
+    "ffffff": "ffffff"
+  },
+  "reason_catalog": {
+    "r001": "Blue Grass side of the reviewed dark biome splice; not water merely because the source fragment is blue-grey.",
+    "r002": "Brown Lines floor side of the building splice, consistent with pinned Building.cs separating floor from Wooden Wall objects.",
+    "r003": "Dark-grass side of reviewed grass/stream splices. Does not paint across the observed water support.",
+    "r004": "Exact gamma-family match for selected Palm Tree variant1 RGB00c714, kind0x18e. Preserve 44 occupied source cells; runtime sprite variant may differ.",
+    "r005": "Exact gamma-family match to selected Grey Circle ground0x65; preserve nonblocking ground, not an invented wall.",
+    "r006": "Exact selected Tomb Wall variant color, kind0x1dd. Preserve 24 blocking source cells. Hidden Sand Tile substrate inferred, not observable original ground.",
+    "r007": "Exact selected Tombstone variant. Same explicitly disclosed safe Rock Grey substitution as737373.",
+    "r008": "Exact selected Tombstone variant. Source0x181f is Static+Enemy and cannot pass scenery encoding; deliberate safe Rock Grey0x107 substitution, retaining source position/blocking but losing destructibility/HP/original flags/size.",
+    "r009": "Exact selected-client Death Tree variant 5, kind0x181e. Reuse existing World2 choice for same safe static kind, inferred substrate and habitat.",
+    "r010": "Exact selected-client Sand Tile ground 0xf7, reviewed Sphinx/stone-site context; not bare beige biome fill.",
+    "r011": "Fragments on the existing light-blue river footprint; keep engineering Water choice and river continuity. No calibrated depth/speed or historical identity claim.",
+    "r012": "Green ground splice/fringe in reviewed grass and vegetation boundaries; reconstruct Light Grass, not a new terrain class.",
+    "r013": "Grey fragments on the reviewed building-wall seam: retain the existing safe blocking wall choice on these exact pixels rather than washing the wall into floor. Original wall identity/HP remains unproved.",
+    "r014": "Isolated grey scenery point in plains; explicit safe Rock Grey substitution preserves a blocking footprint without claiming an original sprite identity.",
+    "r015": "Light Sand side of a reviewed sand/grass boundary.",
+    "r016": "Medium-grass ground splice/fringe, including the grass side of building and stream edges. This repairs exact reviewed pixels only, not a neighborhood-majority rule.",
+    "r017": "Minor shore-band fragments on the already reviewed Dark Sand support/context.",
+    "r018": "Olive/yellow ground fringe within reviewed plains or its boundary. Individual original pixel identity is lost; use the existing Yellow Grass choice.",
+    "r019": "One brown fragment adjoining the known yellow-tree scenery: preserve that existing static-tree reconstruction choice.",
+    "r020": "Pink flower-ring fragments at the reviewed grove sites. Retain the existing Rose reconstruction choice and its static footprint.",
+    "r021": "Reviewed all236 source-context groups: Dark Sand shore bands, pond rims and small matching sand traces, not only coastline. Exact source support only; no smoothing/expansion. Ground0xbe walkable; inherited shore habitat11 is engineering metadata.",
+    "r022": "Reviewed all3 connected supports: dark water bodies adjoining light-water shore. Ground0xbc intentionally inherits selected NoWalk/Sink flags, matching established World2 dark-water convention, not a proof of historical depth.",
+    "r023": "Reviewed all61 grouped building-floor contexts, including eroded fragments. Pinned Building.cs uses Brown Lines floor separately from Wooden Wall objects. Ground0x0c remains walkable; known wooden/grey wall pixels untouched.",
+    "r024": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 0d0d0d. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r025": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 0f6928. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r026": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 184a1d. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r027": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 1e2432. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r028": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 216628. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r029": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 2d3a1b. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r030": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 2f3059. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r031": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 323232. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r032": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 35863d. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r033": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 415229. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r034": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 4f3118. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r035": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 5278c5. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r036": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 59462f. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r037": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 633d1e. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r038": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 888a1d. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r039": "Reviewed complete context atlas for this exact source support; retain existing canonical choice 9e8a38. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r040": "Reviewed complete context atlas for this exact source support; retain existing canonical choice a67c52. Channel intervals were evidence for review only, not a general assignment rule. No new RGB is authorized by this row.",
+    "r041": "Reviewed pink arcs at grove sites: explicit Rose reconstruction choice. Not claimed as an exact single gamma conversion.",
+    "r042": "Reviewed road-edge fragments. All twenty b6b4b3 pixels touch at least three known road cells; these are not inferred grey walls.",
+    "r043": "Six irrecoverable dark leaf-like image fragments: deliberate safe static-tree substitution, not a claim to recover the original object. These may over-preserve a one-cell obstacle; candidate connectivity/native QA must check them. No general darkness-to-tree rule is introduced.",
+    "r044": "Two isolated brown or mixed foreground fragments beside vegetation: deliberate safe Tree Dead substitutions preserve a potential obstacle. Original species and hidden substrate are not recovered.",
+    "r045": "Two pale foreground fragments in reviewed vegetation/temple contexts: preserve the existing Jungle Tree Big static-scenery choice rather than erase a potential object. This is a declared reconstruction of blended detail, not recovered original identity."
+  },
+  "palette_rule": "Only the frozen exact raw and gamma2.2-to-piecewise-sRGB lookup for this source; mixed rectangular raw/converted patches remain at original coordinates. No whole-image correction, nearest colors, fitted matrices or generic fill. Numeric agreement is not capture/build/authenticity proof.",
+  "habitat_rule": "Separate reconstructed terrain layer stores listed class tiers: Rock/Snow1, LightSand5, DarkSand11, Yellow4, LightGrass6, DarkGrass7, Grass9, BlueGrass8. Object classes carry explicitly inferred substrate/tier. Tier is reconstruction data, not image-extracted original gameplay zones; no extra land/support geometry.",
+  "water_rule": "Label exact light-blue5278c5 with FOUR-neighbor connectivity only. A component is coastal iff its own support touches any dark-blue2b4a8b pixel in the FOUR-neighbor dilation. Coastal uses0x73, all other light blue0x72. This is an engineering shallow policy: sea-joining rivers in that same blue component are ALSO shallow, never inferred depth. No dark+light union flood. Both walkable .666/Sink. Apply to the exact combined reviewed water supports after resolving both observed color families and explicit reviewed masks.",
+  "support_rule": "Support IDs enumerate exact RGB masks in the full2100x2100 source, not claimed connected components. Fingerprints are SHA256 of row-major support positions as little-endian u32. All230 masks/220692pixels were context-reviewed. Five-field source choices precede the declared coastal light-water derivation. Dilation/thumbnail grouping was review-only, not annotation expansion.",
+  "uncertainty": "283 irrecoverable blended-detail pixels use explicit manual engineering choices; conservative static substitutions may over-preserve obstacles. 15 unsafe Static+Enemy Tombstone pixels use blocking Rock Grey0x107, losing original identity, HP/destructibility/flags/size. 24 TombWall0x1dd pixels infer SandTile substrate; 44 PalmTree0x18e and109 DeathTree0x181e pixels retain selected occupied positions, not original variant proof. 20 reviewed road fringes remain road, not invented walls. DarkWater0xbc is an engineering NoWalk depth convention, not historical depth evidence.",
+  "reuse_rights": "Source-image and image-derived reuse rights unverified. Public hosting, attribution, code MIT and omission of raw PNG do not grant a licence."
+}

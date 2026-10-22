@@ -16,12 +16,12 @@ fn community_resources_withdraw_missing_supplies_then_reassess_observed_stock() 
     let c = Content::load(std::path::Path::new("data")).unwrap();
     let mut v = vault(&c);
     v.objects[0].contents[0] = 0xa22;
-    let d = bank(&v, &c, &Grid::new(&v), None).unwrap().unwrap();
+    let d = bank(&v, &c, &Grid::terrain(&v), None).unwrap().unwrap();
     assert!(
         matches!(d.item, Some(Action::Swap { from, to }) if from.object == 22 && from.kind == 0xa22 && to.object == 1)
     );
     v.objects[0].contents[0] = -1;
-    let d = bank(&v, &c, &Grid::new(&v), None).unwrap().unwrap();
+    let d = bank(&v, &c, &Grid::terrain(&v), None).unwrap().unwrap();
     assert!(d.item.is_none());
     assert!(matches!(d.journey, Some(Journey::Nexus)));
 }
@@ -32,12 +32,12 @@ fn community_resources_full_backpack_reconsiders_potion_for_upgrade_and_item_for
     let mut v = vault(&c);
     v.character.items[4..].fill(0xa23);
     v.objects[0].contents[0] = 0xa22;
-    let d = bank(&v, &c, &Grid::new(&v), None).unwrap().unwrap();
+    let d = bank(&v, &c, &Grid::terrain(&v), None).unwrap().unwrap();
     assert!(
         matches!(d.item, Some(Action::Swap { from, to }) if from.object == 22 && from.kind == 0xa22 && to.object == 1)
     );
     v.objects[0].contents[0] = 0xa9a;
-    let d = bank(&v, &c, &Grid::new(&v), None).unwrap().unwrap();
+    let d = bank(&v, &c, &Grid::terrain(&v), None).unwrap().unwrap();
     assert!(
         matches!(d.item, Some(Action::Swap { from, to }) if from.kind == 0xa9a && to.kind == 0xa23)
     );
@@ -50,7 +50,7 @@ fn community_resources_full_vault_keeps_better_carried_stock_without_discard() {
     v.character.items[0] = 0xa9a;
     v.character.items[4] = 0xa21;
     v.objects[0].contents.fill(0xa9a);
-    let d = bank(&v, &c, &Grid::new(&v), None).unwrap().unwrap();
+    let d = bank(&v, &c, &Grid::terrain(&v), None).unwrap().unwrap();
     assert!(d.item.is_none());
     assert!(matches!(d.journey, Some(Journey::Nexus)));
     assert_eq!(v.character.items[4], 0xa21);
@@ -159,7 +159,7 @@ async fn community_resources_stale_vault_revision_and_stock_cannot_mint_holdings
         .await
         .unwrap();
     ch.items[4..].fill(-1);
-    let mut vault = store.vault(account).await.unwrap();
+    let mut vault = store.vault(account, 0).await.unwrap();
     vault.items[0] = 0xa22;
     ch.revision = store
         .exchange(
@@ -169,11 +169,11 @@ async fn community_resources_stale_vault_revision_and_stock_cannot_mint_holdings
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            Some(vault),
+            vec![vault],
         )
         .await
         .unwrap()[0];
-    let vault = store.vault(account).await.unwrap();
+    let vault = store.vault(account, 0).await.unwrap();
     let mut cells = vec![
         Cell {
             ground: 0x61,
@@ -197,7 +197,7 @@ async fn community_resources_stale_vault_revision_and_stock_cannot_mint_holdings
     .unwrap();
     world.name = "Vault".into();
     world.owner = Some(account);
-    world.load_vault(vault.clone()).unwrap();
+    world.load_vaults(vec![vault.clone()]).unwrap();
     let (packets, _receiver) = tokio::sync::mpsc::channel(OUTPUT_CAPACITY);
     let (lost, _) = tokio::sync::watch::channel(false);
     let id = world
@@ -256,7 +256,7 @@ async fn community_resources_stale_vault_revision_and_stock_cannot_mint_holdings
                 revision: ch.revision,
                 items: ch.items.clone(),
             }],
-            Some(changed),
+            vec![changed],
         )
         .await
         .unwrap()[0];
@@ -268,7 +268,7 @@ async fn community_resources_stale_vault_revision_and_stock_cannot_mint_holdings
                 revision,
                 items: plan.items.clone(),
             }],
-            plan.vault.clone(),
+            plan.vaults.clone(),
         )
         .await;
     assert!(result.is_err());
@@ -286,7 +286,7 @@ async fn community_resources_stale_vault_revision_and_stock_cannot_mint_holdings
             .iter()
             .all(|k| *k != 0xa22)
     );
-    assert_eq!(store.vault(account).await.unwrap().items[0], 0xa23);
+    assert_eq!(store.vault(account, 0).await.unwrap().items[0], 0xa23);
     println!("resource stale-revision evidence: {}", dir.display());
 }
 
@@ -319,7 +319,7 @@ async fn community_resources_death_keeps_account_interest_not_dead_stock_or_repl
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                vec![],
             )
             .await
             .unwrap()[0];
@@ -333,7 +333,7 @@ async fn community_resources_death_keeps_account_interest_not_dead_stock_or_repl
         assert!(store.load(account, dead).await.is_err());
         assert!(
             store
-                .vault(account)
+                .vault(account, 0)
                 .await
                 .unwrap()
                 .items

@@ -1,4 +1,4 @@
-use crate::content::Content;
+use crate::{content::Content, dungeon::beach};
 use anyhow::{Result, ensure};
 use rand::{Rng, seq::SliceRandom};
 #[derive(Clone, Copy)]
@@ -10,9 +10,106 @@ pub(crate) const WEAPONS: &[i32] = &[1, 2, 3, 8, 17];
 pub(crate) const ABILITIES: &[i32] = &[4, 5, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23];
 pub(crate) const ARMOR: &[i32] = &[6, 7, 14];
 pub(crate) const RINGS: &[i32] = &[9];
+fn gray_blob_private_table(kind: u16) -> &'static [(f64, Pick)] {
+    match kind {
+        0x20d => &[(0.005, Pick::Item(0xa51))],
+        _ => &[],
+    }
+}
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        beach::BOSS => &[
+            (0.1, Item(beach::DRINKS[0])),
+            (0.1, Item(beach::DRINKS[1])),
+            (0.1, Item(beach::DRINKS[2])),
+            (0.1, Item(beach::DRINKS[3])),
+        ],
+        crate::dungeon::beach::BUM => &[(1., Item(0xc2e))],
+        crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN => &[
+            (0.5, Item(0xc21)),
+            (0.01, Item(0xc1d)),
+            (0.01, Item(0xc1f)),
+            (0.05, Item(0xc20)),
+            (0.005, Item(0xc09)),
+            (0.01, Item(0xc22)),
+            (0.005, Item(0x722)),
+            (0.03, Tier(9, WEAPONS)),
+            (0.03, Tier(4, ABILITIES)),
+        ],
+        crate::dungeon::manor::KAGE => &[
+            (0.1, Tier(6, WEAPONS)),
+            (0.1, Tier(7, WEAPONS)),
+            (0.05, Tier(8, WEAPONS)),
+            (0.1, Tier(6, ARMOR)),
+            (0.1, Tier(7, ARMOR)),
+            (0.05, Tier(8, ARMOR)),
+            (0.1, Tier(3, ABILITIES)),
+            (0.05, Tier(4, ABILITIES)),
+            (0.1, Tier(3, RINGS)),
+            (0.05, Tier(4, RINGS)),
+            (0.1, Item(0xa22)),
+            (0.1, Item(0xa23)),
+            (0.005, Item(0x722)),
+        ],
+        0x1728 => &[(0.01, Item(0xc22)), (0.03, Tier(8, WEAPONS))],
+        0x1729 => &[(0.05, Tier(6, WEAPONS))],
+        kind if crate::dungeon::manor::ROSTER.contains(&kind)
+            || kind == crate::dungeon::manor::BOOKCASE =>
+        {
+            &[]
+        }
+        crate::dungeon::davy::BOSS => &[
+            (0.2, Tier(3, RINGS)),
+            (0.2, Tier(7, ARMOR)),
+            (0.2, Tier(8, WEAPONS)),
+            (0.1, Tier(4, ABILITIES)),
+            (0.1, Tier(8, ARMOR)),
+            (0.05, Tier(4, RINGS)),
+            (0.03, Tier(9, ARMOR)),
+            (0.03, Tier(5, ABILITIES)),
+            (0.03, Tier(9, WEAPONS)),
+            (0.02, Tier(10, ARMOR)),
+            (0.02, Tier(10, WEAPONS)),
+            (0.01, Tier(11, ARMOR)),
+            (0.01, Tier(11, WEAPONS)),
+            (0.01, Tier(5, RINGS)),
+            (0.01, Item(0xc29)),
+            (0.01, Item(0xc28)),
+            (0.01, Item(0xc2a)),
+            (0.01, Item(0xc27)),
+            (0.01, Item(0x722)),
+            (0.5, Item(0xa35)),
+        ],
+        0xe31 | 0xe3a | 0xe42 => &[
+            (0.03, Item(0xa22)),
+            (0.03, Item(0xa23)),
+            (0.01, Item(0xc25)),
+        ],
+        0xe43 => &[
+            (0.05, Tier(7, WEAPONS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.02, Tier(3, RINGS)),
+            (0.03, Item(0xa23)),
+            (0.01, Item(0xc25)),
+        ],
+        0xe44 => &[
+            (0.05, Tier(7, WEAPONS)),
+            (0.03, Tier(8, WEAPONS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.02, Tier(3, RINGS)),
+            (0.03, Item(0xa23)),
+        ],
+        0xe45 => &[
+            (0.03, Tier(4, RINGS)),
+            (0.05, Tier(8, WEAPONS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.03, Tier(3, ABILITIES)),
+            (0.03, Tier(3, RINGS)),
+            (0.03, Item(0xa23)),
+            (0.01, Item(0xc25)),
+        ],
+        kind if crate::dungeon::davy::ROSTER.contains(&kind) || kind == 0x182e => &[],
         0x6c4 => &[
             (0.10, Tier(2, WEAPONS)),
             (0.10, Tier(2, ARMOR)),
@@ -38,6 +135,18 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.1, Tier(5, ABILITIES)),
         ],
         kind if crate::dungeon::lab::ROSTER.contains(&kind) => &[],
+        crate::dungeon::jungle::BOSS => &[
+            (1., Item(0xc1a)),
+            (0.4, Item(0xc17)),
+            (0.25, Item(0xc15)),
+            (0.3, Item(0xc16)),
+            (0.4, Item(0xc14)),
+            (0.003, Item(0x722)),
+        ],
+        crate::dungeon::jungle::SHAMAN
+        | crate::dungeon::jungle::WARRIOR
+        | crate::dungeon::jungle::HUNTER => &[(0.1, Item(0xc1a))],
+        kind if crate::dungeon::jungle::ROSTER.contains(&kind) => &[],
         crate::dungeon::spider::BOSS => {
             &[(0.2, Item(0xa16)), (0.2, Item(0x708)), (0.2, Item(0x709))]
         }
@@ -63,6 +172,27 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Tier(4, ARMOR)),
             (0.05, Tier(1, ABILITIES)),
             (0.05, Tier(1, RINGS)),
+        ],
+        // Current reconstruction from Trapped's older Midland table, not 123.5.1 rate fidelity.
+        0x945 => &[
+            (0.10, Tier(5, WEAPONS)),
+            (0.10, Tier(5, ARMOR)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.05, Tier(2, ABILITIES)),
+        ],
+        0x955 => &[
+            (0.15, Tier(3, WEAPONS)),
+            (0.15, Tier(3, ARMOR)),
+            (0.15, Tier(1, ABILITIES)),
+            (0.15, Tier(1, RINGS)),
+        ],
+        // Trapped 593e490 engineering tables, not authenticated 123.5.1 probabilities.
+        0x205 | 0x20d | 0x20f | 0x202 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
+        0x204 => &[
+            (0.01, Tier(2, ARMOR)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
         ],
         // Behavior coverage alone does not establish new drop probabilities.
         kind if crate::encounter::fauna::ROSTER.contains(&kind)
@@ -319,7 +449,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.3, Tier(8, ARMOR)),
         ],
         0xd06 => &[
-            (0.3, Item(0xa4c)),
+            (1., Item(0xa4c)),
             (0.01, Item(0xa4b)),
             (0.01, Item(0xc03)),
             (0.01, Item(0xa5a)),
@@ -343,8 +473,10 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Tier(3, ABILITIES)),
         ],
         0x908 | 0x909 | 0x90b => &[],
+        // Malphas and the Abyss Idol both drop a Potion of Vitality and a Potion of Defense.
         crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL => &[
             (1., Item(0xa34)),
+            (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
@@ -384,6 +516,7 @@ pub fn collectibles(content: &Content) -> std::collections::BTreeSet<u16> {
         .flat_map(|kind| {
             table(kind)
                 .iter()
+                .chain(gray_blob_private_table(kind))
                 .flat_map(|(_, pick)| candidates(content, *pick))
                 .chain(bonus(kind).iter().map(|(_, item)| *item))
         })
@@ -430,7 +563,7 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
             );
         }
     }
-    for (_, pick) in table(kind) {
+    for (_, pick) in table(kind).iter().chain(gray_blob_private_table(kind)) {
         let items = candidates(content, *pick);
         ensure!(
             !items.is_empty(),
@@ -447,7 +580,10 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
     Ok(())
 }
 pub fn roll(content: &Content, kind: u16, rng: &mut impl Rng) -> Option<u16> {
-    for (chance, pick) in table(kind) {
+    roll_table(content, table(kind), rng)
+}
+fn roll_table(content: &Content, picks: &[(f64, Pick)], rng: &mut impl Rng) -> Option<u16> {
+    for (chance, pick) in picks {
         if rng.gen_bool(*chance) {
             return Some(
                 *candidates(content, *pick)
@@ -470,6 +606,12 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | 0xd79
                 | crate::dungeon::spider::BOSS
                 | crate::dungeon::lab::BOSS
+                | crate::dungeon::jungle::BOSS
+                | crate::dungeon::beach::BOSS
+                | crate::dungeon::manor::BOSS
+                | crate::dungeon::manor::COFFIN
+                | crate::dungeon::manor::KAGE
+                | crate::dungeon::davy::BOSS
                 | crate::dungeon::abyss::MALPHAS
                 | crate::dungeon::abyss::IDOL
                 | crate::endgame::ORYX
@@ -496,19 +638,59 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     }
     items
 }
+pub fn gray_blob_rewards(
+    content: &Content,
+    contributors_by_damage: &[(i32, i32)],
+    rng: &mut impl Rng,
+) -> Vec<(i32, u16)> {
+    let owners: Vec<_> = contributors_by_damage
+        .iter()
+        .filter(|(_, damage)| *damage > 1)
+        .map(|(account, _)| *account)
+        .collect();
+    let mut rewards = Vec::new();
+    for _ in 0..owners.len() {
+        if let Some(item) = roll_table(content, gray_blob_private_table(0x20d), rng) {
+            // Successful rolls advance allocation, not failed attempts or independent player rolls.
+            rewards.push((owners[rewards.len()], item));
+            if rewards.len() == 8 {
+                break;
+            }
+        }
+    }
+    rewards
+}
 pub fn private(kind: u16) -> bool {
     crate::quest::final_root(kind)
+        || kind == crate::dungeon::davy::BOSS
         || matches!(
             kind,
             0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL
         )
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
+        | crate::dungeon::jungle::BOSS | crate::dungeon::beach::BOSS
+        | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
 }
-fn chest_table(kind: u16) -> [(f64, Pick); 12] {
+fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
     use Pick::Tier;
+    if kind == crate::dungeon::jungle::COIL {
+        return vec![
+            (0.3, Tier(4, WEAPONS)),
+            (0.2, Tier(5, WEAPONS)),
+            (0.3, Tier(4, ARMOR)),
+            (0.2, Tier(5, ARMOR)),
+            (0.25, Tier(1, ABILITIES)),
+            (0.15, Tier(2, ABILITIES)),
+            (0.3, Tier(2, RINGS)),
+            (0.2, Tier(3, RINGS)),
+            (0.5, Tier(1, &[10])),
+            (0.5, Tier(1, &[10])),
+            (0.5, Tier(1, &[10])),
+        ];
+    }
     let (weapon, armor) = match kind {
         0x67d => (6, 5),
         0x668 => (7, 6),
@@ -528,12 +710,13 @@ fn chest_table(kind: u16) -> [(f64, Pick); 12] {
         (0.15, Tier(3, RINGS)),
         (0.5, Tier(1, &[10])),
     ]
+    .to_vec()
 }
 pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
     let picks = chest_table(kind);
-    for (_, pick) in picks {
+    for (_, pick) in &picks {
         ensure!(
-            !candidates(content, pick).is_empty(),
+            !candidates(content, *pick).is_empty(),
             "landmark {kind:#x} chest has an empty selected tier"
         );
     }
@@ -558,6 +741,109 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+    struct Branch(Vec<u64>);
+    impl rand::RngCore for Branch {
+        fn next_u32(&mut self) -> u32 {
+            0
+        }
+        fn next_u64(&mut self) -> u64 {
+            self.0.remove(0)
+        }
+        fn fill_bytes(&mut self, _: &mut [u8]) {
+            panic!("unexpected byte draw")
+        }
+        fn try_fill_bytes(&mut self, _: &mut [u8]) -> Result<(), rand::Error> {
+            panic!("unexpected byte draw")
+        }
+    }
+    #[test]
+    fn starter_gray_private_rolls_use_strict_threshold_success_order_and_eight_success_cap() {
+        let mut content = Content::load(std::path::Path::new("data")).unwrap();
+        assert_eq!(
+            gray_blob_private_table(0x20d)
+                .iter()
+                .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+                .collect::<Vec<_>>(),
+            vec![(0.005, vec![0xa51])]
+        );
+        let mut second_roll = Branch(vec![u64::MAX, 0]);
+        assert_eq!(
+            gray_blob_rewards(&content, &[(1, 3), (2, 2), (3, 1)], &mut second_roll),
+            vec![(1, 0xa51)]
+        );
+        assert!(second_roll.0.is_empty());
+        let owners: Vec<_> = (1..=12).map(|account| (account, 2)).collect();
+        let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+        assert_eq!(
+            gray_blob_rewards(&content, &owners, &mut hits),
+            (1..=8).map(|account| (account, 0xa51)).collect::<Vec<_>>()
+        );
+        let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(gray_blob_rewards(&content, &owners, &mut misses).is_empty());
+        content.objects.get_mut(&0xa51).unwrap().bag_type = 5;
+        assert!(validate(&content, 0x20d).is_err());
+        validate(&content, 0x205).unwrap();
+    }
+    #[test]
+    fn starter_enemy_tables_use_the_reconstructed_ordered_public_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, name) in [
+            (0x205, "Pink Blob"),
+            (0x20d, "Gray Blob"),
+            (0x20f, "Little Green Slime"),
+            (0x202, "Red Spider"),
+            (0x204, "Black Bat"),
+        ] {
+            assert_eq!(content.get(kind).unwrap().name, name);
+            let mut expected = vec![(0.03, vec![0xa22]), (0.02, vec![0xa23])];
+            if kind == 0x204 {
+                expected.insert(0, (0.01, vec![0xa0d, 0xa0f, 0xa7e]));
+            }
+            let actual: Vec<_> = table(kind)
+                .iter()
+                .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+                .collect();
+            assert_eq!(actual, expected, "{name}");
+            for (branch, (_, items)) in expected.iter().enumerate() {
+                let mut rng = Branch(vec![u64::MAX; branch]);
+                rng.0.push(0);
+                let result = rewards(&content, kind, &mut rng);
+                assert_eq!(result.len(), 1);
+                assert!(items.contains(&result[0]));
+                assert!(rng.0.is_empty(), "first success ends the attempt");
+            }
+            let mut rng = Branch(vec![u64::MAX; expected.len()]);
+            assert!(rewards(&content, kind, &mut rng).is_empty());
+            assert!(rng.0.is_empty());
+            assert!(!private(kind) && bonus(kind).is_empty());
+            validate(&content, kind).unwrap();
+        }
+        assert!(collectibles(&content).contains(&0xa51));
+        let mushroom = content.get(0xa51).unwrap();
+        assert_eq!(
+            (
+                mushroom.name.as_str(),
+                mushroom.bag_type,
+                mushroom.soulbound
+            ),
+            ("Magic Mushroom", 1, false)
+        );
+        for kind in [0x20e, 0x206, 0x620, 0x622, 0x947, 0x948, 0x949, 0x952] {
+            assert!(table(kind).is_empty() && bonus(kind).is_empty() && !private(kind));
+        }
+    }
+    #[test]
+    fn abyss_bosses_always_drop_the_vitality_and_defense_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in [crate::dungeon::abyss::MALPHAS, crate::dungeon::abyss::IDOL] {
+            for seed in 0..64 {
+                let mut rng = StdRng::seed_from_u64(seed);
+                let items = rewards(&content, kind, &mut rng);
+                assert!(items.contains(&0xa34), "kind {kind:#x} seed {seed}");
+                assert!(items.contains(&0xa20), "kind {kind:#x} seed {seed}");
+            }
+        }
+    }
     #[test]
     fn desert_werewolf_uses_only_existing_ordered_public_tiers_without_a_minimum() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
@@ -601,10 +887,90 @@ mod tests {
         let first = content.get(first[0]).unwrap();
         assert_eq!(first.tier, Some(3));
         assert!(WEAPONS.contains(&first.slot_type));
-        for kind in [0x620, 0x622, 0x205] {
+        for kind in [0x620, 0x622, 0x20e] {
             assert!(rewards(&content, kind, &mut hits).is_empty());
         }
         assert!(!private(0x623));
+    }
+    #[test]
+    fn swarm_uses_only_the_reconstructed_ordered_public_pool_without_a_minimum() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected = [
+            vec![0xa01, 0xa05, 0xa73, 0xa76, 0xa9a],
+            vec![0xa5d, 0xa79, 0xa7c],
+            vec![
+                0xa09, 0xa42, 0xa57, 0xa62, 0xa67, 0xaa4, 0xaab, 0xab2, 0xad4, 0xad7, 0xad9, 0xb1c,
+                0xb2e,
+            ],
+            vec![0xa24, 0xa25, 0xa26, 0xa27, 0xa28, 0xa36, 0xa37, 0xa4d],
+        ];
+        let actual: Vec<_> = table(0x955)
+            .iter()
+            .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+            .collect();
+        assert_eq!(actual, expected.clone().map(|items| (0.15, items)));
+        let existing: std::collections::BTreeSet<_> = table(0x614)
+            .iter()
+            .flat_map(|(_, pick)| candidates(&content, *pick))
+            .collect();
+        let catalogue = collectibles(&content);
+        for item in expected.into_iter().flatten() {
+            let object = content.get(item).unwrap();
+            assert_eq!(object.class, "Equipment");
+            assert!(!object.soulbound && object.bag_type == 0);
+            assert!(existing.contains(&item) && catalogue.contains(&item));
+        }
+        let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(rewards(&content, 0x955, &mut misses).is_empty());
+        let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+        let first = rewards(&content, 0x955, &mut hits);
+        assert_eq!(first.len(), 1);
+        assert!(candidates(&content, Pick::Tier(3, WEAPONS)).contains(&first[0]));
+        assert!(!private(0x955));
+        assert!(bonus(0x955).is_empty());
+        for distinct in [0x919, 0x954] {
+            assert!(table(distinct).is_empty());
+        }
+    }
+    #[test]
+    fn horned_drake_uses_only_the_reconstructed_ordered_public_pool_without_a_minimum() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected = [
+            (0.10, vec![0xa06, 0xa16, 0xa1c, 0xa3b, 0xa9c]),
+            (0.10, vec![0xa10, 0xa80, 0xad0]),
+            (0.03, vec![0xa22]),
+            (0.02, vec![0xa23]),
+            (
+                0.05,
+                vec![
+                    0xa0a, 0xa2f, 0xa32, 0xa43, 0xa53, 0xa58, 0xa63, 0xa68, 0xaa5, 0xaac, 0xab3,
+                    0xb1d, 0xb2f,
+                ],
+            ),
+        ];
+        let actual: Vec<_> = table(0x945)
+            .iter()
+            .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+            .collect();
+        assert_eq!(actual, expected);
+        let catalogue = collectibles(&content);
+        for (_, items) in expected {
+            for item in items {
+                let object = content.get(item).unwrap();
+                assert_eq!(object.class, "Equipment");
+                assert!(!object.soulbound && object.bag_type == 0);
+                assert!(catalogue.contains(&item));
+            }
+        }
+        let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(rewards(&content, 0x945, &mut misses).is_empty());
+        let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+        let first = rewards(&content, 0x945, &mut hits);
+        assert_eq!(first.len(), 1);
+        assert!(candidates(&content, Pick::Tier(5, WEAPONS)).contains(&first[0]));
+        assert!(!private(0x945));
+        assert!(bonus(0x945).is_empty());
+        assert!(table(0x946).is_empty());
     }
     #[test]
     fn collection_catalogue_covers_every_encounter_reward() {

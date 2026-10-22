@@ -137,7 +137,7 @@ async fn community_events_actual_castle_controllers_progress_or_causally_abandon
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                vec![],
             )
             .await
             .unwrap()[0];

@@ -58,8 +58,11 @@ impl World {
         item: &Object,
     ) -> Result<InventoryPlan> {
         ensure!(
-            item.consumable
-                && !item.consumable_effects.is_empty()
+            item.consumable,
+            controller("item is not a supported consumable")
+        );
+        ensure!(
+            !item.consumable_effects.is_empty()
                 && item.consumable_effects.len() == item.activations,
             "item is not a supported consumable"
         );
@@ -122,13 +125,13 @@ impl World {
                 .retain(|b| b.until.is_none_or(|until| until > self.now));
             ensure!(
                 p.boosts.len() + count <= 128,
-                "temporary stat effect budget exhausted"
+                controller("temporary stat effect budget exhausted")
             );
         }
         for (target, boost) in reservations {
             self.players.get_mut(&target).unwrap().boosts.push(boost);
         }
-        let mut plan = self.consumable_plan(id, slot, next);
+        let mut plan = self.consumable_plan(id, slot, next)?;
         plan.effects = item.consumable_effects.clone();
         Ok(plan)
     }

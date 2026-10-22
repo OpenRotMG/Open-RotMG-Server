@@ -16,6 +16,7 @@ struct Companion {
     published: bool,
     until: Option<u64>,
     pulse: u64,
+    remaining: u8,
 }
 #[derive(Default)]
 pub(super) struct State {
@@ -27,11 +28,12 @@ impl State {
         self.active.contains_key(entity)
     }
 }
-// The selected eggs omit lifetime/AI; the period Drake Eggs table supplies these profiles.
-fn duration(kind: u16) -> Result<u64> {
+// Firecrackers expire after their last pulse; drake lifetimes come from the period eggs table.
+fn duration(kind: u16) -> Result<Option<u64>> {
     match kind {
-        0x1401 => Ok(60_000),
-        0x1400 | 0x1402..=0x1405 => Ok(30_000),
+        0x1401 => Ok(Some(60_000)),
+        0x1400 | 0x1402..=0x1405 => Ok(Some(30_000)),
+        0x1407 | 0x1408 => Ok(None),
         _ => bail!("This temporary companion is not implemented yet."),
     }
 }
@@ -45,10 +47,22 @@ impl World {
     ) -> Result<i32> {
         ensure!(
             self.companions.active.len() < 128,
-            "companion population limit reached"
+            controller("companion population limit reached")
         );
         if !permanent {
             duration(kind)?;
+            if matches!(kind, 0x1407 | 0x1408) {
+                // Prove all ten cumulative [-2, 2) jumps valid before consumption or RNG draws.
+                ensure!(
+                    pos.x.is_finite()
+                        && pos.y.is_finite()
+                        && self.map.cell(pos.x - 20., pos.y - 20.).is_some()
+                        && self.map.cell(pos.x + 10., pos.y + 10.).is_some(),
+                    controller(
+                        "Firecrackers need at least 20 tiles from the left/top and more than 10 from the right/bottom world boundary."
+                    )
+                );
+            }
             ensure!(
                 self.companions
                     .active
@@ -56,7 +70,7 @@ impl World {
                     .filter(|p| p.owner == owner && !p.permanent)
                     .count()
                     < 8,
-                "at most eight temporary companions may be active"
+                controller("at most eight temporary companions may be active")
             );
         }
         let entity = self.spawn_entity(kind, pos, vec![])?;
@@ -80,6 +94,11 @@ impl World {
                 published: false,
                 until: None,
                 pulse: self.now,
+                remaining: if matches!(kind, 0x1407 | 0x1408) {
+                    10
+                } else {
+                    0
+                },
             },
         );
         Ok(entity)
@@ -98,9 +117,9 @@ impl World {
         ensure!(!pet.published, "companion already published");
         pet.published = true;
         if !pet.permanent {
-            pet.until = Some(self.now + duration(pet.kind)?);
+            pet.until = duration(pet.kind)?.map(|duration| self.now + duration);
         }
-        pet.pulse = self.now + 50;
+        pet.pulse = self.now + if pet.remaining > 0 { 0 } else { 50 };
         let e = self
             .entities
             .get_mut(&id)
@@ -140,13 +159,15 @@ impl World {
             ensure!(
                 p.last_companion
                     .is_none_or(|last| self.now >= last + metadata.cooldown),
-                "companion generator cooldown"
+                controller("companion generator cooldown")
             );
         } else {
             ensure!(item.consumable, "temporary companion must consume its egg");
-            self.now
-                .checked_add(duration(kind)?)
-                .context("companion deadline overflow")?;
+            if let Some(duration) = duration(kind)? {
+                self.now
+                    .checked_add(duration)
+                    .context("companion deadline overflow")?;
+            }
         }
         let selected =
             if metadata.permanent && !item.consumable && p.character.pet_kind == Some(kind) {
@@ -252,6 +273,80 @@ impl World {
             send(p, wire::SHOW_EFFECT, body.clone());
         }
     }
+    fn firecracker_pulse(&mut self, id: i32, kind: u16) -> Result<()> {
+        let pos = self.entities[&id].pos;
+        let pos = Pos {
+            x: pos.x + self.rng.gen_range(-2..2) as f32,
+            y: pos.y + self.rng.gen_range(-2..2) as f32,
+        };
+        self.position_entity(id, pos)?;
+        let radius = if kind == 0x1407 {
+            1
+        } else {
+            self.rng.gen_range(2..4)
+        } as f32;
+        let color = self.rng.gen_range(0..0xffffff);
+        let mut effect = Writer::new();
+        effect
+            .u8(5)
+            .i32(id)
+            .f32(radius)
+            .f32(0.)
+            .f32(0.)
+            .f32(0.)
+            .u32(color);
+        let mut sound = Writer::new();
+        sound.i32(id).u8(0);
+        for p in self.players.values().filter(|p| p.known.contains(&id)) {
+            send(p, wire::SHOW_EFFECT, effect.0.clone());
+            if p.pos.distance(pos) <= 25. {
+                send(p, wire::PLAY_SOUND, sound.0.clone());
+            }
+        }
+        let targets: Vec<_> = self
+            .near_entities(
+                Pos {
+                    x: pos.x - radius,
+                    y: pos.y - radius,
+                },
+                Pos {
+                    x: pos.x + radius,
+                    y: pos.y + radius,
+                },
+            )
+            .filter(|e| {
+                e.hp > 0 && self.content.objects[&e.kind].enemy && e.pos.distance(pos) <= radius
+            })
+            .map(|e| e.id)
+            .collect();
+        for target in &targets {
+            self.damage_enemy(0, *target, 100, true, &[], None)?;
+        }
+        let pet = self.companions.active.get_mut(&id).unwrap();
+        pet.remaining -= 1;
+        pet.pulse = self.now
+            + if kind == 0x1408 && pet.remaining == 9 {
+                250
+            } else {
+                100
+            };
+        if pet.remaining == 0 {
+            pet.until = Some(self.now + 1);
+        }
+        tracing::info!(
+            companion = id,
+            kind,
+            x = pos.x,
+            y = pos.y,
+            radius,
+            color,
+            targets = targets.len(),
+            remaining = pet.remaining,
+            tick = self.now,
+            "firecracker pulse"
+        );
+        Ok(())
+    }
     pub(super) fn companion_step(&mut self) -> Result<()> {
         let ids: Vec<_> = self.companions.active.keys().copied().collect();
         for id in ids {
@@ -272,6 +367,12 @@ impl World {
             }
             let owner = &self.players[&owner];
             if owner.paused {
+                continue;
+            }
+            if matches!(kind, 0x1407 | 0x1408) {
+                if pet.remaining > 0 && pet.pulse <= self.now {
+                    self.firecracker_pulse(id, kind)?;
+                }
                 continue;
             }
             let goal = owner.pos;
@@ -397,6 +498,7 @@ impl World {
 mod tests {
     use super::*;
     use crate::store::{InventoryWrite, Store};
+    use crate::wire::Reader;
     use crate::world::tests as fixtures;
 
     fn fixture(kind: i32) -> (World, i32) {
@@ -439,246 +541,311 @@ mod tests {
         enemy
     }
 
-    #[test]
-    fn temporary_drake_is_invisible_until_commit_damages_without_player_credit_and_expires() {
-        let (mut w, id) = fixture(0xaa9);
-        let enemy = target(&mut w, id);
-        let plan = stage(&mut w, id, 5);
-        let entity = plan.companion.as_ref().unwrap().entity.unwrap();
-        assert!(!w.entities[&entity].published && w.entities[&entity].reserved);
-        assert!(
-            w.use_item(
-                id,
-                Slot {
-                    object: id,
-                    slot: 5,
-                    kind: 0xaa9
-                },
-                w.players[&id].pos
-            )
-            .is_err()
-        );
-        w.now += 40000;
-        w.companion_step().unwrap();
-        assert_eq!(w.entities[&enemy].hp, 1000);
-        commit(&mut w, plan);
-        assert_eq!(w.players[&id].character.items[5], -1);
-        assert!(w.entities[&entity].published && !w.entities[&entity].reserved);
-        w.now += 50;
-        w.companion_step().unwrap();
-        assert_eq!(w.entities[&enemy].hp, 965);
-        assert!(w.entities[&enemy].damage.is_empty());
-        assert_eq!(
-            (
-                w.players[&id].character.shots,
-                w.players[&id].character.hits
-            ),
-            (0, 0)
-        );
-        w.now += 30000;
-        w.companion_step().unwrap();
-        assert!(!w.entities.contains_key(&entity));
-        assert!(!w.companions.active.contains_key(&entity));
+    fn firecracker_fixture(item: i32) -> (World, i32) {
+        let base = fixtures::arena(1);
+        let mut map = (*base.map).clone();
+        map.width = 64;
+        map.height = 64;
+        map.cells = vec![map.cells[0].clone(); 64 * 64];
+        map.spawns = vec![(25., 25.)];
+        let mut w = World::new(base.content.clone(), Arc::new(map)).unwrap();
+        let mut ch = fixtures::ch(&w);
+        ch.items[5] = item;
+        let id = w.enter(ch, None).unwrap();
+        w.players.get_mut(&id).unwrap().pos = Pos { x: 25., y: 25. };
+        (w, id)
     }
 
     #[test]
-    fn failed_egg_save_and_companion_limits_preserve_items_without_hidden_reservations() {
-        for failed_write in [true, false] {
-            let (mut w, id) = fixture(0xaa9);
+    fn firecrackers_execute_ten_seeded_pulses_without_following_or_player_credit_then_expire() {
+        use rand::{Rng, SeedableRng};
+        for (item, kind) in [(0xc2b, 0x1407), (0xc2c, 0x1408)] {
+            let (mut w, id) = firecracker_fixture(item);
+            let origin = w.players[&id].pos;
+            w.rng = rand::rngs::StdRng::seed_from_u64(12351);
+            let enemy = target(&mut w, id);
+            w.entities.get_mut(&enemy).unwrap().hp = 2000;
             let plan = stage(&mut w, id, 5);
             let entity = plan.companion.as_ref().unwrap().entity.unwrap();
-            let result = if failed_write {
-                Err(anyhow::anyhow!("injected egg save failure"))
-            } else {
-                Ok(plan.revision + 2)
-            };
-            assert!(w.finish_inventory(plan, result).is_err());
-            assert!(w.players[&id].persistence_failure.is_some());
-            assert_eq!(w.players[&id].character.items[5], 0xaa9);
-            assert!(!w.entities.contains_key(&entity) && w.companions.active.is_empty());
-        }
-        let (mut w, id) = fixture(0xaa9);
-        for _ in 0..8 {
-            w.players.get_mut(&id).unwrap().character.items[5] = 0xaa9;
-            let plan = stage(&mut w, id, 5);
+            assert_eq!(w.entities[&entity].kind, kind);
+            assert!(!w.entities[&entity].published);
+            w.now += 5000;
+            w.companion_step().unwrap();
+            assert_eq!(w.entities[&enemy].hp, 2000);
+            w.players.get_mut(&id).unwrap().pos = Pos { x: 19.5, y: 19.5 };
             commit(&mut w, plan);
+            assert_eq!(w.entities[&entity].pos.distance(origin), 0.);
+            assert_eq!(w.players[&id].character.items[5], -1);
+            let (packets, mut rx) = tokio::sync::mpsc::channel(128);
+            let (lost, _) = tokio::sync::watch::channel(false);
+            let p = w.players.get_mut(&id).unwrap();
+            p.tx = Some(Output { packets, lost });
+            p.known.insert(entity);
+            let mut rng = w.rng.clone();
+            let mut position = origin;
+            for pulse in 0..10 {
+                position.x += rng.gen_range(-2..2) as f32;
+                position.y += rng.gen_range(-2..2) as f32;
+                let radius = if kind == 0x1407 {
+                    1
+                } else {
+                    rng.gen_range(2..4)
+                };
+                let color: u32 = rng.gen_range(0..0xffffff);
+                w.position_entity(enemy, position).unwrap();
+                let before = w.entities[&enemy].hp;
+                w.companion_step().unwrap();
+                assert_eq!(w.entities[&entity].pos.distance(position), 0.);
+                assert_eq!(w.entities[&enemy].hp, before - 100);
+                assert!(w.entities[&enemy].damage.is_empty());
+                let received: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+                let effects: Vec<_> = received
+                    .iter()
+                    .filter(|p| p.id == wire::SHOW_EFFECT)
+                    .collect();
+                assert_eq!(effects.len(), 1);
+                let mut effect = Reader::new(&effects[0].body);
+                assert_eq!(effect.u8().unwrap(), 5);
+                assert_eq!(effect.i32().unwrap(), entity);
+                assert_eq!(effect.f32().unwrap(), radius as f32);
+                for _ in 0..3 {
+                    assert_eq!(effect.f32().unwrap(), 0.);
+                }
+                assert_eq!(effect.i32().unwrap() as u32, color);
+                effect.done().unwrap();
+                let sounds: Vec<_> = received.iter().filter(|p| p.id == 44).collect();
+                assert_eq!(sounds.len(), 1);
+                let mut sound = Reader::new(&sounds[0].body);
+                assert_eq!(sound.i32().unwrap(), entity);
+                assert_eq!(sound.u8().unwrap(), 0);
+                sound.done().unwrap();
+                if pulse < 9 {
+                    let interval = if kind == 0x1408 && pulse == 0 {
+                        250
+                    } else {
+                        100
+                    };
+                    w.now += interval - 1;
+                    w.companion_step().unwrap();
+                    assert_eq!(w.entities[&entity].pos.distance(position), 0.);
+                    assert!(rx.try_recv().is_err());
+                    w.now += 1;
+                }
+            }
+            assert_eq!(w.entities[&enemy].hp, 1000);
+            assert_eq!(
+                (
+                    w.players[&id].character.shots,
+                    w.players[&id].character.hits,
+                    w.players[&id].character.kills
+                ),
+                (0, 0, 0)
+            );
+            w.companion_step().unwrap();
+            assert!(rx.try_recv().is_err());
+            w.now += 50;
+            w.companion_step().unwrap();
+            assert!(!w.entities.contains_key(&entity));
+            assert!(w.companions.active.is_empty());
         }
-        w.players.get_mut(&id).unwrap().character.items[5] = 0xaa9;
+    }
+
+    #[test]
+    fn firecrackers_reject_unsafe_envelopes_without_consumption_reservation_or_rng() {
+        use rand::RngCore;
+        for item in [0xc2b, 0xc2c] {
+            let (mut w, id) = firecracker_fixture(item);
+            let revision = w.players[&id].character.revision;
+            for pos in [
+                Pos { x: 19.99, y: 25. },
+                Pos { x: 25., y: 19.99 },
+                Pos { x: 54., y: 25. },
+                Pos { x: 25., y: 54. },
+            ] {
+                w.players.get_mut(&id).unwrap().pos = pos;
+                let mut rng = w.rng.clone();
+                let error = w
+                    .use_item(
+                        id,
+                        Slot {
+                            object: id,
+                            slot: 5,
+                            kind: item,
+                        },
+                        pos,
+                    )
+                    .err()
+                    .unwrap();
+                assert_eq!(
+                    error.downcast_ref::<CloseReason>(),
+                    Some(&CloseReason::Controller)
+                );
+                assert!(crate::server::lifecycle::rule_rejection(&error));
+                assert!(error.to_string().contains("world boundary"));
+                assert_eq!(w.players[&id].character.items[5], item);
+                assert_eq!(w.players[&id].character.revision, revision);
+                assert!(!w.players[&id].pending);
+                assert!(w.companions.active.is_empty());
+                assert_eq!(w.rng.next_u64(), rng.next_u64());
+            }
+            for pos in [Pos { x: 20., y: 20. }, Pos { x: 53.99, y: 53.99 }] {
+                w.players.get_mut(&id).unwrap().pos = pos;
+                let plan = stage(&mut w, id, 5);
+                commit(&mut w, plan);
+                w.clear_companions(id);
+                w.players.get_mut(&id).unwrap().character.items[5] = item;
+            }
+        }
+        let (mut w, id) = fixture(0xc2b);
+        assert!(w.map.width < 31);
         assert!(
             w.use_item(
                 id,
                 Slot {
                     object: id,
                     slot: 5,
-                    kind: 0xaa9
+                    kind: 0xc2b
                 },
                 w.players[&id].pos
             )
             .is_err()
         );
-        assert_eq!(w.players[&id].character.items[5], 0xaa9);
-        assert!(!w.players[&id].pending);
-        assert_eq!(w.companions.active.len(), 8);
+        assert_eq!(w.players[&id].character.items[5], 0xc2b);
     }
 
     #[test]
-    fn each_drake_color_executes_its_selected_healing_or_control_profile() {
-        for (item, effect) in [
-            (0xaf0, crate::condition::PARALYZED),
-            (0xaf1, crate::condition::STASIS),
-            (0xaf2, crate::condition::SLOWED),
-        ] {
-            let (mut w, id) = fixture(item);
-            let enemy = target(&mut w, id);
-            let plan = stage(&mut w, id, 5);
-            commit(&mut w, plan);
-            w.now += 50;
-            w.companion_step().unwrap();
-            assert_ne!(
-                w.entities[&enemy].conditions(w.now) & crate::condition::bit(effect),
-                0
-            );
-        }
-        let (mut w, id) = fixture(0xaef);
-        w.players.get_mut(&id).unwrap().character.hp = 10;
+    fn firecracker_area_damage_preserves_protection_contributors_radius_and_armor_piercing() {
+        use crate::condition::{INVINCIBLE, INVULNERABLE, STASIS};
+        use rand::Rng;
+        let (mut w, id) = firecracker_fixture(0xc2b);
         let plan = stage(&mut w, id, 5);
         commit(&mut w, plan);
-        let entity = *w.companions.active.keys().next().unwrap();
-        assert_eq!(w.companions.active[&entity].until, Some(w.now + 60000));
-        w.now += 50;
-        w.companion_step().unwrap();
-        assert_eq!(w.players[&id].character.hp, 35);
-        w.apply_condition(id, crate::condition::SICK, 10000)
+        let origin = w.players[&id].pos;
+        let mut rng = w.rng.clone();
+        let center = Pos {
+            x: origin.x + rng.gen_range(-2..2) as f32,
+            y: origin.y + rng.gen_range(-2..2) as f32,
+        };
+        let armored = w
+            .content
+            .objects
+            .values()
+            .find(|o| o.enemy && o.defense >= 100)
+            .unwrap()
+            .kind;
+        let mut enemies = Vec::new();
+        for protection in [None, Some(INVINCIBLE), Some(INVULNERABLE), Some(STASIS)] {
+            let enemy = w.spawn_entity(armored, center, vec![]).unwrap();
+            w.entities.get_mut(&enemy).unwrap().hp = 1000;
+            w.entities.get_mut(&enemy).unwrap().damage.insert(123, 25);
+            if let Some(effect) = protection {
+                w.apply_condition(enemy, effect, 10000).unwrap();
+            }
+            enemies.push(enemy);
+        }
+        let outside = w
+            .spawn_entity(
+                armored,
+                Pos {
+                    x: center.x + 1.01,
+                    y: center.y,
+                },
+                vec![],
+            )
             .unwrap();
-        w.now += 500;
+        w.entities.get_mut(&outside).unwrap().hp = 1000;
+        let player_hp = w.players[&id].character.hp;
         w.companion_step().unwrap();
-        assert_eq!(w.players[&id].character.hp, 35);
-    }
-
-    #[test]
-    fn yellow_drake_bleeding_is_nonstacking_and_completes_after_the_companion_leaves() {
-        let (mut w, id) = fixture(0xaf3);
-        let enemy = target(&mut w, id);
-        let plan = stage(&mut w, id, 5);
-        commit(&mut w, plan);
-        w.now += 50;
-        w.companion_step().unwrap();
-        assert_ne!(
-            w.entities[&enemy].conditions(w.now)
-                & crate::condition::bit(crate::condition::BLEEDING),
-            0
-        );
-        w.clear_companions(id);
-        for _ in 0..10 {
-            w.now += 1000;
-            w.companion_step().unwrap();
+        assert_eq!(w.entities[&enemies[0]].hp, 900);
+        for enemy in &enemies[1..] {
+            assert_eq!(w.entities[enemy].hp, 1000);
         }
-        assert_eq!(w.entities[&enemy].hp, 700);
-        assert!(w.entities[&enemy].damage.is_empty());
-        w.now += 50;
-        w.companion_step().unwrap();
-        assert!(w.companions.bleeds.is_empty());
+        for enemy in enemies {
+            assert_eq!(w.entities[&enemy].damage, BTreeMap::from([(123, 25)]));
+        }
+        assert_eq!(w.entities[&outside].hp, 1000);
+        assert_eq!(w.players[&id].character.hp, player_hp);
     }
 
     #[test]
-    fn zero_hp_companion_motion_reaches_native_ticks() {
-        let (mut w, id) = fixture(0x1513);
-        let (packets, mut rx) = tokio::sync::mpsc::channel(32);
-        let (lost, _) = tokio::sync::watch::channel(false);
-        w.players.get_mut(&id).unwrap().tx = Some(Output { packets, lost });
-        let plan = stage(&mut w, id, 5);
-        commit(&mut w, plan);
-        let entity = *w.companions.active.keys().next().unwrap();
-        let origin = w.entities[&entity].pos;
-        assert_eq!(w.entities[&entity].hp, 0);
-        assert!(w.entities[&entity].items.is_empty());
-        w.updates(id, false).unwrap();
-        assert!(w.players[&id].known.contains(&entity));
-        while rx.try_recv().is_ok() {}
-        w.players.get_mut(&id).unwrap().pos.x += 3.;
-        w.step();
-        w.step();
-        assert!(w.entities[&entity].pos.distance(origin) > 0.1);
-        let expected = w.stats(entity, id).unwrap();
-        assert!(
-            std::iter::from_fn(|| rx.try_recv().ok())
-                .filter(|packet| packet.id == wire::NEW_TICK)
-                .any(|packet| packet
-                    .body
-                    .windows(expected.len())
-                    .any(|body| body == expected))
-        );
-    }
-
-    #[test]
-    fn generators_replace_toggle_and_follow_owners_without_consumption_or_surviving_death() {
-        let (mut w, id) = fixture(0x1513);
-        w.players.get_mut(&id).unwrap().character.items[6] = 0x151b;
-        w.players.get_mut(&id).unwrap().character.items[7] = 0x151e;
-        for (slot, kind) in [(5, 0x1613), (6, 0x161b), (7, 0x161e)] {
-            let items = w.players[&id].character.items.clone();
-            let plan = stage(&mut w, id, slot);
-            commit(&mut w, plan);
-            assert_eq!(w.players[&id].character.items, items);
-            assert_eq!(w.players[&id].character.pet_kind, Some(kind));
-            assert_eq!(w.companions.active.len(), 1);
-            let entity = *w.companions.active.keys().next().unwrap();
-            assert_eq!(w.entities[&entity].kind, kind);
+    fn firecrackers_celebrate_without_targets_and_share_caps_rollback_and_departure_cleanup() {
+        for item in [0xc2b, 0xc2c] {
+            for failed in [true, false] {
+                let (mut w, id) = firecracker_fixture(item);
+                let plan = stage(&mut w, id, 5);
+                let entity = plan.companion.as_ref().unwrap().entity.unwrap();
+                let result = if failed {
+                    Err(anyhow::anyhow!("injected firecracker save failure"))
+                } else {
+                    Ok(plan.revision + 2)
+                };
+                assert!(w.finish_inventory(plan, result).is_err());
+                assert_eq!(w.players[&id].character.items[5], item);
+                assert!(!w.entities.contains_key(&entity));
+                assert!(w.companions.active.is_empty());
+                assert!(w.players[&id].persistence_failure.is_some());
+            }
+            let (mut w, id) = firecracker_fixture(item);
+            for _ in 0..8 {
+                let plan = stage(&mut w, id, 5);
+                commit(&mut w, plan);
+                w.players.get_mut(&id).unwrap().character.items[5] = item;
+            }
             assert!(
                 w.use_item(
                     id,
                     Slot {
                         object: id,
-                        slot,
-                        kind: items[slot]
+                        slot: 5,
+                        kind: item
                     },
                     w.players[&id].pos
                 )
                 .is_err()
             );
-            w.now += 10000;
-        }
-        let entity = *w.companions.active.keys().next().unwrap();
-        let old = w.players[&id].pos;
-        w.players.get_mut(&id).unwrap().pos = Pos {
-            x: old.x + 3.,
-            y: old.y,
-        };
-        for _ in 0..12 {
-            w.now += 50;
+            assert_eq!(w.players[&id].character.items[5], item);
+            let (packets, mut rx) = tokio::sync::mpsc::channel(32);
+            let (lost, _) = tokio::sync::watch::channel(false);
+            let p = w.players.get_mut(&id).unwrap();
+            p.tx = Some(Output { packets, lost });
+            p.known.extend(w.companions.active.keys());
             w.companion_step().unwrap();
+            let packets: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+            assert_eq!(
+                packets.iter().filter(|p| p.id == wire::SHOW_EFFECT).count(),
+                8
+            );
+            assert_eq!(
+                packets.iter().filter(|p| p.id == wire::PLAY_SOUND).count(),
+                8
+            );
+            let saved = w.leave(id).unwrap();
+            assert_eq!(saved.items[5], item);
+            assert!(w.companions.active.is_empty());
+            assert!(
+                w.entities
+                    .values()
+                    .all(|e| !matches!(e.kind, 0x1407 | 0x1408))
+            );
         }
-        assert!(w.entities[&entity].pos.distance(w.players[&id].pos) <= 1.01);
-        let plan = stage(&mut w, id, 7);
-        commit(&mut w, plan);
-        assert_eq!(w.players[&id].character.pet_kind, None);
-        assert!(w.companions.active.is_empty());
-        w.now += 10000;
-        let plan = stage(&mut w, id, 5);
-        commit(&mut w, plan);
-        w.players.get_mut(&id).unwrap().character.hp = 0;
-        w.players.get_mut(&id).unwrap().death_pending = true;
-        assert_eq!(w.pending_deaths().len(), 1);
-        w.finish_death(id).unwrap();
-        assert!(w.companions.active.is_empty());
     }
 
     #[tokio::test]
-    async fn generator_selection_is_atomic_restartable_and_failed_save_does_not_summon() {
-        for fail in [false, true] {
-            let (mut w, _) = fixture(0x1513);
+    async fn firecracker_consumption_uses_existing_exchange_once_and_survives_store_reopen() {
+        for item in [0xc2b, 0xc2c] {
+            let (mut w, _) = firecracker_fixture(item);
             w.players.clear();
             let path = std::env::temp_dir().join(format!(
-                "openrotmg-companion-{:016x}.db",
+                "openrotmg-firecracker-{:016x}.db",
                 rand::random::<u64>()
             ));
             let store = Store::open(&path, &w.content).unwrap();
-            let account = store.list("prepared-companion".into()).await.unwrap().id;
+            let account = store.list("prepared-firecracker".into()).await.unwrap().id;
             let mut ch = store
                 .create(account, w.content.get(0x030e).unwrap())
                 .await
                 .unwrap();
-            ch.items[5] = 0x1513;
+            ch.items[5] = item;
             ch.revision = store
                 .exchange(
                     vec![InventoryWrite {
@@ -687,53 +854,43 @@ mod tests {
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    None,
+                    vec![],
                 )
                 .await
                 .unwrap()[0];
             let character = ch.id;
             let id = w.enter(ch, None).unwrap();
+            w.players.get_mut(&id).unwrap().pos = Pos { x: 25., y: 25. };
             let plan = stage(&mut w, id, 5);
-            let selection = plan.companion.as_ref().unwrap().selected;
-            if fail {
-                rusqlite::Connection::open(&path).unwrap().execute_batch("CREATE TRIGGER fail_pet BEFORE UPDATE OF items ON characters BEGIN SELECT RAISE(ABORT,'injected companion save failure'); END;").unwrap();
-            }
             let write = InventoryWrite {
                 id: character,
                 account,
                 revision: plan.revision,
                 items: plan.items.clone(),
             };
-            let result = store
-                .select_companion(write.clone(), 5, 0x1513, selection, w.content.clone())
-                .await;
-            assert_eq!(result.is_err(), fail);
-            assert_eq!(w.finish_inventory(plan, result).is_err(), fail);
-            if !fail {
-                assert!(
-                    store
-                        .select_companion(write, 5, 0x1513, selection, w.content.clone())
-                        .await
-                        .is_err()
-                );
-            }
+            let revision = store.exchange(vec![write.clone()], vec![]).await.unwrap()[0];
+            w.finish_inventory(plan, Ok(revision)).unwrap();
+            assert!(store.exchange(vec![write], vec![]).await.is_err());
+            assert!(
+                w.use_item(
+                    id,
+                    Slot {
+                        object: id,
+                        slot: 5,
+                        kind: item
+                    },
+                    w.players[&id].pos
+                )
+                .is_err()
+            );
+            w.leave(id).unwrap();
+            assert!(w.companions.active.is_empty());
             drop(store);
             let restarted = Store::open(&path, &w.content).unwrap();
             let saved = restarted.load(account, character).await.unwrap();
-            assert_eq!(saved.items[5], 0x1513);
-            if fail {
-                assert_eq!(saved.pet_kind, None);
-                assert!(w.companions.active.is_empty());
-            } else {
-                assert_eq!(saved.pet_kind, Some(0x1613));
-                let mut next = fixtures::world();
-                let next_id = next.enter(saved, None).unwrap();
-                assert_eq!(next.companions.active.len(), 1);
-                assert_eq!(next.players[&next_id].character.pet_kind, Some(0x1613));
-                let saved = next.leave(next_id).unwrap();
-                assert_eq!(saved.pet_kind, Some(0x1613));
-                assert!(next.companions.active.is_empty());
-            }
+            assert_eq!(saved.items[5], -1);
+            assert_eq!(saved.revision, revision);
+            assert_eq!(saved.pet_kind, None);
         }
     }
 }

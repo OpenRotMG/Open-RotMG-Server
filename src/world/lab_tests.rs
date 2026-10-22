@@ -466,7 +466,9 @@ fn community_lab_clear_private_rewards_and_exit_are_once_only_and_commit_gated()
     assert_eq!(plans.len(), 1);
     assert_eq!(plans[0].0, p);
     assert_eq!(plans[0].1.mad_labs, 1);
+    assert_eq!(w.players[&p].character.mad_labs, 0);
     w.finish_progress(p, plans[0].1.clone()).unwrap();
+    assert_eq!(w.players[&p].character.mad_labs, 1);
     assert!(w.entities[&exit].published);
     assert_eq!(w.players[&visitor].character.mad_labs, 0);
     let bags = w.entities.len();
@@ -636,7 +638,7 @@ async fn community_lab_real_store_retains_clear_pickup_and_permanent_death_witho
                 revision: pickup.revision,
                 items: pickup.items.clone(),
             }],
-            pickup.vault.clone(),
+            pickup.vaults.clone(),
         )
         .await
         .unwrap()[0];

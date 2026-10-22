@@ -4,7 +4,73 @@ use super::*;
 pub(super) struct Terrain {
     map: std::sync::Weak<Map>,
     content: std::sync::Weak<Content>,
-    pub(super) tiles: Arc<Vec<Tile>>,
+    pub(super) tiles: Arc<crate::navigation::Tiles>,
+    geometry: Option<Arc<crate::navigation::Geometry>>,
+    pub(super) rebuilds: u64,
+    pub(super) incremental_tiles: u64,
+    pub(super) cloned_snapshot_tiles: u64,
+}
+impl Terrain {
+    pub(super) fn discover(
+        &mut self,
+        map: &Arc<Map>,
+        content: &Arc<Content>,
+        points: &[(i16, i16, u8)],
+        known: usize,
+    ) {
+        if points.is_empty()
+            || !self.map.ptr_eq(&Arc::downgrade(map))
+            || !self.content.ptr_eq(&Arc::downgrade(content))
+        {
+            return;
+        }
+        assert_eq!(
+            self.tiles.len() + points.len(),
+            known,
+            "navigation discovery delta missing"
+        );
+        Arc::make_mut(&mut self.tiles).discover(
+            self.geometry
+                .as_ref()
+                .expect("navigation producer missing geometry"),
+            points.iter().map(|&(x, y, _)| (x, y)),
+        );
+        self.incremental_tiles += points.len() as u64;
+    }
+}
+
+#[derive(Default)]
+pub(super) struct GeometryCache {
+    map: std::sync::Weak<Map>,
+    content: std::sync::Weak<Content>,
+    geometry: Option<Arc<crate::navigation::Geometry>>,
+}
+impl GeometryCache {
+    #[cfg(test)]
+    pub(super) fn get_for_test(
+        &mut self,
+        map: &Arc<Map>,
+        content: &Arc<Content>,
+    ) -> Arc<crate::navigation::Geometry> {
+        self.get(map, content)
+    }
+
+    fn get(&mut self, map: &Arc<Map>, content: &Arc<Content>) -> Arc<crate::navigation::Geometry> {
+        if !self.map.ptr_eq(&Arc::downgrade(map)) || !self.content.ptr_eq(&Arc::downgrade(content))
+        {
+            self.geometry = Some(crate::navigation::Geometry::new(
+                (map.width, map.height),
+                map.cells.iter().map(|c| c.ground).collect(),
+                &content.grounds,
+            ));
+            self.map = Arc::downgrade(map);
+            self.content = Arc::downgrade(content);
+        }
+        self.geometry
+            .as_ref()
+            .expect("navigation geometry not initialized")
+            .clone()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -26,7 +92,7 @@ pub struct PlayerView {
     pub map: MapInfo,
     pub character: OwnCharacter,
     pub lifecycle: Lifecycle,
-    pub tiles: Arc<Vec<Tile>>,
+    pub tiles: Arc<crate::navigation::Tiles>,
     pub objects: Vec<VisibleObject>,
     pub player_markers: Vec<PlayerMarker>,
     pub projectiles: Vec<VisibleProjectile>,
@@ -118,7 +184,7 @@ pub struct VisibleProjectile {
 
 impl Directory {
     pub fn player_view(&self, id: i32) -> Result<PlayerView> {
-        let started = Instant::now();
+        let started = crate::performance::Measure::start();
         let scope = self.location(id)?;
         let w = &self.worlds[&scope];
         let p = &w.players[&id];
@@ -171,28 +237,25 @@ impl Directory {
             let map = Arc::downgrade(&w.map);
             let content = Arc::downgrade(&w.content);
             // Discovery only grows within a session. Weak identities invalidate copy-on-write changes without retaining an old map.
-            if cache.tiles.len() != p.tiles.len()
-                || !cache.map.ptr_eq(&map)
-                || !cache.content.ptr_eq(&content)
-            {
-                cache.tiles = Arc::new(
-                    p.tiles
-                        .iter()
-                        .map(|(x, y)| {
-                            let cell =
-                                &w.map.cells[*y as usize * w.map.width as usize + *x as usize];
-                            Tile {
-                                x: *x,
-                                y: *y,
-                                ground: cell.ground,
-                                ground_speed: w.content.grounds[&cell.ground],
-                            }
-                        })
-                        .collect(),
-                );
+            if !cache.map.ptr_eq(&map) || !cache.content.ptr_eq(&content) {
+                let refreshing = crate::performance::Measure::start();
+                cache.rebuilds += 1;
+                let geometry = w.navigation_geometry.borrow_mut().get(&w.map, &w.content);
+                cache.tiles = Arc::new(crate::navigation::Tiles::new(
+                    geometry.clone(),
+                    p.tiles.iter().copied(),
+                ));
+                cache.geometry = Some(geometry);
                 cache.map = map;
                 cache.content = content;
+                w.performance
+                    .borrow_mut()
+                    .work("terrain_rebuild", refreshing);
             }
+            ensure!(
+                cache.tiles.len() == p.tiles.len(),
+                "navigation knowledge missed discovery delta"
+            );
             cache.tiles.clone()
         };
         // A newly discovered shooter does not reveal its earlier, unreceived shots.
@@ -218,10 +281,7 @@ impl Directory {
                 passes_cover: b.spec.passes_cover,
             })
             .collect();
-        w.performance
-            .borrow_mut()
-            .record("perception", started.elapsed());
-        Ok(PlayerView {
+        let view = PlayerView {
             session: Session {
                 world: scope,
                 player: id,
@@ -252,12 +312,7 @@ impl Directory {
                 inventory_revision: p.character.revision,
                 pirate_caves: p.character.pirate_caves,
                 snake_pits: p.character.dungeons[0],
-                ability_ready_ms: match (p.last_ability, p.character.items[1]) {
-                    (Some(last), item) if item >= 0 => last
-                        .checked_add(w.content.get(item as u16)?.cooldown_ms)
-                        .context("own ability cooldown overflow")?,
-                    _ => 0,
-                },
+                ability_ready_ms: p.ability_ready_ms,
             },
             lifecycle: Lifecycle {
                 alive: p.character.alive,
@@ -283,6 +338,8 @@ impl Directory {
                 })
                 .collect(),
             projectiles,
-        })
+        };
+        w.performance.borrow_mut().work("perception", started);
+        Ok(view)
     }
 }

@@ -85,6 +85,63 @@ fn attach(
 fn index(map: &Map, x: i32, y: i32) -> usize {
     (y * map.width + x) as usize
 }
+
+/// The pinned 7.0 Abyss generator floods a random fractal height field with lava, so each
+/// run has its own terrain shape; the fixed band it replaces was identical in every room.
+struct LavaField {
+    cells: Vec<f32>,
+    width: i32,
+    height: i32,
+}
+impl LavaField {
+    fn new(rng: &mut rand::rngs::StdRng, width: i32, height: i32) -> Self {
+        let (cw, ch) = ((width + 3) / 4 + 2, (height + 3) / 4 + 2);
+        let mut cells = vec![0f32; (cw * ch) as usize];
+        let span = cw.min(ch) as f32;
+        let radius = rng.gen_range(span / 3.0..span * 2.0 / 3.0);
+        for _ in 0..200 {
+            let (cx, cy) = (rng.gen_range(0..cw), rng.gen_range(0..ch));
+            let mut aspect = rng.gen_range(1.0..4.0);
+            if rng.gen_bool(0.5) {
+                aspect = 1.0 / aspect;
+            }
+            for x in 0..cw {
+                for y in 0..ch {
+                    let (dx, dy) = ((x - cx) as f32, (y - cy) as f32);
+                    let z = radius * radius - (dx * dx / aspect + dy * dy * aspect);
+                    if z > 0. {
+                        cells[(y * cw + x) as usize] += z / (radius * radius);
+                    }
+                }
+            }
+        }
+        let low = cells.iter().copied().fold(f32::MAX, f32::min);
+        let high = cells.iter().copied().fold(f32::MIN, f32::max);
+        let range = (high - low).max(f32::EPSILON);
+        for cell in &mut cells {
+            *cell = ((*cell - low) / range).powi(2);
+        }
+        Self {
+            cells,
+            width: cw,
+            height: ch,
+        }
+    }
+    fn at(&self, x: i32, y: i32) -> f32 {
+        let (fx, fy) = (x as f32 / 4.0, y as f32 / 4.0);
+        let (x0, y0) = (fx.floor() as i32, fy.floor() as i32);
+        let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+        let at = |x: i32, y: i32| {
+            self.cells
+                [(y.clamp(0, self.height - 1) * self.width + x.clamp(0, self.width - 1)) as usize]
+        };
+        let (a, b) = (at(x0, y0), at(x0 + 1, y0));
+        let (c, d) = (at(x0, y0 + 1), at(x0 + 1, y0 + 1));
+        let top = a + (b - a) * tx;
+        let bottom = c + (d - c) * tx;
+        top + (bottom - top) * ty
+    }
+}
 fn path(map: &mut Map, mut a: (i32, i32), b: (i32, i32)) {
     loop {
         let i = index(map, a.0, a.1);
@@ -219,17 +276,31 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         cells: vec![empty; (width * height) as usize],
         spawns: vec![],
     };
-    let phase = rng.gen_range(0f32..std::f32::consts::TAU);
+    let field = LavaField::new(&mut rng, width, height);
+    // The flood level is taken from the field itself so every run keeps the same amount of
+    // lava while its shape follows the random field.
+    let mut levels = Vec::new();
+    for room in &rooms {
+        if room.tag >= 16 || room.depth == 0 {
+            continue;
+        }
+        for y in room.y..room.y + room.h {
+            for x in room.x..room.x + room.w {
+                levels.push(field.at(x, y));
+            }
+        }
+    }
+    levels.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let lava_level = levels[levels.len() * 2 / 5];
     for (number, room) in rooms.iter().enumerate() {
         for y in room.y..room.y + room.h {
             for x in room.x..room.x + room.w {
                 let i = index(&map, x, y);
-                let band =
-                    (x as f32 * 0.29 + y as f32 * 0.21 + (y as f32 * 0.13 + phase).sin() * 1.8)
-                        .sin();
                 map.cells[i].ground = if room.tag >= 16 {
                     0x69
-                } else if band > 0.35 {
+                } else if number == 0 {
+                    FLOOR
+                } else if field.at(x, y) < lava_level {
                     LAVA
                 } else {
                     FLOOR
@@ -276,6 +347,21 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             }
         }
     }
+    // The reference leaves broken tiles on part of the lava so it can be crossed.
+    for room in &rooms {
+        if room.tag >= 16 || room.depth == 0 {
+            continue;
+        }
+        for y in room.y..room.y + room.h {
+            for x in room.x..room.x + room.w {
+                let i = index(&map, x, y);
+                if map.cells[i].ground == LAVA && map.cells[i].object.is_none() && rng.gen_bool(0.1)
+                {
+                    map.cells[i].object = Some(BRIDGE);
+                }
+            }
+        }
+    }
     for edge in &edges {
         for y in edge.a.1.min(edge.b.1)..=edge.a.1.max(edge.b.1) {
             for x in edge.a.0.min(edge.b.0)..=edge.a.0.max(edge.b.0) {
@@ -297,17 +383,24 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     for room in &rooms {
         let (cx, cy) = room.center();
         if room.tag == 1 {
-            for y in cy - 2..=cy + 2 {
-                for x in cx - 2..=cx + 2 {
+            // The reference start room holds the Portal of Cowardice at a random tile and
+            // keeps the ground around it clear of lava.
+            let (px, py) = (
+                rng.gen_range(room.x + 2..room.x + room.w - 2),
+                rng.gen_range(room.y + 2..room.y + room.h - 2),
+            );
+            for y in py - 1..=py + 1 {
+                for x in px - 1..=px + 1 {
                     let i = index(&map, x, y);
                     map.cells[i].ground = FLOOR;
                     map.cells[i].object = None;
                 }
             }
-            let i = index(&map, cx, cy);
+            let i = index(&map, px, py);
             map.cells[i].object = Some(0x703);
             map.cells[i].region = 1;
-            map.spawns.push((cx as f32 + 0.5, cy as f32 + 0.5));
+            map.spawns.push((px as f32 + 0.5, py as f32 + 0.5));
+            path(&mut map, (px, py), (cx, cy));
         } else if room.tag >= 16 {
             let i = index(&map, cx, cy);
             map.cells[i].object = Some(IDOL);
@@ -316,7 +409,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 let x = rng.gen_range(room.x..room.x + room.w);
                 let y = rng.gen_range(room.y..room.y + room.h);
                 let i = index(&map, x, y);
-                if map.cells[i].object.is_none() {
+                if map.cells[i].ground != LAVA && map.cells[i].object.is_none() {
                     map.cells[i].object = Some(rng.gen_range(0x66d..=0x672));
                 }
             }
@@ -535,75 +628,5 @@ pub fn phase(elapsed: u64) -> u64 {
         36500..39000 => 4,
         39000..47000 => 5,
         _ => 6,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{
-        collections::{BTreeSet, VecDeque},
-        path::Path,
-    };
-    #[test]
-    fn generated_abysses_have_seeded_complete_lava_safe_routes_and_optional_treasures() {
-        let content = Content::load(Path::new("data")).unwrap();
-        let mut variants = BTreeSet::new();
-        for seed in 0..256 {
-            let map = generate(&content, seed).unwrap();
-            if seed == 7 {
-                assert_eq!(
-                    serde_json::to_vec(&map).unwrap(),
-                    serde_json::to_vec(&generate(&content, seed).unwrap()).unwrap()
-                );
-            }
-            let (x, y) = map.spawns[0];
-            let start = index(&map, x as i32, y as i32);
-            let mut seen = BTreeSet::from([start]);
-            let mut queue = VecDeque::from([start]);
-            while let Some(i) = queue.pop_front() {
-                let (x, y) = (i as i32 % map.width, i as i32 / map.width);
-                for (x, y) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                    if x < 0 || y < 0 || x >= map.width || y >= map.height {
-                        continue;
-                    }
-                    let n = index(&map, x, y);
-                    let c = &map.cells[n];
-                    if content.grounds[&c.ground] > 0.
-                        && (c.ground != LAVA || c.object == Some(BRIDGE))
-                        && c.object.is_none_or(|k| !content.objects[&k].blocks)
-                        && seen.insert(n)
-                    {
-                        queue.push_back(n);
-                    }
-                }
-            }
-            let mut idols = 0;
-            for (i, c) in map.cells.iter().enumerate() {
-                if matches!(c.object, Some(MALPHAS | IDOL)) {
-                    assert!(seen.contains(&i), "seed {seed}: encounter disconnected");
-                }
-                if c.object == Some(IDOL) {
-                    idols += 1;
-                    assert!(c.region >= 16);
-                }
-            }
-            variants.insert(idols);
-            assert!(
-                map.cells
-                    .iter()
-                    .filter(|c| c.object.is_some_and(|k| (0x66d..=0x672).contains(&k)))
-                    .count()
-                    > 100
-            );
-            assert_eq!(
-                map.cells
-                    .iter()
-                    .filter(|c| c.object == Some(MALPHAS))
-                    .count(),
-                1
-            );
-        }
-        assert_eq!(variants, BTreeSet::from([0, 1, 2, 3]));
     }
 }

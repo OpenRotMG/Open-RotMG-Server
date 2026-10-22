@@ -24,7 +24,11 @@ impl World {
                 if need > 0 {
                     let born = self.landmark_birth(id, 0xd52, 10, need, 1.)?;
                     for child in &born {
-                        self.entities.get_mut(child).unwrap().parent = Some(id);
+                        self.entities.get_mut(child).unwrap().parent.set(
+                            Some(id),
+                            *child,
+                            &mut self.timed_ids,
+                        );
                     }
                     self.entities
                         .get_mut(&id)
@@ -95,7 +99,7 @@ impl World {
             if next == 10 {
                 let e = self.entities.get_mut(&id).unwrap();
                 e.statuses.remove(&condition::STUNNED);
-                e.expires = Some(self.now + 50);
+                e.expires.set(Some(self.now + 50), id, &mut self.timed_ids);
             }
         }
         let e = &self.entities[&id];
@@ -156,6 +160,8 @@ impl World {
                         sight: 20.,
                         stop: 3.,
                         idle: nr_speed(0.4),
+                        duration: 0,
+                        cooldown: 0,
                     },
                     nr_speed(1.),
                 ),

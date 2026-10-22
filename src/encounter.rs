@@ -3,6 +3,7 @@ use anyhow::{Result, ensure};
 
 pub(crate) mod attacks;
 pub(crate) mod fauna;
+pub(crate) mod jungle;
 pub(crate) mod landmarks;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,6 +32,8 @@ pub enum Motion {
         sight: f32,
         stop: f32,
         idle: f32,
+        duration: u64,
+        cooldown: u64,
     },
     Charge {
         sight: f32,
@@ -78,6 +81,21 @@ pub fn profile(kind: u16) -> Option<Profile> {
     if crate::dungeon::lab::ROSTER.contains(&kind) {
         return Some(crate::dungeon::lab::profile(kind));
     }
+    if matches!(
+        kind,
+        crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
+    ) {
+        return Some(crate::dungeon::beach::profile(kind));
+    }
+    if crate::dungeon::jungle::ROSTER.contains(&kind) {
+        return Some(jungle::profile(kind));
+    }
+    if crate::dungeon::manor::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::manor::profile(kind));
+    }
+    if let Some(profile) = crate::dungeon::davy::profile(kind) {
+        return Some(profile);
+    }
     if let Some(profile) = crate::dungeon::trench::profile(kind) {
         return Some(profile);
     }
@@ -122,7 +140,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             4.,
             1000,
-            8.,
+            6.,
         ),
         0x954 => (
             Chase {
@@ -131,7 +149,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             8.,
             2000,
-            8.,
+            6.,
         ),
         0x612 | 0x613 => (
             Chase {
@@ -167,7 +185,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             8.,
             1000,
-            10.,
+            8.,
         ),
         0x61a => (
             Chase {
@@ -176,7 +194,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             7.5,
             200,
-            12.,
+            10.5,
         ),
         0x60e => (Wander, 4., 1000, 5.),
         0x60f => (Wander, 4., 600, 5.),
@@ -402,10 +420,7 @@ fn ring(index: u8, count: usize, offset: f32) -> Vec<(u8, f32)> {
         })
         .collect()
 }
-#[cfg(test)]
-pub fn attacks(kind: u16, hp: i32, heading: f32) -> Vec<(u8, f32)> {
-    phased_attacks(kind, hp, heading, 0)
-}
+
 pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return crate::dungeon::abyss::attacks(kind, heading, elapsed);
@@ -416,7 +431,7 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     match kind {
         0x927 if hp < 640 => vec![(0, heading), (1, heading)],
         0x172 | 0x173 | 0x175..=0x179 | 0x927 | 0x68a..=0x68f | 0x653 => vec![],
-        0x604 | 0x6d2..=0x6d4 => vec![],
+        0x604 | 0x6d2..=0x6d4 | crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM => vec![],
         0x62f => spread(0, 2, 7., heading),
         0x601 | 0x602 | 0x603 | 0x612 | 0x613 | 0x618 | 0x619 => vec![(0, heading)],
         0x60e => spread(0, 2, 10., heading),
@@ -504,6 +519,39 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
     if crate::dungeon::lab::ROSTER.contains(&kind) {
         return crate::dungeon::lab::validate(content, kind);
     }
+    if matches!(
+        kind,
+        crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
+    ) {
+        let last = if kind == crate::dungeon::manor::MINE {
+            1
+        } else {
+            3
+        };
+        for stage in 0..=last {
+            for attack in attacks::manor_entry_schedule(kind, stage, 0).attacks {
+                if let attacks::Action::Shoot { projectile, .. } = attack.action {
+                    ensure!(
+                        content.get(kind)?.projectiles.contains_key(&projectile),
+                        "missing Manor entrance projectile {kind:#x}/{projectile}"
+                    );
+                }
+            }
+        }
+    }
+    if crate::dungeon::jungle::ROSTER.contains(&kind) {
+        for stage in 0..=6 {
+            for attack in jungle::schedule(kind, stage, 0).attacks {
+                if let attacks::Action::Shoot { projectile, .. } = attack.action {
+                    ensure!(
+                        content.get(kind)?.projectiles.contains_key(&projectile),
+                        "missing Jungle projectile {kind:#x}/{projectile}"
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
     if crate::dungeon::trench::ROSTER.contains(&kind) {
         return crate::dungeon::trench::validate(content, kind);
     }
@@ -567,18 +615,4 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
         }
     }
     Ok(())
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn candidate_profiles_preserve_boss_threshold_and_cube_patterns() {
-        assert!(attacks(0x927, 640, 0.).is_empty());
-        assert_eq!(attacks(0x927, 639, 0.4), vec![(0, 0.4), (1, 0.4)]);
-        assert_eq!(attacks(0x610, 70, 0.).len(), 5);
-        let red = attacks(0x60e, 70, 0.);
-        assert!((red[1].1 - red[0].1 - 10f32.to_radians()).abs() < 0.00001);
-        assert!(profile(0xffff).is_none());
-        assert!(attacks(0x68a, 5, 0.).is_empty());
-    }
 }

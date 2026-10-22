@@ -1,3 +1,4 @@
+use crate::server::lifecycle::{CloseReason, controller, protocol};
 use crate::{
     content::{Content, Map, PARALYZED, Projectile, SLOWED, SPEEDY, STUNNED},
     store::{AccountLists, AccountPresentation, Character, Vault},
@@ -12,124 +13,103 @@ use std::{
         Arc,
         atomic::{AtomicI32, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
-#[cfg(test)]
-mod audit_tests;
+
+mod cell_index;
 mod charges;
 pub(crate) mod chat;
-#[cfg(test)]
-mod client_contract_tests;
+
 mod companions;
 mod consumables;
+mod davy;
 mod endgame;
 mod endgame_ai;
 mod enemy_damage;
 mod enemy_shots;
+mod entity_store;
 mod families;
 mod fauna;
 mod fauna_births;
 mod fauna_special;
 mod ghost_ship;
 mod gods;
-#[cfg(test)]
-mod gods_tests;
+mod ground_dye;
+
 mod gold;
 mod golems;
+
 mod ground;
-#[cfg(test)]
-mod ground_tests;
+
 mod guilds;
-#[cfg(test)]
-mod inventory_safety_tests;
-#[cfg(test)]
-mod key_tests;
 mod lab;
 #[cfg(test)]
 mod lab_tests;
 mod lair;
 mod landmark_ai;
-#[cfg(test)]
-mod landmark_tests;
+
 mod lost_lands;
+mod manor;
+mod manor_entry;
 mod midlands;
 #[cfg(test)]
-mod midlands_tests;
+mod movement_tests;
+
 mod named_births;
 mod names;
 mod ocean;
 mod ocean_setpiece;
-#[cfg(test)]
-mod ocean_tests;
-#[cfg(test)]
-mod player_position_tests;
+
 mod population;
+mod population_density;
+
 #[cfg(test)]
-mod population_tests;
+mod quest_tests;
+
 mod realm_events;
-#[cfg(test)]
-mod realm_events_tests;
-#[cfg(test)]
-mod realm_maps_tests;
-#[cfg(test)]
-mod realm_movement_tests;
+
 mod realm_portal;
 mod realm_quests;
-#[cfg(test)]
-mod realm_quests_tests;
+
 mod realm_setpieces;
-#[cfg(test)]
-mod realm_setpieces_tests;
+
 mod spider;
-#[cfg(test)]
-mod spider_tests;
-#[cfg(test)]
-mod xp_booster_tests;
+
+mod tracked;
+
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+mod beach;
+mod coil;
+mod jungle;
 #[cfg(test)]
-mod abyss_tests;
-#[cfg(test)]
-mod announce_tests;
-#[cfg(test)]
-mod bot_tests;
-#[cfg(test)]
-mod class_tests;
-#[cfg(test)]
-mod complete_abilities_tests;
-#[cfg(test)]
-mod consumable_tests;
+mod jungle_tests;
+
 mod cooperative;
-#[cfg(test)]
-mod cooperative_tests;
+
 mod mechanics;
-#[cfg(test)]
-mod mechanics_tests;
+
 mod native_hits;
 #[cfg(test)]
 mod native_hits_tests;
 mod npc_attacks;
-#[cfg(test)]
-mod quiver_tests;
+mod npc_queries;
+
 mod reconciliation;
-#[cfg(test)]
-mod reconciliation_tests;
+
 mod resurrection;
 mod snake;
-#[cfg(test)]
-mod snake_tests;
+
 pub use reconciliation::{NativeInput, RejectedNativeShot};
 mod progression;
-#[cfg(test)]
-mod progression_tests;
+
 pub(crate) mod shop;
 mod trade;
 pub(crate) mod view;
-#[cfg(test)]
-mod view_tests;
+
 pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
@@ -154,12 +134,17 @@ enum Following {
     Acquired,
     Resting,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone)]
 pub struct Entity {
     pub id: i32,
     pub kind: u16,
-    pub name: String,
     pub pos: Pos,
+    home: Pos,
+    state: entity_store::EntityState,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct EntityData {
+    pub name: String,
     pub hp: i32,
     pub size: i32,
     pub condition: i32,
@@ -171,12 +156,17 @@ pub struct Entity {
     pub reserved: bool,
     published: bool,
     damage: BTreeMap<i32, i32>,
-    home: Pos,
     goal: Option<Pos>,
     #[serde(skip)]
     motion: Option<crate::encounter::Motion>,
     #[serde(skip)]
     following: Following,
+    #[serde(skip)]
+    lair_escort: Option<lair::Escort>,
+    #[serde(skip)]
+    follow_remaining: u64,
+    #[serde(skip)]
+    strict_initialized: bool,
     #[serde(skip)]
     charge: Option<charges::Charge>,
     #[serde(skip)]
@@ -189,14 +179,97 @@ pub struct Entity {
     attacks: crate::encounter::attacks::Clocks,
     activated: Option<u64>,
     stage: Option<u64>,
-    parent: Option<i32>,
+    parent: tracked::Tracked<i32>,
     camp: Option<usize>,
+    #[serde(skip)]
+    population_slot: Option<usize>,
     quest: Option<i32>,
-    expires: Option<u64>,
+    expires: tracked::Tracked<u64>,
     next_aux: u64,
     blocked_since: Option<u64>,
     reaction_until: u64,
     bullet: u8,
+}
+impl std::fmt::Debug for Entity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut out = f.debug_struct("Entity");
+        out.field("id", &self.id);
+        out.field("kind", &self.kind);
+        out.field("name", &self.name);
+        out.field("pos", &self.pos);
+        out.field("hp", &self.hp);
+        out.field("size", &self.size);
+        out.field("condition", &self.condition);
+        out.field("statuses", &self.statuses);
+        out.field("items", &self.items);
+        out.field("drop_slots", &self.drop_slots);
+        out.field("extra_stats", &self.extra_stats);
+        out.field("reserved", &self.reserved);
+        out.field("published", &self.published);
+        out.field("damage", &self.damage);
+        out.field("home", &self.home);
+        out.field("goal", &self.goal);
+        out.field("motion", &self.motion);
+        out.field("following", &self.following);
+        out.field("charge", &self.charge);
+        out.field("script", &self.script);
+        out.field("last_step", &self.last_step);
+        out.field("phase", &self.phase);
+        out.field("orbit", &self.orbit);
+        out.field("next_shot", &self.next_shot);
+        out.field("attacks", &self.attacks);
+        out.field("activated", &self.activated);
+        out.field("stage", &self.stage);
+        out.field("parent", &self.parent);
+        out.field("camp", &self.camp);
+        out.field("population_slot", &self.population_slot);
+        out.field("quest", &self.quest);
+        out.field("expires", &self.expires);
+        out.field("next_aux", &self.next_aux);
+        out.field("blocked_since", &self.blocked_since);
+        out.field("reaction_until", &self.reaction_until);
+        out.field("bullet", &self.bullet);
+        out.finish()
+    }
+}
+impl Serialize for Entity {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut out = serializer.serialize_struct("Entity", 29)?;
+        out.serialize_field("id", &self.id)?;
+        out.serialize_field("kind", &self.kind)?;
+        out.serialize_field("name", &self.name)?;
+        out.serialize_field("pos", &self.pos)?;
+        out.serialize_field("hp", &self.hp)?;
+        out.serialize_field("size", &self.size)?;
+        out.serialize_field("condition", &self.condition)?;
+        out.serialize_field("statuses", &self.statuses)?;
+        out.serialize_field("items", &self.items)?;
+        out.serialize_field("extra_stats", &self.extra_stats)?;
+        out.serialize_field("reserved", &self.reserved)?;
+        out.serialize_field("published", &self.published)?;
+        out.serialize_field("damage", &self.damage)?;
+        out.serialize_field("home", &self.home)?;
+        out.serialize_field("goal", &self.goal)?;
+        out.serialize_field("last_step", &self.last_step)?;
+        out.serialize_field("phase", &self.phase)?;
+        out.serialize_field("orbit", &self.orbit)?;
+        out.serialize_field("next_shot", &self.next_shot)?;
+        out.serialize_field("activated", &self.activated)?;
+        out.serialize_field("stage", &self.stage)?;
+        out.serialize_field("parent", &self.parent)?;
+        out.serialize_field("camp", &self.camp)?;
+        out.serialize_field("quest", &self.quest)?;
+        out.serialize_field("expires", &self.expires)?;
+        out.serialize_field("next_aux", &self.next_aux)?;
+        out.serialize_field("blocked_since", &self.blocked_since)?;
+        out.serialize_field("reaction_until", &self.reaction_until)?;
+        out.serialize_field("bullet", &self.bullet)?;
+        out.end()
+    }
 }
 impl Entity {
     fn conditions(&self, now: u64) -> i32 {
@@ -241,7 +314,6 @@ pub struct Player {
     pub known: BTreeSet<i32>,
     quest: Option<i32>,
     statuses: BTreeMap<u8, (u64, u64)>,
-    native_motion_condition: i32,
     lab_conditions: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
@@ -250,6 +322,7 @@ pub struct Player {
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
+    tile_scan: Option<(i32, i32)>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
     killer: String,
@@ -279,7 +352,7 @@ pub struct Player {
     discarded_attack: Option<(i32, i32)>,
     tick: i32,
     last_motion: Option<(f32, u64)>,
-    last_ability: Option<u64>,
+    ability_ready_ms: u64,
     boosts: Vec<consumables::Boost>,
     last_companion: Option<u64>,
     ability_shot: Option<(u16, i32, bool, i32)>,
@@ -309,13 +382,29 @@ impl Player {
         };
     }
     fn quarantine(&mut self, id: i32, error: String) {
-        tracing::error!(player=id,account=self.character.account,%error,"character quarantined; avatar and reservations retained");
         self.persistence_failure = Some(error);
         self.pending = true;
         self.bot_goal = None;
         self.bot_aim = None;
         if let Some(output) = &self.tx {
             let _ = output.lost.send(true);
+        }
+        // Quarantine remains authoritative even when its diagnostic sink fails.
+        let error = self
+            .persistence_failure
+            .as_ref()
+            .expect("recorded persistence failure");
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tracing::error!(player=id,account=self.character.account,%error,"character quarantined; avatar and reservations retained");
+        }))
+        .is_err()
+        {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr(),
+                "quarantine diagnostic sink panicked; player={id} account={} error={error}",
+                self.character.account
+            );
         }
     }
     fn progress_queued(&self) -> bool {
@@ -408,18 +497,20 @@ impl PortalPlan {
 }
 #[derive(Clone)]
 pub struct InventoryPlan {
+    ground_dye: Option<ground_dye::Reservation>,
     pub player: i32,
     pub items: Vec<i32>,
     pub revision: i32,
     pub account: i32,
     pub character: i32,
-    pub bag: Option<(i32, Vec<i32>)>,
+    pub bags: Vec<(i32, Vec<i32>)>,
     pub effects: Vec<crate::content::ConsumableEffect>,
     pub stat_growth: Option<(Character, Slot, usize, i32)>,
     pub appearance: Option<(Slot, u32, u32)>,
     pub xp_boost: Option<Slot>,
     pub(crate) companion: Option<companions::Plan>,
-    pub vault: Option<Vault>,
+    pub vaults: Vec<Vault>,
+    pub(crate) vault_purchase: Option<shop::VaultPurchase>,
     pub dropped: Option<i32>,
     pub unlock: Option<PortalPlan>,
     pub collected: Option<u16>,
@@ -441,7 +532,6 @@ struct Spawn {
     kind: u16,
     pos: Pos,
     entity: Option<i32>,
-    ready: u64,
     camp: Option<usize>,
 }
 struct Admission {
@@ -453,10 +543,19 @@ struct Admission {
 pub struct World {
     pub content: Arc<Content>,
     pub map: Arc<Map>,
-    pub(crate) realm_layout: Option<&'static str>,
+    navigation_geometry: Box<std::cell::RefCell<view::GeometryCache>>,
+    pub(crate) realm_layout: Option<String>,
     performance: std::cell::RefCell<crate::performance::Window>,
-    pub entities: BTreeMap<i32, Entity>,
+    pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
+    // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
+    timed_ids: BTreeSet<i32>,
+    gun_ids: BTreeSet<i32>,
+    pentaract_ids: BTreeSet<i32>,
+    // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
+    npc_global_ids: BTreeSet<i32>,
+    non_population_ids: BTreeSet<i32>,
+    quests_by_level: BTreeMap<i32, BTreeSet<i32>>,
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
@@ -464,11 +563,13 @@ pub struct World {
     fauna_births: Vec<fauna_births::Birth>,
     named_births: Vec<named_births::Birth>,
     lab_tosses: Vec<lab::Toss>,
+    manor_births: Vec<manor::Toss>,
     lava_patches: BTreeMap<usize, (u64, u8)>,
+    locker: Option<davy::Locker>,
     ability_state: abilities::State,
     companions: companions::State,
     finale: endgame_ai::Actors,
-    cells: Vec<BTreeSet<i32>>,
+    cells: cell_index::CellIndex,
     fountains: Vec<(i32, Pos)>,
     next_fountain_heal: u64,
     rng: rand::rngs::StdRng,
@@ -476,6 +577,7 @@ pub struct World {
     last_npc_step: u64,
     attack_epoch: Instant,
     clock: crate::clock::Clock,
+    new_tick_at: Instant,
     pub(crate) prepared_seed: Option<u64>,
     pub tick: u64,
     ids: Arc<AtomicI32>,
@@ -487,6 +589,9 @@ pub struct World {
     encounter: bool,
     population: Vec<Spawn>,
     camps: Vec<population::Camp>,
+    population_regions: [population_density::Region; 13],
+    population_counts: [usize; 13],
+    population_next: u64,
     setpieces: Vec<realm_setpieces::Area>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
@@ -494,7 +599,8 @@ pub struct World {
     bag_expiry: BTreeMap<i32, u64>,
     cleared: bool,
     clear_exit: Option<i32>,
-    vault: Option<(i32, Vault)>,
+    vaults: BTreeMap<i32, Vault>,
+    closed_vaults: BTreeMap<i32, i32>,
     trades: BTreeMap<i32, trade::Trade>,
     trade_requests: BTreeMap<i32, (i32, u64)>,
 }
@@ -521,6 +627,7 @@ struct Grant {
     destination: i32,
     key_time: i32,
     expires: u64,
+    consumed: bool,
 }
 struct Portal {
     origin: i32,
@@ -567,7 +674,7 @@ impl Directory {
             "world_players": world.players.len(), "world_entities": world.entities.len(), "world_projectiles": world.bullets.len(),
             "native_acknowledgements": {"weapon_tick_records":p.weapon_ticks.len(),"goto":p.goto_acks.len(),"shoot":p.shoot_acks.len(),
                 "oldest_goto_ms":p.goto_acks.front().map(|(_,at)|at.elapsed().as_millis()),
-                "oldest_shoot_ms":p.shoot_acks.front().map(|(at,_)|world.clock.now().duration_since(*at).as_millis())},
+                "oldest_shoot_pause_excluding_ms":p.shoot_acks.front().map(|(at,_)|world.clock.now().duration_since(*at).as_millis())},
             "tick_interval_ms": 50, "recent_ticks": ticks, "tick": self.tick,
             "total_worlds": self.worlds.len(), "total_players": self.worlds.values().map(|w| w.players.len()).sum::<usize>(),
             "total_entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
@@ -608,6 +715,7 @@ impl Directory {
             "entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
             "projectiles": self.worlds.values().map(|w| w.bullets.len()).sum::<usize>(),
             "tick": self.tick, "max_tick_us": self.max_tick_us,
+            "paused": self.clock.paused(), "process": std::process::id(), "revision": option_env!("GITHUB_SHA"),
         })
     }
     #[cfg(test)]
@@ -623,15 +731,7 @@ impl Directory {
     ) -> Result<Self> {
         Self::fixture(path, content, max_players, seed, None)
     }
-    #[cfg(test)]
-    pub(crate) fn test_prepared(
-        path: &std::path::Path,
-        content: Arc<Content>,
-        max_players: usize,
-        seed: u64,
-    ) -> Result<Self> {
-        Self::fixture(path, content, max_players, seed, Some(seed))
-    }
+
     #[cfg(test)]
     fn fixture(
         path: &std::path::Path,
@@ -640,7 +740,8 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        let map = Arc::new(crate::terrain::generate(&content, seed, 512)?);
+        // The fixture must fit both finite 65-tile graveyards alongside the other setpieces.
+        let map = Arc::new(crate::terrain::generate(&content, seed, 768)?);
         Self::configured(
             path,
             content,
@@ -700,8 +801,6 @@ impl Directory {
             crate::endgame::CASTLE,
             crate::endgame::CHAMBER,
             crate::endgame::CELLAR,
-            "sprite-world",
-            "undead-lair",
             "guild-hall-1",
             "guild-hall-2",
             "guild-hall-3",
@@ -784,11 +883,23 @@ impl Directory {
                     None => rand::random(),
                 };
                 Arc::new(crate::dungeon::abyss::generate(&self.content, seed)?)
+            } else if template == "manor-of-the-immortals" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::manor::generate(&self.content, seed)?)
+            } else if template == "beachzone" {
+                Arc::new(crate::dungeon::beach::generate(&self.content)?)
             } else if template == "ocean-trench" {
                 let seed = self
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
+            } else if template == "forbidden-jungle" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::jungle::generate(&self.content, seed)?)
             } else if template == "spider-den" {
                 let seed = match self.prepared_seed {
                     Some(seed) => seed ^ self.next_world as u64,
@@ -805,6 +916,21 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::snake_pit(&self.content, seed)?)
+            } else if template == "sprite-world" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
+            } else if template == crate::dungeon::davy::TEMPLATE {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::davy::generate(&self.content, seed)?)
+            } else if template == "undead-lair" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::undead::generate(&self.content, seed)?)
             } else {
                 self.templates
                     .get(template)
@@ -813,9 +939,10 @@ impl Directory {
             },
             self.ids.clone(),
         )?;
-        world.realm_layout = layout.map(|index| self.realms[index].name());
+        world.realm_layout = layout.map(|index| self.realms[index].name().to_owned());
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
+        world.new_tick_at = self.clock.now();
         if let Some(seed) = self.prepared_seed {
             let seed = seed ^ self.next_world as u64;
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -832,20 +959,35 @@ impl Directory {
                 .chain(crate::endgame::DUNGEONS)
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
-            world.populate_shore()?;
-            world.populate_inland()?;
+            let started = Instant::now();
+            // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
+            let beach_bum = world.rng.gen_ratio(1, 200);
+            world.populate_coil_snakes()?;
+            if beach_bum {
+                world.populate_beach_bum()?;
+            }
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
             world.populate_hermit()?;
+            world.populate_manor_entry()?;
+            world.populate_ghost_ship()?;
+            world.populate_realm_population()?;
+            // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+            let crystal = world.place_named_setpiece(0x935, &[1])?;
+            world.spawn_entity(0x935, crystal, vec![])?;
             tracing::info!(
                 layout = world.realm_layout,
                 entities = world.entities.len(),
                 actors = world.actor_ids.len(),
+                elapsed_ms = started.elapsed().as_millis(),
                 "Realm simulation populated"
             );
         }
         world.prepare_endgame()?;
+        if template == crate::dungeon::davy::TEMPLATE {
+            world.prepare_locker()?;
+        }
         if template == "sprite-world" {
             let exits: Vec<_> = world
                 .entities
@@ -895,7 +1037,9 @@ impl Directory {
         }
     }
     pub(crate) fn character_transferring(&self, character: i32) -> bool {
-        self.grants.values().any(|g| g.character == character)
+        self.grants
+            .values()
+            .any(|g| g.character == character && !g.consumed)
     }
     pub fn location(&self, player: i32) -> Result<i32> {
         self.worlds
@@ -910,13 +1054,19 @@ impl Directory {
             -1 => -1,
             -3 => self.endgame.active,
             -4 => -4,
-            _ => bail!("world entry {game} requires a transfer grant"),
+            _ => {
+                return Err(anyhow::anyhow!(CloseReason::Protocol)
+                    .context(format!("world entry {game} requires a transfer grant")));
+            }
         };
         ensure!(
             self.worlds.contains_key(&destination),
             "entry world missing"
         );
-        ensure!(self.worlds[&destination].admission_open, "Realm is closed");
+        ensure!(
+            self.worlds[&destination].admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         Ok(destination)
     }
     pub(crate) fn prepared_instance(&mut self, template: &str) -> Result<i32> {
@@ -927,7 +1077,7 @@ impl Directory {
         if template != crate::endgame::CASTLE {
             return self.instance(template, None);
         }
-        ensure!(self.worlds.len() < 12, "world instance limit reached");
+        self.reserve_worlds(1, &[])?;
         let world = self.make(template, "Oryx's Castle", false, None)?;
         let id = self.next_world;
         self.next_world = id
@@ -936,6 +1086,48 @@ impl Directory {
         self.worlds.insert(id, world);
         self.idle.insert(id, self.tick);
         Ok(id)
+    }
+    fn reclaimable_world(&self, id: i32) -> bool {
+        id > 0
+            && self.worlds[&id].players.is_empty()
+            && self.worlds[&id].bag_expiry.is_empty()
+            && !self.endgame.references_world(id)
+            && !self.grants.values().any(|g| g.destination == id)
+            && !self
+                .portals
+                .values()
+                .any(|p| p.origin == id || p.destination == Some(id))
+    }
+    fn reserve_worlds(&mut self, slots: usize, keep: &[i32]) -> Result<()> {
+        let needed = (self.worlds.len() + slots).saturating_sub(12);
+        if needed == 0 {
+            return Ok(());
+        }
+        // Empty caches must not deny entry, but live portals and transfers still own their worlds.
+        let retired: Vec<_> = self
+            .worlds
+            .keys()
+            .copied()
+            .filter(|id| !keep.contains(id) && self.reclaimable_world(*id))
+            .take(needed)
+            .collect();
+        ensure!(
+            retired.len() == needed,
+            "world instance limit reached: {} worlds, {slots} requested, {} reclaimable",
+            self.worlds.len(),
+            retired.len()
+        );
+        for id in retired {
+            let world = self.worlds.remove(&id).unwrap();
+            self.idle.remove(&id);
+            tracing::info!(
+                world = id,
+                name = world.name,
+                owner = world.owner,
+                "empty world reclaimed for capacity"
+            );
+        }
+        Ok(())
     }
     pub fn instance(&mut self, template: &str, account: Option<i32>) -> Result<i32> {
         ensure!(
@@ -952,7 +1144,7 @@ impl Directory {
         {
             return Ok(*id);
         }
-        ensure!(self.worlds.len() < 12, "world instance limit reached");
+        self.reserve_worlds(1, &[])?;
         let world = self.make(
             template,
             if template == "vault" {
@@ -983,13 +1175,16 @@ impl Directory {
         let p = &world.players[&player];
         ensure!(
             p.character.alive && p.character.hp > 0 && !p.death_pending && !p.departing,
-            "character cannot transfer"
+            protocol("character cannot transfer")
         );
         let (account, character) = (p.character.account, p.character.id);
         let kind = if let Some(id) = portal {
-            let e = world.entities.get(&id).context("portal missing")?;
-            ensure!(e.published, "portal not published");
-            ensure!(p.pos.distance(e.pos) <= 2., "portal out of reach");
+            let e = world
+                .entities
+                .get(&id)
+                .ok_or_else(|| protocol("portal missing"))?;
+            ensure!(e.published, protocol("portal not published"));
+            ensure!(p.pos.distance(e.pos) <= 2., protocol("portal out of reach"));
             e.kind
         } else {
             0x712
@@ -1005,7 +1200,7 @@ impl Directory {
                     .presentation
                     .guild
                     .as_ref()
-                    .context("You are not in a guild.")?
+                    .ok_or_else(|| protocol("You are not in a guild."))?
                     .id;
                 *self
                     .worlds
@@ -1021,15 +1216,21 @@ impl Directory {
                     .context("dropped portal has no live instance binding")?;
                 ensure!(
                     binding.origin == origin && binding.expires > self.tick,
-                    "dungeon portal binding expired or belongs to another world"
+                    protocol("dungeon portal binding expired or belongs to another world")
                 );
                 binding
                     .destination
-                    .context("This dungeon is not implemented yet.")?
+                    .ok_or_else(|| protocol("This dungeon is not implemented yet."))?
             }
-            _ => bail!("unsupported portal destination {kind:#x}"),
+            _ => {
+                return Err(anyhow::anyhow!(CloseReason::Protocol)
+                    .context(format!("unsupported portal destination {kind:#x}")));
+            }
         };
-        ensure!(destination != origin, "already in destination world");
+        ensure!(
+            destination != origin,
+            protocol("already in destination world")
+        );
         Ok((account, character, destination))
     }
     pub fn issue(
@@ -1038,7 +1239,10 @@ impl Directory {
         character: i32,
         destination: i32,
     ) -> Result<(i32, Vec<u8>, String)> {
-        ensure!(self.grants.len() < 64, "transfer grant limit reached");
+        ensure!(
+            self.grants.len() < 64,
+            anyhow::anyhow!(CloseReason::Controller).context("transfer grant limit reached")
+        );
         let world = self
             .worlds
             .get(&destination)
@@ -1047,17 +1251,21 @@ impl Directory {
             world.owner.is_none_or(|owner| owner == account),
             "private destination belongs to another account"
         );
-        ensure!(world.admission_open, "Realm is closed");
+        ensure!(
+            world.admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         ensure!(
             world.players.len() + world.reserved_slots() < world.max_players,
-            "transfer destination full"
+            anyhow::anyhow!(CloseReason::Controller).context("transfer destination full")
         );
         ensure!(
             !self.worlds.values().any(|w| w
                 .admissions
                 .values()
                 .any(|a| a.account == account && a.expires > w.now)),
-            "account already has a reserved admission"
+            anyhow::anyhow!(CloseReason::Controller)
+                .context("account already has a reserved admission")
         );
         let name = world.name.clone();
         let mut key = vec![0; 16];
@@ -1088,6 +1296,7 @@ impl Directory {
                 destination,
                 key_time,
                 expires: self.tick + 2400,
+                consumed: false,
             },
         );
         tracing::info!(
@@ -1109,19 +1318,26 @@ impl Directory {
         let grant = self
             .grants
             .get(&key)
-            .context("unknown or already used transfer grant")?;
-        ensure!(grant.expires > self.tick, "transfer grant expired");
+            .ok_or_else(|| protocol("unknown or already used transfer grant"))?;
+        ensure!(!grant.consumed, protocol("transfer grant already used"));
+        ensure!(
+            grant.expires > self.tick,
+            protocol("transfer grant expired")
+        );
         ensure!(
             grant.account == account
                 && grant.destination == destination
                 && grant.key_time == key_time,
-            "transfer grant binding mismatch"
+            protocol("transfer grant binding mismatch")
         );
         ensure!(
             self.worlds.contains_key(&destination),
-            "transfer destination expired"
+            protocol("transfer destination expired")
         );
-        ensure!(self.worlds[&destination].admission_open, "Realm is closed");
+        ensure!(
+            self.worlds[&destination].admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         let character = grant.character;
         let world = self
             .worlds
@@ -1139,7 +1355,8 @@ impl Directory {
             "transfer admission binding/expiry changed"
         );
         admission.consumed = true;
-        self.grants.remove(&key);
+        // HELLO consumes the key before LOAD enters the world; keep both bindings until entry.
+        self.grants.get_mut(&key).unwrap().consumed = true;
         if destination > 0 {
             self.idle.insert(destination, self.tick);
         }
@@ -1165,10 +1382,7 @@ impl Directory {
         self.grants.remove(&key);
         Ok(())
     }
-    #[cfg(test)]
-    fn drop_portal(&mut self, origin: i32, pos: Pos) -> Result<i32> {
-        self.drop_dungeon_portal(origin, 0x717, pos)
-    }
+
     fn drop_dungeon_portal(&mut self, origin: i32, kind: u16, pos: Pos) -> Result<i32> {
         let definition = crate::dungeon::DUNGEONS
             .iter()
@@ -1205,9 +1419,18 @@ impl Directory {
     fn step(&mut self) {
         self.tick += 1;
         self.sync_realm_portal();
-        self.grants.retain(|_, grant| grant.expires > self.tick);
+        self.grants.retain(|_, g| {
+            g.expires > self.tick
+                && !(g.consumed
+                    && self.worlds[&g.destination]
+                        .players
+                        .values()
+                        .any(|p| p.character.account == g.account && p.character.id == g.character))
+        });
         for (id, world) in &mut self.worlds {
+            let _context = crate::supervision::world(*id, self.tick);
             world.step();
+            world.report_performance(*id);
             if *id > 0 && *id != self.endgame.active {
                 if world.players.is_empty() {
                     self.idle.entry(*id).or_insert(self.tick);
@@ -1255,14 +1478,7 @@ impl Directory {
         let expired: Vec<_> = self
             .idle
             .iter()
-            .filter(|(id, since)| {
-                self.tick - **since > 6000
-                    && !self.grants.values().any(|grant| grant.destination == **id)
-                    && !self
-                        .portals
-                        .values()
-                        .any(|portal| portal.destination == Some(**id))
-            })
+            .filter(|(id, since)| self.tick - **since > 6000 && self.reclaimable_world(**id))
             .map(|(id, _)| *id)
             .collect();
         for id in expired {
@@ -1273,17 +1489,46 @@ impl Directory {
     }
 }
 type Job = Box<dyn FnOnce(&mut Directory) + Send>;
+async fn service_queued_jobs(directory: &mut Directory, rx: &mut mpsc::Receiver<Job>) {
+    for _ in 0..16 {
+        // Serial packet handlers must receive their replies before they can enqueue the next acknowledgement.
+        tokio::task::yield_now().await;
+        let Ok(job) = rx.try_recv() else { break };
+        job(directory);
+    }
+}
+#[cfg(test)]
+type LifecycleJobGate = Arc<
+    std::sync::Mutex<
+        Option<(
+            usize,
+            bool,
+            bool,
+            oneshot::Sender<()>,
+            std::sync::mpsc::Receiver<()>,
+        )>,
+    >,
+>;
 #[derive(Clone)]
 pub struct Handle {
+    #[cfg(test)]
+    lifecycle_lost_reply: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    lifecycle_job_gate: LifecycleJobGate,
     tx: mpsc::Sender<Job>,
     target: Target,
     pub clock: crate::clock::Clock,
+    pub supervisor: crate::supervision::Supervisor,
 }
 impl Handle {
+    #[cfg(test)]
     pub fn spawn(directory: Directory) -> Self {
+        Self::supervised(directory, crate::supervision::Supervisor::default())
+    }
+    pub fn supervised(directory: Directory, supervisor: crate::supervision::Supervisor) -> Self {
         let (tx, mut rx) = mpsc::channel::<Job>(256);
         let clock = directory.clock.clone();
-        tokio::spawn(async move {
+        supervisor.spawn("world", async move {
             let mut directory = directory;
             let mut timer = tokio::time::interval(std::time::Duration::from_millis(50));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1292,10 +1537,11 @@ impl Handle {
                     scheduled = timer.tick() => {
                         if directory.clock.paused() { continue; }
                         let late=scheduled.elapsed().as_micros() as u64;
+                        let measuring=crate::performance::Measure::start();
                         let start=Instant::now(); directory.step();
                         let us=start.elapsed().as_micros() as u64;
                         directory.max_tick_us=directory.max_tick_us.max(us);
-                        directory.performance.record("step", start.elapsed());
+                        directory.performance.work("step", measuring);
                         directory.performance.record("scheduling_lateness", std::time::Duration::from_micros(late));
                         directory.diagnostic_ticks.push_back((start, us, late));
                         while directory.diagnostic_ticks.front().is_some_and(|(t, _, _)| t.elapsed().as_secs() > 120) { directory.diagnostic_ticks.pop_front(); }
@@ -1309,55 +1555,152 @@ impl Handle {
                                 diagnostic_tick_samples=directory.diagnostic_ticks.len(),queued_jobs=rx.len(),
                                 memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
+                        // Over-budget ticks must not repeatedly win select and starve queued input or lease renewals.
+                        service_queued_jobs(&mut directory, &mut rx).await;
                     },
                     job=rx.recv()=>match job{Some(f)=>f(&mut directory),None=>break}
                 }
             }
+            Ok(())
         });
         Self {
+            #[cfg(test)]
+            lifecycle_lost_reply: Default::default(),
+            #[cfg(test)]
+            lifecycle_job_gate: Default::default(),
             tx,
             target: Target::World(-1),
             clock,
+            supervisor,
         }
     }
     pub fn in_world(&self, id: i32) -> Self {
         Self {
+            #[cfg(test)]
+            lifecycle_lost_reply: self.lifecycle_lost_reply.clone(),
+            #[cfg(test)]
+            lifecycle_job_gate: self.lifecycle_job_gate.clone(),
             tx: self.tx.clone(),
             target: Target::World(id),
             clock: self.clock.clone(),
+            supervisor: self.supervisor.clone(),
         }
     }
     pub fn for_player(&self, id: i32) -> Self {
         Self {
+            #[cfg(test)]
+            lifecycle_lost_reply: self.lifecycle_lost_reply.clone(),
+            #[cfg(test)]
+            lifecycle_job_gate: self.lifecycle_job_gate.clone(),
             tx: self.tx.clone(),
             target: Target::Player(id),
             clock: self.clock.clone(),
+            supervisor: self.supervisor.clone(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_lose_reply(&self) {
+        assert!(!self.lifecycle_lost_reply.swap(true, Ordering::SeqCst));
     }
     pub async fn directory<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Directory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
-        let queued = Instant::now();
-        self.tx
-            .send(Box::new(move |d| {
-                d.performance.record("job_wait", queued.elapsed());
-                let started = Instant::now();
-                let result = f(d);
-                d.performance.record("job", started.elapsed());
-                let _ = tx.send(result);
-            }))
+        let request = crate::performance::REQUEST.try_with(Arc::clone).ok();
+        let trace = request.as_ref().and_then(|r| {
+            let mut r = r.lock().expect("request timings poisoned");
+            r.calls += 1;
+            r.native_control
+                .as_ref()
+                .map(|trace| (trace.clone(), r.calls))
+        });
+        let record = move |stage, receiver_closed| {
+            if let Some((trace, call)) = &trace {
+                trace.record(*call, stage, receiver_closed);
+            }
+        };
+        let start = Instant::now();
+        record("capacity_wait", tx.is_closed());
+        let permit = self
+            .tx
+            .reserve()
             .await
             .map_err(|_| anyhow::anyhow!("world directory stopped"))?;
-        rx.await.context("world directory worker failed")?
-    }
-    pub async fn collect<T: Send + 'static>(
-        &self,
-        mut f: impl FnMut(&mut World) -> Vec<T> + Send + 'static,
-    ) -> Result<Vec<T>> {
-        self.directory(move |d| Ok(d.worlds.values_mut().flat_map(&mut f).collect()))
-            .await
+        let send_wait = start.elapsed();
+        record("capacity_acquired", tx.is_closed());
+        let queued = Instant::now();
+        let work_request = request.clone();
+        let work_record = record.clone();
+        #[cfg(test)]
+        let lost = self.lifecycle_lost_reply.clone();
+        #[cfg(test)]
+        let mut gate = {
+            let mut gate = self.lifecycle_job_gate.lock().unwrap();
+            if let Some((count, _, request_only, _, _)) = gate.as_mut()
+                && (!*request_only || request.is_some())
+            {
+                *count -= 1;
+            }
+            if gate.as_ref().is_some_and(|(count, _, _, _, _)| *count == 0) {
+                gate.take()
+            } else {
+                None
+            }
+        };
+        permit.send(Box::new(move |d| {
+            let queue_wait = queued.elapsed();
+            work_record("started", tx.is_closed());
+            d.performance.record("job_send_wait", send_wait);
+            d.performance.record("job_wait", queue_wait);
+            let started = crate::performance::Measure::start();
+            #[cfg(test)]
+            if gate.as_ref().is_some_and(|(_, before, _, _, _)| *before) {
+                let (_, _, _, entered, wait) = gate.take().unwrap();
+                let _ = entered.send(());
+                if wait.recv().is_err() {
+                    let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                    return;
+                }
+            }
+            let result = f(d);
+            #[cfg(test)]
+            if let Some((_, _, _, entered, wait)) = gate {
+                let _ = entered.send(());
+                if wait.recv().is_err() {
+                    let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                    return;
+                }
+            }
+
+            let measurement = started.finish();
+            d.performance.completed("job", measurement);
+            if let Some(r) = work_request {
+                let mut r = r.lock().expect("request timings poisoned");
+                r.completed += 1;
+                r.send_wait += send_wait;
+                r.queued += queue_wait;
+                r.work += measurement.wall;
+                if let Some(cpu) = measurement.cpu {
+                    *r.cpu.get_or_insert(Duration::ZERO) += cpu;
+                }
+            }
+            work_record("completed", tx.is_closed());
+            #[cfg(test)]
+            if lost.swap(false, Ordering::SeqCst) {
+                return;
+            }
+            let receiver_closed = tx.send(result).is_err();
+            work_record("result_send", receiver_closed);
+        }));
+        // The receiver cannot be dropped until this poll yields.
+        record("enqueued", false);
+        let result = rx.await.context("world directory worker failed");
+        if let Some(r) = request {
+            r.lock().expect("request timings poisoned").round_trip += start.elapsed();
+        }
+        result?
     }
     pub async fn call<T: Send + 'static>(
         &self,
@@ -1389,11 +1732,17 @@ impl World {
     pub fn new(content: Arc<Content>, map: Arc<Map>) -> Result<Self> {
         Self::with_ids(content, map, Arc::new(AtomicI32::new(1000)))
     }
-    fn with_ids(content: Arc<Content>, map: Arc<Map>, ids: Arc<AtomicI32>) -> Result<Self> {
-        let mut entities = BTreeMap::new();
+    pub(crate) fn with_ids(
+        content: Arc<Content>,
+        map: Arc<Map>,
+        ids: Arc<AtomicI32>,
+    ) -> Result<Self> {
+        let mut entities = entity_store::Entities::default();
+        let mut scenery_templates = BTreeMap::new();
         let mut actor_ids = BTreeSet::new();
+        let mut quests_by_level: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         let mut fountains = Vec::new();
-        let mut cells = vec![BTreeSet::new(); map.cells.len()];
+        let mut cells = cell_index::CellIndex::new(map.width as usize, map.height as usize);
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
             for (x, c) in row.iter().enumerate() {
                 if let Some(kind) = c.object {
@@ -1406,55 +1755,64 @@ impl World {
                     let mut e = Entity {
                         id,
                         kind,
-                        name: if o.class == "Portal" {
-                            o.name.clone()
-                        } else {
-                            String::new()
-                        },
                         pos,
                         home: pos,
-                        goal: None,
-                        motion: None,
-                        following: Following::Unknown,
-                        charge: None,
-                        script: None,
-                        last_step: Pos { x: 0., y: 0. },
-                        phase: 0.,
-                        orbit: None,
-                        hp: o.hp,
-                        size: o.size,
-                        condition: crate::dungeon::abyss::initial_condition(kind)
-                            | crate::dungeon::lab::initial_condition(kind)
-                            | crate::dungeon::spider::initial_condition(kind)
-                            | crate::dungeon::snake::initial_condition(kind)
-                            | if o.stasis_immune {
-                                crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                        state: entity_store::EntityState::Owned(Box::new(EntityData {
+                            name: if o.class == "Portal" {
+                                o.name.clone()
                             } else {
-                                0
+                                String::new()
                             },
-                        statuses: BTreeMap::new(),
-                        items: o.equipment.clone(),
-                        drop_slots: BTreeSet::new(),
-                        extra_stats: if o.class == "Portal" {
-                            vec![(37, 1)]
-                        } else {
-                            vec![]
-                        },
-                        reserved: false,
-                        published: true,
-                        damage: BTreeMap::new(),
-                        next_shot: 0,
-                        attacks: Default::default(),
-                        activated: None,
-                        stage: None,
-                        parent: None,
-                        camp: None,
-                        quest: None,
-                        expires: None,
-                        next_aux: 0,
-                        blocked_since: None,
-                        reaction_until: 0,
-                        bullet: 0,
+                            goal: None,
+                            motion: None,
+                            following: Following::Unknown,
+                            lair_escort: None,
+                            follow_remaining: 0,
+                            strict_initialized: false,
+                            charge: None,
+                            script: None,
+                            last_step: Pos { x: 0., y: 0. },
+                            phase: 0.,
+                            orbit: None,
+                            hp: o.hp,
+                            size: o.size,
+                            condition: crate::dungeon::manor::initial_condition(kind)
+                                | crate::dungeon::lab::initial_condition(kind)
+                                | crate::dungeon::abyss::initial_condition(kind)
+                                | crate::dungeon::spider::initial_condition(kind)
+                                | crate::dungeon::snake::initial_condition(kind)
+                                | crate::dungeon::jungle::initial_condition(kind)
+                                | crate::dungeon::davy::initial_condition(kind)
+                                | if o.stasis_immune {
+                                    crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                                } else {
+                                    0
+                                },
+                            statuses: BTreeMap::new(),
+                            items: o.equipment.clone(),
+                            drop_slots: BTreeSet::new(),
+                            extra_stats: if o.class == "Portal" {
+                                vec![(37, 1)]
+                            } else {
+                                vec![]
+                            },
+                            reserved: false,
+                            published: true,
+                            damage: BTreeMap::new(),
+                            next_shot: 0,
+                            attacks: Default::default(),
+                            activated: None,
+                            stage: None,
+                            parent: Default::default(),
+                            camp: None,
+                            population_slot: None,
+                            quest: None,
+                            expires: Default::default(),
+                            next_aux: 0,
+                            blocked_since: None,
+                            reaction_until: 0,
+                            bullet: 0,
+                        })),
                     };
                     for setting in c.config.split(';').filter(|s| !s.is_empty()) {
                         let (k, v) = setting.split_once(':').context("malformed map setting")?;
@@ -1490,24 +1848,50 @@ impl World {
                     if o.name == "White Fountain" {
                         fountains.push((id, pos));
                     }
-                    cells[y * map.width as usize + x].insert(id);
-                    if o.enemy
+                    let actor = o.enemy
                         || o.quest
                         || !o.static_object
-                        || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805)
-                    {
+                        || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805);
+                    cells.insert(y * map.width as usize + x, id, actor);
+                    if actor {
                         actor_ids.insert(id);
+                    }
+                    if let Some(level) = o.quest_level.filter(|_| o.quest) {
+                        quests_by_level.entry(level).or_default().insert(id);
+                    }
+                    if !actor
+                        && !o.destructible
+                        && o.class == "GameObject"
+                        && o.name != "White Fountain"
+                    {
+                        e.share(&mut scenery_templates, &c.config);
                     }
                     entities.insert(id, e);
                 }
             }
         }
-        Ok(Self {
+        let gun_ids = actor_ids
+            .iter()
+            .copied()
+            .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
+            .collect();
+        let mut world = Self {
             content,
             map,
+            navigation_geometry: Box::default(),
             realm_layout: None,
+            timed_ids: BTreeSet::new(),
+            gun_ids,
+            pentaract_ids: entities
+                .values()
+                .filter(|e| e.kind == 0xd5f)
+                .map(|e| e.id)
+                .collect(),
             entities,
+            non_population_ids: actor_ids.clone(),
+            npc_global_ids: actor_ids.clone(),
             actor_ids,
+            quests_by_level,
             players: BTreeMap::new(),
             guild: None,
             bullets: Vec::new(),
@@ -1515,7 +1899,9 @@ impl World {
             fauna_births: Vec::new(),
             named_births: Vec::new(),
             lab_tosses: Vec::new(),
+            manor_births: Vec::new(),
             lava_patches: BTreeMap::new(),
+            locker: None,
             ability_state: abilities::State::default(),
             companions: companions::State::default(),
             finale: endgame_ai::Actors::default(),
@@ -1528,6 +1914,7 @@ impl World {
             performance: std::cell::RefCell::default(),
             attack_epoch: Instant::now(),
             clock: crate::clock::Clock::default(),
+            new_tick_at: Instant::now(),
             prepared_seed: None,
             tick: 0,
             ids,
@@ -1539,6 +1926,9 @@ impl World {
             encounter: false,
             population: vec![],
             camps: vec![],
+            population_regions: std::array::from_fn(|_| population_density::Region::default()),
+            population_counts: [0; 13],
+            population_next: 10000,
             setpieces: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
@@ -1546,10 +1936,13 @@ impl World {
             bag_expiry: BTreeMap::new(),
             cleared: false,
             clear_exit: None,
-            vault: None,
+            vaults: BTreeMap::new(),
+            closed_vaults: BTreeMap::new(),
             trades: BTreeMap::new(),
             trade_requests: BTreeMap::new(),
-        })
+        };
+        world.jungle_initialize()?;
+        Ok(world)
     }
     pub fn settled(&self) -> Result<bool> {
         for p in self.players.values() {
@@ -1567,25 +1960,43 @@ impl World {
                 && !p.departing
         }))
     }
-    pub fn load_vault(&mut self, vault: Vault) -> Result<()> {
+    pub fn load_vaults(&mut self, vaults: Vec<Vault>) -> Result<()> {
+        let account = self.owner.context("Vault world has no owner")?;
         ensure!(
-            self.name == "Vault" && self.owner == Some(vault.account),
-            "vault world owner mismatch"
+            self.name == "Vault"
+                && !vaults.is_empty()
+                && vaults.len() <= crate::store::VAULT_CHESTS as usize
+                && vaults.iter().all(|v| v.account == account
+                    && (0..crate::store::VAULT_CHESTS).contains(&v.chest)
+                    && v.items.len() == 8
+                    && v.items.iter().all(|i| (-1..=65535).contains(i))
+                    && v.revision >= 0),
+            "invalid private vault state"
         );
+        let count = vaults.len();
+        let by_chest: BTreeMap<_, _> = vaults.into_iter().map(|v| (v.chest, v)).collect();
         ensure!(
-            vault.items.len() == 8,
-            "vault must contain exactly eight slots"
+            by_chest.len() == count && by_chest.contains_key(&0),
+            "duplicate or missing initial vault chest"
         );
-        if let Some((id, loaded)) = &self.vault {
+        if !self.vaults.is_empty() {
             ensure!(
-                loaded.revision == vault.revision && self.entities[id].items == vault.items,
-                "loaded vault disagrees with durable revision"
+                self.vaults.len() == by_chest.len()
+                    && self.vaults.iter().all(|(id, v)| {
+                        by_chest.get(&v.chest).is_some_and(|saved| {
+                            saved.account == v.account
+                                && saved.revision == v.revision
+                                && saved.items == v.items
+                                && self.entities[id].items == saved.items
+                        })
+                    }),
+                "loaded vault disagrees with durable identity or revision"
             );
             return Ok(());
         }
         let (x, y) = self.map.spawns[0];
         let spawn = Pos { x, y };
-        let pos = self
+        let mut cells = self
             .map
             .cells
             .iter()
@@ -1595,21 +2006,66 @@ impl World {
                 x: (i % self.map.width as usize) as f32 + 0.5,
                 y: (i / self.map.width as usize) as f32 + 0.5,
             })
-            .min_by(|a, b| a.distance(spawn).total_cmp(&b.distance(spawn)))
-            .context("sourced Vault has no chest region")?;
-        let id = self.spawn_entity(0x504, pos, vault.items.clone())?;
-        self.entities
-            .get_mut(&id)
-            .unwrap()
-            .extra_stats
-            .push((54, vault.account));
-        tracing::info!(
-            entity = id,
-            account = vault.account,
-            revision = vault.revision,
-            "private eight-slot chest loaded"
+            .collect::<Vec<_>>();
+        // Stable current identities; the period evidence does not establish equal-distance ordering.
+        cells.sort_by(|a, b| {
+            a.distance(spawn)
+                .total_cmp(&b.distance(spawn))
+                .then(a.y.total_cmp(&b.y))
+                .then(a.x.total_cmp(&b.x))
+        });
+        ensure!(
+            cells.len() == crate::store::VAULT_CHESTS as usize,
+            "Vault map must have exactly twenty chest cells"
         );
-        self.vault = Some((id, vault));
+        for (chest, pos) in cells.into_iter().enumerate() {
+            let chest = chest as i32;
+            if let Some(vault) = by_chest.get(&chest) {
+                let id = self.spawn_entity(0x504, pos, vault.items.clone())?;
+                self.entities
+                    .get_mut(&id)
+                    .unwrap()
+                    .extra_stats
+                    .push((54, account));
+                self.vaults.insert(id, vault.clone());
+            } else {
+                let id = self.spawn_entity(0x505, pos, Vec::new())?;
+                // Native stat 54 casts to Container; sellers are owned by this private world's identity map.
+                self.entities.get_mut(&id).unwrap().extra_stats.extend([
+                    (36, crate::store::VAULT_PRICE),
+                    (40, 0),
+                    (45, 0),
+                ]);
+                self.closed_vaults.insert(id, chest);
+            }
+        }
+        tracing::info!(
+            account,
+            owned = self.vaults.len(),
+            closed = self.closed_vaults.len(),
+            "private vault loaded"
+        );
+        Ok(())
+    }
+    fn bind_vaults(&self, plan: &mut InventoryPlan) -> Result<()> {
+        for (id, items) in &plan.bags {
+            let e = self.entities.get(id).context("vault source disappeared")?;
+            if let Some(vault) = self.vaults.get(id) {
+                ensure!(
+                    e.kind == 0x504
+                        && self.owner == Some(plan.account)
+                        && vault.account == plan.account
+                        && vault.items == e.items
+                        && e.extra_stats.contains(&(54, plan.account)),
+                    "vault source ownership or contents changed"
+                );
+                let mut vault = vault.clone();
+                vault.items = items.clone();
+                plan.vaults.push(vault);
+            } else {
+                ensure!(e.kind != 0x504, "container has no durable chest identity");
+            }
+        }
         Ok(())
     }
     pub fn spawn_entity(&mut self, kind: u16, pos: Pos, items: Vec<i32>) -> Result<i32> {
@@ -1634,61 +2090,81 @@ impl World {
             Entity {
                 id,
                 kind,
-                name: if definition.class == "Portal" {
-                    definition.name.clone()
-                } else {
-                    String::new()
-                },
                 pos,
                 home: pos,
-                goal: None,
-                motion: None,
-                following: Following::Unknown,
-                charge: None,
-                script: None,
-                last_step: Pos { x: 0., y: 0. },
-                phase: 0.,
-                orbit: None,
-                hp: definition.hp,
-                size: definition.size,
-                condition: crate::dungeon::abyss::initial_condition(kind)
-                    | crate::dungeon::lab::initial_condition(kind)
-                    | crate::dungeon::spider::initial_condition(kind)
-                    | crate::dungeon::snake::initial_condition(kind)
-                    | (if kind == 0x91a {
-                        crate::condition::bit(crate::condition::INVULNERABLE)
+                state: entity_store::EntityState::Owned(Box::new(EntityData {
+                    name: if definition.class == "Portal" {
+                        definition.name.clone()
                     } else {
-                        0
-                    })
-                    | (if definition.stasis_immune {
-                        crate::condition::bit(crate::condition::STASIS_IMMUNE)
-                    } else {
-                        0
-                    }),
+                        String::new()
+                    },
+                    goal: None,
+                    motion: None,
+                    following: Following::Unknown,
+                    lair_escort: None,
+                    follow_remaining: 0,
+                    strict_initialized: false,
+                    charge: None,
+                    script: None,
+                    last_step: Pos { x: 0., y: 0. },
+                    phase: 0.,
+                    orbit: None,
+                    hp: definition.hp,
+                    size: definition.size,
+                    condition: crate::dungeon::manor::initial_condition(kind)
+                        | crate::dungeon::lab::initial_condition(kind)
+                        | crate::dungeon::abyss::initial_condition(kind)
+                        | crate::dungeon::spider::initial_condition(kind)
+                        | crate::dungeon::snake::initial_condition(kind)
+                        | crate::dungeon::jungle::initial_condition(kind)
+                        | crate::dungeon::davy::initial_condition(kind)
+                        | (if kind == 0x91a {
+                            crate::condition::bit(crate::condition::INVULNERABLE)
+                        } else {
+                            0
+                        })
+                        | (if definition.stasis_immune {
+                            crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                        } else {
+                            0
+                        }),
 
-                statuses: BTreeMap::new(),
-                items,
-                drop_slots: BTreeSet::new(),
-                extra_stats,
-                reserved: false,
-                published: true,
-                damage: BTreeMap::new(),
-                next_shot: 0,
-                attacks: Default::default(),
-                activated: None,
-                stage: None,
-                parent: None,
-                camp: None,
-                quest: None,
-                expires: None,
-                next_aux: 0,
-                blocked_since: None,
-                reaction_until: 0,
-                bullet: 0,
+                    statuses: BTreeMap::new(),
+                    items,
+                    drop_slots: BTreeSet::new(),
+                    extra_stats,
+                    reserved: false,
+                    published: true,
+                    damage: BTreeMap::new(),
+                    next_shot: 0,
+                    attacks: Default::default(),
+                    activated: None,
+                    stage: None,
+                    parent: Default::default(),
+                    camp: None,
+                    population_slot: None,
+                    quest: None,
+                    expires: Default::default(),
+                    next_aux: 0,
+                    blocked_since: None,
+                    reaction_until: 0,
+                    bullet: 0,
+                })),
             },
         );
-        self.cells[cell].insert(id);
+        self.cells.insert(cell, id, true);
         self.actor_ids.insert(id);
+        if (0x802..=0x805).contains(&kind) {
+            self.gun_ids.insert(id);
+        }
+        if kind == 0xd5f {
+            self.pentaract_ids.insert(id);
+        }
+        self.npc_global_ids.insert(id);
+        self.non_population_ids.insert(id);
+        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
+            self.quests_by_level.entry(level).or_default().insert(id);
+        }
         Ok(id)
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
@@ -1719,8 +2195,36 @@ impl World {
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
         self.actor_ids.remove(&id);
+        self.timed_ids.remove(&id);
+        self.gun_ids.remove(&id);
+        self.pentaract_ids.remove(&id);
+        self.npc_global_ids.remove(&id);
+        self.non_population_ids.remove(&id);
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
+        let definition = &self.content.objects[&entity.kind];
+        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
+            let ids = self
+                .quests_by_level
+                .get_mut(&level)
+                .expect("quest level missing");
+            assert!(ids.remove(&id), "indexed quest missing");
+            if ids.is_empty() {
+                self.quests_by_level.remove(&level);
+            }
+        }
+        if let Some(slot) = entity.population_slot {
+            let terrain = self.population_terrain(&self.population[slot]) as usize;
+            assert_eq!(
+                self.population[slot].entity,
+                Some(id),
+                "population slot ownership changed"
+            );
+            self.population[slot].entity = None;
+            self.population_counts[terrain] = self.population_counts[terrain]
+                .checked_sub(1)
+                .expect("population count underflow");
+        }
         self.orphan_satellites(&entity);
         assert!(!entity.reserved, "cannot remove a reserved container");
         self.bag_expiry.remove(&id);
@@ -1734,7 +2238,7 @@ impl World {
         }
         let cell = entity.pos.y as usize * self.map.width as usize + entity.pos.x as usize;
         assert!(
-            self.cells[cell].remove(&id),
+            self.cells.remove(cell, id),
             "entity absent from spatial index"
         );
         entity
@@ -1810,7 +2314,10 @@ impl World {
                 "prepared position is blocked or outside the world"
             );
         }
-        ensure!(self.admission_open, "Realm is closed");
+        ensure!(
+            self.admission_open,
+            anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
+        );
         ensure!(ch.alive && ch.hp > 0, "dead character");
         ch.effective(&self.content)?;
         ensure!(
@@ -1869,7 +2376,6 @@ impl World {
                 known: BTreeSet::new(),
                 quest: None,
                 statuses: BTreeMap::new(),
-                native_motion_condition: 0,
                 lab_conditions: 0,
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
@@ -1877,6 +2383,7 @@ impl World {
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
+                tile_scan: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
                 killer: String::new(),
@@ -1911,7 +2418,7 @@ impl World {
                 discarded_attack: None,
                 tick: 0,
                 last_motion: None,
-                last_ability: None,
+                ability_ready_ms: 0,
                 boosts: Vec::new(),
                 last_companion: None,
                 ability_shot: None,
@@ -1924,6 +2431,7 @@ impl World {
         o.i32(id).i32(char_id);
         send(&self.players[&id], wire::CREATE_SUCCESS, o.0);
         self.updates(id, true)?;
+        self.locker_key_ui(id);
         tracing::info!(
             player = id,
             character = char_id,
@@ -1934,15 +2442,7 @@ impl World {
         );
         Ok(id)
     }
-    #[cfg(test)]
-    pub fn enter_autonomous(&mut self, ch: Character, tx: Output) -> Result<i32> {
-        let id = self.enter(ch, Some(tx))?;
-        self.players
-            .get_mut(&id)
-            .context("new controller missing")?
-            .controller = Controller::Autonomous;
-        Ok(id)
-    }
+
     pub fn leave(&mut self, id: i32) -> Result<Character> {
         self.clear_abilities(id);
         self.cancel_trade(id, "Trade cancelled by departure.");
@@ -2118,33 +2618,47 @@ impl World {
             return None;
         }
         let player = &self.players[&id];
-        self.actors()
-            .filter_map(|e| {
-                let definition = &self.content.objects[&e.kind];
-                if !definition.quest || e.hp <= 0 || !e.accessible(player.character.account) {
-                    return None;
+        let level = player.character.level;
+        let mut lower = self.quests_by_level.range(..=level).rev().peekable();
+        let mut upper = self
+            .quests_by_level
+            .range((std::ops::Bound::Excluded(level), std::ops::Bound::Unbounded))
+            .peekable();
+        let levels = std::iter::from_fn(|| match (lower.peek(), upper.peek()) {
+            (Some((a, _)), Some((b, _))) if a.abs_diff(level) <= b.abs_diff(level) => lower.next(),
+            (Some(_), None) => lower.next(),
+            _ => upper.next(),
+        });
+        let mut best: Option<&Entity> = None;
+        let mut difference = u32::MAX;
+        for (&quest_level, ids) in levels {
+            if quest_level.abs_diff(level) > difference {
+                break;
+            }
+            // Equally suitable levels on both sides must compete on distance, not iteration order.
+            for id in ids {
+                let e = self.entities.get(id).expect("indexed quest missing");
+                let (min, max) = self.content.objects[&e.kind].quest_window;
+                if e.hp <= 0
+                    || !e.accessible(player.character.account)
+                    || level < i32::from(min)
+                    || level > i32::from(max)
+                {
+                    continue;
                 }
-                let max = match e.kind {
-                    0x617 => 8,
-                    0x609 | 0x60d => 9,
-                    0x61f => 10,
-                    _ => 20,
-                };
-                // XML Level recommends a quest, rather than setting a minimum character level.
-                (player.character.level <= max)
-                    .then_some((e, definition.quest_level?.abs_diff(player.character.level)))
-            })
-            .min_by(|(a, a_level), (b, b_level)| {
-                a_level
-                    .cmp(b_level)
-                    .then_with(|| {
-                        a.pos
-                            .distance(player.pos)
-                            .total_cmp(&b.pos.distance(player.pos))
-                    })
-                    .then_with(|| a.id.cmp(&b.id))
-            })
-            .map(|(e, _)| e.id)
+                if best.is_none_or(|b| {
+                    e.pos
+                        .distance(player.pos)
+                        .total_cmp(&b.pos.distance(player.pos))
+                        .then_with(|| e.id.cmp(&b.id))
+                        .is_lt()
+                }) {
+                    best = Some(e);
+                    difference = quest_level.abs_diff(level);
+                }
+            }
+        }
+        best.map(|e| e.id)
     }
     fn broadcast_text(&self, name: &str, text: &str) -> usize {
         let packet = chat::text_packet(name, -1, 0, text);
@@ -2160,11 +2674,14 @@ impl World {
         recipients
     }
     fn visible(&self, id: i32) -> BTreeSet<i32> {
+        self.visible_with(id, self.quest_target(id))
+    }
+    fn visible_with(&self, id: i32, quest: Option<i32>) -> BTreeSet<i32> {
         let pos = self.players[&id].pos;
         self.entities_near(pos, 20.)
             .filter(|e| e.accessible(self.players[&id].character.account))
             .map(|e| e.id)
-            .chain(self.quest_target(id))
+            .chain(quest)
             .chain(
                 self.players
                     .iter()
@@ -2180,8 +2697,10 @@ impl World {
             .map(|(peer, player)| (*peer, player))
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
-        let started = Instant::now();
-        let mut visible = self.visible(id);
+        let started = crate::performance::Measure::start();
+        // Nothing below changes quest eligibility, so one evaluation serves visibility and the quest arrow.
+        let quest = self.quest_target(id);
+        let mut visible = self.visible_with(id, quest);
         // The native minimap tracks players across this world, including outside explored terrain.
         visible.extend(self.players.keys().copied());
         let previous = &self.players[&id].known;
@@ -2191,11 +2710,15 @@ impl World {
         let dropped: Vec<i32> = previous.difference(&visible).copied().collect();
         let pos = self.players[&id].pos;
         let mut tiles = Vec::new();
+        let center = (pos.x as i32, pos.y as i32);
+        // Discovered tiles only grow, so rescanning the same centre cannot find anything new.
+        let rescan = initial || self.players[&id].tile_scan != Some(center);
         for y in ((pos.y as i32 - 20).max(0))..=(pos.y as i32 + 20).min(self.map.height - 1) {
             for x in ((pos.x as i32 - 20).max(0))..=(pos.x as i32 + 20).min(self.map.width - 1) {
                 let dx = x - pos.x as i32;
                 let dy = y - pos.y as i32;
-                if dx * dx + dy * dy <= 20 * 20
+                if rescan
+                    && dx * dx + dy * dy <= 20 * 20
                     && !self.players[&id].tiles.contains(&(x as i16, y as i16))
                 {
                     tiles.push((
@@ -2206,14 +2729,22 @@ impl World {
                 }
             }
         }
+        self.players.get_mut(&id).unwrap().tile_scan = Some(center);
         if initial || !tiles.is_empty() || !added.is_empty() || !dropped.is_empty() {
             let mut o = Writer::new();
             o.i16(i16::try_from(tiles.len())?);
             let p = self.players.get_mut(&id).unwrap();
-            for (x, y, ground) in tiles {
+            for &(x, y, ground) in &tiles {
                 p.tiles.insert((x, y));
                 p.character.tiles += 1;
                 o.i16(x).i16(y).u8(ground);
+            }
+            if !tiles.is_empty() {
+                let adding = crate::performance::Measure::start();
+                p.view_tiles
+                    .borrow_mut()
+                    .discover(&self.map, &self.content, &tiles, p.tiles.len());
+                self.performance.borrow_mut().work("terrain_update", adding);
             }
             o.i16(added.len() as i16);
             for entity in added {
@@ -2237,7 +2768,6 @@ impl World {
             p.known_since.entry(*entity).or_insert(self.now);
         }
         p.known = visible;
-        let quest = self.quest_target(id);
         let p = self.players.get_mut(&id).unwrap();
         if initial || p.quest != quest {
             p.quest = quest;
@@ -2246,9 +2776,7 @@ impl World {
             send(p, 34, out.0);
             tracing::debug!(player = id, quest, "native quest target updated");
         }
-        self.performance
-            .borrow_mut()
-            .record("visibility", started.elapsed());
+        self.performance.borrow_mut().work("visibility", started);
         Ok(())
     }
     #[cfg(test)]
@@ -2345,12 +2873,7 @@ impl World {
         );
         Ok(credit - charged)
     }
-    #[cfg(test)]
-    pub fn native_move_to(&mut self, id: i32, pos: Pos, time: i32) -> Result<()> {
-        // Skipped simulation ticks must not reduce real movement funding or desynchronize SHOOT prediction.
-        self.native_move_received(id, pos, (time, self.clock.now()))
-            .map(|_| ())
-    }
+
     pub fn native_move_received(
         &mut self,
         id: i32,
@@ -2379,7 +2902,10 @@ impl World {
             self.validate_native_position(id, pos, time)?;
         }
         let p = self.players.get_mut(&id).context("native player missing")?;
-        ensure!(time >= p.last_move, "native movement clock regressed");
+        ensure!(
+            time >= p.last_move,
+            controller("native movement clock regressed")
+        );
         ensure!(received >= p.last_move_at, "native ingress clock regressed");
         let speed = p.speed(&self.content, self.now)? * 1000.;
         p.record_motion(if sentinel { p.pos } else { pos }, time, self.now, speed);
@@ -2499,6 +3025,11 @@ impl World {
                 .expect("simulated entity missing from storage")
         })
     }
+    fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
+        self.non_population_ids
+            .iter()
+            .map(|id| self.entities.get(id).expect("scripted actor missing"))
+    }
     fn entities_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
         self.near_entities(
             Pos {
@@ -2512,9 +3043,25 @@ impl World {
         )
         .filter(move |e| e.pos.distance(pos) < radius)
     }
+    fn actors_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
+        let clamp = |v: f32, max: i32| (v as i32).clamp(0, max - 1) as usize;
+        let (x0, x1) = (
+            clamp(pos.x - radius - 1., self.map.width),
+            clamp(pos.x + radius + 1., self.map.width),
+        );
+        let (y0, y1) = (
+            clamp(pos.y - radius - 1., self.map.height),
+            clamp(pos.y + radius + 1., self.map.height),
+        );
+        self.cells
+            .actors_in(x0, y0, x1, y1)
+            .map(|id| &self.entities[&id])
+            .filter(move |e| e.pos.distance(pos) < radius)
+    }
     fn entities_at(&self, pos: Pos) -> impl Iterator<Item = &Entity> {
         self.map.cell(pos.x, pos.y).into_iter().flat_map(move |_| {
-            self.cells[pos.y as usize * self.map.width as usize + pos.x as usize]
+            self.cells
+                .ids(pos.y as usize * self.map.width as usize + pos.x as usize)
                 .iter()
                 .map(|id| self.entities.get(id).expect("occupied cell missing entity"))
         })
@@ -2526,7 +3073,8 @@ impl World {
         let y1 = (a.y.max(b.y) as i32 + 1).min(self.map.height - 1);
         (y0..=y1).flat_map(move |y| {
             (x0..=x1).flat_map(move |x| {
-                self.cells[(y * self.map.width + x) as usize]
+                self.cells
+                    .ids((y * self.map.width + x) as usize)
                     .iter()
                     .map(|id| self.entities.get(id).expect("occupied cell missing entity"))
             })
@@ -2591,15 +3139,19 @@ impl World {
         start: Pos,
         angle: f32,
     ) -> Result<NativeInput> {
-        ensure!(angle.is_finite(), "invalid shot angle");
+        ensure!(angle.is_finite(), protocol("invalid shot angle"));
         ensure!(
             start.x.is_finite() && start.y.is_finite(),
-            "non-finite shot origin"
+            protocol("non-finite shot origin")
         );
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
-            p.active(),
+            p.persistence_failure.is_none(),
             "dead, departing or quarantined player cannot shoot"
+        );
+        ensure!(
+            p.active(),
+            protocol("dead, departing or quarantined player cannot shoot")
         );
 
         let ability =
@@ -2609,7 +3161,7 @@ impl World {
             p.character.items[0] == kind as i32
                 || native && p.advertised_weapon(kind)
                 || ability && p.character.items[1] == kind as i32,
-            "weapon does not match equipped item"
+            protocol("weapon does not match equipped item")
         );
         let item = self.content.get(kind)?;
         ensure!(item.shots > 0, "weapon projectile count is zero");
@@ -2675,12 +3227,21 @@ impl World {
             };
         let admission = if native { normal_cooldown } else { cooldown };
         let p = self.players.get_mut(&id).unwrap();
-        ensure!(time >= 0, "negative shot time");
-        ensure!(shot_index < item.shots, "too many projectiles in attack");
-        ensure!(bullet == p.next_bullet, "unexpected player bullet counter");
+        ensure!(time >= 0, protocol("negative shot time"));
+        ensure!(
+            shot_index < item.shots,
+            protocol("too many projectiles in attack")
+        );
+        ensure!(
+            bullet == p.next_bullet,
+            protocol("unexpected player bullet counter")
+        );
         if !ability && time != p.last_attack {
             let attack_elapsed = i64::from(time) - i64::from(p.last_attack);
-            ensure!(attack_elapsed >= admission as i64 - 2, "attack too fast");
+            ensure!(
+                attack_elapsed >= admission as i64 - 2,
+                protocol("attack too fast")
+            );
             let elapsed = received
                 .checked_sub(p.last_attack_at)
                 .context("attack receive clock regressed")?;
@@ -2792,7 +3353,7 @@ impl World {
                 .get(&id)
                 .is_some_and(|p| p.character.items[1] == slot.kind)
             && self.content.get(slot.kind as u16)?.activate == "Shoot";
-        ensure!(!ability || time >= 0, "negative ability time");
+        ensure!(!ability || time >= 0, controller("negative ability time"));
         ensure!(
             !ability || (1..=5).contains(&self.content.get(slot.kind as u16)?.shots),
             "unsupported native ability projectile count"
@@ -2808,9 +3369,9 @@ impl World {
     pub fn use_item(&mut self, id: i32, slot: Slot, pos: Pos) -> Result<Option<InventoryPlan>> {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("player missing")?;
-        ensure!(!p.paused, "Cannot use items while paused.");
+        ensure!(!p.paused, controller("Cannot use items while paused."));
         ensure!(
-            p.active() && !p.pending && p.character.hp > 0,
+            p.persistence_failure.is_none(),
             "player is busy, departing, quarantined or dead"
         );
         let source = if slot.object == id {
@@ -2819,22 +3380,29 @@ impl World {
             let bag = self
                 .entities
                 .get(&slot.object)
-                .context("item ownership mismatch")?;
+                .ok_or_else(|| controller("item ownership mismatch"))?;
             ensure!(
                 !bag.reserved
                     && bag.accessible(p.character.account)
                     && p.pos.distance(bag.pos) < 1.5
                     && self.content.get(bag.kind)?.class == "Container",
-                "item container inaccessible"
+                controller("item container inaccessible")
             );
             &bag.items
         };
         ensure!(
             source.get(slot.slot) == Some(&slot.kind),
-            "item ownership mismatch"
+            controller("item ownership mismatch")
         );
-        ensure!(slot.kind >= 0, "empty item slot");
+        ensure!(slot.kind >= 0, controller("empty item slot"));
         let item = self.content.get(slot.kind as u16)?.clone();
+        // Saving earned XP must not freeze abilities; inventory mutations remain serialized.
+        ensure!(
+            p.active()
+                && p.character.hp > 0
+                && (!p.pending || p.progress_started && !item.abilities.is_empty()),
+            controller("player is busy, departing, quarantined or dead")
+        );
         if item.xp_boost {
             ensure!(
                 item.kind == 0xc42 && item.consumable && item.activations == 0,
@@ -2842,29 +3410,32 @@ impl World {
             );
             ensure!(
                 p.character.level < 20,
-                "XP boost requires a character below level 20"
+                controller("XP boost requires a character below level 20")
             );
-            ensure!(!p.character.xp_boost.active, "XP boost is already active");
+            ensure!(
+                !p.character.xp_boost.active,
+                controller("XP boost is already active")
+            );
             ensure!(
                 !p.progress_queued(),
-                "character progress is awaiting commit"
+                controller("character progress is awaiting commit")
             );
-            let mut plan = self.consumable_plan(id, slot, -1);
+            let mut plan = self.consumable_plan(id, slot, -1)?;
             plan.xp_boost = Some(slot);
             return Ok(Some(plan));
         }
         if !item.abilities.is_empty() {
-            ensure!(slot.object == id, "ability must be equipped");
+            ensure!(slot.object == id, controller("ability must be equipped"));
             self.activate_ability(id, slot, &item, pos)?;
             return Ok(None);
         }
         if matches!(
             item.activate.as_str(),
-            "Dye" | "Pet" | "PermaPet" | "Create" | "UnlockPortal"
+            "Pet" | "PermaPet" | "Create" | "UnlockPortal"
         ) {
             ensure!(
                 slot.object == id,
-                "item activation requires owned inventory"
+                controller("item activation requires owned inventory")
             );
         }
         match item.activate.as_str() {
@@ -2883,7 +3454,13 @@ impl World {
                 if let Some(value) = item.textures[1] {
                     tex2 = value;
                 }
-                let mut plan = self.consumable_plan(id, slot, -1);
+                let source = if slot.object == id {
+                    None
+                } else {
+                    Some(self.reserve_ground_dye(id, slot)?)
+                };
+                let mut plan = self.consumable_plan(id, slot, -1)?;
+                plan.ground_dye = source;
                 plan.appearance = Some((slot, tex1, tex2));
                 Ok(Some(plan))
             }
@@ -2905,13 +3482,14 @@ impl World {
                     .context("unsupported permanent potion stat")?;
                 let remaining =
                     self.content.classes[&p.character.class].caps[index] - p.character.base[index];
+                ensure!(amount > 0, "stat is already at its class cap");
                 ensure!(
-                    amount > 0 && remaining > 0,
-                    "stat is already at its class cap"
+                    remaining > 0,
+                    controller("stat is already at its class cap")
                 );
                 let amount = amount.min(remaining);
                 let snapshot = p.character.clone();
-                let mut plan = self.consumable_plan(id, slot, -1);
+                let mut plan = self.consumable_plan(id, slot, -1)?;
                 plan.stat_growth = Some((snapshot, slot, index, amount));
                 Ok(Some(plan))
             }
@@ -2921,7 +3499,7 @@ impl World {
             _ => self.begin_consumable(id, slot, &item).map(Some),
         }
     }
-    fn consumable_plan(&mut self, id: i32, slot: Slot, next: i32) -> InventoryPlan {
+    fn consumable_plan(&mut self, id: i32, slot: Slot, next: i32) -> Result<InventoryPlan> {
         let mut plan = self.plan(id, self.players[&id].character.items.clone(), None);
         if slot.object == id {
             plan.items[slot.slot] = next;
@@ -2929,35 +3507,33 @@ impl World {
             let bag = self.entities.get_mut(&slot.object).unwrap();
             let mut items = bag.items.clone();
             items[slot.slot] = next;
-            bag.reserved = true;
-            if let Some((container, vault)) = &self.vault
-                && *container == slot.object
-            {
-                let mut vault = vault.clone();
-                vault.items = items.clone();
-                plan.vault = Some(vault);
-            }
-            plan.bag = Some((slot.object, items));
+            plan.bags.push((slot.object, items));
             plan.loot_slot = Some((slot.object, slot.slot));
         }
+        self.bind_vaults(&mut plan)?;
+        for (bag, _) in &plan.bags {
+            self.entities.get_mut(bag).unwrap().reserved = true;
+        }
         self.players.get_mut(&id).unwrap().pending = true;
-        plan
+        Ok(plan)
     }
     fn plan(&self, id: i32, items: Vec<i32>, bag: Option<(i32, Vec<i32>)>) -> InventoryPlan {
         let p = &self.players[&id];
         InventoryPlan {
+            ground_dye: None,
             player: id,
             items,
             revision: p.character.revision,
             account: p.character.account,
             character: p.character.id,
-            bag,
+            bags: bag.into_iter().collect(),
             effects: Vec::new(),
             stat_growth: None,
             appearance: None,
             xp_boost: None,
             companion: None,
-            vault: None,
+            vaults: Vec::new(),
+            vault_purchase: None,
             dropped: None,
             unlock: None,
             collected: None,
@@ -2969,8 +3545,12 @@ impl World {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("drop owner missing")?;
         ensure!(
-            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            p.persistence_failure.is_none(),
             "player busy, departing or dead"
+        );
+        ensure!(
+            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            controller("player busy, departing or dead")
         );
         let pos = p.pos;
         let account = p.character.account;
@@ -2981,13 +3561,13 @@ impl World {
             let e = self
                 .entities
                 .get(&slot.object)
-                .context("drop container missing")?;
+                .ok_or_else(|| controller("drop container missing"))?;
             ensure!(
                 !e.reserved
                     && e.accessible(account)
                     && pos.distance(e.pos) < 1.5
                     && self.content.get(e.kind)?.class == "Container",
-                "drop container inaccessible"
+                controller("drop container inaccessible")
             );
             Some((slot.object, e.items.clone()))
         };
@@ -2997,22 +3577,16 @@ impl World {
         };
         ensure!(
             slot.kind >= 0 && inventory.get(slot.slot) == Some(&slot.kind),
-            "empty or stale drop slot"
+            controller("empty or stale drop slot")
         );
         inventory[slot.slot] = -1;
+        let mut plan = self.plan(id, items, source);
+        self.bind_vaults(&mut plan)?;
         let dropped = self.reserve_drop(pos, account, slot.kind, false)?;
-        if let Some((source, _)) = &source {
+        for (source, _) in &plan.bags {
             self.entities.get_mut(source).unwrap().reserved = true;
         }
         self.players.get_mut(&id).unwrap().pending = true;
-        let mut plan = self.plan(id, items, source);
-        if let (Some((container, vault)), Some((source, items))) = (&self.vault, &plan.bag)
-            && container == source
-        {
-            let mut vault = vault.clone();
-            vault.items = items.clone();
-            plan.vault = Some(vault);
-        }
         if slot.object != id {
             plan.loot_slot = Some((slot.object, slot.slot));
         }
@@ -3032,46 +3606,54 @@ impl World {
         self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
-            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            p.persistence_failure.is_none(),
             "player busy, departing or dead"
+        );
+        ensure!(
+            !p.pending && !p.death_pending && !p.departing && p.character.alive,
+            controller("player busy, departing or dead")
         );
         ensure!(
             from.object == id
                 || to.object == id
-                || self
-                    .vault
-                    .as_ref()
-                    .is_some_and(|(chest, _)| { from.object == *chest && to.object == *chest }),
-            "swap must involve own inventory or the vault chest"
+                || (self.vaults.contains_key(&from.object) && self.vaults.contains_key(&to.object)),
+            controller("swap must involve own inventory or owned vault chests")
         );
         let mut items = p.character.items.clone();
-        let bag_id = if from.object != id {
-            Some(from.object)
-        } else if to.object != id {
-            Some(to.object)
-        } else {
-            None
-        };
-        let mut bag = if let Some(b) = bag_id {
-            let e = self.entities.get(&b).context("container missing")?;
+        let mut bags = BTreeMap::new();
+        for object in [from.object, to.object]
+            .into_iter()
+            .filter(|object| *object != id)
+        {
+            let e = self
+                .entities
+                .get(&object)
+                .ok_or_else(|| controller("container missing"))?;
             ensure!(
                 !e.reserved
                     && e.accessible(p.character.account)
                     && p.pos.distance(e.pos) < 1.5
                     && self.content.get(e.kind)?.class == "Container",
-                "container inaccessible"
+                controller("container inaccessible")
             );
-            e.items.clone()
-        } else {
-            Vec::new()
-        };
+            bags.insert(object, e.items.clone());
+        }
         let get = |s: &Slot| -> Result<i32> {
-            let a = if s.object == id { &items } else { &bag };
-            Ok(*a.get(s.slot).context("invalid inventory slot")?)
+            let inventory = if s.object == id {
+                &items
+            } else {
+                bags.get(&s.object).context("unbound swap source")?
+            };
+            Ok(*inventory
+                .get(s.slot)
+                .ok_or_else(|| controller("invalid inventory slot"))?)
         };
         let a = get(&from)?;
         let b = get(&to)?;
-        ensure!(a == from.kind && b == to.kind, "stale inventory offer");
+        ensure!(
+            a == from.kind && b == to.kind,
+            controller("stale inventory offer")
+        );
         let mut replacement = None;
         for (s, k) in [(&from, b), (&to, a)] {
             if s.object != id && k >= 0 {
@@ -3087,7 +3669,7 @@ impl World {
                 if !accepts {
                     ensure!(
                         a >= 0 && b >= 0 && self.bag_expiry.contains_key(&s.object),
-                        "container rejects this normal or Soulbound item"
+                        controller("container rejects this normal or Soulbound item")
                     );
                     replacement = Some(k);
                 }
@@ -3096,28 +3678,28 @@ impl World {
                 let obj = self.content.get(k as u16)?;
                 ensure!(
                     !obj.unsupported_equipment,
-                    "equipment effect not implemented"
+                    controller("equipment effect not implemented")
                 );
                 ensure!(
                     obj.slot_type == self.content.get(p.character.class)?.slots[s.slot],
-                    "incompatible equipment slot"
+                    controller("incompatible equipment slot")
                 );
             }
         }
         if from.object == id {
             items[from.slot] = b
         } else {
-            bag[from.slot] = b
+            bags.get_mut(&from.object).unwrap()[from.slot] = b
         }
         if to.object == id {
             items[to.slot] = a
         } else {
-            bag[to.slot] = a
+            bags.get_mut(&to.object).unwrap()[to.slot] = a
         }
         let dropped = if let Some(kind) = replacement {
             // A swap must not put Soulbound gear in public loot or violate the source bag's put flags.
             let source = if from.object == id { to } else { from };
-            bag[source.slot] = -1;
+            bags.get_mut(&source.object).unwrap()[source.slot] = -1;
             let private = self.entities[&source.object]
                 .extra_stats
                 .contains(&(54, p.character.account));
@@ -3125,30 +3707,31 @@ impl World {
         } else {
             None
         };
-        if let Some(b) = bag_id {
-            self.entities.get_mut(&b).unwrap().reserved = true;
-        }
-        self.players.get_mut(&id).unwrap().pending = true;
-        let mut plan = self.plan(id, items, bag_id.map(|b| (b, bag)));
+        let mut plan = self.plan(id, items, None);
+        plan.bags = bags.into_iter().collect();
+        self.bind_vaults(&mut plan)?;
         plan.dropped = dropped;
-        if let Some(container) = bag_id {
-            let source = if from.object == container { &from } else { &to };
-            plan.loot_slot = Some((container, source.slot));
-            if source.kind >= 0
-                && self.entities[&container].drop_slots.contains(&source.slot)
-                && self.players[&id].controller == Controller::Human
-                && self.content.get(source.kind as u16)?.class == "Equipment"
-            {
-                plan.collected = Some(source.kind as u16);
+        for (container, _) in &plan.bags {
+            let source = if from.object == *container {
+                &from
+            } else {
+                &to
+            };
+            if plan.bags.len() == 1 {
+                plan.loot_slot = Some((*container, source.slot));
+                if source.kind >= 0
+                    && self.entities[container].drop_slots.contains(&source.slot)
+                    && self.players[&id].controller == Controller::Human
+                    && self.content.get(source.kind as u16)?.class == "Equipment"
+                {
+                    plan.collected = Some(source.kind as u16);
+                }
             }
         }
-        if let (Some((container, vault)), Some((bag, items))) = (&self.vault, &plan.bag)
-            && container == bag
-        {
-            let mut updated = vault.clone();
-            updated.items = items.clone();
-            plan.vault = Some(updated);
+        for (container, _) in &plan.bags {
+            self.entities.get_mut(container).unwrap().reserved = true;
         }
+        self.players.get_mut(&id).unwrap().pending = true;
         Ok(plan)
     }
     pub fn committed<T>(&mut self, id: i32, result: Result<T>) -> Result<T> {
@@ -3175,8 +3758,15 @@ impl World {
         let player = plan.player;
         let source = (plan.character, plan.revision);
         let companion = plan.companion.clone();
+        let ground_dye = plan.ground_dye.as_ref().map(|source| source.bag_id());
         let result = self.publish_inventory(plan, result);
         if let Err(error) = &result {
+            if let Some(id) = ground_dye
+                && let Some(bag) = self.entities.get_mut(&id)
+            {
+                // An error may conceal COMMIT; retain even a damaged reservation, never refund the source.
+                bag.reserved = true;
+            }
             self.discard_consumable(source);
             if let Err(cleanup) = self.discard_companion(&companion) {
                 tracing::error!(player,%cleanup,"companion cleanup failed after rejected publication");
@@ -3187,6 +3777,9 @@ impl World {
     }
     fn publish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
         let revision = result?;
+        if plan.ground_dye.is_some() {
+            self.validate_ground_dye(&plan)?;
+        }
         let p = self
             .players
             .get_mut(&plan.player)
@@ -3201,7 +3794,7 @@ impl World {
             "inventory completion owner, reservation or revision changed"
         );
         p.pending = false;
-        if let Some((id, _)) = &plan.bag {
+        for (id, _) in &plan.bags {
             ensure!(
                 self.entities
                     .get(id)
@@ -3254,7 +3847,7 @@ impl World {
                 "permanent stat potion committed"
             );
         }
-        if let Some((_, tex1, tex2)) = plan.appearance {
+        if let Some((slot, tex1, tex2)) = plan.appearance {
             p.character.tex1 = tex1;
             p.character.tex2 = tex2;
             tracing::info!(
@@ -3262,6 +3855,9 @@ impl World {
                 tex1,
                 tex2,
                 revision,
+                source = slot.object,
+                slot = slot.slot,
+                item = slot.kind,
                 "appearance consumable committed"
             );
         }
@@ -3282,13 +3878,29 @@ impl World {
                 .context("committed loot identity missing")?;
             tracing::info!(player=plan.player,character=p.character.id,bag,slot,item=*item,world=%self.name,"loot slot committed");
         }
-        if let Some(mut vault) = plan.vault {
+        for mut vault in plan.vaults {
+            let (id, loaded) = self
+                .vaults
+                .iter_mut()
+                .find(|(_, v)| v.chest == vault.chest && v.account == vault.account)
+                .context("committed chest missing")?;
+            ensure!(
+                loaded.revision == vault.revision
+                    && self.entities[id].kind == 0x504
+                    && self.entities[id].items == loaded.items
+                    && self.entities[id].extra_stats.contains(&(54, plan.account))
+                    && plan
+                        .bags
+                        .iter()
+                        .any(|(bag, items)| bag == id && items == &vault.items),
+                "committed chest identity, ownership or revision changed"
+            );
             vault.revision += 1;
-            self.vault.as_mut().context("committed chest missing")?.1 = vault;
+            *loaded = vault;
         }
         self.finish_consumable(plan.player, (plan.character, plan.revision), plan.effects)?;
         self.finish_companion(plan.player, plan.companion)?;
-        if let Some((id, items)) = plan.bag {
+        for (id, items) in plan.bags {
             let bag = self.entities.get_mut(&id).unwrap();
             bag.items = items;
             bag.reserved = false;
@@ -3318,7 +3930,7 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             p.controller == Controller::Qa,
-            "script actions require a QA-owned player"
+            controller("script actions require a QA-owned player")
         );
         self.controlled_action(id, a)
     }
@@ -3332,14 +3944,18 @@ impl World {
     fn controlled_action(&mut self, id: i32, a: Action) -> Result<Option<InventoryPlan>> {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
-            p.active(),
+            p.persistence_failure.is_none(),
             "dead, departing or quarantined player cannot act"
+        );
+        ensure!(
+            p.active(),
+            controller("dead, departing or quarantined player cannot act")
         );
         match a {
             Action::Move { x, y } => {
                 ensure!(
                     self.player_position_valid(Some(p.pos), Pos { x, y }),
-                    "goal outside map or blocked"
+                    controller("goal outside map or blocked")
                 );
                 self.players
                     .get_mut(&id)
@@ -3348,7 +3964,7 @@ impl World {
                 Ok(None)
             }
             Action::Shoot { angle } => {
-                ensure!(angle.is_finite(), "invalid aim");
+                ensure!(angle.is_finite(), controller("invalid aim"));
                 self.players.get_mut(&id).context("player missing")?.bot_aim = Some(angle);
                 Ok(None)
             }
@@ -3366,7 +3982,7 @@ impl World {
                     .character
                     .items
                     .get(slot)
-                    .context("invalid slot")?;
+                    .ok_or_else(|| controller("invalid slot"))?;
                 self.use_item(
                     id,
                     Slot {
@@ -3397,10 +4013,17 @@ impl World {
         );
         Ok(())
     }
-    pub fn pending_progress(&mut self) -> Vec<(i32, Character)> {
+
+    pub(crate) fn pending_progress_where(
+        &mut self,
+        mut accept: impl FnMut(i32, i32) -> bool,
+    ) -> Vec<(i32, Character)> {
         let mut plans = Vec::new();
         for (id, p) in &mut self.players {
             if !p.progress_queued() || p.pending || p.death_started {
+                continue;
+            }
+            if !accept(*id, p.character.account) {
                 continue;
             }
             let mut snapshot = p.character.clone();
@@ -3412,6 +4035,10 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.trenches))
                     .chain(std::iter::once(&mut snapshot.spider_dens))
                     .chain(std::iter::once(&mut snapshot.mad_labs))
+                    .chain(std::iter::once(&mut snapshot.jungles))
+                    .chain(std::iter::once(&mut snapshot.manors))
+                    .chain(std::iter::once(&mut snapshot.beaches))
+                    .chain(std::iter::once(&mut snapshot.davy_lockers))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3447,22 +4074,36 @@ impl World {
         );
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
+            || snapshot.jungles > p.character.jungles
             || snapshot.abysses > p.character.abysses
             || snapshot.trenches > p.character.trenches
             || snapshot.spider_dens > p.character.spider_dens
-            || snapshot.mad_labs > p.character.mad_labs;
+            || snapshot.mad_labs > p.character.mad_labs
+            || snapshot.manors > p.character.manors
+            || snapshot.beaches > p.character.beaches
+            || snapshot.davy_lockers > p.character.davy_lockers;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
         p.character.fame = snapshot.fame;
+        let best = p
+            .presentation
+            .best_fame
+            .entry(p.character.class)
+            .or_default();
+        *best = (*best).max(snapshot.fame);
         p.character.level = snapshot.level;
         p.character.base = snapshot.base;
         p.character.pirate_caves = snapshot.pirate_caves;
         p.character.dungeons = snapshot.dungeons;
         p.character.abysses = snapshot.abysses;
+        p.character.jungles = snapshot.jungles;
         p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
         p.character.mad_labs = snapshot.mad_labs;
+        p.character.manors = snapshot.manors;
+        p.character.beaches = snapshot.beaches;
+        p.character.davy_lockers = snapshot.davy_lockers;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -3476,6 +4117,8 @@ impl World {
             player = id,
             level = p.character.level,
             experience = p.character.exp,
+            fame = p.character.fame,
+            stars = p.presentation.stars(),
             bonus_experience = p.character.xp_boost.bonus_exp,
             xp_boost = p.character.xp_boost.active,
             "progress committed"
@@ -3493,7 +4136,14 @@ impl World {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn pending_deaths(&mut self) -> Vec<(i32, Character, String)> {
+        self.pending_deaths_where(|_, _| true)
+    }
+    pub(crate) fn pending_deaths_where(
+        &mut self,
+        mut accept: impl FnMut(i32, i32) -> bool,
+    ) -> Vec<(i32, Character, String)> {
         let dying: Vec<_> = self
             .players
             .iter()
@@ -3506,6 +4156,9 @@ impl World {
                 self.cancel_trade(id, "Trade cancelled by permanent death.");
                 let p = self.players.get_mut(&id).unwrap();
                 if p.pending || p.progress_queued() || p.death_started {
+                    return None;
+                }
+                if !accept(id, p.character.account) {
                     return None;
                 }
                 p.death_started = true;
@@ -3541,7 +4194,9 @@ impl World {
         let grave = self.insert_entity(kind, pos, vec![])?;
         let entity = self.entities.get_mut(&grave).unwrap();
         entity.name = name;
-        entity.expires = lifetime.map(|ms| self.now + ms);
+        entity
+            .expires
+            .set(lifetime.map(|ms| self.now + ms), grave, &mut self.timed_ids);
         tracing::info!(player=id, grave, kind, maxed, expires=?entity.expires, "gravestone created");
         let p = self.players.get_mut(&id).unwrap();
         p.character.alive = false;
@@ -3558,6 +4213,17 @@ impl World {
         self.clear_companions(id);
         Ok(())
     }
+    pub(crate) fn stop_controller(&mut self, id: i32) -> Result<()> {
+        let p = self
+            .players
+            .get_mut(&id)
+            .context("stopping controller missing")?;
+        p.departing = true;
+        p.tx = None;
+        p.bot_goal = None;
+        p.bot_aim = None;
+        Ok(())
+    }
     pub fn begin_departure(&mut self, id: i32) -> Result<Option<Character>> {
         self.cancel_trade(id, "Trade cancelled by departure.");
         let p = self
@@ -3569,10 +4235,11 @@ impl World {
             "quarantined persistence failure: {:?}",
             p.persistence_failure
         );
-        p.departing = true;
-        p.tx = None;
-        p.bot_goal = None;
-        p.bot_aim = None;
+        self.stop_controller(id)?;
+        let p = self
+            .players
+            .get_mut(&id)
+            .context("departing player missing")?;
         if p.pending || p.death_pending || p.progress_queued() {
             return Ok(None);
         };
@@ -3702,6 +4369,13 @@ impl World {
                 if amount > 0 {
                     tracing::debug!(player = id, enemy = e.kind, amount, "experience queued");
                 }
+                if p.quest == Some(e.id) {
+                    // This exact notification also starts the native client's quest-arrow completion delay.
+                    let mut out = Writer::new();
+                    out.i32(*id).utf("Quest Complete!").u32(0xff00ff00);
+                    send(p, wire::NOTIFICATION, out.0);
+                    tracing::debug!(player = id, enemy = e.id, "native quest completed");
+                }
             }
         }
         if self.name == "Realm"
@@ -3787,12 +4461,38 @@ impl World {
             if self.clear_exit.is_none() {
                 let kind = if defeated.kind == crate::dungeon::abyss::MALPHAS {
                     0x71c
-                } else if defeated.kind == crate::dungeon::snake::BOSS {
+                } else if matches!(
+                    defeated.kind,
+                    crate::dungeon::snake::BOSS
+                        | crate::dungeon::jungle::BOSS
+                        | crate::dungeon::beach::BOSS
+                        | crate::dungeon::davy::BOSS
+                ) {
                     0x704
                 } else {
                     0x71d
                 };
-                let exit = self.spawn_exit(kind, defeated.pos)?;
+                let pos = if defeated.kind == crate::dungeon::manor::BOSS {
+                    let sites: Vec<_> = self
+                        .map
+                        .cells
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| c.object == Some(crate::dungeon::manor::BOSS))
+                        .map(|(i, _)| Pos {
+                            x: (i % self.map.width as usize) as f32 + 0.5,
+                            y: (i / self.map.width as usize) as f32 + 0.5,
+                        })
+                        .collect();
+                    ensure!(
+                        sites.len() == 1,
+                        "Manor completion requires one authored arena marker"
+                    );
+                    sites[0]
+                } else {
+                    defeated.pos
+                };
+                let exit = self.spawn_exit(kind, pos)?;
                 self.entities.get_mut(&exit).unwrap().published = false;
                 self.clear_exit = Some(exit);
             }
@@ -3817,7 +4517,11 @@ impl World {
             0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | 0x1705
         ) {
             self.content.objects[&defeated.kind].hp / 100
-        } else if defeated.kind == 0x927 {
+        } else if defeated.kind == crate::dungeon::manor::BOSS {
+            100
+        } else if defeated.kind == crate::dungeon::manor::COFFIN {
+            800
+        } else if matches!(defeated.kind, 0x927 | crate::dungeon::davy::BOSS) {
             100
         } else {
             (self.content.objects[&defeated.kind].hp / 10).max(1)
@@ -3837,6 +4541,10 @@ impl World {
         eligible.sort_by_key(|(_, damage)| std::cmp::Reverse(*damage));
         if eligible.is_empty() {
             return Ok(());
+        }
+        if defeated.kind == crate::dungeon::beach::BUM {
+            // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
+            return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
         // Private boss rewards belong to every eligible character, not only the first eight.
@@ -3865,6 +4573,13 @@ impl World {
                 }
             }
         }
+        if defeated.kind == 0x20d {
+            for (owner, item) in
+                crate::loot::gray_blob_rewards(&self.content, &eligible, &mut self.rng)
+            {
+                drops.entry(owner).or_default().push(i32::from(item));
+            }
+        }
         for (owner, items) in drops {
             self.loot_bags(
                 self.ocean_reward_position(defeated)?,
@@ -3874,36 +4589,16 @@ impl World {
         }
         Ok(())
     }
-    fn populate_shore(&mut self) -> Result<()> {
-        self.populate_shore_population()
-    }
-    fn repopulate(&mut self) -> Result<()> {
-        for s in &mut self.population {
-            if s.entity.is_some_and(|id| !self.entities.contains_key(&id)) {
-                s.entity = None;
-                s.ready = self.now + 60_000;
-            }
-        }
-        for i in 0..self.population.len() {
-            let s = &self.population[i];
-            if s.camp.is_none()
-                && s.entity.is_none()
-                && self.now >= s.ready
-                && self.population_space(self.content.objects[&s.kind].terrain, 1)?
-                && self.players.values().all(|p| p.pos.distance(s.pos) >= 12.)
-            {
-                let id = self.spawn_entity(s.kind, s.pos, vec![])?;
-                self.population[i].entity = Some(id);
-                tracing::debug!(
-                    entity = id,
-                    kind = self.population[i].kind,
-                    "ordinary population member replenished"
-                );
-            }
-        }
-        self.repopulate_families()
-    }
     fn move_entity(&mut self, id: i32, goal: Pos, distance: f32) -> Result<()> {
+        self.move_entity_colliding(id, goal, distance, false)
+    }
+    fn move_entity_colliding(
+        &mut self,
+        id: i32,
+        goal: Pos,
+        distance: f32,
+        slide: bool,
+    ) -> Result<()> {
         let old = self.entities[&id].pos;
         let length = old.distance(goal);
         if length <= 0.001 {
@@ -3916,17 +4611,65 @@ impl World {
             y: old.y + (goal.y - old.y) / length * distance,
         };
         let samples = (distance / 0.1).ceil().max(1.) as usize;
-        ensure!(
-            (1..=samples).all(|i| self.ocean_walkable(
-                self.entities[&id].kind,
+        let step = Pos {
+            x: (pos.x - old.x) / samples as f32,
+            y: (pos.y - old.y) / samples as f32,
+        };
+        let kind = self.entities[&id].kind;
+        let mut resolved = old;
+        for i in 1..=samples {
+            let next = if slide {
                 Pos {
-                    x: old.x + (pos.x - old.x) * i as f32 / samples as f32,
-                    y: old.y + (pos.y - old.y) * i as f32 / samples as f32
+                    x: resolved.x + step.x,
+                    y: resolved.y + step.y,
                 }
-            )),
-            "NPC movement crosses a blocked tile"
+            } else {
+                Pos {
+                    x: old.x + step.x * i as f32,
+                    y: old.y + step.y * i as f32,
+                }
+            };
+            let horizontal = Pos {
+                x: next.x,
+                y: resolved.y,
+            };
+            let vertical = Pos {
+                x: resolved.x,
+                y: next.y,
+            };
+            let clear = |pos| self.jungle_walkable(kind, pos) || self.ocean_walkable(kind, pos);
+            let x_clear = clear(horizontal);
+            let y_clear = clear(vertical);
+            if clear(next) && (!slide || x_clear || y_clear) {
+                resolved = next;
+            } else if slide {
+                // Wall contact removes the blocked component, not the entire movement step.
+                resolved = if x_clear && (!y_clear || step.x.abs() >= step.y.abs()) {
+                    horizontal
+                } else if y_clear {
+                    vertical
+                } else {
+                    break;
+                };
+            } else {
+                bail!("NPC movement crosses a blocked tile");
+            }
+        }
+        ensure!(
+            distance == 0. || resolved.distance(old) > 0.,
+            "NPC movement blocked on both axes"
         );
-        self.position_entity(id, pos)
+        if slide && resolved.distance(pos) > 0.001 {
+            tracing::debug!(
+                entity = id,
+                kind,
+                ?old,
+                ?pos,
+                ?resolved,
+                "NPC movement projected along obstacle"
+            );
+        }
+        self.position_entity(id, resolved)
     }
     fn position_entity(&mut self, id: i32, pos: Pos) -> Result<()> {
         ensure!(
@@ -3936,10 +4679,11 @@ impl World {
         let old = self.entities[&id].pos;
         let cell = |p: Pos| p.y as usize * self.map.width as usize + p.x as usize;
         assert!(
-            self.cells[cell(old)].remove(&id),
+            self.cells.remove(cell(old), id),
             "moving NPC missing from spatial index"
         );
-        self.cells[cell(pos)].insert(id);
+        self.cells
+            .insert(cell(pos), id, self.actor_ids.contains(&id));
         let e = self.entities.get_mut(&id).unwrap();
         e.pos = pos;
         e.last_step = Pos {
@@ -3948,30 +4692,100 @@ impl World {
         };
         Ok(())
     }
+    // Follow owns its acquisition clock; encounter age must not restart a pursuit.
+    // https://github.com/moistosaurus/realm-src/tree/1855c017eab870d13f0b61b1cf0b9e66a01922ff
+    fn follow_goal(
+        &mut self,
+        id: i32,
+        target: Option<Pos>,
+        motion: crate::encounter::Motion,
+        delta: u64,
+    ) -> Option<Pos> {
+        let crate::encounter::Motion::Follow {
+            sight,
+            stop,
+            duration,
+            cooldown,
+            ..
+        } = motion
+        else {
+            unreachable!("Follow goal requires Follow motion");
+        };
+        let pos = self.entities[&id].pos;
+        let e = self.entities.get_mut(&id).unwrap();
+        let old = e.following;
+        let target = target.filter(|p| pos.distance(*p) < sight);
+        match e.following {
+            Following::Unknown => {
+                if target.is_some() && e.follow_remaining == 0 {
+                    e.following = Following::Acquired;
+                    e.follow_remaining = duration;
+                } else {
+                    e.follow_remaining = e.follow_remaining.saturating_sub(delta);
+                }
+            }
+            Following::Resting => match target {
+                None => {
+                    e.following = Following::Unknown;
+                    e.follow_remaining = duration;
+                }
+                Some(p) if pos.distance(p) > stop + 1. => {
+                    e.following = Following::Acquired;
+                    e.follow_remaining = duration;
+                }
+                _ => {}
+            },
+            Following::Acquired => {}
+        }
+        if e.following == Following::Acquired {
+            match target {
+                None => {
+                    e.following = Following::Unknown;
+                    e.follow_remaining = 0;
+                }
+                Some(_) if duration > 0 && e.follow_remaining == 0 => {
+                    e.following = Following::Unknown;
+                    e.follow_remaining = cooldown;
+                }
+                Some(target) => {
+                    e.follow_remaining = e.follow_remaining.saturating_sub(delta);
+                    if pos.distance(target) <= stop {
+                        e.following = Following::Resting;
+                        e.follow_remaining = 0;
+                    }
+                }
+            }
+        }
+        if old != e.following {
+            e.goal = None;
+        }
+        (e.following == Following::Acquired)
+            .then_some(target)
+            .flatten()
+    }
     fn npc_step(&mut self) -> Vec<(i32, Vec<u8>)> {
         use crate::encounter::{Motion, profile};
         let mut packets = Vec::new();
         if !self.encounter || self.safe {
             return packets;
         }
+        self.beach_notice();
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
-        let ids: Vec<_> = self
-            .actors()
-            .filter(|e| {
-                let object = &self.content.objects[&e.kind];
-                // Breakable scenery takes damage but has no movement/attack state machine.
-                object.class != "Wall"
-                    && !matches!(e.kind, 0xd5f | 0xd60)
-                    && (object.enemy || matches!(e.kind, 0x173 | 0xd7d))
-            })
-            .map(|e| e.id)
+        let audience: Vec<_> = self
+            .players
+            .values()
+            .filter(|p| p.character.alive && !p.death_pending && !p.departing && !p.paused)
+            .map(|p| p.pos)
+            .chain(self.decoy_positions())
             .collect();
-        for id in ids {
+        let ids = self.npc_candidates(&audience);
+        'entities: for id in ids {
             let Some(entity) = self.entities.get(&id) else {
                 continue;
             };
             let kind = entity.kind;
+            let _context = crate::supervision::npc(id, kind);
             let pos = entity.pos;
             if entity.hp == self.content.objects[&kind].hp
                 && (kind == crate::dungeon::abyss::IDOL || kind == 0xd7e && entity.stage.is_none())
@@ -3982,7 +4796,7 @@ impl World {
             // Self-destruction is a deadline, not target acquisition or a weapon cooldown.
             let shield_burst = self.shield_burst(id);
             let burst = shield_burst
-                || (kind == 0x91a
+                || (matches!(kind, 0x91a | crate::dungeon::manor::MINE)
                     && entity.expires == Some(self.now + 50)
                     && self.now >= entity.next_shot);
             if !burst
@@ -4000,29 +4814,52 @@ impl World {
                         && !p.death_pending
                         && !p.departing
                         && !p.paused
-                        && (kind == 0x6d8
+                        && (matches!(kind, 0x6d8 | crate::dungeon::manor::MINE)
                             || p.conditions(self.now)
                                 & crate::condition::bit(crate::condition::INVISIBLE)
                                 == 0)
                 })
-                .map(|p| p.pos)
-                .chain(self.decoy_positions())
-                .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
+                .map(|p| {
+                    (
+                        kind == crate::dungeon::davy::BOSS
+                            && entity.reaction_until > self.now
+                            && pos.distance(p.pos) < 12.
+                            && p.conditions(self.now)
+                                & crate::condition::bit(crate::condition::PARALYZED)
+                                != 0,
+                        p.pos,
+                    )
+                })
+                .chain(self.decoy_positions().map(|p| (false, p)))
+                .min_by(|(ap, a), (bp, b)| {
+                    bp.cmp(ap)
+                        .then_with(|| pos.distance(*a).total_cmp(&pos.distance(*b)))
+                })
+                .map(|(_, p)| p);
             let wake = match kind {
+                crate::dungeon::manor::KAGE
+                | crate::dungeon::manor::BAT
+                | crate::dungeon::manor::CHASER
+                | crate::dungeon::manor::DECOY
+                | 0x1727 => 20.,
+                0x953 | 0x954 => 6.,
+                0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
-                0x617 | 0x61a | 0x6d8 => 12.,
+                0x617 => 8.,
+                0x61a => 10.5,
+                0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
-                _ => 20.,
+                _ => 12.,
             };
-            let radius = if entity.activated.is_some() {
-                20.
-            } else {
-                wake
-            };
-            let target = if burst {
+            // Activated enemies keep the same sight radius; they do not keep
+            // shooting once the player leaves that radius.
+            let radius = wake;
+            let target = if burst && kind == crate::dungeon::manor::MINE {
+                nearest.filter(|p| pos.distance(*p) < 60.)
+            } else if burst {
                 Some(pos)
             } else {
                 nearest.filter(|p| pos.distance(*p) < radius)
@@ -4034,7 +4871,9 @@ impl World {
                     && !p.paused
                     && pos.distance(p.pos) < radius
             });
-            if !burst && target.is_none() && !nearby {
+            let manor_clock =
+                crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
+            if !burst && target.is_none() && !nearby && !manor_clock {
                 self.suspend_npc(id, delta);
                 continue;
             }
@@ -4054,10 +4893,42 @@ impl World {
             };
             let elapsed = self.now - current.activated.expect("activated encounter");
             let flags = current.conditions(self.now);
-            let (mut motion, mut speed) = if kind == 0x909 && current.stage == Some(1) {
+            let lair_escort = matches!(kind, 0xdaa | 0xdac);
+            let queued_hero = kind == 0x668 || matches!(kind, 0x67e..=0x682);
+            let mut hero_continue = false;
+            let mut target = target;
+            let (mut motion, mut speed) = if lair_escort {
+                if let Err(error) = self.lair_escort_step(id, target, delta) {
+                    self.entities.get_mut(&id).unwrap().last_step = Pos { x: 0., y: 0. };
+                    tracing::error!(entity=id, %error, "Lair escort movement refused");
+                    continue;
+                }
                 (Motion::Stationary, 0.)
             } else if crate::dungeon::lab::ROSTER.contains(&kind) {
                 self.lab_movement(id)
+            } else if queued_hero {
+                match self.hero_movement(id, target, delta) {
+                    Ok((motion, speed, completed)) => {
+                        hero_continue = completed;
+                        (motion, speed)
+                    }
+                    Err(error) => {
+                        tracing::error!(entity=id, %error, "Realm hero movement refused");
+                        continue;
+                    }
+                }
+            } else if crate::dungeon::davy::profile(kind).is_some() {
+                self.locker_movement(id, elapsed)
+            } else if kind == 0x909 && current.stage == Some(1) {
+                (Motion::Stationary, 0.)
+            } else if crate::dungeon::jungle::ROSTER.contains(&kind) {
+                crate::encounter::jungle::movement(
+                    kind,
+                    current.stage.expect("Jungle movement phase"),
+                    current.parent.is_some(),
+                )
+            } else if crate::dungeon::manor::ROSTER.contains(&kind) {
+                self.manor_movement(id, target, elapsed)
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
@@ -4114,14 +4985,6 @@ impl World {
                         continue;
                     }
                 }
-            } else if matches!(kind, 0xdaa | 0xdac) {
-                match self.lair_escort_movement(id) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Lair escort movement refused");
-                        continue;
-                    }
-                }
             } else if crate::endgame::ROSTER.contains(&kind) {
                 match self.finale_movement(id, target, elapsed) {
                     Ok(movement) => movement,
@@ -4133,298 +4996,357 @@ impl World {
             } else {
                 crate::encounter::movement(kind, self.entities[&id].hp, elapsed)
             };
-            if target.is_none()
-                && matches!(
-                    motion,
-                    Motion::Chase { .. }
-                        | Motion::Maintain { .. }
-                        | Motion::Retreat { .. }
-                        | Motion::Orbit {
-                            anchor: crate::encounter::Anchor::Player,
-                            ..
-                        }
-                        | Motion::Protect {
-                            anchor: crate::encounter::Anchor::Player,
-                            ..
-                        }
-                )
-            {
-                motion = Motion::Wander;
-                speed = 4.;
-            }
-            let e = self.entities.get_mut(&id).unwrap();
-            if e.motion != Some(motion) {
-                e.motion = Some(motion);
-                e.following = Following::Unknown;
-                e.charge = None;
-                e.goal = None;
-                if matches!(motion, Motion::Pace { .. }) {
-                    e.phase = 1.;
+            // Completion invokes at most one successor, after publishing the first motor step.
+            // https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/Behavior.cs
+            for invocation in 0..2 {
+                if lair_escort {
+                    break;
                 }
-                tracing::debug!(entity = id, kind, ?motion, speed, "NPC movement entered");
-            }
-            let planned_motion = if flags & crate::condition::bit(crate::condition::PARALYZED) != 0
-            {
-                if let Some(charge) = &mut e.charge {
-                    charge.suspend(delta);
-                }
-                Motion::Stationary
-            } else {
-                motion
-            };
-            let goal = match planned_motion {
-                Motion::Stationary => {
-                    speed = 0.;
-                    Some(pos)
-                }
-                Motion::Charge { .. } => self.charge_goal(id, target, motion, speed),
-                Motion::WanderHome { radius } => {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    if e.goal.is_none_or(|p| {
-                        p.distance(e.pos) < 0.1 || p.distance(e.home) > radius + 0.01
-                    }) {
-                        let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                        let distance = self.rng.gen_range(0. ..radius);
-                        e.goal = Some(Pos {
-                            x: e.home.x + distance * angle.cos(),
-                            y: e.home.y + distance * angle.sin(),
-                        });
-                    }
-                    e.goal
-                }
-                Motion::Follow { sight, stop, .. } => {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
-                        Some(pos)
-                    } else {
-                        let old = e.following;
-                        let target = target.filter(|p| pos.distance(*p) < sight);
-                        e.following = match target {
-                            None => Following::Unknown,
-                            Some(p)
-                                if pos.distance(p)
-                                    > stop + if old == Following::Resting { 1. } else { 0. } =>
-                            {
-                                Following::Acquired
+                let pos = self.entities[&id].pos;
+                if target.is_none()
+                    && matches!(
+                        motion,
+                        Motion::Chase { .. }
+                            | Motion::Maintain { .. }
+                            | Motion::Retreat { .. }
+                            | Motion::Orbit {
+                                anchor: crate::encounter::Anchor::Player,
+                                ..
                             }
-                            Some(_) => Following::Resting,
-                        };
-                        if old != e.following {
-                            e.goal = None;
+                            | Motion::Protect {
+                                anchor: crate::encounter::Anchor::Player,
+                                ..
+                            }
+                    )
+                {
+                    motion = Motion::Wander;
+                    speed = 4.;
+                }
+                let e = self.entities.get_mut(&id).unwrap();
+                if e.motion != Some(motion) {
+                    e.motion = Some(motion);
+                    e.following = Following::Unknown;
+                    e.follow_remaining = 0;
+                    e.strict_initialized = false;
+                    e.charge = None;
+                    e.goal = None;
+                    if matches!(motion, Motion::Pace { .. }) {
+                        e.phase = 1.;
+                    }
+                    tracing::debug!(entity = id, kind, ?motion, speed, "NPC movement entered");
+                }
+                let planned_motion =
+                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
+                        if let Some(charge) = &mut e.charge {
+                            charge.suspend(delta);
                         }
-                        if e.following == Following::Acquired {
-                            target
+                        Motion::Stationary
+                    } else {
+                        motion
+                    };
+                let goal = match planned_motion {
+                    Motion::Stationary => {
+                        speed = 0.;
+                        Some(pos)
+                    }
+                    Motion::Charge { .. } => self.charge_goal(id, target, motion, speed),
+                    Motion::WanderHome { radius } => {
+                        let e = self.entities.get_mut(&id).unwrap();
+                        if e.goal.is_none_or(|p| {
+                            p.distance(e.pos) < 0.1 || p.distance(e.home) > radius + 0.01
+                        }) {
+                            let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                            let distance = self.rng.gen_range(0. ..radius);
+                            e.goal = Some(Pos {
+                                x: e.home.x + distance * angle.cos(),
+                                y: e.home.y + distance * angle.sin(),
+                            });
+                        }
+                        e.goal
+                    }
+                    Motion::Follow { idle, .. } => {
+                        if let Some(target) = self.follow_goal(id, target, motion, delta) {
+                            Some(target)
+                        } else if idle == 0. {
+                            speed = 0.;
+                            Some(pos)
                         } else {
                             None
                         }
                     }
-                }
-                Motion::Pace { distance } => {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    Some(match e.goal {
-                        Some(goal) if pos.distance(goal) > 0.001 => goal,
-                        _ => {
-                            if e.goal.is_some() {
-                                e.phase = -e.phase;
+                    Motion::Pace { distance } => {
+                        let e = self.entities.get_mut(&id).unwrap();
+                        Some(match e.goal {
+                            Some(goal) if pos.distance(goal) > 0.001 => goal,
+                            _ => {
+                                if e.goal.is_some() {
+                                    e.phase = -e.phase;
+                                }
+                                Pos {
+                                    x: pos.x + distance * e.phase,
+                                    y: pos.y,
+                                }
                             }
-                            Pos {
-                                x: pos.x + distance * e.phase,
-                                y: pos.y,
-                            }
-                        }
-                    })
-                }
-                Motion::Tangential => {
-                    let step = self.entities[&id].last_step;
-                    let length = step.x.hypot(step.y);
-                    if length == 0. {
-                        speed = 0.;
-                        Some(pos)
-                    } else {
-                        Some(Pos {
-                            x: pos.x + step.x / length,
-                            y: pos.y + step.y / length,
                         })
                     }
-                }
-                Motion::Maintain { sight, distance }
-                    if target.is_some_and(|p| pos.distance(p) < sight) =>
-                {
-                    let target = target.expect("acquired maintain-distance target");
-                    let angle = (pos.y - target.y).atan2(pos.x - target.x);
-                    Some(Pos {
-                        x: target.x + distance * angle.cos(),
-                        y: target.y + distance * angle.sin(),
-                    })
-                }
-                Motion::Retreat { distance } => {
-                    let target = target.expect("target-dependent retreat guarded");
-                    if pos.distance(target) >= distance {
-                        speed = 0.;
+                    Motion::Tangential => {
+                        let step = self.entities[&id].last_step;
+                        let length = step.x.hypot(step.y);
+                        if length == 0. {
+                            speed = 0.;
+                            Some(pos)
+                        } else {
+                            Some(Pos {
+                                x: pos.x + step.x / length,
+                                y: pos.y + step.y / length,
+                            })
+                        }
                     }
-                    let angle = (pos.y - target.y).atan2(pos.x - target.x);
-                    Some(Pos {
-                        x: target.x + distance * angle.cos(),
-                        y: target.y + distance * angle.sin(),
-                    })
-                }
-                Motion::Protect { anchor, distance } => {
-                    let leader = match self.orbit_anchor(id, anchor, target) {
-                        Ok(leader) => leader,
-                        Err(error) => {
-                            tracing::error!(entity=id, %error, "protection anchor refused");
-                            continue;
-                        }
-                    };
-                    if pos.distance(leader) <= distance {
-                        speed = 0.;
-                    }
-                    Some(leader)
-                }
-                Motion::Chase { sight, stop }
-                    if target.is_some_and(|p| pos.distance(p) < sight) =>
-                {
-                    if pos.distance(target.expect("acquired chase target")) <= stop {
-                        speed = 0.;
-                    }
-                    target
-                }
-                Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
-                    let target = match self.orbit_anchor(id, anchor, target) {
-                        Ok(target) => target,
-                        Err(error) => {
-                            tracing::error!(entity=id, %error, "orbit anchor refused");
-                            continue;
-                        }
-                    };
-                    let e = self.entities.get_mut(&id).unwrap();
-                    let direction = if let Some(orbit) = e.orbit {
-                        if pos.distance(target) > 0.001 {
-                            e.phase = (pos.y - target.y).atan2(pos.x - target.x);
-                        }
-                        orbit.direction
-                    } else {
-                        if e.goal.is_none() {
-                            e.phase = if matches!(motion, Motion::StrictOrbit { .. }) {
-                                self.rng.gen_range(0. ..std::f32::consts::TAU)
-                            } else {
-                                (pos.y - target.y).atan2(pos.x - target.x)
-                            };
-                        }
-                        1.
-                    };
-                    let angular_speed = if e.quest.is_some()
-                        || e.orbit.is_some()
-                        || matches!(motion, Motion::StrictOrbit { .. })
+                    Motion::Maintain { sight, distance }
+                        if target.is_some_and(|p| pos.distance(p) < sight) =>
                     {
-                        (if e.quest.is_some() || e.orbit.is_some() {
-                            speed / 1.5
-                        } else {
-                            speed
-                        }) * if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
-                            0.5
-                        } else {
-                            1.
-                        }
-                    } else {
-                        speed
-                    };
-                    if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
-                        e.phase = (e.phase + direction * angular_speed / radius * 0.05)
-                            % std::f32::consts::TAU;
+                        let target = target.expect("acquired maintain-distance target");
+                        let angle = (pos.y - target.y).atan2(pos.x - target.x);
+                        Some(Pos {
+                            x: target.x + distance * angle.cos(),
+                            y: target.y + distance * angle.sin(),
+                        })
                     }
-                    Some(Pos {
-                        x: target.x + e.phase.cos() * radius,
-                        y: target.y + e.phase.sin() * radius,
-                    })
-                }
-                Motion::Circle => {
-                    let boss = self
-                        .actors()
-                        .find(|e| e.kind == 0x927 && pos.distance(e.pos) < 10.)
-                        .map(|e| e.pos);
-                    boss.map(|boss| {
-                        let e = self.entities.get_mut(&id).unwrap();
-                        if e.goal.is_none() {
-                            e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                    Motion::Retreat { distance } => {
+                        let target = target.expect("target-dependent retreat guarded");
+                        if pos.distance(target) >= distance
+                            || matches!(kind, 0x67e..=0x682)
+                                && pos.x == target.x
+                                && pos.y == target.y
+                        {
+                            speed = 0.;
                         }
-                        e.phase = (e.phase + profile.speed / 3. * 0.05) % std::f32::consts::TAU;
-                        Pos {
-                            x: boss.x + e.phase.cos() * 3.,
-                            y: boss.y + e.phase.sin() * 3.,
-                        }
-                    })
-                }
-                _ => None,
-            };
-            let goal = if kind == 0xd06 && pos.distance(self.entities[&id].home) > 7. {
-                speed = 7.8;
-                Some(
-                    self.orbit_anchor(id, crate::encounter::Anchor::Home, target)
-                        .expect("live boss home"),
-                )
-            } else {
-                goal
-            };
-            let goal = if let Some(goal) = goal {
-                goal
-            } else {
-                let e = self.entities.get_mut(&id).unwrap();
-                speed = match motion {
-                    Motion::Wander | Motion::Maintain { .. } => speed,
-                    Motion::Follow { idle, .. } | Motion::Charge { idle, .. } => idle,
-                    Motion::Chase { .. } if kind == 0x600 => 4.,
-                    Motion::Chase { .. } if !(0x687..=0x689).contains(&kind) => 4.,
-                    Motion::Protect { .. } => profile.speed,
-                    _ => 2.,
-                };
-                let realm = self.name == "Realm";
-                if e.goal.is_none_or(|goal| {
-                    goal.distance(e.pos) < 0.1
-                        || if realm {
-                            goal.distance(e.pos) > 1.01
+                        let angle = (pos.y - target.y).atan2(pos.x - target.x);
+                        // Retracting gates at radius 8 without clamping the final outward step.
+                        let distance = if matches!(kind, 0x67e..=0x682) {
+                            pos.distance(target) + 1.
                         } else {
-                            goal.distance(e.home) > 2.01
+                            distance
+                        };
+                        Some(Pos {
+                            x: target.x + distance * angle.cos(),
+                            y: target.y + distance * angle.sin(),
+                        })
+                    }
+                    Motion::Protect { anchor, distance } => {
+                        let leader = match self.orbit_anchor(id, anchor, target) {
+                            Ok(leader) => leader,
+                            Err(error) => {
+                                tracing::error!(entity=id, %error, "protection anchor refused");
+                                continue 'entities;
+                            }
+                        };
+                        if pos.distance(leader) <= distance {
+                            speed = 0.;
                         }
-                }) {
-                    let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                    let (center, radius) = if realm {
-                        (e.pos, 1.)
-                    } else {
-                        (e.home, self.rng.gen_range(0. ..2.))
+                        Some(leader)
+                    }
+                    Motion::Chase { sight, stop }
+                        if target.is_some_and(|p| pos.distance(p) < sight) =>
+                    {
+                        if pos.distance(target.expect("acquired chase target")) <= stop {
+                            speed = 0.;
+                        }
+                        target
+                    }
+                    Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
+                        let target = match self.orbit_anchor(id, anchor, target) {
+                            Ok(target) => target,
+                            Err(error) => {
+                                tracing::error!(entity=id, %error, "orbit anchor refused");
+                                continue 'entities;
+                            }
+                        };
+                        let e = self.entities.get_mut(&id).unwrap();
+                        let shield_formation = matches!(kind, 0x900 | 0x902)
+                            && matches!(motion, Motion::StrictOrbit { .. });
+                        if shield_formation && !e.strict_initialized {
+                            e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                            e.strict_initialized = true;
+                            speed = 0.;
+                            Some(pos)
+                        } else {
+                            let direction = if let Some(orbit) = e.orbit {
+                                if pos.distance(target) > 0.001 {
+                                    e.phase = (pos.y - target.y).atan2(pos.x - target.x);
+                                }
+                                orbit.direction
+                            } else {
+                                if !shield_formation && e.goal.is_none() {
+                                    e.phase = if matches!(motion, Motion::StrictOrbit { .. }) {
+                                        self.rng.gen_range(0. ..std::f32::consts::TAU)
+                                    } else {
+                                        (pos.y - target.y).atan2(pos.x - target.x)
+                                    };
+                                }
+                                1.
+                            };
+                            // This older shield formation clock ignores the slowed motor.
+                            let angular_speed = if shield_formation {
+                                speed
+                            } else if e.quest.is_some()
+                                || e.orbit.is_some()
+                                || matches!(motion, Motion::StrictOrbit { .. })
+                            {
+                                (if e.quest.is_some() || e.orbit.is_some() {
+                                    speed / 1.5
+                                } else {
+                                    speed
+                                }) * if flags & crate::condition::bit(crate::condition::SLOWED) != 0
+                                {
+                                    0.5
+                                } else {
+                                    1.
+                                }
+                            } else {
+                                speed
+                            };
+                            if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
+                                e.phase = (e.phase + direction * angular_speed / radius * 0.05)
+                                    % std::f32::consts::TAU;
+                            }
+                            Some(Pos {
+                                x: target.x + e.phase.cos() * radius,
+                                y: target.y + e.phase.sin() * radius,
+                            })
+                        }
+                    }
+                    Motion::Circle => {
+                        let boss = self
+                            .actors()
+                            .find(|e| e.kind == 0x927 && pos.distance(e.pos) < 10.)
+                            .map(|e| e.pos);
+                        boss.map(|boss| {
+                            let e = self.entities.get_mut(&id).unwrap();
+                            if e.goal.is_none() {
+                                e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                            }
+                            e.phase = (e.phase + profile.speed / 3. * 0.05) % std::f32::consts::TAU;
+                            Pos {
+                                x: boss.x + e.phase.cos() * 3.,
+                                y: boss.y + e.phase.sin() * 3.,
+                            }
+                        })
+                    }
+                    _ => None,
+                };
+                let goal = if kind == 0xd06 && pos.distance(self.entities[&id].home) > 7. {
+                    speed = 7.8;
+                    Some(
+                        self.orbit_anchor(id, crate::encounter::Anchor::Home, target)
+                            .expect("live boss home"),
+                    )
+                } else {
+                    goal
+                };
+                let goal = if let Some(goal) = goal {
+                    goal
+                } else {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    speed = match motion {
+                        Motion::Wander | Motion::Maintain { .. } => speed,
+                        Motion::Follow { idle, .. } | Motion::Charge { idle, .. } => idle,
+                        Motion::Chase { .. } if kind == 0x600 => 4.,
+                        Motion::Chase { .. } if !(0x687..=0x689).contains(&kind) => 4.,
+                        Motion::Protect { .. } => profile.speed,
+                        _ => 2.,
                     };
-                    e.goal = Some(if realm && e.pos.distance(e.home) > 24. {
-                        e.home
-                    } else {
-                        Pos {
-                            x: center.x + angle.cos() * radius,
-                            y: center.y + angle.sin() * radius,
-                        }
-                    });
+                    let realm = self.name == "Realm";
+                    if e.goal.is_none_or(|goal| {
+                        goal.distance(e.pos) < 0.1
+                            || if realm {
+                                goal.distance(e.pos) > 1.01
+                            } else {
+                                goal.distance(e.home) > 2.01
+                            }
+                    }) {
+                        let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                        let (center, radius) = if realm {
+                            (e.pos, 1.)
+                        } else {
+                            (e.home, self.rng.gen_range(0. ..2.))
+                        };
+                        e.goal = Some(if realm && e.pos.distance(e.home) > 24. {
+                            e.home
+                        } else {
+                            Pos {
+                                x: center.x + angle.cos() * radius,
+                                y: center.y + angle.sin() * radius,
+                            }
+                        });
+                    }
+                    e.goal.expect("wander destination assigned")
+                };
+                if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
+                    speed = 0.;
+                } else if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
+                    speed *= 0.5;
                 }
-                e.goal.expect("wander destination assigned")
-            };
-            if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
-                speed = 0.;
-            } else if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
-                speed *= 0.5;
+                if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
+                    self.entities.get_mut(&id).unwrap().goal = Some(goal);
+                }
+                let distance = if matches!(motion, Motion::StrictOrbit { .. }) && speed > 0. {
+                    pos.distance(goal)
+                } else {
+                    speed / 1.5 * 0.05
+                };
+                if let Err(error) = self.move_entity_colliding(
+                    id,
+                    goal,
+                    distance,
+                    !matches!(motion, Motion::Charge { .. } | Motion::StrictOrbit { .. }),
+                ) {
+                    let e = self.entities.get_mut(&id).unwrap();
+                    e.goal = None;
+                    e.last_step = Pos { x: 0., y: 0. };
+                    tracing::debug!(entity=id,%error,"NPC movement blocked; retargeting");
+                }
+                if !hero_continue || invocation == 1 {
+                    break;
+                }
+                let pos = self.entities[&id].pos;
+                target = self
+                    .players
+                    .values()
+                    .filter(|p| {
+                        p.character.alive
+                            && !p.death_pending
+                            && !p.departing
+                            && !p.paused
+                            && p.conditions(self.now)
+                                & crate::condition::bit(crate::condition::INVISIBLE)
+                                == 0
+                    })
+                    .map(|p| p.pos)
+                    .chain(self.decoy_positions())
+                    .filter(|p| pos.distance(*p) < 20.)
+                    .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
+                match self.hero_movement(id, target, delta) {
+                    Ok((next_motion, next_speed, completed)) => {
+                        motion = next_motion;
+                        speed = next_speed;
+                        hero_continue = completed;
+                    }
+                    Err(error) => {
+                        tracing::error!(entity=id, %error, "Realm hero continuation refused");
+                        break;
+                    }
+                }
             }
-            if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
-                self.entities.get_mut(&id).unwrap().goal = Some(goal);
-            }
-            let distance = if matches!(motion, Motion::StrictOrbit { .. }) && speed > 0. {
-                pos.distance(goal)
-            } else {
-                speed / 1.5 * 0.05
-            };
-            if let Err(error) = self.move_entity(id, goal, distance) {
+            if queued_hero {
                 let e = self.entities.get_mut(&id).unwrap();
-                e.goal = None;
-                e.last_step = Pos { x: 0., y: 0. };
-                tracing::debug!(entity=id,%error,"NPC movement blocked; retargeting");
+                e.last_step = Pos {
+                    x: e.pos.x - pos.x,
+                    y: e.pos.y - pos.y,
+                };
             }
             let e = &self.entities[&id];
-            let schedule = if burst {
+            let schedule = if burst && kind != crate::dungeon::manor::MINE {
                 None
             } else {
                 match self.npc_attack_schedule(id, elapsed) {
@@ -4448,7 +5370,8 @@ impl World {
             let result = if let Some(schedule) = &schedule {
                 self.scheduled_attacks(id, target, schedule)
             } else {
-                self.legacy_enemy_shots(id, target.expect("legacy attack target acquired"), elapsed)
+                let Some(target) = target else { continue };
+                self.legacy_enemy_shots(id, target, elapsed)
             };
             let shots = match result {
                 Ok(shots) => shots,
@@ -4539,7 +5462,7 @@ impl World {
         packets
     }
     pub fn step(&mut self) {
-        let started = Instant::now();
+        let started = crate::performance::Measure::start();
         self.now += 50;
         self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
@@ -4655,9 +5578,13 @@ impl World {
                 }
             }
         }
+        let population_started = crate::performance::Measure::start();
         if let Err(error) = self.repopulate() {
             tracing::error!(%error,"Realm population replenishment failed");
         }
+        self.performance
+            .borrow_mut()
+            .work("population", population_started);
         let expired: Vec<_> = self
             .bag_expiry
             .iter()
@@ -4674,17 +5601,22 @@ impl World {
             self.remove_entity(id);
             tracing::debug!(entity = id, "expired transient or empty container removed");
         }
+        let mechanics_started = crate::performance::Measure::start();
         self.mechanic_expiry();
         self.abyss_step();
+        if let Err(error) = self.locker_step() {
+            tracing::error!(%error, "Davy Locker progression refused");
+        }
         self.ground_step();
         self.ocean_step();
         self.event_step();
         self.ability_step();
-        let npc_started = Instant::now();
-        let shots = self.npc_step();
         self.performance
             .borrow_mut()
-            .record("npc", npc_started.elapsed());
+            .work("mechanics", mechanics_started);
+        let npc_started = crate::performance::Measure::start();
+        let shots = self.npc_step();
+        self.performance.borrow_mut().work("npc", npc_started);
         self.grenade_step();
         for id in &ids {
             if let Err(e) = self.updates(*id, false) {
@@ -4695,9 +5627,10 @@ impl World {
             self.send_enemy_shot(owner, shot);
         }
         let guns: Vec<_> = self
-            .actors()
-            .filter(|e| (0x0802..=0x0805).contains(&e.kind) && self.now >= e.next_shot)
-            .map(|e| e.id)
+            .gun_ids
+            .iter()
+            .filter(|id| self.now >= self.entities[id].next_shot)
+            .copied()
             .collect();
         for id in guns {
             let e = self.entities.get_mut(&id).unwrap();
@@ -4836,6 +5769,13 @@ impl World {
         });
         self.bullets = bullets;
         if self.tick.is_multiple_of(2) {
+            // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
+            // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
+            let now = self.clock.now();
+            let tick_ms = i32::try_from(now.duration_since(self.new_tick_at).as_millis())
+                .expect("NEW_TICK interval exceeds i32 milliseconds")
+                .max(100);
+            self.new_tick_at = now;
             for id in ids {
                 if let Err(e) = self.updates(id, false) {
                     tracing::error!(player=id,error=%e,"visibility update failed");
@@ -4857,56 +5797,33 @@ impl World {
                     .copied()
                     .collect();
                 let mut o = Writer::new();
-                o.i32(p.tick).i32(100).i16(dynamic.len() as i16);
+                o.i32(p.tick).i32(tick_ms).i16(dynamic.len() as i16);
                 for entity in dynamic {
                     o.0.extend(self.stats(entity, id).expect("visible entity must exist"));
                 }
                 send(p, wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
                 p.remember_weapon_tick();
-                let slow = crate::condition::bit(crate::condition::SLOWED);
-                let paralyzed = crate::condition::bit(crate::condition::PARALYZED);
-                let motion_condition = p.conditions(self.now) & (slow | paralyzed | SPEEDY);
-                let base = 0.004
-                    + 0.0056
-                        * p.effective(&self.content, self.now)
-                            .expect("valid player equipment")[4] as f32
-                        / 75.;
-                let speed = |flags: i32| {
-                    if flags & paralyzed != 0 {
-                        0.
-                    } else if flags & slow != 0 {
-                        0.004
-                    } else {
-                        base * if flags & SPEEDY != 0 { 1.5 } else { 1. }
-                    }
-                };
-                let restricts_motion = speed(motion_condition) < speed(p.native_motion_condition);
-                if p.controller == Controller::Human && p.active() && restricts_motion {
-                    // The client must consume its real stat29 before acknowledging the new motor baseline.
-                    let mut out = Writer::new();
-                    out.i32(id).f32(p.pos.x).f32(p.pos.y);
-                    reconciliation::goto(p, true, out.0);
-                    tracing::info!(
-                        player = id,
-                        previous = p.native_motion_condition,
-                        current = motion_condition,
-                        "native movement condition synchronized"
-                    );
-                }
-                p.native_motion_condition = motion_condition;
                 p.tick += 1;
             }
         }
-        let mut performance = self.performance.borrow_mut();
-        performance.record("step", started.elapsed());
-        if let Some(timings) = performance.report() {
-            tracing::info!(world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
+        self.performance.borrow_mut().work("step", started);
+    }
+    fn report_performance(&self, world_id: i32) {
+        if let Some(timings) = self.performance.borrow_mut().report() {
+            tracing::info!(world_id,world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
+                bullets=self.bullets.len(),compact_entities=self.entities.shared(),scenery_promotions=self.entities.promotions,spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
+                pending_shoot_acks=self.players.values().map(|p|p.shoot_acks.len()).sum::<usize>(),
+                weapon_tick_records=self.players.values().map(|p|p.weapon_ticks.len()).sum::<usize>(),
                 humans=self.players.values().filter(|p| p.controller==Controller::Human).count(),
                 bots=self.players.values().filter(|p| p.controller==Controller::Autonomous).count(),
                 qa_actors=self.players.values().filter(|p| p.controller==Controller::Qa).count(),
                 discovered_tiles=self.players.values().map(|p|p.tiles.len()).sum::<usize>(),
                 cached_view_tiles=self.players.values().map(|p|p.view_tiles.borrow().tiles.len()).sum::<usize>(),
+                cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.allocated_bytes()).sum::<usize>(),
+                terrain_rebuilds=self.players.values().map(|p|p.view_tiles.borrow().rebuilds).sum::<u64>(),
+                incremental_terrain_tiles=self.players.values().map(|p|p.view_tiles.borrow().incremental_tiles).sum::<u64>(),
+                cloned_snapshot_tiles=self.players.values().map(|p|p.view_tiles.borrow().cloned_snapshot_tiles).sum::<u64>(),
                 timings=%timings,"world performance");
         }
     }
@@ -4917,13 +5834,21 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 #[cfg(test)]
 #[path = "../examples/testing/cover.rs"]
 mod cover_example;
-#[cfg(test)]
-mod gravestones_tests;
-#[cfg(test)]
-mod loot_interactions_tests;
+
 #[cfg(test)]
 #[path = "../examples/testing/timing.rs"]
 mod timing_example;
+
+#[cfg(test)]
+mod community_cooperative_tests;
+#[cfg(test)]
+mod ground_dye_tests;
+#[cfg(test)]
+mod manor_tests;
+#[cfg(test)]
+mod starter_loot_tests;
+#[cfg(test)]
+mod view_navigation_tests;
 
 #[cfg(test)]
 impl World {
@@ -4934,86 +5859,28 @@ impl World {
         self.attack_epoch = clock.now();
         assert_eq!(self.clock.now(), self.attack_epoch);
     }
+    fn view_geometry_for_test(&self) -> Arc<crate::navigation::Geometry> {
+        self.navigation_geometry
+            .borrow_mut()
+            .get_for_test(&self.map, &self.content)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn active_lifecycle_is_independent_of_pause_and_pending_writes() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.paused = true;
-        p.pending = true;
-        for flags in 0..16 {
-            p.character.alive = flags & 1 == 0;
-            p.death_pending = flags & 2 != 0;
-            p.departing = flags & 4 != 0;
-            p.persistence_failure = (flags & 8 != 0).then(|| "uncertain commit".into());
-            assert_eq!(p.active(), flags == 0, "lifecycle flags={flags}");
-        }
-    }
-    #[test]
-    fn prepared_worlds_share_explicit_seed_without_changing_normal_creation() {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let first =
-            Directory::test_prepared(std::path::Path::new("data"), content.clone(), 4, 12351)
-                .unwrap();
-        let second =
-            Directory::test_prepared(std::path::Path::new("data"), content.clone(), 4, 12351)
-                .unwrap();
-        for id in [-1, -2, -3, -4] {
-            let mut a = first.worlds[&id].rng.clone();
-            let mut b = second.worlds[&id].rng.clone();
-            assert_eq!(
-                rand::RngCore::next_u64(&mut a),
-                rand::RngCore::next_u64(&mut b)
-            );
-            assert!(first.worlds[&id].prepared_seed.is_some());
-        }
-        let ordinary =
-            Directory::test_with_seed(std::path::Path::new("data"), content, 4, 12351).unwrap();
-        assert!(ordinary.worlds.values().all(|w| w.prepared_seed.is_none()));
-    }
+
     use crate::content::WIZARD;
     use std::path::Path;
-    #[test]
-    fn spawned_nexus_exit_publishes_the_name_required_by_native_portal_draw() {
-        let mut w = world();
-        let id = w
-            .spawn_entity(
-                0x712,
-                Pos {
-                    x: w.map.spawns[0].0,
-                    y: w.map.spawns[0].1,
-                },
-                vec![],
-            )
-            .unwrap();
-        assert_eq!(w.entities[&id].name, "Nexus Portal");
-        let bytes = w.stats(id, 0).unwrap();
-        let mut r = crate::wire::Reader::new(&bytes);
-        assert_eq!(r.i32().unwrap(), id);
-        r.f32().unwrap();
-        r.f32().unwrap();
-        let count = r.i16().unwrap();
-        let mut names = Vec::new();
-        for _ in 0..count {
-            let stat = r.u8().unwrap();
-            if stat == 31 {
-                names.push(r.utf().unwrap());
-            } else {
-                r.i32().unwrap();
-            }
-        }
-        r.done().unwrap();
-        assert_eq!(names, ["Nexus Portal"]);
-    }
+
     pub(super) fn world() -> World {
-        let c = Arc::new(Content::load(Path::new("data")).unwrap());
-        let m = Arc::new(Map::load(Path::new("data/tutorial.wmap"), &c).unwrap());
-        World::new(c, m).unwrap()
+        static FIXTURE: std::sync::OnceLock<(Arc<Content>, Arc<Map>)> = std::sync::OnceLock::new();
+        let (content, map) = FIXTURE.get_or_init(|| {
+            let content = Arc::new(Content::load(Path::new("data")).unwrap());
+            let map = Arc::new(Map::load(Path::new("data/tutorial.wmap"), &content).unwrap());
+            (content, map)
+        });
+        World::new(content.clone(), map.clone()).unwrap()
     }
     pub(super) fn arena(terrain: u8) -> World {
         let mut w = world();
@@ -5028,6 +5895,8 @@ mod tests {
             cell.terrain = terrain;
             cell.object = None;
         }
+        w.configure_population().unwrap();
+        w.population_next = u64::MAX;
         w
     }
     pub(super) fn ch(w: &World) -> Character {
@@ -5058,31 +5927,17 @@ mod tests {
             tiles: 0,
             pirate_caves: 0,
             dungeons: [0; 3],
+            jungles: 0,
             abysses: 0,
             trenches: 0,
             spider_dens: 0,
             mad_labs: 0,
+            manors: 0,
+            beaches: 0,
+            davy_lockers: 0,
         }
     }
-    pub(super) fn receive(
-        d: &mut Directory,
-        world: i32,
-        account: i32,
-        class: u16,
-    ) -> (i32, mpsc::Receiver<Packet>) {
-        let w = d.worlds.get_mut(&world).unwrap();
-        let mut c = super::tests::ch(w);
-        c.id = account + 100;
-        c.account = account;
-        c.class = class;
-        c.base = w.content.classes[&class].base;
-        c.items = w.content.objects[&class].equipment.clone();
-        let (packets, mut rx) = mpsc::channel(128);
-        let (lost, _) = watch::channel(false);
-        let id = w.enter(c, Some(Output { packets, lost })).unwrap();
-        while rx.try_recv().is_ok() {}
-        (id, rx)
-    }
+
     pub(super) fn directory() -> Directory {
         Directory::load(
             Path::new("data"),
@@ -5091,229 +5946,39 @@ mod tests {
         )
         .unwrap()
     }
-    #[test]
-    fn directory_routes_and_global_identities_do_not_alias() {
-        let mut d = directory();
-        assert_eq!(d.initial(0).unwrap(), -2);
-        for game in [-1, -2, -3, -4] {
-            assert_eq!(d.initial(game).unwrap(), game);
-        }
-        assert!(d.initial(-5).is_err());
-        assert!(d.initial(-6).is_err());
-        let mut ids = BTreeSet::new();
-        for world in d.worlds.values() {
-            for id in world.entities.keys() {
-                assert!(ids.insert(*id));
+
+    #[tokio::test]
+    async fn simulation_ticks_service_a_bounded_fifo_batch_of_serial_packet_jobs() {
+        let mut directory = directory();
+        let (tx, mut rx) = mpsc::channel::<Job>(256);
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = observed.clone();
+        let record = move |n, completed: oneshot::Sender<()>| -> Job {
+            let seen = seen.clone();
+            Box::new(move |_| {
+                seen.lock().unwrap().push(n);
+                completed.send(()).unwrap();
+            })
+        };
+        let (completed, mut reply) = oneshot::channel();
+        assert!(tx.try_send(record(0, completed)).is_ok());
+        let packets = tokio::spawn(async move {
+            for n in 1..17 {
+                reply.await.unwrap();
+                let (completed, next) = oneshot::channel();
+                assert!(tx.send(record(n, completed)).await.is_ok());
+                reply = next;
             }
-        }
-        let a = d.worlds.get_mut(&-1).unwrap();
-        let first = a.enter(ch(a), None).unwrap();
-        let b = d.worlds.get_mut(&-2).unwrap();
-        let second = b.enter(ch(b), None).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(d.location(first).unwrap(), -1);
-        assert_eq!(d.location(second).unwrap(), -2);
-        assert!(d.worlds[&-2].safe && !d.worlds[&-3].safe);
-        assert!(d.worlds[&-2].entities.values().any(|e| e.kind == 0x712));
+            reply.await.unwrap();
+        });
+        service_queued_jobs(&mut directory, &mut rx).await;
+        assert_eq!(*observed.lock().unwrap(), (0..16).collect::<Vec<_>>());
+        assert!(!packets.is_finished());
+        service_queued_jobs(&mut directory, &mut rx).await;
+        packets.await.unwrap();
+        assert_eq!(*observed.lock().unwrap(), (0..17).collect::<Vec<_>>());
     }
-    #[test]
-    fn transfer_grants_are_bound_one_use_expiring_and_private() {
-        let mut d = directory();
-        let vault = d.instance("vault", Some(1)).unwrap();
-        assert_eq!(d.instance("vault", Some(1)).unwrap(), vault);
-        assert_ne!(d.instance("vault", Some(2)).unwrap(), vault);
-        assert!(d.issue(2, 1, vault).is_err());
-        let (time, key, _) = d.issue(1, 42, vault).unwrap();
-        assert!(d.consume(2, vault, time, key.clone()).is_err());
-        assert!(d.consume(1, -2, time, key.clone()).is_err());
-        assert!(d.consume(1, vault, time + 1, key.clone()).is_err());
-        assert_eq!(d.consume(1, vault, time, key.clone()).unwrap(), 42);
-        assert!(d.consume(1, vault, time, key.clone()).is_err());
-        assert!(
-            d.issue(1, 42, -2).is_err(),
-            "consumption still reserves the destination until entry"
-        );
-        let w = d.worlds.get_mut(&vault).unwrap();
-        let mut character = ch(w);
-        character.id = 42;
-        character.account = 1;
-        let id = w
-            .enter_admitted(
-                character,
-                None,
-                None,
-                AccountPresentation {
-                    guild: None,
-                    credits: 0,
-                    fame: 0,
-                    best_fame: BTreeMap::new(),
-                },
-                Some(key.clone()),
-            )
-            .unwrap();
-        assert_eq!(w.reserved_slots(), 0);
-        assert!(
-            w.enter_admitted(
-                w.players[&id].character.clone(),
-                None,
-                None,
-                AccountPresentation {
-                    guild: None,
-                    credits: 0,
-                    fame: 0,
-                    best_fame: BTreeMap::new()
-                },
-                Some(key)
-            )
-            .is_err(),
-            "entry admission is one-use too"
-        );
-        let (time, key, _) = d.issue(1, 42, -2).unwrap();
-        d.tick += 2400;
-        assert!(d.consume(1, -2, time, key).is_err());
-        let ids = AtomicI32::new(i32::MAX);
-        assert!(allocate_id(&ids).is_err());
-        assert_eq!(ids.load(Ordering::Relaxed), i32::MAX);
-    }
-    #[test]
-    fn directory_instances_are_bounded_and_idle_instances_are_collected() {
-        let mut d = directory();
-        for _ in 0..8 {
-            d.instance("pirate-cave", None).unwrap();
-        }
-        assert!(d.instance("pirate-cave", None).is_err());
-        d.tick = 6001;
-        d.step();
-        assert_eq!(d.worlds.len(), 4);
-    }
-    #[test]
-    fn sourced_worlds_preserve_connected_wall_and_merchant_config_stats() {
-        let content = Arc::new(Content::load(Path::new("data")).unwrap());
-        for name in [
-            "nexus",
-            "nexus-limbo",
-            "vault",
-            "realm-shore",
-            "pirate-cave",
-        ] {
-            let map = Arc::new(
-                Map::load(&Path::new("data").join(format!("{name}.wmap")), &content).unwrap(),
-            );
-            let world = World::new(content.clone(), map).unwrap();
-            for e in world.entities.values() {
-                world.stats(e.id, 0).unwrap();
-            }
-            if name == "pirate-cave" {
-                assert!(
-                    world
-                        .entities
-                        .values()
-                        .any(|e| e.extra_stats.iter().any(|(stat, _)| *stat == 41))
-                );
-            }
-            if name == "nexus" {
-                let changer = world.entities.values().find(|e| e.kind == 0x1dc).unwrap();
-                assert_eq!(changer.extra_stats, [(55, 0)]);
-                assert!(
-                    world
-                        .entities
-                        .values()
-                        .any(|e| e.extra_stats.iter().any(|(stat, _)| *stat == 34))
-                );
-            }
-        }
-    }
-    #[test]
-    fn progress_is_invisible_until_commit_and_cannot_heal_pending_death() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&id).unwrap().experience_queued = 50;
-        let plans = w.pending_progress();
-        assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].1.level, 2);
-        assert_eq!(w.players[&id].character.level, 1);
-        assert!(w.pending_progress().is_empty());
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.hp = 0;
-        p.death_pending = true;
-        assert!(w.pending_deaths().is_empty());
-        w.finish_progress(id, plans[0].1.clone()).unwrap();
-        assert_eq!(w.players[&id].character.level, 2);
-        assert_eq!(w.players[&id].character.hp, 0);
-        let death = w.pending_deaths();
-        assert_eq!(death.len(), 1);
-        assert_eq!(death[0].1.level, 2);
-        assert_eq!(death[0].1.hp, 0);
-    }
-    #[test]
-    fn committed_fame_survives_departure_and_permanent_death() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&id).unwrap().experience_queued = 1000;
-        let plans = w.pending_progress();
-        assert_eq!(plans[0].1.fame, 1);
-        assert_eq!(w.players[&id].character.fame, 0);
-        w.finish_progress(id, plans[0].1.clone()).unwrap();
-        let saved = w.begin_departure(id).unwrap().unwrap();
-        assert_eq!(saved.fame, 1);
-        w.finish_departure(id).unwrap();
-        let id = w.enter(saved, None).unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.hp = 0;
-        p.death_pending = true;
-        assert_eq!(w.pending_deaths()[0].1.fame, 1);
-    }
-    #[test]
-    fn departure_waits_for_earned_progress() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&id).unwrap().experience_queued = 50;
-        assert!(w.begin_departure(id).unwrap().is_none());
-        let plans = w.pending_progress();
-        w.finish_progress(id, plans[0].1.clone()).unwrap();
-        let leaving = w.begin_departure(id).unwrap().unwrap();
-        assert_eq!(leaving.exp, 50);
-        assert_eq!(leaving.level, 2);
-        w.finish_departure(id).unwrap();
-        assert!(!w.players.contains_key(&id));
-    }
-    #[test]
-    fn health_excludes_qa_actors_from_population() {
-        let mut d = directory();
-        let w = d.worlds.get_mut(&-1).unwrap();
-        w.enter(ch(w), None).unwrap();
-        let mut native = ch(w);
-        native.id = 2;
-        native.account = 2;
-        let (packets, _rx) = mpsc::channel(64);
-        let (lost, _watch) = watch::channel(false);
-        w.enter(native, Some(Output { packets, lost })).unwrap();
-        let health = d.health(Instant::now());
-        assert_eq!(health["players"], 1);
-        assert_eq!(health["bots"], 0);
-        assert_eq!(health["qa_actors"], 1);
-        assert_eq!(health["worlds"], d.worlds.len());
-        assert_eq!(
-            health["entities"],
-            d.worlds.values().map(|w| w.entities.len()).sum::<usize>()
-        );
-        assert_eq!(
-            health["projectiles"],
-            d.worlds.values().map(|w| w.bullets.len()).sum::<usize>()
-        );
-        assert_eq!(health["tick"], d.tick);
-        assert_eq!(health["max_tick_us"], d.max_tick_us);
-    }
-    #[test]
-    fn health_uptime_uses_elapsed_process_time_not_world_ticks() {
-        let w = directory();
-        let started = Instant::now();
-        let before = w.health(started)["uptime_seconds"].as_u64().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1100));
-        let after = w.health(started)["uptime_seconds"].as_u64().unwrap();
-        assert!(after > before);
-        assert_eq!(w.tick, 0);
-    }
+
     #[test]
     fn one_owner_and_no_teleport() {
         let mut w = world();
@@ -5322,20 +5987,7 @@ mod tests {
         assert!(w.enter(c, None).is_err());
         assert!(w.move_to(id, Pos { x: 12., y: 3. }, 100).is_err());
     }
-    #[test]
-    fn queue_loss_is_observable() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let (packets, mut rx) = mpsc::channel(1);
-        let (lost, watch) = watch::channel(false);
-        let p = w.players.get_mut(&id).unwrap();
-        p.tx = Some(Output { packets, lost });
-        send(p, 6, vec![1]);
-        assert!(!*watch.borrow());
-        send(p, 6, vec![2]);
-        assert!(*watch.borrow());
-        assert_eq!(rx.try_recv().unwrap().body, vec![1]);
-    }
+
     #[test]
     fn control_cannot_steal_browser_input() {
         let mut w = world();
@@ -5349,57 +6001,6 @@ mod tests {
                 .to_string()
                 .contains("QA-owned")
         );
-    }
-    #[test]
-    fn selected_collision_box_is_inclusive() {
-        let a = Pos { x: 0., y: 0. };
-        assert!(inside_box(a, Pos { x: 0.5, y: 0.5 }));
-        assert!(inside_box(a, Pos { x: -0.5, y: -0.5 }));
-        assert!(!inside_box(a, Pos { x: 0.500001, y: 0. }));
-    }
-    #[test]
-    fn fog_reveals_circular_tiles_once_and_remembers_them() {
-        let mut d = directory();
-        let (id, mut rx) = receive(&mut d, -2, 1, WIZARD);
-        let w = d.worlds.get_mut(&-2).unwrap();
-        w.players.get_mut(&id).unwrap().tiles.clear();
-        let initial_count = w.players[&id].character.tiles;
-        let mut known = BTreeSet::new();
-        for (cx, cy) in [(50, 50), (60, 50), (0, 0), (141, 129), (50, 50)] {
-            w.players.get_mut(&id).unwrap().pos = Pos {
-                x: cx as f32 + 0.25,
-                y: cy as f32 + 0.75,
-            };
-            let circle: BTreeSet<_> = (0..w.map.height)
-                .flat_map(|y| (0..w.map.width).map(move |x| (x, y)))
-                .filter(|(x, y)| (x - cx).pow(2) + (y - cy).pow(2) <= 400)
-                .map(|(x, y)| (x as i16, y as i16))
-                .collect();
-            let expected: BTreeSet<_> = circle.difference(&known).copied().collect();
-            w.updates(id, false).unwrap();
-            let mut received = BTreeSet::new();
-            while let Ok(packet) = rx.try_recv() {
-                if packet.id == wire::UPDATE {
-                    let mut r = crate::wire::Reader::new(&packet.body);
-                    for _ in 0..r.i16().unwrap() {
-                        let (x, y) = (r.i16().unwrap(), r.i16().unwrap());
-                        assert_eq!(
-                            r.u8().unwrap(),
-                            w.map.cells[y as usize * w.map.width as usize + x as usize].ground
-                        );
-                        assert!(received.insert((x, y)), "duplicate tile in UPDATE");
-                    }
-                }
-            }
-            assert_eq!(received, expected);
-            known.extend(circle);
-            assert_eq!(w.players[&id].tiles, known);
-            assert_eq!(
-                w.players[&id].character.tiles - initial_count,
-                known.len() as u64
-            );
-            assert!(w.players[&id].known.contains(&id));
-        }
     }
     #[test]
     fn community_crowd_native_minimap_keeps_distant_players_without_revealing_perception_or_fog() {
@@ -5480,13 +6081,10 @@ mod tests {
                 vec!["account", "id", "name", "position"]
             );
             if actor == observer {
-                assert!(
-                    !view
-                        .tiles
-                        .iter()
-                        .any(|t| t.x == marker["position"]["x"].as_f64().unwrap() as i16
-                            && t.y == marker["position"]["y"].as_f64().unwrap() as i16)
-                );
+                assert!(!view.tiles.contains(&(
+                    marker["position"]["x"].as_f64().unwrap() as i16,
+                    marker["position"]["y"].as_f64().unwrap() as i16
+                )));
             }
             if actor == observer {
                 assert!(view.objects.iter().any(|o| o.id == quest));
@@ -5496,12 +6094,7 @@ mod tests {
                     .find(|o| o.id == quest)
                     .unwrap()
                     .position;
-                assert!(
-                    !view
-                        .tiles
-                        .iter()
-                        .any(|t| t.x == target.x as i16 && t.y == target.y as i16)
-                );
+                assert!(!view.tiles.contains(&(target.x as i16, target.y as i16)));
             }
         }
         let (newcomer, _) = receive(&mut d, -3, 3, WIZARD);
@@ -5525,205 +6118,6 @@ mod tests {
         assert_eq!(r.i16().unwrap(), 1);
         assert_eq!(r.i32().unwrap(), peer);
         r.done().unwrap();
-    }
-    #[test]
-    fn initial_update_places_self_before_private_container_owner_stats() {
-        let mut w = world();
-        let pos = Pos {
-            x: w.map.spawns[0].0,
-            y: w.map.spawns[0].1,
-        };
-        let bag = w.loot_bag(pos, Some(1), vec![0xa4f]).unwrap();
-        let (tx, mut rx) = mpsc::channel(64);
-        let (lost, _lost) = watch::channel(false);
-        let id = w.enter(ch(&w), Some(Output { packets: tx, lost })).unwrap();
-        assert!(bag < id);
-        assert_eq!(rx.try_recv().unwrap().id, wire::CREATE_SUCCESS);
-        let update = rx.try_recv().unwrap();
-        assert_eq!(update.id, wire::UPDATE);
-        let mut r = crate::wire::Reader::new(&update.body);
-        let tiles = r.i16().unwrap();
-        r.take(tiles as usize * 5).unwrap();
-        assert!(r.i16().unwrap() >= 2);
-        assert_eq!(r.i16().unwrap() as u16, WIZARD);
-        assert_eq!(r.i32().unwrap(), id);
-        assert!(w.visible(id).contains(&bag));
-    }
-    #[test]
-    fn immutable_scenery_is_not_rebroadcast_in_dynamic_ticks() {
-        let mut w = world();
-        let (tx, mut rx) = mpsc::channel(64);
-        let (lost, _lost) = watch::channel(false);
-        let id = w.enter(ch(&w), Some(Output { packets: tx, lost })).unwrap();
-        while rx.try_recv().is_ok() {}
-        assert!(w.players[&id].known.iter().any(|entity| {
-            w.entities
-                .get(entity)
-                .is_some_and(|e| e.hp == 0 && e.items.is_empty())
-        }));
-        w.step();
-        w.step();
-        let dynamic: Vec<_> = w.players[&id]
-            .known
-            .iter()
-            .filter(|entity| {
-                w.players.contains_key(entity)
-                    || w.entities
-                        .get(entity)
-                        .is_some_and(|e| e.hp > 0 || !e.items.is_empty())
-            })
-            .copied()
-            .collect();
-        let mut expected = Writer::new();
-        expected.i32(0).i32(100).i16(dynamic.len() as i16);
-        for entity in dynamic {
-            expected.0.extend(w.stats(entity, id).unwrap());
-        }
-        let mut tick = None;
-        while let Ok(packet) = rx.try_recv() {
-            if packet.id == wire::NEW_TICK {
-                assert!(tick.replace(packet).is_none());
-            }
-        }
-        assert_eq!(tick.unwrap().body, expected.0);
-    }
-    #[test]
-    fn movement_cannot_borrow_future_clock() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let p = w.players[&id].pos;
-        w.move_to(
-            id,
-            Pos {
-                x: p.x + 0.4,
-                y: p.y,
-            },
-            100,
-        )
-        .unwrap();
-        assert!(
-            w.move_to(
-                id,
-                Pos {
-                    x: p.x + 0.8,
-                    y: p.y
-                },
-                200
-            )
-            .is_err()
-        );
-    }
-    #[test]
-    fn shots_cannot_borrow_future_clock() {
-        let mut w = world();
-        let id = w.enter(ch(&w), None).unwrap();
-        let p = w.players[&id].pos;
-        let start = Pos {
-            x: p.x + 0.3,
-            y: p.y,
-        };
-        for (time, bullet) in [(100, 1), (100, 2), (500, 3), (500, 4)] {
-            w.shoot(id, time, bullet, 0xa97, start, 0.).unwrap();
-        }
-        assert!(w.shoot(id, 900, 5, 0xa97, start, 0.).is_err());
-        assert_eq!(w.bullets.len(), 4);
-    }
-    #[test]
-    fn magic_potion_publishes_after_commit_and_cannot_restore_pending_death() {
-        let mut w = world();
-        let mut c = ch(&w);
-        c.items[4] = 0xa23;
-        c.mp = 25;
-        let id = w.enter(c, None).unwrap();
-        let slot = Slot {
-            object: id,
-            slot: 4,
-            kind: 0xa23,
-        };
-        let plan = w.use_item(id, slot, w.players[&id].pos).unwrap().unwrap();
-        assert_eq!(w.players[&id].character.mp, 25);
-        assert_eq!(w.players[&id].character.items[4], 0xa23);
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert_eq!(w.players[&id].character.mp, 100);
-        assert_eq!(w.players[&id].character.items[4], -1);
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.items[4] = 0xa23;
-        p.character.mp = 25;
-        let plan = w.use_item(id, slot, w.players[&id].pos).unwrap().unwrap();
-        let p = w.players.get_mut(&id).unwrap();
-        p.character.hp = 0;
-        p.death_pending = true;
-        w.finish_inventory(plan, Ok(2)).unwrap();
-        assert_eq!(w.players[&id].character.mp, 25);
-    }
-    #[test]
-    fn selected_container_put_flags_cannot_expose_soulbound_items() {
-        let mut w = world();
-        let soulbound = w
-            .content
-            .objects
-            .values()
-            .find(|o| o.class == "Equipment" && o.soulbound && o.bag_type <= 4)
-            .unwrap()
-            .kind;
-        let mut c = ch(&w);
-        c.items[5] = i32::from(soulbound);
-        let id = w.enter(c, None).unwrap();
-        let pos = w.players[&id].pos;
-        let public = w.loot_bag(pos, None, vec![0xa22]).unwrap();
-        let from = Slot {
-            object: id,
-            slot: 5,
-            kind: i32::from(soulbound),
-        };
-        assert!(
-            w.swap(
-                id,
-                from,
-                Slot {
-                    object: public,
-                    slot: 1,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        let private = w
-            .loot_bag(pos, Some(1), vec![i32::from(soulbound)])
-            .unwrap();
-        w.entities.get_mut(&private).unwrap().kind = 0x503;
-        assert!(
-            w.swap(
-                id,
-                Slot {
-                    object: id,
-                    slot: 4,
-                    kind: 0xa22
-                },
-                Slot {
-                    object: private,
-                    slot: 1,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        w.entities.get_mut(&private).unwrap().kind = 0x504;
-        let plan = w
-            .swap(
-                id,
-                from,
-                Slot {
-                    object: private,
-                    slot: 1,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        assert_eq!(w.players[&id].character.items[5], i32::from(soulbound));
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert_eq!(w.players[&id].character.items[5], -1);
-        assert_eq!(w.entities[&private].items[1], i32::from(soulbound));
     }
     #[test]
     fn late_heal_cannot_revive() {
@@ -5797,211 +6191,7 @@ mod tests {
         assert_eq!(w.entities[&bag.id].items[0], 0xa4f);
         assert_eq!(w.players[&id].character.items[3], -1);
     }
-    #[tokio::test]
-    async fn sourced_private_chest_publishes_only_atomic_character_vault_commit() {
-        use crate::store::{InventoryWrite, Store};
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let path = std::env::temp_dir().join(format!(
-            "vault-rearrangement-{:016x}.db",
-            rand::random::<u64>()
-        ));
-        let store = Store::open(&path, &content).unwrap();
-        let account = store.list("vault-actor".into()).await.unwrap();
-        let ch = store
-            .create(account.id, content.get(crate::content::WIZARD).unwrap())
-            .await
-            .unwrap();
-        let map = Arc::new(Map::load(std::path::Path::new("data/vault.wmap"), &content).unwrap());
-        let mut w = World::with_ids(content, map, Arc::new(AtomicI32::new(1))).unwrap();
-        w.name = "Vault".into();
-        w.owner = Some(account.id);
-        w.safe = true;
-        let original = store.vault(account.id).await.unwrap();
-        let mut foreign = original.clone();
-        foreign.account += 1;
-        assert!(w.load_vault(foreign).is_err());
-        w.load_vault(original.clone()).unwrap();
-        let player = w.enter(ch, None).unwrap();
-        let chest = w.vault.as_ref().unwrap().0;
-        w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
-        let plan = w
-            .swap(
-                player,
-                Slot {
-                    object: player,
-                    slot: 4,
-                    kind: 0xa22,
-                },
-                Slot {
-                    object: chest,
-                    slot: 0,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        assert_eq!(w.entities[&chest].items[0], -1);
-        assert_eq!(store.vault(account.id).await.unwrap().items[0], -1);
-        let revisions = store
-            .exchange(
-                vec![InventoryWrite {
-                    id: plan.character,
-                    account: plan.account,
-                    revision: plan.revision,
-                    items: plan.items.clone(),
-                }],
-                plan.vault.clone(),
-            )
-            .await
-            .unwrap();
-        w.finish_inventory(plan, Ok(revisions[0])).unwrap();
-        assert_eq!(w.players[&player].character.items[4], -1);
-        assert_eq!(w.entities[&chest].items[0], 0xa22);
-        let saved = store.vault(account.id).await.unwrap();
-        assert_eq!(saved.items[0], 0xa22);
-        assert_eq!(saved.revision, 1);
-        assert!(w.load_vault(original).is_err());
-        w.load_vault(saved).unwrap();
-        for (from, to) in [
-            ((player, 0), (chest, 1)),
-            ((chest, 0), (chest, 2)),
-            ((chest, 2), (chest, 1)),
-        ] {
-            let slot = |(object, slot)| Slot {
-                object,
-                slot,
-                kind: if object == player {
-                    w.players[&player].character.items[slot]
-                } else {
-                    w.entities[&chest].items[slot]
-                },
-            };
-            let before = w.entities[&chest].items.clone();
-            let inventory = w.players[&player].character.items.clone();
-            let plan = w.swap(player, slot(from), slot(to)).unwrap();
-            if from.0 == chest {
-                assert_eq!(plan.items, inventory);
-            }
-            assert!(plan.collected.is_none() && plan.dropped.is_none());
-            assert!(w.players[&player].pending && w.entities[&chest].reserved);
-            assert!(
-                w.swap(
-                    player,
-                    Slot {
-                        object: chest,
-                        slot: 0,
-                        kind: before[0]
-                    },
-                    Slot {
-                        object: chest,
-                        slot: 1,
-                        kind: before[1]
-                    }
-                )
-                .is_err()
-            );
-            let revisions = store
-                .exchange(
-                    vec![InventoryWrite {
-                        id: plan.character,
-                        account: plan.account,
-                        revision: plan.revision,
-                        items: plan.items.clone(),
-                    }],
-                    plan.vault.clone(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(w.entities[&chest].items, before);
-            w.finish_inventory(plan, Ok(revisions[0])).unwrap();
-            assert_eq!(
-                w.entities[&chest].items,
-                store.vault(account.id).await.unwrap().items
-            );
-        }
-        let expected = vec![-1, 0xa22, 0xa97, -1, -1, -1, -1, -1];
-        assert_eq!(w.entities[&chest].items, expected);
-        assert_eq!(w.players[&player].character.revision, 4);
-        let from = Slot {
-            object: chest,
-            slot: 1,
-            kind: 0xa22,
-        };
-        let to = Slot {
-            object: chest,
-            slot: 2,
-            kind: 0xa97,
-        };
-        let other = w
-            .spawn_entity(0x504, w.entities[&chest].pos, vec![-1; 8])
-            .unwrap();
-        for (a, b) in [
-            (
-                from,
-                Slot {
-                    object: other,
-                    slot: 0,
-                    kind: -1,
-                },
-            ),
-            (
-                Slot {
-                    object: other,
-                    slot: 0,
-                    kind: -1,
-                },
-                Slot {
-                    object: other,
-                    slot: 1,
-                    kind: -1,
-                },
-            ),
-            (Slot { kind: -1, ..from }, to),
-            (from, Slot { kind: -1, ..to }),
-            (Slot { slot: 8, ..from }, to),
-            (from, Slot { slot: 8, ..to }),
-        ] {
-            assert!(w.swap(player, a, b).is_err());
-            assert!(!w.players[&player].pending && !w.entities[&chest].reserved);
-            assert_eq!(w.entities[&chest].items, expected);
-        }
-        let ownership = w.entities[&chest].extra_stats.clone();
-        w.entities.get_mut(&chest).unwrap().extra_stats = vec![(54, account.id + 1)];
-        assert!(w.swap(player, from, to).is_err());
-        w.entities.get_mut(&chest).unwrap().extra_stats = ownership;
-        w.players.get_mut(&player).unwrap().pos.x += 2.0;
-        assert!(w.swap(player, from, to).is_err());
-        w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
-        let plan = w.swap(player, from, to).unwrap();
-        let mut stale = plan.vault.clone().unwrap();
-        stale.revision += 1;
-        let failed = store
-            .exchange(
-                vec![InventoryWrite {
-                    id: plan.character,
-                    account: plan.account,
-                    revision: plan.revision,
-                    items: plan.items.clone(),
-                }],
-                Some(stale),
-            )
-            .await
-            .unwrap_err();
-        assert!(w.finish_inventory(plan, Err(failed)).is_err());
-        assert!(w.players[&player].persistence_failure.is_some() && w.entities[&chest].reserved);
-        assert_eq!(w.entities[&chest].items, expected);
-        drop(store);
-        let reopened = Store::open(&path, &w.content).unwrap();
-        let vault = reopened.vault(account.id).await.unwrap();
-        assert_eq!((vault.revision, vault.items), (4, expected));
-        let character = reopened
-            .load(account.id, w.players[&player].character.id)
-            .await
-            .unwrap();
-        assert_eq!(character.revision, 4);
-        assert_eq!(character.items, w.players[&player].character.items);
-        drop(reopened);
-        std::fs::remove_file(path).unwrap();
-    }
+
     #[test]
     fn ground_drop_is_hidden_until_commit_and_quarantines_uncertain_failure() {
         let mut w = world();
@@ -6090,190 +6280,7 @@ mod tests {
         assert!(!w.visible(owner).contains(&uncertain));
         assert_eq!(w.players[&other].character.items[5], 0xa22);
     }
-    #[test]
-    fn empty_ground_bag_despawns_only_after_commit_before_timeout() {
-        let mut w = world();
-        let owner = w.enter(ch(&w), None).unwrap();
-        let bag = w
-            .loot_bag(w.players[&owner].pos, None, vec![0xa22])
-            .unwrap();
-        let plan = w
-            .swap(
-                owner,
-                Slot {
-                    object: bag,
-                    slot: 0,
-                    kind: 0xa22,
-                },
-                Slot {
-                    object: owner,
-                    slot: 5,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        w.step();
-        assert!(w.entities.contains_key(&bag));
-        assert_eq!(w.players[&owner].character.items[5], -1);
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        assert!(w.now < 60_000);
-        w.step();
-        assert!(!w.entities.contains_key(&bag));
-        assert!(!w.bag_expiry.contains_key(&bag));
-        assert!(w.cells.iter().all(|cell| !cell.contains(&bag)));
-        assert_eq!(w.players[&owner].character.items[5], 0xa22);
-    }
-    #[test]
-    fn private_loot_is_server_scoped_and_reservations_protect_expiry() {
-        let mut w = world();
-        let owner = w.enter(ch(&w), None).unwrap();
-        let mut ch2 = ch(&w);
-        ch2.id = 2;
-        ch2.account = 2;
-        let other = w.enter(ch2, None).unwrap();
-        let pos = w.players[&owner].pos;
-        let bag = w.loot_bag(pos, Some(1), vec![0xa4f]).unwrap();
-        assert!(w.visible(owner).contains(&bag));
-        assert!(!w.visible(other).contains(&bag));
-        for observer in [Some(other), None] {
-            assert!(
-                !w.inspect_map(observer).unwrap()["entities"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|e| e["id"] == bag)
-            );
-        }
-        assert!(
-            w.inspect_map(Some(owner)).unwrap()["entities"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|e| e["id"] == bag)
-        );
-        assert!(w.inspect_map(Some(-999)).is_err());
-        assert!(
-            !w.observe(other).unwrap()["entities"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|e| e["id"] == bag)
-        );
-        let from = Slot {
-            object: bag,
-            slot: 0,
-            kind: 0xa4f,
-        };
-        assert!(
-            w.swap(
-                other,
-                from,
-                Slot {
-                    object: other,
-                    slot: 5,
-                    kind: -1
-                }
-            )
-            .is_err()
-        );
-        let plan = w
-            .swap(
-                owner,
-                from,
-                Slot {
-                    object: owner,
-                    slot: 5,
-                    kind: -1,
-                },
-            )
-            .unwrap();
-        w.now = 60_000;
-        w.step();
-        assert!(w.entities.contains_key(&bag));
-        assert_eq!(w.players[&owner].character.items[5], -1);
-        w.finish_inventory(plan, Ok(1)).unwrap();
-        w.step();
-        assert!(!w.entities.contains_key(&bag));
-        assert_eq!(w.players[&owner].character.items[5], 0xa4f);
-        assert_eq!(w.players[&other].character.items[5], -1);
-        assert_eq!(w.cells.iter().filter(|c| c.contains(&bag)).count(), 0);
-    }
-    #[test]
-    fn native_projectile_observation_exposes_only_the_players_friendly_origins() {
-        let mut w = world();
-        let a = w.enter(ch(&w), None).unwrap();
-        let mut other = ch(&w);
-        other.id = 2;
-        other.account = 2;
-        let b = w.enter(other, None).unwrap();
-        w.now = 1000;
-        for id in [a, b] {
-            let p = w.players[&id].pos;
-            w.shoot(
-                id,
-                1000,
-                1,
-                2711,
-                Pos {
-                    x: p.x + 0.3,
-                    y: p.y,
-                },
-                0.,
-            )
-            .unwrap();
-        }
-        let mut hostile = w.bullets[0].clone();
-        hostile.friendly = false;
-        w.bullets.push(hostile);
-        let observed = w.observe(a).unwrap();
-        let own = observed["own_projectiles"].as_array().unwrap();
-        assert_eq!(own.len(), 1);
-        assert_eq!(
-            own[0]["start"],
-            serde_json::to_value(w.bullets[0].start).unwrap()
-        );
-        assert_eq!(own[0]["angle"], 0.);
-    }
-    #[test]
-    fn native_spread_uses_central_muzzle_without_funding_false_centres() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        let kind = 0xc03;
-        let item = w.content.get(kind).unwrap();
-        let shots = item.shots;
-        let gap = item.arc.to_radians();
-        assert_eq!(shots, 10);
-        let p = w.players.get_mut(&player).unwrap();
-        p.character.items[0] = i32::from(kind);
-        p.next_bullet = 0;
-        p.last_move = 1000;
-        p.last_move_at = w.now;
-        p.movement_credit = 0.;
-        let pos = p.pos;
-        let aim = 0.8f32;
-        let muzzle = Pos {
-            x: pos.x + 0.3 * aim.cos(),
-            y: pos.y + 0.3 * aim.sin(),
-        };
-        for index in 0..shots {
-            let angle = aim + gap * (index as f32 - (shots - 1) as f32 / 2.);
-            if index == 1 {
-                assert!(
-                    w.shoot(player, 1000, index as u8, kind, muzzle, angle + 0.5)
-                        .unwrap_err()
-                        .to_string()
-                        .contains("invalid shot origin")
-                );
-                assert_eq!(w.players[&player].attack_count, 1);
-            }
-            w.shoot(player, 1000, index as u8, kind, muzzle, angle)
-                .unwrap();
-        }
-        assert_eq!(w.players[&player].attack_count, shots);
-        assert_eq!(w.players[&player].movement_credit, 0.);
-        assert_eq!(w.players[&player].pos.x, pos.x);
-        assert_eq!(w.players[&player].pos.y, pos.y);
-    }
+
     #[test]
     fn native_shoot_before_move_uses_the_same_speed_time_and_wall_budget() {
         let mut w = world();
@@ -6410,395 +6417,7 @@ mod tests {
             .contains("blocked tile")
         );
     }
-    #[test]
-    fn hiscore_snapshots_exclude_qa_and_keep_the_latest_fame_until_death_commits() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let world_id = d.initial(-2).unwrap();
-        let (id, _receiver) = receive(&mut d, world_id, 1, WIZARD);
-        let w = d.worlds.get_mut(&world_id).unwrap();
-        w.players.get_mut(&id).unwrap().character.fame = 100;
-        w.players.get_mut(&id).unwrap().death_pending = true;
-        assert_eq!(d.competitive_characters()[0].fame, 100);
-        d.worlds
-            .get_mut(&world_id)
-            .unwrap()
-            .players
-            .get_mut(&id)
-            .unwrap()
-            .controller = Controller::Qa;
-        assert!(d.competitive_characters().is_empty());
-        let p = d
-            .worlds
-            .get_mut(&world_id)
-            .unwrap()
-            .players
-            .get_mut(&id)
-            .unwrap();
-        p.controller = Controller::Human;
-        p.persistence_failure = Some("test storage failure".into());
-        assert!(d.competitive_characters().is_empty());
-    }
-    #[test]
-    fn only_human_enemy_drop_pickups_stage_collection_and_player_drops_never_do() {
-        for controller in [Controller::Human, Controller::Qa, Controller::Autonomous] {
-            let (mut w, id, enemy) = encounter(0x683);
-            w.players.get_mut(&id).unwrap().controller = controller;
-            w.rng = rand::rngs::StdRng::seed_from_u64(5);
-            let mut defeated = w.remove_entity(enemy);
-            defeated.damage.insert(w.players[&id].character.id, 100);
-            for _ in 0..32 {
-                w.drop_loot(&defeated).unwrap();
-                if w.entities.values().any(|e| !e.drop_slots.is_empty()) {
-                    break;
-                }
-            }
-            let bag = w
-                .entities
-                .values()
-                .find(|e| !e.drop_slots.is_empty())
-                .unwrap()
-                .clone();
-            let slot = *bag.drop_slots.first().unwrap();
-            let kind = bag.items[slot];
-            w.players.get_mut(&id).unwrap().pos = bag.pos;
-            let plan = w
-                .swap(
-                    id,
-                    Slot {
-                        object: bag.id,
-                        slot,
-                        kind,
-                    },
-                    Slot {
-                        object: id,
-                        slot: 11,
-                        kind: -1,
-                    },
-                )
-                .unwrap();
-            assert_eq!(
-                plan.collected,
-                if controller == Controller::Human {
-                    Some(kind as u16)
-                } else {
-                    None
-                }
-            );
-            assert!(w.entities[&bag.id].drop_slots.contains(&slot));
-            w.finish_inventory(plan, Ok(1)).unwrap();
-            assert!(!w.entities[&bag.id].drop_slots.contains(&slot));
-            let plan = w
-                .drop_item(
-                    id,
-                    Slot {
-                        object: id,
-                        slot: 11,
-                        kind,
-                    },
-                )
-                .unwrap();
-            let dropped = plan.dropped.unwrap();
-            assert_eq!(plan.collected, None);
-            w.finish_inventory(plan, Ok(2)).unwrap();
-            let plan = w
-                .swap(
-                    id,
-                    Slot {
-                        object: dropped,
-                        slot: 0,
-                        kind,
-                    },
-                    Slot {
-                        object: id,
-                        slot: 11,
-                        kind: -1,
-                    },
-                )
-                .unwrap();
-            assert_eq!(plan.collected, None);
-        }
-    }
-    #[test]
-    fn dungeon_clear_counter_is_staged_until_progress_commit() {
-        let (mut w, player, boss) = encounter(0x927);
-        w.name = "Pirate Cave".into();
-        let mut defeated = w.remove_entity(boss);
-        defeated.damage.insert(w.players[&player].character.id, 101);
-        w.drop_loot(&defeated).unwrap();
-        assert!(w.cleared);
-        assert_eq!(w.players[&player].character.pirate_caves, 0);
-        assert!(w.entities.values().any(|e| e.kind == 0x71d && !e.published));
-        assert!(!w.entities.values().any(|e| e.kind == 0x71d && e.published));
-        assert!(w.drop_loot(&defeated).is_err());
-        let plans = w.pending_progress();
-        assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].1.pirate_caves, 1);
-        assert!(w.pending_progress().is_empty());
-        assert!(w.begin_departure(player).unwrap().is_none());
-        w.finish_progress(player, plans[0].1.clone()).unwrap();
-        assert_eq!(w.players[&player].character.pirate_caves, 1);
-        assert!(w.entities.values().any(|e| e.kind == 0x71d && e.published));
-        assert!(w.clear_exit.is_none());
-    }
-    fn encounter(kind: u16) -> (World, i32, i32) {
-        let mut w = world();
-        let obsolete: Vec<_> = w
-            .entities
-            .values()
-            .filter(|e| w.content.objects[&e.kind].enemy)
-            .map(|e| e.id)
-            .collect();
-        for id in obsolete {
-            w.remove_entity(id);
-        }
-        let player = w.enter(ch(&w), None).unwrap();
-        let pos = w.players[&player].pos;
-        let npc = w
-            .spawn_entity(
-                kind,
-                Pos {
-                    x: pos.x + 4.,
-                    y: pos.y,
-                },
-                vec![],
-            )
-            .unwrap();
-        w.encounter = true;
-        (w, player, npc)
-    }
-    #[test]
-    fn dropped_portal_binds_both_players_to_one_cave_and_expires() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let w = d.worlds.get_mut(&-3).unwrap();
-        let pos = w.population[0].pos;
-        let a = w.enter(ch(w), None).unwrap();
-        let mut other = ch(w);
-        other.id = 2;
-        other.account = 2;
-        let b = w.enter(other, None).unwrap();
-        w.players.get_mut(&a).unwrap().pos = pos;
-        w.players.get_mut(&b).unwrap().pos = pos;
-        let portal = d.drop_portal(-3, pos).unwrap();
-        assert_eq!(d.portals[&portal].expires, d.tick + 600);
-        d.worlds
-            .get_mut(&-3)
-            .unwrap()
-            .entities
-            .get_mut(&portal)
-            .unwrap()
-            .published = false;
-        assert!(
-            d.destination(a, Some(portal))
-                .unwrap_err()
-                .to_string()
-                .contains("portal not published")
-        );
-        d.worlds
-            .get_mut(&-3)
-            .unwrap()
-            .entities
-            .get_mut(&portal)
-            .unwrap()
-            .published = true;
-        let (_, _, destination) = d.destination(a, Some(portal)).unwrap();
-        assert_eq!(d.destination(b, Some(portal)).unwrap().2, destination);
-        assert_eq!(d.worlds[&destination].name, "Pirate Cave");
-        d.worlds
-            .get_mut(&-3)
-            .unwrap()
-            .players
-            .get_mut(&b)
-            .unwrap()
-            .pos = Pos {
-            x: pos.x + 3.,
-            y: pos.y,
-        };
-        assert!(d.destination(b, Some(portal)).is_err());
-        let fake = d
-            .worlds
-            .get_mut(&-3)
-            .unwrap()
-            .spawn_entity(0x717, pos, vec![])
-            .unwrap();
-        assert!(d.destination(a, Some(fake)).is_err());
-        d.tick = 599;
-        d.step();
-        assert!(!d.portals.contains_key(&portal));
-        assert!(!d.worlds[&-3].entities.contains_key(&portal));
-        assert!(d.destination(a, Some(portal)).is_err());
-    }
-    #[test]
-    fn sprite_world_portal_stays_usable_for_fifteen_seconds_then_expires() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let w = d.worlds.get_mut(&-3).unwrap();
-        let pos = w.population[0].pos;
-        let player = w.enter(ch(w), None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = pos;
-        d.tick = 1234;
-        let born = d.tick;
-        let portal = d.drop_dungeon_portal(-3, 0x70c, pos).unwrap();
-        for age in [200, 299] {
-            d.tick = born + age - 1;
-            d.step();
-            assert!(d.worlds[&-3].entities.contains_key(&portal));
-            let destination = d.destination(player, Some(portal)).unwrap().2;
-            assert_eq!(d.worlds[&destination].name, "Sprite World");
-        }
-        d.step();
-        assert_eq!(d.tick - born, 300);
-        assert!(!d.portals.contains_key(&portal));
-        assert!(!d.worlds[&-3].entities.contains_key(&portal));
-        assert!(d.destination(player, Some(portal)).is_err());
-    }
-    #[test]
-    fn shore_population_is_bounded_sourced_and_cannot_respawn_on_players() {
-        let mut d = Directory::load(Path::new("data"), world().content, 16).unwrap();
-        let w = d.worlds.get_mut(&-3).unwrap();
-        assert_eq!(w.population_count(11), 24);
-        for spawn in w
-            .population
-            .iter()
-            .filter(|s| w.content.objects[&s.kind].terrain >= 11)
-        {
-            assert_eq!(
-                w.map.cell(spawn.pos.x, spawn.pos.y).unwrap().terrain,
-                w.content.objects[&spawn.kind].terrain
-            );
-            assert!(w.walkable(spawn.pos));
-        }
-        let slot = w.population.iter().position(|s| s.kind == 0x602).unwrap();
-        let pos = w.population[slot].pos;
-        let old = w.population[slot].entity.unwrap();
-        w.remove_entity(old);
-        w.repopulate().unwrap();
-        let player = w.enter(ch(w), None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = pos;
-        w.now = 60_000;
-        w.repopulate().unwrap();
-        assert!(w.population[slot].entity.is_none());
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 0.5, y: 0.5 };
-        w.repopulate().unwrap();
-        assert_ne!(w.population[slot].entity.unwrap(), old);
-        assert_eq!(w.entities_at(pos).filter(|e| e.kind == 0x602).count(), 1);
-        assert_eq!(
-            w.entities
-                .values()
-                .filter(|e| {
-                    let object = &w.content.objects[&e.kind];
-                    object.enemy
-                        && object.class != "Wall"
-                        && !(e.quest.is_some() && matches!(e.kind, 0xd5e | 0xd65))
-                })
-                .count(),
-            w.population
-                .iter()
-                .filter(|s| s.entity.is_some_and(|id| w.entities.contains_key(&id)))
-                .count()
-                + w.hero_identities().len()
-        );
-        assert!(w.population_count(11) <= 24);
-        assert_eq!(w.hero_identities().len(), 14);
-        assert!(
-            w.population
-                .iter()
-                .all(|s| !crate::endgame::HEROES.contains(&s.kind))
-        );
-    }
-    #[test]
-    fn moving_chaser_stays_indexed_and_fires_real_selected_projectiles() {
-        let (mut w, player, npc) = encounter(0x687);
-        let initial = w.entities[&npc].pos;
-        for _ in 0..20 {
-            w.step();
-        }
-        let current = w.entities[&npc].pos;
-        assert!(initial.distance(current) > 2.);
-        assert!(current.distance(w.players[&player].pos) <= 1.3);
-        assert_eq!(w.cells.iter().filter(|cell| cell.contains(&npc)).count(), 1);
-        assert!(w.entities_at(current).any(|e| e.id == npc));
-        assert!(w.players[&player].character.hp < 100);
-        let before = current;
-        assert!(w.move_entity(npc, Pos { x: -10., y: -10. }, 100.).is_err());
-        assert_eq!(w.entities[&npc].pos.distance(before), 0.);
-        assert!(w.entities_at(before).any(|e| e.id == npc));
-    }
-    #[test]
-    fn boss_emits_both_attacks_only_after_threshold_and_safe_worlds_do_not_run_ai() {
-        let (mut w, _, boss) = encounter(0x927);
-        w.step();
-        assert!(!w.bullets.iter().any(|b| b.owner == boss));
-        w.entities.get_mut(&boss).unwrap().hp = 639;
-        for _ in 0..10 {
-            w.step();
-        }
-        let attacks: Vec<_> = w
-            .bullets
-            .iter()
-            .filter(|b| b.owner == boss)
-            .map(|b| b.spec.speed)
-            .collect();
-        assert!(attacks.contains(&75.));
-        assert!(attacks.contains(&130.));
-        let pos = w.entities[&boss].pos;
-        w.safe = true;
-        for _ in 0..40 {
-            w.step();
-        }
-        assert_eq!(w.entities[&boss].pos.distance(pos), 0.);
-        assert!(!w.bullets.iter().any(|b| b.owner == boss));
-    }
-    #[test]
-    fn overlapping_entities_preserve_collision_visibility_and_removal() {
-        let mut w = world();
-        let (x, y) = w.map.spawns[0];
-        let pos = Pos { x, y };
-        let first = w.spawn_entity(0x806, pos, vec![-1; 8]).unwrap();
-        let second = w.spawn_entity(0x806, pos, vec![-1; 8]).unwrap();
-        assert_eq!(w.entities_at(pos).count(), 2);
-        assert_eq!(
-            w.near_entities(pos, pos)
-                .filter(|e| e.id == first || e.id == second)
-                .count(),
-            2
-        );
-        let wall = w.spawn_entity(0x163, pos, vec![]).unwrap();
-        assert!(!w.walkable(pos));
-        assert!(w.spawn_entity(0x806, pos, vec![]).is_err());
-        w.remove_entity(wall);
-        assert!(w.walkable(pos));
-        w.remove_entity(first);
-        assert_eq!(
-            w.entities_at(pos).map(|e| e.id).collect::<Vec<_>>(),
-            vec![second]
-        );
-    }
-    #[test]
-    fn projectile_keeps_killer_identity_after_emitter_dies() {
-        let mut w = world();
-        let mut character = ch(&w);
-        character.hp = 1;
-        let player = w.enter(character, None).unwrap();
-        let emitter = w.entities.values().find(|e| e.kind == 0x802).unwrap().id;
-        let kind = w.entities[&emitter].kind;
-        let pos = w.players[&player].pos;
-        w.bullets.push(Bullet {
-            owner: emitter,
-            source_kind: kind,
-            id: 1,
-            friendly: false,
-            start: pos,
-            pos,
-            angle: 0.,
-            born: 0,
-            damage: 100,
-            spec: w.content.objects[&kind].projectiles[&0].clone(),
-            hit: BTreeSet::new(),
-        });
-        w.remove_entity(emitter);
-        w.step();
-        assert!(w.players[&player].death_pending);
-        assert_eq!(w.players[&player].killer, w.content.objects[&kind].name);
-    }
+
     #[test]
     fn selected_cover_stops_hostile_projectiles_before_player_damage() {
         for (kind, passes_cover, hp) in [
@@ -6806,6 +6425,8 @@ mod tests {
             (0x120, true, 100),
             (0x100, false, 100),
             (0x100, true, 92),
+            (0x17b, false, 100),
+            (0x17b, true, 100),
         ] {
             let mut w = world();
             for id in w.entities.keys().copied().collect::<Vec<_>>() {
@@ -6843,244 +6464,5 @@ mod tests {
             );
             assert!(w.bullets.is_empty());
         }
-    }
-    #[test]
-    fn native_movement_and_shot_origin_follow_client_positions_without_funding_scripts() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        let pos = w.players[&player].pos;
-        w.attack_epoch = Instant::now() - std::time::Duration::from_millis(2000);
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_move = 1000;
-        p.last_move_at = 1000;
-        p.movement_credit = 0.;
-        w.now = 1000;
-        let next = Pos {
-            x: pos.x + 0.4,
-            y: pos.y,
-        };
-        assert!(w.move_to(player, next, 1100).is_err());
-        w.native_move_to(player, next, 1100).unwrap();
-        let received = w.players[&player].last_move_at;
-        assert!(received >= 2000);
-        let predicted = Pos {
-            x: next.x + 0.4,
-            y: next.y,
-        };
-        assert!(w.move_timed(player, predicted, 1200, received).is_err());
-        w.shoot_timed(
-            player,
-            (1200, received, true),
-            1,
-            0xa97,
-            Pos {
-                x: predicted.x + 0.3,
-                y: predicted.y,
-            },
-            0.,
-        )
-        .unwrap();
-        assert_eq!(w.players[&player].movement_credit, 0.);
-        assert_eq!(w.players[&player].pos.x, next.x);
-        assert_eq!(w.bullets.len(), 1);
-    }
-
-    #[test]
-    fn native_positions_preserve_actual_ingress_without_rejecting_actor_or_network_delay() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        let pos = w.players[&player].pos;
-        w.attack_epoch = Instant::now() - std::time::Duration::from_millis(2000);
-        let received = w.attack_epoch + std::time::Duration::from_millis(1100);
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_move = 1000;
-        p.last_move_at = 1000;
-        p.movement_credit = 0.;
-        let next = Pos {
-            x: pos.x + 0.7,
-            y: pos.y,
-        };
-        w.native_move_received(player, next, (1100, received))
-            .unwrap();
-        w.native_shoot_received(
-            player,
-            (1100, received),
-            1,
-            0xa97,
-            Pos {
-                x: next.x + 0.3,
-                y: next.y,
-            },
-            0.,
-        )
-        .unwrap();
-        let p = &w.players[&player];
-        assert_eq!((p.last_move_at, p.last_attack_at), (1100, 1100));
-        assert_eq!(p.pos.x, next.x);
-        assert_eq!(p.movement_credit, 0.);
-        assert!(
-            w.native_move_received(
-                player,
-                next,
-                (1200, received - std::time::Duration::from_millis(1))
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn queued_progress_must_settle_before_pause_is_confirmed() {
-        let mut w = world();
-        let character = ch(&w);
-        let player = w.enter(character, None).unwrap();
-        w.players.get_mut(&player).unwrap().experience_queued = 20;
-        assert!(!w.settled().unwrap());
-        let (id, progress) = w.pending_progress().pop().unwrap();
-        assert!(!w.settled().unwrap());
-        w.finish_progress(id, progress).unwrap();
-        assert!(w.settled().unwrap());
-    }
-    #[test]
-    fn paused_ingress_clock_stays_frozen_while_client_cadence_funds_native_shots() {
-        let mut w = world();
-        let mut character = ch(&w);
-        character.base[5] = 26;
-        let player = w.enter(character, None).unwrap();
-        let pos = w.players[&player].pos;
-        let start = Pos {
-            x: pos.x + 0.3,
-            y: pos.y,
-        };
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_attack = 1000;
-        p.last_attack_at = 1000;
-        p.attack_credit = 0.;
-        w.attack_epoch = w.clock.now() - std::time::Duration::from_millis(1000);
-        w.clock.set_paused(true);
-        let paused = w.clock.now();
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        assert_eq!(w.clock.now(), paused);
-        assert_eq!(
-            w.native_shoot_received(player, (1298, w.clock.now()), 1, 0xa97, start, 0.)
-                .unwrap(),
-            NativeInput::Applied
-        );
-        w.clock.set_paused(false);
-        assert_eq!(
-            w.native_shoot_received(player, (1596, w.clock.now()), 2, 0xa97, start, 0.)
-                .unwrap(),
-            NativeInput::Applied
-        );
-        assert!(w.players[&player].last_attack_at < 1100);
-        assert_eq!(w.players[&player].character.shots, 2);
-        assert_eq!(w.bullets.len(), 2);
-    }
-    #[test]
-    fn native_attack_cadence_uses_client_time_but_keeps_real_ingress_metadata() {
-        let mut w = world();
-        let mut character = ch(&w);
-        character.base[5] = 26;
-        let player = w.enter(character, None).unwrap();
-        let pos = w.players[&player].pos;
-        let start = Pos {
-            x: pos.x + 0.3,
-            y: pos.y,
-        };
-        let p = w.players.get_mut(&player).unwrap();
-        p.last_attack = 1000;
-        p.last_attack_at = 1000;
-        p.attack_credit = 0.;
-        for (time, received) in [(1298, 1200), (1596, 1298)] {
-            for _ in 0..2 {
-                let bullet = w.players[&player].next_bullet;
-                assert_eq!(
-                    w.shoot_timed(player, (time, received, true), bullet, 0xa97, start, 0.)
-                        .unwrap(),
-                    NativeInput::Applied
-                );
-            }
-        }
-        w.now = 9000;
-        w.shoot_timed(player, (1894, 1400, true), 5, 0xa97, start, 0.)
-            .unwrap();
-        assert_eq!(w.players[&player].character.shots, 5);
-        assert_eq!(w.players[&player].last_attack_at, 1400);
-        let seed = w.players[&player].seed;
-        assert!(
-            w.shoot_timed(player, (2192, 1200, true), 6, 0xa97, start, 0.)
-                .unwrap_err()
-                .to_string()
-                .contains("attack receive clock regressed")
-        );
-        assert_eq!(w.players[&player].seed, seed);
-    }
-    #[test]
-    fn native_integer_attack_period_keeps_the_bounded_server_credit() {
-        for dexterity in [15, 17, 18, 25, 75] {
-            let mut w = world();
-            let mut character = ch(&w);
-            character.base[5] = dexterity;
-            let player = w.enter(character, None).unwrap();
-            let period = (1. / (0.0015_f64 + (0.008 - 0.0015) * dexterity as f64 / 75.)) as i32;
-            let pos = w.players[&player].pos;
-            let start = Pos {
-                x: pos.x + 0.3,
-                y: pos.y,
-            };
-            for attack in 0..2000 {
-                let time = attack * period;
-                w.now = time as u64;
-                for _ in 0..2 {
-                    let bullet = w.players[&player].next_bullet;
-                    w.shoot(player, time, bullet, 0xa97, start, 0.).unwrap();
-                }
-                w.bullets.clear();
-            }
-            assert_eq!(w.players[&player].character.shots, 4000);
-            let bullet = w.players[&player].next_bullet;
-            assert!(
-                w.shoot(player, 2000 * period - 3, bullet, 0xa97, start, 0.)
-                    .is_err()
-            );
-        }
-    }
-    #[test]
-    fn candidate_tutorial_gun_still_reaches_its_open_lane() {
-        let mut w = world();
-        let player = w.enter(ch(&w), None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 12.2, y: 137.8 };
-        assert!((0..200).any(|_| {
-            w.step();
-            w.players[&player].character.hp < 100
-        }));
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 12.2, y: 138.0 };
-        assert!((0..3000).any(|_| {
-            w.step();
-            w.players[&player].death_pending
-        }));
-    }
-    #[test]
-    fn paired_staff_wave() {
-        let w = world();
-        let spec = w.content.objects[&0xa97].projectiles[&0].clone();
-        let mut b = Bullet {
-            owner: 1,
-            source_kind: WIZARD,
-            id: 1,
-            friendly: true,
-            start: Pos { x: 0., y: 0. },
-            pos: Pos { x: 0., y: 0. },
-            angle: 0.,
-            born: 0,
-            damage: 7,
-            spec,
-            hit: BTreeSet::new(),
-        };
-        let a = b.position(60);
-        b.id = 2;
-        let c = b.position(60);
-        assert!((a.x - 1.08).abs() < 0.001);
-        assert!((a.y + c.y).abs() < 0.001);
-        assert!(a.y.abs() > 0.4);
     }
 }

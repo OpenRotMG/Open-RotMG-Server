@@ -53,7 +53,7 @@ async fn community_social_actual_healing_changes_requests_and_gifts_or_own_need_
                         revision: ch.revision,
                         items: ch.items.clone(),
                     }],
-                    None,
+                    vec![],
                 )
                 .await
                 .unwrap()[0];

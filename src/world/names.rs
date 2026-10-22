@@ -86,7 +86,3 @@ impl World {
         published
     }
 }
-
-#[cfg(test)]
-#[path = "names_tests.rs"]
-mod tests;

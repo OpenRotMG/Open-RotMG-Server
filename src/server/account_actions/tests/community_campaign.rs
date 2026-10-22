@@ -296,7 +296,7 @@ async fn community_campaign_ordinary_account_lifetimes() -> Result<()> {
                     let mut durable = Vec::new();
                     for account in &accounts {
                         durable.push(serde_json::json!({"account":account,"mind":app.store.bot_mind(*account).await?,
-                            "vault":app.store.vault(*account).await?}));
+                            "vault":app.store.vault(*account, 0).await?}));
                     }
                     append(&mut evidence, serde_json::json!({"kind":"window_checkpoint","window":window+1,
                         "logical_end_active_ms":target,"active_bracket_ms":[prior_active,active],

@@ -15,7 +15,7 @@ async function fixture(t,transfer=false) {
   await mkdir(join(dir,'testing'));
   await writeFile(join(dir,'control.token'),'fixture-control');
   await writeFile(join(dir,'testing.json'),JSON.stringify({schema:1,provenance:'prepared'}));
-  let paused=true,world=-1,tick=0,lease,activeFault='';
+  let paused=true,world=-1,tick=0,lease,activeFault='',handoffChecks=0;
   const view=()=>({actor:1,controller:'native',paused,position:{x:1,y:1},session:{world,player:1},world:world===-1?'Tutorial':'Nexus',lifecycle:{alive:true},character:{hp:100,mp:50,items:[]},verification:{shots:0}});
   let origin;
   const server=createServer(async(req,res)=>{
@@ -25,11 +25,22 @@ async function fixture(t,transfer=false) {
     const chunks=[];for await(const chunk of req)chunks.push(chunk);
     const request=JSON.parse(Buffer.concat(chunks));calls.push(request);
     const c=request.command;
+    const handoff=activeFault==='post-input-handoff'&&(await readFile(log,'utf8')).includes('keyUp');
+    if(handoff&&c.op==='native_state'&&++handoffChecks<3)return res.end(JSON.stringify({runtime:'fixture-runtime',paused,actors:[{actor:1,stage:'transferring'}]}));
+    if(handoff&&c.op==='observe'&&handoffChecks<3)return res.end(JSON.stringify({status:'failed',error:'selected character is not connected; no replacement was selected'}));
     if(c.op==='native_state')return res.end(JSON.stringify({runtime:'fixture-runtime',paused,actors:[{actor:1,player:1,stage:activeFault==='loading'?'disconnected':'ready',world,world_name:world===-1?'Tutorial':'Nexus',client_time:++tick}]}));
-    if(c.op==='native_sync')return res.end(JSON.stringify({acknowledged:[{actor:1,player:1,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('000000090600000001','hex')).digest('hex')}]}));
+    if(c.op==='inspect')return res.end(JSON.stringify({view:{position:{x:1,y:1},objects:[{id:2,hp:100,position:{x:3,y:1}}]},diagnostic:{own_projectiles:[]}}));
+    if(c.op==='native_sync'){
+      if(activeFault==='binding-renew-timeout'&&!paused)await new Promise(resolve=>setTimeout(resolve,900));
+      return res.end(JSON.stringify({acknowledged:[{actor:1,player:1,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('000000090600000001','hex')).digest('hex')}]}));
+    }
+    if(c.op==='native_lease'&&c.operation==='renew'&&['binding-renew-timeout','layout-renew-timeout'].includes(activeFault)){
+      await new Promise(resolve=>setTimeout(resolve,1000));
+      return res.end(JSON.stringify({status:'failed',error:'fixture delayed renewal'}));
+    }
     if(c.op==='native_lease'&&c.operation==='renew'&&activeFault==='terminal'){paused=true;return res.end(JSON.stringify({status:'failed',error:'native participant is terminal during control'}));}
     if(c.op==='native_lease'){clearTimeout(lease);if(c.operation!=='end')lease=setTimeout(()=>{paused=true;},1500);}
-    if(c.op==='pause')paused=true;if(c.op==='resume'){paused=false;if(transfer)world=-2;}
+    if(c.op==='pause'||c.op==='native_lease'&&c.operation==='halt')paused=true;if(c.op==='resume'){paused=false;if(transfer)world=-2;}
     res.end(JSON.stringify(c.op==='observe'?view():c.op==='run'?{status:'succeeded',result:{goal_reached:true,state:view()}}:{status:'succeeded',paused}));
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -39,9 +50,10 @@ async function fixture(t,transfer=false) {
   await writeFile(bootstrap,`
     import {appendFileSync} from 'node:fs';
     globalThis.WebSocket=class {
-      constructor(){this.binding=null;queueMicrotask(()=>this.onopen());}
+      constructor(){this.binding=null;if(process.env.FIXTURE_FAULT==='network-enable')this.openSocket=setInterval(()=>{},1000);queueMicrotask(()=>this.onopen());}
       send(raw){const row=JSON.parse(raw);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({...row,at:Date.now()})+'\\n');
         let value=true,error;
+        if(row.method==='Network.enable'&&process.env.FIXTURE_FAULT==='network-enable')error={message:'fixture Network.enable failure'};
         if(row.method==='Network.enable')setTimeout(()=>{const frame=payloadData=>this.onmessage({data:JSON.stringify({method:'Network.webSocketFrameReceived',params:{response:{opcode:2,payloadData}}})});frame(Buffer.from('000000090600000001','hex').toString('base64'));if(process.env.FIXTURE_FAULT==='combat-frames')for(let n=0;n<256;n++)frame(Buffer.from('000000094a00000001','hex').toString('base64'));},0);
         if(row.method==='Runtime.evaluate'&&row.params.expression.includes('playing:'))value={playing:true,binding:this.binding};
         if(row.method==='Runtime.evaluate'&&row.params.expression.startsWith('globalThis[Symbol.for("openrotmg.testing.binding.v1")]=')){this.binding=JSON.parse(row.params.expression.split(']=')[1]);value=this.binding;}
@@ -49,9 +61,9 @@ async function fixture(t,transfer=false) {
         if(row.method==='Runtime.evaluate'&&row.params.expression.includes('getBoundingClientRect'))value={x:0,y:0,width:800,height:600,viewportWidth:800,viewportHeight:600};
         if(process.env.FIXTURE_FAULT==='input'&&row.method==='Input.dispatchKeyEvent'&&row.params.type==='keyDown')error={message:'fixture keydown failure'};
         if(process.env.FIXTURE_FAULT==='pause'&&row.method==='Runtime.evaluate'&&row.params.expression.endsWith(')(true)'))error={message:'fixture native pause failure'};
-        setTimeout(()=>this.onmessage({data:JSON.stringify({id:row.id,...(error?{error}:{result:row.method==='Runtime.evaluate'?{result:{value}}:{}})})}),process.env.FIXTURE_FAULT==='slow-ack'&&row.method==='Input.dispatchKeyEvent'&&row.params.type==='keyDown'?1000:0);
+        setTimeout(()=>this.onmessage({data:JSON.stringify({id:row.id,...(error?{error}:{result:row.method==='Runtime.evaluate'?{result:{value}}:{}})})}),process.env.FIXTURE_FAULT==='slow-ack'&&row.method==='Input.dispatchKeyEvent'&&row.params.type==='keyDown'?1000:process.env.FIXTURE_FAULT==='layout-renew-timeout'&&row.method==='Runtime.evaluate'&&row.params.expression.includes('getBoundingClientRect')?900:0);
       }
-      close(){this.onclose?.();}
+      close(){clearInterval(this.openSocket);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({method:'socket.close'})+'\\n');this.onclose?.();}
     };
   `);
   const config=join(dir,'config.json');
@@ -80,11 +92,22 @@ test('native request releases keys, coordinates pause, and replays without repea
   assert.equal((await f.events()).length,events.length);
   assert.equal(f.paused(),true);
 });
+test('failed native CDP setup closes its still-live socket',async t=>{
+  const f=await fixture(t),result=await f.run('failed-network',{op:'pause'},'network-enable');
+  assert.equal(result.code,1,result.stderr);assert.match(result.stderr,/fixture Network.enable failure/);
+  assert.ok((await f.events()).some(e=>e.method==='socket.close'));
+});
 test('cross-world coordinates never report a physical movement distance',async t=>{
   const f=await fixture(t,true),result=await f.run('ordinary-transfer',move);
   assert.equal(result.code,0,result.stderr);
   const effects=JSON.parse(result.stdout).effects;
   assert.equal(effects.world_changed,true);assert.equal(effects.distance,null);
+});
+test('released native input waits for the same living actor to settle after handoff',async t=>{
+  const f=await fixture(t),result=await f.run('post-input-handoff',move,'post-input-handoff');
+  assert.equal(result.code,0,result.stderr);assert(f.paused());
+  assert.ok(f.calls.filter(c=>c.command.op==='native_state').length>=3);
+  assert.equal(JSON.parse(result.stdout).steps.length,1);
 });
 test('primary input failure retains release and pause cleanup evidence',async t=>{
   const f=await fixture(t), result=await f.run('bad-input',move,'input');
@@ -144,6 +167,27 @@ test('terminal cohort supervision releases an active hold before its duration ex
   assert.ok(keys[1].at-keys[0].at<1000,JSON.stringify(keys));
   assert.equal(f.paused(),true);
 });
+for(const [name,input] of [['key',{keys:['d'],duration_ms:1}],['mouse',{keys:[],duration_ms:100,drag:{from:{x:634,y:528},to:{x:722,y:428}}}]])test(`failed renewal during binding cannot start a late ${name} DOWN`,async t=>{
+  const f=await fixture(t),result=await f.run('failed-binding-renew',{...move,input},'binding-renew-timeout');
+  assert.equal(result.code,1);assert.match(result.stderr,/TimeoutError/);
+  const down=(await f.events()).filter(e=>e.method.startsWith('Input.')&&['keyDown','mousePressed'].includes(e.params.type));
+  assert.deepEqual(down,[],'A timed-out lease must reject new input, even when its browser proof arrives later');
+  assert.ok(f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='halt'));
+  assert.ok(!f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='end'));
+  assert.equal(f.paused(),true);
+});
+test('failed renewal during binding cannot dispatch a server run',async t=>{
+  const f=await fixture(t),result=await f.run('failed-binding-run',{op:'run',actor:1,goal:{kind:'time',ms:100},max_game_ms:1000},'binding-renew-timeout');
+  assert.equal(result.code,1);assert.match(result.stderr,/TimeoutError/);
+  assert.ok(!f.calls.some(c=>c.command.op==='run'),'A late browser proof cannot authorize server work after heartbeat failure');
+  assert.ok(f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='halt'));
+});
+test('failed renewal during layout cannot dispatch a mouse DOWN',async t=>{
+  const f=await fixture(t),result=await f.run('failed-layout-renew',{...move,input:{keys:[],duration_ms:100,mouse:{x:450,y:300}}},'layout-renew-timeout');
+  assert.equal(result.code,1);assert.match(result.stderr,/TimeoutError/);
+  assert.ok(!(await f.events()).some(e=>e.method==='Input.dispatchMouseEvent'&&e.params.type==='mousePressed'));
+  assert.ok(f.calls.some(c=>c.command.op==='native_lease'&&c.command.operation==='halt'));
+});
 test('native realtime work cannot outlive a successful standalone controller',async t=>{
   const f=await fixture(t);
   const a=await f.run('no-orphan',{...move,pauseAfter:false}),b=await f.run('no-resume',{op:'resume'});
@@ -168,4 +212,65 @@ test('invalid native drags reject before resuming or dispatching input',async t=
   assert.equal(result.code,1);assert.match(result.stderr,/Native drag requires/);
   assert.ok(!f.calls.some(c=>c.command.op==='resume'));
   assert.ok(!(await f.events()).some(e=>e.method.startsWith('Input.')));
+});
+
+test('bounded native sequences release each step and coordinate one cohort pause',async t=>{
+  const f=await fixture(t),result=await f.run('sequence',{op:'act',actor:1,sequence:[{actor:1,input:{keys:['d'],duration_ms:10}},{actor:1,input:{keys:['a'],duration_ms:10}}]});
+  assert.equal(result.code,0,result.stderr);assert(f.paused());
+  assert.equal(f.calls.filter(c=>c.command.op==='resume').length,1);
+  const keys=(await f.events()).filter(e=>e.method==='Input.dispatchKeyEvent');
+  assert.deepEqual(keys.map(e=>[e.params.type,e.params.key]),[['keyDown','d'],['keyUp','d'],['keyDown','a'],['keyUp','a']]);
+});
+test('every native sequence step and total duration validate before any input',async t=>{
+  const f=await fixture(t);
+  for(const [id,sequence,error]of[
+    ['unknown-actor',[{actor:1,input:move.input},{actor:2,input:move.input}],/configured owned target/],
+    ['too-long',[{actor:1,input:{keys:['d'],duration_ms:6000}},{actor:1,input:{keys:['a'],duration_ms:6000}}],/sequence duration/],
+    ['bad-later-key',[{actor:1,input:move.input},{actor:1,input:{keys:['0'],duration_ms:1}}],/supported keys/]
+  ]){
+    const r=await f.run(id,{op:'act',actor:1,sequence});assert.equal(r.code,1);assert.match(r.stderr,error);
+  }
+  assert.ok(!f.calls.some(c=>c.command.op==='resume'));
+  assert.ok(!(await f.events()).some(e=>e.method.startsWith('Input.')));
+});
+test('a dispatched ten-second native hold releases without the no-dispatch race',async t=>{
+  const f=await fixture(t),result=await f.run('ten-seconds',{op:'act',actor:1,input:{keys:['r'],duration_ms:10000}});
+  assert.equal(result.code,0,result.stderr);assert(f.paused());
+  const keys=(await f.events()).filter(e=>e.method==='Input.dispatchKeyEvent');
+  assert.deepEqual(keys.map(e=>e.params.type),['keyDown','keyUp']);
+  assert.ok(keys[1].at-keys[0].at>=9950);
+});
+
+test('live native aim uses only a currently known living target and ordinary mouse input',async t=>{
+  const f=await fixture(t),result=await f.run('known-target',{op:'act',actor:1,input:{keys:[],duration_ms:10,target:{entity:2,camera_angle:0,fire:true}}});
+  assert.equal(result.code,0,result.stderr);assert(f.paused());
+  const moved=(await f.events()).find(e=>e.method==='Input.dispatchMouseEvent'&&e.params.type==='mouseMoved');
+  assert.equal(moved.params.x,400);assert.equal(moved.params.y,325);
+  assert.ok(f.calls.some(c=>c.command.op==='inspect'));
+});
+test('missing live aim target fails instead of substituting coordinates',async t=>{
+  const f=await fixture(t),result=await f.run('missing-target',{op:'act',actor:1,input:{keys:[],duration_ms:10,target:{entity:99,camera_angle:0,fire:true}}});
+  assert.equal(result.code,1);assert.match(result.stderr,/actual client neighborhood/);
+  assert.ok(!(await f.events()).some(e=>e.method.startsWith('Input.')&&e.params.type==='mousePressed'));
+  assert(f.paused());
+});
+
+test('native target can move the pointer and cast without pressing the fire button',async t=>{
+ const f=await fixture(t),result=await f.run('pointer-only',{op:'act',actor:1,input:{keys:[' '],duration_ms:10,target:{entity:2,camera_angle:0,fire:false}}});
+ assert.equal(result.code,0,result.stderr);
+ const events=await f.events();assert.ok(events.some(e=>e.method==='Input.dispatchMouseEvent'&&e.params.type==='mouseMoved'));
+ assert.ok(!events.some(e=>e.method==='Input.dispatchMouseEvent'&&e.params.type==='mousePressed'));
+ assert.ok(events.some(e=>e.method==='Input.dispatchKeyEvent'&&e.params.type==='keyDown'));
+});
+
+test('parallel native inputs reject a duplicated actor before any resume',async t=>{
+ const f=await fixture(t),result=await f.run('duplicate-parallel',{op:'act',actor:1,sequence:[[{actor:1,input:move.input},{actor:1,input:move.input}]]});
+ assert.equal(result.code,1);assert.match(result.stderr,/distinct configured actors/);
+ assert.ok(!f.calls.some(c=>c.command.op==='resume'));assert.ok(!(await f.events()).some(e=>e.method.startsWith('Input.')));
+});
+test('grouped native inputs retain the total ten-second and release gates',async t=>{
+ const f=await fixture(t),bad=await f.run('group-too-long',{op:'act',actor:1,sequence:[[{actor:1,input:{keys:['d'],duration_ms:6000}}],[{actor:1,input:{keys:['a'],duration_ms:6000}}]]});
+ assert.equal(bad.code,1);assert.match(bad.stderr,/sequence duration/);assert.ok(!f.calls.some(c=>c.command.op==='resume'));
+ const good=await f.run('grouped',{op:'act',actor:1,sequence:[[{actor:1,input:{keys:['d'],duration_ms:20}}],[{actor:1,input:{keys:['a'],duration_ms:20}}]]});
+ assert.equal(good.code,0,good.stderr);assert.equal(JSON.parse(good.stdout).steps.length,2);assert(f.paused());
 });

@@ -28,7 +28,7 @@ pub(super) fn expect_shoot_ack(
             pending_units = pending,
             incoming_projectiles = bullets.len(),
             limit_units = MAX_PENDING_SHOOT_UNITS,
-            oldest_ms = p
+            oldest_pause_excluding_ms = p
                 .shoot_acks
                 .front()
                 .map(|(sent, _)| clock.now().duration_since(*sent).as_millis()),
@@ -80,19 +80,19 @@ impl World {
     }
 
     pub fn acknowledge_shoot(&mut self, id: i32, time: i32) -> Result<()> {
-        let now = self.clock.now();
         let p = self
             .players
             .get_mut(&id)
             .context("SHOOT ACK player missing")?;
-        ensure!(time >= -1, "invalid SHOOT acknowledgement time");
+        ensure!(time >= -1, protocol("invalid SHOOT acknowledgement time"));
         let (sent, bullets) = p
             .shoot_acks
             .pop_front()
-            .context("unsolicited SHOOT acknowledgement")?;
+            .ok_or_else(|| protocol("unsolicited SHOOT acknowledgement"))?;
+        let age = self.clock.now().duration_since(sent);
         ensure!(
-            now.duration_since(sent) <= Duration::from_secs(5),
-            "SHOOT acknowledgement timed out"
+            age <= Duration::from_secs(5),
+            protocol("SHOOT acknowledgement timed out")
         );
         for bullet in bullets {
             let key = (bullet.owner, bullet.id);
@@ -114,7 +114,7 @@ impl World {
         tracing::debug!(
             player = id,
             client_time = time,
-            ack_ms = now.duration_since(sent).as_millis(),
+            ack_pause_excluding_ms = age.as_millis(),
             pending_volleys = p.shoot_acks.len(),
             "native volley acknowledged"
         );
@@ -185,7 +185,7 @@ impl World {
                 tracing::error!(
                     player = id,
                     pending = p.shoot_acks.len(),
-                    oldest_ms = now.duration_since(*sent).as_millis(),
+                    oldest_pause_excluding_ms = now.duration_since(*sent).as_millis(),
                     shooter = ?bullets.first().map(|b|b.owner),
                     volley = bullets.len(),
                     source_kind = bullets.first().map(|b| b.source_kind),
@@ -211,6 +211,7 @@ impl World {
             }
         }
         let p = self.players.get_mut(&id).unwrap();
+        let drained = damage.min(p.character.hp).max(0);
         p.character.hp = (p.character.hp - damage).max(0);
         if p.character.hp == 0 {
             p.death_pending = true;
@@ -240,6 +241,15 @@ impl World {
             echo,
             "player damaged"
         );
+        if drained > 0
+            && self.content.objects[&b.source_kind].leach_health
+            && self
+                .entities
+                .get(&b.owner)
+                .is_some_and(|e| e.kind == b.source_kind && e.hp > 0)
+        {
+            self.heal_enemy(b.owner, b.owner, drained)?;
+        }
         Ok(())
     }
 }

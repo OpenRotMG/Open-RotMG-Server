@@ -79,7 +79,7 @@ impl Player {
         if let Some((_, sent)) = self.goto_acks.iter().find(|(own, _)| *own) {
             ensure!(
                 sent.elapsed() <= ACK_TIMEOUT,
-                "GOTO acknowledgement timed out"
+                crate::server::lifecycle::protocol("GOTO acknowledgement timed out")
             );
             return Ok(true);
         }
@@ -106,7 +106,7 @@ impl World {
             .context("tick ACK player missing")?;
         ensure!(
             tick >= 0 && tick < p.tick,
-            "unsolicited tick acknowledgement"
+            crate::server::lifecycle::protocol("unsolicited tick acknowledgement")
         );
         // NEW_TICK queues MOVE before applying inventory; earlier SHOOTs still use the old weapon.
         p.weapon_ticks.retain(|(sent, _)| *sent >= tick);
@@ -114,18 +114,22 @@ impl World {
     }
     pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
         let p = self.players.get(&id).context("native player missing")?;
-        ensure!(p.active(), "inactive native character");
+        ensure!(p.persistence_failure.is_none(), "inactive native character");
+        ensure!(
+            p.active(),
+            crate::server::lifecycle::controller("inactive native character")
+        );
         ensure!(
             time >= 0 && time >= p.last_move,
-            "native position clock regressed"
+            crate::server::lifecycle::controller("native position clock regressed")
         );
         ensure!(
             pos.x.is_finite() && pos.y.is_finite(),
-            "non-finite native position"
+            crate::server::lifecycle::controller("non-finite native position")
         );
         ensure!(
             self.player_step_valid(p.pos, pos),
-            "native position is outside walkable terrain"
+            crate::server::lifecycle::controller("native position is outside walkable terrain")
         );
         Ok(())
     }
@@ -152,17 +156,22 @@ impl World {
             .players
             .get_mut(&id)
             .context("GOTO ACK player missing")?;
-        let (own, sent) = *p
-            .goto_acks
-            .front()
-            .context("unsolicited GOTO acknowledgement")?;
-        ensure!(time >= 0, "negative GOTO acknowledgement time");
+        let (own, sent) = *p.goto_acks.front().ok_or_else(|| {
+            crate::server::lifecycle::protocol("unsolicited GOTO acknowledgement")
+        })?;
+        ensure!(
+            time >= 0,
+            crate::server::lifecycle::protocol("negative GOTO acknowledgement time")
+        );
         ensure!(
             sent.elapsed() <= ACK_TIMEOUT,
-            "GOTO acknowledgement timed out"
+            crate::server::lifecycle::protocol("GOTO acknowledgement timed out")
         );
         if own {
-            ensure!(time >= p.last_move, "GOTO acknowledgement clock regressed");
+            ensure!(
+                time >= p.last_move,
+                crate::server::lifecycle::protocol("GOTO acknowledgement clock regressed")
+            );
             // The native client ACKs with lastUpdate_, then moves to the supplied position.
             p.last_move = time;
         }
@@ -175,17 +184,23 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             time >= 0 && time >= p.last_attack,
-            "invalid correcting SHOOT time"
+            crate::server::lifecycle::protocol("invalid correcting SHOOT time")
         );
         ensure!(
             p.character.items[0] == i32::from(kind) || p.advertised_weapon(kind),
-            "weapon does not match equipped item"
+            crate::server::lifecycle::protocol("weapon does not match equipped item")
         );
-        ensure!(bullet == p.next_bullet, "unexpected player bullet counter");
+        ensure!(
+            bullet == p.next_bullet,
+            crate::server::lifecycle::protocol("unexpected player bullet counter")
+        );
         let (last, count) = p
             .discarded_attack
             .unwrap_or((p.last_attack, p.attack_count));
-        ensure!(time >= last, "discarded attack clock regressed");
+        ensure!(
+            time >= last,
+            crate::server::lifecycle::protocol("discarded attack clock regressed")
+        );
         let item = self.content.get(kind)?;
         let count = if time == last { count } else { 0 };
         if time != last {
@@ -193,12 +208,12 @@ impl World {
             let cooldown = (1. / (rate * f64::from(item.rate))).floor() as f32;
             ensure!(
                 i64::from(time) - i64::from(last) >= cooldown as i64 - 2,
-                "discarded attack too fast"
+                crate::server::lifecycle::protocol("discarded attack too fast")
             );
         }
         ensure!(
             count < item.shots,
-            "too many discarded projectiles in attack"
+            crate::server::lifecycle::protocol("too many discarded projectiles in attack")
         );
         Ok(count)
     }
@@ -240,7 +255,7 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             time >= 0 && pos.x.is_finite() && pos.y.is_finite(),
-            "invalid correcting MOVE"
+            crate::server::lifecycle::protocol("invalid correcting MOVE")
         );
         let correcting = p.correcting()?;
         if correcting {
@@ -266,14 +281,17 @@ impl World {
         let correcting = p.correcting()?;
         let continuing = p.discarded_attack.is_some_and(|(last, _)| time == last);
         if let Some((last, _)) = p.discarded_attack {
-            ensure!(time >= last, "discarded attack clock regressed");
+            ensure!(
+                time >= last,
+                crate::server::lifecycle::protocol("discarded attack clock regressed")
+            );
         }
         if !correcting && !continuing {
             return Ok(false);
         }
         ensure!(
             start.x.is_finite() && start.y.is_finite() && angle.is_finite(),
-            "invalid correcting SHOOT"
+            crate::server::lifecycle::protocol("invalid correcting SHOOT")
         );
         let count = self.validate_discarded_shot(id, time, bullet, kind)?;
         self.consume_native_discard(id, time, bullet, kind, count)?;

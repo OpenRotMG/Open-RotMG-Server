@@ -18,7 +18,7 @@ async fn seed(path: &Path) -> (Store, Terms, Vec<InventoryWrite>) {
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                vec![],
             )
             .await
             .unwrap()[0];

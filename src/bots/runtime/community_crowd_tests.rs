@@ -128,7 +128,7 @@ async fn context(
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                None,
+                vec![],
             )
             .await
             .unwrap()[0];
@@ -217,7 +217,7 @@ async fn context(
         "post_enter_cognition":post_enter.iter().map(|m| &m.cognition).collect::<Vec<_>>(),
         "post_enter_minds":post_enter,"post_enter_policy_minds":policy_minds,"initial_characters":characters,"bindings":bindings,"positions":positions,
         "world":world,"allow_teleport":allowed,"initial_views":initial,
-        "competing_attention":"same ordinary visible Medusa at19 tiles in every context; narrow attention is occupied by the encounter, not a random idle delay", 
+        "competing_attention":"same ordinary visible Medusa at19 tiles in every context; narrow attention is occupied by the encounter, not a random idle delay",
         "limits":"context only; no post-start mutation, takeover, forced follow/teleport or Brain::decide calls"});
     save(&dir, "crowd-declaration.json", &declaration);
     app.world.clock.set_paused(false);

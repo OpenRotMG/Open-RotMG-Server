@@ -1,6 +1,8 @@
 use super::*;
 mod community_crowd;
 mod community_social;
+#[path = "finalize_tests.rs"]
+mod finalize_tests;
 
 fn fixture() -> (PathBuf, App) {
     let (dir, mut app) = crate::server::account_actions::tests::fixture();
@@ -33,78 +35,7 @@ async fn request(app: &App, id: &str, command: Value) -> Value {
 fn spec(pos: Pos) -> Value {
     json!({"guid":"qa-interface-unit","class":WIZARD,"level":8,"seed":12351,"equipment":[2712,-1,-1,-1],"backpack":[2599,2594,-1,-1,-1,-1,-1,-1],"world":-1,"position":pos,"controller":"direct","stats":null})
 }
-#[tokio::test]
-async fn oversized_requests_are_rejected_before_acceptance() {
-    let (dir, app) = fixture();
-    let result = request(
-        &app,
-        "oversized",
-        json!({"op":"capabilities","padding":"x".repeat(MAX_REQUEST_BYTES)}),
-    )
-    .await;
-    assert!(
-        result["error"]
-            .as_str()
-            .unwrap()
-            .contains("8192-byte limit")
-    );
-    assert_eq!(
-        fs::read_dir(&app.testing.as_ref().unwrap().root)
-            .unwrap()
-            .count(),
-        0
-    );
-    assert!(app.world.clock.paused());
-    app.shutdown.send_replace(true);
-    fs::remove_dir_all(dir).unwrap();
-}
-#[tokio::test]
-async fn mutation_budget_preserves_replay_and_does_not_resume() {
-    let (dir, app) = fixture();
-    let original = request(&app, "retained", json!({"op":"pause","native_paused":[]})).await;
-    let testing = app.testing.as_ref().unwrap();
-    for n in 1..MAX_MUTATIONS {
-        fs::write(testing.path(&format!("budget-{n}"), "receipt"), b"").unwrap();
-    }
-    app.world.clock.set_paused(false);
-    let denied = request(&app, "over-budget", json!({"op":"resume"})).await;
-    assert!(
-        denied["error"]
-            .as_str()
-            .unwrap()
-            .contains("mutation budget")
-    );
-    assert!(app.world.clock.paused());
-    assert!(!testing.path("over-budget", "receipt").exists());
-    assert_eq!(
-        request(&app, "retained", json!({"op":"pause","native_paused":[]})).await,
-        original
-    );
-    app.shutdown.send_replace(true);
-    fs::remove_dir_all(dir).unwrap();
-}
-#[tokio::test]
-async fn unknown_cancellation_cannot_grow_the_registry() {
-    let (dir, app) = fixture();
-    let result = request(
-        &app,
-        "cancel",
-        json!({"op":"cancel","request":"not-accepted"}),
-    )
-    .await;
-    assert_eq!(result["status"], "failed");
-    assert!(
-        app.testing
-            .as_ref()
-            .unwrap()
-            .cancelled
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
-    app.shutdown.send_replace(true);
-    fs::remove_dir_all(dir).unwrap();
-}
+
 #[tokio::test]
 async fn explicit_spawn_idempotency_and_compact_observations() {
     let (dir, app) = fixture();
@@ -232,44 +163,7 @@ async fn ordinary_equipment_action_is_committed_and_pause_is_stable() {
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
 }
-#[tokio::test]
-async fn prepared_priest_attaches_the_named_actual_controller() {
-    let (dir, app) = fixture();
-    let pos = app
-        .world
-        .in_world(-2)
-        .call(|w| {
-            let (x, y) = w.map.spawns[0];
-            Ok(Pos { x, y })
-        })
-        .await
-        .unwrap();
-    let mut body = spec(pos);
-    body["class"] = crate::content::PRIEST.into();
-    body["controller"] = "game_bot".into();
-    body["profile"] = "Kadabu".into();
-    body["world"] = (-2).into();
-    let equipment = &app.content.get(crate::content::PRIEST).unwrap().equipment;
-    body["equipment"] = json!(&equipment[..4]);
-    body["backpack"] = json!(&equipment[4..]);
-    let created = request(&app, "priest-create", json!({"op":"spawn","spec":body})).await;
-    assert_eq!(created["status"], "succeeded");
-    let actor = created["result"]["actor"].as_i64().unwrap() as i32;
-    let account = created["result"]["account"].as_i64().unwrap() as i32;
-    let view = request(
-        &app,
-        "priest-observe",
-        json!({"op":"observe","actor":actor}),
-    )
-    .await;
-    assert_eq!(view["controller"], "game_bot");
-    assert_eq!(view["registered_profile"], "Kadabu");
-    assert_eq!(view["character"]["class"], crate::content::PRIEST);
-    assert_eq!(app.store.load(account, actor).await.unwrap().name, "Kadabu");
-    assert!(app.world.clock.paused());
-    app.shutdown.send_replace(true);
-    fs::remove_dir_all(dir).unwrap();
-}
+
 #[tokio::test]
 async fn actual_gameplay_controller_can_run_a_bounded_time_goal() {
     let (dir, app) = fixture();
@@ -354,30 +248,6 @@ async fn native_input_acknowledgement_is_bound_to_the_exact_session() {
 }
 
 #[tokio::test]
-async fn synchronizing_an_already_paused_session_never_resumes_it() {
-    let (dir, app) = fixture();
-    let result = request(
-        &app,
-        "paused-native-sync",
-        json!({"op":"native_sync","actors":[1]}),
-    )
-    .await;
-    assert_eq!(result["status"], "failed");
-    assert!(result["error"].as_str().unwrap().contains("not connected"));
-    assert!(app.world.clock.paused());
-    assert_eq!(
-        request(
-            &app,
-            "duplicate-native-sync",
-            json!({"op":"native_sync","actors":[1,1]})
-        )
-        .await["status"],
-        "failed"
-    );
-    std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[tokio::test]
 async fn native_lease_expiry_is_independent_terminal_and_cannot_be_renewed_by_another_owner() {
     let (dir, app) = fixture();
     let testing = app.testing.as_ref().unwrap();
@@ -415,43 +285,6 @@ async fn native_lease_expiry_is_independent_terminal_and_cannot_be_renewed_by_an
         "failed"
     );
     assert!(app.world.clock.paused());
-    app.shutdown.send_replace(true);
-    fs::remove_dir_all(dir).unwrap();
-}
-#[tokio::test]
-async fn released_native_lease_cannot_stop_a_later_operation() {
-    let (dir, app) = fixture();
-    let testing = app.testing.as_ref().unwrap();
-    native_lease(&app, testing, "done".into(), "begin".into(), vec![])
-        .await
-        .unwrap();
-    native_lease(&app, testing, "done".into(), "end".into(), vec![])
-        .await
-        .unwrap();
-    tokio::time::sleep(Duration::from_millis(1700)).await;
-    assert!(testing.stopped.borrow().is_none());
-    assert!(testing.lease.lock().unwrap().is_none());
-    app.shutdown.send_replace(true);
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[tokio::test]
-async fn native_pause_json_preserves_integer_session_identity() {
-    let (dir, app) = fixture();
-    let result = request(
-        &app,
-        "session-pairs",
-        json!({"op":"pause","native_paused":[],"native_sessions":[[3,7233],[4,7234]]}),
-    )
-    .await;
-    assert_eq!(result["status"], "succeeded");
-    let bad = request(
-        &app,
-        "duplicate-pairs",
-        json!({"op":"pause","native_paused":[],"native_sessions":[[3,7233],[3,7234]]}),
-    )
-    .await;
-    assert_eq!(bad["status"], "failed");
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -590,27 +423,124 @@ async fn committed_native_death_is_not_reconnect_and_halts_the_owned_cohort() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn prepared_castle_is_full_strength_and_not_available_on_an_ordinary_directory() {
-    let content = Arc::new(Content::load(Path::new("data")).unwrap());
-    let mut ordinary =
-        crate::world::Directory::test_with_seed(Path::new("data"), content.clone(), 16, 12351)
-            .unwrap();
-    assert!(ordinary.prepared_instance(crate::endgame::CASTLE).is_err());
-    let mut prepared =
-        crate::world::Directory::test_prepared(Path::new("data"), content, 16, 12351).unwrap();
-    let id = prepared.prepared_instance(crate::endgame::CASTLE).unwrap();
-    let guards = prepared.worlds[&id]
-        .entities
-        .values()
-        .filter(|e| crate::endgame::GUARDIANS.contains(&e.kind))
-        .collect::<Vec<_>>();
-    assert_eq!(guards.len(), 2);
-    assert!(guards.iter().all(|g| g.hp == 60000));
-    assert!(
-        !prepared.worlds[&id]
-            .entities
-            .values()
-            .any(|e| e.kind == 0xd7b)
+#[tokio::test]
+async fn dropped_native_renewal_keeps_deadline_and_traces_late_read() {
+    let (dispatch, output) = crate::performance::tests::trace();
+    let _logging = tracing::dispatcher::set_default(&dispatch);
+    let (dir, app) = fixture();
+    let pos = app
+        .world
+        .in_world(-1)
+        .call(|w| {
+            let (x, y) = w.map.spawns[0];
+            Ok(Pos { x, y })
+        })
+        .await
+        .unwrap();
+    let mut spawn = spec(pos);
+    spawn["controller"] = "native".into();
+    let created = request(&app, "renewal-fixture", json!({"op":"spawn","spec":spawn})).await;
+    let actor = created["result"]["actor"].as_i64().unwrap() as i32;
+    let account = app.store.list("qa-interface-unit".into()).await.unwrap();
+    let ch = app.store.load(account.id, actor).await.unwrap();
+    let (tx, _packets) = tokio::sync::mpsc::channel(64);
+    let lost = tokio::sync::watch::channel(false).0;
+    app.world
+        .in_world(-1)
+        .call(move |w| {
+            let id = w.enter_at(
+                ch,
+                Some(crate::world::Output { packets: tx, lost }),
+                Some(pos),
+                crate::store::AccountPresentation {
+                    guild: None,
+                    credits: 100,
+                    fame: 0,
+                    best_fame: Default::default(),
+                },
+            )?;
+            w.players.get_mut(&id).unwrap().native_update_acked = true;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let begun = request(
+        &app,
+        "renewal-begin",
+        json!({"op":"native_lease","owner":"owner","operation":"begin","actors":[actor]}),
+    )
+    .await;
+    assert_eq!(begun["operation"], "begin");
+    let renewed = request(
+        &app,
+        "renewal-control",
+        json!({"op":"native_lease","owner":"owner","operation":"renew"}),
+    )
+    .await;
+    assert_eq!(renewed["operation"], "renew");
+    let testing = app.testing.as_ref().unwrap();
+    let deadline = testing.lease.lock().unwrap().as_ref().unwrap().expires;
+    let mut renewal = Box::pin(request(
+        &app,
+        "dropped-renew",
+        json!({"op":"native_lease","owner":"owner","operation":"renew"}),
+    ));
+    assert!(futures_util::poll!(renewal.as_mut()).is_pending());
+    drop(renewal);
+    app.world.directory(|_| Ok(())).await.unwrap();
+    assert_eq!(
+        testing.lease.lock().unwrap().as_ref().unwrap().expires,
+        deadline
     );
+    assert!(testing.stopped.borrow().is_none());
+    native_lease(&app, testing, "owner".into(), "end".into(), vec![])
+        .await
+        .unwrap();
+    let events = crate::performance::tests::events(&output);
+    let events = events
+        .iter()
+        .filter(|event| event["fields"]["request"] == "dropped-renew")
+        .collect::<Vec<_>>();
+    let dropped = events
+        .iter()
+        .filter(|event| event["fields"]["message"] == "native control request dropped")
+        .collect::<Vec<_>>();
+    assert_eq!(dropped.len(), 1, "{events:?}");
+    assert_eq!(dropped[0]["fields"]["outcome"], "dropped");
+    let snapshot: Value =
+        serde_json::from_str(dropped[0]["fields"]["world_requests"].as_str().unwrap()).unwrap();
+    assert_eq!(snapshot["calls"], 1);
+    assert_eq!(snapshot["completed"], 0);
+    assert_eq!(snapshot["round_trip_sum_ms"], 0.);
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["fields"]["message"] == "native control request completed")
+    );
+    let stages = events
+        .iter()
+        .filter(|event| event["fields"]["message"] == "native control world request")
+        .map(|event| event["fields"]["stage"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        stages,
+        [
+            "capacity_wait",
+            "capacity_acquired",
+            "enqueued",
+            "started",
+            "completed",
+            "result_send"
+        ]
+    );
+    for stage in ["started", "completed", "result_send"] {
+        let event = events
+            .iter()
+            .find(|event| event["fields"]["stage"] == stage)
+            .unwrap();
+        assert_eq!(event["fields"]["call"], 1);
+        assert_eq!(event["fields"]["receiver_closed"], true);
+    }
+    app.shutdown.send_replace(true);
+    fs::remove_dir_all(dir).unwrap();
 }

@@ -5,7 +5,7 @@ use crate::{
 };
 
 impl World {
-    fn change_ground(&mut self, i: usize, ground: u8) {
+    pub(super) fn change_ground(&mut self, i: usize, ground: u8) {
         Arc::make_mut(&mut self.map).cells[i].ground = ground;
         let tile = (
             (i % self.map.width as usize) as i16,
@@ -35,7 +35,9 @@ impl World {
             .collect();
         ensure!(!bridges.is_empty(), "Idol treasure room has no bridge");
         for i in bridges {
-            let existing = self.cells[i]
+            let existing = self
+                .cells
+                .ids(i)
                 .iter()
                 .find(|id| self.entities[id].kind == BRIDGE)
                 .copied();
@@ -117,7 +119,7 @@ impl World {
                 e.stage = Some(1);
                 e.next_aux = self.now + 600;
                 e.next_shot = self.now + 600;
-                e.expires = Some(self.now + 650);
+                e.expires.set(Some(self.now + 650), id, &mut self.timed_ids);
                 self.abyss_flash(id, 0xffffffff, 0.1, 0.6);
             }
             return Ok(());
@@ -182,13 +184,14 @@ impl World {
             self.spawn_children(id, 0x908, 3, 9.)?;
             if stage == 0 && elapsed % 1800 < 500 {
                 self.spawn_children(id, 0x909, 4, 1.)?;
-                for child in self
-                    .entities
-                    .values_mut()
-                    .filter(|e| e.parent == Some(id) && e.kind == 0x909 && e.activated.is_none())
-                {
+                for child in self.entities.matching_mut(|e| {
+                    e.parent == Some(id) && e.kind == 0x909 && e.activated.is_none()
+                }) {
+                    let child_id = child.id;
                     child.activated = Some(self.now);
-                    child.expires = Some(self.now + 5650);
+                    child
+                        .expires
+                        .set(Some(self.now + 5650), child_id, &mut self.timed_ids);
                 }
             }
             self.entities.get_mut(&id).unwrap().next_aux = self.now + 500;

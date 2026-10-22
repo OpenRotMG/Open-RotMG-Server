@@ -3,39 +3,50 @@ use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
-const ASSETS: [(&str, &str); 3] = [
-    (
-        "realm-fsod-1",
-        "7c6045ce772be1d2805a97fc4c45380d1095cdc4236ec7a2366ae0de4df80df9",
-    ),
-    (
-        "realm-fsod-2",
-        "bd1b448df6dede4a2a3ae6c36c6f47322c660e6cb1ee614175ad7853c4813f62",
-    ),
-    (
-        "realm-fsod-3",
-        "b63d971c5dc9d0d2c703903e138664565d26ff3b7131db0f2ae9686eaaf2c4ad",
-    ),
-];
+use super::prepare::{bounded_read, read_recipe, safe_path, valid_hash, valid_id};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Entry {
+    Baseline {
+        id: String,
+        path: String,
+        sha256: String,
+    },
+    Reconstruction {
+        recipe: String,
+        sha256: String,
+    },
+}
+
+pub(crate) struct Asset {
+    pub(crate) id: String,
+    pub(crate) bytes: Vec<u8>,
+    sha256: String,
+    profile: String,
+}
 
 pub(crate) enum Source {
-    Encoded(&'static str, Vec<u8>),
+    Encoded(Asset),
     #[cfg(test)]
     Fixture(Arc<Map>),
 }
 impl Source {
-    pub(crate) fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &str {
         match self {
-            Self::Encoded(name, _) => name,
+            Self::Encoded(asset) => &asset.id,
             #[cfg(test)]
             Self::Fixture(_) => "procedural-test-fixture",
         }
     }
     pub(crate) fn open(&self, content: &Content) -> Result<Arc<Map>> {
         match self {
-            Self::Encoded(name, bytes) => {
+            Self::Encoded(asset) => {
+                let name = &asset.id;
+                let bytes = &asset.bytes;
                 let started = std::time::Instant::now();
-                let mut map = Map::decode(bytes, content)
+                let mut map = Map::decode_cells(bytes, content)
                     .with_context(|| format!("decode Realm layout {name}"))?;
                 ensure!(
                     map.width == 2048 && map.height == 2048,
@@ -45,11 +56,13 @@ impl Source {
                     .with_context(|| format!("prepare Realm layout {name}"))?;
                 tracing::info!(
                     layout = name,
+                    sha256 = asset.sha256,
+                    profile = asset.profile,
                     width = map.width,
                     height = map.height,
                     scenery = map.cells.iter().filter(|c| c.object.is_some()).count(),
                     elapsed_ms = started.elapsed().as_millis(),
-                    "private-server Realm layout opened"
+                    "Realm layout opened"
                 );
                 Ok(Arc::new(map))
             }
@@ -59,19 +72,65 @@ impl Source {
     }
 }
 pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
-    ASSETS
+    let catalog = safe_path(path, "realm-catalog.json")?;
+    let entries: Vec<Entry> = serde_json::from_slice(&bounded_read(&catalog, 64 * 1024)?)
+        .with_context(|| format!("parse Realm catalog {}", catalog.display()))?;
+    ensure!(
+        !entries.is_empty(),
+        "empty Realm catalog {}",
+        catalog.display()
+    );
+    let mut ids = std::collections::BTreeSet::new();
+    entries
         .into_iter()
-        .map(|(name, expected)| {
-            let file = path.join(format!("{name}.wmap"));
-            let bytes = std::fs::read(&file)
-                .with_context(|| format!("read Realm layout {}", file.display()))?;
-            let hash = format!("{:x}", Sha256::digest(&bytes));
-            ensure!(
-                hash == expected,
-                "Realm layout {name} hash mismatch: expected {expected}, got {hash}"
-            );
-            tracing::info!(layout = name, sha256 = hash, "Realm asset verified");
-            Ok(Source::Encoded(name, bytes))
+        .enumerate()
+        .map(|(index, entry)| {
+            let load = || -> Result<Source> {
+                let (id, file, expected, profile) = match entry {
+                    Entry::Baseline {
+                        id,
+                        path: relative,
+                        sha256,
+                    } => (id, safe_path(path, &relative)?, sha256, "fsod".to_owned()),
+                    Entry::Reconstruction { recipe, sha256 } => {
+                        let root = safe_path(path, "realms")?;
+                        let metadata = read_recipe(&root, &recipe).with_context(|| {
+                            format!("Realm recipe {recipe} expected output SHA-256 {sha256}")
+                        })?;
+                        let file = safe_path(&root, metadata.output())?;
+                        (
+                            metadata.id().to_owned(),
+                            file,
+                            sha256,
+                            metadata.profile().to_owned(),
+                        )
+                    }
+                };
+                ensure!(valid_id(&id), "invalid Realm catalog ID {id:?}");
+                ensure!(ids.insert(id.clone()), "duplicate Realm catalog ID {id}");
+                ensure!(
+                    valid_hash(&expected),
+                    "Realm {id} {}: invalid SHA-256 {expected:?}",
+                    file.display()
+                );
+                let bytes = bounded_read(&file, 16 * 1024 * 1024).with_context(|| {
+                    format!("Realm {id} {} expected SHA-256 {expected}", file.display())
+                })?;
+                let hash = format!("{:x}", Sha256::digest(&bytes));
+                ensure!(
+                    hash == expected,
+                    "Realm {id} {} hash mismatch: expected {expected}, got {hash}",
+                    file.display()
+                );
+                tracing::info!(layout = id, sha256 = hash, profile, "Realm asset verified");
+                Ok(Source::Encoded(Asset {
+                    id,
+                    bytes,
+                    sha256: hash,
+                    profile,
+                }))
+            };
+            load().with_context(|| format!("Realm catalog {} entry {index}", catalog.display()))
         })
         .collect()
 }
@@ -150,74 +209,4 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
         map.spawns.push((x as f32 + 0.5, y as f32 + 0.5));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::content::Cell;
-
-    #[test]
-    fn arrivals_reject_remote_islands_and_missing_habitats() {
-        let content = Content::load(Path::new("data")).unwrap();
-        let mut map = Map {
-            width: 64,
-            height: 64,
-            spawns: vec![],
-            cells: vec![
-                Cell {
-                    ground: 0xbc,
-                    object: None,
-                    config: String::new(),
-                    terrain: 0,
-                    region: 0
-                };
-                64 * 64
-            ],
-        };
-        for (x0, y0, size) in [
-            (16, 16, 32),
-            (30, 4, 5),
-            (30, 55, 5),
-            (4, 30, 5),
-            (55, 30, 5),
-        ] {
-            for y in y0..y0 + size {
-                for x in x0..x0 + size {
-                    let cell = &mut map.cells[y * 64 + x];
-                    cell.ground = 0xbe;
-                    cell.terrain = 11;
-                    cell.region = 1;
-                }
-            }
-        }
-        map.cells[32 * 64 + 32].terrain = 1;
-        prepare_arrivals(&mut map, &content).unwrap();
-        assert_eq!(map.spawns.len(), 4);
-        assert!(
-            map.spawns
-                .iter()
-                .all(|(x, y)| (17.0..47.0).contains(x) && (17.0..47.0).contains(y))
-        );
-        assert_eq!(map.cells.iter().filter(|c| c.region == 1).count(), 36);
-        map.cells[32 * 64 + 32].terrain = 0;
-        assert!(
-            prepare_arrivals(&mut map, &content)
-                .unwrap_err()
-                .to_string()
-                .contains("Godlands")
-        );
-    }
-
-    #[test]
-    fn missing_and_modified_assets_fail_instead_of_generating() {
-        let path =
-            std::env::temp_dir().join(format!("openrotmg-realm-assets-{}", rand::random::<u64>()));
-        std::fs::create_dir(&path).unwrap();
-        assert!(sources(&path).is_err());
-        std::fs::write(path.join("realm-fsod-1.wmap"), b"modified").unwrap();
-        let error = sources(&path).err().unwrap().to_string();
-        assert!(error.contains("realm-fsod-1 hash mismatch"), "{error}");
-        std::fs::remove_dir_all(path).unwrap();
-    }
 }
