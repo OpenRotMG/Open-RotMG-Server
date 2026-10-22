@@ -55,6 +55,26 @@ fn follow_tick(w: &mut World, id: i32, p: i32, ms: u64, distance: f32) -> f32 {
 }
 
 #[test]
+fn septavius_wanders_during_every_attack_phase_but_not_while_paralyzed() {
+    let (mut w, id, _) = actor(0xd90);
+    w.entities.get_mut(&id).unwrap().activated = Some(0);
+    for phase in 0..4 {
+        let start = phase * 13000 + 3000;
+        tick(&mut w, id, start);
+        let mut distance = 0.;
+        for n in 1..=20 {
+            let step = tick(&mut w, id, start + n * 50);
+            distance += step.x.hypot(step.y);
+        }
+        assert!(distance > 0.1, "phase {phase}: traveled {distance}");
+        w.apply_condition(id, condition::PARALYZED, 100).unwrap();
+        let step = tick(&mut w, id, start + 1050);
+        assert_eq!((step.x, step.y), (0., 0.));
+        w.entities.get_mut(&id).unwrap().statuses.clear();
+    }
+}
+
+#[test]
 fn follow_acquisition_duration_and_cooldown_are_invocation_relative() {
     let (mut w, id, p) = ghost();
     w.last_npc_step = 3100;

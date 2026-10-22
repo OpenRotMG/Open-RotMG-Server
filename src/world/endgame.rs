@@ -326,6 +326,21 @@ impl Directory {
                 continue;
             };
             for id in deaths {
+                if cycle.admits() && cycle.remaining.contains(&id) {
+                    match world.earn_realm_event(id) {
+                        realm_events::EventAdmission::Spawned(event) => {
+                            assert!(
+                                cycle.remaining.insert(event),
+                                "summoned event already counted"
+                            );
+                        }
+                        realm_events::EventAdmission::Waiting => {
+                            world.critical_deaths.push(id);
+                            continue;
+                        }
+                        realm_events::EventAdmission::Miss => {}
+                    }
+                }
                 if cycle.defeated(id, now) {
                     tracing::info!(
                         origin,
@@ -701,7 +716,211 @@ impl World {
         }
         Ok(())
     }
-    fn oryx_notice(&self, text: &str) {
+    pub(super) fn oryx_notice(&self, text: &str) {
         self.broadcast_text("Oryx the Mad God", text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quest;
+
+    #[test]
+    fn realm_events_wait_for_qualifying_quest_defeats() {
+        let mut d = super::super::tests::directory();
+        let origin = d.endgame.active;
+        let w = d.worlds.get_mut(&origin).unwrap();
+        let events: Vec<_> = w
+            .entities
+            .values()
+            .filter(|e| quest::EVENT_BOSSES.contains(&e.kind))
+            .map(|e| e.kind)
+            .collect();
+        assert!(events.is_empty(), "unearned startup events: {events:?}");
+        assert!(w.event_reserves.len() >= 5);
+        let crystal = w.entities.values().find(|e| e.kind == 0x935).unwrap().pos;
+        for event in &w.event_reserves {
+            for e in std::iter::once(&event.root).chain(&event.children) {
+                if !matches!(event.root.kind, 0xd50 | 0xd54) {
+                    assert!(
+                        e.pos.distance(crystal) >= 32.,
+                        "event reservation changed crystal spacing"
+                    );
+                }
+                assert!(!w.entities.contains_key(&e.id));
+                assert!(!w.actor_ids.contains(&e.id));
+                assert!(!w.npc_global_ids.contains(&e.id));
+                assert!(!w.timed_ids.contains(&e.id));
+                assert!(w.quests_by_level.values().all(|ids| !ids.contains(&e.id)));
+                assert!(!d.endgame.cycles[&origin].remaining.contains(&e.id));
+            }
+        }
+        let held = w.event_reserves.remove(
+            w.event_reserves
+                .iter()
+                .position(|e| e.root.kind == 0xd59)
+                .unwrap(),
+        );
+        let held_id = held.root.id;
+        let total = w.event_reserves.len();
+        let pos = Pos {
+            x: w.map.spawns[0].0,
+            y: w.map.spawns[0].1,
+        };
+        let owner = w.enter(super::super::tests::ch(w), None).unwrap();
+        let admin = w.spawn_entity(0x668, pos, vec![]).unwrap();
+        w.remove_entity(admin);
+        let wandering = w.spawn_entity(0x604, pos, vec![]).unwrap();
+        w.damage_enemy(owner, wandering, 100000, false, &[], None)
+            .unwrap();
+        d.endgame_step();
+        assert_eq!(d.worlds[&origin].event_reserves.len(), total);
+        let mut winning_seed = None;
+        let mut misses = 0;
+        let mut born = BTreeSet::new();
+        for seed in 0..128 {
+            let w = d.worlds.get_mut(&origin).unwrap();
+            let source = w.spawn_entity(0x668, pos, vec![]).unwrap();
+            d.endgame
+                .cycles
+                .get_mut(&origin)
+                .unwrap()
+                .remaining
+                .insert(source);
+            w.damage_enemy(owner, source, 1, false, &[], None).unwrap();
+            assert!(w.critical_deaths.is_empty());
+            w.damage_enemy(owner, source, 100000, false, &[], None)
+                .unwrap();
+            w.damage_enemy(owner, source, 100000, false, &[], None)
+                .unwrap();
+            assert_eq!(w.critical_deaths, vec![source]);
+            let before = w.event_reserves.len();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            d.endgame_step();
+            let w = d.worlds.get_mut(&origin).unwrap();
+            assert!(before - w.event_reserves.len() <= 1);
+            if w.event_reserves.len() < before {
+                winning_seed = Some(seed);
+            } else {
+                misses += 1;
+            }
+            for e in w
+                .entities
+                .values()
+                .filter(|e| quest::EVENT_BOSSES.contains(&e.kind))
+            {
+                born.insert(e.id);
+                assert_eq!(e.hp, w.content.objects[&e.kind].hp);
+                assert!(d.endgame.cycles[&origin].remaining.contains(&e.id));
+            }
+            let after = w.event_reserves.len();
+            w.critical_deaths.push(source);
+            d.endgame_step();
+            let w = d.worlds.get_mut(&origin).unwrap();
+            assert_eq!(
+                w.event_reserves.len(),
+                after,
+                "duplicate credit rerolled admission"
+            );
+            for id in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                w.remove_entity(id);
+            }
+            if after == 0 {
+                break;
+            }
+        }
+        assert_eq!(born.len(), total);
+        assert!(misses > 0);
+        let w = d.worlds.get_mut(&origin).unwrap();
+        for e in w
+            .entities
+            .values()
+            .filter(|e| e.quest.is_some_and(|id| born.contains(&id)))
+        {
+            assert!(w.actor_ids.contains(&e.id));
+            assert!(w.npc_global_ids.contains(&e.id));
+            let cell = e.pos.y as usize * w.map.width as usize + e.pos.x as usize;
+            assert!(w.cells.ids(cell).contains(&e.id));
+            if let Some(parent) = *e.parent {
+                assert!(w.entities.contains_key(&parent));
+                assert!(w.timed_ids.contains(&e.id));
+            }
+        }
+        let source = w.spawn_entity(0x668, pos, vec![]).unwrap();
+        d.endgame.cycles.get_mut(&origin).unwrap().remaining = BTreeSet::from([source]);
+        w.players.get_mut(&owner).unwrap().pos = held.root.pos;
+        let next_aux = held.root.next_aux;
+        w.event_reserves.push(held);
+        w.now = 10000;
+        d.tick = 200;
+        w.damage_enemy(owner, source, 100000, false, &[], None)
+            .unwrap();
+        w.rng = rand::rngs::StdRng::seed_from_u64(winning_seed.unwrap());
+        d.endgame_step();
+        assert_eq!(d.worlds[&origin].event_waiting, Some(source));
+        assert_eq!(
+            d.endgame.cycles[&origin].stage,
+            crate::endgame::RealmStage::Open
+        );
+        let mut rng = d.worlds[&origin].rng.clone();
+        let next = rng.r#gen::<u64>();
+        for _ in 0..3 {
+            d.endgame_step();
+        }
+        assert_eq!(
+            d.worlds[&origin].rng.clone().r#gen::<u64>(),
+            next,
+            "blocked earned summon rerolled"
+        );
+        d.worlds
+            .get_mut(&origin)
+            .unwrap()
+            .players
+            .get_mut(&owner)
+            .unwrap()
+            .pos = pos;
+        let w = d.worlds.get_mut(&origin).unwrap();
+        let occupied = w
+            .actors()
+            .filter(|e| e.parent.is_some() || e.quest.is_some())
+            .count()
+            + w.named_births.len();
+        let fillers: Vec<_> = (occupied..256)
+            .map(|_| {
+                let id = w.spawn_entity(0xd57, pos, vec![]).unwrap();
+                w.entities.get_mut(&id).unwrap().quest = Some(id);
+                id
+            })
+            .collect();
+        d.endgame_step();
+        assert_eq!(d.worlds[&origin].event_waiting, Some(source));
+        assert!(!d.worlds[&origin].entities.contains_key(&held_id));
+        for id in fillers {
+            d.worlds.get_mut(&origin).unwrap().remove_entity(id);
+        }
+        d.endgame_step();
+        let w = &d.worlds[&origin];
+        assert_eq!(w.event_waiting, None);
+        assert_eq!(w.entities[&held_id].next_aux, 10000 + next_aux);
+        assert!(w.actor_ids.contains(&held_id));
+        assert!(w.quests_by_level.values().any(|ids| ids.contains(&held_id)));
+        assert_eq!(
+            d.endgame.cycles[&origin].remaining,
+            BTreeSet::from([held_id])
+        );
+        assert_eq!(
+            d.endgame.cycles[&origin].stage,
+            crate::endgame::RealmStage::Open
+        );
+        let w = d.worlds.get_mut(&origin).unwrap();
+        w.damage_enemy(owner, held_id, 100000, false, &[], None)
+            .unwrap();
+        d.endgame_step();
+        assert!(matches!(
+            d.endgame.cycles[&origin].stage,
+            crate::endgame::RealmStage::Closing { deadline: 70000 }
+        ));
+        assert!(!d.worlds[&origin].admission_open);
     }
 }
