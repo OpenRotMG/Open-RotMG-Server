@@ -2,23 +2,34 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {startChild,stopChild,browserDiagnostic,runCase} from './native-test.mjs';
-import {mkdtemp,writeFile,readFile,rename,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,rename,rm,open,stat} from 'node:fs/promises';
+import {setImmediate as nextTurn} from 'node:timers/promises';
 import {runInNewContext} from 'node:vm';
 import {identity,registry} from './native-test-process.mjs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-// Execute the production publication tail without launching a browser or duplicating its save logic.
+// SOURCE-SYNTHETIC: production publication/cancellation seams, not runCase or native cleanup.
 async function publication(out,report,io={}) {
   const source=await readFile(new URL('./native-test.mjs',import.meta.url),'utf8');
-  const save=source.match(/^  const save=async\(\)=>\{.*\};$/m)?.[0];
+  const save=source.slice(source.indexOf('  const elapsed='),source.indexOf('  const register='));
+  const cancellation=source.slice(source.indexOf('  const fail='),source.indexOf('  const log='));
+  const failure=source.match(/    primary=error;report\.status='failed';[\s\S]*?    await save\(\);/)?.[0];
+  const finalSave=source.match(/    try\{await save\(\);\}finally\{process\.removeListener[^\n]+/)?.[0];
   const tail=source.match(/      participants\.push\(\{actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env\.DISPLAY\}\);[\s\S]*?return participants\.at\(-1\);/)?.[0];
-  assert(save&&tail,'Production addClient publication boundary must be present');
+  assert(save.includes('const save=')&&cancellation.includes('const bounded=')&&failure&&finalSave&&tail,'Production publication boundaries must be present');
   const participants=[];
-  return runInNewContext(`(()=>{${save};return {save,add:async client=>{
-    const {actor,account,connection,browser,chromePort,call,evaluate,bounds,display}=client,env={DISPLAY:display};
-    ${tail}
-  }}})()`,{out,report,participants,join,elapsed:()=>123,options:{browserTools:'/synthetic/browser-tools'},writeFile,rename,driver:async command=>assert.deepEqual(JSON.parse(JSON.stringify(command)),{op:'pause'}),...io});
+  return runInNewContext(`(()=>{
+    const controller=new AbortController(),started=0,timeout=180000,previousOwner=undefined;
+    let primary,phase='setup',closing=false,activeCase=true;
+    ${save}${cancellation}
+    return {save,bounded,interrupted,get primary(){return primary;},
+      failure:async error=>{${failure}},finalSave:async()=>{${finalSave}},
+      dispose:()=>clearTimeout(timer),add:async client=>{
+        const {actor,account,connection,browser,chromePort,call,evaluate,bounds,display}=client,env={DISPLAY:display};
+        ${tail}
+      }};
+  })()`,{out,report,participants,join,AbortController,Error,setTimeout:()=>null,clearTimeout(){},performance:{now:()=>123},process:{once(){},removeListener(){},env:{}},options:{browserTools:'/synthetic/browser-tools'},writeFile,rename,driver:async command=>assert.deepEqual(JSON.parse(JSON.stringify(command)),{op:'pause'}),...io});
 }
 const participant=index=>({actor:index+1,account:'account-'+index,connection:{},browser:{owner:'native-test:synthetic',port:9000+index,target:'target-'+index,pid:100+index,browser:'browser-'+index,tabPolicy:'agent_only'},chromePort:9000+index,call(){},evaluate(){},bounds:{left:0,top:0,width:1280,height:960},display:':'+(index+100)});
 const participantRecord=({actor,account,browser,bounds,display})=>({actor,account,browser,bounds,display});
@@ -81,6 +92,76 @@ test('addClient rejects pause and publication errors without replacing the prior
       assert.equal(await readFile(join(out,'result.json'),'utf8'),previous);
       assert.equal((await json(join(out,'native.json'))).native.length,2);
     }finally{await rm(out,{recursive:true});}
+  });
+});
+
+test('bounded abort orders pending join, failure and final publications without losing caller errors',async t=>{
+  for(const failedOperation of [null,'write','rename'])await t.test(failedOperation??'interrupted',async()=>{
+    const out=await mkdtemp(join(tmpdir(),'native-test-abort-publication-'));
+    const report={status:'running',phases:{},origin:'http://127.0.0.1:8000'};
+    const ioError=Object.assign(Error('synthetic queued '+failedOperation),{code:'ENOSPC'}),failureError=Error('synthetic queued failure publication '+failedOperation);
+    let release,entered,active=0,maxActive=0,renamedInodeWrites=0,held=false,joinReturned=false;
+    const blocked=new Promise(ok=>release=ok),atWrite=new Promise(ok=>entered=ok),events=[];
+    const outcome=promise=>promise.then(value=>({value}),error=>({error}));
+    let seam,joining,failing;
+    try{
+      seam=await publication(out,report,{
+        writeFile:async(path,bytes,options)=>{
+          if(path!==join(out,'result.tmp'))return writeFile(path,bytes,options);
+          active++;maxActive=Math.max(maxActive,active);
+          const snapshot=JSON.parse(bytes),hold=snapshot.status==='running'&&snapshot.participants?.length===2;
+          events.push(['write',snapshot]);assert.equal(options.mode,0o600);
+          const file=await open(path,'w',options.mode);
+          try{
+            if(hold){held=true;entered();await blocked;
+              const published=await stat(join(out,'result.json'));
+              if((await file.stat()).ino===published.ino)renamedInodeWrites++;
+              if(failedOperation==='write')throw ioError;
+            }
+            if(snapshot.status==='failed'&&!snapshot.cleanupErrors&&failedOperation==='write')throw failureError;
+            await file.writeFile(bytes);
+          }catch(error){active--;throw error;}finally{await file.close();}
+        },
+        rename:async(...args)=>{
+          try{
+            const snapshot=await json(args[0]);
+            if(held&&snapshot.status==='running'&&failedOperation==='rename')throw ioError;
+            if(snapshot.status==='failed'&&!snapshot.cleanupErrors&&failedOperation==='rename')throw failureError;
+            await rename(...args);events.push(['rename',snapshot]);
+          }finally{active--;}
+        }
+      });
+      await seam.add(participant(0));
+      const bounded=outcome(seam.bounded('scenario',()=>{
+        joining=outcome(seam.add(participant(1)).then(client=>{joinReturned=true;return client;}));
+        return joining.then(result=>{if(result.error)throw result.error;return result.value;});
+      }));
+      await Promise.race([atWrite,bounded.then(()=>assert.fail('Bounded work ended before join I/O'))]);seam.interrupted();
+      const reason=(await bounded).error;
+      assert.equal(String(reason),'Error: Native test interrupted');
+      let failureSettled=false;
+      failing=outcome(seam.failure(reason)).then(result=>{failureSettled=true;return result;});
+      await nextTurn();const settledBeforeRelease=failureSettled;
+      release();const joined=await joining,failed=await failing;
+      report.cleanupErrors=[];await seam.finalSave();
+      const final=await json(join(out,'result.json'));
+      assert.equal(maxActive,1,'result.tmp publications must not overlap');
+      assert.equal(settledBeforeRelease,false,'Failure publication must wait for join I/O');
+      assert.equal(renamedInodeWrites,0,'Pending write must not modify a published inode');
+      assert.equal(active,0);assert.equal(joinReturned,false);
+      assert.equal(joined.error,failedOperation?ioError:reason);
+      assert.equal(failed.error,failedOperation?failureError:undefined);
+      assert.equal(seam.primary,reason);assert.equal(final.status,'failed');
+      assert.deepEqual(final.failure,{phase:'scenario',error:String(reason),stack:reason.stack});
+      assert.deepEqual(final.participants,[0,1].map(participant).map(participantRecord));
+      assert.deepEqual(final.cleanupErrors,[]);
+      assert.deepEqual(events.filter(([op])=>op==='write').map(([,s])=>[s.status,s.participants?.length,s.cleanupErrors]),[
+        ['running',1,undefined],['running',1,undefined],['running',2,undefined],['failed',2,undefined],['failed',2,[]]
+      ]);
+      assert.equal((await stat(join(out,'result.json'))).mode&0o777,0o600);
+    }finally{
+      release();await Promise.all([joining,failing].filter(Boolean));seam?.dispose();await rm(out,{recursive:true});
+    }
   });
 });
 
