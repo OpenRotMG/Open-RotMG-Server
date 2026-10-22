@@ -23,6 +23,22 @@ export function browserDiagnostic(line, closing=false) {
   return /\bERROR\b|panicked/.test(line)?'fatal':null;
 }
 export {startChild,stopChild} from './native-test-process.mjs';
+export function hasNativeEntry(module) {
+  const present=Object.hasOwn(module,'enter');
+  assert(!present||typeof module.enter==='function','Case enter export must be a function when present');
+  return present;
+}
+export async function nativeEntry(module,client,{signal,stopped,check},automatic) {
+  check();
+  if(!hasNativeEntry(module)){await automatic();check();return;}
+  const {actor,account,browser}=client;
+  assert(Number.isSafeInteger(actor)&&actor>0&&Number.isSafeInteger(account)&&account>0,'Entry requires actual actor/account IDs');
+  const {owner,port,target,pid}=browser;
+  assert(typeof owner==='string'&&owner&&typeof target==='string'&&target&&Number.isInteger(port)&&port>0&&port<=65535&&Number.isSafeInteger(pid)&&pid>0,'Entry requires the validated managed browser receipt');
+  const context=Object.freeze({actor,account,browser:Object.freeze({owner,port,target,pid}),signal});
+  await Promise.race([Promise.resolve().then(()=>{check();return module.enter(context);}),stopped]);
+  check();
+}
 export async function prepareFixture(module, api, signal) {
   signal.throwIfAborted();let open=true;
   const access=async command=>{
@@ -166,7 +182,7 @@ export async function runCase(scenario, options) {
     guardian.closed.then(value=>{if(!closing)fail(Error('Cleanup guardian exited early: '+JSON.stringify(value)));});
     report.guardian=guardian.child.pid;
     report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]])report.inputs[name]=createHash('sha256').update(await readFile(path)).digest('hex');
-    const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');
+    const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');hasNativeEntry(fixtureModule);
     let spec=fixtureModule.prepare===undefined?await prepareFixture(fixtureModule,api,controller.signal):null;
     port=await freePort();chromePort=await freePort();assert.notEqual(port,chromePort,'Ports collided; no launch attempted');
     owner='native-test:'+randomUUID();process.env.PI_BROWSER_OWNER=owner;
@@ -242,6 +258,7 @@ export async function runCase(scenario, options) {
       await Promise.race([guest,waitFor(()=>guestDone,'Normal fresh guest char/list missing',60000),stopped]);await call('Fetch.disable');
 
       await waitFor(()=>evaluate('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Ruffle did not start');
+      await nativeEntry(fixtureModule,{actor,account,browser:{owner:browser.owner,port:chromePort,target:browser.target,pid:browser.pid}},{signal:controller.signal,stopped,check},async()=>{
       await evaluate('(()=>{const p=document.querySelector("ruffle-player");const modal=p.shadowRoot.querySelector("#hardware-acceleration-modal");if(modal&&!modal.classList.contains("hidden"))modal.querySelector(".close-modal").click();})()');
       const click=async()=>{
         const r=await evaluate('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,vw:innerWidth,vh:innerHeight};})()');assert(r.width===800&&r.height===600&&r.x>=0&&r.y>=0&&r.x+800<=r.vw&&r.y+600<=r.vh,'Native menu requires the unclipped 800x600 client');
@@ -250,6 +267,7 @@ export async function runCase(scenario, options) {
         await evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
       };
       await call('Emulation.setFocusEmulationEnabled',{enabled:true});await click();await click();
+      });
       await waitFor(async()=>{const actors=[...participants.map(c=>c.actor),actor],s=await api({op:'native_state',actors});assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');return s.actors.length===actors.length&&s.actors.every(a=>a.stage==='ready');},'Normal character LOAD did not complete');
       participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
       await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
