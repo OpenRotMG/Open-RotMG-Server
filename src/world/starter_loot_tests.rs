@@ -229,3 +229,218 @@ fn starter_gray_successes_belong_to_highest_damage_owner_and_publish_once_after_
         .is_err()
     );
 }
+
+fn expected_midland(
+    seed: u64,
+    kind: u16,
+    contributors: &[(i32, i32)],
+) -> (BTreeMap<i32, Vec<i32>>, u64) {
+    let public: &[(f64, &[i32])] = if kind == 0x952 {
+        &[
+            (0.05, &[0xa06, 0xa16, 0xa1c, 0xa3b, 0xa9c]),
+            (0.05, &[0xa10, 0xa80, 0xad0]),
+        ]
+    } else {
+        &[
+            (0.10, &[0xa01, 0xa05, 0xa73, 0xa76, 0xa9a]),
+            (0.05, &[0xa6e, 0xa71, 0xa74, 0xa77, 0xa9b]),
+            (0.10, &[0xa5d, 0xa79, 0xa7c]),
+            (0.05, &[0xa7a, 0xa7d, 0xa7f]),
+        ]
+    };
+    let private: &[(f64, &[i32])] = if kind == 0x952 {
+        &[(
+            0.03,
+            &[0xa29, 0xa2a, 0xa2b, 0xa2c, 0xa2d, 0xa38, 0xa39, 0xa4e],
+        )]
+    } else {
+        &[
+            (0.03, &[0xa17, 0xa1d, 0xa3c, 0xa3d, 0xa9d]),
+            (0.03, &[0xa11, 0xa5e, 0xad1]),
+        ]
+    };
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut drops = BTreeMap::<i32, Vec<i32>>::new();
+    for _ in 0..(contributors.len() * 2).min(8) {
+        for (chance, pool) in public {
+            if rng.gen_bool(*chance) {
+                let item = *pool.choose(&mut rng).unwrap();
+                let items = drops.entry(-1).or_default();
+                if !items.contains(&item) {
+                    items.push(item);
+                }
+                break;
+            }
+        }
+    }
+    let owners: Vec<_> = contributors
+        .iter()
+        .filter(|(_, damage)| *damage > 1)
+        .map(|(owner, _)| *owner)
+        .collect();
+    let mut successes = 0;
+    for _ in 0..owners.len() * if kind == 0x949 { 2 } else { 1 } {
+        for (chance, pool) in private {
+            if rng.gen_bool(*chance) {
+                let item = *pool.choose(&mut rng).unwrap();
+                let items = drops.entry(owners[successes % owners.len()]).or_default();
+                if !items.contains(&item) {
+                    items.push(item);
+                }
+                successes += 1;
+                break;
+            }
+        }
+        if successes == 8 {
+            break;
+        }
+    }
+    (drops, rng.next_u64())
+}
+
+#[test]
+fn midland_world_dual_rewards_preserve_living_credit_thresholds_and_exact_attempt_counts() {
+    for kind in [0x952, 0x949] {
+        for count in [0, 1, 3, 5, 10] {
+            let (mut w, players, old) = gray_world(count + 4);
+            w.remove_entity(old);
+            let enemy = w
+                .spawn_entity(kind, Pos { x: 1.5, y: 1.5 }, vec![])
+                .unwrap();
+            let contributors: Vec<_> = (1..=count)
+                .map(|account| (account, count + 1 - account))
+                .collect();
+            for (index, player) in players.iter().enumerate() {
+                w.entities.get_mut(&enemy).unwrap().damage.insert(
+                    w.players[player].character.id,
+                    if index < count as usize {
+                        count - index as i32
+                    } else {
+                        100
+                    },
+                );
+            }
+            w.players
+                .get_mut(&players[count as usize])
+                .unwrap()
+                .character
+                .alive = false;
+            w.players
+                .get_mut(&players[count as usize + 1])
+                .unwrap()
+                .death_pending = true;
+            w.players
+                .get_mut(&players[count as usize + 2])
+                .unwrap()
+                .departing = true;
+            w.entities
+                .get_mut(&enemy)
+                .unwrap()
+                .damage
+                .remove(&w.players[&players[count as usize + 3]].character.id);
+            for seed in 0..64 {
+                for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                    w.remove_entity(bag);
+                }
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let (expected, next) = expected_midland(seed, kind, &contributors);
+                w.drop_loot(&w.entities[&enemy].clone()).unwrap();
+                assert_eq!(
+                    actual_drops(&w),
+                    expected,
+                    "kind {kind:x} count {count} seed {seed}"
+                );
+                assert_eq!(
+                    w.rng.next_u64(),
+                    next,
+                    "public2Ncap8; privateN/2N; strict1vs2; no contributor no draws"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn midland_world_simultaneous_public_private_rewards_enforce_owner_access_and_committed_pickup() {
+    let contributors = [(1, 3), (2, 2), (3, 1)];
+    for kind in [0x952, 0x949] {
+        let seed = (0..100_000)
+            .find(|seed| {
+                let (drops, _) = expected_midland(*seed, kind, &contributors);
+                drops.contains_key(&-1) && drops.contains_key(&1)
+            })
+            .expect("bounded deterministic dual-channel reward fixture");
+        let (mut w, players, old) = gray_world(3);
+        w.remove_entity(old);
+        let enemy = w
+            .spawn_entity(kind, Pos { x: 1.5, y: 1.5 }, vec![])
+            .unwrap();
+        w.entities.get_mut(&enemy).unwrap().damage = BTreeMap::from(contributors);
+        w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+        w.drop_loot(&w.entities[&enemy].clone()).unwrap();
+        assert_eq!(
+            actual_drops(&w),
+            expected_midland(seed, kind, &contributors).0
+        );
+        let private = w
+            .entities
+            .values()
+            .find(|e| e.extra_stats.contains(&(54, 1)))
+            .unwrap()
+            .id;
+        let public = w
+            .entities
+            .values()
+            .find(|e| {
+                w.bag_expiry.contains_key(&e.id)
+                    && !e.extra_stats.iter().any(|(stat, _)| *stat == 54)
+            })
+            .unwrap()
+            .id;
+        let (owner, spectator) = (players[0], players[2]);
+        assert!(w.visible(owner).contains(&private) && !w.visible(spectator).contains(&private));
+        assert!(w.visible(owner).contains(&public) && w.visible(spectator).contains(&public));
+        let item = w.entities[&private].items[0];
+        let from = Slot {
+            object: private,
+            slot: 0,
+            kind: item,
+        };
+        assert!(
+            w.swap(
+                spectator,
+                from,
+                Slot {
+                    object: spectator,
+                    slot: 6,
+                    kind: -1
+                }
+            )
+            .is_err()
+        );
+        w.players.get_mut(&owner).unwrap().controller = Controller::Human;
+        let plan = w
+            .swap(
+                owner,
+                Slot {
+                    object: private,
+                    slot: 0,
+                    kind: item,
+                },
+                Slot {
+                    object: owner,
+                    slot: 6,
+                    kind: -1,
+                },
+            )
+            .unwrap();
+        assert_eq!(plan.collected, Some(item as u16));
+        assert_eq!(w.entities[&private].items[0], item);
+        assert_eq!(w.players[&owner].character.items[6], -1);
+        w.finish_inventory(plan, Ok(1)).unwrap();
+        assert_eq!(w.entities[&private].items[0], -1);
+        assert_eq!(w.players[&owner].character.items[6], item);
+        assert_eq!(w.players[&owner].character.revision, 1);
+        assert!(!w.entities[&private].drop_slots.contains(&0));
+    }
+}

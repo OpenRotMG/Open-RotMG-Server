@@ -723,7 +723,7 @@ pub struct World {
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
-    quests_by_level: BTreeMap<i32, BTreeSet<i32>>,
+    quests_by_level: BTreeMap<Option<i32>, BTreeSet<i32>>,
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
@@ -749,6 +749,7 @@ pub struct World {
     pub tick: u64,
     ids: Arc<AtomicI32>,
     pub name: String,
+    background: i32,
     pub safe: bool,
     pub owner: Option<i32>,
     pub max_players: usize,
@@ -761,6 +762,8 @@ pub struct World {
     setpieces: Vec<realm_setpieces::Area>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
+    event_reserves: Vec<realm_events::ReservedEvent>,
+    event_waiting: Option<i32>,
     admission_open: bool,
     bag_expiry: BTreeMap<i32, u64>,
     cleared: bool,
@@ -1171,6 +1174,12 @@ impl Directory {
             world.prepared_seed = Some(seed);
         }
         world.name = name.into();
+        // Preserve the blue Nexus/Vault backdrop, not dungeon void: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/worlds/Vault.cs
+        world.background = if matches!(template, "nexus" | "vault") {
+            2
+        } else {
+            0
+        };
         world.safe = safe;
         world.owner = owner;
         world.max_players = self.max_players;
@@ -1198,6 +1207,7 @@ impl Directory {
             // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
             let crystal = world.place_named_setpiece(0x935, &[1])?;
             world.spawn_entity(0x935, crystal, vec![])?;
+            world.reserve_realm_events()?;
             tracing::info!(
                 layout = world.realm_layout,
                 entities = world.entities.len(),
@@ -1828,7 +1838,7 @@ impl Directory {
             .worlds
             .get_mut(&origin)
             .unwrap()
-            .spawn_entity(kind, pos, vec![])?;
+            .spawn_exit(kind, pos)?;
         self.portals.insert(
             id,
             Portal {
@@ -1843,6 +1853,8 @@ impl Directory {
             kind,
             origin,
             destination,
+            x = self.worlds[&origin].entities[&id].pos.x,
+            y = self.worlds[&origin].entities[&id].pos.y,
             "earned dungeon portal dropped"
         );
         Ok(id)
@@ -1883,7 +1895,7 @@ impl Directory {
             .collect();
         for (origin, (kind, pos)) in requests {
             if let Err(error) = self.drop_dungeon_portal(origin, kind, pos) {
-                tracing::error!(origin,%error,"earned dungeon portal creation failed");
+                tracing::error!(origin,kind,x=pos.x,y=pos.y,%error,"earned dungeon portal creation failed");
             }
         }
         let expired_portals: Vec<_> = self
@@ -2314,8 +2326,8 @@ impl World {
                     if actor {
                         actor_ids.insert(id);
                     }
-                    if let Some(level) = o.quest_level.filter(|_| o.quest) {
-                        quests_by_level.entry(level).or_default().insert(id);
+                    if o.quest {
+                        quests_by_level.entry(o.quest_level).or_default().insert(id);
                     }
                     if !actor
                         && !o.destructible
@@ -2376,6 +2388,7 @@ impl World {
             tick: 0,
             ids,
             name: "Development tutorial".into(),
+            background: 0,
             safe: false,
             owner: None,
             max_players: 85,
@@ -2388,6 +2401,8 @@ impl World {
             setpieces: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
+            event_reserves: vec![],
+            event_waiting: None,
             admission_open: true,
             bag_expiry: BTreeMap::new(),
             cleared: false,
@@ -2533,7 +2548,6 @@ impl World {
             pos.x.is_finite() && pos.y.is_finite() && self.map.cell(pos.x, pos.y).is_some(),
             "entity spawn outside map"
         );
-        let cell = pos.y.floor() as usize * self.map.width as usize + pos.x.floor() as usize;
         let definition = self.content.get(kind)?;
         let id = allocate_id(&self.ids)?;
         let extra_stats = if definition.class == "Portal" {
@@ -2607,8 +2621,19 @@ impl World {
                 })),
             },
         );
+        self.index_actor(id);
+        Ok(id)
+    }
+    fn index_actor(&mut self, id: i32) {
+        let e = &self.entities[&id];
+        let kind = e.kind;
+        let definition = &self.content.objects[&kind];
+        let cell = e.pos.y.floor() as usize * self.map.width as usize + e.pos.x.floor() as usize;
         self.cells.insert(cell, id, true);
         self.actor_ids.insert(id);
+        if e.parent.is_some() || e.expires.is_some() {
+            self.timed_ids.insert(id);
+        }
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
         }
@@ -2617,13 +2642,15 @@ impl World {
         }
         self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
-        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
-            self.quests_by_level.entry(level).or_default().insert(id);
+        if definition.quest {
+            self.quests_by_level
+                .entry(definition.quest_level)
+                .or_default()
+                .insert(id);
         }
-        Ok(id)
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
-        // Native interaction picks one nearest object; an exit on a bag makes that loot unreachable.
+        // Nearest-only interaction masks co-located loot or portals: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/game/GameSprite.as#L195-L225
         let pos = (0..8)
             .map(|i| {
                 let angle = i as f32 * std::f32::consts::TAU / 8.;
@@ -2635,8 +2662,7 @@ impl World {
             .find(|pos| {
                 self.walkable(*pos)
                     && self
-                        .entities
-                        .values()
+                        .entities_near(*pos, 2.)
                         .filter(|e| {
                             matches!(
                                 self.content.objects[&e.kind].class.as_str(),
@@ -2645,7 +2671,7 @@ impl World {
                         })
                         .all(|e| e.pos.distance(*pos) > 1.5)
             })
-            .context("boss exit has no walkable position clear of loot and interactions")?;
+            .context("portal has no walkable position clear of loot and interactions")?;
         self.spawn_entity(kind, pos, vec![])
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
@@ -2658,14 +2684,14 @@ impl World {
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
         let definition = &self.content.objects[&entity.kind];
-        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
+        if definition.quest {
             let ids = self
                 .quests_by_level
-                .get_mut(&level)
-                .expect("quest level missing");
+                .get_mut(&definition.quest_level)
+                .expect("quest index missing");
             assert!(ids.remove(&id), "indexed quest missing");
             if ids.is_empty() {
-                self.quests_by_level.remove(&level);
+                self.quests_by_level.remove(&definition.quest_level);
             }
         }
         if let Some(slot) = entity.population_slot {
@@ -2704,7 +2730,7 @@ impl World {
             .i32(self.map.height)
             .utf(&self.name)
             .u32(1)
-            .i32(0)
+            .i32(self.background)
             .u8(u8::from(self.allow_teleport()))
             .u8(1)
             .i16(0)
@@ -3047,20 +3073,37 @@ impl World {
         }
         let player = &self.players[&id];
         let level = player.character.level;
-        let mut lower = self.quests_by_level.range(..=level).rev().peekable();
+        let mut lower = self
+            .quests_by_level
+            .range(Some(i32::MIN)..=Some(level))
+            .rev()
+            .peekable();
         let mut upper = self
             .quests_by_level
-            .range((std::ops::Bound::Excluded(level), std::ops::Bound::Unbounded))
+            .range((
+                std::ops::Bound::Excluded(Some(level)),
+                std::ops::Bound::Unbounded,
+            ))
             .peekable();
         let levels = std::iter::from_fn(|| match (lower.peek(), upper.peek()) {
-            (Some((a, _)), Some((b, _))) if a.abs_diff(level) <= b.abs_diff(level) => lower.next(),
+            (Some((a, _)), Some((b, _)))
+                if a.map(|a| a.abs_diff(level)) <= b.map(|b| b.abs_diff(level)) =>
+            {
+                lower.next()
+            }
             (Some(_), None) => lower.next(),
             _ => upper.next(),
         });
+        let levels = self
+            .quests_by_level
+            .get_key_value(&None)
+            .into_iter()
+            .chain(levels);
         let mut best: Option<&Entity> = None;
         let mut difference = u32::MAX;
         for (&quest_level, ids) in levels {
-            if quest_level.abs_diff(level) > difference {
+            let delta = quest_level.map_or(0, |quest_level| quest_level.abs_diff(level));
+            if delta > difference {
                 break;
             }
             // Equally suitable levels on both sides must compete on distance, not iteration order.
@@ -3082,7 +3125,7 @@ impl World {
                         .is_lt()
                 }) {
                     best = Some(e);
-                    difference = quest_level.abs_diff(level);
+                    difference = delta;
                 }
             }
         }
@@ -5016,7 +5059,8 @@ impl World {
     fn drop_loot(&mut self, defeated: &Entity) -> Result<()> {
         if crate::endgame::HEROES.contains(&defeated.kind) {
             self.critical_deaths.push(defeated.id);
-        } else if crate::quest::final_root(defeated.kind)
+        } else if (crate::quest::final_root(defeated.kind)
+            || matches!(defeated.kind, 0x678 | 0xd50 | 0xd54))
             && let Some(original) = defeated.quest
         {
             self.critical_deaths.push(original);
@@ -5155,10 +5199,13 @@ impl World {
                 }
             }
         }
-        if defeated.kind == 0x20d {
-            for (owner, item) in
-                crate::loot::gray_blob_rewards(&self.content, &eligible, &mut self.rng)
-            {
+        if matches!(defeated.kind, 0x20d | 0x952 | 0x949) {
+            for (owner, item) in crate::loot::fauna_private_rewards(
+                &self.content,
+                defeated.kind,
+                &eligible,
+                &mut self.rng,
+            ) {
                 drops.entry(owner).or_default().push(i32::from(item));
             }
         }
@@ -6034,6 +6081,20 @@ impl World {
                 }
                 self.bullets.push(bullet);
             }
+            // Shoot then retire, independent of the proximity poll; keep the owner until publication: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.UndeadLair.cs#L462-L480
+            if matches!(kind, 0xda2 | 0xda3) && !notices.is_empty() {
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
+                tracing::debug!(
+                    entity = id,
+                    kind,
+                    shots = notices.len(),
+                    "Lair trap detonated"
+                );
+            }
             packets.extend(
                 enemy_shots::packets(id, &notices)
                     .into_iter()
@@ -6437,6 +6498,8 @@ mod timing_example;
 #[cfg(test)]
 mod ground_dye_tests;
 #[cfg(test)]
+mod lair_trap_tests;
+#[cfg(test)]
 mod manor_tests;
 #[cfg(test)]
 mod starter_loot_tests;
@@ -6533,6 +6596,77 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn map_info_selects_blue_only_for_nexus_and_vault() {
+        let mut d = directory();
+        // Packet assertions must not depend on random dungeon generation.
+        d.prepared_seed = Some(12351);
+        for (template, background) in [
+            ("nexus", 2),
+            ("vault", 2),
+            ("tutorial", 0),
+            ("nexus-limbo", 0),
+            ("guild-hall-1", 0),
+            ("pirate-cave", 0),
+            ("sprite-world", 0),
+        ] {
+            let w = d.make(template, "Renamed world", false, None).unwrap();
+            let packet = w.map_info();
+            let mut r = wire::Reader::new(&packet);
+            assert_eq!(r.i32().unwrap(), w.map.width);
+            assert_eq!(r.i32().unwrap(), w.map.height);
+            assert_eq!(r.utf().unwrap(), "Renamed world");
+            assert_eq!(r.i32().unwrap(), 1);
+            assert_eq!(r.i32().unwrap(), background, "{template}");
+            assert_eq!(r.u8().unwrap(), u8::from(w.allow_teleport()));
+            assert_eq!(r.u8().unwrap(), 1);
+            assert_eq!(r.i16().unwrap(), 0);
+            assert_eq!(r.i16().unwrap(), 0);
+            r.done().unwrap();
+        }
+    }
+
+    #[test]
+    fn earned_portals_leave_loot_and_other_portals_individually_reachable() {
+        let mut d = directory();
+        let mut origin = arena(1);
+        origin.name = "Realm".into();
+        origin.ids = d.ids.clone();
+        d.worlds.insert(-3, origin);
+        let w = d.worlds.get_mut(&-3).unwrap();
+        let (x, y) = (10.5, 10.5);
+        let pos = Pos { x, y };
+        let public = w.loot_bag(pos, None, vec![0xa23, 0xa22]).unwrap();
+        let private = w
+            .loot_bag(Pos { x: x + 3.5, y }, Some(17), vec![0xa23])
+            .unwrap();
+        let mut expected_rng = w.rng.clone();
+        let snake = d.drop_dungeon_portal(-3, 0x718, pos).unwrap();
+        let sprite = d.drop_dungeon_portal(-3, 0x70c, pos).unwrap();
+        let w = &d.worlds[&-3];
+        let objects = [public, private, snake, sprite];
+        for id in objects {
+            let at = w.entities[&id].pos;
+            assert!(w.walkable(at));
+            for other in objects.into_iter().filter(|other| *other != id) {
+                assert!(
+                    at.distance(w.entities[&other].pos) > 1.5,
+                    "interaction {id} overlaps {other}"
+                );
+            }
+        }
+        assert_eq!(&w.entities[&public].items[..2], &[0xa23, 0xa22]);
+        assert_eq!(w.entities[&private].extra_stats, vec![(54, 17)]);
+        assert_eq!(w.bag_expiry[&public], 60000);
+        assert_eq!(w.rng.clone().r#gen::<u64>(), expected_rng.r#gen::<u64>());
+        for (id, name, lifetime) in [(snake, "Snake Pit", 600), (sprite, "Sprite World", 300)] {
+            let portal = &d.portals[&id];
+            assert_eq!(portal.origin, -3);
+            assert_eq!(portal.expires, d.tick + lifetime);
+            assert_eq!(d.worlds[&portal.destination.unwrap()].name, name);
+        }
+    }
+
     #[tokio::test]
     async fn simulation_ticks_service_a_bounded_fifo_batch_of_serial_packet_jobs() {
         let mut directory = directory();
@@ -6563,6 +6697,71 @@ mod tests {
         service_queued_jobs(&mut directory, &mut rx).await;
         packets.await.unwrap();
         assert_eq!(*observed.lock().unwrap(), (0..17).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn classic_highland_leaders_earn_snake_portals_but_followers_do_not() {
+        for kind in [
+            0x640, 0x645, 0x646, 0x649, 0x650, 0x63e, 0x642, 0x647, 0x64f,
+        ] {
+            let eligible = matches!(kind, 0x640 | 0x645 | 0x646 | 0x649 | 0x650);
+            assert_eq!(
+                crate::dungeon::portal_drop(kind),
+                eligible.then_some((0x718, 0.17))
+            );
+            let family = population::FAMILIES.iter().find(|f| f.leader == kind);
+            let mut w = arena(family.map_or(6, |f| f.terrain));
+            w.name = "Realm".into();
+            let owner = w.enter(ch(&w), None).unwrap();
+            let pos = Pos { x: 12.5, y: 12.5 };
+            if let Some(family) = family {
+                let positions = w.family_layout(pos, family, &[]).unwrap();
+                w.place_camp(family, positions).unwrap();
+            }
+            let mut drops = 0;
+            for seed in 0..64 {
+                let enemy = if family.is_some() {
+                    let slot = w.camps[0].start;
+                    if w.population[slot].entity.is_none() {
+                        w.place_member(0, slot, pos).unwrap();
+                    }
+                    let id = w.population[slot].entity.unwrap();
+                    assert_eq!(w.entities[&id].camp, Some(0));
+                    id
+                } else {
+                    w.spawn_entity(kind, pos, vec![]).unwrap()
+                };
+                let hp = w.entities[&enemy].hp;
+                let defense = w.content.objects[&kind].defense;
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.damage_enemy(owner, enemy, defense + 1, false, &[], None)
+                    .unwrap();
+                assert!(w.portal_requests.is_empty(), "nonlethal hit: {kind:#x}");
+                w.damage_enemy(owner, enemy, hp + defense, false, &[], None)
+                    .unwrap();
+                assert!(!w.entities.contains_key(&enemy));
+                assert!(
+                    w.portal_requests
+                        .iter()
+                        .all(|(portal, p)| *portal == 0x718 && p.distance(pos) < 0.01)
+                );
+                assert!(w.portal_requests.len() <= 1);
+                let count = w.portal_requests.len();
+                w.damage_enemy(owner, enemy, hp, false, &[], None).unwrap();
+                assert_eq!(
+                    w.portal_requests.len(),
+                    count,
+                    "duplicate defeat: {kind:#x}"
+                );
+                drops += w.portal_requests.len();
+                w.portal_requests.clear();
+                for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                    w.remove_entity(bag);
+                }
+            }
+            assert_eq!(drops > 0, eligible, "observed drops for {kind:#x}: {drops}");
+            assert!(drops < 64, "drops are not guaranteed for {kind:#x}");
+        }
     }
 
     #[test]
