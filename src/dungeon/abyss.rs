@@ -86,8 +86,6 @@ fn index(map: &Map, x: i32, y: i32) -> usize {
     (y * map.width + x) as usize
 }
 
-/// The pinned 7.0 Abyss generator floods a random fractal height field with lava, so each
-/// run has its own terrain shape; the fixed band it replaces was identical in every room.
 struct LavaField {
     cells: Vec<f32>,
     width: i32,
@@ -140,6 +138,14 @@ impl LavaField {
         let top = a + (b - a) * tx;
         let bottom = c + (d - c) * tx;
         top + (bottom - top) * ty
+    }
+    fn ground(&self, x: i32, y: i32) -> u8 {
+        // Alternating height bands, not a fixed lava quota: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/DungeonGen/Templates/Abyss/Overlay.cs#L98-L107
+        if ((self.at(x, y) * 255.) as u8 / 10).is_multiple_of(2) {
+            LAVA
+        } else {
+            FLOOR
+        }
     }
 }
 fn path(map: &mut Map, mut a: (i32, i32), b: (i32, i32)) {
@@ -277,33 +283,14 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         spawns: vec![],
     };
     let field = LavaField::new(&mut rng, width, height);
-    // The flood level is taken from the field itself so every run keeps the same amount of
-    // lava while its shape follows the random field.
-    let mut levels = Vec::new();
-    for room in &rooms {
-        if room.tag >= 16 || room.depth == 0 {
-            continue;
-        }
-        for y in room.y..room.y + room.h {
-            for x in room.x..room.x + room.w {
-                levels.push(field.at(x, y));
-            }
-        }
-    }
-    levels.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let lava_level = levels[levels.len() * 2 / 5];
     for (number, room) in rooms.iter().enumerate() {
         for y in room.y..room.y + room.h {
             for x in room.x..room.x + room.w {
                 let i = index(&map, x, y);
                 map.cells[i].ground = if room.tag >= 16 {
                     0x69
-                } else if number == 0 {
-                    FLOOR
-                } else if field.at(x, y) < lava_level {
-                    LAVA
                 } else {
-                    FLOOR
+                    field.ground(x, y)
                 };
                 map.cells[i].region = if room.tag >= 16 { room.tag } else { 0 };
             }
@@ -372,7 +359,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                         (x, y + side)
                     };
                     let i = index(&map, x, y);
-                    map.cells[i].ground = FLOOR;
+                    map.cells[i].ground = field.ground(x, y);
                 }
             }
         }
