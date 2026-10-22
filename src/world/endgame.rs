@@ -739,8 +739,15 @@ mod tests {
             .collect();
         assert!(events.is_empty(), "unearned startup events: {events:?}");
         assert!(w.event_reserves.len() >= 5);
+        let crystal = w.entities.values().find(|e| e.kind == 0x935).unwrap().pos;
         for event in &w.event_reserves {
             for e in std::iter::once(&event.root).chain(&event.children) {
+                if !matches!(event.root.kind, 0xd50 | 0xd54) {
+                    assert!(
+                        e.pos.distance(crystal) >= 32.,
+                        "event reservation changed crystal spacing"
+                    );
+                }
                 assert!(!w.entities.contains_key(&e.id));
                 assert!(!w.actor_ids.contains(&e.id));
                 assert!(!w.npc_global_ids.contains(&e.id));
