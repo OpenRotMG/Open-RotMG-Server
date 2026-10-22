@@ -235,6 +235,7 @@ fn jungle_entrance_is_earned_from_a_real_realm_coil_and_eggs_hatch() {
     assert!(!w.entities.contains_key(&egg));
     assert!((1..=2).contains(&w.actors().filter(|e| e.kind == SNAKE).count()));
     let mut d = tests::directory();
+    assert!(d.portals.is_empty());
     let realm = d.endgame.active;
     let w = d.worlds.get_mut(&realm).unwrap();
     let coils: Vec<_> = w
@@ -251,16 +252,25 @@ fn jungle_entrance_is_earned_from_a_real_realm_coil_and_eggs_hatch() {
         .find(|s| rand::rngs::StdRng::seed_from_u64(*s).gen_bool(0.2))
         .unwrap();
     w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+    assert!(w.portal_requests.is_empty());
     w.damage_enemy(player, coils[0], 1000, true, &[], None)
         .unwrap();
+    assert!(!w.entities.contains_key(&coils[0]));
     assert_eq!(w.portal_requests.len(), 1);
+    let (kind, requested_pos) = w.portal_requests[0];
+    assert_eq!(kind, 0x733);
+    assert_eq!((requested_pos.x, requested_pos.y), (pos.x, pos.y));
     d.step();
-    let portal = *d
-        .portals
-        .iter()
-        .find(|(id, p)| p.origin == realm && d.worlds[&realm].entities[id].kind == 0x733)
-        .unwrap()
-        .0;
+    assert_eq!(d.portals.len(), 1);
+    let (&portal, binding) = d.portals.first_key_value().unwrap();
+    assert_eq!(binding.origin, realm);
+    let expected_destination = binding.destination.unwrap();
+    let w = d.worlds.get_mut(&realm).unwrap();
+    assert!(w.portal_requests.is_empty());
+    assert_eq!(w.entities[&portal].kind, 0x733);
+    // Approach the earned portal: its nominal two-tile ring can round outside entry range.
+    w.players.get_mut(&player).unwrap().pos = w.entities[&portal].pos;
     let (_, _, destination) = d.destination(player, Some(portal)).unwrap();
+    assert_eq!(destination, expected_destination);
     assert_eq!(d.worlds[&destination].name, "Forbidden Jungle");
 }
