@@ -1,6 +1,50 @@
 use super::tests::{content, object, view};
 use super::*;
 
+#[test]
+fn community_events_c13_actual_postclear_branch_requires_exact_normal_own_witness() {
+    let c = content();
+    let mut v = view(&c);
+    equipped(&mut v);
+    v.session = crate::world::view::Session {
+        account: 6,
+        character: 6,
+        player: 206,
+        world: 2,
+    };
+    v.map.name = "Oryx's Chamber".into();
+    v.objects
+        .push(object(999, crate::endgame::ORYX, 12.5, 11.5));
+    let mut brain = Brain::new(PROFILES[1], &v);
+    let (dispatch, output) = crate::performance::tests::trace();
+    tracing::dispatcher::with_default(&dispatch, || {
+        brain.decide(&v, &c).unwrap();
+        v.tick += 4;
+        v.time_ms += 200;
+        v.objects.clear();
+        v.objects.push(object(721, 0x721, 12.5, 11.5));
+        brain.decide(&v, &c).unwrap();
+        v.tick += 200;
+        v.time_ms += 10000;
+        let selected = brain.decide(&v, &c).unwrap();
+        assert_eq!(selected.goal, Goal::Wait);
+        assert!(matches!(selected.journey, Some(Journey::Nexus)));
+        assert!(selected.item.is_none());
+    });
+    let logs = crate::performance::tests::events(&output);
+    assert!(
+        logs.iter()
+            .any(|v| v["fields"]["message"] == "autonomous shared clear cue observed")
+    );
+    let witness = logs
+        .iter()
+        .find(|v| v["fields"]["message"] == "autonomous postclear own-view branch witness")
+        .expect("actual no-known-usable-exit branch lacks exact normal OWN observability");
+    let own: serde_json::Value =
+        serde_json::from_str(witness["fields"]["normal_view"].as_str().unwrap()).unwrap();
+    assert_eq!(own, serde_json::to_value(&v).unwrap());
+}
+
 fn equipped(v: &mut PlayerView) {
     v.character.level = 20;
     v.character.hp = 670;

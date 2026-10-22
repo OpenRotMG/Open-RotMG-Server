@@ -41,7 +41,7 @@ async fn community_crowd_three_actual_controllers_recover_continue_and_clear_ind
             assert_eq!(d.tick, 0);
             assert!(d.clock.paused());
             assert!(d.worlds[&-3].players.is_empty());
-            assert!(d.worlds.get_mut(&-3).unwrap().pending_progress().is_empty());
+            assert!(d.worlds[&-3].players.is_empty());
             // Ambient loot can legitimately preempt combat, so this prepared opportunity starts without it.
             let mut w = World::new(content, map)?;
             w.bind_fixture_clock(&d.clock);
@@ -293,7 +293,11 @@ async fn community_crowd_three_actual_controllers_recover_continue_and_clear_ind
     assert!(app.quarantined.lock().unwrap().is_empty());
     assert_eq!(
         app.world
-            .collect(|w| vec![w.players.len()])
+            .directory(|d| Ok(d
+                .worlds
+                .values()
+                .map(|w| w.players.len())
+                .collect::<Vec<_>>()))
             .await
             .unwrap()
             .into_iter()
@@ -303,7 +307,11 @@ async fn community_crowd_three_actual_controllers_recover_continue_and_clear_ind
     );
     assert!(
         app.world
-            .collect(crate::world::World::pending_progress)
+            .directory(|d| Ok(d
+                .worlds
+                .values()
+                .flat_map(|w| w.players.keys().copied())
+                .collect::<Vec<_>>()))
             .await
             .unwrap()
             .is_empty()
@@ -355,35 +363,5 @@ async fn community_crowd_three_actual_controllers_recover_continue_and_clear_ind
 }
 
 async fn drain(app: &App) {
-    let progress = app
-        .world
-        .collect(crate::world::World::pending_progress)
-        .await
-        .unwrap();
-    if !progress.is_empty() {
-        app.store
-            .progress_batch(progress.iter().map(|(_, ch)| ch.clone()).collect())
-            .await
-            .unwrap();
-        for (id, ch) in progress {
-            app.world
-                .for_player(id)
-                .call(move |w| {
-                    w.committed(id, Ok(()))?;
-                    w.finish_progress(id, ch)
-                })
-                .await
-                .unwrap();
-        }
-    }
-    for (id, ch, killer) in app
-        .world
-        .collect(crate::world::World::pending_deaths)
-        .await
-        .unwrap()
-    {
-        crate::server::persist_death(app, id, ch, killer)
-            .await
-            .unwrap();
-    }
+    crate::server::fixture_persistence_tick(app).await.unwrap();
 }

@@ -77,6 +77,32 @@ use tokio::sync::mpsc;
 mod account_actions;
 #[cfg(test)]
 pub(crate) use account_actions::tests::{fixture, fixture as test_app};
+
+#[cfg(test)]
+pub(crate) async fn fixture_persistence_tick(a: &App) -> Result<()> {
+    a.world.supervisor.ensure_running()?;
+    let mut accounts: std::collections::BTreeSet<_> =
+        a.owners.lock().unwrap().keys().copied().collect();
+    persistence_tick(a).await?;
+    a.world.supervisor.ensure_running()?;
+    // Store rejections can poison World without fencing the owning claim.
+    a.world
+        .directory(|d| {
+            for (world, w) in &d.worlds {
+                w.fixture_persistence_health(*world)?;
+            }
+            Ok(())
+        })
+        .await?;
+    accounts.extend(a.owners.lock().unwrap().keys().copied());
+    for account in accounts {
+        a.world.supervisor.check_account(account)?;
+        if let Some((_, _, failed)) = lifecycle::state(a, account) {
+            ensure!(!failed, "fixture persistence fenced account={account}");
+        }
+    }
+    Ok(())
+}
 pub(crate) mod browser_link;
 pub(crate) mod diagnostics;
 mod gold;
@@ -2089,14 +2115,13 @@ async fn connection_io<S, I>(
             );
         }
     }
-    if let Some((key, account)) = cancelled_admission {
-        if let Err(error) = a
+    if let Some((key, account)) = cancelled_admission
+        && let Err(error) = a
             .world
             .directory(move |d| d.cancel_admission(account, key))
             .await
-        {
-            tracing::error!(account,%error,"disconnected admission cancellation failed");
-        }
+    {
+        tracing::error!(account,%error,"disconnected admission cancellation failed");
     }
     if let Some(result) = finalization {
         let result = match result {

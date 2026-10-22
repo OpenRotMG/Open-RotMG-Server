@@ -733,6 +733,16 @@ impl Directory {
     }
 
     #[cfg(test)]
+    pub(crate) fn test_prepared(
+        path: &std::path::Path,
+        content: Arc<Content>,
+        max_players: usize,
+        seed: u64,
+    ) -> Result<Self> {
+        Self::fixture(path, content, max_players, seed, Some(seed))
+    }
+
+    #[cfg(test)]
     fn fixture(
         path: &std::path::Path,
         content: Arc<Content>,
@@ -2272,6 +2282,16 @@ impl World {
             },
         )
     }
+    #[cfg(test)]
+    pub(crate) fn enter_autonomous(&mut self, ch: Character, tx: Output) -> Result<i32> {
+        let id = self.enter(ch, Some(tx))?;
+        self.players
+            .get_mut(&id)
+            .context("new controller missing")?
+            .controller = Controller::Autonomous;
+        Ok(id)
+    }
+
     pub fn enter_at(
         &mut self,
         ch: Character,
@@ -5842,6 +5862,8 @@ mod timing_example;
 #[cfg(test)]
 mod community_cooperative_tests;
 #[cfg(test)]
+mod community_postclear_audit;
+#[cfg(test)]
 mod ground_dye_tests;
 #[cfg(test)]
 mod manor_tests;
@@ -5852,6 +5874,21 @@ mod view_navigation_tests;
 
 #[cfg(test)]
 impl World {
+    pub(crate) fn fixture_persistence_health(&self, world: i32) -> Result<()> {
+        for (id, p) in &self.players {
+            ensure!(
+                p.persistence_failure.is_none(),
+                "fixture persistence failed account={} character={} world={} player={}: {:?}",
+                p.character.account,
+                p.character.id,
+                world,
+                id,
+                p.persistence_failure
+            );
+        }
+        Ok(())
+    }
+
     pub(crate) fn bind_fixture_clock(&mut self, clock: &crate::clock::Clock) {
         assert!(self.tick == 0 && self.now == 0 && self.players.is_empty() && clock.paused());
         // Raw fixture replacements need the same paused epoch attachment as Directory::make.
@@ -5870,6 +5907,7 @@ impl World {
 mod tests {
     use super::*;
 
+    use super::community_cooperative_tests::receive;
     use crate::content::WIZARD;
     use std::path::Path;
 

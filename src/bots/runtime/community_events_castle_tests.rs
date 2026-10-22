@@ -65,8 +65,7 @@ async fn community_events_actual_castle_controllers_progress_or_causally_abandon
             let mut guardians = vec![];
             for e in w
                 .entities
-                .values_mut()
-                .filter(|e| crate::endgame::GUARDIANS.contains(&e.kind))
+                .matching_mut(|e| crate::endgame::GUARDIANS.contains(&e.kind))
             {
                 e.hp = 2000;
                 guardians.push(e.pos);
@@ -143,9 +142,18 @@ async fn community_events_actual_castle_controllers_progress_or_causally_abandon
             .unwrap()[0];
         app.store.progress(ch.clone()).await.unwrap();
         actors.push((account, ch.id));
-        initial.push(json!({"character":ch,"position":position}));
+        assert!(app.world.clock.paused());
+        let vaults = app.store.vaults(account).await.unwrap();
+        assert!(
+            !vaults.is_empty()
+                && vaults.iter().all(|v| v.account == account
+                    && v.revision == 0
+                    && v.items.iter().all(|k| *k == -1))
+        );
+        initial.push(json!({"character":ch,"position":position,"vaults":vaults}));
         let selected = ch.id;
-        launch(&app, p, ch, world, Some(position), Some(selected))
+        let claim = app.claim(ch.account).unwrap();
+        launch(&app, p, ch, world, Some(position), Some(selected), claim)
             .await
             .unwrap();
     }
@@ -190,7 +198,18 @@ async fn community_events_actual_castle_controllers_progress_or_causally_abandon
         }
     }
     app.world.clock.set_paused(true);
-    let end_tick = app.world.directory(|d| Ok(d.tick)).await.unwrap();
+    let (end_tick, terminal_audit) = app
+        .world
+        .directory(|d| {
+            Ok((
+                d.tick,
+                d.prepared_postclear_key_audit(None)?
+                    .context("missing terminal key authority")?,
+            ))
+        })
+        .await
+        .unwrap();
+    tracing::info!(audit=%terminal_audit,"prepared postclear terminal key audit");
     let step_ms = (end_tick - start_tick) * 50;
     let wall_ms = start.elapsed().as_millis();
     let active_clock_ms = app

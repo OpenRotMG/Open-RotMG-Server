@@ -1,20 +1,10 @@
 use super::*;
-use crate::{content::WIZARD, store::InventoryWrite, world::World};
+use crate::{content::WIZARD, store::InventoryWrite};
 use serde_json::json;
 use std::{fs, time::Instant};
 
 async fn progress(app: &App) {
-    for (id, ch) in app.world.collect(World::pending_progress).await.unwrap() {
-        app.store.progress(ch.clone()).await.unwrap();
-        app.world
-            .for_player(id)
-            .call(move |w| {
-                w.committed(id, Ok(()))?;
-                w.finish_progress(id, ch)
-            })
-            .await
-            .unwrap();
-    }
+    crate::server::fixture_persistence_tick(app).await.unwrap();
 }
 #[tokio::test]
 async fn community_market_actual_controllers_negotiate_private_terms_bank_and_commit_installments()
@@ -190,9 +180,18 @@ async fn controller_market_case(mode: &str) {
         }
         initial.push(json!({"character":ch,"vault":app.store.vault(ch.account, 0).await.unwrap()}));
         selected.push((ch.account, ch.id));
-        launch(&app, *profile, ch.clone(), scope, Some(pos), Some(ch.id))
-            .await
-            .unwrap();
+        let claim = app.claim(ch.account).unwrap();
+        launch(
+            &app,
+            *profile,
+            ch.clone(),
+            scope,
+            Some(pos),
+            Some(ch.id),
+            claim,
+        )
+        .await
+        .unwrap();
         if incompatible {
             let account = ch.account;
             let view = app
@@ -402,7 +401,8 @@ async fn resume_without_partner(original: &App, dir: &std::path::Path, selected:
     app.store = crate::store::Store::open(&dir.join("game.db"), &app.content).unwrap();
     let ch = app.store.load(selected.0, selected.1).await.unwrap();
     fs::write(dir.join("restart-declaration.json"),serde_json::to_vec_pretty(&json!({"trigger":"prospectively declared outage after first durable installment; all previous owners released before restart","returning_account":selected.0,"unavailable_peer":terms.accounts.iter().find(|a|**a!=selected.0),"initial":initial,"unchanged_expiry":terms.expires,"max_game_ms":180000,"max_wall_ms":240000,"humans":0,"qa":0,"autonomous":1,"new_world_state":restart_dir})).unwrap()).unwrap();
-    launch(&app, PROFILES[0], ch, -3, None, Some(selected.1))
+    let claim = app.claim(ch.account).unwrap();
+    launch(&app, PROFILES[0], ch, -3, None, Some(selected.1), claim)
         .await
         .unwrap();
     let rebound = app.store.bot_mind(selected.0).await.unwrap().unwrap();

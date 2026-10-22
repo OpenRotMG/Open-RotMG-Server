@@ -2,7 +2,7 @@ use super::*;
 use crate::content::{PRIEST, WIZARD};
 use std::time::Duration;
 
-fn receive(
+pub(super) fn receive(
     d: &mut Directory,
     world: i32,
     account: i32,

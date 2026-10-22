@@ -153,9 +153,18 @@ async fn context(
             "stats":ch.base,"hp":ch.hp,"mp":ch.mp,"items":ch.items,"revision":ch.revision}),
         );
         let character = ch.id;
-        launch(&app, profile, ch, -3, Some(positions[i]), Some(character))
-            .await
-            .unwrap();
+        let claim = app.claim(ch.account).unwrap();
+        launch(
+            &app,
+            profile,
+            ch,
+            -3,
+            Some(positions[i]),
+            Some(character),
+            claim,
+        )
+        .await
+        .unwrap();
         let entered = app.store.bot_mind(account).await.unwrap().unwrap();
         assert_eq!(entered.cognition, expected);
         assert!(entered.facts.is_empty());
@@ -261,7 +270,11 @@ async fn context(
     assert!(app.quarantined.lock().unwrap().is_empty());
     assert_eq!(
         app.world
-            .collect(|w| vec![w.players.len()])
+            .directory(|d| Ok(d
+                .worlds
+                .values()
+                .map(|w| w.players.len())
+                .collect::<Vec<_>>()))
             .await
             .unwrap()
             .into_iter()
@@ -270,7 +283,11 @@ async fn context(
     );
     assert!(
         app.world
-            .collect(World::pending_progress)
+            .directory(|d| Ok(d
+                .worlds
+                .values()
+                .flat_map(|w| w.players.keys().copied())
+                .collect::<Vec<_>>()))
             .await
             .unwrap()
             .is_empty()
@@ -383,15 +400,5 @@ fn save(dir: &Path, name: &str, value: &Value) {
 }
 
 async fn progress(app: &App) {
-    for (id, ch) in app.world.collect(World::pending_progress).await.unwrap() {
-        app.store.progress(ch.clone()).await.unwrap();
-        app.world
-            .for_player(id)
-            .call(move |w| {
-                w.committed(id, Ok(()))?;
-                w.finish_progress(id, ch)
-            })
-            .await
-            .unwrap();
-    }
+    crate::server::fixture_persistence_tick(app).await.unwrap();
 }

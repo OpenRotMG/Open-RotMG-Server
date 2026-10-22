@@ -1,5 +1,5 @@
 use super::*;
-use crate::{content::WIZARD, store::InventoryWrite, world::World};
+use crate::{content::WIZARD, store::InventoryWrite};
 use serde_json::{Value, json};
 use std::{fs, time::Instant};
 
@@ -103,7 +103,8 @@ async fn community_resources_transfer_gap_observer_rejects_loss_quarantine_timeo
         .unwrap()[0];
     app.store.progress(ch.clone()).await.unwrap();
     let (account, character) = (ch.account, ch.id);
-    launch(&app, PROFILES[0], ch, -2, None, Some(character))
+    let claim = app.claim(ch.account).unwrap();
+    launch(&app, PROFILES[0], ch, -2, None, Some(character), claim)
         .await
         .unwrap();
     app.world.clock.set_paused(false);
@@ -219,6 +220,7 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
             .await
             .unwrap();
         let character = ch.id;
+        let claim = app.claim(ch.account).unwrap();
         launch(
             &app,
             PROFILES[0],
@@ -226,6 +228,7 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
             scope,
             Some(position),
             Some(character),
+            claim,
         )
         .await
         .unwrap();
@@ -341,7 +344,11 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
         assert!(app.quarantined.lock().unwrap().is_empty());
         assert_eq!(
             app.world
-                .collect(|w| vec![w.players.len()])
+                .directory(|d| Ok(d
+                    .worlds
+                    .values()
+                    .map(|w| w.players.len())
+                    .collect::<Vec<_>>()))
                 .await
                 .unwrap()
                 .into_iter()
@@ -450,15 +457,5 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
 }
 
 async fn finish_progress(app: &App) {
-    for (id, pending) in app.world.collect(World::pending_progress).await.unwrap() {
-        app.store.progress(pending.clone()).await.unwrap();
-        app.world
-            .for_player(id)
-            .call(move |w| {
-                w.committed(id, Ok(()))?;
-                w.finish_progress(id, pending)
-            })
-            .await
-            .unwrap();
-    }
+    crate::server::fixture_persistence_tick(app).await.unwrap();
 }

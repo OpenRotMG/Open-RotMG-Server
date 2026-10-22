@@ -1,5 +1,5 @@
 use super::*;
-use crate::{content::WIZARD, store::InventoryWrite, world::World};
+use crate::{content::WIZARD, store::InventoryWrite};
 use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use std::{fs, time::Instant};
@@ -191,34 +191,25 @@ fn community_events_terminal_observer_rejects_healthy_noop_cleanup_and_transfer_
 }
 
 async fn commits(app: &App) {
-    for (id, ch) in app.world.collect(World::pending_progress).await.unwrap() {
-        app.store.progress(ch.clone()).await.unwrap();
-        app.world
-            .for_player(id)
-            .call(move |w| {
-                w.committed(id, Ok(()))?;
-                w.finish_progress(id, ch)
-            })
-            .await
-            .unwrap();
-    }
-    for (id, ch, killer) in app.world.collect(World::pending_deaths).await.unwrap() {
-        assert!(
-            !ch.items
-                .iter()
-                .take(4)
-                .any(|k| *k >= 0 && app.content.objects[&(*k as u16)].resurrects)
-        );
-        let result = app.store.death(ch, killer).await;
-        app.world
-            .for_player(id)
-            .call(move |w| {
-                w.committed(id, result)?;
-                w.finish_death(id)
-            })
-            .await
-            .unwrap();
-    }
+    app.world
+        .directory(|d| {
+            for w in d.worlds.values() {
+                for p in w.players.values().filter(|p| p.death_pending) {
+                    ensure!(
+                        !p.character
+                            .items
+                            .iter()
+                            .take(4)
+                            .any(|k| *k >= 0 && w.content.objects[&(*k as u16)].resurrects),
+                        "prepared event death cannot use resurrection equipment"
+                    );
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    crate::server::fixture_persistence_tick(app).await.unwrap();
 }
 async fn cleanup(app: &App) {
     app.world.clock.set_paused(true);
@@ -232,7 +223,11 @@ async fn cleanup(app: &App) {
     assert!(app.quarantined.lock().unwrap().is_empty());
     assert_eq!(
         app.world
-            .collect(|w| vec![w.players.len()])
+            .directory(|d| Ok(d
+                .worlds
+                .values()
+                .map(|w| w.players.len())
+                .collect::<Vec<_>>()))
             .await
             .unwrap()
             .into_iter()
@@ -271,8 +266,8 @@ async fn community_events_actual_lab_controllers_remedy_or_guarded_escape_with_i
                 let w = d.worlds.get_mut(&world).unwrap();
                 let boss = w
                     .entities
-                    .values_mut()
-                    .find(|e| e.kind == crate::dungeon::lab::BOSS)
+                    .matching_mut(|e| e.kind == crate::dungeon::lab::BOSS)
+                    .next()
                     .unwrap();
                 boss.hp = 5000;
                 Ok(world)
@@ -324,7 +319,8 @@ async fn community_events_actual_lab_controllers_remedy_or_guarded_escape_with_i
             initial.push(json!({"character":ch,"position":pos,"knowledge_blue":i==0}));
             actors.push((account, ch.id));
             let selected = ch.id;
-            launch(&app, p, ch, world, Some(pos), Some(selected))
+            let claim = app.claim(ch.account).unwrap();
+            launch(&app, p, ch, world, Some(pos), Some(selected), claim)
                 .await
                 .unwrap();
         }

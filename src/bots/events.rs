@@ -124,6 +124,13 @@ pub(crate) struct Events {
     advice: bool,
 }
 impl Events {
+    #[cfg(test)]
+    pub(super) fn postclear_observed(&self, v: &PlayerView) -> bool {
+        self.outing.as_ref().is_some_and(|o| {
+            o.world == v.session.world && o.character == v.session.character && o.clear.is_some()
+        })
+    }
+
     pub(super) fn bind(&mut self) {
         self.outing = None;
         self.advice = false;
@@ -529,6 +536,8 @@ impl Events {
             .any(|p| p.usable && matches!(p.kind, 0x71d | 0x712 | 0x700))
         {
             d.journey = Some(Journey::Nexus);
+            #[cfg(test)]
+            tracing::info!(normal_view=%serde_json::to_string(v)?,clear_world=o.world,clear_character=o.character,clear_time_ms=clear,boss=?o.boss,pending=o.pending.is_some(),applicable_remedy=readiness_item(v,c)?.is_some(),loot_waiting,live_objective=v.objects.iter().any(|p|objective(p.kind)&&p.hp>0),"autonomous postclear own-view branch witness");
             return Ok(Some(d));
         }
         Ok(None)

@@ -61,6 +61,7 @@ async fn community_social_actual_healing_changes_requests_and_gifts_or_own_need_
             accounts.push(account);
             initial.push(ch.clone());
             let selected = ch.id;
+            let claim = app.claim(ch.account).unwrap();
             launch(
                 &app,
                 p,
@@ -71,6 +72,7 @@ async fn community_social_actual_healing_changes_requests_and_gifts_or_own_need_
                     y: 73.5,
                 }),
                 Some(selected),
+                claim,
             )
             .await
             .unwrap();

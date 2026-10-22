@@ -86,7 +86,11 @@ impl World {
         let id = self.spawn_entity(kind, position, vec![])?;
         // TossObject's admitted 1500ms landing survives its thrower's death.
         let parent = self.entities.contains_key(&owner).then_some(owner);
-        self.entities.get_mut(&id).unwrap().parent = parent;
+        self.entities
+            .get_mut(&id)
+            .unwrap()
+            .parent
+            .set(parent, id, &mut self.timed_ids);
         Ok(id)
     }
 
@@ -179,7 +183,7 @@ impl World {
                 .collect();
             for fixture in fixtures {
                 let e = self.entities.get_mut(&fixture).unwrap();
-                e.parent = Some(id);
+                e.parent.set(Some(id), fixture, &mut self.timed_ids);
                 if (0x993..=0x996).contains(&e.kind) {
                     e.stage = Some(u64::from(!hide && stage < 12 && e.kind != 0x993 + safe));
                 }
@@ -229,7 +233,11 @@ impl World {
         } else if kind == 0x978 {
             if elapsed >= 2000 && e.stage.is_none() {
                 self.lab_stage(id, 1);
-                self.entities.get_mut(&id).unwrap().expires = Some(self.now + 50);
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
             }
         } else if matches!(kind, 0x980 | 0x1e24) {
             let stage = e.stage.unwrap_or(0);
@@ -237,7 +245,11 @@ impl World {
                 self.lab_stage(id, 3);
             } else if stage == 3 && elapsed >= 2000 {
                 self.lab_stage(id, 4);
-                self.entities.get_mut(&id).unwrap().expires = Some(self.now + 50);
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
             } else if stage == 0 && elapsed >= 10000 {
                 self.lab_stage(id, 1);
             } else if stage == 1 && elapsed >= 3000 {
@@ -326,7 +338,7 @@ impl World {
                 .collect();
             for child in children {
                 let e = self.entities.get_mut(&child).unwrap();
-                e.parent = None;
+                e.parent.set(None, child, &mut self.timed_ids);
                 if (0x993..=0x996).contains(&e.kind) {
                     e.stage = Some(0);
                 }
@@ -341,7 +353,11 @@ impl World {
                 .map(|e| e.id)
                 .collect();
             for cage in cages {
-                self.entities.get_mut(&cage).unwrap().parent = None;
+                self.entities
+                    .get_mut(&cage)
+                    .unwrap()
+                    .parent
+                    .set(None, cage, &mut self.timed_ids);
                 self.landmark_texture(cage, 0);
             }
         } else if defeated.kind == 0x982 {

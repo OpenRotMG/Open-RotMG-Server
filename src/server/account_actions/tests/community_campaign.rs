@@ -2,39 +2,7 @@ use super::*;
 use std::{collections::BTreeSet, io::Write, time::Duration};
 
 async fn persist_campaign(app: &App) -> Result<()> {
-    let progress = app
-        .world
-        .collect(crate::world::World::pending_progress)
-        .await?;
-    if !progress.is_empty() {
-        let result = app
-            .store
-            .progress_batch(progress.iter().map(|(_, ch)| ch.clone()).collect())
-            .await
-            .context("progress persistence failed");
-        for (id, snapshot) in progress {
-            let committed = result
-                .as_ref()
-                .map(|_| ())
-                .map_err(|e| anyhow::anyhow!("{e:#}"));
-            app.world
-                .for_player(id)
-                .call(move |w| {
-                    w.committed(id, committed)?;
-                    w.finish_progress(id, snapshot)
-                })
-                .await?;
-        }
-        result?;
-    }
-    for (id, ch, killer) in app
-        .world
-        .collect(crate::world::World::pending_deaths)
-        .await?
-    {
-        super::super::super::persist_death(app, id, ch, killer).await?;
-    }
-    Ok(())
+    crate::server::fixture_persistence_tick(app).await
 }
 
 async fn snapshot(app: &App) -> Result<serde_json::Value> {

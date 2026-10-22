@@ -70,37 +70,7 @@ async fn community_pursuit_stop(app: &App) {
     app.shutdown.send(true).unwrap();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while !app.owners.lock().unwrap().is_empty() {
-        let progress = app
-            .world
-            .collect(crate::world::World::pending_progress)
-            .await
-            .unwrap();
-        if !progress.is_empty() {
-            app.store
-                .progress_batch(progress.iter().map(|(_, ch)| ch.clone()).collect())
-                .await
-                .unwrap();
-            for (id, ch) in progress {
-                app.world
-                    .for_player(id)
-                    .call(move |w| {
-                        w.committed(id, Ok(()))?;
-                        w.finish_progress(id, ch)
-                    })
-                    .await
-                    .unwrap();
-            }
-        }
-        for (id, ch, killer) in app
-            .world
-            .collect(crate::world::World::pending_deaths)
-            .await
-            .unwrap()
-        {
-            super::super::persist_death(app, id, ch, killer)
-                .await
-                .unwrap();
-        }
+        crate::server::fixture_persistence_tick(app).await.unwrap();
         assert!(
             tokio::time::Instant::now() < deadline,
             "controller ownership did not release; quarantined={}",
@@ -150,8 +120,8 @@ async fn community_pursuit_prepare_supply(
         .call(move |w| {
             let bag = w
                 .entities
-                .values_mut()
-                .find(|e| e.pos.distance(pos) < 1. && e.items.contains(&0xa22))
+                .matching_mut(|e| e.pos.distance(pos) < 1. && e.items.contains(&0xa22))
+                .next()
                 .unwrap();
             bag.items = vec![0xa22, 0xa22, -1, -1, -1, -1, -1, -1];
             bag.extra_stats.push((54, account));
@@ -204,7 +174,8 @@ async fn community_pursuit_selected_supply_commits_partial_banks_and_resumes_sam
     let (ch, pos) = community_pursuit_prepare_supply(&app, ch).await;
     let character = ch.id;
     // The real dropped bag expires after 60s; no scene mutation occurs after enrollment.
-    crate::bots::start_test(&app, ch, -3, pos, "Biceps")
+    let claim = app.claim(ch.account).unwrap();
+    crate::bots::start_test(&app, ch, -3, pos, "Biceps", claim)
         .await
         .unwrap();
     app.world.clock.set_paused(false);
@@ -461,16 +432,7 @@ async fn community_pursuit_ordinary_death_and_restart_preserve_account_not_dead_
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
     let replacement = loop {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        for (id, ch, killer) in app
-            .world
-            .collect(crate::world::World::pending_deaths)
-            .await
-            .unwrap()
-        {
-            super::super::persist_death(&app, id, ch, killer)
-                .await
-                .unwrap();
-        }
+        crate::server::fixture_persistence_tick(&app).await.unwrap();
         let living = app
             .world
             .directory(move |d| {
@@ -617,7 +579,8 @@ async fn community_pursuit_equal_resource_selected_controllers_learn_before_comm
             })
             .await
             .unwrap();
-        crate::bots::start_test(&app, ch, -3, Pos { x, y: 10.5 }, "Biceps")
+        let claim = app.claim(ch.account).unwrap();
+        crate::bots::start_test(&app, ch, -3, Pos { x, y: 10.5 }, "Biceps", claim)
             .await
             .unwrap();
     }
@@ -799,7 +762,8 @@ async fn community_pursuit_crossing_pair(risk: bool, loaded: bool) {
             .await
             .unwrap();
         emitters.push((owner, x));
-        crate::bots::start_test(&app, ch, -3, Pos { x, y: 10.5 }, "Biceps")
+        let claim = app.claim(ch.account).unwrap();
+        crate::bots::start_test(&app, ch, -3, Pos { x, y: 10.5 }, "Biceps", claim)
             .await
             .unwrap();
     }
@@ -1022,7 +986,8 @@ async fn community_pursuit_execution_pair(simple: bool) {
             .await
             .unwrap();
         targets.push((owner, x));
-        crate::bots::start_test(&app, ch, -3, Pos { x, y: 10.5 }, "Biceps")
+        let claim = app.claim(ch.account).unwrap();
+        crate::bots::start_test(&app, ch, -3, Pos { x, y: 10.5 }, "Biceps", claim)
             .await
             .unwrap();
     }
@@ -1192,7 +1157,8 @@ async fn community_pursuit_actual_return_reobserves_expired_bag_without_inventin
         .await
         .unwrap();
     // Initial pickup is local; the ordinary return needs over 50s walking plus the Vault trip, beyond the real 60s bag lifetime.
-    crate::bots::start_test(&app, ch, -3, pos, "Biceps")
+    let claim = app.claim(ch.account).unwrap();
+    crate::bots::start_test(&app, ch, -3, pos, "Biceps", claim)
         .await
         .unwrap();
     app.world.clock.set_paused(false);

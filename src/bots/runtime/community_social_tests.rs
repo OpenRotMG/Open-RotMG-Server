@@ -15,17 +15,7 @@ pub(super) mod rebuild;
 mod rebuild_admission;
 
 async fn commits(app: &App) {
-    for (id, ch) in app.world.collect(World::pending_progress).await.unwrap() {
-        app.store.progress(ch.clone()).await.unwrap();
-        app.world
-            .for_player(id)
-            .call(move |w| {
-                w.committed(id, Ok(()))?;
-                w.finish_progress(id, ch)
-            })
-            .await
-            .unwrap();
-    }
+    crate::server::fixture_persistence_tick(app).await.unwrap();
 }
 async fn stop(app: &App) {
     app.world.clock.set_paused(true);
@@ -39,7 +29,11 @@ async fn stop(app: &App) {
     assert!(app.quarantined.lock().unwrap().is_empty());
     assert_eq!(
         app.world
-            .collect(|w| vec![w.players.len()])
+            .directory(|d| Ok(d
+                .worlds
+                .values()
+                .map(|w| w.players.len())
+                .collect::<Vec<_>>()))
             .await
             .unwrap()
             .into_iter()
@@ -310,7 +304,8 @@ async fn community_social_six_actual_controllers_wait_reconsider_and_enter_after
         let world = if i < 4 { -3 } else { -2 };
         initial.push(json!({"character":ch,"world":world,"position":pos}));
         let selected = ch.id;
-        launch(&app, p, ch, world, Some(pos), Some(selected))
+        let claim = app.claim(ch.account).unwrap();
+        launch(&app, p, ch, world, Some(pos), Some(selected), claim)
             .await
             .unwrap();
     }

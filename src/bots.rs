@@ -9,7 +9,7 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{Arc, Mutex},
 };
 

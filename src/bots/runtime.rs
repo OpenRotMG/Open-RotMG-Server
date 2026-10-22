@@ -450,7 +450,16 @@ async fn launch(
                         tracing::info!(player=id,account,character=character_id,destination,"autonomous collective transfer completed");
                         continue;
                     }
-                    let view = Arc::new(app.world.directory(move |d| d.player_view(id)).await?);
+                    #[cfg(test)]
+                    let audit_due = (selected.is_some(), brain.next_decision);
+                    let view = Arc::new(app.world.directory(move |d| {
+                        let view = d.player_view(id)?;
+                        #[cfg(test)]
+                        if audit_due.0 && view.tick >= audit_due.1 && let Some(audit) = d.prepared_postclear_key_audit(Some(&view))? {
+                            tracing::info!(audit=%audit,"prepared postclear evaluator key audit");
+                        }
+                        Ok(view)
+                    }).await?);
                     ensure!(view.session.account == account, "autonomous account binding changed");
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }
                     if view.map.name=="Nexus" && brain.agreement.as_ref().is_none_or(|a|a.waiting.is_none()) && brain.group_lost_since.is_some_and(|since|view.time_ms.saturating_sub(since)>=30000) {
@@ -639,6 +648,14 @@ async fn launch(
                             navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
                             navigation=%serde_json::json!(brain.navigation.as_ref().map(|g|g.metrics())),timings=%timings,"bot performance");
                     }
+                    #[cfg(test)]
+                    let postclear_choice_sha = if selected.is_some() && brain.mind.events.postclear_observed(&view) {
+                        use sha2::Digest;
+                        let raw = serde_json::to_string(&*view)?;
+                        let hash = format!("{:x}", sha2::Sha256::digest(raw.as_bytes()));
+                        tracing::info!(account,character=view.session.character,normal_view_sha256=%hash,session=%serde_json::to_string(&view.session)?,tick=view.tick,time_ms=view.time_ms,goal=?decision.goal,journey=?decision.journey,item=?decision.item,movement=?decision.movement,"prepared postclear final selected decision");
+                        Some(hash)
+                    } else { None };
                     next_bank = now.checked_add(Duration::from_millis(brain.next_bank.saturating_sub(view.time_ms))).context("autonomous bank cooldown overflow")?;
                     if let Some(text) = decision.chat {
                         let received = app.world.clock.now();
@@ -715,7 +732,7 @@ async fn launch(
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 lifecycle::finalize(&app, id, CloseReason::Controller)?.wait().await?;
                                 let previous = view.session.character;
-                                (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Portal { destination, time, key, session: view.session, selected }).await?;
+                                (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
                                 let current_character = brain.session.2;
                                 let destination = if current_character != previous { -2 } else { destination };
                                 if current_character != previous {
@@ -723,6 +740,10 @@ async fn launch(
                                 }
                                 admission = None;
                                 tracing::info!(player=id,account,character=current_character,destination,?portal,portal_kind,"autonomous durable transfer completed");
+                                #[cfg(test)]
+                                if let Some(hash) = postclear_choice_sha {
+                                    tracing::info!(normal_view_sha256=%hash,origin_world=view.session.world,origin_player=view.session.player,account,character=current_character,destination,player=id,tick=view.tick,time_ms=view.time_ms,?portal,portal_kind,"prepared postclear durable transfer ACK");
+                                }
                             }
                         }
                     }

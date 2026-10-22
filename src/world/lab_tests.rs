@@ -462,7 +462,7 @@ fn community_lab_clear_private_rewards_and_exit_are_once_only_and_commit_gated()
     assert_eq!(wisdom.len(), 1);
     assert!(wisdom[0].accessible(1));
     assert!(!wisdom[0].accessible(2));
-    let plans = w.pending_progress();
+    let plans = w.pending_progress_where(|_, _| true);
     assert_eq!(plans.len(), 1);
     assert_eq!(plans[0].0, p);
     assert_eq!(plans[0].1.mad_labs, 1);
@@ -474,7 +474,7 @@ fn community_lab_clear_private_rewards_and_exit_are_once_only_and_commit_gated()
     let bags = w.entities.len();
     assert!(w.drop_loot(&dead).is_err());
     assert_eq!(w.entities.len(), bags);
-    assert!(w.pending_progress().is_empty());
+    assert!(w.pending_progress_where(|_, _| true).is_empty());
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn community_lab_dead_departing_and_zero_damage_players_cannot_receive_rewards_o
         let defeated = w.remove_entity(boss);
         w.drop_loot(&defeated).unwrap();
         assert!(!w.entities.values().any(|e| !e.drop_slots.is_empty()));
-        assert!(w.pending_progress().is_empty());
+        assert!(w.pending_progress_where(|_, _| true).is_empty());
         assert!(!w.entities[&w.clear_exit.unwrap()].published);
     }
 }
@@ -498,14 +498,15 @@ fn community_lab_cyborg_and_experiment_prediction_uses_recent_ordinary_native_mo
         let (mut w, p) = arena();
         w.players.get_mut(&p).unwrap().controller = Controller::Human;
         let original = w.players[&p].pos;
-        w.native_move_to(p, original, 1000).unwrap();
-        w.native_move_to(
+        w.native_move_received(p, original, (1000, w.clock.now()))
+            .unwrap();
+        w.native_move_received(
             p,
             Pos {
                 x: original.x,
                 y: original.y + 0.4,
             },
-            1100,
+            (1100, w.clock.now()),
         )
         .unwrap();
         let target = w.players[&p].pos;
@@ -540,7 +541,11 @@ fn community_lab_global_rage_is_strict_irreversible_and_does_not_reset_timers_or
             assert_eq!(w.entities[&boss].stage, Some(stage));
         }
         let child = w.spawn_entity(0x979, target, vec![]).unwrap();
-        w.entities.get_mut(&child).unwrap().parent = Some(boss);
+        w.entities
+            .get_mut(&child)
+            .unwrap()
+            .parent
+            .set(Some(boss), child, &mut w.timed_ids);
         w.entities.get_mut(&boss).unwrap().hp = 17999;
         w.lab_mechanics(boss, Some(target), 0).unwrap();
         assert_eq!(w.entities[&boss].stage, Some(12));
@@ -592,7 +597,7 @@ async fn community_lab_real_store_retains_clear_pickup_and_permanent_death_witho
     w.defeat_entity(boss).unwrap();
     let exit = w.clear_exit.unwrap();
     assert!(!w.entities[&exit].published);
-    let (owner, progress) = w.pending_progress().pop().unwrap();
+    let (owner, progress) = w.pending_progress_where(|_, _| true).pop().unwrap();
     store.progress(progress.clone()).await.unwrap();
     w.finish_progress(owner, progress).unwrap();
     assert!(w.entities[&exit].published);
@@ -802,7 +807,11 @@ fn community_lab_shared_and_owned_summon_limits_fail_explicitly_before_admission
             let child = w
                 .spawn_entity(0x979, Pos { x: 12.5, y: 66.5 }, vec![])
                 .unwrap();
-            w.entities.get_mut(&child).unwrap().parent = Some(boss);
+            w.entities
+                .get_mut(&child)
+                .unwrap()
+                .parent
+                .set(Some(boss), child, &mut w.timed_ids);
         }
         let before = w.entities.len();
         let result = if hide {
@@ -866,8 +875,8 @@ fn community_lab_dead_boss_preserves_survivors_and_each_admitted_ownerless_toss_
             .count()
             < 256
     );
-    let progress = w.pending_progress();
+    let progress = w.pending_progress_where(|_, _| true);
     assert_eq!(progress.len(), 1);
     assert_eq!(progress[0].1.mad_labs, 1);
-    assert!(w.pending_progress().is_empty());
+    assert!(w.pending_progress_where(|_, _| true).is_empty());
 }

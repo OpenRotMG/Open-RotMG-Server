@@ -92,7 +92,8 @@ pub(in crate::bots::runtime) async fn rebuilding_context(
         };
         let world = if i < 4 { -3 } else { -2 };
         initial.push(json!({"character":ch,"world":world,"position":position}));
-        launch(app, p, ch, world, Some(position), None)
+        let claim = app.claim(ch.account).unwrap();
+        launch(app, p, ch, world, Some(position), None, claim)
             .await
             .unwrap();
     }
