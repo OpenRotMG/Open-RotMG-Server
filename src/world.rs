@@ -5829,7 +5829,7 @@ mod tests {
         ] {
             let w = d.make(template, "Renamed world", false, None).unwrap();
             let packet = w.map_info();
-            let mut r = Reader::new(&packet);
+            let mut r = wire::Reader::new(&packet);
             assert_eq!(r.i32().unwrap(), w.map.width);
             assert_eq!(r.i32().unwrap(), w.map.height);
             assert_eq!(r.utf().unwrap(), "Renamed world");
