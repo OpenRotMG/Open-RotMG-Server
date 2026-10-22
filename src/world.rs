@@ -584,6 +584,8 @@ pub struct World {
     setpieces: Vec<realm_setpieces::Area>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
+    event_reserves: Vec<realm_events::ReservedEvent>,
+    event_waiting: Option<i32>,
     admission_open: bool,
     bag_expiry: BTreeMap<i32, u64>,
     cleared: bool,
@@ -956,6 +958,7 @@ impl Directory {
             world.populate_hermit()?;
             world.populate_manor_entry()?;
             world.populate_ghost_ship()?;
+            world.reserve_realm_events()?;
             world.populate_realm_population()?;
             // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
             let crystal = world.place_named_setpiece(0x935, &[1])?;
@@ -1853,6 +1856,8 @@ impl World {
             setpieces: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
+            event_reserves: vec![],
+            event_waiting: None,
             admission_open: true,
             bag_expiry: BTreeMap::new(),
             cleared: false,
@@ -1998,7 +2003,6 @@ impl World {
             pos.x.is_finite() && pos.y.is_finite() && self.map.cell(pos.x, pos.y).is_some(),
             "entity spawn outside map"
         );
-        let cell = pos.y.floor() as usize * self.map.width as usize + pos.x.floor() as usize;
         let definition = self.content.get(kind)?;
         let id = allocate_id(&self.ids)?;
         let extra_stats = if definition.class == "Portal" {
@@ -2072,8 +2076,19 @@ impl World {
                 })),
             },
         );
+        self.index_actor(id);
+        Ok(id)
+    }
+    fn index_actor(&mut self, id: i32) {
+        let e = &self.entities[&id];
+        let kind = e.kind;
+        let definition = &self.content.objects[&kind];
+        let cell = e.pos.y.floor() as usize * self.map.width as usize + e.pos.x.floor() as usize;
         self.cells.insert(cell, id, true);
         self.actor_ids.insert(id);
+        if e.parent.is_some() || e.expires.is_some() {
+            self.timed_ids.insert(id);
+        }
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
         }
@@ -2085,7 +2100,6 @@ impl World {
         if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
             self.quests_by_level.entry(level).or_default().insert(id);
         }
-        Ok(id)
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
         // Native interaction picks one nearest object; an exit on a bag makes that loot unreachable.
@@ -4308,7 +4322,8 @@ impl World {
     fn drop_loot(&mut self, defeated: &Entity) -> Result<()> {
         if crate::endgame::HEROES.contains(&defeated.kind) {
             self.critical_deaths.push(defeated.id);
-        } else if crate::quest::final_root(defeated.kind)
+        } else if (crate::quest::final_root(defeated.kind)
+            || matches!(defeated.kind, 0x678 | 0xd50 | 0xd54))
             && let Some(original) = defeated.quest
         {
             self.critical_deaths.push(original);
