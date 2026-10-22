@@ -591,7 +591,7 @@ impl World {
             return self.event_tower_death(defeated);
         }
         if defeated.kind == crate::dungeon::abyss::IDOL {
-            self.idol_bridge(defeated.home, true)?;
+            self.idol_entrance(defeated.home, true)?;
         }
         if let Some(tag) = defeated.quest {
             if defeated.kind == 0x929 {
