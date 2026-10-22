@@ -165,6 +165,55 @@ fn path(map: &mut Map, mut a: (i32, i32), b: (i32, i32)) {
     }
 }
 
+// Keep the shrine dry until activation: legacy reconstruction (creepylava, 2015), https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/DungeonGen/Templates/Abyss/template.jm
+fn treasure_room(map: &mut Map, room: Room) {
+    for y in 0..21 {
+        for x in 0..15 {
+            let chamber = match y {
+                0 | 14 => (1..=3).contains(&x) || (11..=13).contains(&x),
+                1..=3 | 11..=12 => true,
+                4..=10 => (1..=13).contains(&x),
+                13 => x != 5 && x != 9,
+                _ => false,
+            };
+            let entrance = (14..=20).contains(&y)
+                && if y == 14 || y == 20 {
+                    (6..=8).contains(&x)
+                } else {
+                    (5..=9).contains(&x)
+                };
+            if chamber || entrance {
+                let i = index(map, room.x + x, room.y + y);
+                map.cells[i].ground = if entrance {
+                    FLOOR
+                } else if (6..=8).contains(&x) && (6..=8).contains(&y) {
+                    0x35
+                } else {
+                    0x36
+                };
+                map.cells[i].region = room.tag;
+            }
+        }
+    }
+    for (x, y) in [
+        (5, 1),
+        (9, 1),
+        (1, 5),
+        (13, 5),
+        (1, 9),
+        (13, 9),
+        (5, 16),
+        (9, 16),
+        (5, 18),
+        (9, 18),
+    ] {
+        let i = index(map, room.x + x, room.y + y);
+        map.cells[i].object = Some(if x == 5 && y >= 16 { 0x183 } else { 0x17e });
+    }
+    let i = index(map, room.x + 7, room.y + 7);
+    map.cells[i].object = Some(IDOL);
+}
+
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut rooms = vec![Room {
@@ -207,6 +256,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 };
                 for offset in offsets {
                     for positive in [true, false] {
+                        if tag >= 16 && (horizontal || positive) {
+                            continue;
+                        }
                         let (r, edge) =
                             attach(&rooms, parent, (w, h, tag), (horizontal, positive, offset));
                         if rooms.iter().any(|other| r.overlaps(*other)) {
@@ -288,11 +340,10 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             for x in room.x..room.x + room.w {
                 let i = index(&map, x, y);
                 map.cells[i].ground = if room.tag >= 16 {
-                    0x69
+                    0xfe
                 } else {
                     field.ground(x, y)
                 };
-                map.cells[i].region = if room.tag >= 16 { room.tag } else { 0 };
             }
         }
         if number == 0 {
@@ -323,15 +374,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             }
         }
         if room.tag >= 16 {
-            let (cx, cy) = room.center();
-            for y in room.y..room.y + room.h {
-                for x in room.x..room.x + room.w {
-                    let i = index(&map, x, y);
-                    if (x - cx).abs() > 4 || (y - cy).abs() > 5 {
-                        map.cells[i].ground = LAVA;
-                    }
-                }
-            }
+            treasure_room(&mut map, *room);
         }
     }
     // The reference leaves broken tiles on part of the lava so it can be crossed.
@@ -359,13 +402,17 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                         (x, y + side)
                     };
                     let i = index(&map, x, y);
-                    map.cells[i].ground = field.ground(x, y);
+                    if map.cells[i].region < 16 {
+                        map.cells[i].ground = field.ground(x, y);
+                    }
                 }
             }
         }
         path(&mut map, rooms[edge.parent].center(), edge.a);
         path(&mut map, edge.a, edge.b);
-        path(&mut map, edge.b, rooms[edge.child].center());
+        if rooms[edge.child].tag < 16 {
+            path(&mut map, edge.b, rooms[edge.child].center());
+        }
     }
     for room in &rooms {
         let (cx, cy) = room.center();
@@ -388,10 +435,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             map.cells[i].region = 1;
             map.spawns.push((px as f32 + 0.5, py as f32 + 0.5));
             path(&mut map, (px, py), (cx, cy));
-        } else if room.tag >= 16 {
-            let i = index(&map, cx, cy);
-            map.cells[i].object = Some(IDOL);
-        } else if room.depth > 0 {
+        } else if room.depth > 0 && room.tag == 0 {
             for _ in 0..rng.gen_range(4..=7) {
                 let x = rng.gen_range(room.x..room.x + room.w);
                 let y = rng.gen_range(room.y..room.y + room.h);
