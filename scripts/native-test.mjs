@@ -177,6 +177,7 @@ export async function runCase(scenario, options) {
       participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
       await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state:join(out,'state'),browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
+      await save();
       return participants.at(-1);
 
     }
