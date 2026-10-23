@@ -1137,6 +1137,7 @@ mod tests {
         d.endgame.realms.get_mut(&origin).unwrap().cycle.remaining = BTreeSet::from([source]);
         w.players.get_mut(&owner).unwrap().pos = held.root.pos;
         let next_aux = held.root.next_aux;
+        assert!(held.children.is_empty());
         w.event_reserves.push(held);
         w.now = 10000;
         d.tick = 200;
@@ -1172,7 +1173,7 @@ mod tests {
             .filter(|e| e.parent.is_some() || e.quest.is_some())
             .count()
             + w.named_births.len();
-        let fillers: Vec<_> = (occupied..256)
+        let mut fillers: Vec<_> = (occupied..256)
             .map(|_| {
                 let id = w.spawn_entity(0xd57, pos, vec![]).unwrap();
                 w.entities.get_mut(&id).unwrap().quest = Some(id);
@@ -1182,13 +1183,62 @@ mod tests {
         d.endgame_step();
         assert_eq!(d.worlds[&origin].event_waiting, Some(source));
         assert!(!d.worlds[&origin].entities.contains_key(&held_id));
+        let w = d.worlds.get_mut(&origin).unwrap();
+        w.remove_entity(fillers.pop().unwrap());
+        let kage = w
+            .spawn_entity(crate::dungeon::manor::KAGE, pos, vec![])
+            .unwrap();
+        w.entities.get_mut(&kage).unwrap().stage = Some(2);
+        assert_eq!(w.summon_occupancy(), 255);
+        w.manor_entry_mechanics(kage, Some(pos), 0).unwrap();
+        assert_eq!(w.manor_births.len(), 1);
+        assert_eq!(w.summon_occupancy(), 256);
+        let mut rng = w.rng.clone();
+        let next = rng.r#gen::<u64>();
+        for _ in 0..3 {
+            d.endgame_step();
+            assert_eq!(d.worlds[&origin].event_waiting, Some(source));
+            assert!(!d.worlds[&origin].entities.contains_key(&held_id));
+            assert_eq!(d.worlds[&origin].rng.clone().r#gen::<u64>(), next);
+        }
+        let w = d.worlds.get_mut(&origin).unwrap();
+        w.now = 11499;
+        w.manor_birth_step();
+        assert_eq!(w.manor_births.len(), 1);
+        assert!(!w.actors().any(|e| e.parent == Some(kage)));
+        w.now = 11500;
+        w.manor_birth_step();
+        assert!(w.manor_births.is_empty());
+        let mines: Vec<_> = w
+            .actors()
+            .filter(|e| e.parent == Some(kage))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(
+            mines.len(),
+            1,
+            "admitted Kage mine must land, not be discarded"
+        );
+        let mine = mines[0];
+        assert_eq!(w.entities[&mine].kind, crate::dungeon::manor::MINE);
+        assert_eq!(w.entities[&mine].activated, Some(11500));
+        assert_eq!(*w.entities[&mine].expires, Some(15550));
+        assert_eq!(w.summon_occupancy(), 256);
+        d.tick = 230;
+        d.endgame_step();
+        assert_eq!(d.worlds[&origin].event_waiting, Some(source));
+        assert!(!d.worlds[&origin].entities.contains_key(&held_id));
+        assert!(d.worlds[&origin].entities.contains_key(&mine));
+        assert_eq!(d.worlds[&origin].rng.clone().r#gen::<u64>(), next);
         for id in fillers {
             d.worlds.get_mut(&origin).unwrap().remove_entity(id);
         }
         d.endgame_step();
         let w = &d.worlds[&origin];
         assert_eq!(w.event_waiting, None);
-        assert_eq!(w.entities[&held_id].next_aux, 10000 + next_aux);
+        assert_eq!(w.entities[&held_id].next_aux, 11500 + next_aux);
+        assert!(w.event_reserves.is_empty());
+        assert!(w.entities.contains_key(&mine));
         assert!(w.actor_ids.contains(&held_id));
         assert!(w.quests_by_level.values().any(|ids| ids.contains(&held_id)));
         assert_eq!(
@@ -1199,13 +1249,19 @@ mod tests {
             d.endgame.realms[&origin].cycle.stage,
             crate::endgame::RealmStage::Open
         );
+        d.endgame_step();
+        assert_eq!(
+            d.endgame.realms[&origin].cycle.remaining,
+            BTreeSet::from([held_id])
+        );
+        assert!(d.worlds[&origin].event_reserves.is_empty());
         let w = d.worlds.get_mut(&origin).unwrap();
         w.damage_enemy(owner, held_id, 100000, false, &[], None)
             .unwrap();
         d.endgame_step();
         assert!(matches!(
             d.endgame.realms[&origin].cycle.stage,
-            crate::endgame::RealmStage::Closing { deadline: 130000 }
+            crate::endgame::RealmStage::Closing { deadline: 131500 }
         ));
         assert!(!d.worlds[&origin].admission_open);
     }

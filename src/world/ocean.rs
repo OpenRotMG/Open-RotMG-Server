@@ -51,6 +51,7 @@ impl World {
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + self.named_births.len()
+                + self.abyss_pending_count()
                 < 256,
             "ocean summon budget exhausted"
         );
@@ -103,6 +104,7 @@ impl World {
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + self.named_births.len()
+                + self.abyss_pending_count()
                 + positions.len()
                 <= 256,
             "Hermit wave exceeds summon budget"
@@ -176,6 +178,7 @@ impl World {
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + self.named_births.len()
+                + self.abyss_pending_count()
                 + count
                 <= 256,
             "ocean toss exceeds summon budget"

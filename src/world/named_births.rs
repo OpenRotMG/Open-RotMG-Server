@@ -56,6 +56,7 @@ impl World {
                     .filter(|e| e.parent.is_some() || e.quest.is_some())
                     .count()
                     + self.named_births.len()
+                    + self.abyss_pending_count()
                     < 256,
                 "shared summon budget exhausted before toss"
             );
