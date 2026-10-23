@@ -70,6 +70,13 @@ impl World {
         tracing::debug!(
             player = id,
             ground,
+            cell = i,
+            client_time_ms = time,
+            world_time_ms = self.now,
+            report_x = pos.x,
+            report_y = pos.y,
+            player_x = p.pos.x,
+            player_y = p.pos.y,
             damage,
             hp = p.character.hp,
             "ground damage committed"

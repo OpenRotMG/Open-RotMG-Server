@@ -601,10 +601,36 @@ impl World {
     pub(super) fn outside_setpieces(&self, pos: Pos) -> bool {
         self.setpieces.iter().all(|a| a.distance(pos) >= 4.)
     }
+    fn setpiece_cell_available(
+        &self,
+        cell: &crate::content::Cell,
+        untouched: bool,
+        retain_authored_lava: bool,
+    ) -> bool {
+        // Transparent stencils must not bypass source-bound whole-site lava protection.
+        !(retain_authored_lava && cell.ground == 0xf4)
+            && (untouched
+                || cell.region == 0
+                    && cell
+                        .object
+                        .is_none_or(|kind| !self.content.objects[&kind].full_occupy)
+                    && self.content.grounds[&cell.ground] > 0.
+                    && !matches!(cell.ground, 0x72 | 0x73))
+    }
     pub(super) fn place_named_setpiece(&mut self, kind: u16, terrains: &[u8]) -> Result<Pos> {
         ensure!(
             self.players.is_empty() && self.now == 0,
             "setpieces require an unentered Realm"
+        );
+        // These reconstructions deliberately retain bare lava through normal construction.
+        let retain_authored_lava = matches!(
+            self.realm_layout.as_deref(),
+            Some(
+                "classic-world-01-reconstruction"
+                    | "classic-world-05-reconstruction"
+                    | "classic-world-09-reconstruction"
+                    | "classic-world-11-reconstruction"
+            )
         );
         let piece = Piece::build(kind, &mut self.rng);
         for mark in piece.cells.iter().copied().filter(|m| *m != 0) {
@@ -692,17 +718,14 @@ impl World {
                             ) && piece.cells
                                 [(y - a.y) as usize * piece.width + (x - a.x) as usize]
                                 == 0;
-                            untouched
-                                || c.region == 0
-                                    && self.content.grounds[&c.ground] > 0.
-                                    && !matches!(c.ground, 0x72 | 0x73)
+                            self.setpiece_cell_available(c, untouched, retain_authored_lava)
                         })
                     })
             })
             .with_context(|| {
                 format!(
-                    "Realm cannot place {kind:#x} setpiece {}x{} in its selected habitat",
-                    piece.width, piece.height
+                    "Realm cannot place {kind:#x} setpiece {}x{} in its selected habitat (layout={:?}, retain_authored_lava={retain_authored_lava})",
+                    piece.width, piece.height, self.realm_layout
                 )
             })?;
         for y in 0..piece.height {
@@ -770,6 +793,8 @@ impl World {
         };
         tracing::info!(
             kind,
+            layout = ?self.realm_layout,
+            retain_authored_lava,
             x = area.x,
             y = area.y,
             width = area.width,
@@ -778,5 +803,260 @@ impl World {
         );
         self.setpieces.push(area);
         Ok(pos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transparent_cells_keep_main_admission_without_bypassing_authored_lava() {
+        let w = super::super::tests::world();
+        assert!(w.content.objects[&288].full_occupy);
+        let mut cell = crate::content::Cell {
+            ground: 190,
+            object: Some(288),
+            config: String::new(),
+            terrain: 0,
+            region: 0,
+        };
+        assert!(w.setpiece_cell_available(&cell, true, false));
+        assert!(!w.setpiece_cell_available(&cell, false, false));
+        cell.object = None;
+        assert!(w.setpiece_cell_available(&cell, false, false));
+        cell.ground = 244;
+        assert!(w.setpiece_cell_available(&cell, true, false));
+        assert!(!w.setpiece_cell_available(&cell, true, true));
+        assert!(!w.setpiece_cell_available(&cell, false, true));
+    }
+
+    #[test]
+    fn setpiece_preflight_preserves_map_only_solid_walls() {
+        for hermit in [false, true] {
+            for object in [None, Some(379), Some(288), Some(498)] {
+                let width = 64;
+                let center = (32, 32);
+                let mut map = Map {
+                    width,
+                    height: 64,
+                    cells: vec![
+                        crate::content::Cell {
+                            ground: 190,
+                            object: None,
+                            config: String::new(),
+                            terrain: 0,
+                            region: 0,
+                        };
+                        64 * 64
+                    ],
+                    spawns: vec![],
+                };
+                map.cells[(center.1 * width + center.0) as usize].terrain = 4;
+                let mut w =
+                    World::new(super::super::tests::world().content, Arc::new(map)).unwrap();
+                let map = Arc::make_mut(&mut w.map);
+                map.cells[((center.1 + 1) * width + center.0 + 2) as usize].object = object;
+                let before: Vec<_> = map
+                    .cells
+                    .iter()
+                    .map(|c| (c.ground, c.object, c.config.clone(), c.terrain, c.region))
+                    .collect();
+                assert!(w.entities.is_empty());
+                let result = if hermit {
+                    w.populate_hermit()
+                } else {
+                    w.place_named_setpiece(0x91f, &[4]).map(|_| ())
+                };
+                if object.is_some_and(|kind| w.content.objects[&kind].full_occupy) {
+                    assert!(
+                        result.is_err(),
+                        "map-only FullOccupy {object:?} was overwritten (Hermit: {hermit})"
+                    );
+                    assert!(w.entities.is_empty() && w.setpieces.is_empty());
+                    let after: Vec<_> = w
+                        .map
+                        .cells
+                        .iter()
+                        .map(|c| (c.ground, c.object, c.config.clone(), c.terrain, c.region))
+                        .collect();
+                    assert_eq!(before, after);
+                } else {
+                    result.unwrap();
+                    assert_eq!(w.setpieces.len(), 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn source1_source5_source9_source11_lava_footprints_are_scoped_atomic_and_relocate() {
+        let content = super::super::tests::world().content;
+        for hermit in [false, true] {
+            for corner in [false, true] {
+                for alternate in [false, true] {
+                    for (layout, lava_terrain, lava_object) in [
+                        (None, 0, None),
+                        (Some("classic-world-02-reconstruction"), 0, None),
+                        (Some("classic-world-04-reconstruction"), 0, None),
+                        (Some("classic-world-05-reconstruction"), 0, None),
+                        (Some("classic-world-05-reconstruction"), 1, Some(339)),
+                        (Some("classic-world-05-reconstruction-extra"), 0, None),
+                        (Some("classic-world-01-reconstruction"), 0, None),
+                        (Some("classic-world-09-reconstruction"), 0, None),
+                        (Some("classic-world-09-reconstruction-extra"), 0, None),
+                        (Some("classic-world-11-reconstruction"), 0, None),
+                        (Some("classic-world-11-reconstruction-extra"), 0, None),
+                    ] {
+                        let retain_lava = matches!(
+                            layout,
+                            Some(
+                                "classic-world-01-reconstruction"
+                                    | "classic-world-05-reconstruction"
+                                    | "classic-world-09-reconstruction"
+                                    | "classic-world-11-reconstruction"
+                            )
+                        );
+                        let mut map = Map {
+                            width: 176,
+                            height: 96,
+                            cells: vec![
+                                crate::content::Cell {
+                                    ground: 190,
+                                    object: None,
+                                    config: String::new(),
+                                    terrain: 0,
+                                    region: 0
+                                };
+                                176 * 96
+                            ],
+                            spawns: vec![],
+                        };
+                        map.cells[48 * 176 + 48].terrain = 4;
+                        if alternate {
+                            map.cells[48 * 176 + 128].terrain = 4;
+                        }
+                        let (x, y) = if corner {
+                            if hermit { (32, 34) } else { (36, 36) }
+                        } else {
+                            (50, 49)
+                        };
+                        let i = y * 176 + x;
+                        map.cells[i].ground = 244;
+                        map.cells[i].terrain = lava_terrain;
+                        map.cells[i].object = lava_object;
+                        let mut w = World::new(content.clone(), Arc::new(map)).unwrap();
+                        w.realm_layout = layout.map(str::to_owned);
+                        let entity_states = |world: &World| {
+                            world
+                                .entities
+                                .iter()
+                                .map(|(&id, e)| {
+                                    (id, e.kind, e.pos.x.to_bits(), e.pos.y.to_bits(), e.hp)
+                                })
+                                .collect::<BTreeSet<_>>()
+                        };
+                        let before_entities = entity_states(&w);
+                        let before_actors = w.actor_ids.clone();
+                        let before: Vec<_> = w
+                            .map
+                            .cells
+                            .iter()
+                            .map(|c| (c.ground, c.object, c.config.clone(), c.terrain, c.region))
+                            .collect();
+                        let result = if hermit {
+                            w.populate_hermit()
+                        } else {
+                            w.place_named_setpiece(0x91f, &[4]).map(|_| ())
+                        };
+                        if retain_lava && !alternate {
+                            assert!(
+                                result.is_err(),
+                                "lava candidate was admitted (layout={layout:?}, Hermit={hermit}, corner={corner})"
+                            );
+                            let error = result.unwrap_err().to_string();
+                            assert!(error.contains("retain_authored_lava=true"), "{error}");
+                            assert!(w.setpieces.is_empty());
+                            assert_eq!(entity_states(&w), before_entities);
+                            assert_eq!(w.actor_ids, before_actors);
+                            assert_eq!(
+                                before,
+                                w.map
+                                    .cells
+                                    .iter()
+                                    .map(|c| (
+                                        c.ground,
+                                        c.object,
+                                        c.config.clone(),
+                                        c.terrain,
+                                        c.region
+                                    ))
+                                    .collect::<Vec<_>>()
+                            );
+                        } else {
+                            result.unwrap();
+                            assert_eq!(w.setpieces.len(), 1);
+                            if retain_lava {
+                                assert!(before_entities.is_subset(&entity_states(&w)));
+                                let a = &w.setpieces[0];
+                                assert!(
+                                    !(x as i32 >= a.x
+                                        && y as i32 >= a.y
+                                        && (x as i32) < a.x + a.width
+                                        && (y as i32) < a.y + a.height)
+                                );
+                                let c = &w.map.cells[i];
+                                assert_eq!(
+                                    before[i],
+                                    (c.ground, c.object, c.config.clone(), c.terrain, c.region)
+                                );
+                            }
+                            if hermit {
+                                let roots: Vec<_> = w
+                                    .entities
+                                    .values()
+                                    .filter(|e| e.kind == crate::dungeon::trench::HERMIT)
+                                    .collect();
+                                assert_eq!(roots.len(), 1);
+                                assert_eq!(w.entities.values().filter(|e| e.kind==0xd65 && e.parent==Some(roots[0].id)).count(),8);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut map = Map {
+            width: 96,
+            height: 96,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 190,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0
+                };
+                96 * 96
+            ],
+            spawns: vec![],
+        };
+        map.cells[48 * 96 + 48].terrain = 1;
+        let map = Arc::new(map);
+        for layout in [
+            "classic-world-01-reconstruction",
+            "classic-world-05-reconstruction",
+            "classic-world-09-reconstruction",
+            "classic-world-11-reconstruction",
+        ] {
+            let mut w = World::new(content.clone(), map.clone()).unwrap();
+            w.realm_layout = Some(layout.into());
+            w.place_named_setpiece(0x668, &[1]).unwrap();
+            assert!(
+                w.map
+                    .cells
+                    .iter()
+                    .any(|c| c.ground == 244 && c.object == Some(339))
+            );
+        }
     }
 }
