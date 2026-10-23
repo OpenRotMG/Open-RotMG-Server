@@ -760,6 +760,32 @@ mod community_tests {
             .collect()
     }
     #[tokio::test]
+    async fn trade_settling_uses_pause_aware_elapsed_time_not_world_ticks() {
+        let (mut w, _, ids, _) = fixture().await;
+        start(&mut w, ids);
+        let mut masks = [[false; 12]; 2];
+        masks[0][4] = true;
+        masks[1][5] = true;
+        w.change_trade(ids[0], masks[0]).unwrap();
+        w.change_trade(ids[1], masks[1]).unwrap();
+        let tick_time = w.now;
+        w.clock.set_paused(true);
+        tokio::time::sleep(Duration::from_millis(3050)).await;
+        assert!(w.accept_trade(ids[0], masks[0], masks[1]).is_err());
+        w.clock.set_paused(false);
+        tokio::time::sleep(Duration::from_millis(3050)).await;
+        assert_eq!(
+            w.now, tick_time,
+            "no simulation ticks in this slow-world fixture"
+        );
+        assert!(
+            w.accept_trade(ids[0], masks[0], masks[1])
+                .expect("client countdown elapsed while world ticks lagged")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn community_market_expiry_is_revalidated_after_autonomous_native_acceptance_before_commit()
      {
         use crate::bots::pursuits::market::{Goods, Terms, now};
