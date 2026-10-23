@@ -327,12 +327,111 @@ mod tests {
     use crate::condition::INVISIBLE;
     use crate::world::tests::{ch, directory};
 
+    fn own_goto(packets: &[Packet], sender: i32, landing: Pos) -> Result<usize> {
+        let gotos: Vec<_> = packets
+            .iter()
+            .enumerate()
+            .filter(|(_, packet)| packet.id == wire::GOTO)
+            .collect();
+        ensure!(gotos.len() == 1, "expected exactly one own GOTO");
+        let (index, packet) = gotos[0];
+        let mut r = crate::wire::Reader::new(&packet.body);
+        ensure!(r.i32()? == sender, "wrong GOTO sender");
+        ensure!(r.f32()? == landing.x, "wrong GOTO x");
+        ensure!(r.f32()? == landing.y, "wrong GOTO y");
+        r.done()?;
+        Ok(index)
+    }
+
+    #[test]
+    fn teleport_output_delivers_destination_update_before_exact_own_goto() {
+        let mut d = directory();
+        let w = d.worlds.get_mut(&-2).unwrap();
+        let (packets, mut rx) = mpsc::channel(256);
+        let (lost, lost_rx) = watch::channel(false);
+        let sender = w.enter(ch(w), Some(Output { packets, lost })).unwrap();
+        let mut target_character = ch(w);
+        target_character.id = 2;
+        target_character.account = 2;
+        let (packets, _target_rx) = mpsc::channel(256);
+        let (lost, _) = watch::channel(false);
+        let target = w
+            .enter(target_character, Some(Output { packets, lost }))
+            .unwrap();
+        let landing = Pos { x: 56.5, y: 25. };
+        assert!(w.player_position_valid(None, landing));
+        assert!(w.players[&sender].pos.distance(landing) > 20.);
+        w.players.get_mut(&target).unwrap().pos = landing;
+        w.updates(sender, false).unwrap();
+        let p = &w.players[&sender];
+        assert_eq!(p.controller, Controller::Human);
+        assert_eq!(w.players[&target].controller, Controller::Human);
+        assert!(ready(p) && ready(&w.players[&target]));
+        assert!(p.known.contains(&sender) && p.known.contains(&target));
+        assert!(!p.tiles.contains(&(56, 25)));
+        assert!(p.goto_acks.is_empty());
+        let bootstrap: Vec<_> = (0..rx.len()).map(|_| rx.try_recv().unwrap()).collect();
+        assert!(bootstrap.iter().any(|p| p.id == wire::CREATE_SUCCESS));
+        assert!(bootstrap.iter().any(|p| p.id == wire::UPDATE));
+        assert!(bootstrap.iter().all(|p| p.id != wire::GOTO));
+        let ground = w.map.cell(landing.x, landing.y).unwrap().ground;
+        assert_eq!(ground, 0x48);
+        let received = w.attack_epoch + Duration::from_secs(1);
+        let receipt = d.teleport(sender, target, received).unwrap();
+        assert_eq!(receipt.position.distance(landing), 0.);
+        let mut encoder = wire::Codec::server();
+        let mut decoder = wire::Codec::client();
+        let packets: Vec<_> = (0..rx.len())
+            .flat_map(|_| {
+                let packet = rx.try_recv().unwrap();
+                decoder
+                    .feed(&encoder.frame(packet.id, packet.body))
+                    .unwrap()
+            })
+            .collect();
+        assert!(!*lost_rx.borrow());
+        let goto = own_goto(&packets, sender, landing).unwrap();
+        let update = packets.iter().position(|p| p.id == wire::UPDATE).unwrap();
+        assert!(update < goto);
+        let mut r = crate::wire::Reader::new(&packets[update].body);
+        let tiles: Vec<_> = (0..r.i16().unwrap())
+            .map(|_| (r.i16().unwrap(), r.i16().unwrap(), r.u8().unwrap()))
+            .collect();
+        assert!(tiles.contains(&(56, 25, ground)));
+        let w = d.worlds.get_mut(&-2).unwrap();
+        assert_eq!(w.players[&sender].goto_acks.len(), 1);
+        assert!(w.players[&sender].goto_acks.front().unwrap().0);
+        w.acknowledge_goto(sender, 0).unwrap();
+        assert!(w.players[&sender].goto_acks.is_empty());
+
+        // Synthetic counterexamples mutate received output, not idealized expected packets.
+        let mut packets = packets;
+        let actual = packets[goto].body.clone();
+        let omitted = packets.remove(goto);
+        assert!(own_goto(&packets, sender, landing).is_err(), "missing GOTO");
+        packets.insert(goto, omitted);
+        packets[goto].body[..4].copy_from_slice(&target.to_be_bytes());
+        assert!(own_goto(&packets, sender, landing).is_err(), "wrong ID");
+        packets[goto].body.clone_from(&actual);
+        packets[goto].body[4..8].copy_from_slice(&actual[8..12]);
+        packets[goto].body[8..12].copy_from_slice(&actual[4..8]);
+        assert!(own_goto(&packets, sender, landing).is_err(), "swapped x/y");
+        packets[goto].body.clone_from(&actual);
+        packets[goto].body.push(0);
+        assert!(
+            own_goto(&packets, sender, landing).is_err(),
+            "trailing byte"
+        );
+    }
+
     #[test]
     fn invisible_teleport_target_preserves_position_and_successful_cooldown() {
         for prior_success in [false, true] {
             let mut d = directory();
             let w = d.worlds.get_mut(&-2).unwrap();
-            let sender = w.enter(ch(w), None).unwrap();
+            let (packets, mut rx) = mpsc::channel(256);
+            let (lost, lost_rx) = watch::channel(false);
+            let sender = w.enter(ch(w), Some(Output { packets, lost })).unwrap();
             let mut target_character = ch(w);
             target_character.id = 2;
             target_character.account = 2;
@@ -353,6 +452,7 @@ mod tests {
                 let receipt = d.teleport(sender, target, received).unwrap();
                 assert_eq!(receipt.position.distance(landing), 0.);
                 let w = d.worlds.get_mut(&-2).unwrap();
+                w.acknowledge_goto(sender, 0).unwrap();
                 w.players.get_mut(&sender).unwrap().pos = origin;
             }
             d.worlds
@@ -360,6 +460,9 @@ mod tests {
                 .unwrap()
                 .apply_condition(target, INVISIBLE, 1000)
                 .unwrap();
+            while !rx.is_empty() {
+                rx.try_recv().unwrap();
+            }
             let cooldowns = d.teleports.clone();
             // An expired prior cooldown must not be pruned by a rejected destination either.
             for attempt in [
@@ -370,6 +473,12 @@ mod tests {
                 assert!(error.to_string().contains("invisible"), "{error:#}");
                 assert_eq!(d.worlds[&-2].players[&sender].pos.distance(origin), 0.);
                 assert_eq!(d.teleports, cooldowns);
+                assert!(matches!(
+                    rx.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+                assert!(d.worlds[&-2].players[&sender].goto_acks.is_empty());
+                assert!(!*lost_rx.borrow());
             }
             let w = d.worlds.get_mut(&-2).unwrap();
             w.now += 1000;
@@ -379,6 +488,11 @@ mod tests {
             d.teleport(sender, target, success).unwrap();
             assert_eq!(d.worlds[&-2].players[&sender].pos.distance(landing), 0.);
             assert_eq!(d.teleports.get(&1), Some(&success));
+            d.worlds
+                .get_mut(&-2)
+                .unwrap()
+                .acknowledge_goto(sender, 0)
+                .unwrap();
             let error = d
                 .teleport(sender, target, success + Duration::from_secs(1))
                 .unwrap_err();
