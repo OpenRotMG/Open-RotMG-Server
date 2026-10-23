@@ -6137,6 +6137,8 @@ mod hermit_loot_tests;
 #[cfg(test)]
 mod lair_trap_tests;
 #[cfg(test)]
+mod loot_bag_tests;
+#[cfg(test)]
 mod manor_tests;
 #[cfg(test)]
 mod starter_loot_tests;
