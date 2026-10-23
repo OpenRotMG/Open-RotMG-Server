@@ -412,8 +412,9 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
             fan(1, 1, 0., 2000, 10.).delay(1000).predict(1.),
         ],
         0xd05 => vec![fan(0, 4, 10., 1000, 12.), fan(1, 1, 0., 1000, 12.)],
+        // Only Quiet leads movement: https://steamcommunity.com/sharedfiles/filedetails/?id=181796604
         0x652 => vec![
-            fan(0, 4, 10., 1000, 12.).predict(1.),
+            fan(0, 4, 10., 1000, 12.),
             fan(1, 1, 0., 1000, 10.).predict(1.),
         ],
         0x656 => vec![
