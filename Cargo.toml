@@ -5,6 +5,11 @@ edition = "2024"
 rust-version = "1.88"
 license = "AGPL-3.0-only"
 
+[workspace]
+members = ["src/build100"]
+default-members = ["."]
+resolver = "2"
+
 [dependencies]
 anyhow = "1"
 argon2 = "0.5"
