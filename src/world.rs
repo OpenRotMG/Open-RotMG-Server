@@ -75,6 +75,8 @@ mod realm_setpieces;
 
 mod spider;
 
+mod tick_stats;
+mod tomb;
 mod tracked;
 
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
@@ -162,6 +164,8 @@ pub struct EntityData {
     #[serde(skip)]
     lair_escort: Option<lair::Escort>,
     #[serde(skip)]
+    tomb: Option<tomb::State>,
+    #[serde(skip)]
     follow_remaining: u64,
     #[serde(skip)]
     strict_initialized: bool,
@@ -209,6 +213,7 @@ impl std::fmt::Debug for Entity {
         out.field("goal", &self.goal);
         out.field("motion", &self.motion);
         out.field("following", &self.following);
+        out.field("tomb", &self.tomb);
         out.field("charge", &self.charge);
         out.field("script", &self.script);
         out.field("last_step", &self.last_step);
@@ -236,7 +241,7 @@ impl Serialize for Entity {
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut out = serializer.serialize_struct("Entity", 29)?;
+        let mut out = serializer.serialize_struct("Entity", 30)?;
         out.serialize_field("id", &self.id)?;
         out.serialize_field("kind", &self.kind)?;
         out.serialize_field("name", &self.name)?;
@@ -258,6 +263,7 @@ impl Serialize for Entity {
         out.serialize_field("next_shot", &self.next_shot)?;
         out.serialize_field("activated", &self.activated)?;
         out.serialize_field("stage", &self.stage)?;
+        out.serialize_field("tomb", &self.tomb)?;
         out.serialize_field("parent", &self.parent)?;
         out.serialize_field("camp", &self.camp)?;
         out.serialize_field("quest", &self.quest)?;
@@ -310,6 +316,7 @@ pub struct Player {
     pub(crate) controller: Controller,
     pub(crate) native_update_acked: bool,
     pub known: BTreeSet<i32>,
+    tick_stats: tick_stats::Cache,
     quest: Option<i32>,
     statuses: BTreeMap<u8, (u64, u64)>,
     known_since: BTreeMap<i32, u64>,
@@ -898,6 +905,11 @@ impl Directory {
                     None => rand::random(),
                 };
                 Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
+            } else if template == "tomb-of-the-ancients" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::tomb::generate(&self.content, seed)?)
             } else if template == "snake-pit" {
                 let seed = self
                     .prepared_seed
@@ -955,6 +967,7 @@ impl Directory {
             let started = Instant::now();
             // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
             let beach_bum = world.rng.gen_ratio(1, 200);
+            world.populate_tomb_entry()?;
             world.populate_coil_snakes()?;
             if beach_bum {
                 world.populate_beach_bum()?;
@@ -1186,7 +1199,7 @@ impl Directory {
         let destination = match kind {
             0x712 if origin == -2 && portal == Some(self.realm_portal) => self.initial(-3)?,
             0x703 if world.name == "Snake Pit" => self.initial(-3)?,
-            0x703 | 0x70d | 0x712 | 0x71d => -2,
+            0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
             0x704 | 0x70e | 0x71c => self.initial(-3)?,
             0x720 => self.instance("vault", Some(account))?,
             0x72f => {
@@ -1703,6 +1716,7 @@ impl World {
                             motion: None,
                             following: Following::Unknown,
                             lair_escort: None,
+                            tomb: tomb::State::for_kind(kind),
                             follow_remaining: 0,
                             strict_initialized: false,
                             charge: None,
@@ -1718,6 +1732,7 @@ impl World {
                                 | crate::dungeon::snake::initial_condition(kind)
                                 | crate::dungeon::jungle::initial_condition(kind)
                                 | crate::dungeon::davy::initial_condition(kind)
+                                | crate::dungeon::tomb::initial_condition(kind)
                                 | if o.stasis_immune {
                                     crate::condition::bit(crate::condition::STASIS_IMMUNE)
                                 } else {
@@ -1878,6 +1893,7 @@ impl World {
             trade_requests: BTreeMap::new(),
         };
         world.jungle_initialize()?;
+        world.tomb_bindings()?;
         Ok(world)
     }
     pub fn settled(&self) -> Result<bool> {
@@ -2037,6 +2053,7 @@ impl World {
                     motion: None,
                     following: Following::Unknown,
                     lair_escort: None,
+                    tomb: tomb::State::for_kind(kind),
                     follow_remaining: 0,
                     strict_initialized: false,
                     charge: None,
@@ -2052,6 +2069,7 @@ impl World {
                         | crate::dungeon::snake::initial_condition(kind)
                         | crate::dungeon::jungle::initial_condition(kind)
                         | crate::dungeon::davy::initial_condition(kind)
+                        | crate::dungeon::tomb::initial_condition(kind)
                         | (if kind == 0x91a {
                             crate::condition::bit(crate::condition::INVULNERABLE)
                         } else {
@@ -2290,6 +2308,7 @@ impl World {
                 },
                 tx,
                 known: BTreeSet::new(),
+                tick_stats: tick_stats::Cache::default(),
                 quest: None,
                 statuses: BTreeMap::new(),
                 known_since: BTreeMap::new(),
@@ -2691,6 +2710,7 @@ impl World {
             p.known_since.entry(*entity).or_insert(self.now);
         }
         p.known = visible;
+        p.tick_stats.retain(&p.known);
         let p = self.players.get_mut(&id).unwrap();
         if initial || p.quest != quest {
             p.quest = quest;
@@ -3254,7 +3274,7 @@ impl World {
         let mut o = Writer::new();
         o.u8(bullet).i32(id).i16(kind as i16).f32(angle);
         for (other, p) in &self.players {
-            if *other != id && p.known.contains(&id) {
+            if *other != id && p.known.contains(&id) && p.pos.distance(start) <= 20. {
                 send(p, 74, o.0.clone());
             }
         }
@@ -3961,6 +3981,7 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.manors))
                     .chain(std::iter::once(&mut snapshot.beaches))
                     .chain(std::iter::once(&mut snapshot.davy_lockers))
+                    .chain(std::iter::once(&mut snapshot.tombs))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -4002,7 +4023,8 @@ impl World {
             || snapshot.spider_dens > p.character.spider_dens
             || snapshot.manors > p.character.manors
             || snapshot.beaches > p.character.beaches
-            || snapshot.davy_lockers > p.character.davy_lockers;
+            || snapshot.davy_lockers > p.character.davy_lockers
+            || snapshot.tombs > p.character.tombs;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
@@ -4024,6 +4046,7 @@ impl World {
         p.character.manors = snapshot.manors;
         p.character.beaches = snapshot.beaches;
         p.character.davy_lockers = snapshot.davy_lockers;
+        p.character.tombs = snapshot.tombs;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -4044,6 +4067,17 @@ impl World {
             "progress committed"
         );
         if cleared_dungeon && let Some(exit) = self.clear_exit.take() {
+            if self.name == "Tomb of the Ancients" {
+                let old_exits: Vec<_> = self
+                    .entities
+                    .values()
+                    .filter(|e| e.kind == crate::dungeon::tomb::EXIT)
+                    .map(|e| e.id)
+                    .collect();
+                for id in old_exits {
+                    self.remove_entity(id);
+                }
+            }
             self.entities
                 .get_mut(&exit)
                 .context("reserved clear exit missing")?
@@ -4268,7 +4302,8 @@ impl World {
         let e = self.remove_entity(id);
         let definition = &self.content.objects[&e.kind];
         // Reference Reproduce suppresses follower XP; Pentaract Spawn explicitly allows eye XP.
-        let reward = if e.script.as_ref().is_some_and(|script| script.no_experience)
+        let reward = if e.kind == crate::dungeon::tomb::ANCHOR
+            || e.script.as_ref().is_some_and(|script| script.no_experience)
             || (e.quest.is_some() && matches!(e.kind, 0xd57 | 0xd58 | 0xd5a..=0xd5c))
         {
             0
@@ -4361,13 +4396,23 @@ impl World {
             .iter()
             .position(|(_, _, name, boss)| *name == self.name && *boss == defeated.kind)
         {
+            let completion_pos = if defeated.kind == crate::dungeon::tomb::ANCHOR {
+                defeated
+                    .tomb
+                    .as_ref()
+                    .context("Tomb completion state missing")?
+                    .completion_pos
+                    .context("Tomb completion lacks a final boss death")?
+            } else {
+                defeated.pos
+            };
             ensure!(!self.cleared, "dungeon clear already recorded");
             self.cleared = true;
             for (id, p) in self.players.iter_mut().filter(|(_, p)| {
                 p.character.alive
                     && !p.death_pending
                     && !p.departing
-                    && p.pos.distance(defeated.pos) < 25.
+                    && p.pos.distance(completion_pos) < 25.
                     && (index == 0 || defeated.damage.get(&p.character.id).is_some_and(|n| *n > 0))
             }) {
                 p.clears_queued[index] = p.clears_queued[index]
@@ -4388,6 +4433,7 @@ impl World {
                         | crate::dungeon::jungle::BOSS
                         | crate::dungeon::beach::BOSS
                         | crate::dungeon::davy::BOSS
+                        | crate::dungeon::tomb::ANCHOR
                 ) {
                     0x704
                 } else {
@@ -4428,11 +4474,16 @@ impl World {
         }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
-        let threshold = if matches!(defeated.kind, 0xd56 | 0xd59) {
+        let threshold = if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
+            100
+        } else if matches!(defeated.kind, 0xd56 | 0xd59) {
             self.content.objects[&defeated.kind].hp / 20
         } else if matches!(
             defeated.kind,
             0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | 0x1705
+        ) || matches!(
+            defeated.kind,
+            crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
         ) {
             self.content.objects[&defeated.kind].hp / 100
         } else if defeated.kind == crate::dungeon::manor::BOSS {
@@ -4465,8 +4516,10 @@ impl World {
             return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
-        // Private boss rewards belong to every eligible character, not only the first eight.
-        let attempts = if private {
+        // The older Tomb loot engine shares two rolls instead of guaranteeing Life to every raider.
+        let attempts = if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
+            2
+        } else if private {
             eligible.len()
         } else {
             (eligible.len() * 2).min(8)
@@ -4763,6 +4816,7 @@ impl World {
                 | crate::dungeon::manor::CHASER
                 | crate::dungeon::manor::DECOY
                 | 0x1727 => 20.,
+                kind if crate::dungeon::tomb::contains(kind) => 30.,
                 0x953 | 0x954 => 6.,
                 0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
@@ -4848,6 +4902,14 @@ impl World {
                 )
             } else if crate::dungeon::manor::ROSTER.contains(&kind) {
                 self.manor_movement(id, target, elapsed)
+            } else if crate::dungeon::tomb::contains(kind) {
+                match self.tomb_movement(id, target) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"Tomb movement refused");
+                        continue;
+                    }
+                }
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
@@ -5730,9 +5792,16 @@ impl World {
                 let mut o = Writer::new();
                 o.i32(p.tick).i32(tick_ms).i16(dynamic.len() as i16);
                 for entity in dynamic {
-                    o.0.extend(self.stats(entity, id).expect("visible entity must exist"));
+                    let status = self.stats(entity, id).expect("visible entity must exist");
+                    o.0.extend(
+                        self.players
+                            .get_mut(&id)
+                            .unwrap()
+                            .tick_stats
+                            .encode(entity, status),
+                    );
                 }
-                send(p, wire::NEW_TICK, o.0);
+                send(&self.players[&id], wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
                 p.remember_weapon_tick();
                 p.tick += 1;
@@ -5752,6 +5821,7 @@ impl World {
                 discovered_tiles=self.players.values().map(|p|p.tiles.len()).sum::<usize>(),
                 cached_view_tiles=self.players.values().map(|p|p.view_tiles.borrow().tiles.len()).sum::<usize>(),
                 cached_view_payload_bytes=self.players.values().map(|p|p.view_tiles.borrow().tiles.allocated_bytes()).sum::<usize>(),
+                tick_stats_elided=self.players.values().map(|p|p.tick_stats.elided).sum::<u64>(),
                 terrain_rebuilds=self.players.values().map(|p|p.view_tiles.borrow().rebuilds).sum::<u64>(),
                 incremental_terrain_tiles=self.players.values().map(|p|p.view_tiles.borrow().incremental_tiles).sum::<u64>(),
                 cloned_snapshot_tiles=self.players.values().map(|p|p.view_tiles.borrow().cloned_snapshot_tiles).sum::<u64>(),
@@ -5858,6 +5928,7 @@ mod tests {
             manors: 0,
             beaches: 0,
             davy_lockers: 0,
+            tombs: 0,
         }
     }
 
