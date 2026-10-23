@@ -204,7 +204,15 @@ impl World {
             occupied + missing <= limit,
             "summon budget exhausted: {occupied}+{missing} exceeds {limit}"
         );
-        let positions = self.child_positions(parent, radius)?;
+        let mut positions = self.child_positions(parent, radius)?;
+        if self.entities[&parent].kind == 0xd90 {
+            // Reference Follow jitters each ghost; distinct starts prevent deterministic lockstep: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/Follow.cs
+            positions.retain(|pos| {
+                !self
+                    .actors()
+                    .any(|e| e.parent == Some(parent) && pos.distance(e.pos) < 0.25)
+            });
+        }
         ensure!(
             positions.len() >= missing,
             "insufficient walkable summon positions around {parent}"
