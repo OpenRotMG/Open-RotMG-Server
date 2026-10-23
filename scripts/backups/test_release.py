@@ -37,6 +37,8 @@ def legacy_copy(bundle):
 
 class ReleaseContract(unittest.TestCase):
     def check_fame_migration(self, migrated, original):
+        self.assertEqual(migrated.pop('bot_minds'), [])
+        self.assertEqual(migrated.pop('trade_transactions'), [])
         self.assertEqual(migrated.pop('legacy_claims'), [])
         self.assertEqual(migrated.pop('level_credits'), [])
         for row, old in zip(migrated['deaths'], original['deaths']):
