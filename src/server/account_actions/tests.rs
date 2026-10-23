@@ -22,6 +22,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
                     content.clone(),
                     16,
                     seed,
+                    2,
                 ),
                 None => crate::world::Directory::test_with_seed(
                     std::path::Path::new("data"),

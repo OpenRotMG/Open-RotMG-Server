@@ -196,7 +196,11 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         crate::dungeon::trench::HERMIT => {
             &[(0.1, Item(0xa34)), (0.1, Item(0xa4c)), (0.004, Item(0xc08))]
         }
+        // BehaviorDb.Sphinx.cs / Oasis.cs, realm-src@1855c017 (GPL-3.0; data/REALM-SRC-LICENSE), NR-Core and Skilly.
+        0xd54 => &[(0.1, Item(0xa34)), (0.1, Item(0xa35)), (0.004, Item(0xc08))],
         0xd62 => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
+        0x679 | 0x67c => &[(0.05, Item(0xa23))],
+        0x67a | 0x67b => &[(0.05, Item(0xa22))],
         0x1705 | crate::dungeon::trench::THESSAL => &[
             (0.3, Item(0xc12)),
             (0.01, Item(0xc10)),
@@ -621,7 +625,7 @@ pub fn collectibles(content: &Content) -> std::collections::BTreeSet<u16> {
                 .flat_map(|(_, pick)| candidates(content, *pick))
                 .chain(bonus(kind).iter().map(|(_, item)| *item))
         })
-        .chain([0x67d, 0x668].into_iter().flat_map(|kind| {
+        .chain([0x678, 0x67d, 0x668].into_iter().flat_map(|kind| {
             chest_table(kind)
                 .into_iter()
                 .flat_map(|(_, pick)| candidates(content, pick))
@@ -784,7 +788,7 @@ pub fn private(kind: u16) -> bool {
         || kind == crate::dungeon::davy::BOSS
         || matches!(
             kind,
-            0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL
+            0x679..=0x67c | 0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL
         )
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
         | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
@@ -811,10 +815,12 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
         ];
     }
     let (weapon, armor) = match kind {
+        0x678 => (5, 4),
         0x67d => (6, 5),
         0x668 => (7, 6),
         _ => unreachable!("selected landmark chest"),
     };
+    let ring = if kind == 0x678 { 1 } else { 2 };
     [
         (0.3, Tier(weapon, WEAPONS)),
         (0.2, Tier(weapon + 1, WEAPONS)),
@@ -825,11 +831,13 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
         (0.3, Tier(2, ABILITIES)),
         (0.2, Tier(3, ABILITIES)),
         (0.1, Tier(4, ABILITIES)),
-        (0.25, Tier(2, RINGS)),
-        (0.15, Tier(3, RINGS)),
+        (0.25, Tier(ring, RINGS)),
+        (0.15, Tier(ring + 1, RINGS)),
         (0.5, Tier(1, &[10])),
     ]
-    .to_vec()
+    .into_iter()
+    .filter(|(_, pick)| kind != 0x678 || !matches!(pick, Tier(4, ABILITIES)))
+    .collect()
 }
 pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
     let picks = chest_table(kind);
@@ -1639,7 +1647,7 @@ mod tests {
             assert!(catalogue.contains(&item), "missing collectible {item:#x}");
         }
         let mut rng = StdRng::seed_from_u64(127);
-        for kind in [0x67d, 0x668] {
+        for kind in [0x678, 0x67d, 0x668] {
             for _ in 0..100 {
                 for item in landmark_chest(&content, kind, &mut rng)
                     .unwrap()

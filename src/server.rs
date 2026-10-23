@@ -1835,7 +1835,7 @@ async fn reconnect(
                 }
             };
             let world = &d.worlds[&destination];
-            if world.players.len() + world.reserved_slots() >= world.max_players {
+            if world.occupancy() >= world.max_players {
                 let message = crate::world::chat_info("Destination is full.");
                 crate::world::send(
                     &d.worlds[&d.location(id)?].players[&id],
@@ -2146,19 +2146,19 @@ pub(crate) async fn automatic_transfer(
     id: i32,
 ) -> Result<Option<crate::world::ForcedTransfer>> {
     let transfer = a.world.directory(move |d| d.forced_transfer(id)).await?;
-    if let Some(t) = &transfer
-        && let Err(error) = depart(a, id).await
-    {
-        let key = t.key.clone();
-        a.world
-            .directory(move |d| {
-                let account = d.player_view(id)?.session.account;
-                d.cancel_admission(account, key)
-            })
-            .await?;
-        return Err(error);
+    if let Some(transfer) = transfer {
+        if let Err(error) = depart(a, id).await {
+            return a
+                .world
+                .directory(move |d| {
+                    d.cancel_forced_transfer(&transfer);
+                    Err(error)
+                })
+                .await;
+        }
+        return Ok(Some(transfer));
     }
-    Ok(transfer)
+    Ok(None)
 }
 pub(crate) async fn depart(a: &App, id: i32) -> Result<()> {
     // Legacy owned adapter continuations retain custody until their Phase2 conversion.
@@ -2188,6 +2188,8 @@ enum DepartureStep {
     Waiting,
 }
 async fn depart_inner(a: &App, id: i32) -> Result<()> {
+    lifecycle::stage(Stage::Reservation);
+    let origin = a.world.directory(move |d| d.location(id)).await?;
     loop {
         lifecycle::stage(Stage::Reservation);
         let step = a
@@ -2246,6 +2248,12 @@ async fn depart_inner(a: &App, id: i32) -> Result<()> {
             .await?;
         lifecycle::stage(Stage::Retirement);
         retirement()?;
+        a.world
+            .directory(move |d| {
+                d.realm_departed(origin, id);
+                Ok(())
+            })
+            .await?;
         lifecycle::stage(Stage::Settled);
         return Ok(());
     }

@@ -24,15 +24,11 @@ pub(crate) fn owner(kind: u16) -> u16 {
 }
 pub(crate) fn profile(kind: u16) -> Profile {
     let (motion, speed, interval, range) = match kind {
-        0x678 => (Motion::WanderHome { radius: 1. }, 3., 1000, 10.),
+        0x678 => (Motion::WanderHome { radius: 2. }, nr_speed(0.4), 1000, 10.),
         0x679..=0x67c => (
             Motion::Wander,
             5.,
-            match kind {
-                0x679 => 1000,
-                0x67a => 500,
-                _ => 250,
-            },
+            if kind == 0x67b { 400 } else { 1000 },
             10.,
         ),
         0x925 => (Motion::WanderHome { radius: 3. }, 3., 1000, 10.),
@@ -49,7 +45,7 @@ pub(crate) fn profile(kind: u16) -> Profile {
         0x941 => (Motion::WanderHome { radius: 7. }, nr_speed(0.3), 50, 10.),
         0x942 => (Motion::WanderHome { radius: 5. }, nr_speed(0.85), 1400, 10.),
         0x943 => (Motion::WanderHome { radius: 12. }, nr_speed(1.), 50, 10.),
-        0xd54 => (Motion::WanderHome { radius: 3. }, 2., 50, 15.),
+        0xd54 => (Motion::Wander, nr_speed(0.5), 50, 20.),
         0xd55 => (
             Motion::Chase {
                 sight: 15.,
@@ -145,21 +141,17 @@ pub(crate) fn schedule(kind: u16, _hp: i32, stage: u64, choice: u8, age: u64) ->
     let mut at = age;
     let attacks = match kind {
         0x678 => {
-            let mut a = fan(0, 4, 10., 1000, 10.);
+            let mut a = fan(0, 4, 7., 1000, 10.);
             a.offset = 1.;
             vec![a]
         }
-        0x679..=0x67c => vec![fan(
-            0,
-            1,
-            0.,
-            match kind {
-                0x679 => 1000,
-                0x67a => 500,
-                _ => 250,
-            },
-            10.,
-        )],
+        0x679..=0x67c => {
+            let mut a = fan(0, 1, 0., if kind == 0x67b { 400 } else { 1000 }, 10.);
+            if matches!(kind, 0x67a | 0x67c) {
+                a.offset = 0.5;
+            }
+            vec![a]
+        }
         0x925 => vec![fan(0, 3, 6., 1000, 10.)],
         0x65a..=0x65e => vec![fan(0, 1, 0., 1000, 10.)],
         0x935 => {
@@ -212,68 +204,43 @@ pub(crate) fn schedule(kind: u16, _hp: i32, stage: u64, choice: u8, age: u64) ->
             at = age.saturating_sub(800);
             vec![fan(0, 1, 0., 500, 10.).chance(0.3).enabled(age >= 800)]
         }
+        // BehaviorDb.Sphinx.cs, realm-src@1855c017; GPL-3.0, NR-Core and Skilly (data/REALM-SRC-LICENSE).
         0xd54 => {
-            // Whole-loop deadlines retain volleys exactly on a shield transition.
-            let period = 33600;
-            let mut a = Vec::new();
-            for (delay, count, is_ring) in [
-                (600, 2, false),
-                (1200, 2, false),
-                (1500, 9, true),
-                (2100, 2, false),
-                (2700, 2, false),
-                (3200, 8, false),
-                (3700, 9, true),
-                (4300, 2, false),
-                (4900, 2, false),
-                (5400, 8, false),
-                (5900, 9, true),
-                (6500, 2, false),
-                (7100, 2, false),
-                (7600, 8, false),
-                (8100, 9, true),
-            ] {
-                a.push(if is_ring {
-                    ring(2, count, period, 0.).fixed(0.).delay(2500 + delay)
-                } else {
-                    fan(2, count, 5., period, 15.).delay(2500 + delay)
-                });
+            state = stage;
+            match stage {
+                0 | 2 | 4 | 6 | 7 => vec![],
+                // Count-one source channels ignore shootAngle and remain independent.
+                1 => vec![
+                    fan(0, 1, 0., 800, 12.),
+                    fan(0, 3, 10., 1000, 12.),
+                    fan(0, 1, 0., 1000, 12.),
+                    fan(0, 1, 0., 1000, 12.),
+                ],
+                3 => (0..4)
+                    .flat_map(|n| {
+                        [0., 180.].map(move |opposite| {
+                            fan(1, 8, 10., 100000, 0.)
+                                .fixed((n as f32 * 70. + opposite).to_radians())
+                                .delay(n * 2000)
+                                .once()
+                        })
+                    })
+                    .collect(),
+                5 => vec![
+                    ring(2, 9, 2300, 0.).fixed(40f32.to_radians()),
+                    fan(2, 2, 4., 700, 20.).enabled(choice == 0),
+                    fan(2, 8, 5., 1100, 20.).enabled(choice == 1),
+                ],
+                _ => panic!("invalid Sphinx phase"),
             }
-            for delay in (300..7000).step_by(300) {
-                a.push(if (delay / 300) % 2 == 1 {
-                    fan(0, 3, 30., period, 15.).delay(13100 + delay)
-                } else {
-                    ring(0, 3, period, 0.).fixed(0.).delay(13100 + delay)
-                });
-            }
-            for n in 0..11 {
-                for opposite in [0., 180.] {
-                    a.push(
-                        fan(1, 11, 5., period, 0.)
-                            .fixed(((n % 5) as f32 * 36. + opposite).to_radians())
-                            .delay(22600 + n * 1000),
-                    );
-                }
-            }
-            a
         }
         0xd55 => {
-            state = age / 17000 * 4;
-            at = age % 17000;
-            if at < 3000 {
-                vec![fan(1, 1, 0., 500, 10.)]
-            } else if at < 6000 {
-                state += 1;
-                at -= 3000;
-                vec![fan(0, 1, 0., 200, 10.)]
-            } else if at < 9000 {
-                state += 2;
-                at -= 6000;
-                vec![]
-            } else {
-                state += 3;
-                at -= 9000;
-                vec![ring(0, 6, 600, 0.).fixed(30f32.to_radians())]
+            state = stage;
+            match stage {
+                0 | 3 => vec![],
+                1 => vec![ring(0, 6, 700, 0.).fixed(60f32.to_radians())],
+                2 => vec![fan(0, 1, 0., 700, 7.)],
+                _ => panic!("invalid Reaper phase"),
             }
         }
         0xd50 => {

@@ -1176,10 +1176,11 @@ async fn abyss_route_completion_identity_waits_for_progress_commit() {
             assert!(w.pending_progress_where(|_, _| true).is_empty());
             let id = w.players[&player].character.id;
             assert_eq!(store.load(account, id).await.unwrap().abysses, 1);
-            assert_eq!(
-                d.destination(player, Some(exit)).unwrap(),
-                (account, id, -3)
-            );
+            let (return_account, return_character, realm) =
+                d.destination(player, Some(exit)).unwrap();
+            assert_eq!((return_account, return_character), (account, id));
+            assert!(d.endgame.realms.contains_key(&realm));
+            assert!(d.worlds[&realm].admission_open);
             println!(
                 "Malphas fullHP={hp} real damage; exit={exit} kind=0x704 staged->StoreACK->published clear=1"
             );
@@ -2067,7 +2068,10 @@ fn abyss_cowardice_routes_living_character_to_realm_not_nexus() {
         );
         let (account, id, destination) = d.destination(player, Some(portal)).unwrap();
         println!("{template} Cowardice destination: {destination}");
-        assert_eq!(destination, -3, "Cowardice must return to Realm");
+        assert!(
+            d.endgame.realms.contains_key(&destination) && d.worlds[&destination].admission_open,
+            "Cowardice must return to an open Realm, not Nexus"
+        );
         assert_eq!((account, id), (character.account, character.id));
         let (time, grant, _) = d.issue(account, id, destination).unwrap();
         let ch = d.worlds.get_mut(&origin).unwrap().leave(player).unwrap();
