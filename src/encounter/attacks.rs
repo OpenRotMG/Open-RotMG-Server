@@ -469,6 +469,16 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
             }
         }
         0x906 | 0x907 if hp < 400 => vec![ring(0, 8, 50, 0.).fixed(0.)],
+        crate::dungeon::snake::GUARD => {
+            state = u64::from(hp < crate::dungeon::snake::GUARD_RAGE_HP);
+            vec![
+                fan(0, 3, 25., 1000, 25.),
+                fan(1, 6, 60., 1000, 10.),
+                fan(2, 3, 120., 2000, 15.).enabled(state == 1),
+            ]
+        }
+        crate::dungeon::snake::DART => vec![fan(0, 1, 0., 2000, 25.)],
+        crate::dungeon::snake::BUTTON | crate::dungeon::snake::SPAWNER => vec![],
         0x917 => {
             (state, age) = crate::dungeon::snake::phase(elapsed);
             match state % 3 {

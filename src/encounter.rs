@@ -116,7 +116,14 @@ pub fn profile(kind: u16) -> Option<Profile> {
     }
     let chase = |stop| Chase { sight: 10., stop };
     let (motion, speed, interval, range) = match kind {
-        0x172 | 0x173 | 0x175..=0x179 => (Stationary, 0., 0, 0.),
+        0x172
+        | 0x173
+        | 0x175..=0x179
+        | crate::dungeon::snake::BUTTON
+        | crate::dungeon::snake::SPAWNER => (Stationary, 0., 0, 0.),
+        crate::dungeon::snake::DART => (Stationary, 0., 2000, 25.),
+        // Qualified Guard/button/dart comparator; selected stats/projectiles remain authoritative: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.SnakePit.cs
+        crate::dungeon::snake::GUARD => (WanderHome { radius: 4. }, nr_speed(0.2), 1000, 25.),
         0x600 => (
             Chase {
                 sight: 6.,
@@ -371,6 +378,16 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
     }
     let p = profile(kind).expect("validated encounter motion");
     match kind {
+        crate::dungeon::snake::GUARD if hp < crate::dungeon::snake::GUARD_RAGE_HP => (
+            Motion::Follow {
+                sight: 10.,
+                stop: 3.,
+                idle: nr_speed(0.2),
+                duration: 0,
+                cooldown: 0,
+            },
+            nr_speed(0.2),
+        ),
         0x917 => match stage(kind, hp, elapsed) % 3 {
             1 => (Motion::WanderHome { radius: 2. }, nr_speed(0.4)),
             2 => (

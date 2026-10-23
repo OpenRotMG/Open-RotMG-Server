@@ -5,6 +5,11 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 pub const BOSS: u16 = 0x917;
 pub const PET: u16 = 0x918;
 pub const SWARM: u16 = 0x919;
+pub const GUARD: u16 = 0xe26;
+pub const BUTTON: u16 = 0xe27;
+pub const SPAWNER: u16 = 0xe28;
+pub const DART: u16 = 0xe25;
+pub const GUARD_RAGE_HP: i32 = 3300;
 
 // The modified 7.0 server provides explicit timings, not an authenticated 123.5.1 AI script.
 pub fn phase(elapsed: u64) -> (u64, u64) {
@@ -19,10 +24,10 @@ pub fn phase(elapsed: u64) -> (u64, u64) {
 }
 
 pub fn initial_condition(kind: u16) -> i32 {
-    if kind == BOSS {
-        crate::condition::bit(crate::condition::INVULNERABLE)
-    } else {
-        0
+    match kind {
+        BOSS => crate::condition::bit(crate::condition::INVULNERABLE),
+        BUTTON | SPAWNER | DART => crate::condition::bit(crate::condition::INVINCIBLE),
+        _ => 0,
     }
 }
 
@@ -68,6 +73,37 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         edges.push((parent, rooms.len()));
         rooms.push(pos);
     }
+    let ordinary = rooms.len();
+    // Keep existing circular-room rolls independent of optional treasure placement.
+    let mut treasure_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7472_6561_7375_7265);
+    let mut candidates: Vec<_> = (1..ordinary)
+        .filter(|&i| i != 6)
+        .flat_map(|i| [-1, 1].map(|dx| (i, (rooms[i].0 + dx, rooms[i].1))))
+        .filter(|&(parent, pos)| {
+            !rooms.contains(&pos)
+                && rooms
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &(x, y))| i == parent || (x - pos.0).abs() + (y - pos.1).abs() > 1)
+        })
+        .collect();
+    candidates.shuffle(&mut treasure_rng);
+    let mut spaces: Vec<(usize, (i32, i32))> = Vec::new();
+    for candidate in candidates {
+        if spaces
+            .iter()
+            .all(|&(_, (x, y))| (x - candidate.1.0).abs() + (y - candidate.1.1).abs() > 1)
+        {
+            spaces.push(candidate);
+            if spaces.len() == 3 {
+                break;
+            }
+        }
+    }
+    for &(parent, pos) in &spaces[..treasure_rng.gen_range(0..=spaces.len())] {
+        edges.push((parent, rooms.len()));
+        rooms.push(pos);
+    }
     let min_x = rooms
         .iter()
         .map(|p| p.0)
@@ -100,6 +136,10 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         spawns: vec![(centers[0].0 as f32 + 0.5, centers[0].1 as f32 + 0.5)],
     };
     for (i, &(cx, cy)) in centers.iter().enumerate() {
+        if i >= ordinary {
+            treasure_room(&mut map, cx, cy);
+            continue;
+        }
         let radius = if i == 6 { 16 } else { rng.gen_range(7..=9) };
         for y in -radius..=radius {
             for x in -radius..=radius {
@@ -198,12 +238,37 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     tracing::info!(
         seed,
         rooms = rooms.len(),
+        treasure_rooms = rooms.len() - ordinary,
+        treasure_slots = spaces.len(),
         width,
         height,
         "generated branching Snake Pit with diggable tunnels"
     );
     Ok(map)
 }
+
+fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
+    for dy in -16i32..=16 {
+        for dx in -7i32..=7 {
+            let cell = &mut map.cells[((cy + dy) * map.width + cx + dx) as usize];
+            cell.ground = 0xca;
+            if dy.abs() == 7 && dx.abs() > 1 {
+                cell.ground = 0x16;
+                cell.object = Some(0x170);
+            }
+        }
+    }
+    map.cells[((cy - 12) * map.width + cx) as usize].object = Some(BUTTON);
+    map.cells[(cy * map.width + cx) as usize].object = Some(SPAWNER);
+    for dy in [-4, -2, 0, 2, 4] {
+        for dx in [-7, 7] {
+            map.cells[((cy + dy) * map.width + cx + dx) as usize].object = Some(DART);
+        }
+    }
+}
+
+#[cfg(test)]
+mod treasure_tests;
 
 #[cfg(test)]
 #[test]

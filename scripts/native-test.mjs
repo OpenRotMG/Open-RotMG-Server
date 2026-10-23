@@ -62,6 +62,7 @@ export async function prepareFixture(module, api, signal) {
     assert(spec&&typeof spec==='object'&&['class','level','seed','world','position','equipment','backpack','stats'].every(k=>Object.hasOwn(spec,k)),'Case must return an explicit fixture');
     const items=(values,n)=>Array.isArray(values)&&values.length===n&&values.every(v=>Number.isInteger(v)&&v>=-1&&v<=65535);
     assert(Number.isInteger(spec.class)&&spec.class>=0&&spec.class<=65535&&Number.isInteger(spec.level)&&spec.level>=1&&spec.level<=20&&Number.isSafeInteger(spec.seed)&&spec.seed>=0&&(Number.isInteger(spec.world)||typeof spec.world==='string')&&(spec.position==='spawn'||typeof spec.position==='function'||(spec.position&&Number.isFinite(spec.position.x)&&Number.isFinite(spec.position.y)))&&items(spec.equipment,4)&&items(spec.backpack,8)&&(spec.stats===null||(Array.isArray(spec.stats)&&spec.stats.length===8&&spec.stats.every(v=>Number.isInteger(v)&&v>=0&&v<=2147483647))),'Invalid explicit fixture bounds');
+    assert(spec.worldSeed===undefined||typeof spec.world==='string'&&Number.isSafeInteger(spec.worldSeed)&&spec.worldSeed>=0,'worldSeed requires a dungeon template and a nonnegative safe integer');
     return spec;
   } finally {open=false;signal.removeEventListener('abort',abort);}
 }
@@ -75,7 +76,7 @@ export function nativeJoins({signal,api,participants,freePort,privateDisplay,ope
       try {
         spec=await prepareFixture({fixture:spec},api,signal);check();
         assert(participants.length<3,'At most three prepared native clients');
-        const world=typeof spec.world==='string'?(await api({op:'world',template:spec.world})).result.world:spec.world;
+        const world=typeof spec.world==='string'?(await api({op:'world',template:spec.world,...(spec.worldSeed===undefined?{}:{seed:spec.worldSeed})})).result.world:spec.world;
         check();assert(Number.isInteger(world),'Prepared fixture must resolve to an explicit world ID');
         const port=await freePort();check();
         const env=await privateDisplay(participants.length);check();
@@ -108,7 +109,8 @@ export async function spawnNativeFixture(api,spec,worldId,guid) {
   if(spec.position==='spawn')assert(Array.isArray(point)&&point.length===2&&point.every(Number.isFinite),'Invalid observed spawn tuple');
   const position=spec.position==='spawn'?{x:point[0],y:point[1]}:typeof spec.position==='function'?spec.position(world):spec.position;
   assert(position&&Number.isFinite(position.x)&&Number.isFinite(position.y),'Prepared fixture must resolve to an explicit finite position');
-  const created=await api({op:'spawn',spec:{...spec,world:worldId,guid,position,controller:'native',profile:null}});
+  const {worldSeed,...actorSpec}=spec;
+  const created=await api({op:'spawn',spec:{...actorSpec,world:worldId,guid,position,controller:'native',profile:null}});
   return {created,position};
 }
 export async function runNativeScenario(run,game,idle,report) {
@@ -320,7 +322,7 @@ export async function runCase(scenario, options) {
           check();let complete=false;const action=driver({op:'act',actor,...(Array.isArray(input)?{sequence:input}:{input}),pauseAfter:true}).finally(()=>complete=true);
           if(!captureSpec)return await action;
           const shot=(async()=>{
-            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor});return !view.paused&&captureSpec.when(view);},'Screenshot condition not observed',(Array.isArray(input)?input.flat().reduce((sum,s)=>sum+s.input.duration_ms,0):input.duration_ms)+10000);
+            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor});return !view.paused&&captureSpec.when(view)&&await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying');},'Screenshot condition not observed',(Array.isArray(input)?input.flat().reduce((sum,s)=>sum+s.input.duration_ms,0):input.duration_ms)+10000);
             assert(await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying'),'Client paused before capture');await capture(captureSpec.name,client.connection);
           })();
           const results=await Promise.allSettled([action,shot]);for(const r of results)if(r.status==='rejected')throw r.reason;return results[0].value;

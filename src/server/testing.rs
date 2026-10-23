@@ -101,6 +101,8 @@ enum Command {
     },
     World {
         template: String,
+        #[serde(default)]
+        seed: Option<u64>,
     },
     Observe {
         actor: i32,
@@ -929,7 +931,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::Catalog{search,limit} => {ensure!(!search.is_empty() && search.len()<=80 && (1..=20).contains(&limit),"catalog needs search and limit 1–20");let matches=a.content.objects.values().filter(|o|o.name.to_lowercase().contains(&search.to_lowercase())).collect::<Vec<_>>();Ok(json!({"items":matches.iter().take(limit).map(|o|json!({"id":o.kind,"name":o.name,"class":o.class,"slot_type":o.slot_type,"unsupported_equipment":o.unsupported_equipment})).collect::<Vec<_>>(),"omitted":matches.len().saturating_sub(limit)}))},
         Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed,"privileged":true,"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0xd06|0xd7a|0xd7b|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
         Command::Spawn{spec} => spawn(a,t,spec).await,
-        Command::World{template} => { let world=a.world.directory(move |d|d.prepared_instance(&template)).await?; Ok(json!({"world":world,"provenance":"prepared"})) },
+        Command::World{template,seed} => { let world=a.world.directory(move |d|match seed { Some(seed)=>d.prepared_instance_with_seed(&template,seed), None=>d.prepared_instance(&template) }).await?; Ok(json!({"world":world,"provenance":"prepared"})) },
         Command::Observe{actor} => {t.registration(actor)?;snapshot(a,actor,false).await},
         Command::Inspect{actor} => {t.registration(actor)?;snapshot(a,actor,true).await},
         Command::Resume => {resume(a,t).await?;Ok(json!({"paused":false}))},
