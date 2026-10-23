@@ -1310,7 +1310,11 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
         let (scope, time, key) = a
             .world
             .directory(move |d| {
-                let scope = d.instance("snake-pit", None)?;
+                let scope = if failure == 0 {
+                    -2
+                } else {
+                    d.instance("snake-pit", None)?
+                };
                 let (time, key, _) = d.issue(account, character, scope)?;
                 Ok((scope, time, key))
             })
@@ -1338,10 +1342,26 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
         )
         .await
         .unwrap();
-        let portal = a
+        let (portal, bound_destination) = a
             .world
-            .for_player(id)
-            .call(move |w| w.spawn_entity(0x704, w.players[&id].pos, vec![]))
+            .directory(move |d| {
+                let w = d.worlds.get_mut(&scope).unwrap();
+                if failure == 0 {
+                    assert_eq!(w.name, "Nexus");
+                    let portal = w
+                        .entities
+                        .values()
+                        .find(|e| e.kind == 0x712 && e.published)
+                        .context("published named Realm portal missing")?
+                        .clone();
+                    w.players.get_mut(&id).unwrap().pos = portal.pos;
+                    let binding = d.destination(id, Some(portal.id))?;
+                    assert_eq!((binding.0, binding.1), (account, character));
+                    Ok((portal.id, Some(binding.2)))
+                } else {
+                    Ok((w.spawn_entity(0x704, w.players[&id].pos, vec![])?, None))
+                }
+            })
             .await
             .unwrap();
         let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
@@ -1349,26 +1369,58 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
             db.execute_batch("CREATE TRIGGER reject_exit_save BEFORE UPDATE ON characters BEGIN SELECT RAISE(ABORT,'injected exit save rollback'); END;").unwrap();
         } else if failure == 0 {
             a.world
-                .directory(|d| {
-                    let destination = d.initial(-3)?;
-                    let w = d.worlds.get_mut(&destination).unwrap();
-                    w.max_players = w.players.len();
-                    Ok(())
-                })
-                .await
-                .unwrap();
-        }
-        if failure == 2 {
-            a.world
                 .directory(move |d| {
-                    for _ in 0..63 {
-                        d.issue(account, character, -2)?;
-                    }
+                    let w = d.worlds.get_mut(&bound_destination.unwrap()).unwrap();
+                    w.max_players = w.players.len();
+                    assert_eq!(w.occupancy(), w.max_players);
                     Ok(())
                 })
                 .await
                 .unwrap();
         }
+        let saturated = if failure == 2 {
+            let mut identities = vec![(account, character)];
+            for n in 0..63 {
+                let other = a
+                    .store
+                    .list(format!("phase4-reserved-{n}"))
+                    .await
+                    .unwrap()
+                    .id;
+                let ch = a
+                    .store
+                    .create(other, a.content.get(WIZARD).unwrap())
+                    .await
+                    .unwrap();
+                identities.push((other, ch.id));
+            }
+            Some(
+                a.world
+                    .directory(move |d| {
+                        assert!(d.forced_transfer_candidates().is_empty());
+                        let mut reservations = Vec::new();
+                        for (account, character) in identities {
+                            let (_, key, _) = d.issue(account, character, -2)?;
+                            reservations.push((account, key));
+                        }
+                        assert_eq!(reservations.len(), 64);
+                        assert_eq!(
+                            d.worlds.values().map(|w| w.reserved_slots()).sum::<usize>(),
+                            64
+                        );
+                        let error = d.issue(account, character, -2).unwrap_err();
+                        assert!(
+                            error.to_string().contains("transfer grant limit reached"),
+                            "{error:#}"
+                        );
+                        Ok(reservations)
+                    })
+                    .await
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
         socket.forbid_reconnect = true;
         socket
             .send(Packet {
@@ -1385,6 +1437,15 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
             r.u8().unwrap();
             r.utf().unwrap();
             assert_eq!(r.utf().unwrap(), "Destination is full.");
+            assert_eq!(
+                a.world
+                    .for_player(id)
+                    .call(|w| Ok(w.name.clone()))
+                    .await
+                    .unwrap(),
+                "Nexus",
+                "full named-Realm refusal must retain the original Nexus source"
+            );
             let state = lifecycle::state(&a, account).unwrap();
             assert!(
                 !state.0 && !state.2 && state.1 == Some(id),
@@ -1410,6 +1471,21 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
         drop(socket);
         if failure == 0 {
             released(&a, account).await;
+        }
+        if let Some(reservations) = saturated {
+            a.world
+                .directory(move |d| {
+                    for (account, key) in reservations {
+                        d.cancel_admission(account, key)?;
+                    }
+                    assert_eq!(
+                        d.worlds.values().map(|w| w.reserved_slots()).sum::<usize>(),
+                        0
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
         }
         server.abort();
         assert!(server.await.unwrap_err().is_cancelled());
