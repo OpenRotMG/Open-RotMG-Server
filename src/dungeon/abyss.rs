@@ -703,6 +703,37 @@ mod tests {
     }
 
     #[test]
+    fn abyss_start_room_contains_no_generated_enemies() {
+        let content = Content::load(Path::new("data")).unwrap();
+        for seed in 0..128 {
+            let (rooms, _, _) = seeded_layout(seed);
+            let room = rooms.iter().find(|room| room.tag == 1).unwrap();
+            let map = generate(&content, seed).unwrap();
+            let (x, y) = map.spawns[0];
+            assert!(x >= room.x as f32 && x < (room.x + room.w) as f32);
+            assert!(y >= room.y as f32 && y < (room.y + room.h) as f32);
+            assert_eq!(
+                map.cells[index(&map, x as i32, y as i32)].object,
+                Some(0x703)
+            );
+            // No generated enemies is not runtime sanctuary: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/DungeonGen/Templates/Abyss/StartRoom.cs
+            for y in room.y..room.y + room.h {
+                for x in room.x..room.x + room.w {
+                    assert!(
+                        map.cells[index(&map, x, y)]
+                            .object
+                            .is_none_or(|kind| !content.objects[&kind].enemy),
+                        "Abyss seed {seed}: enemy generated in entrance room at ({x},{y})"
+                    );
+                }
+            }
+        }
+        eprintln!(
+            "128 generated Abyss entrance rooms: zero initial enemies; runtime arrivals are separate"
+        );
+    }
+
+    #[test]
     fn abyss_geometry_treasure_entries_are_south_facing_and_lava_safe() {
         let content = Content::load(Path::new("data")).unwrap();
         let mut invalid = vec![];

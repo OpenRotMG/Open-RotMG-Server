@@ -4004,14 +4004,9 @@ impl World {
                 .remove(&slot);
         }
         let mut o = Writer::new();
-        let potion_feedback = plan.stat_growth.as_ref().map(|(_, slot, _, amount)| {
-            format!(
-                "{} consumed (+{amount}).",
-                self.content.objects[&(slot.kind as u16)].name
-            )
-        });
         p.character.items = plan.items;
         p.character.revision = revision;
+        // Stat growth is silent in the 2013 comparator: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.UseItem.cs#L659-L679
         if let Some((snapshot, _, index, amount)) = plan.stat_growth {
             ensure!(
                 p.character.base == snapshot.base,
@@ -4097,10 +4092,6 @@ impl World {
         }
         tracing::info!(player = plan.player, revision, "inventory committed");
         let p = &self.players[&plan.player];
-        if let Some(text) = potion_feedback {
-            let packet = chat_info(&text);
-            send(p, packet.id, packet.body);
-        }
         if plan.purchase.is_some() {
             let packet = shop::reply(true, "Item purchased!");
             send(p, packet.id, packet.body);
@@ -4788,7 +4779,13 @@ impl World {
         } else if private {
             eligible.len()
         } else {
-            (eligible.len() * 2).min(8)
+            // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
+            let multiplier = match defeated.kind {
+                0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 => 4,
+                0x62c => 3,
+                _ => 2,
+            };
+            (eligible.len() * multiplier).min(8)
         };
         for i in 0..attempts {
             let mut rewards = crate::loot::rewards(&self.content, defeated.kind, &mut self.rng);
@@ -4822,7 +4819,7 @@ impl World {
                 }
             }
         }
-        if matches!(defeated.kind, 0x20d | 0x952 | 0x949) {
+        if !crate::loot::fauna_private_table(defeated.kind).is_empty() {
             for (owner, item) in crate::loot::fauna_private_rewards(
                 &self.content,
                 defeated.kind,
@@ -7342,6 +7339,54 @@ mod tests {
         assert_eq!(r.i32().unwrap(), peer);
         r.done().unwrap();
     }
+    #[test]
+    fn stat_potions_commit_gains_without_chat_messages() {
+        for (kind, index, gain) in [
+            (0xa1f, 2, 1),
+            (0xa20, 3, 1),
+            (0xa21, 4, 1),
+            (0xa34, 6, 1),
+            (0xa35, 7, 1),
+            (0xa4c, 5, 1),
+            (0xae9, 0, 5),
+            (0xaea, 1, 5),
+        ] {
+            let mut w = world();
+            let mut character = ch(&w);
+            character.items[4] = kind;
+            let before = character.base;
+            let (packets, mut rx) = mpsc::channel(64);
+            let (lost, _watch) = watch::channel(false);
+            let id = w.enter(character, Some(Output { packets, lost })).unwrap();
+            while rx.try_recv().is_ok() {}
+            let plan = w
+                .use_item(
+                    id,
+                    Slot {
+                        object: id,
+                        slot: 4,
+                        kind,
+                    },
+                    w.players[&id].pos,
+                )
+                .unwrap()
+                .unwrap();
+            w.finish_inventory(plan, Ok(1)).unwrap();
+            let character = &w.players[&id].character;
+            let mut expected = before;
+            expected[index] += gain;
+            assert_eq!(character.base, expected);
+            assert_eq!(character.items[4], -1);
+            assert_eq!(character.revision, 1);
+            let packets: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+            assert!(packets.iter().any(|p| p.id == 4 && p.body == [0, 0, 0, 0]));
+            assert!(
+                !packets.iter().any(|p| p.id == wire::TEXT),
+                "item {kind:#x}"
+            );
+        }
+    }
+
     #[test]
     fn late_heal_cannot_revive() {
         let mut w = world();

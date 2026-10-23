@@ -38,7 +38,7 @@ async fn enter_admitted(
     position: Option<Pos>,
     admission: Option<Vec<u8>>,
 ) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
-    let world = if world == -3 && position.is_none() {
+    let world = if world == -3 && position.is_none() && admission.is_none() {
         app.world.directory(|d| d.initial(-3)).await?
     } else {
         world

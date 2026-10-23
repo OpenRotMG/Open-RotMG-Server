@@ -117,11 +117,6 @@ async fn community_social_actual_lifetimes_rebuild_independently_after_natural_d
         .finish();
     let _logging = tracing::subscriber::set_default(sub);
     let declaration = rebuilding_context(&mut app, &dir).await;
-    let serving = tokio::spawn(crate::server::serve(
-        app.clone(),
-        "127.0.0.1:0".parse().unwrap(),
-        std::path::PathBuf::from(std::env::var("CLIENT_DIR").unwrap()),
-    ));
     let initial = declaration["initial"].as_array().unwrap();
     let originals: Vec<_> = initial[..4]
         .iter()
@@ -141,6 +136,7 @@ async fn community_social_actual_lifetimes_rebuild_independently_after_natural_d
     let mut sequence = vec![];
     loop {
         tokio::time::sleep(Duration::from_millis(100)).await;
+        commits(&app).await;
         let sample=app.world.directory(|d| {
             let views=d.worlds.values().flat_map(|w|w.players.iter()).map(|(id,_)| {let v=d.player_view(*id)?;Ok(json!({"session":v.session,"map":v.map.name,"character":v.character,"lifecycle":v.lifecycle,"position":v.position}))}).collect::<Result<Vec<_>>>()?;
             Ok(json!({"game_ms":d.tick*50,"realm_count":d.worlds[&-3].players.len(),"views":views,"hazards":d.worlds[&-3].entities.values().filter(|e|matches!(e.kind,0x651|0x654|0x652)).collect::<Vec<_>>()}))
@@ -212,8 +208,6 @@ async fn community_social_actual_lifetimes_rebuild_independently_after_natural_d
     if quarantine == 0 {
         stop(&app).await;
     }
-    serving.abort();
-    let _ = serving.await;
     let death = events
         .iter()
         .find(|e| {

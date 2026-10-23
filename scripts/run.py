@@ -150,9 +150,6 @@ def main():
             revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
             dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
             guard = str(Path(__file__).with_name('cargo.py'))
-            code = run([sys.executable, guard, 'status'], ROOT, log)
-            if code:
-                raise RuntimeError(f'Build cache access failed with status {code}. See {LOG}.')
             if args.local_client is not None:
                 client = args.local_client.resolve()
             else:

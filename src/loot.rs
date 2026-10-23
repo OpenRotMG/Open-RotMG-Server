@@ -10,12 +10,30 @@ pub(crate) const WEAPONS: &[i32] = &[1, 2, 3, 8, 17];
 pub(crate) const ABILITIES: &[i32] = &[4, 5, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23];
 pub(crate) const ARMOR: &[i32] = &[6, 7, 14];
 pub(crate) const RINGS: &[i32] = &[9];
-fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
+pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::Tier;
     match kind {
         0x20d => &[(0.005, Pick::Item(0xa51))],
         0x952 => &[(0.03, Tier(2, RINGS))],
-        0x949 => &[(0.03, Tier(6, WEAPONS)), (0.03, Tier(6, ARMOR))],
+        0x949 | 0x950 => &[(0.03, Tier(6, WEAPONS)), (0.03, Tier(6, ARMOR))],
+        0x945 => &[
+            (0.05, Tier(6, WEAPONS)),
+            (0.05, Tier(6, ARMOR)),
+            (0.05, Tier(2, RINGS)),
+            (0.03, Tier(3, RINGS)),
+            (0.03, Tier(3, ABILITIES)),
+        ],
+        0x903 => &[(0.01, Tier(2, RINGS))],
+        0x957 => &[
+            (0.02, Tier(5, WEAPONS)),
+            (0.01, Tier(6, WEAPONS)),
+            (0.005, Tier(7, WEAPONS)),
+            (0.02, Tier(5, ARMOR)),
+            (0.01, Tier(6, ARMOR)),
+            (0.005, Tier(7, ARMOR)),
+            (0.015, Tier(3, RINGS)),
+            (0.015, Tier(3, ABILITIES)),
+        ],
         _ => &[],
     }
 }
@@ -234,13 +252,28 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         ],
         // Trapped 593e490 engineering tables, not authenticated 123.5.1 probabilities.
         0x952 => &[(0.05, Tier(5, WEAPONS)), (0.05, Tier(5, ARMOR))],
-        0x949 => &[
+        0x949 | 0x950 => &[
             (0.10, Tier(3, WEAPONS)),
             (0.05, Tier(4, WEAPONS)),
             (0.10, Tier(3, ARMOR)),
             (0.05, Tier(4, ARMOR)),
         ],
-        0x205 | 0x20d | 0x20f | 0x202 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
+        0x637 => &[
+            (0.10, Tier(3, WEAPONS)),
+            (0.05, Tier(4, WEAPONS)),
+            (0.03, Tier(5, WEAPONS)),
+            (0.10, Tier(3, ARMOR)),
+            (0.05, Tier(4, ARMOR)),
+            (0.03, Tier(5, ARMOR)),
+            (0.05, Tier(1, RINGS)),
+            (0.05, Tier(1, ABILITIES)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+        ],
+        0x205 | 0x20d | 0x20f | 0x202 | 0x635 | 0x636 | 0x639 | 0x6c5 | 0x7f22 | 0x6c7 | 0x6c9
+        | 0x6d1 | 0x951 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
+        0x903 | 0x209 => &[(0.04, Item(0xa22)), (0.01, Item(0xa23))],
+        0x904 => &[(0.03, Item(0xa23)), (0.01, Tier(5, WEAPONS))],
         0x204 => &[
             (0.01, Tier(2, ARMOR)),
             (0.03, Item(0xa22)),
@@ -372,6 +405,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x602 | 0x604 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
         0x603 | 0x954 => &[],
         0x6d2..=0x6d7 => &[],
+        0x624 => &[(0.03, Tier(5, WEAPONS)), (0.03, Item(0xa23))],
+        0x625 => &[(0.03, Tier(2, ABILITIES)), (0.03, Item(0xa23))],
+        0x626 => &[(0.03, Tier(5, ARMOR)), (0.03, Item(0xa23))],
         0x62d | 0x631 => &[(0.03, Tier(5, WEAPONS)), (0.03, Item(0xa22))],
         0x62e => &[(0.03, Tier(5, ARMOR)), (0.03, Item(0xa22))],
         0x62f => &[(0.03, Item(0xa22)), (0.01, Tier(2, RINGS))],
@@ -469,7 +505,6 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0x615
         | 0x616
         | 0x61c..=0x61e
-        | 0x624..=0x626
         | 0x63a..=0x63c
         | 0x63f
         | 0x642..=0x644
@@ -480,7 +515,14 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xd9b..=0xd9f
         | 0xda4..=0xda6
         | 0xdb0..=0xdb2 => &[(0.05, Item(0xa22)), (0.03, Item(0xa23))],
-        0x609 | 0x617 | 0x60d => &[
+        0x60d => &[
+            (0.10, Tier(3, WEAPONS)),
+            (0.10, Tier(3, ARMOR)),
+            (0.10, Tier(1, RINGS)),
+            (0.10, Tier(1, ABILITIES)),
+            (0.03, Item(0xa22)),
+        ],
+        0x609 | 0x617 => &[
             (0.2, Tier(2, WEAPONS)),
             (0.2, Tier(2, ARMOR)),
             (0.2, Tier(1, RINGS)),
@@ -795,8 +837,8 @@ pub fn fauna_private_rewards(
     rng: &mut impl Rng,
 ) -> Vec<(i32, u16)> {
     let multiplier = match kind {
-        0x20d | 0x952 => 1,
-        0x949 => 2,
+        0x20d | 0x952 | 0x903 => 1,
+        0x949 | 0x950 | 0x945 | 0x957 => 2,
         _ => unreachable!("unsupported dual-channel fauna kind {kind:#x}"),
     };
     let owners: Vec<_> = contributors_by_damage
@@ -1291,6 +1333,113 @@ mod tests {
         }
     }
     #[test]
+    fn realm_progression_pools_preserve_selected_equipment_and_dual_channels() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let tiers = |rows: &[(f64, Pick)]| {
+            rows.iter()
+                .filter_map(|(_, pick)| match pick {
+                    Pick::Tier(tier, slots) => Some((*tier, *slots)),
+                    Pick::Item(_) => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        for (kind, public, soul) in [
+            (
+                0x60d,
+                vec![(3, WEAPONS), (3, ARMOR), (1, RINGS), (1, ABILITIES)],
+                vec![],
+            ),
+            (0x624, vec![(5, WEAPONS)], vec![]),
+            (0x625, vec![(2, ABILITIES)], vec![]),
+            (0x626, vec![(5, ARMOR)], vec![]),
+            (
+                0x637,
+                vec![
+                    (3, WEAPONS),
+                    (4, WEAPONS),
+                    (5, WEAPONS),
+                    (3, ARMOR),
+                    (4, ARMOR),
+                    (5, ARMOR),
+                    (1, RINGS),
+                    (1, ABILITIES),
+                ],
+                vec![],
+            ),
+            (
+                0x950,
+                vec![(3, WEAPONS), (4, WEAPONS), (3, ARMOR), (4, ARMOR)],
+                vec![(6, WEAPONS), (6, ARMOR)],
+            ),
+            (
+                0x945,
+                vec![(5, WEAPONS), (5, ARMOR), (2, ABILITIES)],
+                vec![
+                    (6, WEAPONS),
+                    (6, ARMOR),
+                    (2, RINGS),
+                    (3, RINGS),
+                    (3, ABILITIES),
+                ],
+            ),
+            (0x903, vec![], vec![(2, RINGS)]),
+            (0x904, vec![(5, WEAPONS)], vec![]),
+            (
+                0x957,
+                vec![],
+                vec![
+                    (5, WEAPONS),
+                    (6, WEAPONS),
+                    (7, WEAPONS),
+                    (5, ARMOR),
+                    (6, ARMOR),
+                    (7, ARMOR),
+                    (3, RINGS),
+                    (3, ABILITIES),
+                ],
+            ),
+        ] {
+            assert_eq!(tiers(table(kind)), public, "public {kind:x}");
+            assert_eq!(tiers(fauna_private_table(kind)), soul, "private {kind:x}");
+            assert!(!private(kind));
+            validate(&content, kind).unwrap();
+            for (private, rows) in [(false, table(kind)), (true, fauna_private_table(kind))] {
+                for (branch, (_, pick)) in rows.iter().enumerate() {
+                    let mut draws = vec![u64::MAX; branch];
+                    draws.push(0);
+                    if private && matches!(kind, 0x945 | 0x950 | 0x957) {
+                        draws.extend(vec![u64::MAX; rows.len()]);
+                    }
+                    let mut rng = Branch(draws);
+                    let item = if private {
+                        let result =
+                            fauna_private_rewards(&content, kind, &[(9, 2), (8, 1)], &mut rng);
+                        assert_eq!(result.len(), 1);
+                        assert_eq!(result[0].0, 9);
+                        result[0].1
+                    } else {
+                        let result = rewards(&content, kind, &mut rng);
+                        assert_eq!(result.len(), 1);
+                        result[0]
+                    };
+                    assert!(candidates(&content, *pick).contains(&item) && rng.0.is_empty());
+                    assert!(collectibles(&content).contains(&item));
+                }
+            }
+        }
+        for kind in [
+            0x635, 0x636, 0x639, 0x6c5, 0x7f22, 0x6c7, 0x6c9, 0x6d1, 0x951,
+        ] {
+            assert_eq!(
+                table(kind)
+                    .iter()
+                    .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+                    .collect::<Vec<_>>(),
+                vec![(0.03, vec![0xa22]), (0.02, vec![0xa23])]
+            );
+        }
+    }
+    #[test]
     fn midland_great_lizard_and_warrior_wasp_ordered_public_tables() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for (kind, name, expected) in [
@@ -1761,9 +1910,8 @@ mod tests {
                 assert!(collectibles(&content).contains(&item));
             }
         }
-        for neighbor in [0x6c7, 0x6c8] {
-            assert!(table(neighbor).is_empty());
-        }
+        assert_eq!(table(0x6c7).len(), 2);
+        assert!(table(0x6c8).is_empty());
         assert_eq!(table(crate::dungeon::trench::HERMIT).len(), 3);
     }
     #[test]

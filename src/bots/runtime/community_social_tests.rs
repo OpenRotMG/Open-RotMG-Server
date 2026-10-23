@@ -122,7 +122,13 @@ fn observed_normal_vacancy(events: &[Value], portal: i32, waiters: &[(i32, i32)]
                     "transfer grant consumed",
                     "player entered development world",
                 ] {
-                    let next = (cursor + 1..refill).find(|i| {
+                    // Issuance reserves the slot, so full publication can precede consumption and entry.
+                    let until = if message == "transfer grant issued" {
+                        refill
+                    } else {
+                        events.len()
+                    };
+                    let next = (cursor + 1..until).find(|i| {
                         let f = &events[*i]["fields"];
                         f["message"] == message
                             && f["character"] == character
@@ -196,8 +202,12 @@ fn community_social_vacancy_observer_rejects_cleanup_wrong_waiter_and_out_of_ord
     let mut reordered = live.clone();
     reordered.swap(1, 2);
     assert!(!observed_normal_vacancy(&reordered, 77, &waiters));
+    let mut reserved = live.clone();
+    let refill = reserved.remove(7);
+    reserved.insert(4, refill);
+    assert!(observed_normal_vacancy(&reserved, 77, &waiters));
     let mut late = live.clone();
-    late.swap(5, 7);
+    late.swap(4, 5);
     assert!(!observed_normal_vacancy(&late, 77, &waiters));
 }
 
