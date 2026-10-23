@@ -3,6 +3,7 @@ use anyhow::{Result, ensure};
 
 pub(crate) mod attacks;
 pub(crate) mod fauna;
+pub(crate) mod jungle;
 pub(crate) mod landmarks;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,6 +78,21 @@ pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
 pub fn profile(kind: u16) -> Option<Profile> {
+    if matches!(
+        kind,
+        crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
+    ) {
+        return Some(crate::dungeon::beach::profile(kind));
+    }
+    if crate::dungeon::jungle::ROSTER.contains(&kind) {
+        return Some(jungle::profile(kind));
+    }
+    if crate::dungeon::manor::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::manor::profile(kind));
+    }
+    if let Some(profile) = crate::dungeon::davy::profile(kind) {
+        return Some(profile);
+    }
     if let Some(profile) = crate::dungeon::trench::profile(kind) {
         return Some(profile);
     }
@@ -274,6 +290,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
         ),
         0xd06 => (Wander, 3., 400, 12.),
         0xd07..=0xd0a => (Stationary, 0., 300, 100.),
+        // Wandering runs alongside Septavius's attack queue: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Undead_Lair.cs
         0xd90 => (Wander, 0.5, 150, 12.),
         0xd91..=0xd93 => (chase(1.), 10., 1000, 6.),
         0xd94..=0xd98 => (chase(7.), 9., 1000, 10.),
@@ -356,9 +373,6 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
             ),
             _ => (Motion::Stationary, 0.),
         },
-        0xd90 if elapsed % 13000 >= 3000 && (elapsed / 13000).is_multiple_of(4) => {
-            (Motion::Stationary, 0.)
-        }
         0xd06 => match stage(kind, hp, elapsed) % 5 {
             0 | 4 => (Motion::Wander, 3.),
             1 => (
@@ -412,7 +426,7 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     match kind {
         0x927 if hp < 640 => vec![(0, heading), (1, heading)],
         0x172 | 0x173 | 0x175..=0x179 | 0x927 | 0x68a..=0x68f | 0x653 => vec![],
-        0x604 | 0x6d2..=0x6d4 => vec![],
+        0x604 | 0x6d2..=0x6d4 | crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM => vec![],
         0x62f => spread(0, 2, 7., heading),
         0x601 | 0x602 | 0x603 | 0x612 | 0x613 | 0x618 | 0x619 => vec![(0, heading)],
         0x60e => spread(0, 2, 10., heading),
@@ -497,6 +511,39 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if matches!(
+        kind,
+        crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
+    ) {
+        let last = if kind == crate::dungeon::manor::MINE {
+            1
+        } else {
+            3
+        };
+        for stage in 0..=last {
+            for attack in attacks::manor_entry_schedule(kind, stage, 0).attacks {
+                if let attacks::Action::Shoot { projectile, .. } = attack.action {
+                    ensure!(
+                        content.get(kind)?.projectiles.contains_key(&projectile),
+                        "missing Manor entrance projectile {kind:#x}/{projectile}"
+                    );
+                }
+            }
+        }
+    }
+    if crate::dungeon::jungle::ROSTER.contains(&kind) {
+        for stage in 0..=6 {
+            for attack in jungle::schedule(kind, stage, 0).attacks {
+                if let attacks::Action::Shoot { projectile, .. } = attack.action {
+                    ensure!(
+                        content.get(kind)?.projectiles.contains_key(&projectile),
+                        "missing Jungle projectile {kind:#x}/{projectile}"
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
     if crate::dungeon::trench::ROSTER.contains(&kind) {
         return crate::dungeon::trench::validate(content, kind);
     }

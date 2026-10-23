@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
     condition,
-    dungeon::abyss::{self, BRIDGE, IDOL, LAVA, MALPHAS},
+    dungeon::abyss::{self, FLOOR, IDOL, LAVA, MALPHAS},
 };
 
 impl World {
-    fn change_ground(&mut self, i: usize, ground: u8) {
+    pub(super) fn change_ground(&mut self, i: usize, ground: u8) {
         Arc::make_mut(&mut self.map).cells[i].ground = ground;
         let tile = (
             (i % self.map.width as usize) as i16,
@@ -18,42 +18,29 @@ impl World {
         }
     }
 
-    pub(super) fn idol_bridge(&mut self, home: Pos, restore: bool) -> Result<()> {
+    pub(super) fn idol_entrance(&mut self, home: Pos, restore: bool) -> Result<()> {
         let region = self
             .map
             .cell(home.x, home.y)
             .context("Idol home outside map")?
             .region;
         ensure!(region >= 16, "Idol has no generated treasure-room region");
-        let bridges: Vec<_> = self
-            .map
-            .cells
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.region == region && c.object == Some(BRIDGE))
-            .map(|(i, _)| i)
-            .collect();
-        ensure!(!bridges.is_empty(), "Idol treasure room has no bridge");
-        for i in bridges {
-            let existing = self
+        if !restore {
+            let entrance: Vec<_> = self
+                .map
                 .cells
-                .ids(i)
                 .iter()
-                .find(|id| self.entities[id].kind == BRIDGE)
-                .copied();
-            if restore {
-                if existing.is_none() {
-                    self.spawn_entity(
-                        BRIDGE,
-                        Pos {
-                            x: (i % self.map.width as usize) as f32 + 0.5,
-                            y: (i / self.map.width as usize) as f32 + 0.5,
-                        },
-                        vec![],
-                    )?;
-                }
-            } else if let Some(id) = existing {
-                self.remove_entity(id);
+                .enumerate()
+                .filter(|(_, c)| c.region == region && c.ground == FLOOR)
+                .map(|(i, _)| i)
+                .collect();
+            ensure!(
+                !entrance.is_empty(),
+                "Idol treasure room has no dry entrance"
+            );
+            for i in entrance {
+                self.lava_patches.insert(i, (u64::MAX, FLOOR));
+                self.change_ground(i, LAVA);
             }
         }
         if restore {
@@ -68,7 +55,7 @@ impl World {
                 self.lava_patches.get_mut(&i).unwrap().0 = self.now;
             }
         }
-        tracing::info!(region, restore, "Abyss Idol treasure bridge changed");
+        tracing::info!(region, restore, "Abyss Idol treasure entrance changed");
         Ok(())
     }
 
@@ -161,7 +148,7 @@ impl World {
                 "Abyss encounter phase entered"
             );
             if kind == IDOL {
-                self.idol_bridge(home, false)?;
+                self.idol_entrance(home, false)?;
             } else if matches!(stage, 1 | 4) {
                 self.abyss_flash(id, 0xff00ff00, 0.25, 2.5);
             } else if stage == 5 {
@@ -216,4 +203,121 @@ impl World {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+#[test]
+fn treasure_geometry_and_entrance_lifecycle() {
+    use std::collections::{BTreeSet, VecDeque};
+    let content = super::tests::world().content.clone();
+    let mut treasures = 0;
+    for seed in 0..64 {
+        let map = crate::dungeon::abyss::generate(&content, seed).unwrap();
+        let mut seen = BTreeSet::new();
+        let mut queue = VecDeque::from([(map.spawns[0].0 as i32, map.spawns[0].1 as i32)]);
+        while let Some((x, y)) = queue.pop_front() {
+            if x < 0 || y < 0 || x >= map.width || y >= map.height || seen.contains(&(x, y)) {
+                continue;
+            }
+            let cell = &map.cells[(y * map.width + x) as usize];
+            if content.grounds[&cell.ground] <= 0.
+                || cell
+                    .object
+                    .is_some_and(|kind| content.objects[&kind].blocks)
+            {
+                continue;
+            }
+            seen.insert((x, y));
+            queue.extend([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]);
+        }
+        let homes = map
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.object == Some(IDOL))
+            .map(|(i, c)| (i as i32 % map.width, i as i32 / map.width, c.region))
+            .collect::<Vec<_>>();
+        for &(x, y, region) in &homes {
+            treasures += 1;
+            assert!(seen.contains(&(x, y)), "seed {seed}: unreachable treasure");
+            let cell = |dx, dy| &map.cells[((y + dy) * map.width + x + dx) as usize];
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    assert_eq!(cell(dx, dy).ground, 0x35, "seed {seed}: shrine");
+                }
+            }
+            assert_eq!(cell(0, -7).ground, 0xfe, "seed {seed}: recessed north wall");
+            assert_eq!(cell(-7, 0).ground, 0xfe);
+            assert_eq!(cell(7, 0).ground, 0xfe);
+            assert_eq!(cell(0, 13).ground, abyss::FLOOR);
+            assert_ne!(cell(0, 14).ground, 0xfe, "seed {seed}: south connection");
+            let cells = map
+                .cells
+                .iter()
+                .filter(|c| c.region == region)
+                .collect::<Vec<_>>();
+            assert_eq!(cells.iter().filter(|c| c.object == Some(0x17e)).count(), 8);
+            assert_eq!(cells.iter().filter(|c| c.object == Some(0x183)).count(), 2);
+            assert_eq!(
+                cells.iter().filter(|c| c.ground == abyss::FLOOR).count(),
+                31
+            );
+            assert!(
+                cells
+                    .iter()
+                    .all(|c| c.ground != LAVA && c.object != Some(abyss::BRIDGE))
+            );
+        }
+        if homes.is_empty() {
+            continue;
+        }
+        let original = map.cells.iter().map(|c| c.ground).collect::<Vec<_>>();
+        let mut w = World::new(content.clone(), Arc::new(map)).unwrap();
+        let idols = w
+            .entities
+            .values()
+            .filter(|e| e.kind == IDOL)
+            .map(|e| (e.id, e.home))
+            .collect::<Vec<_>>();
+        let (idol, home) = idols[0];
+        let region = w.map.cell(home.x, home.y).unwrap().region;
+        w.abyss_mechanics(idol, home, 0).unwrap();
+        assert_eq!(
+            w.map
+                .cells
+                .iter()
+                .filter(|c| c.region == region && c.ground == LAVA)
+                .count(),
+            37
+        );
+        assert!(
+            w.map
+                .cells
+                .iter()
+                .enumerate()
+                .all(|(i, c)| c.region == region || c.ground == original[i])
+        );
+        w.now = 5000;
+        w.abyss_step();
+        assert_eq!(
+            w.map
+                .cells
+                .iter()
+                .filter(|c| c.region == region && c.ground == LAVA)
+                .count(),
+            31
+        );
+        let player = w.enter(super::tests::ch(&w), None).unwrap();
+        w.damage_enemy(player, idol, 100_000, true, &[], None)
+            .unwrap();
+        assert!(!w.entities.contains_key(&idol));
+        assert!(
+            w.map
+                .cells
+                .iter()
+                .enumerate()
+                .all(|(i, c)| c.ground == original[i])
+        );
+    }
+    assert!(treasures > 10);
 }

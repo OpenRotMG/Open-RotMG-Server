@@ -14,6 +14,10 @@ impl World {
             tracing::debug!(owner, target, "damage target already removed");
             return Ok(0);
         };
+        // Selected Boss Totems have no HP; zero HP must not turn an immune hit into a defeat.
+        if e.kind == crate::dungeon::jungle::BOSS_TOTEM {
+            return Ok(0);
+        }
         let flags = e.conditions(self.now);
         let affects = !crate::condition::protected(flags);
         let damage =
@@ -42,7 +46,9 @@ impl World {
         let lethal = e.hp <= 0;
         let transform =
             lethal && e.quest.is_some() && matches!(e.kind, 0x675 | 0x6c2 | 0x92a | 0x92b);
-        let kill = lethal && !transform;
+        let lantern = lethal && e.kind == crate::dungeon::davy::UNLIT && self.locker.is_some();
+        let kill = lethal && !transform && !lantern;
+        let kind = e.kind;
 
         let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
         if let Some(p) = self.players.get_mut(&owner) {
@@ -73,11 +79,13 @@ impl World {
                 send(p, 47, o.0.clone());
             }
         }
-        if transform {
+        if lantern {
+            self.light_locker_lantern(target)?;
+        } else if transform {
             self.quest_lethal_transform(target)?;
         } else if kill {
             self.defeat_entity(target)?;
-            tracing::info!(entity = target, owner = owner, "enemy defeated");
+            tracing::info!(entity = target, kind, owner = owner, "enemy defeated");
         }
         Ok(actual)
     }

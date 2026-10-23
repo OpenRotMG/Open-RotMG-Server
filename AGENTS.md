@@ -19,6 +19,8 @@ Before researching or implementing gameplay, read `docs/reference-sources.md`. S
 
 # Contributions
 
+Restoration gameplay PR comments identify affected IDs (https://openrotmg.org/restoration/) and revision-bound evidence; update website records. Keep implementation and historical evidence separate. Source inspection or merging is not acceptance.
+
 For gameplay or visual changes, capture screenshots before editing and after verification through normal client gameplay. PRs do not require video. Nonvisual changes need test evidence.
 
 Develop in a separate worktree with distinct port, state directory and browser profile; see the development instructions for launcher options. For prepared native tests, use the shared scenario runner and testing guide in `examples/testing/README.md`, not copied browser/setup scripts. Keep feature cases small and assert observed outcomes, not merely dispatched input. Keep the regression suite lean; expanding shared testing infrastructure requires explicit approval.

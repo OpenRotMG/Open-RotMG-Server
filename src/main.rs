@@ -14,6 +14,7 @@ mod performance;
 mod quest;
 mod server;
 mod store;
+mod supervision;
 mod terrain;
 mod wire;
 mod world;
@@ -25,7 +26,10 @@ fn main() -> Result<()> {
     if terrain::prepare::run(&args)? {
         return Ok(());
     }
-    serve(args)
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(serve(args));
+    runtime.shutdown_timeout(std::time::Duration::from_secs(5));
+    result
 }
 fn validate_client_assets(client: &std::path::Path) -> Result<()> {
     for file in ["index.html", "vendor/ruffle.js"] {
@@ -36,7 +40,6 @@ fn validate_client_assets(client: &std::path::Path) -> Result<()> {
     }
     Ok(())
 }
-#[tokio::main]
 async fn serve(args: Vec<String>) -> Result<()> {
     if backup::run(&args).await? {
         return Ok(());
@@ -51,6 +54,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         .with_env_filter(filter)
         .json()
         .init();
+    supervision::install_panic_hook();
     let (config, dev_control) = config::Config::load(&args)?;
     let dialogue = bots::dialogue::Service::configured(config.bot_llm)?;
     let client = config.client;
@@ -93,6 +97,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         testing.is_none() || !config.shore_bots,
         "prepared sessions require --no-shore-bots or shore_bots:false; spawn every controller explicitly"
     );
+    let supervisor = supervision::Supervisor::persisted(state.join("last-critical-incident.json"))?;
     let store = store::Store::open(&state.join("game.db"), &content)?;
     let directory = match &testing {
         Some(_) => world::Directory::prepared(
@@ -111,7 +116,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
     if testing.is_some() {
         directory.clock.set_paused(true);
     }
-    let world = world::Handle::spawn(directory);
+    let world = world::Handle::supervised(directory, supervisor);
     let control = if dev_control {
         let mut bytes = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut bytes);

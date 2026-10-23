@@ -1,5 +1,13 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
+enum DyeSource {
+    Inventory(usize),
+    GroundBag,
+}
+
 impl Store {
     pub async fn consume_xp_booster(
         &self,
@@ -51,13 +59,38 @@ impl Store {
         kind: u16,
         expected: [u32; 2],
     ) -> Result<i32> {
+        self.consume_dye_from(write, DyeSource::Inventory(slot), kind, expected)
+            .await
+    }
+
+    // Ephemeral bags must remain reserved through publication; SQL cannot consume their source slot.
+    pub async fn consume_ground_dye(
+        &self,
+        write: InventoryWrite,
+        kind: u16,
+        expected: [u32; 2],
+    ) -> Result<i32> {
+        self.consume_dye_from(write, DyeSource::GroundBag, kind, expected)
+            .await
+    }
+
+    async fn consume_dye_from(
+        &self,
+        write: InventoryWrite,
+        source: DyeSource,
+        kind: u16,
+        expected: [u32; 2],
+    ) -> Result<i32> {
         ensure!(
-            write.items.len() == 12
-                && slot < 12
-                && write.items[slot] == -1
-                && write.items.iter().all(|item| (-1..=65535).contains(item)),
+            write.items.len() == 12 && write.items.iter().all(|item| (-1..=65535).contains(item)),
             "invalid dye inventory"
         );
+        if let DyeSource::Inventory(slot) = source {
+            ensure!(
+                slot < 12 && write.items[slot] == -1,
+                "invalid dye inventory"
+            );
+        }
         ensure!(
             (0..i32::MAX).contains(&write.revision),
             "invalid dye revision"
@@ -70,9 +103,17 @@ impl Store {
                 params![write.id,write.account,write.revision], |r| Ok((r.get(0)?,r.get(1)?)))
                 .context("dye conflict: dead, foreign or stale character")?;
             let mut previous: Vec<i32> = serde_json::from_str(&items)?;
-            ensure!(previous.len() == 12 && previous[slot] == i32::from(kind), "dye item reservation changed");
-            previous[slot] = -1;
-            ensure!(previous == write.items, "dye may only consume its reserved slot");
+            ensure!(previous.len() == 12, "invalid saved dye inventory");
+            match source {
+                DyeSource::Inventory(slot) => {
+                    ensure!(previous[slot] == i32::from(kind), "dye item reservation changed");
+                    previous[slot] = -1;
+                    ensure!(previous == write.items, "dye may only consume its reserved slot");
+                }
+                DyeSource::GroundBag => {
+                    ensure!(previous == write.items, "ground dye must preserve inventory exactly");
+                }
+            }
             let textures = dyes.get(&kind).context("item is not a selected dye or cloth")?;
             let mut saved: Character = serde_json::from_str(&raw)?;
             if let Some(tex1) = textures[0] { saved.tex1 = tex1; }

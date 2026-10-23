@@ -33,6 +33,34 @@ impl World {
             endgame::{ORYX, ORYX2, OryxPhase},
         };
         let e = &self.entities[&id];
+        if matches!(
+            e.kind,
+            crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
+        ) {
+            return Ok(Some(attacks::manor_entry_schedule(
+                e.kind,
+                e.stage.context("Manor entrance phase missing")?,
+                elapsed,
+            )));
+        }
+        if crate::dungeon::jungle::ROSTER.contains(&e.kind) {
+            return Ok(Some(self.jungle_schedule(id)?));
+        }
+        if crate::dungeon::davy::profile(e.kind).is_some() {
+            let mut schedule = attacks::davy_schedule(e.kind, e.stage.unwrap_or(0), elapsed);
+            if e.kind == 0xe50 {
+                let owner = e
+                    .parent
+                    .and_then(|id| self.entities.get(&id))
+                    .context("senior ghost lacks its captain")?;
+                schedule.attacks[0].count = if owner.hp < self.content.objects[&owner.kind].hp / 2 {
+                    3
+                } else {
+                    2
+                };
+            }
+            return Ok(Some(schedule));
+        }
         if crate::encounter::landmarks::ROSTER.contains(&e.kind) {
             let state = e.stage.context("landmark attack phase missing")?;
             let script = e

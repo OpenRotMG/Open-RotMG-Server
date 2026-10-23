@@ -4,6 +4,77 @@ use crate::{
     encounter::{Anchor, Motion, nr_speed},
 };
 impl World {
+    pub(super) fn populate_ghost_ship(&mut self) -> Result<()> {
+        ensure!(
+            !self
+                .entities
+                .values()
+                .any(|e| matches!(e.kind, 0xe37 | 0xe38)),
+            "Realm already contains a Ghost Ship or anchor"
+        );
+        for kind in [0xe37, 0xe38] {
+            crate::encounter::validate(&self.content, kind)?;
+            crate::loot::validate(&self.content, kind)?;
+        }
+        let pos = self.place_named_setpiece(0xe37, &[1, 2, 3, 4, 5, 6, 7])?;
+        let ship = self.spawn_entity(0xe37, pos, vec![])?;
+        let anchor = self.spawn_entity(0xe38, pos, vec![])?;
+        self.entities.get_mut(&anchor).unwrap().condition |= condition::bit(condition::INVINCIBLE);
+        self.landmark_bind(ship)?;
+        self.landmark_bind(anchor)?;
+        tracing::info!(
+            ship,
+            anchor,
+            x = pos.x,
+            y = pos.y,
+            "finite Ghost Ship lake placed"
+        );
+        Ok(())
+    }
+    pub(super) fn ghost_ship_locker_reward(&mut self, ship: &Entity) -> Result<()> {
+        if self.name != "Realm" {
+            return Ok(());
+        }
+        let tag = ship
+            .quest
+            .context("defeated Ghost Ship lacks encounter identity")?;
+        let anchors: Vec<_> = self
+            .entities
+            .values()
+            .filter(|e| e.kind == 0xe38 && e.quest == Some(tag))
+            .map(|e| e.id)
+            .collect();
+        ensure!(
+            anchors.len() == 1,
+            "defeated Ghost Ship lacks its unique anchor"
+        );
+        let anchor = anchors[0];
+        let earned = self.rng.gen_bool(0.5);
+        let pos = self.entities[&anchor].pos;
+        let e = self.entities.get_mut(&anchor).unwrap();
+        e.stage = Some(if earned { 2 } else { 3 });
+        if earned {
+            e.expires
+                .set(Some(self.now + 1000), anchor, &mut self.timed_ids);
+            for (dx, dy) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let (x, y) = (pos.x as i32 + dx, pos.y as i32 + dy);
+                ensure!(
+                    x >= 0 && y >= 0 && x < self.map.width && y < self.map.height,
+                    "Ghost Ship exit cross leaves map"
+                );
+                self.change_ground((y * self.map.width + x) as usize, 0xed);
+            }
+        } else {
+            self.landmark_fade(anchor, 50);
+        }
+        tracing::info!(
+            ship = ship.id,
+            anchor,
+            earned,
+            "Ghost Ship Locker portal roll resolved"
+        );
+        Ok(())
+    }
     pub(super) fn ghost_ship_mechanics(
         &mut self,
         id: i32,
@@ -144,6 +215,48 @@ impl World {
         elapsed: u64,
     ) -> Result<()> {
         let kind = self.entities[&id].kind;
+        if kind == 0xe38 && matches!(self.entities[&id].stage, Some(2..=4)) {
+            if self.entities[&id].stage == Some(4)
+                && self.now
+                    >= self.entities[&id]
+                        .expires
+                        .context("Ghost Ship palm clock missing")?
+            {
+                let pos = self.entities[&id].pos;
+                for dx in [-1., 1.] {
+                    self.spawn_entity(
+                        0x18e,
+                        Pos {
+                            x: pos.x + dx,
+                            y: pos.y,
+                        },
+                        vec![],
+                    )?;
+                }
+                self.remove_entity(id);
+                return Ok(());
+            }
+            if self.entities[&id].stage == Some(2)
+                && self.now
+                    >= self.entities[&id]
+                        .expires
+                        .context("earned Locker portal clock missing")?
+            {
+                let pos = self.entities[&id].pos;
+                ensure!(self.walkable(pos), "earned Locker portal anchor is blocked");
+                self.portal_requests.push((0x741, pos));
+                let palms_at = self.entities[&id]
+                    .expires
+                    .context("earned Locker portal clock missing")?
+                    + 500;
+                let e = self.entities.get_mut(&id).unwrap();
+                // The invisible anchor keeps the clock for the reference's owner-independent 1500ms toss.
+                e.stage = Some(4);
+                e.expires.set(Some(palms_at), id, &mut self.timed_ids);
+                tracing::info!(anchor = id, "earned Locker portal requested");
+            }
+            return Ok(());
+        }
         let owner = self
             .landmark_members(id, 0xe37)
             .into_iter()

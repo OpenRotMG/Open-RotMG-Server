@@ -24,6 +24,7 @@ pub(crate) mod chat;
 
 mod companions;
 mod consumables;
+mod davy;
 mod endgame;
 mod endgame_ai;
 mod enemy_damage;
@@ -35,6 +36,7 @@ mod fauna_births;
 mod fauna_special;
 mod ghost_ship;
 mod gods;
+mod ground_dye;
 
 mod gold;
 mod golems;
@@ -47,6 +49,8 @@ mod lair;
 mod landmark_ai;
 
 mod lost_lands;
+mod manor;
+mod manor_entry;
 mod midlands;
 #[cfg(test)]
 mod movement_tests;
@@ -76,6 +80,11 @@ mod tracked;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+mod beach;
+mod coil;
+mod jungle;
+#[cfg(test)]
+mod jungle_tests;
 
 mod cooperative;
 
@@ -340,7 +349,7 @@ pub struct Player {
     discarded_attack: Option<(i32, i32)>,
     tick: i32,
     last_motion: Option<(f32, u64)>,
-    last_ability: Option<u64>,
+    ability_ready_ms: u64,
     boosts: Vec<consumables::Boost>,
     last_companion: Option<u64>,
     ability_shot: Option<(u16, i32, bool, i32)>,
@@ -485,6 +494,7 @@ impl PortalPlan {
 }
 #[derive(Clone)]
 pub struct InventoryPlan {
+    ground_dye: Option<ground_dye::Reservation>,
     pub player: i32,
     pub items: Vec<i32>,
     pub revision: i32,
@@ -536,14 +546,16 @@ pub struct World {
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
-    quests_by_level: BTreeMap<i32, BTreeSet<i32>>,
+    quests_by_level: BTreeMap<Option<i32>, BTreeSet<i32>>,
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
     grenades: Vec<mechanics::Grenade>,
     fauna_births: Vec<fauna_births::Birth>,
     named_births: Vec<named_births::Birth>,
+    manor_births: Vec<manor::Toss>,
     lava_patches: BTreeMap<usize, (u64, u8)>,
+    locker: Option<davy::Locker>,
     ability_state: abilities::State,
     companions: companions::State,
     finale: endgame_ai::Actors,
@@ -560,6 +572,7 @@ pub struct World {
     pub tick: u64,
     ids: Arc<AtomicI32>,
     pub name: String,
+    background: i32,
     pub safe: bool,
     pub owner: Option<i32>,
     pub max_players: usize,
@@ -572,6 +585,8 @@ pub struct World {
     setpieces: Vec<realm_setpieces::Area>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
+    event_reserves: Vec<realm_events::ReservedEvent>,
+    event_waiting: Option<i32>,
     admission_open: bool,
     bag_expiry: BTreeMap<i32, u64>,
     cleared: bool,
@@ -692,6 +707,7 @@ impl Directory {
             "entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
             "projectiles": self.worlds.values().map(|w| w.bullets.len()).sum::<usize>(),
             "tick": self.tick, "max_tick_us": self.max_tick_us,
+            "paused": self.clock.paused(), "process": std::process::id(), "revision": option_env!("GITHUB_SHA"),
         })
     }
     #[cfg(test)]
@@ -716,7 +732,8 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        let map = Arc::new(crate::terrain::generate(&content, seed, 512)?);
+        // The fixture must fit both finite 65-tile graveyards alongside the other setpieces.
+        let map = Arc::new(crate::terrain::generate(&content, seed, 768)?);
         Self::configured(
             path,
             content,
@@ -858,11 +875,23 @@ impl Directory {
                     None => rand::random(),
                 };
                 Arc::new(crate::dungeon::abyss::generate(&self.content, seed)?)
+            } else if template == "manor-of-the-immortals" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::manor::generate(&self.content, seed)?)
+            } else if template == "beachzone" {
+                Arc::new(crate::dungeon::beach::generate(&self.content)?)
             } else if template == "ocean-trench" {
                 let seed = self
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
+            } else if template == "forbidden-jungle" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::jungle::generate(&self.content, seed)?)
             } else if template == "spider-den" {
                 let seed = match self.prepared_seed {
                     Some(seed) => seed ^ self.next_world as u64,
@@ -879,6 +908,11 @@ impl Directory {
                     .prepared_seed
                     .map_or_else(rand::random, |s| s ^ self.next_world as u64);
                 Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
+            } else if template == crate::dungeon::davy::TEMPLATE {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::davy::generate(&self.content, seed)?)
             } else if template == "undead-lair" {
                 let seed = self
                     .prepared_seed
@@ -902,6 +936,12 @@ impl Directory {
             world.prepared_seed = Some(seed);
         }
         world.name = name.into();
+        // Preserve the blue Nexus/Vault backdrop, not dungeon void: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/worlds/Vault.cs
+        world.background = if matches!(template, "nexus" | "vault") {
+            2
+        } else {
+            0
+        };
         world.safe = safe;
         world.owner = owner;
         world.max_players = self.max_players;
@@ -913,11 +953,23 @@ impl Directory {
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
             let started = Instant::now();
+            // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
+            let beach_bum = world.rng.gen_ratio(1, 200);
+            world.populate_coil_snakes()?;
+            if beach_bum {
+                world.populate_beach_bum()?;
+            }
             world.populate_realm_heroes()?;
             world.populate_named_quests()?;
             world.populate_realm_events()?;
             world.populate_hermit()?;
+            world.populate_manor_entry()?;
+            world.populate_ghost_ship()?;
             world.populate_realm_population()?;
+            // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+            let crystal = world.place_named_setpiece(0x935, &[1])?;
+            world.spawn_entity(0x935, crystal, vec![])?;
+            world.reserve_realm_events()?;
             tracing::info!(
                 layout = world.realm_layout,
                 entities = world.entities.len(),
@@ -927,6 +979,9 @@ impl Directory {
             );
         }
         world.prepare_endgame()?;
+        if template == crate::dungeon::davy::TEMPLATE {
+            world.prepare_locker()?;
+        }
         if template == "sprite-world" {
             let exits: Vec<_> = world
                 .entities
@@ -1278,7 +1333,7 @@ impl Directory {
             .worlds
             .get_mut(&origin)
             .unwrap()
-            .spawn_entity(kind, pos, vec![])?;
+            .spawn_exit(kind, pos)?;
         self.portals.insert(
             id,
             Portal {
@@ -1293,6 +1348,8 @@ impl Directory {
             kind,
             origin,
             destination,
+            x = self.worlds[&origin].entities[&id].pos.x,
+            y = self.worlds[&origin].entities[&id].pos.y,
             "earned dungeon portal dropped"
         );
         Ok(id)
@@ -1309,6 +1366,7 @@ impl Directory {
                         .any(|p| p.character.account == g.account && p.character.id == g.character))
         });
         for (id, world) in &mut self.worlds {
+            let _context = crate::supervision::world(*id, self.tick);
             world.step();
             world.report_performance(*id);
             if *id > 0 && *id != self.endgame.active {
@@ -1331,7 +1389,7 @@ impl Directory {
             .collect();
         for (origin, (kind, pos)) in requests {
             if let Err(error) = self.drop_dungeon_portal(origin, kind, pos) {
-                tracing::error!(origin,%error,"earned dungeon portal creation failed");
+                tracing::error!(origin,kind,x=pos.x,y=pos.y,%error,"earned dungeon portal creation failed");
             }
         }
         let expired_portals: Vec<_> = self
@@ -1369,6 +1427,14 @@ impl Directory {
     }
 }
 type Job = Box<dyn FnOnce(&mut Directory) + Send>;
+async fn service_queued_jobs(directory: &mut Directory, rx: &mut mpsc::Receiver<Job>) {
+    for _ in 0..16 {
+        // Serial packet handlers must receive their replies before they can enqueue the next acknowledgement.
+        tokio::task::yield_now().await;
+        let Ok(job) = rx.try_recv() else { break };
+        job(directory);
+    }
+}
 #[cfg(test)]
 type LifecycleJobGate = Arc<
     std::sync::Mutex<
@@ -1390,12 +1456,17 @@ pub struct Handle {
     tx: mpsc::Sender<Job>,
     target: Target,
     pub clock: crate::clock::Clock,
+    pub supervisor: crate::supervision::Supervisor,
 }
 impl Handle {
+    #[cfg(test)]
     pub fn spawn(directory: Directory) -> Self {
+        Self::supervised(directory, crate::supervision::Supervisor::default())
+    }
+    pub fn supervised(directory: Directory, supervisor: crate::supervision::Supervisor) -> Self {
         let (tx, mut rx) = mpsc::channel::<Job>(256);
         let clock = directory.clock.clone();
-        tokio::spawn(async move {
+        supervisor.spawn("world", async move {
             let mut directory = directory;
             let mut timer = tokio::time::interval(std::time::Duration::from_millis(50));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1422,10 +1493,13 @@ impl Handle {
                                 diagnostic_tick_samples=directory.diagnostic_ticks.len(),queued_jobs=rx.len(),
                                 memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
+                        // Over-budget ticks must not repeatedly win select and starve queued input or lease renewals.
+                        service_queued_jobs(&mut directory, &mut rx).await;
                     },
                     job=rx.recv()=>match job{Some(f)=>f(&mut directory),None=>break}
                 }
             }
+            Ok(())
         });
         Self {
             #[cfg(test)]
@@ -1435,6 +1509,7 @@ impl Handle {
             tx,
             target: Target::World(-1),
             clock,
+            supervisor,
         }
     }
     pub fn in_world(&self, id: i32) -> Self {
@@ -1446,6 +1521,7 @@ impl Handle {
             tx: self.tx.clone(),
             target: Target::World(id),
             clock: self.clock.clone(),
+            supervisor: self.supervisor.clone(),
         }
     }
     pub fn for_player(&self, id: i32) -> Self {
@@ -1457,6 +1533,7 @@ impl Handle {
             tx: self.tx.clone(),
             target: Target::Player(id),
             clock: self.clock.clone(),
+            supervisor: self.supervisor.clone(),
         }
     }
 
@@ -1637,9 +1714,12 @@ impl World {
                             orbit: None,
                             hp: o.hp,
                             size: o.size,
-                            condition: crate::dungeon::abyss::initial_condition(kind)
+                            condition: crate::dungeon::manor::initial_condition(kind)
+                                | crate::dungeon::abyss::initial_condition(kind)
                                 | crate::dungeon::spider::initial_condition(kind)
                                 | crate::dungeon::snake::initial_condition(kind)
+                                | crate::dungeon::jungle::initial_condition(kind)
+                                | crate::dungeon::davy::initial_condition(kind)
                                 | if o.stasis_immune {
                                     crate::condition::bit(crate::condition::STASIS_IMMUNE)
                                 } else {
@@ -1714,8 +1794,8 @@ impl World {
                     if actor {
                         actor_ids.insert(id);
                     }
-                    if let Some(level) = o.quest_level.filter(|_| o.quest) {
-                        quests_by_level.entry(level).or_default().insert(id);
+                    if o.quest {
+                        quests_by_level.entry(o.quest_level).or_default().insert(id);
                     }
                     if !actor
                         && !o.destructible
@@ -1733,7 +1813,7 @@ impl World {
             .copied()
             .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
             .collect();
-        Ok(Self {
+        let mut world = Self {
             content,
             map,
             navigation_geometry: Box::default(),
@@ -1756,7 +1836,9 @@ impl World {
             grenades: Vec::new(),
             fauna_births: Vec::new(),
             named_births: Vec::new(),
+            manor_births: Vec::new(),
             lava_patches: BTreeMap::new(),
+            locker: None,
             ability_state: abilities::State::default(),
             companions: companions::State::default(),
             finale: endgame_ai::Actors::default(),
@@ -1774,6 +1856,7 @@ impl World {
             tick: 0,
             ids,
             name: "Development tutorial".into(),
+            background: 0,
             safe: false,
             owner: None,
             max_players: 85,
@@ -1786,6 +1869,8 @@ impl World {
             setpieces: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
+            event_reserves: vec![],
+            event_waiting: None,
             admission_open: true,
             bag_expiry: BTreeMap::new(),
             cleared: false,
@@ -1794,7 +1879,9 @@ impl World {
             closed_vaults: BTreeMap::new(),
             trades: BTreeMap::new(),
             trade_requests: BTreeMap::new(),
-        })
+        };
+        world.jungle_initialize()?;
+        Ok(world)
     }
     pub fn settled(&self) -> Result<bool> {
         for p in self.players.values() {
@@ -1929,7 +2016,6 @@ impl World {
             pos.x.is_finite() && pos.y.is_finite() && self.map.cell(pos.x, pos.y).is_some(),
             "entity spawn outside map"
         );
-        let cell = pos.y.floor() as usize * self.map.width as usize + pos.x.floor() as usize;
         let definition = self.content.get(kind)?;
         let id = allocate_id(&self.ids)?;
         let extra_stats = if definition.class == "Portal" {
@@ -1963,9 +2049,12 @@ impl World {
                     orbit: None,
                     hp: definition.hp,
                     size: definition.size,
-                    condition: crate::dungeon::abyss::initial_condition(kind)
+                    condition: crate::dungeon::manor::initial_condition(kind)
+                        | crate::dungeon::abyss::initial_condition(kind)
                         | crate::dungeon::spider::initial_condition(kind)
                         | crate::dungeon::snake::initial_condition(kind)
+                        | crate::dungeon::jungle::initial_condition(kind)
+                        | crate::dungeon::davy::initial_condition(kind)
                         | (if kind == 0x91a {
                             crate::condition::bit(crate::condition::INVULNERABLE)
                         } else {
@@ -2000,26 +2089,40 @@ impl World {
                 })),
             },
         );
+        self.index_actor(id);
+        Ok(id)
+    }
+    fn index_actor(&mut self, id: i32) {
+        let e = &self.entities[&id];
+        let kind = e.kind;
+        let definition = &self.content.objects[&kind];
+        let cell = e.pos.y.floor() as usize * self.map.width as usize + e.pos.x.floor() as usize;
         let actor = !definition.passive_destructible();
         self.cells.insert(cell, id, actor);
-        if actor {
-            self.actor_ids.insert(id);
-            self.npc_global_ids.insert(id);
-            self.non_population_ids.insert(id);
+        if e.parent.is_some() || e.expires.is_some() {
+            self.timed_ids.insert(id);
         }
+        if !actor {
+            return;
+        }
+        self.actor_ids.insert(id);
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
         }
         if kind == 0xd5f {
             self.pentaract_ids.insert(id);
         }
-        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
-            self.quests_by_level.entry(level).or_default().insert(id);
+        self.npc_global_ids.insert(id);
+        self.non_population_ids.insert(id);
+        if definition.quest {
+            self.quests_by_level
+                .entry(definition.quest_level)
+                .or_default()
+                .insert(id);
         }
-        Ok(id)
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
-        // Native interaction picks one nearest object; an exit on a bag makes that loot unreachable.
+        // Nearest-only interaction masks co-located loot or portals: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/game/GameSprite.as#L195-L225
         let pos = (0..8)
             .map(|i| {
                 let angle = i as f32 * std::f32::consts::TAU / 8.;
@@ -2031,8 +2134,7 @@ impl World {
             .find(|pos| {
                 self.walkable(*pos)
                     && self
-                        .entities
-                        .values()
+                        .entities_near(*pos, 2.)
                         .filter(|e| {
                             matches!(
                                 self.content.objects[&e.kind].class.as_str(),
@@ -2041,7 +2143,7 @@ impl World {
                         })
                         .all(|e| e.pos.distance(*pos) > 1.5)
             })
-            .context("boss exit has no walkable position clear of loot and interactions")?;
+            .context("portal has no walkable position clear of loot and interactions")?;
         self.spawn_entity(kind, pos, vec![])
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
@@ -2054,14 +2156,14 @@ impl World {
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
         let definition = &self.content.objects[&entity.kind];
-        if let Some(level) = definition.quest_level.filter(|_| definition.quest) {
+        if definition.quest {
             let ids = self
                 .quests_by_level
-                .get_mut(&level)
-                .expect("quest level missing");
+                .get_mut(&definition.quest_level)
+                .expect("quest index missing");
             assert!(ids.remove(&id), "indexed quest missing");
             if ids.is_empty() {
-                self.quests_by_level.remove(&level);
+                self.quests_by_level.remove(&definition.quest_level);
             }
         }
         if let Some(slot) = entity.population_slot {
@@ -2100,7 +2202,7 @@ impl World {
             .i32(self.map.height)
             .utf(&self.name)
             .u32(1)
-            .i32(0)
+            .i32(self.background)
             .u8(u8::from(self.allow_teleport()))
             .u8(1)
             .i16(0)
@@ -2238,7 +2340,7 @@ impl World {
                 discarded_attack: None,
                 tick: 0,
                 last_motion: None,
-                last_ability: None,
+                ability_ready_ms: 0,
                 boosts: Vec::new(),
                 last_companion: None,
                 ability_shot: None,
@@ -2248,6 +2350,7 @@ impl World {
         o.i32(id).i32(char_id);
         send(&self.players[&id], wire::CREATE_SUCCESS, o.0);
         self.updates(id, true)?;
+        self.locker_key_ui(id);
         tracing::info!(
             player = id,
             character = char_id,
@@ -2435,20 +2538,37 @@ impl World {
         }
         let player = &self.players[&id];
         let level = player.character.level;
-        let mut lower = self.quests_by_level.range(..=level).rev().peekable();
+        let mut lower = self
+            .quests_by_level
+            .range(Some(i32::MIN)..=Some(level))
+            .rev()
+            .peekable();
         let mut upper = self
             .quests_by_level
-            .range((std::ops::Bound::Excluded(level), std::ops::Bound::Unbounded))
+            .range((
+                std::ops::Bound::Excluded(Some(level)),
+                std::ops::Bound::Unbounded,
+            ))
             .peekable();
         let levels = std::iter::from_fn(|| match (lower.peek(), upper.peek()) {
-            (Some((a, _)), Some((b, _))) if a.abs_diff(level) <= b.abs_diff(level) => lower.next(),
+            (Some((a, _)), Some((b, _)))
+                if a.map(|a| a.abs_diff(level)) <= b.map(|b| b.abs_diff(level)) =>
+            {
+                lower.next()
+            }
             (Some(_), None) => lower.next(),
             _ => upper.next(),
         });
+        let levels = self
+            .quests_by_level
+            .get_key_value(&None)
+            .into_iter()
+            .chain(levels);
         let mut best: Option<&Entity> = None;
         let mut difference = u32::MAX;
         for (&quest_level, ids) in levels {
-            if quest_level.abs_diff(level) > difference {
+            let delta = quest_level.map_or(0, |quest_level| quest_level.abs_diff(level));
+            if delta > difference {
                 break;
             }
             // Equally suitable levels on both sides must compete on distance, not iteration order.
@@ -2470,7 +2590,7 @@ impl World {
                         .is_lt()
                 }) {
                     best = Some(e);
-                    difference = quest_level.abs_diff(level);
+                    difference = delta;
                 }
             }
         }
@@ -3241,7 +3361,7 @@ impl World {
         }
         if matches!(
             item.activate.as_str(),
-            "Dye" | "Pet" | "PermaPet" | "Create" | "UnlockPortal"
+            "Pet" | "PermaPet" | "Create" | "UnlockPortal"
         ) {
             ensure!(
                 slot.object == id,
@@ -3264,7 +3384,13 @@ impl World {
                 if let Some(value) = item.textures[1] {
                     tex2 = value;
                 }
+                let source = if slot.object == id {
+                    None
+                } else {
+                    Some(self.reserve_ground_dye(id, slot)?)
+                };
                 let mut plan = self.consumable_plan(id, slot, -1)?;
+                plan.ground_dye = source;
                 plan.appearance = Some((slot, tex1, tex2));
                 Ok(Some(plan))
             }
@@ -3324,6 +3450,7 @@ impl World {
     fn plan(&self, id: i32, items: Vec<i32>, bag: Option<(i32, Vec<i32>)>) -> InventoryPlan {
         let p = &self.players[&id];
         InventoryPlan {
+            ground_dye: None,
             player: id,
             items,
             revision: p.character.revision,
@@ -3561,8 +3688,15 @@ impl World {
         let player = plan.player;
         let source = (plan.character, plan.revision);
         let companion = plan.companion.clone();
+        let ground_dye = plan.ground_dye.as_ref().map(|source| source.bag_id());
         let result = self.publish_inventory(plan, result);
         if let Err(error) = &result {
+            if let Some(id) = ground_dye
+                && let Some(bag) = self.entities.get_mut(&id)
+            {
+                // An error may conceal COMMIT; retain even a damaged reservation, never refund the source.
+                bag.reserved = true;
+            }
             self.discard_consumable(source);
             if let Err(cleanup) = self.discard_companion(&companion) {
                 tracing::error!(player,%cleanup,"companion cleanup failed after rejected publication");
@@ -3573,6 +3707,9 @@ impl World {
     }
     fn publish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
         let revision = result?;
+        if plan.ground_dye.is_some() {
+            self.validate_ground_dye(&plan)?;
+        }
         let p = self
             .players
             .get_mut(&plan.player)
@@ -3640,7 +3777,7 @@ impl World {
                 "permanent stat potion committed"
             );
         }
-        if let Some((_, tex1, tex2)) = plan.appearance {
+        if let Some((slot, tex1, tex2)) = plan.appearance {
             p.character.tex1 = tex1;
             p.character.tex2 = tex2;
             tracing::info!(
@@ -3648,6 +3785,9 @@ impl World {
                 tex1,
                 tex2,
                 revision,
+                source = slot.object,
+                slot = slot.slot,
+                item = slot.kind,
                 "appearance consumable committed"
             );
         }
@@ -3824,6 +3964,10 @@ impl World {
                     .chain(std::iter::once(&mut snapshot.abysses))
                     .chain(std::iter::once(&mut snapshot.trenches))
                     .chain(std::iter::once(&mut snapshot.spider_dens))
+                    .chain(std::iter::once(&mut snapshot.jungles))
+                    .chain(std::iter::once(&mut snapshot.manors))
+                    .chain(std::iter::once(&mut snapshot.beaches))
+                    .chain(std::iter::once(&mut snapshot.davy_lockers))
                     .zip(p.clears_queued)
                 {
                     *count = count
@@ -3859,9 +4003,13 @@ impl World {
         );
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
+            || snapshot.jungles > p.character.jungles
             || snapshot.abysses > p.character.abysses
             || snapshot.trenches > p.character.trenches
-            || snapshot.spider_dens > p.character.spider_dens;
+            || snapshot.spider_dens > p.character.spider_dens
+            || snapshot.manors > p.character.manors
+            || snapshot.beaches > p.character.beaches
+            || snapshot.davy_lockers > p.character.davy_lockers;
         let leveled = snapshot.level > p.character.level;
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
@@ -3877,8 +4025,12 @@ impl World {
         p.character.pirate_caves = snapshot.pirate_caves;
         p.character.dungeons = snapshot.dungeons;
         p.character.abysses = snapshot.abysses;
+        p.character.jungles = snapshot.jungles;
         p.character.trenches = snapshot.trenches;
         p.character.spider_dens = snapshot.spider_dens;
+        p.character.manors = snapshot.manors;
+        p.character.beaches = snapshot.beaches;
+        p.character.davy_lockers = snapshot.davy_lockers;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
             p.character.hp = values[0];
@@ -4206,7 +4358,8 @@ impl World {
     fn drop_loot(&mut self, defeated: &Entity) -> Result<()> {
         if crate::endgame::HEROES.contains(&defeated.kind) {
             self.critical_deaths.push(defeated.id);
-        } else if crate::quest::final_root(defeated.kind)
+        } else if (crate::quest::final_root(defeated.kind)
+            || matches!(defeated.kind, 0x678 | 0xd50 | 0xd54))
             && let Some(original) = defeated.quest
         {
             self.critical_deaths.push(original);
@@ -4236,12 +4389,38 @@ impl World {
             if self.clear_exit.is_none() {
                 let kind = if defeated.kind == crate::dungeon::abyss::MALPHAS {
                     0x71c
-                } else if defeated.kind == crate::dungeon::snake::BOSS {
+                } else if matches!(
+                    defeated.kind,
+                    crate::dungeon::snake::BOSS
+                        | crate::dungeon::jungle::BOSS
+                        | crate::dungeon::beach::BOSS
+                        | crate::dungeon::davy::BOSS
+                ) {
                     0x704
                 } else {
                     0x71d
                 };
-                let exit = self.spawn_exit(kind, defeated.pos)?;
+                let pos = if defeated.kind == crate::dungeon::manor::BOSS {
+                    let sites: Vec<_> = self
+                        .map
+                        .cells
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| c.object == Some(crate::dungeon::manor::BOSS))
+                        .map(|(i, _)| Pos {
+                            x: (i % self.map.width as usize) as f32 + 0.5,
+                            y: (i / self.map.width as usize) as f32 + 0.5,
+                        })
+                        .collect();
+                    ensure!(
+                        sites.len() == 1,
+                        "Manor completion requires one authored arena marker"
+                    );
+                    sites[0]
+                } else {
+                    defeated.pos
+                };
+                let exit = self.spawn_exit(kind, pos)?;
                 self.entities.get_mut(&exit).unwrap().published = false;
                 self.clear_exit = Some(exit);
             }
@@ -4263,7 +4442,11 @@ impl World {
             0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | 0x1705
         ) {
             self.content.objects[&defeated.kind].hp / 100
-        } else if defeated.kind == 0x927 {
+        } else if defeated.kind == crate::dungeon::manor::BOSS {
+            100
+        } else if defeated.kind == crate::dungeon::manor::COFFIN {
+            800
+        } else if matches!(defeated.kind, 0x927 | crate::dungeon::davy::BOSS) {
             100
         } else {
             (self.content.objects[&defeated.kind].hp / 10).max(1)
@@ -4283,6 +4466,10 @@ impl World {
         eligible.sort_by_key(|(_, damage)| std::cmp::Reverse(*damage));
         if eligible.is_empty() {
             return Ok(());
+        }
+        if defeated.kind == crate::dungeon::beach::BUM {
+            // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
+            return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
         // Private boss rewards belong to every eligible character, not only the first eight.
@@ -4309,6 +4496,16 @@ impl World {
                 if !items.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
                     items.push(item as i32);
                 }
+            }
+        }
+        if matches!(defeated.kind, 0x20d | 0x952 | 0x949) {
+            for (owner, item) in crate::loot::fauna_private_rewards(
+                &self.content,
+                defeated.kind,
+                &eligible,
+                &mut self.rng,
+            ) {
+                drops.entry(owner).or_default().push(i32::from(item));
             }
         }
         for (owner, items) in drops {
@@ -4368,9 +4565,10 @@ impl World {
                 x: resolved.x,
                 y: next.y,
             };
-            let x_clear = self.ocean_walkable(kind, horizontal);
-            let y_clear = self.ocean_walkable(kind, vertical);
-            if self.ocean_walkable(kind, next) && (!slide || x_clear || y_clear) {
+            let clear = |pos| self.jungle_walkable(kind, pos) || self.ocean_walkable(kind, pos);
+            let x_clear = clear(horizontal);
+            let y_clear = clear(vertical);
+            if clear(next) && (!slide || x_clear || y_clear) {
                 resolved = next;
             } else if slide {
                 // Wall contact removes the blocked component, not the entire movement step.
@@ -4499,6 +4697,7 @@ impl World {
         if !self.encounter || self.safe {
             return packets;
         }
+        self.beach_notice();
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
         let audience: Vec<_> = self
@@ -4514,6 +4713,7 @@ impl World {
                 continue;
             };
             let kind = entity.kind;
+            let _context = crate::supervision::npc(id, kind);
             let pos = entity.pos;
             if entity.hp == self.content.objects[&kind].hp
                 && (kind == crate::dungeon::abyss::IDOL || kind == 0xd7e && entity.stage.is_none())
@@ -4524,7 +4724,7 @@ impl World {
             // Self-destruction is a deadline, not target acquisition or a weapon cooldown.
             let shield_burst = self.shield_burst(id);
             let burst = shield_burst
-                || (kind == 0x91a
+                || (matches!(kind, 0x91a | crate::dungeon::manor::MINE)
                     && entity.expires == Some(self.now + 50)
                     && self.now >= entity.next_shot);
             if !burst
@@ -4542,15 +4742,34 @@ impl World {
                         && !p.death_pending
                         && !p.departing
                         && !p.paused
-                        && (kind == 0x6d8
+                        && (matches!(kind, 0x6d8 | crate::dungeon::manor::MINE)
                             || p.conditions(self.now)
                                 & crate::condition::bit(crate::condition::INVISIBLE)
                                 == 0)
                 })
-                .map(|p| p.pos)
-                .chain(self.decoy_positions())
-                .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
+                .map(|p| {
+                    (
+                        kind == crate::dungeon::davy::BOSS
+                            && entity.reaction_until > self.now
+                            && pos.distance(p.pos) < 12.
+                            && p.conditions(self.now)
+                                & crate::condition::bit(crate::condition::PARALYZED)
+                                != 0,
+                        p.pos,
+                    )
+                })
+                .chain(self.decoy_positions().map(|p| (false, p)))
+                .min_by(|(ap, a), (bp, b)| {
+                    bp.cmp(ap)
+                        .then_with(|| pos.distance(*a).total_cmp(&pos.distance(*b)))
+                })
+                .map(|(_, p)| p);
             let wake = match kind {
+                crate::dungeon::manor::KAGE
+                | crate::dungeon::manor::BAT
+                | crate::dungeon::manor::CHASER
+                | crate::dungeon::manor::DECOY
+                | 0x1727 => 20.,
                 0x953 | 0x954 => 6.,
                 0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
@@ -4566,7 +4785,9 @@ impl World {
             // Activated enemies keep the same sight radius; they do not keep
             // shooting once the player leaves that radius.
             let radius = wake;
-            let target = if burst {
+            let target = if burst && kind == crate::dungeon::manor::MINE {
+                nearest.filter(|p| pos.distance(*p) < 60.)
+            } else if burst {
                 Some(pos)
             } else {
                 nearest.filter(|p| pos.distance(*p) < radius)
@@ -4578,7 +4799,9 @@ impl World {
                     && !p.paused
                     && pos.distance(p.pos) < radius
             });
-            if !burst && target.is_none() && !nearby {
+            let manor_clock =
+                crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
+            if !burst && target.is_none() && !nearby && !manor_clock {
                 self.suspend_npc(id, delta);
                 continue;
             }
@@ -4620,8 +4843,18 @@ impl World {
                         continue;
                     }
                 }
+            } else if crate::dungeon::davy::profile(kind).is_some() {
+                self.locker_movement(id, elapsed)
             } else if kind == 0x909 && current.stage == Some(1) {
                 (Motion::Stationary, 0.)
+            } else if crate::dungeon::jungle::ROSTER.contains(&kind) {
+                crate::encounter::jungle::movement(
+                    kind,
+                    current.stage.expect("Jungle movement phase"),
+                    current.parent.is_some(),
+                )
+            } else if crate::dungeon::manor::ROSTER.contains(&kind) {
+                self.manor_movement(id, target, elapsed)
             } else if crate::dungeon::trench::ROSTER.contains(&kind) {
                 self.ocean_movement(id, target, elapsed)
             } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
@@ -5039,7 +5272,7 @@ impl World {
                 };
             }
             let e = &self.entities[&id];
-            let schedule = if burst {
+            let schedule = if burst && kind != crate::dungeon::manor::MINE {
                 None
             } else {
                 match self.npc_attack_schedule(id, elapsed) {
@@ -5063,7 +5296,8 @@ impl World {
             let result = if let Some(schedule) = &schedule {
                 self.scheduled_attacks(id, target, schedule)
             } else {
-                self.legacy_enemy_shots(id, target.expect("legacy attack target acquired"), elapsed)
+                let Some(target) = target else { continue };
+                self.legacy_enemy_shots(id, target, elapsed)
             };
             let shots = match result {
                 Ok(shots) => shots,
@@ -5144,6 +5378,20 @@ impl World {
                     );
                 }
                 self.bullets.push(bullet);
+            }
+            // Shoot then retire, independent of the proximity poll; keep the owner until publication: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.UndeadLair.cs#L462-L480
+            if matches!(kind, 0xda2 | 0xda3) && !notices.is_empty() {
+                self.entities.get_mut(&id).unwrap().expires.set(
+                    Some(self.now + 50),
+                    id,
+                    &mut self.timed_ids,
+                );
+                tracing::debug!(
+                    entity = id,
+                    kind,
+                    shots = notices.len(),
+                    "Lair trap detonated"
+                );
             }
             packets.extend(
                 enemy_shots::packets(id, &notices)
@@ -5294,6 +5542,9 @@ impl World {
         let mechanics_started = crate::performance::Measure::start();
         self.mechanic_expiry();
         self.abyss_step();
+        if let Err(error) = self.locker_step() {
+            tracing::error!(%error, "Davy Locker progression refused");
+        }
         self.ground_step();
         self.ocean_step();
         self.event_step();
@@ -5527,6 +5778,14 @@ mod cover_example;
 mod timing_example;
 
 #[cfg(test)]
+mod ground_dye_tests;
+#[cfg(test)]
+mod lair_trap_tests;
+#[cfg(test)]
+mod manor_tests;
+#[cfg(test)]
+mod starter_loot_tests;
+#[cfg(test)]
 mod view_navigation_tests;
 
 #[cfg(test)]
@@ -5599,9 +5858,13 @@ mod tests {
             tiles: 0,
             pirate_caves: 0,
             dungeons: [0; 3],
+            jungles: 0,
             abysses: 0,
             trenches: 0,
             spider_dens: 0,
+            manors: 0,
+            beaches: 0,
+            davy_lockers: 0,
         }
     }
 
@@ -6006,7 +6269,7 @@ mod tests {
                 (244, None, "", 0, 0)
             );
         }
-        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (14, 14));
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (10, 20));
         assert_eq!(w.population_counts[0], 0);
         for terrain in 1..=12 {
             let region = &w.population_regions[terrain];
@@ -6076,7 +6339,7 @@ mod tests {
                 assert!(entities.contains(&(i % 2100, i / 2100, kind)));
             }
         }
-        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (14, 14));
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (10, 20));
         for terrain in 1..=12 {
             let region = &w.population_regions[terrain];
             assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
@@ -6257,16 +6520,20 @@ mod tests {
                 .into_iter()
                 .map(|id| &w.entities[&id])
                 .collect();
-            assert_eq!(roots.len(), 14);
+            assert_eq!(roots.len(), 10);
             let mut roster = BTreeMap::new();
             for e in &roots {
                 *roster.entry(e.kind).or_insert(0usize) += 1;
             }
             assert_eq!(roster.remove(&0x668), Some(3));
             assert_eq!(roster.remove(&0x67d), Some(3));
-            assert_eq!(roster.len(), 8);
-            assert!(roster.values().all(|count| *count == 1));
-            assert_eq!(w.setpieces.len(), 14);
+            assert_eq!(
+                roster,
+                [(0x675, 1), (0x91b, 1), (0x91f, 1), (0x928, 1)]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>()
+            );
+            assert_eq!(w.setpieces.len(), 20);
             for terrain in 1..=12 {
                 let region = &w.population_regions[terrain];
                 assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
@@ -6295,6 +6562,174 @@ mod tests {
                 w.actor_ids.len(),
                 roots.len()
             );
+        }
+    }
+
+    #[test]
+    fn map_info_selects_blue_only_for_nexus_and_vault() {
+        let mut d = directory();
+        // Packet assertions must not depend on random dungeon generation.
+        d.prepared_seed = Some(12351);
+        for (template, background) in [
+            ("nexus", 2),
+            ("vault", 2),
+            ("tutorial", 0),
+            ("nexus-limbo", 0),
+            ("guild-hall-1", 0),
+            ("pirate-cave", 0),
+            ("sprite-world", 0),
+        ] {
+            let w = d.make(template, "Renamed world", false, None).unwrap();
+            let packet = w.map_info();
+            let mut r = wire::Reader::new(&packet);
+            assert_eq!(r.i32().unwrap(), w.map.width);
+            assert_eq!(r.i32().unwrap(), w.map.height);
+            assert_eq!(r.utf().unwrap(), "Renamed world");
+            assert_eq!(r.i32().unwrap(), 1);
+            assert_eq!(r.i32().unwrap(), background, "{template}");
+            assert_eq!(r.u8().unwrap(), u8::from(w.allow_teleport()));
+            assert_eq!(r.u8().unwrap(), 1);
+            assert_eq!(r.i16().unwrap(), 0);
+            assert_eq!(r.i16().unwrap(), 0);
+            r.done().unwrap();
+        }
+    }
+
+    #[test]
+    fn earned_portals_leave_loot_and_other_portals_individually_reachable() {
+        let mut d = directory();
+        let mut origin = arena(1);
+        origin.name = "Realm".into();
+        origin.ids = d.ids.clone();
+        d.worlds.insert(-3, origin);
+        let w = d.worlds.get_mut(&-3).unwrap();
+        let (x, y) = (10.5, 10.5);
+        let pos = Pos { x, y };
+        let public = w.loot_bag(pos, None, vec![0xa23, 0xa22]).unwrap();
+        let private = w
+            .loot_bag(Pos { x: x + 3.5, y }, Some(17), vec![0xa23])
+            .unwrap();
+        let mut expected_rng = w.rng.clone();
+        let snake = d.drop_dungeon_portal(-3, 0x718, pos).unwrap();
+        let sprite = d.drop_dungeon_portal(-3, 0x70c, pos).unwrap();
+        let w = &d.worlds[&-3];
+        let objects = [public, private, snake, sprite];
+        for id in objects {
+            let at = w.entities[&id].pos;
+            assert!(w.walkable(at));
+            for other in objects.into_iter().filter(|other| *other != id) {
+                assert!(
+                    at.distance(w.entities[&other].pos) > 1.5,
+                    "interaction {id} overlaps {other}"
+                );
+            }
+        }
+        assert_eq!(&w.entities[&public].items[..2], &[0xa23, 0xa22]);
+        assert_eq!(w.entities[&private].extra_stats, vec![(54, 17)]);
+        assert_eq!(w.bag_expiry[&public], 60000);
+        assert_eq!(w.rng.clone().r#gen::<u64>(), expected_rng.r#gen::<u64>());
+        for (id, name, lifetime) in [(snake, "Snake Pit", 600), (sprite, "Sprite World", 300)] {
+            let portal = &d.portals[&id];
+            assert_eq!(portal.origin, -3);
+            assert_eq!(portal.expires, d.tick + lifetime);
+            assert_eq!(d.worlds[&portal.destination.unwrap()].name, name);
+        }
+    }
+
+    #[tokio::test]
+    async fn simulation_ticks_service_a_bounded_fifo_batch_of_serial_packet_jobs() {
+        let mut directory = directory();
+        let (tx, mut rx) = mpsc::channel::<Job>(256);
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = observed.clone();
+        let record = move |n, completed: oneshot::Sender<()>| -> Job {
+            let seen = seen.clone();
+            Box::new(move |_| {
+                seen.lock().unwrap().push(n);
+                completed.send(()).unwrap();
+            })
+        };
+        let (completed, mut reply) = oneshot::channel();
+        assert!(tx.try_send(record(0, completed)).is_ok());
+        let packets = tokio::spawn(async move {
+            for n in 1..17 {
+                reply.await.unwrap();
+                let (completed, next) = oneshot::channel();
+                assert!(tx.send(record(n, completed)).await.is_ok());
+                reply = next;
+            }
+            reply.await.unwrap();
+        });
+        service_queued_jobs(&mut directory, &mut rx).await;
+        assert_eq!(*observed.lock().unwrap(), (0..16).collect::<Vec<_>>());
+        assert!(!packets.is_finished());
+        service_queued_jobs(&mut directory, &mut rx).await;
+        packets.await.unwrap();
+        assert_eq!(*observed.lock().unwrap(), (0..17).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn classic_highland_leaders_earn_snake_portals_but_followers_do_not() {
+        for kind in [
+            0x640, 0x645, 0x646, 0x649, 0x650, 0x63e, 0x642, 0x647, 0x64f,
+        ] {
+            let eligible = matches!(kind, 0x640 | 0x645 | 0x646 | 0x649 | 0x650);
+            assert_eq!(
+                crate::dungeon::portal_drop(kind),
+                eligible.then_some((0x718, 0.17))
+            );
+            let family = population::FAMILIES.iter().find(|f| f.leader == kind);
+            let mut w = arena(family.map_or(6, |f| f.terrain));
+            w.name = "Realm".into();
+            let owner = w.enter(ch(&w), None).unwrap();
+            let pos = Pos { x: 12.5, y: 12.5 };
+            if let Some(family) = family {
+                let positions = w.family_layout(pos, family, &[]).unwrap();
+                w.place_camp(family, positions).unwrap();
+            }
+            let mut drops = 0;
+            for seed in 0..64 {
+                let enemy = if family.is_some() {
+                    let slot = w.camps[0].start;
+                    if w.population[slot].entity.is_none() {
+                        w.place_member(0, slot, pos).unwrap();
+                    }
+                    let id = w.population[slot].entity.unwrap();
+                    assert_eq!(w.entities[&id].camp, Some(0));
+                    id
+                } else {
+                    w.spawn_entity(kind, pos, vec![]).unwrap()
+                };
+                let hp = w.entities[&enemy].hp;
+                let defense = w.content.objects[&kind].defense;
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.damage_enemy(owner, enemy, defense + 1, false, &[], None)
+                    .unwrap();
+                assert!(w.portal_requests.is_empty(), "nonlethal hit: {kind:#x}");
+                w.damage_enemy(owner, enemy, hp + defense, false, &[], None)
+                    .unwrap();
+                assert!(!w.entities.contains_key(&enemy));
+                assert!(
+                    w.portal_requests
+                        .iter()
+                        .all(|(portal, p)| *portal == 0x718 && p.distance(pos) < 0.01)
+                );
+                assert!(w.portal_requests.len() <= 1);
+                let count = w.portal_requests.len();
+                w.damage_enemy(owner, enemy, hp, false, &[], None).unwrap();
+                assert_eq!(
+                    w.portal_requests.len(),
+                    count,
+                    "duplicate defeat: {kind:#x}"
+                );
+                drops += w.portal_requests.len();
+                w.portal_requests.clear();
+                for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                    w.remove_entity(bag);
+                }
+            }
+            assert_eq!(drops > 0, eligible, "observed drops for {kind:#x}: {drops}");
+            assert!(drops < 64, "drops are not guaranteed for {kind:#x}");
         }
     }
 
@@ -6628,6 +7063,8 @@ mod tests {
             (0x120, true, 100),
             (0x100, false, 100),
             (0x100, true, 92),
+            (0x17b, false, 100),
+            (0x17b, true, 100),
         ] {
             let mut w = world();
             for id in w.entities.keys().copied().collect::<Vec<_>>() {
