@@ -1,7 +1,7 @@
 use super::{tests, *};
 use crate::{
     condition,
-    dungeon::abyss::{self, BRIDGE, IDOL, LAVA, MALPHAS},
+    dungeon::abyss::{self, BRIDGE, IDOL, MALPHAS},
 };
 
 fn fixture() -> (World, i32) {
