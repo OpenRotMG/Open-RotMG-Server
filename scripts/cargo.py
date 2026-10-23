@@ -12,7 +12,6 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-GIB = 1024**3
 MARKER = 'OpenRotMG disposable Cargo intermediates v1\n'
 
 
@@ -27,9 +26,7 @@ def walk_error(error):
     raise error
 
 
-def allocation(root):
-    seen = set()
-    total = 0
+def validate_cleanup(root):
     device = root.stat().st_dev
     for parent, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
         for name in dirs + files:
@@ -37,17 +34,6 @@ def allocation(root):
             info = path.lstat()
             if info.st_dev != device or path.is_symlink():
                 raise RuntimeError(f'Build cache contains a symlink or another filesystem: {path}')
-            identity = (info.st_dev, info.st_ino)
-            if identity not in seen:
-                seen.add(identity)
-                total += info.st_blocks * 512
-    return total
-
-
-def report(root):
-    free = shutil.disk_usage(root).free / GIB
-    used = allocation(root) / GIB
-    print(f'Build storage: path={root}; free={free:.2f}GiB; cache={used:.2f}GiB', flush=True)
 
 
 @contextmanager
@@ -78,7 +64,7 @@ def locked(root, cleaning=False):
 
 
 def clean(root):
-    allocation(root)
+    validate_cleanup(root)
     for target in root.iterdir():
         if not target.is_dir():
             continue
@@ -132,18 +118,21 @@ def execute(command, target, output, lock):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Serialized Cargo builds with storage reporting, not free-space or cache-size admission gates.',
+    parser = argparse.ArgumentParser(description='Cargo builds with isolated, reusable targets and explicit cache cleanup.',
                                      epilog='User-wide cache: $XDG_CACHE_HOME/openrotmg/cargo (default ~/.cache/openrotmg/cargo). clean removes only managed deps/incremental, never SDK/build data or binaries.')
     parser.add_argument('--toolchain', help='Explicit rustup toolchain, e.g. 1.94.1')
     parser.add_argument('--output', type=Path, help='Atomically retain the server executable outside the cache (build only)')
-    parser.add_argument('command', choices=['build', 'check', 'test', 'clippy', 'fmt', 'status', 'clean'])
+    parser.add_argument('command', choices=['build', 'check', 'test', 'clippy', 'fmt', 'clean'])
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     try:
-        if args.command in ('status', 'clean') and args.arguments:
-            raise RuntimeError('status and clean do not accept Cargo arguments')
+        if args.command == 'clean' and args.arguments:
+            raise RuntimeError('clean does not accept Cargo arguments')
         if args.output is not None and args.command != 'build':
             raise RuntimeError('--output requires build')
+        toolchain = ['+' + args.toolchain] if args.toolchain else []
+        if args.command == 'fmt':
+            return subprocess.call(['cargo', *toolchain, 'fmt', *args.arguments], cwd=ROOT)
         if any(arg.split('=', 1)[0] in ('--target-dir', '--config', '--manifest-path', '--out-dir', '--artifact-dir') for arg in args.arguments):
             raise RuntimeError('Storage/manifest overrides bypass the managed build cache and are not allowed')
         if 'CARGO_TARGET_DIR' in os.environ or 'CARGO_BUILD_TARGET_DIR' in os.environ or 'CARGO_BUILD_BUILD_DIR' in os.environ:
@@ -155,23 +144,18 @@ def main(argv=None):
             if args.command == 'clean':
                 clean(root)
                 return 0
-            report(root)
-            if args.command == 'status':
-                return 0
-            toolchain = ['+' + args.toolchain] if args.toolchain else []
             version = subprocess.check_output(['rustc', *toolchain, '-vV'], cwd=ROOT, text=True)
-            settings = {key: value for key, value in os.environ.items() if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))}
+            # Cargo tracks env! inputs; runtime diagnostics and job counts need no separate target tree.
+            settings = {key: value for key, value in os.environ.items()
+                        if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))
+                        and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'CARGO_BUILD_JOBS')}
             # Cargo can treat an older sibling checkout's different inputs as fresh.
             key = hashlib.sha256(json.dumps([str(ROOT), version, settings], sort_keys=True).encode()).hexdigest()[:20]
             target = root / key
             print(f'Cargo target: {target}; checkout={ROOT}', flush=True)
-            code = execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output, lock)
-            if code:
-                return code
-            report(root)
-            return 0
+            return execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output, lock)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
-        print(f'Build storage error: {error}', file=sys.stderr)
+        print(f'Cargo wrapper error: {error}', file=sys.stderr)
         return 1
 
 

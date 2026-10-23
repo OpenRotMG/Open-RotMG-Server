@@ -227,10 +227,7 @@ async fn community_social_capacity_fence_survives_registered_routes_release_and_
         assert!(!t.root.join("prepared-realm-capacity.json").exists());
         assert_eq!(
             app.world
-                .directory(|d| {
-                    let realm = d.initial(-3)?;
-                    Ok(d.worlds[&realm].max_players)
-                })
+                .directory(|d| Ok(d.worlds[&-3].max_players))
                 .await
                 .unwrap(),
             4
