@@ -325,7 +325,10 @@ pub(super) async fn market(
                         t.offers[0] = mine;
                         t.ready = v.time_ms + 3000;
                         Some(TradeAction::Change { offer: mine })
-                    } else if t.offers[1] == theirs && v.time_ms >= t.ready {
+                    } else if t.offers[1] == theirs
+                        && v.time_ms >= t.ready
+                        && v.clock_at >= t.ready_at
+                    {
                         Some(TradeAction::Accept { mine, theirs })
                     } else {
                         None
@@ -356,6 +359,7 @@ pub(super) async fn market(
         })
     };
     if let Some(action) = action {
+        let changed = matches!(action, TradeAction::Change { .. });
         let id = v.session.player;
         let outcome = app
             .world
@@ -372,6 +376,15 @@ pub(super) async fn market(
             .await;
         match outcome {
             Ok(Some(plan)) => crate::server::persist_trade(app, plan).await?,
+            Ok(None) if changed => {
+                brain
+                    .mind
+                    .market
+                    .trade
+                    .as_mut()
+                    .context("market trade disappeared after offer acknowledgement")?
+                    .ready_at = app.world.clock.now() + std::time::Duration::from_millis(3000);
+            }
             Ok(None) => {}
             Err(error) => {
                 tracing::warn!(account=v.session.account,%error,"market guarded trade rejected; no settlement inferred");

@@ -1,4 +1,5 @@
 use super::*;
+use std::time::{Duration, Instant};
 
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
@@ -164,6 +165,7 @@ pub(in crate::bots) struct SessionTrade {
     pub tradeable: [bool; 12],
     pub offers: [[bool; 12]; 2],
     pub ready: u64,
+    pub ready_at: Instant,
     pub changed: bool,
 }
 impl Market {
@@ -986,6 +988,7 @@ impl Market {
                     tradeable,
                     offers: [[false; 12]; 2],
                     ready: v.time_ms + 3000,
+                    ready_at: v.clock_at + Duration::from_millis(3000),
                     changed: false,
                 });
             }
@@ -995,6 +998,7 @@ impl Market {
                 if let Some(t) = &mut self.trade {
                     t.offers[1] = values;
                     t.ready = v.time_ms + 3000;
+                    t.ready_at = v.clock_at + Duration::from_millis(3000);
                 }
             }
             18 => {

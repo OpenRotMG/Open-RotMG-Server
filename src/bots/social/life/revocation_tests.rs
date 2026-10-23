@@ -170,7 +170,9 @@ async fn withdrawal(ending: Ending) {
     uptake(&app, &mut brain, &mut rx[0]).await;
     tick(&app, &mut brain).await;
     if matches!(ending, Ending::RejectNativeAccept) {
-        brain.mind.market.trade.as_mut().unwrap().ready = 0;
+        let trade = brain.mind.market.trade.as_mut().unwrap();
+        trade.ready = 0;
+        trade.ready_at = app.world.clock.now();
         assert!(!tick(&app, &mut brain).await);
         assert!(
             brain.mind.social.gift.is_none(),

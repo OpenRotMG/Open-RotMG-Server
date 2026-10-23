@@ -153,7 +153,7 @@ impl Context {
             .await
             .unwrap();
         self.record(serde_json::json!({"event":"latch_observation","phase":phase,"world":world,
-            "controller_trade":self.brain.mind.market.trade.as_ref().map(|t| serde_json::json!({"binding":t.binding,"ready":t.ready,"changed":t.changed,"offers":t.offers})),
+            "controller_trade":self.brain.mind.market.trade.as_ref().map(|t| serde_json::json!({"binding":t.binding,"ready":t.ready,"ready_at":format!("{:?}",t.ready_at),"changed":t.changed,"offers":t.offers})),
             "bargain":self.brain.mind.market.bargain}));
         world
     }
@@ -163,7 +163,7 @@ impl Context {
             let result = social::receive_market(&self.app, &mut self.brain, &packet, &v)
                 .await
                 .unwrap();
-            self.record(serde_json::json!({"event":"production_controller_packet_uptake","wire_id":packet.id,"wire_body":if [wire::TEXT,12,18,23,61,67].contains(&packet.id){Some(packet.body)}else{None},"view_time_ms":v.time_ms,"result":format!("{result:?}"),"controller_trade":self.brain.mind.market.trade.as_ref().map(|t|serde_json::json!({"ready":t.ready,"changed":t.changed,"offers":t.offers})),"bargain":self.brain.mind.market.bargain}));
+            self.record(serde_json::json!({"event":"production_controller_packet_uptake","wire_id":packet.id,"wire_body":if [wire::TEXT,12,18,23,61,67].contains(&packet.id){Some(packet.body)}else{None},"view_time_ms":v.time_ms,"result":format!("{result:?}"),"controller_trade":self.brain.mind.market.trade.as_ref().map(|t|serde_json::json!({"ready":t.ready,"ready_at":format!("{:?}",t.ready_at),"changed":t.changed,"offers":t.offers})),"bargain":self.brain.mind.market.bargain}));
             assert_ne!(result, social::MarketUptake::PendingCommit);
         }
     }
@@ -269,6 +269,26 @@ impl Context {
         self.drain().await;
         self.observe_latch("human_change_received_before_sleep")
             .await;
+        let original_ready = self.brain.mind.market.trade.as_ref().unwrap().ready;
+        self.brain.mind.market.trade.as_mut().unwrap().ready = 0;
+        self.driver().await;
+        let unready = self
+            .observe_latch("tick_predicate_forced_but_elapsed_still_unready")
+            .await;
+        assert!(unready["clock_paused"].as_bool().unwrap());
+        assert!(!unready["trade"]["settled"].as_bool().unwrap());
+        assert_eq!(
+            unready["trade"]["accepted"],
+            serde_json::json!([false, false])
+        );
+        assert!(!self.receive_native_latch(masks));
+        self.brain
+            .mind
+            .market
+            .trade
+            .as_mut()
+            .expect("elapsed guard must prevent a rejected premature native Accept")
+            .ready = original_ready;
         let binding = self.brain.mind.market.trade.as_ref().unwrap().binding;
         if stall_executor {
             self.app.world.clock.set_paused(false);
@@ -317,6 +337,7 @@ impl Context {
                 assert_eq!(trade.binding, binding);
                 assert_eq!(trade.peer, self.terms.names[0]);
                 assert!(decision_time >= controller_ready);
+                assert!(self.app.world.clock.now() >= trade.ready_at);
                 assert!(observed["trade"]["settled"].as_bool().unwrap());
                 assert_eq!(
                     observed["trade"]["accepted"],
