@@ -702,6 +702,7 @@ fn roll_table(content: &Content, picks: &[(f64, Pick)], rng: &mut impl Rng) -> O
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     let mut items = if kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
+        || kind == crate::dungeon::trench::HERMIT
         || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b)
         || matches!(kind, 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL)
         || matches!(
@@ -786,6 +787,7 @@ pub fn private(kind: u16) -> bool {
         )
         || crate::quest::final_root(kind)
         || kind == crate::dungeon::davy::BOSS
+        || kind == crate::dungeon::trench::HERMIT
         || matches!(
             kind,
             0x679..=0x67c | 0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL
