@@ -49,7 +49,7 @@ class PicturesBackup(unittest.TestCase):
 
     def test_artwork_bytes_ownership_high_water_restore_and_usable_reload(self):
         bundle = self.bundle
-        self.assertEqual(bundle['schema'], 15)
+        self.assertEqual(bundle['schema'], 16)
         self.assertEqual(len(bundle['game']['pictures']), 2)
         self.assertEqual(bundle['game']['picture_sequence'], [{'id': 1, 'next_id': 4}])
         with closing(sqlite3.connect(self.root / 'written/game.db')) as db:
@@ -65,6 +65,27 @@ class PicturesBackup(unittest.TestCase):
         expected = deepcopy(bundle['game'])
         expected['picture_sequence'][0]['next_id'] = 5
         self.assertEqual(backup.snapshot(restored / 'game.db', backup.RELOADED_GAME), expected)
+
+    def test_account_minds_and_trade_receipts_are_preserved_and_validated(self):
+        self.assertEqual(len(self.bundle['game']['bot_minds']), 2)
+        self.assertEqual(len(self.bundle['game']['trade_transactions']), 1)
+        for table, field, value in [('bot_minds', 'revision', 999), ('bot_minds', 'account', 99999),
+                                    ('bot_minds', 'mind', '{"schema":1,"password":"must-not-export"}'),
+                                    ('trade_transactions', 'owners', '[99999,99998]'),
+                                    ('trade_transactions', 'revisions', '[0,0]'),
+                                    ('trade_transactions', 'writes', '[]'),
+                                    ('trade_transactions', 'market_key', 'unbound'),
+                                    ('trade_transactions', 'delivery', '{}')]:
+            with self.subTest(table=table, field=field):
+                malformed = deepcopy(self.bundle)
+                malformed['game'][table][0][field] = value
+                with self.assertRaises(ValueError):
+                    backup.validate(malformed)
+        for table in ['bot_minds', 'trade_transactions']:
+            malformed = deepcopy(self.bundle)
+            malformed['game'][table] *= 2
+            with self.assertRaises(ValueError):
+                backup.validate(malformed)
 
     def test_invalid_art_archive_is_rejected_before_restore_directory_creation(self):
         cases = []
