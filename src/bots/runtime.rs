@@ -369,7 +369,7 @@ async fn launch(
                         dialogue::end_agreement(&app, &mut brain, "world changed").await;
                         ensure!(transfer.player == id && transfer.output.packets.same_channel(&sender), "collective transfer does not belong to autonomous output");
                         while output.try_recv().is_ok() {}
-                        let destination = transfer.destination;
+                        let Some(destination) = transfer.destination else { return Ok(()); };
                         let character_id = brain.session.2;
                         (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Collective { destination, time: transfer.key_time, key: transfer.key, character: character_id }).await?;
                         tracing::info!(player=id,account,character=character_id,destination,"autonomous collective transfer completed");

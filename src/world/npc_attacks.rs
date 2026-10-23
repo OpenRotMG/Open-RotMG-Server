@@ -152,7 +152,11 @@ impl World {
                 e.hp,
                 state,
                 script.choice,
-                elapsed,
+                if matches!(e.kind, 0xd54 | 0xd55) {
+                    self.now - e.activated.context("Sphinx phase clock missing")?
+                } else {
+                    elapsed
+                },
             )));
         }
         if e.kind == ORYX2 {

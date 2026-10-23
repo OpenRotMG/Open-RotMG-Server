@@ -1,11 +1,11 @@
 use crate::encounter::{Motion, Profile};
 use anyhow::{Result, ensure};
 
-pub const ROOTS: [u16; 4] = [0x91f, 0x91b, 0x928, 0x675];
+pub const ROOTS: [u16; 5] = [0x91f, 0x91b, 0x928, 0x675, 0x678];
 pub const EVENTS: [u16; 3] = [0xd56, 0xd59, 0xd5f];
 pub const EVENT_BOSSES: [u16; 7] = [0xd56, 0xd59, 0xd5f, 0xd50, 0xd54, 0xd61, 0xe37];
 pub fn root(kind: u16) -> bool {
-    ROOTS.contains(&kind) || EVENT_BOSSES.contains(&kind) || kind == 0x678
+    ROOTS.contains(&kind) || EVENT_BOSSES.contains(&kind)
 }
 
 /// Character level windows of the quest monsters, as (kind, first level, last level).
@@ -60,7 +60,7 @@ pub fn window(kind: u16) -> (u8, u8) {
 pub const ROSTER: &[u16] = &[
     0x91b, 0x91c, 0x91d, 0x91e, 0x91f, 0x920, 0x921, 0x922, 0x923, 0x924, 0x928, 0x929, 0x92a,
     0x92b, 0x92c, 0x92d, 0x675, 0x676, 0x677, 0x6c1, 0x6c2, 0x65f, 0x660, 0x661, 0xd56, 0xd57,
-    0xd58, 0xd59, 0xd5a, 0xd5b, 0xd5c, 0xd5d, 0xd5e, 0xd5f, 0xd60,
+    0xd58, 0xd59, 0xd5a, 0xd5b, 0xd5c, 0xd5d, 0xd5e, 0xd5f, 0xd60, 0xd54, 0xd55,
 ];
 pub fn final_root(kind: u16) -> bool {
     matches!(
@@ -69,6 +69,8 @@ pub fn final_root(kind: u16) -> bool {
             | 0x91c
             | 0x92d
             | 0x6c1
+            | 0x678
+            | 0xd54
             | 0xd56
             | 0xd59
             | 0xd5f
@@ -97,8 +99,16 @@ pub fn validate(content: &crate::content::Content, kind: u16) -> Result<()> {
     );
     let object = content.get(kind)?;
     ensure!(object.enemy && object.hp > 0, "invalid Realm quest enemy");
+    if kind == 0xd54 {
+        ensure!(
+            object.per_realm_max == Some(1),
+            "Grand Sphinx requires selected PerRealmMax=1"
+        );
+    }
     let indexes: &[u8] = match kind {
         0x6c2 | 0xd5e..=0xd60 => &[],
+        0xd54 => &[0, 1, 2],
+        0xd55 => &[0, 1],
         0x920 => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
         0x91b | 0x91c | 0x91d | 0x6c1 | 0xd59 | 0xd5a | 0xd5c => &[0, 1],
         _ => &[0],
