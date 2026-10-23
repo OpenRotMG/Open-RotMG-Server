@@ -160,6 +160,77 @@ impl Schedule {
             .collect()
     }
 }
+pub(crate) fn abyss_schedule(kind: u16, elapsed: u64) -> Schedule {
+    use crate::dungeon::abyss::{self, IDOL, MALPHAS};
+    let fan = Attack::fan;
+    let mut state = 0;
+    let mut age = elapsed;
+    let attacks = match kind {
+        0x66d => vec![fan(0, 5, 9., 1000, 20.)],
+        0x66e => vec![fan(0, 3, 7.2, 1000, 15.)],
+        0x66f | 0x670 => vec![fan(0, 3, 9., 1000, 15.)],
+        0x671 | 0x672 => vec![fan(0, 3, 6., 500, 4.8)],
+        0x908 => vec![fan(0, 3, 5., 1200, 5.).chance(0.45)],
+        0x909 => vec![fan(0, 8, 45., 1, 0.).fixed(0.).delay(600).once()],
+        0x90b => vec![
+            fan(0, 1, 0., 200, 4.),
+            fan(0, 8, 45., 1, 0.).fixed(0.).once().enabled(false),
+        ],
+        0x651 => vec![fan(0, 3, 15., 500, 10.)],
+        MALPHAS => {
+            let phase = abyss::phase(elapsed);
+            state = elapsed / 50200 * 7 + phase;
+            age = elapsed % 50200 - [0, 9000, 11500, 23500, 36500, 39000, 47000][phase as usize];
+            let large = phase == 3;
+            let rotation = age.saturating_sub(1800) / 1400 % 3;
+            // Rotation must not rearm the other weapons, including the continuously firing radial slot.
+            vec![
+                fan(
+                    if large { 3 } else { 0 },
+                    1,
+                    0.,
+                    if phase == 5 { 2100 } else { 900 },
+                    8.,
+                )
+                .offset(match phase {
+                    0 => 1.,
+                    2 => 0.6,
+                    _ => 0.,
+                })
+                .chance(match phase {
+                    0 | 2 => 0.15,
+                    3 => 0.2,
+                    5 => 0.25,
+                    _ => 0.,
+                })
+                .delay(if large { 1800 } else { 0 })
+                .enabled(matches!(phase, 0 | 2 | 3 | 5)),
+                fan(2, 6, 60., 1200, 0.).fixed(0.).enabled(phase == 2),
+                fan(4, 3, 120., 700, 0.)
+                    .fixed((rotation as f32 * 40.).to_radians())
+                    .offset(0.7)
+                    .delay(1800)
+                    .enabled(large),
+                fan(3, 1, 0., 2000, 8.)
+                    .chance(0.25)
+                    .delay(3200)
+                    .enabled(large && age >= 3200 && rotation == 1),
+            ]
+        }
+        IDOL => vec![
+            fan(0, 6, 60., 400, 0.).fixed(age as f32 / 1500.),
+            fan(2, 4, 90., 1200, 0.).fixed(0.),
+            fan(3, 3, 10., 1400, 20.),
+            fan(3, 3, 10., 1400, 20.).delay(400),
+        ],
+        _ => unreachable!("unregistered Abyss schedule {kind:#x}"),
+    };
+    Schedule {
+        state,
+        age,
+        attacks,
+    }
+}
 fn manor_schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
     use crate::dungeon::manor::*;
     let mut state = 0;
@@ -231,6 +302,9 @@ pub(crate) fn manor_entry_schedule(kind: u16, stage: u64, elapsed: u64) -> Sched
 }
 
 pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
+    if crate::dungeon::abyss::ROSTER.contains(&kind) {
+        return Some(abyss_schedule(kind, elapsed));
+    }
     if crate::dungeon::manor::ROSTER.contains(&kind) {
         return Some(manor_schedule(kind, hp, elapsed));
     }
@@ -338,8 +412,9 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
             fan(1, 1, 0., 2000, 10.).delay(1000).predict(1.),
         ],
         0xd05 => vec![fan(0, 4, 10., 1000, 12.), fan(1, 1, 0., 1000, 12.)],
+        // Only Quiet leads movement: https://steamcommunity.com/sharedfiles/filedetails/?id=181796604
         0x652 => vec![
-            fan(0, 4, 10., 1000, 12.).predict(1.),
+            fan(0, 4, 10., 1000, 12.),
             fan(1, 1, 0., 1000, 10.).predict(1.),
         ],
         0x656 => vec![

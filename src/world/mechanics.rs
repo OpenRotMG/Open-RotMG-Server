@@ -145,6 +145,25 @@ impl World {
         }
     }
 
+    pub(super) fn child_positions(&self, parent: i32, radius: f32) -> Result<Vec<Pos>> {
+        let home = self
+            .entities
+            .get(&parent)
+            .context("summon parent missing")?
+            .pos;
+        let positions: Vec<_> = (0..32)
+            .map(|i| {
+                let angle = i as f32 * std::f32::consts::TAU / 32.;
+                Pos {
+                    x: home.x + radius * angle.cos(),
+                    y: home.y + radius * angle.sin(),
+                }
+            })
+            .filter(|pos| self.walkable(*pos))
+            .collect();
+        Ok(positions)
+    }
+
     pub(super) fn summon_limit(&self) -> usize {
         if self.name == "Manor of the Immortals" {
             crate::dungeon::manor::SUMMON_LIMIT
@@ -159,6 +178,7 @@ impl World {
             .count()
             + self.named_births.len()
             + self.manor_births.len()
+            + self.abyss_pending_count()
     }
 
     pub(super) fn spawn_children(
@@ -184,17 +204,7 @@ impl World {
             occupied + missing <= limit,
             "summon budget exhausted: {occupied}+{missing} exceeds {limit}"
         );
-        let home = self.entities[&parent].pos;
-        let positions: Vec<_> = (0..32)
-            .map(|i| {
-                let angle = i as f32 * std::f32::consts::TAU / 32.;
-                Pos {
-                    x: home.x + radius * angle.cos(),
-                    y: home.y + radius * angle.sin(),
-                }
-            })
-            .filter(|pos| self.walkable(*pos))
-            .collect();
+        let positions = self.child_positions(parent, radius)?;
         ensure!(
             positions.len() >= missing,
             "insufficient walkable summon positions around {parent}"
@@ -541,14 +551,19 @@ impl World {
     }
 
     pub(super) fn mechanic_expiry(&mut self) {
+        self.abyss_terminal_step();
         self.fauna_birth_step();
         self.named_birth_step();
         self.manor_birth_step();
         let due = |e: &Entity| {
             e.expires.is_some_and(|deadline| deadline <= self.now)
-                // Thrown hazards finish their fuses even if their summoner dies.
-                || !matches!(e.kind, crate::dungeon::manor::ROCK | crate::dungeon::manor::MINE)
-                    && e.parent.is_some_and(|parent| !self.entities.contains_key(&parent))
+                || (!matches!(
+                    e.kind,
+                    crate::dungeon::manor::ROCK | crate::dungeon::manor::MINE
+                ) && e
+                    .parent
+                    .is_some_and(|parent| !self.entities.contains_key(&parent))
+                    && !Self::abyss_orphan(e))
         };
         let expired: Vec<_> = self
             .timed_ids
@@ -562,6 +577,14 @@ impl World {
             .copied()
             .collect();
         for id in expired {
+            let e = &self.entities[&id];
+            if e.kind == 0x908
+                && e.parent
+                    .is_some_and(|owner| !self.entities.contains_key(&owner))
+                && !Self::abyss_orphan(e)
+            {
+                tracing::error!(entity=id, parent=?e.parent, time_ms=self.now,"Abyss Protector missing parent without validated orphan transition");
+            }
             if self.entities[&id].kind == 0xe38 && matches!(self.entities[&id].stage, Some(2 | 4)) {
                 if let Err(error) = self.ghost_ship_mechanics(id, None, 0) {
                     tracing::error!(entity=id,%error,"earned Locker portal deadline refused");

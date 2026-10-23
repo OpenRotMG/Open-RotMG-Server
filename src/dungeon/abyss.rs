@@ -1,5 +1,7 @@
 use crate::content::{Cell, Content, Map};
 use anyhow::{Result, ensure};
+use std::collections::BTreeSet;
+type PillarOffsets = &'static [(i32, i32)];
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 
 pub const MALPHAS: u16 = 0x90a;
@@ -148,9 +150,10 @@ impl LavaField {
         }
     }
 }
-fn path(map: &mut Map, mut a: (i32, i32), b: (i32, i32)) {
+fn path(map: &mut Map, mut a: (i32, i32), b: (i32, i32), protected: &mut BTreeSet<usize>) {
     loop {
         let i = index(map, a.0, a.1);
+        protected.insert(i);
         if map.cells[i].ground == LAVA {
             map.cells[i].object = Some(BRIDGE);
         }
@@ -214,8 +217,133 @@ fn treasure_room(map: &mut Map, room: Room) {
     map.cells[i].object = Some(IDOL);
 }
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+fn room_candidates(rooms: &[Room], size: (i32, i32, u8)) -> Vec<(Room, Edge)> {
+    let (w, h, tag) = size;
+    let mut candidates = Vec::new();
+    for parent in 0..rooms.len() {
+        if rooms[parent].tag != 0 || parent == 0 && rooms.len() > 1 {
+            continue;
+        }
+        for horizontal in [true, false] {
+            let offsets = if parent == 0 {
+                12..30
+            } else {
+                2..(if horizontal {
+                    rooms[parent].h
+                } else {
+                    rooms[parent].w
+                }) - 2
+            };
+            for offset in offsets {
+                for positive in [true, false] {
+                    if tag >= 16 && (horizontal || positive) {
+                        continue;
+                    }
+                    let (r, edge) =
+                        attach(rooms, parent, (w, h, tag), (horizontal, positive, offset));
+                    if rooms.iter().any(|other| r.overlaps(*other)) {
+                        continue;
+                    }
+                    let corridor = Room {
+                        x: edge.a.0.min(edge.b.0) - 1,
+                        y: edge.a.1.min(edge.b.1) - 1,
+                        w: (edge.a.0 - edge.b.0).abs() + 3,
+                        h: (edge.a.1 - edge.b.1).abs() + 3,
+                        depth: 0,
+                        tag: 0,
+                    };
+                    if rooms
+                        .iter()
+                        .enumerate()
+                        .any(|(i, room)| i != parent && corridor.overlaps(*room))
+                    {
+                        continue;
+                    }
+                    candidates.push((r, edge));
+                }
+            }
+        }
+    }
+    candidates
+}
+
+fn choose_room(
+    rooms: &[Room],
+    size: (i32, i32, u8),
+    seed: u64,
+    number: i32,
+    rng: &mut impl Rng,
+) -> Result<(Room, Edge)> {
+    let tag = size.2;
+    let mut candidates = room_candidates(rooms, size);
+    if tag == 1
+        && let Some(depth) = candidates.iter().map(|(r, _)| r.depth).max()
+    {
+        candidates.retain(|(r, _)| r.depth == depth);
+    }
+    let chosen = *candidates
+        .choose_weighted(rng, |(_, e)| {
+            if tag == 0 && e.parent + 1 == rooms.len() {
+                32
+            } else {
+                1
+            }
+        })
+        .map_err(|error| {
+            anyhow::anyhow!("Abyss seed {seed}: room {number} has no valid frontier: {error}")
+        })?;
+    Ok(chosen)
+}
+
+fn place_scenery(
+    map: &mut Map,
+    rooms: &[Room],
+    protected: &BTreeSet<usize>,
+    seed: u64,
+) -> Result<()> {
+    for (number, room) in rooms.iter().enumerate().filter(|(n, _)| *n == 0) {
+        let (cx, cy) = room.center();
+        // Fixed independent reconstruction; the boss offsets were explicitly amended to preserve guards and paths.
+        let (intact, broken): (PillarOffsets, PillarOffsets) = (
+            &[
+                (-10, -8),
+                (-10, -2),
+                (-10, 2),
+                (-10, 8),
+                (10, -8),
+                (10, -2),
+                (10, 2),
+                (10, 8),
+            ],
+            &[(-11, -8), (-11, 8), (11, -8), (11, 8)],
+        );
+        for (offsets, kind) in [(intact, 0x17e), (broken, 0x183)] {
+            for &(dx, dy) in offsets {
+                let (x, y) = (cx + dx, cy + dy);
+                ensure!(
+                    x >= room.x
+                        && x < room.x + room.w
+                        && y >= room.y
+                        && y < room.y + room.h
+                        && dx.abs() > 1
+                        && dy.abs() > 1,
+                    "Abyss seed {seed}: room {number} scenery {kind:#x} cell ({x},{y}) violates room/axis clearance"
+                );
+                let i = index(map, x, y);
+                ensure!(
+                    map.cells[i].object.is_none() && !protected.contains(&i),
+                    "Abyss seed {seed}: room {number} scenery {kind:#x} collision at ({x},{y}): object={:?}, required_path={}",
+                    map.cells[i].object,
+                    protected.contains(&i)
+                );
+                map.cells[i].object = Some(kind);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn layout(seed: u64, rng: &mut impl Rng) -> Result<(Vec<Room>, Vec<Edge>, i32)> {
     let mut rooms = vec![Room {
         x: 0,
         y: 0,
@@ -225,7 +353,8 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         tag: 0,
     }];
     let mut edges = Vec::new();
-    let count = rng.gen_range(36..=52);
+    // Keep the original draw width: changing the integer type changes the seeded RNG stream.
+    let count: i32 = rng.gen_range(36..=52);
     let mut treasures = 0;
     while treasures < 3 && rng.gen_bool(0.2) {
         treasures += 1;
@@ -239,67 +368,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         } else {
             (8, 8, 0)
         };
-        let mut candidates = Vec::new();
-        for parent in 0..rooms.len() {
-            if rooms[parent].tag != 0 || parent == 0 && rooms.len() > 1 {
-                continue;
-            }
-            for horizontal in [true, false] {
-                let offsets = if parent == 0 {
-                    12..30
-                } else {
-                    2..(if horizontal {
-                        rooms[parent].h
-                    } else {
-                        rooms[parent].w
-                    }) - 2
-                };
-                for offset in offsets {
-                    for positive in [true, false] {
-                        if tag >= 16 && (horizontal || positive) {
-                            continue;
-                        }
-                        let (r, edge) =
-                            attach(&rooms, parent, (w, h, tag), (horizontal, positive, offset));
-                        if rooms.iter().any(|other| r.overlaps(*other)) {
-                            continue;
-                        }
-                        let corridor = Room {
-                            x: edge.a.0.min(edge.b.0) - 1,
-                            y: edge.a.1.min(edge.b.1) - 1,
-                            w: (edge.a.0 - edge.b.0).abs() + 3,
-                            h: (edge.a.1 - edge.b.1).abs() + 3,
-                            depth: 0,
-                            tag: 0,
-                        };
-                        if rooms
-                            .iter()
-                            .enumerate()
-                            .any(|(i, room)| i != parent && corridor.overlaps(*room))
-                        {
-                            continue;
-                        }
-                        candidates.push((r, edge));
-                    }
-                }
-            }
-        }
-        if tag == 1
-            && let Some(depth) = candidates.iter().map(|(r, _)| r.depth).max()
-        {
-            candidates.retain(|(r, _)| r.depth == depth);
-        }
-        let (r, edge) = *candidates
-            .choose_weighted(&mut rng, |(_, e)| {
-                if tag == 0 && e.parent + 1 == rooms.len() {
-                    32
-                } else {
-                    1
-                }
-            })
-            .map_err(|error| {
-                anyhow::anyhow!("Abyss seed {seed}: room {number} has no valid frontier: {error}")
-            })?;
+        let (r, edge) = choose_room(&rooms, (w, h, tag), seed, number, rng)?;
         rooms.push(r);
         edges.push(edge);
     }
@@ -315,6 +384,12 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         e.a.1 -= min_y;
         e.b.1 -= min_y;
     }
+    Ok((rooms, edges, treasures))
+}
+
+pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let (rooms, edges, treasures) = layout(seed, &mut rng)?;
     let width = rooms.iter().map(|r| r.x + r.w).max().unwrap() + 3;
     let height = rooms.iter().map(|r| r.y + r.h).max().unwrap() + 3;
     ensure!(
@@ -392,6 +467,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             }
         }
     }
+    let mut protected = BTreeSet::new();
     for edge in &edges {
         for y in edge.a.1.min(edge.b.1)..=edge.a.1.max(edge.b.1) {
             for x in edge.a.0.min(edge.b.0)..=edge.a.0.max(edge.b.0) {
@@ -408,10 +484,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 }
             }
         }
-        path(&mut map, rooms[edge.parent].center(), edge.a);
-        path(&mut map, edge.a, edge.b);
+        path(
+            &mut map,
+            rooms[edge.parent].center(),
+            edge.a,
+            &mut protected,
+        );
+        path(&mut map, edge.a, edge.b, &mut protected);
         if rooms[edge.child].tag < 16 {
-            path(&mut map, edge.b, rooms[edge.child].center());
+            path(&mut map, edge.b, rooms[edge.child].center(), &mut protected);
         }
     }
     for room in &rooms {
@@ -434,7 +515,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             map.cells[i].object = Some(0x703);
             map.cells[i].region = 1;
             map.spawns.push((px as f32 + 0.5, py as f32 + 0.5));
-            path(&mut map, (px, py), (cx, cy));
+            path(&mut map, (px, py), (cx, cy), &mut protected);
         } else if room.depth > 0 && room.tag == 0 {
             for _ in 0..rng.gen_range(4..=7) {
                 let x = rng.gen_range(room.x..room.x + room.w);
@@ -467,6 +548,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         let i = index(&map, cx + dx, cy + dy);
         map.cells[i].object = Some(0x651);
     }
+    place_scenery(&mut map, &rooms, &protected, seed)?;
     let mut walls = vec![];
     for y in 1..height - 1 {
         for x in 1..width - 1 {
@@ -572,84 +654,6 @@ pub fn profile(kind: u16) -> crate::encounter::Profile {
         range,
     }
 }
-pub fn movement(kind: u16, elapsed: u64) -> (crate::encounter::Motion, f32) {
-    use crate::encounter::Motion::*;
-    if kind != MALPHAS {
-        let p = profile(kind);
-        return (p.motion, p.speed);
-    }
-    match phase(elapsed) {
-        0 => (
-            Chase {
-                sight: 8.,
-                stop: 2.,
-            },
-            3.,
-        ),
-        2 => (Wander, 8.),
-        3 => (Wander, 2.),
-        5 => (
-            Chase {
-                sight: 9.,
-                stop: 2.,
-            },
-            4.,
-        ),
-        6 => (Retreat { distance: 4. }, 4.),
-        _ => (Stationary, 0.),
-    }
-}
-pub fn attacks(kind: u16, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
-    let mut shots = Vec::new();
-    let mut fan = |index, count, gap: f32, angle| {
-        for i in 0..count {
-            shots.push((
-                index,
-                angle + (i as f32 - (count - 1) as f32 / 2.) * gap.to_radians(),
-            ));
-        }
-    };
-    let due = |period| elapsed % period < 100;
-    match kind {
-        0x66d => fan(0, 5, 9., heading),
-        0x66e..=0x672 | 0x908 => fan(0, 3, 6., heading),
-        0x909 if (5000..5100).contains(&elapsed) => fan(0, 8, 45., 0.),
-        0x909 => {}
-        0x90b => fan(0, 1, 0., heading),
-        MALPHAS => {
-            let stage = phase(elapsed);
-            let big = elapsed % 50200 >= 25300 && stage == 3;
-            if (matches!(stage, 0 | 2 | 5) || big) && due(if stage == 5 { 2100 } else { 900 }) {
-                fan(if big { 3 } else { 0 }, 1, 0., heading);
-            }
-            if stage == 2 && due(1200) {
-                fan(2, 6, 60., 0.);
-            }
-            if big && due(700) {
-                fan(
-                    4,
-                    3,
-                    120.,
-                    ((elapsed % 50200 - 25300) / 1400 % 3) as f32 * 40f32.to_radians(),
-                );
-            }
-        }
-        IDOL => {
-            if due(400) {
-                fan(0, 6, 60., elapsed as f32 / 1500.);
-            }
-            if due(1200) {
-                fan(2, 4, 90., 0.);
-            }
-            if elapsed % 1400 < 100 || (400..500).contains(&(elapsed % 1400)) {
-                fan(3, 3, 10., heading);
-            }
-        }
-        _ => unreachable!("unregistered Abyss attack"),
-    }
-    shots
-}
-
 pub fn phase(elapsed: u64) -> u64 {
     match elapsed % 50200 {
         0..9000 => 0,
@@ -659,5 +663,416 @@ pub fn phase(elapsed: u64) -> u64 {
         36500..39000 => 4,
         39000..47000 => 5,
         _ => 6,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        collections::{BTreeSet, VecDeque},
+        path::Path,
+    };
+    fn reachable(content: &Content, map: &Map) -> BTreeSet<usize> {
+        let (x, y) = map.spawns[0];
+        let start = index(map, x as i32, y as i32);
+        let mut seen = BTreeSet::from([start]);
+        let mut queue = VecDeque::from([start]);
+        while let Some(i) = queue.pop_front() {
+            let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+            for (x, y) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                if x < 0 || y < 0 || x >= map.width || y >= map.height {
+                    continue;
+                }
+                let n = index(map, x, y);
+                let c = &map.cells[n];
+                if content.grounds[&c.ground] > 0.
+                    && (c.ground != LAVA || c.object == Some(BRIDGE))
+                    && c.object.is_none_or(|k| !content.objects[&k].blocks)
+                    && seen.insert(n)
+                {
+                    queue.push_back(n);
+                }
+            }
+        }
+        seen
+    }
+
+    fn seeded_layout(seed: u64) -> (Vec<Room>, Vec<Edge>, i32) {
+        layout(seed, &mut rand::rngs::StdRng::seed_from_u64(seed)).unwrap()
+    }
+
+    #[test]
+    fn abyss_geometry_treasure_entries_are_south_facing_and_lava_safe() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let mut invalid = vec![];
+        let mut total = 0;
+        for seed in 0..512 {
+            let (rooms, edges, treasures) = seeded_layout(seed);
+            let map = generate(&content, seed).unwrap();
+            let seen = reachable(&content, &map);
+            for edge in edges.iter().filter(|e| rooms[e.child].tag >= 16) {
+                let r = rooms[edge.child];
+                let (cx, cy) = if r.tag >= 16 {
+                    (r.x + 7, r.y + 7)
+                } else {
+                    r.center()
+                };
+                total += 1;
+                if edge.b != (r.x + 7, r.y + r.h - 1) || edge.a.1 <= edge.b.1 {
+                    invalid.push(format!(
+                        "seed {seed} room {}: entry {:?} approach {:?}",
+                        edge.child, edge.b, edge.a
+                    ));
+                }
+                assert_eq!(map.cells[index(&map, cx, cy)].object, Some(IDOL));
+                assert_eq!(map.cells[index(&map, cx, cy)].region, r.tag);
+                assert!(
+                    seen.contains(&index(&map, cx, cy)),
+                    "seed {seed} room {} Idol route",
+                    edge.child
+                );
+                assert!(
+                    seen.contains(&index(&map, edge.b.0, edge.b.1)),
+                    "seed {seed} room {} entry route",
+                    edge.child
+                );
+            }
+            assert_eq!(
+                rooms.iter().filter(|r| r.tag >= 16).count(),
+                treasures as usize
+            );
+            assert_eq!(
+                rooms
+                    .iter()
+                    .filter(|r| r.tag >= 16)
+                    .map(|r| r.tag)
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                treasures as usize
+            );
+        }
+        eprintln!(
+            "south/lava-safe:512 seeds, {total} treasure entries, {} invalid orientations",
+            invalid.len()
+        );
+        assert!(invalid.is_empty(), "{}", invalid.join("\n"));
+    }
+
+    #[test]
+    fn abyss_geometry_approved_scenery_preserves_required_cells_and_routes() {
+        let content = Content::load(Path::new("data")).unwrap();
+        for kind in [0x17e, 0x183] {
+            let o = &content.objects[&kind];
+            assert!(o.blocks && o.occupy_square && o.enemy_occupy_square && !o.full_occupy);
+        }
+        let mut missing = vec![];
+        for seed in 0..512 {
+            let (rooms, _, treasures) = seeded_layout(seed);
+            let map = generate(&content, seed).unwrap();
+            let seen = reachable(&content, &map);
+            let mut expected = BTreeSet::new();
+            for (number, r) in rooms
+                .iter()
+                .enumerate()
+                .filter(|(n, r)| *n == 0 || r.tag >= 16)
+            {
+                let (cx, cy) = if r.tag >= 16 {
+                    (r.x + 7, r.y + 7)
+                } else {
+                    r.center()
+                };
+                // Independent literal expectations for the explicitly amended fixed layout.
+                let (intact, broken): (PillarOffsets, PillarOffsets) = if number == 0 {
+                    (
+                        &[
+                            (-10, -8),
+                            (-10, -2),
+                            (-10, 2),
+                            (-10, 8),
+                            (10, -8),
+                            (10, -2),
+                            (10, 2),
+                            (10, 8),
+                        ],
+                        &[(-11, -8), (-11, 8), (11, -8), (11, 8)],
+                    )
+                } else {
+                    (
+                        &[
+                            (-2, -6),
+                            (2, -6),
+                            (-6, -2),
+                            (6, -2),
+                            (-6, 2),
+                            (6, 2),
+                            (2, 9),
+                            (2, 11),
+                        ],
+                        &[(-2, 9), (-2, 11)],
+                    )
+                };
+                for (offsets, kind) in [(intact, 0x17e), (broken, 0x183)] {
+                    for &(dx, dy) in offsets {
+                        let i = index(&map, cx + dx, cy + dy);
+                        expected.insert((i, kind));
+                        if map.cells[i].object != Some(kind) {
+                            missing.push(format!("seed {seed} room {number} cell ({},{}) expected {kind:#x} found {:?}",cx+dx,cy+dy,map.cells[i].object));
+                        }
+                        assert!(dx.abs() > 1 && dy.abs() > 1);
+                    }
+                }
+                let radius = if number == 0 { 3 } else { 1 };
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        if dx * dx + dy * dy <= radius * radius && (dx, dy) != (0, 0) {
+                            assert!(
+                                !matches!(
+                                    map.cells[index(&map, cx + dx, cy + dy)].object,
+                                    Some(0x17e | 0x183)
+                                ),
+                                "seed {seed} room {number} clearance"
+                            );
+                        }
+                    }
+                }
+            }
+            let actual = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| {
+                    c.object
+                        .filter(|k| matches!(k, 0x17e | 0x183))
+                        .map(|k| (i, k))
+                })
+                .collect::<BTreeSet<_>>();
+            if actual != expected {
+                missing.push(format!("seed {seed}: full scenery set differs"));
+            }
+            if actual == expected {
+                assert_eq!(actual.len(), 12 + 10 * treasures as usize);
+            }
+            for (i, c) in map.cells.iter().enumerate() {
+                if matches!(c.object, Some(MALPHAS | IDOL | 0x703)) {
+                    assert!(
+                        seen.contains(&i),
+                        "seed {seed} required actor/portal disconnected with selected occupancy"
+                    );
+                }
+            }
+            let (x, y) = map.spawns[0];
+            assert!(seen.contains(&index(&map, x as i32, y as i32)));
+        }
+        eprintln!(
+            "exact scenery/selected occupancy/clearance/routes:512 seeds, {} missing cells",
+            missing.len()
+        );
+        assert!(missing.is_empty(), "{}", missing.join("\n"));
+    }
+
+    #[test]
+    fn abyss_geometry_seeded_maps_keep_existing_generation_policies() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let mut variants = BTreeSet::new();
+        let mut guards = BTreeSet::new();
+        for seed in 0..512 {
+            let (rooms, edges, treasures) = seeded_layout(seed);
+            let map = generate(&content, seed).unwrap();
+            assert_eq!(
+                serde_json::to_vec(&map).unwrap(),
+                serde_json::to_vec(&generate(&content, seed).unwrap()).unwrap(),
+                "seed {seed} reproducibility"
+            );
+            assert!((36..=52).contains(&(rooms.len() - treasures as usize - 1)));
+            assert_eq!(edges.len() + 1, rooms.len());
+            assert!(map.width > 0 && map.width <= 1024 && map.height > 0 && map.height <= 1024);
+            assert_eq!((rooms[0].w, rooms[0].h), (42, 42));
+            assert_eq!(map.spawns.len(), 1);
+            let (cx, cy) = rooms[0].center();
+            let actual = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.object == Some(0x651))
+                .map(|(i, _)| (i as i32 % map.width - cx, i as i32 / map.width - cy))
+                .collect::<BTreeSet<_>>();
+            assert!((3..=6).contains(&actual.len()), "seed {seed} guard count");
+            assert_eq!(
+                actual,
+                [(-4, -9), (5, -9), (-9, 0), (10, 0), (-4, 8), (5, 8)]
+                    .into_iter()
+                    .take(actual.len())
+                    .collect()
+            );
+            guards.insert(actual.len());
+            variants.insert(treasures);
+            for (n, r) in rooms.iter().enumerate().skip(1) {
+                assert_eq!(
+                    (r.w, r.h),
+                    if r.tag == 1 {
+                        (16, 16)
+                    } else if r.tag >= 16 {
+                        (15, 21)
+                    } else {
+                        (8, 8)
+                    },
+                    "seed {seed} room {n}"
+                );
+                if r.tag == 0 {
+                    let cells = (r.y..r.y + r.h)
+                        .flat_map(|y| (r.x..r.x + r.w).map(move |x| (x, y)))
+                        .map(|(x, y)| &map.cells[index(&map, x, y)])
+                        .collect::<Vec<_>>();
+                    assert!(
+                        (0..=7).contains(
+                            &cells
+                                .iter()
+                                .filter(|c| c.object.is_some_and(|k| (0x66d..=0x672).contains(&k)))
+                                .count()
+                        )
+                    );
+                    assert!(cells.iter().filter(|c| c.object == Some(0x1fa)).count() <= 2);
+                }
+            }
+            for c in &map.cells {
+                assert!([0xfe, 0x69, LAVA, FLOOR, 0x35, 0x36].contains(&c.ground));
+                if let Some(k) = c.object {
+                    assert!(matches!(
+                        k,
+                        0x66d
+                            ..=0x672
+                                | MALPHAS
+                                | IDOL
+                                | 0x703
+                                | 0x651
+                                | BRIDGE
+                                | 0x150
+                                | 0x151
+                                | 0x1fa
+                                | 0x17e
+                                | 0x183
+                    ));
+                }
+            }
+        }
+        assert_eq!(variants, BTreeSet::from([0, 1, 2, 3]));
+        assert_eq!(guards, BTreeSet::from([3, 4, 5, 6]));
+        eprintln!(
+            "determinism/policy:512 seeds; optional treasures={variants:?}, guard counts={guards:?}; finite census, not historical distribution evidence"
+        );
+    }
+
+    #[test]
+    fn abyss_geometry_invalid_layout_fails_with_seed_and_room() {
+        let content = Content::load(Path::new("data")).unwrap();
+        for seed in 0..512 {
+            let (rooms, _, _) = seeded_layout(seed);
+            // A terminal-only frontier has no legal ordinary parent, regardless of orientation.
+            let terminal_only = [Room { tag: 1, ..rooms[0] }];
+            let number = rooms.len() as i32;
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let error = choose_room(&terminal_only, (15, 21, 16), seed, number, &mut rng)
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(
+                error.contains(&format!("seed {seed}: room {number} has no valid frontier")),
+                "{error}"
+            );
+            let original = generate(&content, seed).unwrap();
+            let (cx, cy) = rooms[0].center();
+            let (x, y) = (cx - 10, cy - 8);
+            for object in [Some(0x651), Some(BRIDGE), None] {
+                let mut map = original.clone();
+                for c in &mut map.cells {
+                    if matches!(c.object, Some(0x17e | 0x183)) {
+                        c.object = None;
+                    }
+                }
+                let i = index(&map, x, y);
+                map.cells[i].object = object;
+                let protected = if object.is_none() {
+                    BTreeSet::from([i])
+                } else {
+                    BTreeSet::new()
+                };
+                let before = serde_json::to_vec(&map).unwrap();
+                let error = place_scenery(&mut map, &rooms, &protected, seed)
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains(&format!("seed {seed}: room 0"))
+                        && error.contains(&format!("collision at ({x},{y})")),
+                    "{error}"
+                );
+                assert!(
+                    error.contains(&format!(
+                        "object={object:?}, required_path={}",
+                        object.is_none()
+                    )),
+                    "{error}"
+                );
+                assert_eq!(
+                    before,
+                    serde_json::to_vec(&map).unwrap(),
+                    "collision must not overwrite or silently omit"
+                );
+                if seed == 0 {
+                    eprintln!("disclosed guard/bridge/path collision fixture: {error}");
+                }
+            }
+            if seed == 0 {
+                eprintln!("disclosed exhausted-frontier fixture: {error}");
+            }
+        }
+        eprintln!(
+            "invalid layouts:512 seeds,512 exhausted frontiers,1536 guard/bridge/path errors with seed/room/cell, no retry or mutation"
+        );
+    }
+
+    #[test]
+    fn generated_abysses_have_seeded_complete_lava_safe_routes_and_optional_treasures() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let mut variants = BTreeSet::new();
+        for seed in 0..512 {
+            let map = generate(&content, seed).unwrap();
+            if seed == 7 {
+                assert_eq!(
+                    serde_json::to_vec(&map).unwrap(),
+                    serde_json::to_vec(&generate(&content, seed).unwrap()).unwrap()
+                );
+            }
+            let seen = reachable(&content, &map);
+            let mut idols = 0;
+            for (i, c) in map.cells.iter().enumerate() {
+                if matches!(c.object, Some(MALPHAS | IDOL)) {
+                    assert!(seen.contains(&i), "seed {seed}: encounter disconnected");
+                }
+                if c.object == Some(IDOL) {
+                    idols += 1;
+                    assert!(c.region >= 16);
+                }
+            }
+            variants.insert(idols);
+            for c in map
+                .cells
+                .iter()
+                .filter(|c| c.object.is_some_and(|k| (0x66d..=0x672).contains(&k)))
+            {
+                assert_ne!(
+                    c.ground, LAVA,
+                    "ordinary population must stay off randomized lava, seed {seed}"
+                );
+            }
+            assert_eq!(
+                map.cells
+                    .iter()
+                    .filter(|c| c.object == Some(MALPHAS))
+                    .count(),
+                1
+            );
+        }
+        assert_eq!(variants, BTreeSet::from([0, 1, 2, 3]));
     }
 }
