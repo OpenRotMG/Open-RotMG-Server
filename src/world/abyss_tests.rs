@@ -2076,7 +2076,8 @@ fn abyss_cowardice_routes_living_character_to_realm_not_nexus() {
         let (time, grant, _) = d.issue(account, id, destination).unwrap();
         let ch = d.worlds.get_mut(&origin).unwrap().leave(player).unwrap();
         assert_eq!(
-            d.consume(account, destination, time, grant.clone()).unwrap(),
+            d.consume(account, destination, time, grant.clone())
+                .unwrap(),
             character.id
         );
         let arrival = d
