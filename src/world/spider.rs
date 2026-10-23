@@ -50,6 +50,8 @@ impl World {
                 self.actors()
                     .filter(|e| e.parent.is_some() || e.quest.is_some())
                     .count()
+                    + self.named_births.len()
+                    + self.abyss_pending_count()
                     + positions.len()
                     <= 256,
                 "Spider Den summon budget exhausted"

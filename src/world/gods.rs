@@ -194,7 +194,7 @@ impl World {
             shots.retain(|(index, _)| *index != 1);
         }
         self.predict_enemy_shots(id, target, &mut shots, |index| match (e.kind, index) {
-            (0x651 | 0x652 | 0x655 | 0x658, _) | (0x656 | 0x6d8 | 0x640 | 0x649, 1) => 1.,
+            (0x651 | 0x655 | 0x658, _) | (0x652 | 0x656 | 0x6d8 | 0x640 | 0x649, 1) => 1.,
             (0x656 | 0x649, 0) => 0.5,
             (0x609, _) if elapsed % 6000 < 2000 => 0.3,
             (0x609, _) if elapsed % 6000 < 4000 => 0.5,
