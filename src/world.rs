@@ -5679,6 +5679,10 @@ impl World {
                             && !p.departing
                             && !p.death_pending
                             && p.controller != Controller::Human
+                            && p.conditions(self.now)
+                                & (crate::condition::bit(crate::condition::STASIS)
+                                    | crate::condition::bit(crate::condition::INVINCIBLE))
+                                == 0
                             && !b.hit.contains(id)
                             && inside_box(p.pos, b.pos)
                         {
@@ -6359,6 +6363,157 @@ mod tests {
             .to_string()
             .contains("blocked tile")
         );
+    }
+
+    #[test]
+    fn hostile_projectiles_skip_invincible_and_stasis_but_collide_with_invulnerable() {
+        use crate::condition::{INVINCIBLE, INVULNERABLE, SLOWED, STASIS, bit};
+
+        let mut observed = Vec::new();
+        let mut expected = Vec::new();
+        for (controller, multi_hit, duration) in [
+            (Controller::Qa, false, 1000),
+            (Controller::Qa, true, 1000),
+            (Controller::Autonomous, false, 1000),
+            (Controller::Autonomous, true, 1000),
+            (Controller::Qa, false, 50),
+            (Controller::Qa, true, 50),
+            (Controller::Autonomous, false, 50),
+            (Controller::Autonomous, true, 50),
+        ] {
+            for protection in [INVULNERABLE, INVINCIBLE, STASIS] {
+                let mut w = arena(0);
+                let front = w.enter(ch(&w), None).unwrap();
+                let mut character = ch(&w);
+                character.id = 2;
+                character.account = 2;
+                let downstream = w.enter(character, None).unwrap();
+                for (id, x) in [(front, 11.5), (downstream, 12.5)] {
+                    let p = w.players.get_mut(&id).unwrap();
+                    assert_eq!(p.controller, Controller::Qa);
+                    p.controller = controller;
+                    p.pos = Pos { x, y: 100.5 };
+                }
+                w.apply_condition(front, protection, duration).unwrap();
+                let start = Pos { x: 10.5, y: 100.5 };
+                let mut spec = w.content.objects[&0x683].projectiles[&0].clone();
+                spec.speed = 200.;
+                spec.multi_hit = multi_hit;
+                spec.effects = vec![(SLOWED, 1000)];
+                w.bullets.push(Bullet {
+                    owner: 500,
+                    source_kind: 0x683,
+                    id: 1,
+                    friendly: false,
+                    start,
+                    pos: start,
+                    angle: 0.,
+                    born: 0,
+                    damage: 20,
+                    spec,
+                    hit: BTreeSet::new(),
+                });
+                w.step();
+                let active = duration > w.now;
+                assert_eq!(
+                    w.players[&front].conditions(w.now) & bit(protection),
+                    if active { bit(protection) } else { 0 }
+                );
+                let passed_front = w.bullets.len() == 1 && w.bullets[0].hit.is_empty();
+                w.step();
+                let hits: BTreeSet<_> = w
+                    .bullets
+                    .iter()
+                    .flat_map(|b| b.hit.iter().copied())
+                    .collect();
+                observed.push((
+                    (controller, multi_hit, duration, protection),
+                    w.players[&front].character.hp,
+                    w.players[&front].conditions(w.now) & bit(SLOWED),
+                    passed_front,
+                    w.players[&downstream].character.hp,
+                    w.players[&downstream].conditions(w.now) & bit(SLOWED),
+                    w.bullets.is_empty(),
+                    hits,
+                ));
+                let passes = active && protection != INVULNERABLE;
+                let downstream_hit = multi_hit || passes;
+                let hits = if multi_hit {
+                    if passes {
+                        BTreeSet::from([downstream])
+                    } else {
+                        BTreeSet::from([front, downstream])
+                    }
+                } else {
+                    BTreeSet::new()
+                };
+                expected.push((
+                    (controller, multi_hit, duration, protection),
+                    if active { 100 } else { 80 },
+                    if active { 0 } else { bit(SLOWED) },
+                    passes,
+                    if downstream_hit { 80 } else { 100 },
+                    if downstream_hit { bit(SLOWED) } else { 0 },
+                    !multi_hit,
+                    hits,
+                ));
+            }
+        }
+        assert_eq!(observed, expected);
+    }
+
+    #[test]
+    fn hostile_projectiles_from_world_gun_pass_protected_autonomous_players() {
+        use crate::condition::{INVINCIBLE, INVULNERABLE, STASIS};
+
+        for protection in [INVULNERABLE, INVINCIBLE, STASIS] {
+            let mut w = arena(0);
+            w.encounter = false;
+            let front = w.enter(ch(&w), None).unwrap();
+            let mut character = ch(&w);
+            character.id = 2;
+            character.account = 2;
+            let downstream = w.enter(character, None).unwrap();
+            for (id, x) in [(front, 11.5), (downstream, 12.5)] {
+                let p = w.players.get_mut(&id).unwrap();
+                p.controller = Controller::Autonomous;
+                p.pos = Pos { x, y: 100.5 };
+            }
+            w.apply_condition(front, protection, 1000).unwrap();
+            let gun = w
+                .spawn_entity(0x804, Pos { x: 10.5, y: 100.5 }, vec![])
+                .unwrap();
+            assert!(w.bullets.is_empty());
+            w.step();
+            assert_eq!(w.bullets.len(), 1);
+            let shot = &w.bullets[0];
+            assert_eq!(
+                (shot.owner, shot.source_kind, shot.born),
+                (gun, 0x804, w.now)
+            );
+            assert!(!shot.spec.multi_hit);
+            let damage = shot.damage;
+            assert_eq!(damage, w.content.objects[&0x804].projectiles[&0].min);
+            for _ in 0..20 {
+                w.step();
+                if w.bullets.is_empty() {
+                    break;
+                }
+                assert!(!w.bullets[0].hit.contains(&front));
+            }
+            assert!(w.now < 1000);
+            assert!(w.bullets.is_empty());
+            assert_eq!(w.players[&front].character.hp, 100, "{protection}");
+            assert_eq!(
+                w.players[&downstream].character.hp,
+                if protection == INVULNERABLE {
+                    100
+                } else {
+                    100 - damage
+                },
+                "{protection}"
+            );
+        }
     }
 
     #[test]
