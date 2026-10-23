@@ -19,7 +19,135 @@ fn movement_speed(value: f32) -> f32 {
     (5.55 * value + 0.74) * 1.5
 }
 
+pub(super) enum EventAdmission {
+    Miss,
+    Waiting,
+    Spawned(i32),
+}
+
+pub(super) struct ReservedEvent {
+    pub(super) root: Entity,
+    pub(super) children: Vec<Entity>,
+}
+
 impl World {
+    pub(super) fn reserve_realm_events(&mut self) -> Result<()> {
+        ensure!(
+            self.now == 0 && self.players.is_empty(),
+            "event reserves require an unentered Realm"
+        );
+        let landmarks: Vec<_> = self
+            .entities
+            .values()
+            .filter(|e| matches!(e.kind, 0x678..=0x67c | 0xd50..=0xd55))
+            .map(|e| e.id)
+            .collect();
+        for id in landmarks {
+            self.landmark_bind(id)?;
+        }
+        let roots: Vec<_> = self
+            .entities
+            .values()
+            .filter(|e| quest::EVENT_BOSSES.contains(&e.kind))
+            .map(|e| e.id)
+            .collect();
+        for id in roots {
+            let children: Vec<_> = self
+                .entities
+                .values()
+                .filter(|e| e.quest == Some(id) && e.id != id)
+                .map(|e| e.id)
+                .collect();
+            for entity in std::iter::once(&id).chain(&children) {
+                let kind = self.entities[entity].kind;
+                crate::encounter::validate(&self.content, kind)?;
+                crate::loot::validate(&self.content, kind)?;
+            }
+            let children = children
+                .into_iter()
+                .map(|id| self.remove_entity(id))
+                .collect();
+            let root = self.remove_entity(id);
+            ensure!(
+                root.quest == Some(id) && root.hp > 0,
+                "event reserve lacks a living owned root"
+            );
+            tracing::info!(
+                entity = id,
+                kind = root.kind,
+                "Realm event reserved outside active indexes"
+            );
+            self.event_reserves.push(ReservedEvent { root, children });
+        }
+        Ok(())
+    }
+    pub(super) fn earn_realm_event(&mut self, source: i32) -> EventAdmission {
+        // Prebuilt sites avoid replacing live camps/terrain; critical kills summon events: https://wikiwiki.jp/rmd/%E3%82%A4%E3%83%99%E3%83%B3%E3%83%88
+        if let Some(waiting) = self.event_waiting {
+            if waiting != source {
+                return EventAdmission::Waiting;
+            }
+        } else {
+            if self.event_reserves.is_empty() || !self.rng.gen_bool(0.1) {
+                return EventAdmission::Miss;
+            }
+            self.event_waiting = Some(source);
+            tracing::info!(source, "quest defeat earned a pending Realm event");
+        }
+        let owned = self
+            .actors()
+            .filter(|e| e.parent.is_some() || e.quest.is_some())
+            .count()
+            + self.named_births.len();
+        let clear: Vec<_> = self
+            .event_reserves
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| {
+                owned + 1 + event.children.len() <= 256
+                    && self
+                        .players
+                        .values()
+                        .all(|p| p.pos.distance(event.root.pos) >= 32.)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        let Some(index) = clear.choose(&mut self.rng).copied() else {
+            return EventAdmission::Waiting;
+        };
+        self.event_waiting = None;
+        let event = self.event_reserves.remove(index);
+        let (id, kind, pos) = (event.root.id, event.root.kind, event.root.pos);
+        for mut entity in std::iter::once(event.root).chain(event.children) {
+            entity.next_aux += self.now;
+            let id = entity.id;
+            assert!(
+                self.entities.insert(id, entity).is_none(),
+                "reserved event identity reused"
+            );
+            self.index_actor(id);
+        }
+        self.oryx_notice(match kind {
+            0xd56 => "Your futile efforts are no match for a Skull Shrine!",
+            0xd59 => "Your meager abilities cannot possibly challenge a Cube God!",
+            0xd5f => "Behold my Pentaract, and despair!",
+            0xd50 => "Cower in fear of my Lord of the Lost Lands!",
+            0xd54 => "A Grand Sphinx is more than a match for this rabble.",
+            0xd61 => "You stand NO CHANCE against my mighty Hermit God!",
+            0xe37 => "A Ghost Ship has entered the realm.",
+            _ => unreachable!("reserved event kind validated at creation"),
+        });
+        tracing::info!(
+            source,
+            entity = id,
+            kind,
+            x = pos.x,
+            y = pos.y,
+            remaining = self.event_reserves.len(),
+            "quest defeat summoned a Realm event"
+        );
+        EventAdmission::Spawned(id)
+    }
     pub(super) fn populate_realm_events(&mut self) -> Result<()> {
         for kind in 0xd56..=0xd60 {
             quest::validate(&self.content, kind)?;

@@ -260,6 +260,15 @@ async fn continue_selected(
 
 pub async fn start(app: &App) -> Result<()> {
     for profile in PROFILES {
+        if let Some(account) = app.store.shore_account(profile.identity.into()).await?
+            && app.world.supervisor.account_fenced(account)?
+        {
+            tracing::error!(
+                account,
+                "autonomous account durably fenced; startup skipped pending operator inspection"
+            );
+            continue;
+        }
         let character = app
             .store
             .shore_character(

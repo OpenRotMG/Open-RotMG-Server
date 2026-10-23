@@ -210,6 +210,7 @@ impl World {
             }
         }
         let p = self.players.get_mut(&id).unwrap();
+        let drained = damage.min(p.character.hp).max(0);
         p.character.hp = (p.character.hp - damage).max(0);
         if p.character.hp == 0 {
             p.death_pending = true;
@@ -239,6 +240,15 @@ impl World {
             echo,
             "player damaged"
         );
+        if drained > 0
+            && self.content.objects[&b.source_kind].leach_health
+            && self
+                .entities
+                .get(&b.owner)
+                .is_some_and(|e| e.kind == b.source_kind && e.hp > 0)
+        {
+            self.heal_enemy(b.owner, b.owner, drained)?;
+        }
         Ok(())
     }
 }

@@ -165,7 +165,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 map.cells[i].ground = if number == 0 && (16..=25).contains(&(dx * dx + dy * dy)) {
                     0x61
                 } else if rng.gen_ratio(1, 32) {
-                    6
+                    0xd4
                 } else {
                     5
                 };
@@ -221,6 +221,21 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     cell.object = Some(0x703);
     cell.region = 1;
     map.spawns.push((sx as f32 + 0.5, sy as f32 + 0.5));
+    // Build 122 names endpoint candles; their count/spacing and blood frequency are reconstructed.
+    for (endpoint, x, y) in [("entrance", sx, sy), ("boss", bx, by)] {
+        for (dx, kind) in [(-2, 0x1801), (2, 0x1802)] {
+            let x = x + dx;
+            let cell = &mut map.cells[(y * width + x) as usize];
+            ensure!(
+                matches!(cell.ground, 5 | 0xd4) && cell.object.is_none(),
+                "Undead Lair seed {seed}: {endpoint} candle requires empty floor at ({x}, {y}); ground={:#x}, object={:?}, region={}",
+                cell.ground,
+                cell.object,
+                cell.region
+            );
+            cell.object = Some(kind);
+        }
+    }
     for cell in &map.cells {
         ensure!(
             content.grounds.contains_key(&cell.ground),
@@ -238,4 +253,136 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         "generated reconstructed Undead Lair"
     );
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn content() -> Content {
+        Content::load(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data"
+        )))
+        .unwrap()
+    }
+
+    #[test]
+    fn endpoint_candles_preserve_routes_and_room_families() {
+        let content = content();
+        for kind in [0x1801, 0x1802] {
+            let candle = content.get(kind).unwrap();
+            assert!(candle.static_object && !candle.blocks && !candle.enemy);
+        }
+        for seed in 0..48 {
+            let map = generate(&content, seed).unwrap();
+            let cell = |x, y| &map.cells[(y * map.width + x) as usize];
+            assert_eq!(map.spawns.len(), 1);
+            let (sx, sy) = map.spawns[0];
+            let spawn = (sx as i32, sy as i32);
+            assert_eq!((sx, sy), (spawn.0 as f32 + 0.5, spawn.1 as f32 + 0.5));
+            assert_eq!(cell(spawn.0, spawn.1).region, 1);
+            assert_eq!(cell(spawn.0, spawn.1).ground, 0x61);
+            let mut endpoints = vec![spawn];
+            for kind in [0x703, 0xd90] {
+                let sites: Vec<_> = map
+                    .cells
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.object == Some(kind))
+                    .map(|(i, _)| (i as i32 % map.width, i as i32 / map.width))
+                    .collect();
+                assert_eq!(sites.len(), 1, "seed {seed}: endpoint {kind:#x}");
+                if kind == 0x703 {
+                    assert_eq!(sites[0], spawn);
+                } else {
+                    endpoints.push(sites[0]);
+                }
+            }
+            let mut expected = BTreeSet::new();
+            for &(x, y) in &endpoints {
+                for (dx, kind) in [(-2, 0x1801), (2, 0x1802)] {
+                    let c = cell(x + dx, y);
+                    assert_eq!(
+                        c.object,
+                        Some(kind),
+                        "seed {seed}: candle at ({}, {y})",
+                        x + dx
+                    );
+                    assert!(matches!(c.ground, 5 | 0xd4));
+                    expected.insert((x + dx, y));
+                }
+            }
+            let walkable = |x, y| {
+                (0..map.width).contains(&x)
+                    && (0..map.height).contains(&y)
+                    && content.grounds[&cell(x, y).ground] > 0.
+                    && cell(x, y)
+                        .object
+                        .is_none_or(|k| !content.objects[&k].blocks)
+            };
+            let mut reached = BTreeSet::from([spawn]);
+            let mut todo = vec![spawn];
+            while let Some((x, y)) = todo.pop() {
+                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let p = (x + dx, y + dy);
+                    if walkable(p.0, p.1) && reached.insert(p) {
+                        todo.push(p);
+                    }
+                }
+            }
+            assert_eq!(
+                reached.len(),
+                map.cells
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| walkable(*i as i32 % map.width, *i as i32 / map.width))
+                    .count(),
+                "seed {seed}: disconnected walkable floor"
+            );
+            for p in endpoints.into_iter().chain(expected) {
+                assert!(
+                    reached.contains(&p),
+                    "seed {seed}: unreachable endpoint/candle {p:?}"
+                );
+            }
+            let mut families = BTreeMap::new();
+            for c in &map.cells {
+                if let Some(family) = FAMILIES
+                    .iter()
+                    .position(|f| c.object.is_some_and(|k| f.contains(&k)))
+                {
+                    assert!(c.region > 2, "seed {seed}: enemy in endpoint/corridor");
+                    if let Some(previous) = families.insert(c.region, family) {
+                        assert_eq!(previous, family, "seed {seed}: mixed room family");
+                    }
+                }
+            }
+            assert!(
+                (30..=38).contains(&families.len()),
+                "seed {seed}: ordinary rooms"
+            );
+        }
+    }
+
+    #[test]
+    fn bloody_floor_uses_selected_nonhazardous_ground() {
+        let content = content();
+        assert_eq!(content.grounds[&0xd4], content.grounds[&5]);
+        assert_eq!(content.pushes[&0xd4], (0., 0.));
+        assert!(!content.hazards.contains_key(&0xd4));
+        for seed in 0..48 {
+            let map = generate(&content, seed).unwrap();
+            assert!(
+                map.cells.iter().any(|c| c.ground == 0xd4),
+                "seed {seed}: no bloody floor"
+            );
+            assert!(map.cells.iter().all(|c| c.ground != 6));
+            assert!(
+                map.cells.iter().any(|c| c.object == Some(0x1803)),
+                "seed {seed}: blood pools lost"
+            );
+        }
+    }
 }
