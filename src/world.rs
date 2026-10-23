@@ -56,6 +56,8 @@ mod manor_entry;
 mod midlands;
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod npc_visibility_tests;
 
 mod named_births;
 mod names;
@@ -5101,12 +5103,19 @@ impl World {
             } else {
                 nearest.filter(|p| pos.distance(*p) < radius)
             };
+            // Visible mobs need simulation, not longer-range targeting: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/Collision.cs#L187-L215
+            let simulation_radius =
+                if self.content.objects[&kind].quest && entity.activated.is_none() {
+                    radius
+                } else {
+                    radius.max(20.)
+                };
             let nearby = self.players.values().any(|p| {
                 p.character.alive
                     && !p.death_pending
                     && !p.departing
                     && !p.paused
-                    && pos.distance(p.pos) < radius
+                    && pos.distance(p.pos) < simulation_radius
             });
             let manor_clock =
                 crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
