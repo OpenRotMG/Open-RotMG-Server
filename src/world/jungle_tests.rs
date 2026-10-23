@@ -211,6 +211,7 @@ fn jungle_generated_routes_rewards_and_transactional_clear() {
     w.finish_progress(player, progress[0].1.clone()).unwrap();
     assert!(w.entities[&exit].published);
     assert_eq!(w.players[&player].character.jungles, 1);
+    assert!(w.players[&player].character.lifetime.realm_exits.is_empty());
     assert!(w.pending_progress_where(|_, _| true).is_empty());
     assert!(w.entities.values().any(|e| e.items.contains(&0xc1a)));
     assert_eq!(crate::dungeon::portal_drop(0xdc2), Some((0x733, 0.2)));

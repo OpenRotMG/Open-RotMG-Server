@@ -23,8 +23,10 @@ def check(binary, data, directory, revision):
     version.write_text(revision + '\n')
     archive = directory / 'state.json.gz'
     bundle = backup.export(written / 'game.db', discord, archive, version, version, version)
-    if not bundle['game']['bot_minds'] or not bundle['game']['trade_transactions']:
-        raise RuntimeError('Release fixture omitted durable minds or committed trade receipts')
+    if len(bundle['game']['bot_minds']) != 2 or len(bundle['game']['trade_transactions']) != 1:
+        raise RuntimeError('Release community payload missing from backup')
+    if bundle['schema'] != 17:
+        raise RuntimeError('Release backup is not schema17')
     if b'BACKUP_FIXTURE_SECRET' in gzip.decompress(archive.read_bytes()):
         raise RuntimeError('Release backup exported a login identity')
     restored = directory / 'restored'
@@ -44,6 +46,14 @@ def check(binary, data, directory, revision):
         raise RuntimeError('Release restored death exercise failed: ' + result.stderr.strip())
     receipt = json.loads(result.stdout)
     character = receipt.pop('exercised_death', None)
+    paid_receipt = receipt.pop('receipt', None)
+    level_credits = receipt.pop('level_credits', None)
+    if paid_receipt != {'policy': 'historical', 'version': 1, 'base': 19, 'rows': [{'kind': 'well_equipped', 'amount': 1}], 'total': 20}:
+        raise RuntimeError('Release immutable paid receipt mismatch')
+    givers = [row['id'] for row in before_death['characters'] if row['alive'] == 1 and row['account'] != next(r['account'] for r in before_death['guild_members'] if r['rank'] == 40)][:2]
+    expected_credits = [{'recipient': character, 'reached_level': level, 'giver': giver} for level, giver in zip((2, 3), givers)]
+    if len(expected_credits) != 2 or level_credits != expected_credits:
+        raise RuntimeError('Release bounded causal credit receipt mismatch')
     if type(character) is not int or receipt != {'base_fame': 19, 'equipment_fame': 1, 'total_fame': 20}:
         raise RuntimeError('Release restored death exercise returned an invalid receipt')
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
@@ -53,6 +63,7 @@ def check(binary, data, directory, revision):
     created = next(row for row in paid['characters'] if row['id'] == character)
     expected['characters'].append(created)
     expected['deaths'].append(next(row for row in paid['deaths'] if row['character'] == character))
+    expected['level_credits'].extend(expected_credits)
     account = created['account']
     member = next(row for row in expected['guild_members'] if row['account'] == account)
     wallet = next(row for row in expected['account_fame'] if row['account'] == account)

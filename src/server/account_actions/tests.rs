@@ -456,6 +456,7 @@ async fn community_pursuit_ordinary_death_and_restart_preserve_account_not_dead_
                 damage: spec.max,
                 spec,
                 hit: Default::default(),
+                hit_enemy: false,
             });
             w.step();
             assert!(
@@ -836,6 +837,7 @@ async fn community_pursuit_crossing_pair(risk: bool, loaded: bool) {
                         damage: spec.max,
                         spec: spec.clone(),
                         hit: Default::default(),
+                        hit_enemy: false,
                     });
                 }
             }
@@ -1054,6 +1056,7 @@ async fn community_pursuit_execution_pair(simple: bool) {
                             damage: spec.max,
                             spec: spec.clone(),
                             hit: Default::default(),
+                            hit_enemy: false,
                         });
                     }
                 }

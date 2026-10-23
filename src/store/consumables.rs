@@ -9,6 +9,50 @@ enum DyeSource {
 }
 
 impl Store {
+    pub async fn consume_inventory_potion(
+        &self,
+        write: InventoryWrite,
+        slot: usize,
+        kind: u16,
+    ) -> Result<i32> {
+        let item = self.content.get(kind)?;
+        ensure!(
+            item.is_potion() && item.stat_increase.is_none(),
+            "item is not a selected restorative or temporary stat potion"
+        );
+        let next = match &item.successor {
+            Some(name) => i32::from(
+                self.content
+                    .objects
+                    .values()
+                    .find(|item| &item.name == name)
+                    .context("potion successor missing")?
+                    .kind,
+            ),
+            None => -1,
+        };
+        ensure!(
+            write.items.len() == 12
+                && write.items.iter().all(|item| (-1..=65535).contains(item))
+                && slot < 12
+                && write.items[slot] == next
+                && (0..i32::MAX).contains(&write.revision),
+            "invalid inventory potion reservation"
+        );
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let (raw, items): (String,String) = tx.query_row("SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",params![write.id,write.account,write.revision],|r|Ok((r.get(0)?,r.get(1)?))).context("inventory potion conflict: dead, foreign or stale character")?;
+            let _: Character = serde_json::from_str(&raw)?;
+            let mut previous: Vec<i32> = serde_json::from_str(&items)?;
+            ensure!(previous.len() == 12 && previous[slot] == i32::from(kind), "inventory potion source changed");
+            previous[slot] = next;
+            ensure!(previous == write.items, "potion may only consume its reserved slot");
+            ensure!(tx.execute("UPDATE characters SET stats=json_set(stats,'$.lifetime.inventory_potion_used',json('true')),items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",params![write.id,write.account,write.revision,serde_json::to_string(&write.items)?])? == 1,"inventory potion commit lost reservation");
+            tx.commit()?;
+            Ok(write.revision+1)
+        }).await
+    }
+
     pub async fn consume_xp_booster(
         &self,
         write: InventoryWrite,

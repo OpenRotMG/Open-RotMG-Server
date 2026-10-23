@@ -1,8 +1,10 @@
+import {writeSync} from 'node:fs';
 import {readFile, writeFile, readdir, rename, open} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {nativeClock} from './native-clock.mjs';
+import {AsyncLocalStorage} from 'node:async_hooks';
 
 const help=`Usage: node scripts/game.mjs CONFIG.json REQUEST.json
 Start a new isolated prepared server with ./run.sh PORT --test-state NEW_DIRECTORY --no-shore-bots.
@@ -46,14 +48,17 @@ if(mutating) {
 }
 const save=async result=>{if(ownsIntent){await writeFile(`${path}.tmp`,JSON.stringify({command,status:'complete',result}),{flag:'wx',mode:0o600,flush:true});await rename(`${path}.tmp`,path);await syncDirectory();}};
 const api = async (value, requestId=`${id}-ctl${++sequence}`) => {
-  const response = await fetch(new URL('/dev/testing', origin), {
-    method: 'POST', headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
-    body: JSON.stringify({id:requestId, command:value}),
-    signal: AbortSignal.timeout(value.op==='run'?660000:value.op==='native_sync'?45000:value.op==='native_lease'&&value.operation==='renew'?500:10000),
-  });
-  const result = await response.json();
-  if (!response.ok || result.status === 'failed') throw new Error(JSON.stringify(result));
-  return result;
+  const started=performance.now();
+  try {
+    const response = await fetch(new URL('/dev/testing', origin), {
+      method: 'POST', headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
+      body: JSON.stringify({id:requestId, command:value}),
+      signal: AbortSignal.timeout(value.op==='run'?660000:value.op==='native_sync'?45000:value.op==='native_lease'&&value.operation==='renew'?500:10000),
+    });
+    const result = await response.json();
+    if (!response.ok || result.status === 'failed') throw new Error(JSON.stringify(result));
+    return result;
+  } finally {console.error(JSON.stringify({event:'native_http_timing',op:value.op,wall_ms:performance.now()-started}));}
 };
 const clients = [];
 async function eachClient(selected, action) {
@@ -65,8 +70,17 @@ async function connect(spec) {
   if (!config.browserTools) throw new Error('Native control requires the installed managed browser helper path');
   if(!Number.isInteger(spec.port)||spec.port<1024||spec.port>65535||typeof spec.target!=='string'||!Number.isInteger(spec.actor))throw new Error('Each native target requires an explicit local port, target id and durable actor id');
   const {managedCDP, scriptOwner} = await import(pathToFileURL(config.browserTools).href);
-  let send;
-  const call=await managedCDP(spec.port,spec.target,scriptOwner(),(method,params)=>send(method,params));
+  let send;const spans=new AsyncLocalStorage();
+  const managed=await managedCDP(spec.port,spec.target,scriptOwner(),(method,params)=>{
+    const span=spans.getStore();if(span)span.rawStart=performance.now();
+    return send(method,params).finally(()=>{if(span)span.rawEnd=performance.now();});
+  });
+  const call=(method,params={})=>{
+    const span={start:performance.now()};
+    return spans.run(span,async()=>{try{return await managed(method,params);}finally{
+      const end=performance.now();console.error(JSON.stringify({event:'native_cdp_timing',method,wall_ms:end-span.start,before_raw_ms:span.rawStart===undefined?null:span.rawStart-span.start,raw_roundtrip_ms:span.rawEnd===undefined?null:span.rawEnd-span.rawStart,after_raw_ms:span.rawEnd===undefined?null:end-span.rawEnd}));
+    }});
+  };
   const pages = await (await fetch(`http://127.0.0.1:${spec.port}/json/list`,{signal:AbortSignal.timeout(5000)})).json();
   const page = pages.find(p => p.id === spec.target);
   if (!page || new URL(page.url).origin !== origin.origin) throw new Error(`Native target ${spec.target} is missing or on the wrong origin`);
@@ -150,6 +164,15 @@ async function states(waitForReady=false,expect,previous){
   }while(Date.now()<deadline);
   throw Error('Native readiness/outcome not observed: '+JSON.stringify({expect,state}));
 }
+function verifiedNativeAck(context,server,frames,abort,write) {
+  if(abort)throw abort;
+  const observedBrowserFrameSha256=frames.find(frame=>frame===server.frame_sha256);
+  if(server.actor!==context.actor||server.player!==context.player||!Number.isSafeInteger(server.nonce)||server.nonce<=-2147483648||server.nonce>=0||!observedBrowserFrameSha256)throw Error('No verified native_sync server/browser ACK');
+  const row={event:'native_sync_verified_ack',context,server:{actor:server.actor,player:server.player,nonce:server.nonce,frame_sha256:server.frame_sha256},observedBrowserFrameSha256};
+  const bytes=Buffer.from(JSON.stringify(row)+'\n');
+  try{if(write(bytes)!==bytes.length)throw Error('Short native_sync ACK diagnostic write');}
+  catch(cause){throw Error('Verified native_sync ACK diagnostic could not be retained',{cause});}
+}
 async function bind(state){
   const fresh=[];
   const pages=await eachClient(clients,async c=>({c,page:await c.evaluate('({playing:document.querySelector("ruffle-player").ruffle().isPlaying,binding:globalThis[Symbol.for("openrotmg.testing.binding.v1")]})')}));
@@ -171,6 +194,7 @@ async function bind(state){
       while(!c.frames.includes(acknowledgment.frame_sha256)&&Date.now()<deadline)await wait(10);
       if(actual.player!==acknowledgment.player||!c.frames.includes(acknowledgment.frame_sha256))throw Error('Native browser/character binding mismatch for actor '+c.actor);
       await c.evaluate('globalThis[Symbol.for("openrotmg.testing.binding.v1")]='+JSON.stringify({runtime:state.runtime,actor:c.actor,player:actual.player}));
+      verifiedNativeAck({runtime:state.runtime,actor:c.actor,player:actual.player},acknowledgment,c.frames,leaseError,bytes=>writeSync(2,bytes));
     });
   }
 }

@@ -214,8 +214,10 @@ class LauncherTests(unittest.TestCase):
 
     def test_failed_download_logs_url_and_cause(self):
         with patch('sys.argv', ['run.py', '8080']), patch.object(launcher.shutil, 'which', return_value='/cargo'), \
+                patch.object(launcher, 'run', return_value=0) as build, \
                 patch.object(launcher, 'urlopen', side_effect=OSError('connection refused')):
             self.assertEqual(launcher.main(), 1)
+        build.assert_not_called()
         self.assertIn(self.url, launcher.LOG.read_text())
         self.assertIn('connection refused', launcher.LOG.read_text())
 
