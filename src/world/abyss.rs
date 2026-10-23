@@ -584,9 +584,10 @@ impl World {
     }
     pub(super) fn abyss_terminal_step(&mut self) {
         let ids: Vec<_> = self
-            .actors()
-            .filter(|e| e.kind == 0x90b && self.abyss_flamer_due(e.id))
-            .map(|e| e.id)
+            .abyss_flamer_ids
+            .iter()
+            .copied()
+            .filter(|id| self.abyss_flamer_due(*id))
             .collect();
         for id in ids {
             if let Err(error) = self.finish_abyss_flamer(id) {

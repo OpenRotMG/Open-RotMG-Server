@@ -563,6 +563,8 @@ pub struct World {
     timed_ids: BTreeSet<i32>,
     gun_ids: BTreeSet<i32>,
     pentaract_ids: BTreeSet<i32>,
+    // Terminal deadlines run in every world, including Realms without any Flamers.
+    abyss_flamer_ids: BTreeSet<i32>,
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
@@ -2002,6 +2004,11 @@ impl World {
             realm_layout: None,
             timed_ids: BTreeSet::new(),
             gun_ids,
+            abyss_flamer_ids: actor_ids
+                .iter()
+                .copied()
+                .filter(|id| entities[id].kind == 0x90b)
+                .collect(),
             pentaract_ids: entities
                 .values()
                 .filter(|e| e.kind == 0xd5f)
@@ -2302,6 +2309,9 @@ impl World {
         if kind == 0xd5f {
             self.pentaract_ids.insert(id);
         }
+        if kind == 0x90b {
+            self.abyss_flamer_ids.insert(id);
+        }
         self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
         if definition.quest {
@@ -2345,6 +2355,7 @@ impl World {
         self.timed_ids.remove(&id);
         self.gun_ids.remove(&id);
         self.pentaract_ids.remove(&id);
+        self.abyss_flamer_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
         self.ability_state.objects.remove(&id);

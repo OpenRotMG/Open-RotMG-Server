@@ -5,7 +5,23 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 const TREES: [u16; 5] = [0x175, 0x176, 0x177, 0x178, 0x179];
 const SPRITES: [u16; 5] = [0xd00, 0xd01, 0xd02, 0xd03, 0xd04];
 
+#[derive(Clone, Copy, Debug)]
+enum FloorPattern {
+    White,
+    YellowChecker,
+}
+
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+    // Reconstructed per-world visual choice; do not consume layout/population RNG draws.
+    let pattern = if seed & 1 == 0 {
+        FloorPattern::White
+    } else {
+        FloorPattern::YellowChecker
+    };
+    generate_with_pattern(content, seed, pattern)
+}
+
+fn generate_with_pattern(content: &Content, seed: u64, pattern: FloorPattern) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let directions = [(1i32, 0), (-1, 0), (0, 1), (0, -1)];
     let mut rooms = vec![(0i32, 0i32)];
@@ -75,7 +91,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         };
         for y in cy - radius..=cy + radius {
             for x in cx - radius..=cx + radius {
-                paint(&mut map, x, y);
+                paint(&mut map, x, y, pattern);
             }
         }
     }
@@ -83,7 +99,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         let ((x0, y0), (x1, y1)) = (centers[a], centers[b]);
         for y in y0.min(y1)..=y0.max(y1) + 1 {
             for x in x0.min(x1)..=x0.max(x1) + 1 {
-                paint(&mut map, x, y);
+                paint(&mut map, x, y, pattern);
             }
         }
     }
@@ -142,6 +158,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         seed,
         rooms = rooms.len(),
         gods,
+        floor_pattern = ?pattern,
         width,
         height,
         "generated varied Sprite World"
@@ -149,21 +166,22 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     Ok(map)
 }
 
-fn paint(map: &mut Map, x: i32, y: i32) {
-    // One pattern aligned to the room centers keeps corridor joins seamless and arrivals stationary.
+fn paint(map: &mut Map, x: i32, y: i32, pattern: FloorPattern) {
+    // Keep conveyor positions/vectors identical; white and yellow are both stationary.
     map.cells[(y * map.width + x) as usize].ground =
         match ((x - 12).rem_euclid(8), (y - 12).rem_euclid(8)) {
             (_, 2) => 0xa1,
             (_, 3) => 0xa2,
             (2, _) => 0xa3,
             (3, _) => 0xa4,
+            _ if matches!(pattern, FloorPattern::YellowChecker) && (x + y) % 2 != 0 => 0xa5,
             _ => 0xa0,
         };
 }
 
 fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
     let cell = &mut map.cells[(y * map.width + x) as usize];
-    if (0xa0..=0xa4).contains(&cell.ground) && cell.object.is_none() {
+    if (0xa0..=0xa5).contains(&cell.ground) && cell.object.is_none() {
         cell.object = Some(kind);
     }
 }
@@ -172,6 +190,51 @@ fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn floor_patterns_only_recolor_stationary_tiles() {
+        let content = Content::load(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data"
+        )))
+        .unwrap();
+        assert_eq!(content.grounds[&0xa0], content.grounds[&0xa5]);
+        assert_eq!(content.pushes[&0xa0], (0., 0.));
+        assert_eq!(content.pushes[&0xa5], (0., 0.));
+        assert!(!content.hazards.contains_key(&0xa0));
+        assert!(!content.hazards.contains_key(&0xa5));
+        for seed in [0, 1] {
+            let white = generate_with_pattern(&content, seed, FloorPattern::White).unwrap();
+            let checker =
+                generate_with_pattern(&content, seed, FloorPattern::YellowChecker).unwrap();
+            assert!(checker.cells.iter().any(|c| c.ground == 0xa5));
+            for (index, (a, b)) in white.cells.iter().zip(&checker.cells).enumerate() {
+                let (x, y) = (index as i32 % white.width, index as i32 / white.width);
+                let expected = if a.ground == 0xa0 && (x + y) % 2 != 0 {
+                    0xa5
+                } else {
+                    a.ground
+                };
+                assert_eq!(b.ground, expected, "seed {seed} at {x},{y}");
+            }
+            let selected = if seed & 1 == 0 { &white } else { &checker };
+            assert_eq!(
+                serde_json::to_vec(&generate(&content, seed).unwrap()).unwrap(),
+                serde_json::to_vec(selected).unwrap()
+            );
+            let mut normalized = checker;
+            for cell in &mut normalized.cells {
+                if cell.ground == 0xa5 {
+                    cell.ground = 0xa0;
+                }
+            }
+            assert_eq!(
+                serde_json::to_vec(&white).unwrap(),
+                serde_json::to_vec(&normalized).unwrap(),
+                "seed {seed}: layout, conveyors, trees, population or portals changed"
+            );
+        }
+    }
 
     #[test]
     fn compact_platforms_have_only_two_tile_bridges() {
@@ -187,7 +250,7 @@ mod tests {
                 serde_json::to_vec(&generate(&content, seed).unwrap()).unwrap()
             );
             let floor = |x: i32, y: i32| {
-                (0xa0..=0xa4).contains(&map.cells[(y * map.width + x) as usize].ground)
+                (0xa0..=0xa5).contains(&map.cells[(y * map.width + x) as usize].ground)
             };
             let mut rooms = Vec::new();
             for cy in (12..map.height).step_by(16) {
@@ -249,7 +312,7 @@ mod tests {
                 seen.len(),
                 map.cells
                     .iter()
-                    .filter(|c| (0xa0..=0xa4).contains(&c.ground))
+                    .filter(|c| (0xa0..=0xa5).contains(&c.ground))
                     .count(),
                 "seed {seed}: disconnected floor/boss"
             );
