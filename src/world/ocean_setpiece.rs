@@ -3,6 +3,10 @@ use super::realm_setpieces::Area;
 use super::*;
 use rand::seq::SliceRandom;
 
+fn hermit_radius(x: i32, y: i32) -> f32 {
+    ((x as f32 - 16.).powi(2) + ((y as f32 - 14.) * 1.1).powi(2)).sqrt()
+}
+
 impl World {
     pub(super) fn populate_hermit(&mut self) -> Result<()> {
         ensure!(
@@ -63,8 +67,9 @@ impl World {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
                             c.region == 0
                                 && !(retain_authored_lava && c.ground == 0xf4)
-                                && c.object
-                                    .is_none_or(|kind| !self.content.objects[&kind].full_occupy)
+                                && (hermit_radius(x - a.x, y - a.y) > 15.
+                                    || c.object
+                                        .is_none_or(|kind| !self.content.objects[&kind].full_occupy))
                         })
                     })
             })
@@ -75,7 +80,7 @@ impl World {
         // Reconstruct the source island's rings without erasing generated waterways.
         for y in 0..29 {
             for x in 0..32 {
-                let radius = ((x as f32 - 16.).powi(2) + ((y as f32 - 14.) * 1.1).powi(2)).sqrt();
+                let radius = hermit_radius(x, y);
                 if radius > 15. {
                     continue;
                 }
@@ -167,6 +172,50 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hermit_preserves_full_occupy_in_an_unpainted_corner() {
+        let mut map = Map {
+            width: 64,
+            height: 64,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 190,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0,
+                };
+                64 * 64
+            ],
+            spawns: vec![],
+        };
+        map.cells[32 * 64 + 32].terrain = 4;
+        let mut w = World::new(super::super::tests::world().content, Arc::new(map)).unwrap();
+        assert!(w.content.objects[&288].full_occupy);
+        let corner = 18 * 64 + 16;
+        Arc::make_mut(&mut w.map).cells[corner].object = Some(288);
+        let before = w.map.cells[corner].clone();
+        w.populate_hermit().unwrap();
+        let after = &w.map.cells[corner];
+        assert_eq!(
+            (
+                after.ground,
+                after.object,
+                after.config.as_str(),
+                after.terrain,
+                after.region
+            ),
+            (
+                before.ground,
+                before.object,
+                before.config.as_str(),
+                before.terrain,
+                before.region
+            )
+        );
+        assert_eq!(w.setpieces.len(), 1);
+    }
 
     #[test]
     fn hermit_lakes_use_inland_event_terrain_on_every_realm_layout() {
