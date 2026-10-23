@@ -1,5 +1,9 @@
 use super::*;
 use crate::endgame::{CASTLE, CELLAR, HEROES, INCANTATION, LOCKED_CELLAR, RealmCycle, RealmStage};
+use rand::seq::IteratorRandom;
+
+// Gameplay documentation specifies two minutes, unlike modified forks' 20s: https://wikiwiki.jp/rmd/イベント#jded12e1
+const REMAINING_TAUNT_MS: u64 = 120_000;
 
 #[derive(Default)]
 pub(super) struct RealmDirectory {
@@ -16,9 +20,10 @@ pub(super) struct RealmRecord {
     pub pending_transfers: BTreeSet<i32>,
     publish_at: Option<u64>,
     retry_at: u64,
+    next_taunt: u64,
 }
 impl RealmRecord {
-    fn new(cycle: RealmCycle) -> Self {
+    fn new(cycle: RealmCycle, now: u64) -> Self {
         Self {
             cycle,
             portal: None,
@@ -29,6 +34,7 @@ impl RealmRecord {
             pending_transfers: BTreeSet::new(),
             publish_at: None,
             retry_at: 0,
+            next_taunt: now + REMAINING_TAUNT_MS,
         }
     }
 }
@@ -339,7 +345,9 @@ impl Directory {
             heroes = cycle.remaining.len(),
             "finite Realm closure roster bound"
         );
-        self.endgame.realms.insert(origin, RealmRecord::new(cycle));
+        self.endgame
+            .realms
+            .insert(origin, RealmRecord::new(cycle, self.tick * 50));
         Ok(())
     }
     pub(super) fn endgame_step(&mut self) {
@@ -387,6 +395,13 @@ impl Directory {
                         self.grants.retain(|_, g| g.destination != *origin);
                         world.admissions.clear();
                     }
+                }
+            }
+            if record.enabled && cycle.admits() && now >= record.next_taunt {
+                record.next_taunt = now + REMAINING_TAUNT_MS;
+                if let Some((kind, count, text)) = world.remaining_taunt(&cycle.remaining) {
+                    world.oryx_notice(&text);
+                    tracing::info!(world = origin, time_ms = now, kind, count, %text, "Oryx remaining encounters announced");
                 }
             }
             while cycle.advance(now) {
@@ -547,7 +562,7 @@ impl Directory {
         self.worlds.insert(realm_id, realm);
         self.next_world = next;
         self.idle.insert(castle_id, self.tick);
-        let mut record = RealmRecord::new(next_cycle);
+        let mut record = RealmRecord::new(next_cycle, self.tick * 50);
         record.portal = Some(portal);
         record.name = name;
         record.enabled = false;
@@ -859,8 +874,76 @@ impl World {
         }
         Ok(())
     }
+    fn remaining_taunt(&self, remaining: &BTreeSet<i32>) -> Option<(u16, usize, String)> {
+        let mut families: BTreeMap<u16, BTreeSet<i32>> = BTreeMap::new();
+        for e in self.actors().filter(|e| e.hp > 0) {
+            let family = match e.kind {
+                0x91b | 0x91c => 0x91b,
+                0x91f | 0x920 => 0x91f,
+                0x928 | 0x92d => 0x928,
+                0x675 | 0x6c1 | 0x6c2 => 0x675,
+                kind if HEROES.contains(&kind)
+                    || crate::quest::EVENT_BOSSES.contains(&kind)
+                    || kind == 0x678 =>
+                {
+                    kind
+                }
+                _ => continue,
+            };
+            let tag = match e.quest {
+                Some(tag) => tag,
+                None => e.id,
+            };
+            if remaining.contains(&tag) {
+                families.entry(family).or_default().insert(tag);
+            }
+        }
+        let (&kind, ids) = families.iter().choose(&mut rand::thread_rng())?;
+        let count = ids.len();
+        let text = match (kind, count == 1) {
+            (0x91b, false) => format!("I am invincible while my {count} Liches still stand!"),
+            (0x91b, true) => "My final Lich will protect me forever!".into(),
+            (0x91f, false) => {
+                format!("Mortal scum! My {count} Ent Ancients will defend me forever!")
+            }
+            (0x91f, true) => "My final Ent Ancient will destroy you all!".into(),
+            (0x928, false) => {
+                format!("My {count} Ghost Kings give me more than enough protection!")
+            }
+            (0x928, true) => "My final Ghost King is untouchable!".into(),
+            (0x675, false) => format!("Maggots! My {count} Phoenix Lords will burn you to ash!"),
+            (0x675, true) => "My final Phoenix Lord will never fall!".into(),
+            (0x678, false) => format!("You have no hope against my {count} Oasis Giants!"),
+            (0x678, true) => "A powerful Oasis Giant still fights for me!".into(),
+            (0x668, false) => format!("Fools! There is no escape from my {count} Red Demons!"),
+            (0x668, true) => "My final Red Demon is unassailable!".into(),
+            (0x67d, false) => format!("Cretins! I have {count} Cyclops Gods to guard me!"),
+            (0x67d, true) => "My last Cyclops God will smash you to pieces!".into(),
+            (0xd56, false) => format!("Imbeciles! My {count} Skull Shrines make me invincible!"),
+            (0xd56, true) => "Pathetic fools! A Skull Shrine guards me!".into(),
+            (0xd59, false) => format!("Filthy vermin! My {count} Cube Gods will exterminate you!"),
+            (0xd59, true) => "Worthless mortals! A mighty Cube God defends me!".into(),
+            (0xd5f, false) => format!("Wretched creatures! {count} Pentaracts remain!"),
+            (0xd5f, true) => "Ignorant fools! A Pentaract guards me still!".into(),
+            (0xd54, false) => format!(
+                "You dull-spirited apes! You shall pose no challenge for {count} Grand Sphinxes!"
+            ),
+            (0xd54, true) => {
+                "Gaze upon the beauty of the Grand Sphinx and feel your last hopes drain away."
+                    .into()
+            }
+            (0xd50, _) => "My Lord of the Lost Lands will make short work of you!".into(),
+            (0xd61, _) => {
+                "My Hermit God's thousand tentacles shall drag you to a watery grave!".into()
+            }
+            (0xe37, _) => "My Ghost Ship will send you to a watery grave.".into(),
+            _ => unreachable!("unsupported Oryx announcement family {kind:#x}"),
+        };
+        Some((kind, count, text))
+    }
+
     pub(super) fn oryx_notice(&self, text: &str) {
-        self.broadcast_text("Oryx the Mad God", text);
+        self.broadcast_text("#Oryx the Mad God", text);
     }
 }
 
@@ -868,6 +951,152 @@ impl World {
 mod tests {
     use super::*;
     use crate::quest;
+
+    #[test]
+    fn oryx_announcements_follow_two_minute_counts_with_realm_isolation() {
+        use crate::wire::Reader;
+        fn listener(d: &mut Directory, world: i32) -> (i32, tokio::sync::mpsc::Receiver<Packet>) {
+            let w = d.worlds.get_mut(&world).unwrap();
+            let (tx, rx) = tokio::sync::mpsc::channel(1024);
+            let (lost, _) = tokio::sync::watch::channel(false);
+            let mut ch = super::super::tests::ch(w);
+            ch.account = w.players.len() as i32 + 1;
+            ch.id = ch.account;
+            let id = w.enter(ch, Some(Output { packets: tx, lost })).unwrap();
+            (id, rx)
+        }
+        fn texts(rx: &mut tokio::sync::mpsc::Receiver<Packet>) -> Vec<(String, String)> {
+            let mut out = Vec::new();
+            while let Ok(packet) = rx.try_recv() {
+                if packet.id != wire::TEXT {
+                    continue;
+                }
+                let mut r = Reader::new(&packet.body);
+                let name = r.utf().unwrap();
+                assert_eq!(r.i32().unwrap(), -1);
+                r.i32().unwrap();
+                assert_eq!(r.u8().unwrap(), 0);
+                assert_eq!(r.utf().unwrap(), "");
+                out.push((name, r.utf().unwrap()));
+            }
+            out
+        }
+        let mut d = super::super::tests::directory();
+        let origin = -3;
+        let other = *d.endgame.realms.keys().find(|id| **id != origin).unwrap();
+        let (owner, mut a) = listener(&mut d, origin);
+        let (_, mut peer) = listener(&mut d, origin);
+        let (_, mut b) = listener(&mut d, other);
+        let (_, mut nexus) = listener(&mut d, -2);
+        let w = d.worlds.get_mut(&origin).unwrap();
+        w.event_reserves.clear();
+        let pos = w.players[&owner].pos;
+        let first = w.spawn_entity(0x668, pos, vec![]).unwrap();
+        let last = w.spawn_entity(0x668, pos, vec![]).unwrap();
+        w.spawn_entity(0x668, pos, vec![]).unwrap();
+        d.endgame.realms.get_mut(&origin).unwrap().cycle.remaining = BTreeSet::from([first, last]);
+        let w = d.worlds.get_mut(&other).unwrap();
+        let cyclops = w.spawn_entity(0x67d, pos, vec![]).unwrap();
+        d.endgame.realms.get_mut(&other).unwrap().cycle.remaining = BTreeSet::from([cyclops]);
+        d.tick = 2399;
+        d.endgame_step();
+        assert!(texts(&mut a).is_empty());
+        d.tick = 2400;
+        d.endgame_step();
+        let plural = vec![(
+            "#Oryx the Mad God".into(),
+            "Fools! There is no escape from my 2 Red Demons!".into(),
+        )];
+        assert_eq!(texts(&mut a), plural);
+        assert_eq!(texts(&mut peer), plural);
+        assert_eq!(
+            texts(&mut b),
+            vec![(
+                "#Oryx the Mad God".into(),
+                "My last Cyclops God will smash you to pieces!".into()
+            )]
+        );
+        assert!(texts(&mut nexus).is_empty());
+        d.endgame_step();
+        assert!(texts(&mut a).is_empty());
+        d.worlds
+            .get_mut(&origin)
+            .unwrap()
+            .damage_enemy(owner, first, 100000, false, &[], None)
+            .unwrap();
+        d.tick = 2401;
+        d.endgame_step();
+        assert!(texts(&mut a).is_empty());
+        d.tick = 4800;
+        d.endgame_step();
+        assert_eq!(
+            texts(&mut a),
+            vec![(
+                "#Oryx the Mad God".into(),
+                "My final Red Demon is unassailable!".into()
+            )]
+        );
+        d.worlds
+            .get_mut(&origin)
+            .unwrap()
+            .damage_enemy(owner, last, 100000, false, &[], None)
+            .unwrap();
+        d.tick = 4801;
+        d.endgame_step();
+        assert!(!d.endgame.realms[&origin].cycle.admits());
+        assert_eq!(texts(&mut a).len(), 1);
+        d.tick = 7200;
+        d.endgame_step();
+        assert!(texts(&mut a).is_empty());
+    }
+
+    #[test]
+    fn oryx_counts_deduplicate_transformations_and_do_not_consume_gameplay_rng() {
+        use rand::RngCore;
+        let mut w = super::super::tests::arena(0);
+        let pos = Pos { x: 10.5, y: 10.5 };
+        for (family, aliases) in [
+            (0x91b, &[0x91b, 0x91c][..]),
+            (0x91f, &[0x91f, 0x920][..]),
+            (0x928, &[0x928, 0x92d][..]),
+            (0x675, &[0x675, 0x6c2, 0x6c1][..]),
+            (0x678, &[0x678][..]),
+            (0x668, &[0x668][..]),
+            (0x67d, &[0x67d][..]),
+            (0xd56, &[0xd56][..]),
+            (0xd59, &[0xd59][..]),
+            (0xd5f, &[0xd5f][..]),
+            (0xd54, &[0xd54][..]),
+            (0xd50, &[0xd50][..]),
+            (0xd61, &[0xd61][..]),
+            (0xe37, &[0xe37][..]),
+        ] {
+            let mut ids = Vec::new();
+            for kind in aliases {
+                let id = w.spawn_entity(*kind, pos, vec![]).unwrap();
+                w.entities.get_mut(&id).unwrap().quest = Some(700);
+                ids.push(id);
+            }
+            let follower = w.spawn_entity(0x676, pos, vec![]).unwrap();
+            w.entities.get_mut(&follower).unwrap().quest = Some(700);
+            assert!(w.remaining_taunt(&BTreeSet::new()).is_none());
+            let mut rng = w.rng.clone();
+            for _ in 0..4 {
+                let (kind, count, text) = w.remaining_taunt(&BTreeSet::from([700])).unwrap();
+                assert_eq!((kind, count), (family, 1));
+                assert!(!text.contains('{'));
+                if family != 0xd54 {
+                    assert!(!text.contains("Sphinx"));
+                }
+            }
+            assert_eq!(w.rng.next_u64(), rng.next_u64());
+            for id in ids {
+                w.remove_entity(id);
+            }
+            assert!(w.remaining_taunt(&BTreeSet::from([700])).is_none());
+            w.remove_entity(follower);
+        }
+    }
 
     #[test]
     fn realm_pool_large_collective_departure_drains_with_bounded_live_grants() {
