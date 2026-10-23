@@ -101,6 +101,20 @@ impl World {
                     .context("family leader is no longer alive")?
                     .pos)
             }
+            encounter::Anchor::BoundEntity(member) => {
+                ensure!(
+                    e.tomb
+                        .as_ref()
+                        .is_some_and(|brain| brain.anchor == Some(member)
+                            || brain.guard.is_some_and(|(caller, _)| caller == member)),
+                    "Tomb anchor ownership mismatch"
+                );
+                Ok(self
+                    .entities
+                    .get(&member)
+                    .context("bound Tomb anchor absent")?
+                    .pos)
+            }
             encounter::Anchor::CampEntity(member) => {
                 let owner = self
                     .entities
@@ -224,6 +238,9 @@ impl World {
         }
         if crate::dungeon::davy::profile(self.entities[&id].kind).is_some() {
             return self.locker_mechanics(id, target, elapsed);
+        }
+        if crate::dungeon::tomb::contains(self.entities[&id].kind) {
+            return self.tomb_mechanics(id, target);
         }
         if self.entities[&id].kind == crate::dungeon::snake::BOSS {
             return self.snake_mechanics(id, elapsed);
@@ -575,6 +592,9 @@ impl World {
         }
         if defeated.kind == 0xe37 {
             self.ghost_ship_locker_reward(defeated)?;
+        }
+        if crate::dungeon::tomb::contains(defeated.kind) {
+            return self.tomb_death(defeated);
         }
         if crate::dungeon::trench::ROSTER.contains(&defeated.kind) {
             return self.ocean_death(defeated);
