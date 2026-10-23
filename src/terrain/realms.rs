@@ -290,3 +290,23 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[test]
+fn imported_road_bends_are_rounded() {
+    let content = Content::load(Path::new("data")).unwrap();
+    for (number, tip, inside) in [
+        (1, (1574, 1272), (1574, 1264)),
+        (2, (747, 343), (747, 336)),
+        (3, (414, 1506), (414, 1500)),
+    ] {
+        let bytes = std::fs::read(format!("data/realm-fsod-{number}.wmap")).unwrap();
+        let map = Map::decode_cells(&bytes, &content).unwrap();
+        let cell = |(x, y)| &map.cells[(y * map.width + x) as usize];
+        assert_ne!(cell(tip).ground, 0xd0, "Realm {number}: sharp tip retained");
+        let arc = cell(inside);
+        assert_eq!(arc.ground, 0xd0, "Realm {number}: rounded arc missing");
+        assert!(arc.object.is_none());
+        assert_eq!((arc.terrain, arc.region), (0, 0));
+    }
+}

@@ -42,25 +42,24 @@ def convert(raw):
             raise ValueError("map string length overflow")
         if offset + length > len(data):
             raise ValueError("truncated map string")
-        data[offset:offset + length].decode("utf-8")
+        value = data[offset:offset + length].decode("utf-8")
         offset += length
+        return value
 
     count = number("<h")
     if count <= 0:
         raise ValueError("empty map dictionary")
+    dictionary = []
     for _ in range(count):
-        if not 0 <= number("<h") <= 255:
+        ground = number("<h")
+        if not 0 <= ground <= 255:
             raise ValueError("ground does not fit the selected client")
-        text()
-        text()
-        number("<B")
-        number("<B")
+        dictionary.append((ground, text(), text(), number("<B"), number("<B")))
     if (number("<i"), number("<i")) != (2048, 2048):
         raise ValueError("expected a full 2048-square Realm")
     payload = data[offset:]
     if len(payload) != 2048 * 2048 * 3:
         raise ValueError("truncated or trailing Realm cells")
-    # Runtime cells have no elevation; all other dictionary and tile bytes survive unchanged.
     cells = bytearray(2048 * 2048 * 2)
     cells[0::2], cells[1::2] = payload[0::3], payload[1::3]
     indices = array.array("H", cells)
@@ -68,6 +67,8 @@ def convert(raw):
         indices.byteswap()
     if max(indices) >= count:
         raise ValueError("invalid map dictionary index")
+    from realm_roads import round_roads
+    cells = round_roads(cells, dictionary, 2048, 2048)
     return zlib.compress(data[:offset] + cells, 9)
 
 
