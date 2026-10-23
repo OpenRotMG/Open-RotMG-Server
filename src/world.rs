@@ -4476,7 +4476,7 @@ impl World {
             .map(|(i, q)| serde_json::json!({"id":i,"pos":q.pos,"name":q.character.name}))
             .collect();
         Ok(
-            serde_json::json!({"tick":self.tick,"time_ms":self.now,"player":id,"pos":p.pos,"character":p.character,"entities":entities,"players":others,"bullets":self.bullets.len(),"own_projectiles":self.bullets.iter().filter(|b| b.friendly && b.owner == id).map(|b| serde_json::json!({"id":b.id,"start":b.start,"pos":b.pos,"angle":b.angle,"born":b.born})).collect::<Vec<_>>(),"pending":p.pending}),
+            serde_json::json!({"tick":self.tick,"time_ms":self.now,"player":id,"pos":p.pos,"character":p.character,"entities":entities,"players":others,"bullets":self.bullets.len(),"own_projectiles":self.bullets.iter().filter(|b| b.friendly && b.owner == id).map(|b| serde_json::json!({"id":b.id,"start":b.start,"pos":b.pos,"angle":b.angle,"born":b.born})).collect::<Vec<_>>(),"pending":p.pending,"oxygen":p.oxygen}),
         )
     }
     fn loot_bag(&mut self, pos: Pos, owner: Option<i32>, mut items: Vec<i32>) -> Result<i32> {
@@ -6153,6 +6153,8 @@ mod lair_trap_tests;
 mod loot_bag_tests;
 #[cfg(test)]
 mod manor_tests;
+#[cfg(test)]
+mod ocean_tests;
 #[cfg(test)]
 mod starter_loot_tests;
 #[cfg(test)]
