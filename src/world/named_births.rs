@@ -85,6 +85,9 @@ impl World {
     pub(super) fn configure_landmark_child(&mut self, id: i32) {
         let e = self.entities.get_mut(&id).unwrap();
         match e.kind {
+            0x679..=0x67c => {
+                e.expires.set(None, id, &mut self.timed_ids);
+            }
             0xdc0 | 0xdc1 => {
                 e.expires.set(None, id, &mut self.timed_ids);
                 e.home = e.pos;
@@ -97,7 +100,12 @@ impl World {
             0x942 => e
                 .expires
                 .set(Some(self.now + 17000), id, &mut self.timed_ids),
-            0x943 | 0xd55 => {
+            0xd55 => {
+                e.expires.set(None, id, &mut self.timed_ids);
+                e.stage = None;
+                e.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
+            }
+            0x943 => {
                 e.expires.set(None, id, &mut self.timed_ids);
                 e.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
             }

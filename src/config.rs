@@ -19,6 +19,11 @@ pub struct Config {
     #[serde(default)]
     pub bot_llm: bool,
     pub realm_seed: u64,
+    #[serde(default = "default_realm_count")]
+    pub realm_count: usize,
+}
+fn default_realm_count() -> usize {
+    2
 }
 fn default_shore_bots() -> bool {
     true
@@ -100,6 +105,7 @@ impl Config {
                 shore_bots: true,
                 bot_llm: false,
                 realm_seed: rand::random(),
+                realm_count: default_realm_count(),
             }
         };
         if let Some(client) = client_dir {
@@ -134,6 +140,10 @@ impl Config {
         Ok((config, control))
     }
     fn validate(&self, control: bool) -> Result<()> {
+        ensure!(
+            (2..=3).contains(&self.realm_count),
+            "realm_count must be 2 or 3"
+        );
         ensure!(
             self.bind.ip().is_loopback(),
             "backend bind must be loopback; terminate public TLS at the proxy"
@@ -181,6 +191,25 @@ impl Config {
 mod tests {
     use super::*;
 
+    #[test]
+    fn realm_pool_configuration_rejects_unsupported_counts() {
+        let (mut config, _) = Config::load(&[]).unwrap();
+        assert_eq!(config.realm_count, 2);
+        for count in [2, 3] {
+            config.realm_count = count;
+            config.validate(false).unwrap();
+        }
+        for count in [0, 1, 4, usize::MAX] {
+            config.realm_count = count;
+            assert!(
+                config
+                    .validate(false)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("realm_count must be 2 or 3")
+            );
+        }
+    }
     #[test]
     fn explicit_state_does_not_change_client_or_origin() {
         let (original, _) = Config::load(&[]).unwrap();

@@ -194,6 +194,8 @@ async function resumeAll() {
   await startLease();mayProgress=true;
   await api({op:'resume'});
   await eachClient(clients,c=>c.clock(false));
+  // Focus can autoresume Ruffle; hidden members need it only after cohort clocks run.
+  await eachClient(clients,c=>c.call('Emulation.setFocusEmulationEnabled',{enabled:true}));
   const after=await states(true,undefined,before);
   await bind(after);
   await eachClient(clients,c=>c.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))'));
@@ -236,7 +238,7 @@ async function nativeAct(value) {
   if(value.require){const current=await api({op:'observe',actor:value.actor});if(current.world!==value.require.world||value.require.inventory_revision!==undefined&&current.character.inventory_revision!==value.require.inventory_revision)throw Error('Native action precondition changed during resume');}
   let primary;const cleanup=[],stepEvidence=[];
   try{
-   await eachClient(clients,async client=>{await client.call('Emulation.setFocusEmulationEnabled',{enabled:true});await client.evaluate('document.querySelector("ruffle-player").focus({preventScroll:true})');});
+   await eachClient(clients,client=>client.evaluate('document.querySelector("ruffle-player").focus({preventScroll:true})'));
    for(const group of groups){const prepared=await Promise.allSettled(group.map(async({client,input})=>{
     const current=await api({op:'observe',actor:client.actor});
     if(current.controller!=='native'||!current.lifecycle.alive)throw Error('Native sequence requires living configured participants');

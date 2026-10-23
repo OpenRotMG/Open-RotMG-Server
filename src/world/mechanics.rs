@@ -611,6 +611,16 @@ impl World {
         if defeated.kind == crate::dungeon::abyss::IDOL {
             self.idol_entrance(defeated.home, true)?;
         }
+        if defeated.kind == 0xd54 {
+            let children: Vec<_> = self
+                .actors()
+                .filter(|e| e.kind == 0xd55 && e.quest == defeated.quest)
+                .map(|e| e.id)
+                .collect();
+            for child in children {
+                self.remove_entity(child);
+            }
+        }
         if let Some(tag) = defeated.quest {
             if defeated.kind == 0x929 {
                 let king = self

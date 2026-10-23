@@ -595,6 +595,7 @@ pub struct World {
     event_reserves: Vec<realm_events::ReservedEvent>,
     event_waiting: Option<i32>,
     admission_open: bool,
+    admissions: BTreeMap<(i32, i32), u64>,
     bag_expiry: BTreeMap<i32, u64>,
     cleared: bool,
     clear_exit: Option<i32>,
@@ -621,6 +622,7 @@ enum Target {
     Player(i32),
 }
 struct Grant {
+    origin: Option<i32>,
     account: i32,
     character: i32,
     destination: i32,
@@ -646,8 +648,6 @@ pub struct Directory {
     chat_budgets: BTreeMap<i32, chat::ChatBudget>,
     guild_invites: BTreeMap<i32, guilds::Invitation>,
     endgame: endgame::RealmDirectory,
-    realm_portal: i32,
-    realm_name: usize,
     teleports: BTreeMap<i32, Instant>,
     idle: BTreeMap<i32, u64>,
     next_world: i32,
@@ -748,6 +748,7 @@ impl Directory {
             seed,
             prepared_seed,
             vec![crate::terrain::realms::Source::Fixture(map)],
+            2,
         )
     }
     pub fn with_seed(
@@ -755,6 +756,7 @@ impl Directory {
         content: Arc<Content>,
         max_players: usize,
         seed: u64,
+        realm_count: usize,
     ) -> Result<Self> {
         Self::configured(
             path,
@@ -763,6 +765,7 @@ impl Directory {
             seed,
             None,
             crate::terrain::realms::sources(path)?,
+            realm_count,
         )
     }
     pub(crate) fn prepared(
@@ -770,6 +773,7 @@ impl Directory {
         content: Arc<Content>,
         max_players: usize,
         seed: u64,
+        realm_count: usize,
     ) -> Result<Self> {
         Self::configured(
             path,
@@ -778,6 +782,7 @@ impl Directory {
             seed,
             Some(seed),
             crate::terrain::realms::sources(path)?,
+            realm_count,
         )
     }
     fn configured(
@@ -787,7 +792,9 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
         realms: Vec<crate::terrain::realms::Source>,
+        realm_count: usize,
     ) -> Result<Self> {
+        ensure!((2..=3).contains(&realm_count), "realm_count must be 2 or 3");
         ensure!(!realms.is_empty(), "Realm layout pool is empty");
         crate::endgame::validate(&content)?;
         let mut templates = BTreeMap::new();
@@ -823,8 +830,6 @@ impl Directory {
             chat_budgets: BTreeMap::new(),
             guild_invites: BTreeMap::new(),
             endgame: endgame::RealmDirectory::default(),
-            realm_portal: 0,
-            realm_name: (seed % realm_portal::NAMES.len() as u64) as usize,
             teleports: BTreeMap::new(),
             idle: BTreeMap::new(),
             next_world: 1,
@@ -844,22 +849,24 @@ impl Directory {
             let world = d.make(template, name, safe, None)?;
             d.worlds.insert(id, world);
         }
-        d.bind_realm_heroes(-3, d.worlds[&-3].hero_identities())?;
-        let nexus = d.worlds.get_mut(&-2).expect("constructed Nexus");
-        let pos = nexus
-            .map
-            .cells
-            .iter()
-            .enumerate()
-            .find_map(|(i, c)| {
-                let pos = Pos {
-                    x: (i % nexus.map.width as usize) as f32 + 0.5,
-                    y: (i / nexus.map.width as usize) as f32 + 0.5,
-                };
-                (c.region == 2 && c.object.is_none() && nexus.walkable(pos)).then_some(pos)
-            })
-            .context("Nexus has no walkable Realm portal region")?;
-        d.realm_portal = nexus.spawn_entity(0x712, pos, vec![])?;
+        for slot in 0..realm_count {
+            let origin = if slot == 0 {
+                -3
+            } else {
+                let id = d.next_world;
+                let world = d.make("realm-shore", "Realm", false, None)?;
+                d.worlds.insert(id, world);
+                d.next_world += 1;
+                id
+            };
+            d.bind_realm_heroes(origin, d.worlds[&origin].hero_identities())?;
+            let name =
+                (seed as usize % realm_portal::NAMES.len() + slot) % realm_portal::NAMES.len();
+            let portal = d.install_realm_portal(slot)?;
+            let record = d.endgame.realms.get_mut(&origin).unwrap();
+            record.name = name;
+            record.portal = Some(portal);
+        }
         d.sync_realm_portal();
         Ok(d)
     }
@@ -1061,7 +1068,19 @@ impl Directory {
         let destination = match game {
             0 | -2 => -2,
             -1 => -1,
-            -3 => self.endgame.active,
+            -3 => *self
+                .endgame
+                .realms
+                .iter()
+                .filter(|(id, record)| {
+                    record.enabled
+                        && self.worlds[id].admission_open
+                        && self.worlds[id].occupancy() < self.worlds[id].max_players
+                })
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>()
+                .choose(&mut rand::thread_rng())
+                .ok_or_else(|| controller("no open Realm has capacity"))?,
             -4 => -4,
             _ => {
                 return Err(anyhow::anyhow!(CloseReason::Protocol)
@@ -1100,6 +1119,7 @@ impl Directory {
         id > 0
             && self.worlds[&id].players.is_empty()
             && self.worlds[&id].bag_expiry.is_empty()
+            && self.worlds[&id].admissions.is_empty()
             && !self.endgame.references_world(id)
             && !self.grants.values().any(|g| g.destination == id)
             && !self
@@ -1199,7 +1219,19 @@ impl Directory {
             0x712
         };
         let destination = match kind {
-            0x712 if origin == -2 && portal == Some(self.realm_portal) => self.initial(-3)?,
+            0x712 if origin == -2 && portal.is_some() => {
+                let (id, record) = self
+                    .endgame
+                    .realms
+                    .iter()
+                    .find(|(_, record)| record.portal == portal)
+                    .ok_or_else(|| protocol("stale named Realm portal"))?;
+                ensure!(
+                    record.enabled && self.worlds[id].admission_open,
+                    controller("Realm is closed")
+                );
+                *id
+            }
             0x703 if world.name == "Snake Pit" => self.initial(-3)?,
             0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
             0x704 | 0x70e | 0x71c => self.initial(-3)?,
@@ -1264,6 +1296,34 @@ impl Directory {
             world.admission_open,
             anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
         );
+        ensure!(
+            world.occupancy() < world.max_players,
+            controller("destination is full (including reservations)")
+        );
+        ensure!(
+            !world.admissions.contains_key(&(account, character)),
+            controller("character already has an admission reservation")
+        );
+        let origin = self
+            .worlds
+            .iter()
+            .find(|(_, w)| {
+                w.players
+                    .values()
+                    .any(|p| p.character.account == account && p.character.id == character)
+            })
+            .map(|(id, _)| *id);
+        let reserved = self.endgame.forced.iter().any(|(id, route)| {
+            self.worlds
+                .get(&route.origin)
+                .and_then(|w| w.players.get(id))
+                .is_some_and(|p| p.character.account == account && p.character.id == character)
+        });
+        // Queued parties can exceed the live-grant bound; ordinary transfers must not starve them.
+        ensure!(
+            reserved || self.grants.len() + self.endgame.forced.len() < 64,
+            controller("transfer grant capacity reserved for collective departures")
+        );
         let name = world.name.clone();
         let mut key = vec![0; 16];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
@@ -1272,9 +1332,15 @@ impl Directory {
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs(),
         )?;
+        self.worlds
+            .get_mut(&destination)
+            .unwrap()
+            .admissions
+            .insert((account, character), self.tick + 2400);
         self.grants.insert(
             key.clone(),
             Grant {
+                origin,
                 account,
                 character,
                 destination,
@@ -1322,6 +1388,14 @@ impl Directory {
             self.worlds[&destination].admission_open,
             anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
         );
+        ensure!(
+            !self.worlds.values().any(|w| {
+                w.players.values().any(|p| {
+                    p.character.account == grant.account && p.character.id == grant.character
+                })
+            }),
+            controller("transfer origin still owns the character; durable departure incomplete")
+        );
         let character = grant.character;
         // HELLO consumes the key before LOAD enters the world; keep its capacity reservation until then.
         self.grants.get_mut(&key).unwrap().consumed = true;
@@ -1367,9 +1441,7 @@ impl Directory {
         );
         Ok(id)
     }
-    fn step(&mut self) {
-        self.tick += 1;
-        self.sync_realm_portal();
+    fn retire_transfer_grants(&mut self) {
         self.grants.retain(|_, g| {
             g.expires > self.tick
                 && !(g.consumed
@@ -1378,11 +1450,16 @@ impl Directory {
                         .values()
                         .any(|p| p.character.account == g.account && p.character.id == g.character))
         });
+    }
+    fn step(&mut self) {
+        self.tick += 1;
+        self.retire_transfer_grants();
         for (id, world) in &mut self.worlds {
             let _context = crate::supervision::world(*id, self.tick);
+            world.admissions.retain(|_, expires| *expires > self.tick);
             world.step();
             world.report_performance(*id);
-            if *id > 0 && *id != self.endgame.active {
+            if *id > 0 && !self.endgame.realms.contains_key(id) {
                 if world.players.is_empty() {
                     self.idle.entry(*id).or_insert(self.tick);
                 } else {
@@ -1391,6 +1468,7 @@ impl Directory {
             }
         }
         self.endgame_step();
+        self.sync_realm_portal();
         let requests: Vec<_> = self
             .worlds
             .iter_mut()
@@ -1887,6 +1965,7 @@ impl World {
             event_reserves: vec![],
             event_waiting: None,
             admission_open: true,
+            admissions: BTreeMap::new(),
             bag_expiry: BTreeMap::new(),
             cleared: false,
             clear_exit: None,
@@ -2227,6 +2306,9 @@ impl World {
             .i16(0);
         o.0
     }
+    pub(crate) fn occupancy(&self) -> usize {
+        self.players.len() + self.admissions.len()
+    }
     #[cfg(test)]
     pub fn enter(&mut self, ch: Character, tx: Option<Output>) -> Result<i32> {
         // Combat and inventory fixtures need nearby, repeatable starting positions.
@@ -2272,7 +2354,8 @@ impl World {
             "Guild Hall membership has been revoked."
         );
         ensure!(
-            self.players.len() < self.max_players,
+            self.occupancy() - usize::from(self.admissions.contains_key(&(ch.account, ch.id)))
+                < self.max_players,
             "development world full"
         );
         ensure!(
@@ -2293,6 +2376,7 @@ impl World {
                 .context("world has no spawn cells")?;
             Pos { x, y }
         };
+        self.admissions.remove(&(ch.account, ch.id));
         let char_id = ch.id;
         if let Some(kind) = ch.pet_kind {
             self.attach_companion(id, kind, pos)?;
@@ -4487,7 +4571,7 @@ impl World {
             self.content.objects[&defeated.kind].hp / 20
         } else if matches!(
             defeated.kind,
-            0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | 0x1705
+            0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | crate::dungeon::tomb::SPHINX | 0x1705
         ) || matches!(
             defeated.kind,
             crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
@@ -6328,9 +6412,16 @@ mod tests {
         assert_eq!(tier1.population_regions[1].target, (area1 + 112) / 100);
         drop(tier0);
         drop(tier1);
-        let directory =
-            Directory::configured(Path::new("data"), content, 16, 51403, Some(51403), sources)
-                .unwrap();
+        let directory = Directory::configured(
+            Path::new("data"),
+            content,
+            16,
+            51403,
+            Some(51403),
+            sources,
+            2,
+        )
+        .unwrap();
         let w = &directory.worlds[&-3];
         assert_eq!(
             w.realm_layout.as_deref(),
@@ -6344,7 +6435,7 @@ mod tests {
                 (244, None, "", 0, 0)
             );
         }
-        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (10, 21));
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (11, 22));
         assert_eq!(w.population_counts[0], 0);
         for terrain in 1..=12 {
             let region = &w.population_regions[terrain];
@@ -6390,9 +6481,16 @@ mod tests {
                 .count(),
             19
         );
-        let directory =
-            Directory::configured(Path::new("data"), content, 16, 51403, Some(51403), sources)
-                .unwrap();
+        let directory = Directory::configured(
+            Path::new("data"),
+            content,
+            16,
+            51403,
+            Some(51403),
+            sources,
+            2,
+        )
+        .unwrap();
         let w = &directory.worlds[&-3];
         assert_eq!(
             w.realm_layout.as_deref(),
@@ -6414,7 +6512,7 @@ mod tests {
                 assert!(entities.contains(&(i % 2100, i / 2100, kind)));
             }
         }
-        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (10, 21));
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (11, 22));
         for terrain in 1..=12 {
             let region = &w.population_regions[terrain];
             assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
@@ -6453,6 +6551,7 @@ mod tests {
                 51403,
                 Some(51403),
                 sources,
+                2,
             )
             .unwrap();
             let w = &directory.worlds[&-3];
@@ -6595,7 +6694,7 @@ mod tests {
                 .into_iter()
                 .map(|id| &w.entities[&id])
                 .collect();
-            assert_eq!(roots.len(), 10);
+            assert_eq!(roots.len(), 11);
             let mut roster = BTreeMap::new();
             for e in &roots {
                 *roster.entry(e.kind).or_insert(0usize) += 1;
@@ -6604,11 +6703,11 @@ mod tests {
             assert_eq!(roster.remove(&0x67d), Some(3));
             assert_eq!(
                 roster,
-                [(0x675, 1), (0x91b, 1), (0x91f, 1), (0x928, 1)]
+                [(0x675, 1), (0x678, 1), (0x91b, 1), (0x91f, 1), (0x928, 1)]
                     .into_iter()
                     .collect::<BTreeMap<_, _>>()
             );
-            assert_eq!(w.setpieces.len(), 21);
+            assert_eq!(w.setpieces.len(), 22);
             for terrain in 1..=12 {
                 let region = &w.population_regions[terrain];
                 assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
