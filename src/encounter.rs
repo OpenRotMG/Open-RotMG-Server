@@ -398,7 +398,14 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
                 },
                 10.8,
             ),
-            3 => (Motion::Stationary, 0.),
+            // Center the box phase rather than freezing at the orbit endpoint: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/logic/db/BehaviorDb.SpriteWorld.cs#L45-L58
+            3 => (
+                Motion::Protect {
+                    anchor: Anchor::Home,
+                    distance: 0.1,
+                },
+                nr_speed(1.4),
+            ),
             _ => unreachable!(),
         },
         _ => (p.motion, p.speed),

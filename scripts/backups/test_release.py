@@ -37,8 +37,10 @@ def legacy_copy(bundle):
 
 class ReleaseContract(unittest.TestCase):
     def check_fame_migration(self, migrated, original):
-        self.assertEqual(migrated.pop('bot_minds'), [])
-        self.assertEqual(migrated.pop('trade_transactions'), [])
+        for table in ['bot_minds', 'trade_transactions']:
+            self.assertEqual(migrated[table], original.get(table, []))
+            if table not in original:
+                del migrated[table]
         self.assertEqual(migrated.pop('legacy_claims'), [])
         self.assertEqual(migrated.pop('level_credits'), [])
         for row, old in zip(migrated['deaths'], original['deaths']):
@@ -99,6 +101,18 @@ class ReleaseContract(unittest.TestCase):
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
             self.assertEqual(bundle['schema'], 17)
+            canonical16 = legacy_copy(bundle)
+            canonical16['schema'] = 16
+            for table in ['bot_minds', 'trade_transactions']:
+                canonical16['game'][table] = deepcopy(bundle['game'][table])
+            archive16 = Path(temporary) / 'canonical16.gz'
+            archive16.write_bytes(gzip.compress(json.dumps(canonical16).encode()))
+            restored16 = Path(temporary) / 'canonical16'
+            backup.restore(archive16, restored16)
+            subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored16 / 'game.db'), str(root / 'data')], check=True)
+            migrated16 = backup.snapshot(restored16 / 'game.db', backup.RELOADED_GAME)
+            self.check_fame_migration(migrated16, canonical16['game'])
+            self.assertEqual(migrated16, canonical16['game'])
             for field, invalid in [('tombs', -1), ('unknown_tombs', 9)]:
                 malformed = deepcopy(bundle)
                 stats = json.loads(malformed['game']['characters'][0]['stats'])

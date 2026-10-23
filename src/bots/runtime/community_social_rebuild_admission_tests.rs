@@ -25,6 +25,15 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
         })
         .await
         .unwrap();
+    let spawn = app
+        .world
+        .in_world(-3)
+        .call(|w| {
+            let (x, y) = w.map.spawns[0];
+            Ok(Pos { x, y })
+        })
+        .await
+        .unwrap();
     let p = PROFILES[0];
     let mut old = app
         .store
@@ -36,18 +45,8 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
     app.store.progress(old.clone()).await.unwrap();
     let mut owner = Some(app.claim(old.account).unwrap());
     let mut owners = vec![];
-    let position = app
-        .world
-        .in_world(-3)
-        .call(|w| {
-            let (x, y) = w.map.spawns[0];
-            Ok(Pos { x, y })
-        })
-        .await
-        .unwrap();
-    let (old_id, old_rx, old_sender, _) = enter(&app, p, old.clone(), -3, Some(position))
-        .await
-        .unwrap();
+    let (old_id, old_rx, old_sender, _) =
+        enter(&app, p, old.clone(), -3, Some(spawn)).await.unwrap();
     let session = app
         .world
         .directory(move |d| Ok(d.player_view(old_id)?.session))
@@ -83,7 +82,7 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
             .await
             .unwrap();
         owners.push(app.claim(ch.account).unwrap());
-        others.push(enter(&app, *p, ch, -3, Some(position)).await.unwrap());
+        others.push(enter(&app, *p, ch, -3, Some(spawn)).await.unwrap());
     }
     assert_eq!(
         app.world
@@ -170,5 +169,54 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
     }
     drop(owner);
     drop(owners);
+    app.shutdown.send_replace(true);
+}
+
+#[tokio::test]
+async fn community_social_consumed_last_slot_grant_keeps_its_exact_realm_destination() {
+    let (_, app) = crate::server::fixture();
+    app.world.clock.set_paused(true);
+    let p = PROFILES[0];
+    let ch = app
+        .store
+        .shore_character(p.identity.into(), p.name.into(), &app.content, p.healer)
+        .await
+        .unwrap();
+    let account = ch.account;
+    let character = ch.id;
+    let owner = app.claim(account).unwrap();
+    let (key, arrival) = app
+        .world
+        .directory(move |d| {
+            d.prepare_realm_capacity(1)?;
+            let (time, key, _) = d.issue(account, character, -3)?;
+            let (consumed, arrival) = d.consume(account, -3, time, key.clone())?;
+            assert_eq!(consumed, character);
+            assert_ne!(d.initial(-3)?, -3);
+            Ok((key, arrival))
+        })
+        .await
+        .unwrap();
+    let (id, rx, sender, _) = enter_admitted(&app, p, ch, -3, None, Some(arrival), Some(key))
+        .await
+        .expect("a consumed grant must retain its reserved Realm, not select another open Realm");
+    app.world
+        .directory(move |d| {
+            assert_eq!(d.player_view(id)?.session.world, -3);
+            assert_eq!(d.worlds[&-3].occupancy(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    owner
+        .close(&app, server::lifecycle::CloseReason::Controller)
+        .unwrap()
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop((rx, sender));
+    assert!(app.owners.lock().unwrap().is_empty());
+    assert!(app.quarantined.lock().unwrap().is_empty());
     app.shutdown.send_replace(true);
 }

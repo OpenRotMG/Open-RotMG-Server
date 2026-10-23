@@ -32,8 +32,10 @@ PICTURES_GAME = {**FAME_GAME, 'pictures': ('id', 'account', 'name', 'data_type',
 PICTURES_SQL = "CREATE TABLE pictures(id INTEGER PRIMARY KEY CHECK(id BETWEEN 1 AND 2147483647),account INTEGER NOT NULL REFERENCES accounts(id),name TEXT NOT NULL,data_type INTEGER NOT NULL CHECK(data_type BETWEEN 1 AND 7),tags TEXT NOT NULL,png BLOB NOT NULL CHECK(typeof(png)='blob' AND length(png)<=16384),UNIQUE(account,name))"
 PICTURE_SEQUENCE_SQL = "CREATE TABLE picture_sequence(id INTEGER PRIMARY KEY CHECK(id=1),next_id INTEGER NOT NULL CHECK(typeof(next_id)='integer' AND next_id BETWEEN 1 AND 2147483648))"
 COMMUNITY_GAME = {**PICTURES_GAME, 'trade_transactions': ('id', 'owners', 'writes', 'revisions', 'delivery', 'market_key'), 'bot_minds': ('account', 'revision', 'mind')}
-TRADES_SQL = "CREATE TABLE trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE)"
-MINDS_SQL = "CREATE TABLE bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)))"
+COMMUNITY_SQL = {
+    'trade_transactions': 'CREATE TABLE trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE)',
+    'bot_minds': 'CREATE TABLE bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)))',
+}
 DEATH_FAME_GAME = {**COMMUNITY_GAME, 'deaths': (*FAME_GAME['deaths'], 'receipt'), 'legacy_claims': ('account', 'class', 'character'), 'level_credits': ('recipient', 'reached_level', 'giver')}
 DEATHS_SQL = "CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()),equipment_fame INTEGER NOT NULL CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647),receipt TEXT NOT NULL CHECK(json_valid(receipt)))"
 CLAIMS_SQL = "CREATE TABLE legacy_claims(account INTEGER NOT NULL REFERENCES accounts(id),class INTEGER NOT NULL CHECK(typeof(class)='integer' AND class BETWEEN 0 AND 65535),character INTEGER NOT NULL UNIQUE REFERENCES deaths(character),PRIMARY KEY(account,class))"
@@ -160,10 +162,6 @@ def snapshot(path, schema, *, include_schema=False):
                 metadata = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(\'deaths\') WHERE name=?', (column,)).fetchone()
                 if metadata != (kind, not_null, default, key, 0):
                     raise ValueError('Unsupported canonical death metadata: ' + column)
-        if 'bot_minds' in schema:
-            for table, expected in [('trade_transactions', TRADES_SQL), ('bot_minds', MINDS_SQL)]:
-                if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (table,)).fetchone() != (expected,):
-                    raise ValueError('Unsupported canonical community metadata: ' + table)
         if 'legacy_claims' in schema:
             for table, expected in [('deaths', DEATHS_SQL), ('legacy_claims', CLAIMS_SQL), ('level_credits', CREDITS_SQL), ('level_credits_by_giver', CREDITS_INDEX_SQL)]:
                 if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (table,)).fetchone() != (expected,):
@@ -172,6 +170,10 @@ def snapshot(path, schema, *, include_schema=False):
             for table, expected in [('pictures', PICTURES_SQL), ('picture_sequence', PICTURE_SEQUENCE_SQL)]:
                 if db.execute("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() != (expected,):
                     raise ValueError('Unsupported canonical picture metadata: ' + table)
+        if 'bot_minds' in schema:
+            for table, expected in COMMUNITY_SQL.items():
+                if db.execute("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() != (expected,):
+                    raise ValueError('Unsupported canonical community metadata: ' + table)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
@@ -395,12 +397,12 @@ def validate_community(game):
     binary = os.environ.get('OPENROTMG_BACKUP_BINARY')
     if not binary:
         raise RuntimeError('OPENROTMG_BACKUP_BINARY must name the matching release binary')
-    result = subprocess.run([binary, '--backup-validate', 'community'],
+    result = subprocess.run([binary, '--backup-validate-community'],
                             input=json.dumps({k: game[k] for k in ('bot_minds', 'trade_transactions')}),
                             text=True, capture_output=True, timeout=30)
     if result.returncode:
         raise ValueError('Release community validation failed: ' + result.stderr.strip())
-    if json.loads(result.stdout) != {'validated_minds': len(minds), 'validated_trades': len(ids)}:
+    if json.loads(result.stdout) != {'validated_minds': len(minds), 'validated_trade_receipts': len(ids)}:
         raise ValueError('Release community validator returned an invalid receipt')
 
 
@@ -418,8 +420,6 @@ def validate(bundle):
             allowed = set(columns) - {'guid'}
             if not isinstance(data[table], list) or any(not isinstance(r, dict) or set(r) != allowed for r in data[table]):
                 raise ValueError('Unsupported backup fields: ' + table)
-    if bundle['schema'] >= 16:
-        validate_community(bundle['game'])
     current = [json.loads(row['stats']) for row in bundle['game']['characters']]
     legacy = []
     if bundle['schema'] < 17:
@@ -501,6 +501,8 @@ def validate(bundle):
         validate_vaults(bundle['game'])
     if bundle['schema'] >= 15:
         validate_pictures(bundle['game'])
+    if bundle['schema'] >= 16:
+        validate_community(bundle['game'])
     validate_deaths(bundle['game'], bundle['schema'])
     return bundle
 
@@ -588,7 +590,7 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
     if bundle['schema'] >= 15:
         definitions['game'] += '\n' + PICTURES_SQL + ';\n' + PICTURE_SEQUENCE_SQL + ';'
     if bundle['schema'] >= 16:
-        definitions['game'] += '\n' + TRADES_SQL + ';\n' + MINDS_SQL + ';'
+        definitions['game'] += '\n' + ';\n'.join(COMMUNITY_SQL.values()) + ';'
     if bundle['schema'] >= 17:
         definitions['game'] += '\nDROP TABLE deaths;\n' + DEATHS_SQL + ';\n' + CLAIMS_SQL + ';\n' + CREDITS_SQL + ';\n' + CREDITS_INDEX_SQL + ';\nCREATE INDEX deaths_by_time ON deaths(died_at);'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:

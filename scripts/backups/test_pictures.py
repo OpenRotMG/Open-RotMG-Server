@@ -66,6 +66,40 @@ class PicturesBackup(unittest.TestCase):
         expected['picture_sequence'][0]['next_id'] = 5
         self.assertEqual(backup.snapshot(restored / 'game.db', backup.RELOADED_GAME), expected)
 
+    def test_account_minds_and_trade_receipts_are_preserved_and_validated(self):
+        self.assertEqual(len(self.bundle['game']['bot_minds']), 2)
+        self.assertEqual(len(self.bundle['game']['trade_transactions']), 1)
+        community = {table: self.bundle['game'][table] for table in ['bot_minds', 'trade_transactions']}
+        for args, count in [(['--backup-validate-community'], 'validated_trade_receipts'),
+                            (['--backup-validate', 'community'], 'validated_trades')]:
+            result = subprocess.run([self.binary, *args], input=json.dumps(community),
+                                    text=True, capture_output=True, check=True)
+            self.assertEqual(json.loads(result.stdout), {'validated_minds': 2, count: 1})
+        mind = community['bot_minds'][0]
+        writes = community['trade_transactions'][0]['writes']
+        duplicate_mind = '{"account":' + str(mind['account']) + ',' + mind['mind'][1:]
+        duplicate_write = '[{"id":' + str(json.loads(writes)[0]['id']) + ',' + writes[2:]
+        for table, field, value in [('bot_minds', 'revision', 999), ('bot_minds', 'account', 99999),
+                                    ('bot_minds', 'mind', '{"schema":1,"password":"must-not-export"}'),
+                                    ('bot_minds', 'mind', duplicate_mind),
+                                    ('trade_transactions', 'id', 'not-a-canonical-receipt'),
+                                    ('trade_transactions', 'writes', duplicate_write),
+                                    ('trade_transactions', 'owners', '[99999,99998]'),
+                                    ('trade_transactions', 'revisions', '[0,0]'),
+                                    ('trade_transactions', 'writes', '[]'),
+                                    ('trade_transactions', 'market_key', 'unbound'),
+                                    ('trade_transactions', 'delivery', '{}')]:
+            with self.subTest(table=table, field=field):
+                malformed = deepcopy(self.bundle)
+                malformed['game'][table][0][field] = value
+                with self.assertRaises(ValueError):
+                    backup.validate(malformed)
+        for table in ['bot_minds', 'trade_transactions']:
+            malformed = deepcopy(self.bundle)
+            malformed['game'][table] *= 2
+            with self.assertRaises(ValueError):
+                backup.validate(malformed)
+
     def test_invalid_art_archive_is_rejected_before_restore_directory_creation(self):
         cases = []
         for field, values in [('id', [True, 0, -1, 2147483648]), ('account', [True, 99999]),

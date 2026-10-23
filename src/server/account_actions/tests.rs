@@ -68,7 +68,7 @@ fn community_pursuit_logging() {
         .try_init();
 }
 async fn community_pursuit_stop(app: &App) {
-    app.shutdown.send(true).unwrap();
+    app.shutdown.send_replace(true);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while !app.owners.lock().unwrap().is_empty() {
         crate::server::fixture_persistence_tick(app).await.unwrap();
@@ -303,6 +303,11 @@ async fn community_pursuit_ordinary_death_and_restart_preserve_account_not_dead_
     let account = target.account;
     let character = target.id;
     community_pursuit_prepare_supply(&app, target).await;
+    // The prepared bag belongs to this Realm, not an unrelated pooled Realm.
+    app.world
+        .directory(|d| d.prepare_single_realm_fixture())
+        .await
+        .unwrap();
     crate::bots::start(&app).await.unwrap();
     assert_eq!(app.owners.lock().unwrap().len(), 6);
     app.world.clock.set_paused(false);

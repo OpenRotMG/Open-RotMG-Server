@@ -59,18 +59,32 @@ class BuildStorageTests(unittest.TestCase):
         self.assertNotEqual(first.call_args.args[1], second.call_args.args[1])
         self.assertNotEqual(first.call_args.args[1], changed.call_args.args[1])
 
-    def test_zero_free_space_and_large_caches_do_not_block_builds_or_status(self):
-        for free, used in [(0, 0), (0, 100 * guard.GIB), (2 * guard.GIB, 100 * guard.GIB)]:
-            with self.subTest(free=free, used=used), \
-                    patch.object(guard.shutil, 'disk_usage', return_value=shutil._ntuple_diskusage(200 * guard.GIB, 200 * guard.GIB - free, free)), \
-                    patch.object(guard, 'allocation', return_value=used):
-                code, execute = self.build()
-                self.assertEqual(code, 0)
-                execute.assert_called_once()
-                self.assertEqual(guard.main(['status']), 0)
-        self.assertIn(str(guard.cache_root()), self.stdout.getvalue())
-        self.assertIn('free=0.00GiB; cache=100.00GiB', self.stdout.getvalue())
+    def test_runtime_settings_reuse_targets_but_compiler_settings_remain_isolated(self):
+        _, first = self.build()
+        for key in ['RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'CARGO_BUILD_JOBS']:
+            with self.subTest(key=key), patch.dict(os.environ, {key: '2'}):
+                _, same = self.build()
+                self.assertEqual(first.call_args.args[1], same.call_args.args[1])
+        for key in ['RUSTFLAGS', 'RUSTC_WRAPPER', 'CARGO_PROFILE_DEV_DEBUG', 'CARGO_BUILD_TARGET']:
+            with self.subTest(key=key), patch.dict(os.environ, {key: 'different'}):
+                _, changed = self.build()
+                self.assertNotEqual(first.call_args.args[1], changed.call_args.args[1])
+
+    def test_build_never_checks_disk_space_or_walks_the_cache(self):
+        with patch.object(guard.shutil, 'disk_usage', side_effect=AssertionError('disk space check')), \
+                patch.object(guard.os, 'walk', side_effect=AssertionError('cache scan')):
+            code, execute = self.build()
+        self.assertEqual(code, 0)
+        execute.assert_called_once()
+        self.assertIn('Cargo target:', self.stdout.getvalue())
         self.assertEqual(self.stderr.getvalue(), '')
+
+    def test_formatting_skips_cache_and_compiler_setup_and_preserves_failure(self):
+        with patch.object(guard, 'cache_root', side_effect=AssertionError('formatting must not use the cache')), \
+                patch.object(guard.subprocess, 'check_output', side_effect=AssertionError('compiler lookup')), \
+                patch.object(guard.subprocess, 'call', return_value=37) as cargo:
+            self.assertEqual(guard.main(['--toolchain', '1.94.1', 'fmt', '--all', '--', '--check']), 37)
+        cargo.assert_called_once_with(['cargo', '+1.94.1', 'fmt', '--all', '--', '--check'], cwd=self.source)
 
     def test_real_allocation_failures_are_reported_as_failures(self):
         for number in [errno.ENOSPC, errno.EDQUOT]:
@@ -90,12 +104,6 @@ class BuildStorageTests(unittest.TestCase):
             self.assertEqual(self.build()[0], 1)
         with patch.dict(os.environ, XDG_CACHE_HOME=str(self.root)), patch.object(guard, 'ROOT', self.root):
             self.assertEqual(self.build()[0], 1)
-
-    def test_status_requires_no_rust_and_reports_actual_cache_path(self):
-        with patch.object(guard.subprocess, 'check_output') as rustc:
-            self.assertEqual(guard.main(['status']), 0)
-            rustc.assert_not_called()
-        self.assertIn(str(guard.cache_root()), self.stdout.getvalue())
 
     def test_cleanup_preserves_binary_codegen_and_adjacent_evidence(self):
         root = guard.cache_root()
@@ -140,34 +148,26 @@ class BuildStorageTests(unittest.TestCase):
             self.assertEqual(guard.main(['--output', str(output), 'build']), 37)
         self.assertEqual(output.read_text(), 'old')
 
-    def test_successful_build_stays_successful_when_space_reaches_zero(self):
-        with patch.object(guard.subprocess, 'check_output', return_value='rustc'), \
-                patch.object(guard.shutil, 'disk_usage', side_effect=[shutil._ntuple_diskusage(100, 80, 20), shutil._ntuple_diskusage(100, 100, 0)]), \
-                patch.object(guard, 'allocation', side_effect=[0, 100 * guard.GIB]), \
-                patch.object(guard, 'execute', return_value=0) as execute:
-            self.assertEqual(guard.main(['build']), 0)
-            execute.assert_called_once()
-        self.assertIn('free=0.00GiB; cache=100.00GiB', self.stdout.getvalue())
-        self.assertEqual(self.stderr.getvalue(), '')
-
-    def test_real_cargo_retains_each_older_checkout_and_reuses_the_first(self):
+    def test_real_cargo_reuses_checkouts_and_rebuilds_changed_compile_time_env(self):
         for name in ['first', 'second']:
             repo = self.root / name
             (repo / 'src').mkdir(parents=True)
             shutil.copyfile(self.source / 'rust-toolchain.toml', repo / 'rust-toolchain.toml')
             (repo / 'Cargo.toml').write_text('[package]\nname="openrotmg"\nversion="0.1.0"\nedition="2021"\n')
-            (repo / 'src/main.rs').write_text(f'fn main() {{ println!("{name}"); }}')
+            (repo / 'src/main.rs').write_text(f'fn main() {{ println!("{name} {{}}", env!("RUST_LOG")); }}')
             for source in [repo / 'Cargo.toml', repo / 'src/main.rs']:
                 os.utime(source, (1, 1))
         outputs = []
-        for index, name in enumerate(['first', 'second', 'first']):
+        for index, (name, level) in enumerate([('first', 'info'), ('second', 'debug'), ('first', 'info'), ('first', 'trace')]):
             output = self.root / f'retained-{index}'
-            with patch.object(guard, 'ROOT', self.root / name):
+            with patch.object(guard, 'ROOT', self.root / name), patch.dict(os.environ, RUST_LOG=level):
                 self.assertEqual(guard.main(['--output', str(output), 'build', '--offline']), 0)
             outputs.append(output)
-        self.assertEqual([subprocess.check_output([str(path)], text=True).strip() for path in outputs], ['first', 'second', 'first'])
+        self.assertEqual([subprocess.check_output([str(path)], text=True).strip() for path in outputs],
+                         ['first info', 'second debug', 'first info', 'first trace'])
+        self.assertEqual(len(list(guard.cache_root().glob('*/debug'))), 2)
         self.assertEqual(guard.main(['clean']), 0)
-        self.assertEqual(subprocess.check_output([str(outputs[0])], text=True).strip(), 'first')
+        self.assertEqual(subprocess.check_output([str(outputs[0])], text=True).strip(), 'first info')
 
     def test_concurrent_builds_lock_and_cleanup_refuses_active_cargo(self):
         bins = self.root / 'bin'

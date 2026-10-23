@@ -2022,7 +2022,7 @@ impl Directory {
             .worlds
             .get_mut(&origin)
             .unwrap()
-            .spawn_exit(kind, pos)?;
+            .spawn_clear_portal(kind, pos, true)?;
         self.portals.insert(
             id,
             Portal {
@@ -2039,6 +2039,9 @@ impl Directory {
             destination,
             x = self.worlds[&origin].entities[&id].pos.x,
             y = self.worlds[&origin].entities[&id].pos.y,
+            requested_x = pos.x,
+            requested_y = pos.y,
+            displacement = pos.distance(self.worlds[&origin].entities[&id].pos),
             "earned dungeon portal dropped"
         );
         Ok(id)
@@ -2863,15 +2866,19 @@ impl World {
         }
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
-        // Nearest-only interaction masks co-located loot or portals: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/game/GameSprite.as#L195-L225
-        let pos = (0..8)
-            .map(|i| {
+        self.spawn_clear_portal(kind, loot, false)
+    }
+    fn spawn_clear_portal(&mut self, kind: u16, loot: Pos, keep_origin: bool) -> Result<i32> {
+        // Keep the reference death point unless loot/portal clearance requires separation: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/DropPortalOnDeath.cs#L42
+        let pos = std::iter::once(loot)
+            .filter(|_| keep_origin)
+            .chain((0..8).map(|i| {
                 let angle = i as f32 * std::f32::consts::TAU / 8.;
                 Pos {
                     x: loot.x + 2. * angle.cos(),
                     y: loot.y + 2. * angle.sin(),
                 }
-            })
+            }))
             .find(|pos| {
                 self.walkable(*pos)
                     && self
@@ -4582,14 +4589,9 @@ impl World {
                 .remove(&slot);
         }
         let mut o = Writer::new();
-        let potion_feedback = plan.stat_growth.as_ref().map(|(_, slot, _, amount)| {
-            format!(
-                "{} consumed (+{amount}).",
-                self.content.objects[&(slot.kind as u16)].name
-            )
-        });
         p.character.items = plan.items;
         p.character.revision = revision;
+        // Stat growth is silent in the 2013 comparator: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.UseItem.cs#L659-L679
         if let Some((snapshot, source, index, amount)) = plan.stat_growth {
             ensure!(
                 p.character.base == snapshot.base,
@@ -4683,10 +4685,6 @@ impl World {
         }
         tracing::info!(player = plan.player, revision, "inventory committed");
         let p = &self.players[&plan.player];
-        if let Some(text) = potion_feedback {
-            let packet = chat_info(&text);
-            send(p, packet.id, packet.body);
-        }
         if plan.purchase.is_some() {
             let packet = shop::reply(true, "Item purchased!");
             send(p, packet.id, packet.body);
@@ -5488,7 +5486,13 @@ impl World {
         } else if private {
             eligible.len()
         } else {
-            (eligible.len() * 2).min(8)
+            // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
+            let multiplier = match defeated.kind {
+                0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 => 4,
+                0x62c => 3,
+                _ => 2,
+            };
+            (eligible.len() * multiplier).min(8)
         };
         for i in 0..attempts {
             let mut rewards = crate::loot::rewards(&self.content, defeated.kind, &mut self.rng);
@@ -5522,7 +5526,7 @@ impl World {
                 }
             }
         }
-        if matches!(defeated.kind, 0x20d | 0x952 | 0x949) {
+        if !crate::loot::fauna_private_table(defeated.kind).is_empty() {
             for (owner, item) in crate::loot::fauna_private_rewards(
                 &self.content,
                 defeated.kind,
@@ -6894,6 +6898,8 @@ mod hermit_loot_tests;
 #[cfg(test)]
 mod lair_trap_tests;
 #[cfg(test)]
+mod loot_bag_tests;
+#[cfg(test)]
 mod manor_tests;
 #[cfg(test)]
 mod starter_loot_tests;
@@ -7012,6 +7018,85 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn limon_box_fits_generated_arenas() {
+        let content = world().content.clone();
+        for seed in 0..16 {
+            let map = Arc::new(crate::dungeon::sprite::generate(&content, seed).unwrap());
+            let mut w = World::new(content.clone(), map).unwrap();
+            let id = w.entities.values().find(|e| e.kind == 0xd06).unwrap().id;
+            w.encounter_mechanics(id, None, 12300).unwrap();
+            assert_eq!(
+                w.entities
+                    .values()
+                    .filter(|e| e.parent == Some(id) && matches!(e.kind, 0xd07..=0xd0a))
+                    .count(),
+                8,
+                "seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn limon_returns_to_center_then_holds_the_box_phase() {
+        for offset in [6., 8.5] {
+            let mut w = arena(0);
+            w.now = 12300;
+            let player = w.enter(ch(&w), None).unwrap();
+            let home = Pos { x: 12.5, y: 100.5 };
+            w.players.get_mut(&player).unwrap().pos = Pos {
+                x: home.x,
+                y: home.y + 3.,
+            };
+            w.apply_condition(player, crate::condition::INVINCIBLE, 100000)
+                .unwrap();
+            let id = w.spawn_entity(0xd06, home, vec![]).unwrap();
+            w.position_entity(
+                id,
+                Pos {
+                    x: home.x + offset,
+                    y: home.y,
+                },
+            )
+            .unwrap();
+            let boss = w.entities.get_mut(&id).unwrap();
+            boss.activated = Some(0);
+            boss.stage = Some(2);
+            for _ in 0..60 {
+                let previous = w.entities[&id].pos;
+                w.step();
+                assert!(
+                    w.entities[&id].pos.distance(previous)
+                        <= crate::encounter::nr_speed(1.4) / 1.5 * 0.05 + 0.001
+                );
+            }
+            let boss = &w.entities[&id];
+            assert_eq!(boss.stage, Some(3));
+            assert!(
+                boss.pos.distance(home) <= 0.11,
+                "box-phase Limon did not return to center: {:?}",
+                boss.pos
+            );
+            assert_eq!(
+                w.entities
+                    .values()
+                    .filter(|e| e.parent == Some(id) && matches!(e.kind, 0xd07..=0xd0a))
+                    .count(),
+                8
+            );
+            let settled = boss.pos;
+            w.players.get_mut(&player).unwrap().pos = Pos {
+                x: home.x - 4.,
+                y: home.y,
+            };
+            for _ in 0..30 {
+                w.step();
+            }
+            assert!(w.entities[&id].pos.distance(settled) < 0.001);
+            assert!(w.entities[&id].home.distance(home) < 0.001);
+        }
     }
 
     #[test]
@@ -7782,6 +7867,43 @@ mod tests {
     }
 
     #[test]
+    fn ghost_god_portal_keeps_an_unobstructed_death_position() {
+        let mut d = directory();
+        let mut w = arena(1);
+        w.name = "Realm".into();
+        w.ids = d.ids.clone();
+        let player = w.enter(ch(&w), None).unwrap();
+        let death = Pos { x: 10.5, y: 10.5 };
+        let mut requests = 0;
+        for seed in 0..64 {
+            let ghost = w.spawn_entity(0x659, death, vec![]).unwrap();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.damage_enemy(player, ghost, 100000, false, &[], None)
+                .unwrap();
+            for (kind, pos) in std::mem::take(&mut w.portal_requests) {
+                assert_eq!(kind, 0x71a);
+                assert!(pos.distance(death) < 0.001);
+                requests += 1;
+            }
+            for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                w.remove_entity(bag);
+            }
+        }
+        assert!((1..64).contains(&requests));
+        let mut expected_rng = w.rng.clone();
+        d.worlds.insert(-3, w);
+        let portal = d.drop_dungeon_portal(-3, 0x71a, death).unwrap();
+        let w = &d.worlds[&-3];
+        assert!(w.entities[&portal].pos.distance(death) < 0.001);
+        assert_eq!(w.rng.clone().r#gen::<u64>(), expected_rng.r#gen::<u64>());
+        assert_eq!(d.portals[&portal].expires, d.tick + 600);
+        assert_eq!(
+            d.worlds[&d.portals[&portal].destination.unwrap()].name,
+            "Undead Lair"
+        );
+    }
+
+    #[test]
     fn earned_portals_leave_loot_and_other_portals_individually_reachable() {
         let mut d = directory();
         let mut origin = arena(1);
@@ -8059,6 +8181,54 @@ mod tests {
         assert_eq!(r.i32().unwrap(), peer);
         r.done().unwrap();
     }
+    #[test]
+    fn stat_potions_commit_gains_without_chat_messages() {
+        for (kind, index, gain) in [
+            (0xa1f, 2, 1),
+            (0xa20, 3, 1),
+            (0xa21, 4, 1),
+            (0xa34, 6, 1),
+            (0xa35, 7, 1),
+            (0xa4c, 5, 1),
+            (0xae9, 0, 5),
+            (0xaea, 1, 5),
+        ] {
+            let mut w = world();
+            let mut character = ch(&w);
+            character.items[4] = kind;
+            let before = character.base;
+            let (packets, mut rx) = mpsc::channel(64);
+            let (lost, _watch) = watch::channel(false);
+            let id = w.enter(character, Some(Output { packets, lost })).unwrap();
+            while rx.try_recv().is_ok() {}
+            let plan = w
+                .use_item(
+                    id,
+                    Slot {
+                        object: id,
+                        slot: 4,
+                        kind,
+                    },
+                    w.players[&id].pos,
+                )
+                .unwrap()
+                .unwrap();
+            w.finish_inventory(plan, Ok(1)).unwrap();
+            let character = &w.players[&id].character;
+            let mut expected = before;
+            expected[index] += gain;
+            assert_eq!(character.base, expected);
+            assert_eq!(character.items[4], -1);
+            assert_eq!(character.revision, 1);
+            let packets: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+            assert!(packets.iter().any(|p| p.id == 4 && p.body == [0, 0, 0, 0]));
+            assert!(
+                !packets.iter().any(|p| p.id == wire::TEXT),
+                "item {kind:#x}"
+            );
+        }
+    }
+
     #[test]
     fn late_heal_cannot_revive() {
         let mut w = world();
