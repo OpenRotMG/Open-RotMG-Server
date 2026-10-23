@@ -499,26 +499,77 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.2, Tier(4, ABILITIES)),
             (0.3, Tier(3, RINGS)),
         ],
-        0x66d..=0x672 => &[
+        0x66d => &[
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
-            (0.01, Tier(6, WEAPONS)),
-            (0.01, Tier(3, ABILITIES)),
+            (0.01, Item(0xa59)),
+            (0.01, Item(0xaa7)),
         ],
-        0x908 | 0x909 | 0x90b => &[],
-        // Malphas and the Abyss Idol both drop a Potion of Vitality and a Potion of Defense.
-        crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL => &[
+        0x66e => &[
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.01, Item(0xa1c)),
+            (0.01, Item(0xa12)),
+        ],
+        0x66f => &[
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.01, Item(0xa3b)),
+            (0.01, Item(0xa0a)),
+        ],
+        0x670 => &[
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.01, Item(0xa2f)),
+            (0.01, Item(0xa3d)),
+            (0.01, Item(0xa9d)),
+            (0.01, Item(0xa5f)),
+            (0.01, Item(0xaae)),
+            (0.01, Item(0xab5)),
+        ],
+        0x671 => &[
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.01, Item(0xa17)),
+            (0.01, Item(0xa6a)),
+        ],
+        0x672 => &[
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa23)),
+            (0.01, Item(0xa3c)),
+            (0.01, Item(0xa4e)),
+            (0.01, Item(0xa64)),
+            (0.01, Item(0xa32)),
+        ],
+        0x908 => &[(0.04, Item(0xa22)), (0.06, Item(0xa23))],
+        0x90b => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
+        0x909 => &[],
+        crate::dungeon::abyss::MALPHAS => &[
             (1., Item(0xa34)),
-            (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
-            (0.8, Tier(7, ARMOR)),
-            (0.4, Tier(8, WEAPONS)),
-            (0.4, Tier(8, ARMOR)),
             (0.11, Tier(9, WEAPONS)),
-            (0.11, Tier(9, ARMOR)),
             (0.05, Tier(10, WEAPONS)),
+            (0.8, Tier(6, ARMOR)),
+            (0.4, Tier(8, ARMOR)),
+            (0.11, Tier(9, ARMOR)),
+            (0.5, Tier(3, ABILITIES)),
+            (0.06, Tier(4, ABILITIES)),
+            (0.5, Tier(3, RINGS)),
+            (0.06, Tier(4, RINGS)),
+        ],
+        crate::dungeon::abyss::IDOL => &[
+            (1., Item(0xa34)),
+            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc01)),
+            (0.8, Tier(7, WEAPONS)),
+            (0.4, Tier(8, WEAPONS)),
+            (0.11, Tier(9, WEAPONS)),
+            (0.05, Tier(10, WEAPONS)),
+            (0.8, Tier(7, ARMOR)),
+            (0.4, Tier(8, ARMOR)),
+            (0.11, Tier(9, ARMOR)),
             (0.05, Tier(10, ARMOR)),
             (0.5, Tier(3, ABILITIES)),
             (0.06, Tier(4, ABILITIES)),
@@ -630,6 +681,7 @@ fn roll_table(content: &Content, picks: &[(f64, Pick)], rng: &mut impl Rng) -> O
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     let mut items = if kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
+        || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b)
         || matches!(kind, 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL)
         || matches!(
             kind,
@@ -790,6 +842,369 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    fn approved_abyss_rows(kind: u16) -> Vec<(f64, Vec<u16>)> {
+        match kind {
+            0x66d => vec![
+                (0.03, vec![0xa22]),
+                (0.02, vec![0xa23]),
+                (0.01, vec![0xa59]),
+                (0.01, vec![0xaa7]),
+            ],
+            0x66e => vec![
+                (0.03, vec![0xa22]),
+                (0.02, vec![0xa23]),
+                (0.01, vec![0xa1c]),
+                (0.01, vec![0xa12]),
+            ],
+            0x66f => vec![
+                (0.03, vec![0xa22]),
+                (0.02, vec![0xa23]),
+                (0.01, vec![0xa3b]),
+                (0.01, vec![0xa0a]),
+            ],
+            0x670 => vec![
+                (0.03, vec![0xa22]),
+                (0.02, vec![0xa23]),
+                (0.01, vec![0xa2f]),
+                (0.01, vec![0xa3d]),
+                (0.01, vec![0xa9d]),
+                (0.01, vec![0xa5f]),
+                (0.01, vec![0xaae]),
+                (0.01, vec![0xab5]),
+            ],
+            0x671 => vec![
+                (0.03, vec![0xa22]),
+                (0.02, vec![0xa23]),
+                (0.01, vec![0xa17]),
+                (0.01, vec![0xa6a]),
+            ],
+            0x672 => vec![
+                (0.03, vec![0xa22]),
+                (0.02, vec![0xa23]),
+                (0.01, vec![0xa3c]),
+                (0.01, vec![0xa4e]),
+                (0.01, vec![0xa64]),
+                (0.01, vec![0xa32]),
+            ],
+            0x908 => vec![(0.04, vec![0xa22]), (0.06, vec![0xa23])],
+            0x90b => vec![(0.1, vec![0xa22]), (0.1, vec![0xa23])],
+            0x909 => vec![],
+            0x90a => vec![
+                (1.0, vec![0xa34]),
+                (0.005, vec![0x722]),
+                (0.001, vec![0xc01]),
+                (0.8, vec![0xa02, 0xa18, 0xa3a, 0xa9e, 0xae0]),
+                (0.11, vec![0xa83, 0xa85, 0xa88, 0xa8b, 0xaa0]),
+                (0.05, vec![0xa84, 0xa86, 0xa89, 0xa8c, 0xaa1]),
+                (0.8, vec![0xa11, 0xa5e, 0xad1]),
+                (0.4, vec![0xa0e, 0xa12, 0xadc]),
+                (0.11, vec![0xa13, 0xa60, 0xad3]),
+                (
+                    0.5,
+                    vec![
+                        0xa44, 0xa69, 0xaa6, 0xaad, 0xab4, 0xacf, 0xad5, 0xad8, 0xada, 0xadb,
+                        0xade, 0xb1e, 0xb30,
+                    ],
+                ),
+                (
+                    0.06,
+                    vec![
+                        0xa0b, 0xa33, 0xa45, 0xa54, 0xa59, 0xa64, 0xa6a, 0xaa7, 0xaae, 0xab5,
+                        0xad6, 0xb1f, 0xb31,
+                    ],
+                ),
+                (
+                    0.5,
+                    vec![0xab7, 0xab8, 0xab9, 0xaba, 0xabb, 0xabc, 0xabd, 0xabe],
+                ),
+                (
+                    0.06,
+                    vec![0xabf, 0xac0, 0xac1, 0xac2, 0xac3, 0xac4, 0xac5, 0xac6],
+                ),
+            ],
+            0x0e1d => vec![
+                (1.0, vec![0xa34]),
+                (0.005, vec![0x722]),
+                (0.001, vec![0xc01]),
+                (0.8, vec![0xa02, 0xa18, 0xa3a, 0xa9e, 0xae0]),
+                (0.4, vec![0xa07, 0xa19, 0xa1e, 0xa82, 0xa9f]),
+                (0.11, vec![0xa83, 0xa85, 0xa88, 0xa8b, 0xaa0]),
+                (0.05, vec![0xa84, 0xa86, 0xa89, 0xa8c, 0xaa1]),
+                (0.8, vec![0xa5f, 0xad2, 0xadf]),
+                (0.4, vec![0xa0e, 0xa12, 0xadc]),
+                (0.11, vec![0xa13, 0xa60, 0xad3]),
+                (0.05, vec![0xa8e, 0xa91, 0xa94]),
+                (
+                    0.5,
+                    vec![
+                        0xa44, 0xa69, 0xaa6, 0xaad, 0xab4, 0xacf, 0xad5, 0xad8, 0xada, 0xadb,
+                        0xade, 0xb1e, 0xb30,
+                    ],
+                ),
+                (
+                    0.06,
+                    vec![
+                        0xa0b, 0xa33, 0xa45, 0xa54, 0xa59, 0xa64, 0xa6a, 0xaa7, 0xaae, 0xab5,
+                        0xad6, 0xb1f, 0xb31,
+                    ],
+                ),
+                (
+                    0.5,
+                    vec![0xab7, 0xab8, 0xab9, 0xaba, 0xabb, 0xabc, 0xabd, 0xabe],
+                ),
+                (
+                    0.06,
+                    vec![0xabf, 0xac0, 0xac1, 0xac2, 0xac3, 0xac4, 0xac5, 0xac6],
+                ),
+            ],
+            _ => panic!("not an approved Abyss reward identity"),
+        }
+    }
+    fn selected_rows(content: &Content, kind: u16) -> Vec<(f64, Vec<u16>)> {
+        table(kind)
+            .iter()
+            .map(|(chance, pick)| (*chance, candidates(content, *pick)))
+            .collect()
+    }
+    #[test]
+    fn abyss_loot_ordinary_candidate_sets_match_selected_census() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let gear = [
+            (0x66d, 0xa59, "Cloak of the Red Agent", 4, 13),
+            (0x66d, 0xaa7, "Felwasp Toxin", 4, 18),
+            (0x66e, 0xa1c, "Fire Bow", 5, 3),
+            (0x66e, 0xa12, "Mithril Armor", 8, 7),
+            (0x66f, 0xa3b, "Fire Sword", 5, 1),
+            (0x66f, 0xa0a, "Steel Shield", 2, 5),
+            (0x670, 0xa2f, "Fire Nova Spell", 2, 11),
+            (0x670, 0xa3d, "Wand of Dark Magic", 6, 8),
+            (0x670, 0xa9d, "Avenger Staff", 6, 17),
+            (0x670, 0xa5f, "Robe of the Invoker", 7, 14),
+            (0x670, 0xaae, "Essence Tap Skull", 4, 19),
+            (0x670, 0xab5, "Demonhunter Trap", 4, 20),
+            (0x671, 0xa17, "Obsidian Dagger", 6, 2),
+            (0x671, 0xa6a, "Steel Helm", 4, 16),
+            (0x672, 0xa3c, "Glass Sword", 6, 1),
+            (0x672, 0xa4e, "Ring of Greater Dexterity", 2, 9),
+            (0x672, 0xa64, "Magesteel Quiver", 4, 15),
+            (0x672, 0xa32, "Spirit Salve Tome", 2, 4),
+        ];
+        assert_eq!(gear.len(), 18);
+        for (kind, item, name, tier, slot) in gear {
+            let object = content.get(item).unwrap();
+            assert_eq!(
+                (object.name.as_str(), object.tier, object.slot_type),
+                (name, Some(tier), slot)
+            );
+            assert!(
+                approved_abyss_rows(kind)
+                    .iter()
+                    .any(|(_, items)| items == &[item])
+            );
+        }
+        for kind in 0x66d..=0x672 {
+            let expected = approved_abyss_rows(kind);
+            assert_eq!(
+                selected_rows(&content, kind),
+                expected,
+                "species {kind:#x}: no cross-species or generic tier substitutes"
+            );
+            for (_, items) in expected {
+                let item = content.get(items[0]).unwrap();
+                assert!(
+                    !item.soulbound && item.bag_type <= 4,
+                    "selected public packaging for {:#x}",
+                    item.kind
+                );
+            }
+            assert!(!private(kind));
+            assert!(bonus(kind).is_empty());
+        }
+        assert!(selected_rows(&content, 0x672).contains(&(0.01, vec![0xa3c])));
+    }
+    #[test]
+    fn abyss_loot_minion_and_boss_candidates_match_approved_pools() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let catalogue = collectibles(&content);
+        for kind in [0x908, 0x909, 0x90b, 0x90a, 0xe1d] {
+            assert_eq!(
+                selected_rows(&content, kind),
+                approved_abyss_rows(kind),
+                "pool {kind:#x}"
+            );
+            validate(&content, kind).unwrap();
+            assert_eq!(private(kind), matches!(kind, 0x90a | 0xe1d));
+            assert!(bonus(kind).is_empty());
+            for (_, pick) in table(kind) {
+                for item in candidates(&content, *pick) {
+                    assert!(catalogue.contains(&item), "unlisted {item:#x}");
+                    assert_ne!(
+                        item, 0xa1f,
+                        "Idol DEF is held: omit the row, not a zero chance"
+                    );
+                }
+            }
+        }
+        for kind in 0x66d..=0x672 {
+            validate(&content, kind).unwrap();
+            for (_, pick) in table(kind) {
+                assert!(
+                    candidates(&content, *pick)
+                        .iter()
+                        .all(|item| catalogue.contains(item))
+                );
+            }
+        }
+    }
+    #[test]
+    fn abyss_loot_rolls_match_approved_rates_and_distribution() {
+        use rand::RngCore;
+        struct BoundaryRng {
+            draws: std::collections::VecDeque<u64>,
+        }
+        impl RngCore for BoundaryRng {
+            fn next_u32(&mut self) -> u32 {
+                0
+            }
+            fn next_u64(&mut self) -> u64 {
+                self.draws.pop_front().expect("unexpected reward roll")
+            }
+            fn fill_bytes(&mut self, _: &mut [u8]) {
+                panic!("unexpected byte RNG");
+            }
+            fn try_fill_bytes(&mut self, _: &mut [u8]) -> std::result::Result<(), rand::Error> {
+                panic!("unexpected byte RNG");
+            }
+        }
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in (0x66d..=0x672).chain([0x908, 0x909, 0x90b, 0x90a, 0xe1d]) {
+            let expected = approved_abyss_rows(kind);
+            for selected in 0..=expected.len() {
+                for hit in [false, true] {
+                    let mut rng = BoundaryRng {
+                        draws: expected
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, (p, _))| *p < 1.)
+                            .map(|(index, (p, _))| {
+                                let boundary = (p * (u64::MAX as f64 + 1.)) as u64;
+                                if hit && index == selected {
+                                    boundary - 1
+                                } else {
+                                    boundary
+                                }
+                            })
+                            .collect(),
+                    };
+                    let actual = rewards(&content, kind, &mut rng);
+                    let wanted: Vec<_> = expected
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, (p, _))| *p == 1. || (hit && *index == selected))
+                        .map(|(_, (_, items))| items[0])
+                        .collect();
+                    assert_eq!(actual, wanted, "kind {kind:#x}, row {selected}, hit {hit}");
+                    assert!(rng.draws.is_empty(), "each optional row rolls exactly once");
+                }
+            }
+            let mut hits = rand::rngs::mock::StepRng::new(0, 0);
+            assert_eq!(
+                rewards(&content, kind, &mut hits),
+                expected
+                    .iter()
+                    .map(|(_, items)| items[0])
+                    .collect::<Vec<_>>()
+            );
+            let mut actual = StdRng::seed_from_u64(12351);
+            let mut reference = actual.clone();
+            for _ in 0..1024 {
+                let mut wanted = Vec::new();
+                for (chance, choices) in &expected {
+                    if reference.gen_bool(*chance) {
+                        wanted.push(*choices.choose(&mut reference).unwrap());
+                    }
+                }
+                assert_eq!(rewards(&content, kind, &mut actual), wanted);
+            }
+        }
+        // Eligibility, per-account groups and duplicate collapse belong to World, not this row roller.
+    }
+    #[test]
+    fn abyss_loot_non_abyss_tables_routing_and_rolls_remain_unchanged() {
+        use sha2::{Digest, Sha256};
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        // Frozen non-Abyss rows and rolls, including upstream's guaranteed Limon DEX drop.
+        for (kind, expected) in [
+            (
+                0x651,
+                "503f03dbf9cd88c75b6a87263743cf61a3fd546ff0bc8f48371a4268fb322db8",
+            ),
+            (
+                0x657,
+                "503f03dbf9cd88c75b6a87263743cf61a3fd546ff0bc8f48371a4268fb322db8",
+            ),
+            (
+                0x900,
+                "bf5338634bb4f6880db5803f043b3ad3f8ce644efe8a3151de5e9b851067ca06",
+            ),
+            (
+                0x901,
+                "0eddb8d16f6722e29c6a5a2c6787bf14f6fe9d44c4b91d8593c136c33fe73c88",
+            ),
+            (
+                0x902,
+                "a3ae3df816fb79027f1129c69bd707eb4a7b74629721c69032156517de0edf2a",
+            ),
+            (
+                0x927,
+                "562be985949a9d637cb5e5cd890ba22716d48deaf8171a57b5fa5f6540e308d4",
+            ),
+            (
+                0xd06,
+                "59e81eba88c6ed76e5d5a2a859758f8c09565a90f201745f890fb48701d00d93",
+            ),
+            (
+                0xd90,
+                "405e7f8749f1f0ceeec5c74a7dfa8b6daa14a8f652c4b4b289ce35bb9a6435e1",
+            ),
+            (
+                0xd62,
+                "88fc781beed1aa09fc1c5e108ecb3ca890017c61ca887df7ec6972dbda8549ad",
+            ),
+            (
+                0x1705,
+                "3d1e5d08f976180504964e859ac20b918b083d561b59861a8c5f1f95b8f592c8",
+            ),
+            (
+                0x1740,
+                "9dbfe60ded9445048768639b0b57bd1ee7089f5ec2f6c6c9f8e57bef9726ac9b",
+            ),
+            (
+                0x932,
+                "e3094c6b7327c04fa469ae614e83359200c3efc32fe4870467032408adf657ea",
+            ),
+        ] {
+            let mut rng = StdRng::seed_from_u64(12351);
+            let rolls: Vec<_> = (0..32)
+                .map(|_| {
+                    (
+                        roll(&content, kind, &mut rng),
+                        rewards(&content, kind, &mut rng),
+                    )
+                })
+                .collect();
+            let signature = format!(
+                "{:?}|{:?}|{}|{:?}",
+                selected_rows(&content, kind),
+                bonus(kind),
+                private(kind),
+                rolls
+            );
+            let hash = format!("{:x}", Sha256::digest(signature.as_bytes()));
+            assert_eq!(hash, expected, "unrelated encounter {kind:#x}");
+        }
+    }
     struct Branch(Vec<u64>);
     impl rand::RngCore for Branch {
         fn next_u32(&mut self) -> u32 {
@@ -1059,14 +1474,14 @@ mod tests {
         }));
     }
     #[test]
-    fn abyss_bosses_always_drop_the_vitality_and_defense_potions() {
+    fn abyss_bosses_guarantee_only_vitality() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for kind in [crate::dungeon::abyss::MALPHAS, crate::dungeon::abyss::IDOL] {
             for seed in 0..64 {
                 let mut rng = StdRng::seed_from_u64(seed);
                 let items = rewards(&content, kind, &mut rng);
                 assert!(items.contains(&0xa34), "kind {kind:#x} seed {seed}");
-                assert!(items.contains(&0xa20), "kind {kind:#x} seed {seed}");
+                assert!(!items.contains(&0xa20), "kind {kind:#x} seed {seed}");
             }
         }
     }

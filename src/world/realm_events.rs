@@ -94,11 +94,7 @@ impl World {
             self.event_waiting = Some(source);
             tracing::info!(source, "quest defeat earned a pending Realm event");
         }
-        let owned = self
-            .actors()
-            .filter(|e| e.parent.is_some() || e.quest.is_some())
-            .count()
-            + self.named_births.len();
+        let owned = self.summon_occupancy();
         let clear: Vec<_> = self
             .event_reserves
             .iter()
