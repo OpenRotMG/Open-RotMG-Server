@@ -2009,7 +2009,7 @@ fn abyss_armed_missile_nonparalyzed_world_step_stays_stationary() {
 }
 
 #[test]
-fn abyss_generated_abyss_guard_activity_twenty_tiles_realm_unchanged() {
+fn abyss_generated_guard_simulation_twenty_tiles_keeps_aimed_range() {
     let content = tests::world().content.clone();
     for name in ["Abyss of Demons", "Realm"] {
         for distance in [12., 16., 19.5, 20.] {
@@ -2061,7 +2061,7 @@ fn abyss_generated_abyss_guard_activity_twenty_tiles_realm_unchanged() {
                 .unwrap();
             assert_eq!(w.players[&player].pos.distance(position), distance);
             w.step();
-            let active = name == "Abyss of Demons" && distance < 20.;
+            let active = distance < 20.;
             assert_eq!(
                 w.entities[&guard].activated.is_some(),
                 active,
