@@ -20,7 +20,7 @@ async function publication(out,report,io={}) {
   assert(save.includes('const save=')&&cancellation.includes('const bounded=')&&failure&&finalSave&&tail,'Production publication boundaries must be present');
   const participants=[];
   return runInNewContext(`(()=>{
-    const controller=new AbortController(),started=0,timeout=180000,previousOwner=undefined,archive=null;
+    const controller=new AbortController(),started=0,timeout=180000,previousOwner=undefined,archive=null,state=join(out,'state');
     let primary,phase='setup',closing=false,activeCase=true;
     ${save}${cancellation}
     return {save,bounded,interrupted,get primary(){return primary;},
@@ -40,6 +40,7 @@ test('addClient persists three in-scenario participants without another bounded 
   try{
     const {add,save}=await publication(out,report);
     await add(clients[0]);await save();
+    assert.equal((await json(join(out,'native.json'))).state,join(out,'state'));
     assert.equal((await json(join(out,'result.json'))).participants.length,1);
     await add(clients[1]);await add(clients[2]);
     assert.equal(report.participants.length,3);
