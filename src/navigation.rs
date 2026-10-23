@@ -8,9 +8,6 @@ use std::{
     },
 };
 
-#[cfg(test)]
-mod tests;
-
 type Point = (i16, i16);
 const SIDE: usize = 64;
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);

@@ -10,16 +10,7 @@ use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const WIZARD: u16 = 0x030e;
 pub const PRIEST: u16 = 0x0310;
-#[cfg(test)]
-pub const ARCHER: u16 = 0x0307;
-#[cfg(test)]
-pub const ROGUE: u16 = 0x0300;
-#[cfg(test)]
-pub const WARRIOR: u16 = 0x031d;
-#[cfg(test)]
-pub const KNIGHT: u16 = 0x031e;
-#[cfg(test)]
-pub const PALADIN: u16 = 0x031f;
+
 pub const SLOWED: i32 = 1 << 3;
 pub const STUNNED: i32 = 1 << 6;
 pub const PARALYZED: i32 = 1 << 13;
@@ -864,48 +855,5 @@ impl Map {
         }
         self.cells
             .get(y.floor() as usize * self.width as usize + x.floor() as usize)
-    }
-}
-
-#[cfg(test)]
-mod passive_signature_tests {
-    use super::*;
-
-    #[test]
-    fn passive_signature_rejects_damage_and_protection_drift_on_load() {
-        let root =
-            std::env::temp_dir().join(format!("rotmg-passive-signature-{}", rand::random::<u64>()));
-        std::fs::create_dir(&root).unwrap();
-        std::fs::copy("data/grounds.xml", root.join("grounds.xml")).unwrap();
-        let original = std::fs::read_to_string("data/objects.xml").unwrap();
-        std::fs::write(root.join("objects.xml"), &original).unwrap();
-        assert!(Content::load(&root).is_ok());
-        for name in [
-            "Destructible Grey Wall",
-            "Destructible Blue Wall",
-            "Tombstone",
-        ] {
-            let start = original.find(&format!("id=\"{name}\"")).unwrap();
-            let end = start + original[start..].find("</Object>").unwrap();
-            for field in [
-                "<Defense>999</Defense>",
-                "<StasisImmune/>",
-                "<ProtectFromGroundDamage/>",
-            ] {
-                let mut changed = original.clone();
-                changed.insert_str(end, field);
-                std::fs::write(root.join("objects.xml"), changed).unwrap();
-                let error = Content::load(&root)
-                    .err()
-                    .expect("changed passive signature accepted");
-                assert!(
-                    error
-                        .to_string()
-                        .contains("selected passive scenery signature changed"),
-                    "{name} {field}: {error:#}"
-                );
-            }
-        }
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

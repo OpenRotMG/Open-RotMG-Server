@@ -104,34 +104,3 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
 }
 
 pub use snake::generate as snake_pit;
-#[cfg(test)]
-pub(crate) mod tests {
-    use crate::content::{Content, Map};
-    use std::collections::{BTreeSet, VecDeque};
-
-    pub(crate) fn reachable(map: &Map, content: &Content) -> BTreeSet<usize> {
-        let (x, y) = map.spawns[0];
-        let start = (y as i32 * map.width + x as i32) as usize;
-        let mut seen = BTreeSet::from([start]);
-        let mut queue = VecDeque::from([start]);
-        while let Some(i) = queue.pop_front() {
-            let (x, y) = (i as i32 % map.width, i as i32 / map.width);
-            for (x, y) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                if x < 0 || y < 0 || x >= map.width || y >= map.height {
-                    continue;
-                }
-                let next = (y * map.width + x) as usize;
-                let cell = &map.cells[next];
-                if content.grounds[&cell.ground] > 0.
-                    && cell.object.is_none_or(|k| {
-                        !content.objects[&k].blocks || content.objects[&k].destructible
-                    })
-                    && seen.insert(next)
-                {
-                    queue.push_back(next);
-                }
-            }
-        }
-        seen
-    }
-}

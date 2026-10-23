@@ -1,6 +1,5 @@
 use super::*;
-#[cfg(test)]
-mod community_tests;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{

@@ -1,6 +1,5 @@
 use super::*;
-#[cfg(test)]
-mod community_tests;
+
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

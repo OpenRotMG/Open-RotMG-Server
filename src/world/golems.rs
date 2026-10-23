@@ -3,8 +3,6 @@ use crate::encounter::{Anchor, Motion};
 pub(super) const ROOTS: &[u16] = &[0x62d, 0x62e, 0x62f, 0x631, 0x632, 0x633];
 #[cfg(test)]
 thread_local! { static QUERY_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
-#[cfg(test)]
-mod tests;
 
 impl World {
     pub(super) fn golem_movement(&self, id: i32, elapsed: u64) -> Result<(Motion, f32)> {

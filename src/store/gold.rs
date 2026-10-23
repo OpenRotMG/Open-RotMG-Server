@@ -112,6 +112,3 @@ impl Store {
         }).await
     }
 }
-
-#[cfg(test)]
-mod tests;

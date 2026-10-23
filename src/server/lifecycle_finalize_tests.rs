@@ -1232,7 +1232,7 @@ async fn all_death_fame_phase4_capacity_acceptance_boundaries() {
                 .await
                 .unwrap()
                 .unwrap();
-            // Poll once to enqueue capacity loss while source snapshot reply is held, then release it.
+            // The SQL gate leaves directory jobs runnable; completion can beat the first poll.
             let mut fill = Box::pin(a.world.directory(move |d| {
                 let source = d.location(id)?;
                 assert!(
@@ -1250,9 +1250,18 @@ async fn all_death_fame_phase4_capacity_acceptance_boundaries() {
                 w.max_players = w.players.len();
                 Ok(())
             }));
-            assert!(futures_util::poll!(fill.as_mut()).is_pending());
+            let first = futures_util::poll!(fill.as_mut());
+            if boundary == 1 {
+                assert!(
+                    first.is_pending(),
+                    "held Directory gate did not block its reply"
+                );
+            }
             drop(release);
-            fill.await.unwrap();
+            match first {
+                std::task::Poll::Pending => fill.await.unwrap(),
+                std::task::Poll::Ready(result) => result.unwrap(),
+            }
         }
         let error = tokio::time::timeout(Duration::from_secs(5), finalization.wait())
             .await

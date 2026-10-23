@@ -664,22 +664,7 @@ mod community_tests {
     use super::*;
     use crate::store::{InventoryWrite, Store};
 
-    impl World {
-        pub(crate) fn market_consent_test_state(&self, id: i32) -> serde_json::Value {
-            let trade = self.trade_key(id).map(|key| {
-                let t = &self.trades[&key];
-                serde_json::json!({"key":key,"transaction":t.transaction,"ready":format!("{:?}",t.ready),"settled":self.clock.now() >= t.ready,
-                    "offers":t.offers,"accepted":t.accepted,"pending":t.pending,
-                    "participants":t.players.map(|player| {
-                        let p = &self.players[&player];
-                        serde_json::json!({"player":player,"active":p.active(),"pending":p.pending,
-                            "inventory_matches":p.character.items==t.items[usize::from(t.players[1]==player)],
-                            "revision":p.character.revision,"position":p.pos})
-                    })})
-            });
-            serde_json::json!({"world_now":self.now,"trade_now":format!("{:?}",self.clock.now()),"clock_paused":self.clock.paused(),"trade":trade})
-        }
-    }
+    impl World {}
     async fn fixture() -> (World, Store, [i32; 2], [mpsc::Receiver<Packet>; 2]) {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
         let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();

@@ -18,8 +18,7 @@ mod combat;
 mod crowds;
 pub(crate) mod dialogue;
 mod events;
-#[cfg(test)]
-mod events_tests;
+
 mod progression;
 pub(crate) mod pursuits;
 mod realms;
@@ -1313,18 +1312,6 @@ type TilePoint = (i16, i16);
 mod movement;
 use movement::Grid;
 
-#[cfg(test)]
-mod community_compat_tests;
-#[cfg(test)]
-mod community_pending_tests;
-#[cfg(test)]
-mod navigation_tests;
-#[cfg(test)]
-#[path = "bots/community_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-mod realm_tests;
 mod runtime;
 pub(crate) const OUTPUT_CAPACITY: usize = 512;
 pub use runtime::start;

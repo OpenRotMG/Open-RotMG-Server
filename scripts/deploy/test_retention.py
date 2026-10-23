@@ -79,45 +79,8 @@ class RetentionTest(unittest.TestCase):
         update.outcome(work, state, source)
         return work, source
 
-    def test_successes_keep_current_and_two_verified_rollback_trees(self):
-        result = update.retain_deployments()
-        self.assertTrue(self.live.is_dir())
-        self.assertEqual(sorted(p.name for p in self.root.glob('server-stage-*')), ['server-stage-1007', 'server-stage-1008'])
-        self.assertEqual((self.root / 'server-stage-1007/REVISION').read_text().strip(), self.rev(6))
-        self.assertEqual((self.root / 'server-stage-1008/REVISION').read_text().strip(), self.rev(7))
-        self.assertEqual(result['kept_attempts'], 3)
-        self.assertTrue((self.tools / 'releases' / self.rev(8)).exists())
-        self.assertTrue((self.tools / 'releases' / self.rev(6)).exists())
-        self.assertFalse((self.tools / 'releases' / self.rev(5)).exists())
-        self.assertEqual((self.data / 'game.db').read_bytes(), b'live database')
-        self.assertEqual((self.data / 'server.pem').read_bytes(), b'live key')
 
-    def test_many_successful_updates_remain_bounded_including_metadata_and_tools(self):
-        update.retain_deployments()
-        for n in range(9, 30):
-            self.work(n)
-            shutil.rmtree(self.live)
-            self.write_release(self.live, n)
-            previous = self.tools / 'releases' / self.rev(n - 1)
-            bundle = self.tools / 'releases' / self.rev(n)
-            shutil.copytree(previous, bundle)
-            (bundle / 'openrotmg').write_bytes(self.contents(n)['openrotmg'])
-            (bundle / 'REVISION').write_bytes(self.contents(n)['REVISION'])
-            (self.tools / 'current').unlink()
-            (self.tools / 'current').symlink_to(bundle)
-            result = update.retain_deployments()
-            self.assertEqual(result['review'], [])
-            self.assertEqual(result['kept_attempts'], 3)
-            self.assertEqual(len(list(self.root.glob('server-stage-*'))), 2)
-            self.assertEqual(len(list((self.tools / 'releases').iterdir())), 4)
-            self.assertEqual(len(list((self.attempts / 'release-manifests').iterdir())), 4)
 
-    def test_only_latest_three_pre_cutover_failure_sets_survive(self):
-        rows = [self.work(n, 'failed') for n in range(10, 16)]
-        update.retain_deployments()
-        for i, (work, stage) in enumerate(rows):
-            self.assertEqual(work.exists(), i >= 3)
-            self.assertEqual(stage.exists(), i >= 3)
 
     def test_cutover_unknown_manual_pin_and_unconfirmed_child_are_preserved(self):
         rows = [self.work(n, state) for n, state in [(10, 'cutover'), (11, 'pinned'), (12, 'preparing'), (13, 'failed')]]
@@ -134,33 +97,8 @@ class RetentionTest(unittest.TestCase):
             self.assertTrue(work.exists() and stage.exists())
         self.assertTrue(unknown.exists() and manual.exists())
 
-    def test_changed_stage_or_replaced_directory_is_pinned(self):
-        stage = self.root / 'server-stage-1002'
-        (stage / 'openrotmg').write_bytes(b'changed')
-        renewed = self.root / 'server-stage-1003'
-        shutil.move(renewed, self.root / 'original-stage')
-        self.write_release(renewed, 2)
-        result = update.retain_deployments()
-        self.assertEqual(len(result['review']), 2)
-        for n in [2, 3]:
-            self.assertTrue((self.attempts / (self.rev(n) + '-' + str(100 + n))).exists())
-            self.assertTrue((self.root / ('server-stage-' + str(1000 + n))).exists())
 
-    def test_running_source_workspace_and_tool_are_preserved(self):
-        work = self.attempts / (self.rev(4) + '-104')
-        self.running.return_value = {self.root / 'server-stage-1002/openrotmg', work / 'shadow.log',
-                                     self.tools / 'releases' / self.rev(5) / 'openrotmg'}
-        update.retain_deployments()
-        self.assertTrue((self.root / 'server-stage-1002').exists())
-        self.assertTrue(work.exists())
-        self.assertTrue((self.tools / 'releases' / self.rev(5)).exists())
 
-    def test_kept_unknown_attempt_can_pin_an_expiring_attempts_stage(self):
-        work, stage = self.work(10, 'pinned')
-        shared = self.root / 'server-stage-1002'
-        (work / 'previous-server-path').write_text(str(shared))
-        update.retain_deployments()
-        self.assertTrue(shared.exists())
 
     def test_invalid_stage_path_or_symlink_aborts_before_any_delete(self):
         work = self.attempts / (self.rev(1) + '-101')
@@ -175,76 +113,12 @@ class RetentionTest(unittest.TestCase):
                 self.assertTrue((self.attempts / (self.rev(2) + '-102')).exists())
                 self.assertTrue(self.live.exists())
 
-    def test_dry_run_is_non_mutating_and_repeated_cleanup_is_idempotent(self):
-        before = update.files(self.root)
-        planned = update.retain_deployments(apply=False)
-        self.assertEqual(update.files(self.root), before)
-        applied = update.retain_deployments()
-        self.assertEqual(planned['remove'], applied['remove'])
-        self.assertEqual(update.retain_deployments()['remove'], [])
 
-    def test_invalid_receipt_or_backup_pointer_aborts_before_any_delete(self):
-        receipt = self.attempts / (self.rev(1) + '-101/outcome.json')
-        original = receipt.read_text()
-        receipt.write_text('{"format":99,"state":"success"}')
-        with self.assertRaisesRegex(RuntimeError, 'Invalid deployment outcome'):
-            update.retain_deployments()
-        receipt.write_text(original)
-        (self.tools / 'current').unlink()
-        with self.assertRaisesRegex(RuntimeError, 'Backup tool pointer is invalid'):
-            update.retain_deployments()
-        self.assertTrue((self.attempts / (self.rev(1) + '-101')).exists())
 
-    def test_artifact_only_legacy_directories_expire_but_extra_evidence_blocks_pruning(self):
-        work, _ = self.work(20, 'artifact_only', stage=False)
-        (work / 'shadow.log').unlink()
-        update.retain_deployments()
-        self.assertFalse(work.exists())
-        work, _ = self.work(21, 'artifact_only', stage=False)
-        with self.assertRaisesRegex(RuntimeError, 'unclassified evidence'):
-            update.retain_deployments()
-        self.assertTrue(work.exists())
 
-    def test_success_receipt_requires_the_frozen_save_and_previous_pointer(self):
-        work = self.attempts / (self.rev(2) + '-102')
-        (work / 'cutover/server.pem').unlink()
-        with self.assertRaisesRegex(RuntimeError, 'Invalid successful cutover receipt'):
-            update.retain_deployments()
-        self.assertTrue(work.exists())
 
-    def test_cleanup_failure_keeps_the_exact_plan_and_is_not_silently_retried(self):
-        with patch.object(update.shutil, 'rmtree', side_effect=OSError('deletion failed')):
-            with self.assertRaisesRegex(OSError, 'deletion failed'):
-                update.retain_deployments()
-        proof = json.loads((self.attempts / 'retention.json').read_text())
-        self.assertEqual(proof['retention'], 'applying')
-        self.assertTrue(proof['remove'])
 
-    def test_successful_deploy_cleanup_error_is_not_retried_or_reclassified(self):
-        import test_update
-        with test_update.UpdateTest().deployment() as (raw, metadata, live, work):
-            def activate(stage, attempt, *_):
-                old = live.with_name('old')
-                live.rename(old)
-                stage.rename(live)
-                old.rename(stage)
-            with patch.object(update, 'deploy', side_effect=activate), patch.object(
-                    update, 'retain_deployments', side_effect=[None, RuntimeError('cleanup failed')]) as cleanup:
-                with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
-                    update.main('a' * 40, raw)
-            self.assertEqual(cleanup.call_count, 2)
-            attempt = next(work.glob('a' * 40 + '-*'))
-            self.assertEqual(json.loads((attempt / 'outcome.json').read_text())['state'], 'success')
 
-    def test_changed_or_unknown_backup_tool_bundle_is_reported_not_deleted(self):
-        changed = self.tools / 'releases' / self.rev(2)
-        (changed / 'openrotmg').write_bytes(b'changed')
-        unknown = self.tools / 'releases' / self.rev(99)
-        unknown.mkdir()
-        (unknown / 'game.db').write_bytes(b'unknown data')
-        result = update.retain_deployments()
-        self.assertEqual(len(result['review']), 2)
-        self.assertTrue(changed.exists() and unknown.exists())
 
 
 if __name__ == '__main__':

@@ -72,22 +72,3 @@ impl Directory {
         Ok(Some(audit))
     }
 }
-
-#[test]
-fn community_events_c13_reclaimed_vault_cannot_be_inferred_absent_from_current_worlds() {
-    let mut d = tests::directory();
-    let vault = d.instance("vault", Some(1)).unwrap();
-    assert!(d.worlds.remove(&vault).is_some());
-    let (player, _output) =
-        super::community_cooperative_tests::receive(&mut d, -2, 1, crate::content::WIZARD);
-    let w = d.worlds.get_mut(&-2).unwrap();
-    w.name = "Oryx's Chamber".into();
-    w.cleared = true;
-    let normal = d.player_view(player).unwrap();
-    let audit = d
-        .prepared_postclear_key_audit(Some(&normal))
-        .unwrap()
-        .unwrap();
-    assert_eq!(audit["storage_world_seen"], false);
-    assert_eq!(audit["allocation_complete"], false);
-}

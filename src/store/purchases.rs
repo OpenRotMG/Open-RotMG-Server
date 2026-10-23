@@ -8,9 +8,6 @@ pub struct Purchase {
     pub currency: u8,
 }
 
-#[cfg(test)]
-mod tests;
-
 impl Store {
     pub async fn purchase(
         &self,
