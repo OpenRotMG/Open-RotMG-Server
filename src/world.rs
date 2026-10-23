@@ -1002,12 +1002,14 @@ impl Directory {
                 .values()
                 .filter(|e| {
                     let object = &world.content.objects[&e.kind];
-                    object.enemy && object.class != "Wall"
+                    object.enemy && (object.class != "Wall" || object.passive_destructible())
                 })
                 .map(|e| e.kind)
                 .collect();
             for kind in kinds {
-                crate::encounter::validate(&world.content, kind)?;
+                if !world.content.objects[&kind].passive_destructible() {
+                    crate::encounter::validate(&world.content, kind)?;
+                }
                 crate::loot::validate(&world.content, kind)?;
             }
         }
@@ -1783,10 +1785,11 @@ impl World {
                     if o.name == "White Fountain" {
                         fountains.push((id, pos));
                     }
-                    let actor = o.enemy
-                        || o.quest
-                        || !o.static_object
-                        || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805);
+                    let actor = !o.passive_destructible()
+                        && (o.enemy
+                            || o.quest
+                            || !o.static_object
+                            || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805));
                     cells.insert(y * map.width as usize + x, id, actor);
                     if actor {
                         actor_ids.insert(id);
@@ -2094,11 +2097,15 @@ impl World {
         let kind = e.kind;
         let definition = &self.content.objects[&kind];
         let cell = e.pos.y.floor() as usize * self.map.width as usize + e.pos.x.floor() as usize;
-        self.cells.insert(cell, id, true);
-        self.actor_ids.insert(id);
+        let actor = !definition.passive_destructible();
+        self.cells.insert(cell, id, actor);
         if e.parent.is_some() || e.expires.is_some() {
             self.timed_ids.insert(id);
         }
+        if !actor {
+            return;
+        }
+        self.actor_ids.insert(id);
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
         }
@@ -5868,6 +5875,54 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn explicit_scenery_sizes_are_absolute_without_changing_blank_defaults() {
+        let cases = [
+            (398, "", 100),
+            (398, "size:140", 140),
+            (398, "size:160", 160),
+            (404, "", 100),
+            (404, "size:120", 120),
+            (404, "size:140", 140),
+            (256, "size:150", 150),
+            (6174, "", 120),
+            (6175, "", 120),
+            (372, "", 140),
+            (478, "", 175),
+            (290, "", 100),
+            (354, "", 100),
+        ];
+        let map = Map {
+            width: cases.len() as i32,
+            height: 1,
+            cells: cases
+                .iter()
+                .map(|(kind, config, _)| crate::content::Cell {
+                    ground: 0x61,
+                    object: Some(*kind),
+                    config: (*config).into(),
+                    terrain: 0,
+                    region: 0,
+                })
+                .collect(),
+            spawns: vec![],
+        };
+        let w = World::new(world().content, Arc::new(map)).unwrap();
+        let actual: Vec<_> = w.entities.values().map(|e| (e.kind, e.size)).collect();
+        assert_eq!(
+            actual,
+            cases
+                .iter()
+                .map(|(kind, _, size)| (*kind, *size))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !w.actor_ids
+                .iter()
+                .any(|id| [290, 354, 6175].contains(&w.entities[id].kind))
+        );
     }
 
     #[test]

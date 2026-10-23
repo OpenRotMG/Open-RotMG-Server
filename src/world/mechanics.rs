@@ -533,7 +533,12 @@ impl World {
         let expired: Vec<_> = self
             .timed_ids
             .iter()
-            .filter(|id| self.actor_ids.contains(id) && due(&self.entities[id]))
+            .filter(|id| {
+                let e = &self.entities[id];
+                (self.actor_ids.contains(id)
+                    || self.content.objects[&e.kind].passive_destructible())
+                    && due(e)
+            })
             .copied()
             .collect();
         for id in expired {
