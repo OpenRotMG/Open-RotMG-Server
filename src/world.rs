@@ -1501,7 +1501,7 @@ impl Directory {
             .worlds
             .get_mut(&origin)
             .unwrap()
-            .spawn_exit(kind, pos)?;
+            .spawn_clear_portal(kind, pos, true)?;
         self.portals.insert(
             id,
             Portal {
@@ -2308,8 +2308,12 @@ impl World {
         }
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
+        self.spawn_clear_portal(kind, loot, false)
+    }
+    fn spawn_clear_portal(&mut self, kind: u16, loot: Pos, keep_origin: bool) -> Result<i32> {
         // Keep the reference death point unless loot/portal clearance requires separation: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/DropPortalOnDeath.cs#L42
         let pos = std::iter::once(loot)
+            .filter(|_| keep_origin)
             .chain((0..8).map(|i| {
                 let angle = i as f32 * std::f32::consts::TAU / 8.;
                 Pos {
