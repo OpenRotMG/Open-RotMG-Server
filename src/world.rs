@@ -5854,6 +5854,8 @@ mod timing_example;
 #[cfg(test)]
 mod ground_dye_tests;
 #[cfg(test)]
+mod hermit_loot_tests;
+#[cfg(test)]
 mod lair_trap_tests;
 #[cfg(test)]
 mod manor_tests;
