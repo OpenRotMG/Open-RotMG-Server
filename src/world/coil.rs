@@ -4,7 +4,8 @@ use crate::dungeon::jungle::{COIL, EGG, SNAKE};
 impl World {
     pub(super) fn populate_coil_snakes(&mut self) -> Result<()> {
         for _ in 0..2 {
-            let pos = self.place_named_setpiece(COIL, &[3, 4, 5, 6])?;
+            // Match the period guide's midland ruins: https://web.archive.org/web/20120420071116id_/http://forums.wildshadow.com/wiki/realm-mad-god/great-coil-snake
+            let pos = self.place_named_setpiece(COIL, &[6, 7])?;
             let items = crate::loot::landmark_chest(&self.content, COIL, &mut self.rng)?;
             self.spawn_entity(0x501, pos, items)?;
             let id = self.spawn_entity(COIL, pos, vec![])?;
