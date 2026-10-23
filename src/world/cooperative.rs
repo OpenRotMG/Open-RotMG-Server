@@ -288,11 +288,12 @@ impl World {
             if *amount > 0 {
                 let mut out = Writer::new();
                 out.i32(*target).utf(&format!("+{amount}")).u32(0xff00ff00);
-                for p in self
-                    .players
-                    .values()
-                    .filter(|p| ready(p) && p.known.contains(target))
-                {
+                // Known includes distant minimap peers, not just observers of local healing.
+                for p in self.players.values().filter(|p| {
+                    ready(p)
+                        && p.known.contains(target)
+                        && p.pos.distance(self.players[target].pos) <= 20.
+                }) {
                     send(p, wire::NOTIFICATION, out.0.clone());
                     send(p, wire::SHOW_EFFECT, effect(1, *target, position));
                 }
@@ -301,7 +302,7 @@ impl World {
         for p in self
             .players
             .values()
-            .filter(|p| ready(p) && p.known.contains(&id))
+            .filter(|p| ready(p) && p.known.contains(&id) && p.pos.distance(position) <= 20.)
         {
             send(p, wire::SHOW_EFFECT, effect(5, id, Pos { x: range, y: 0. }));
         }
@@ -422,6 +423,131 @@ mod tests {
             own_goto(&packets, sender, landing).is_err(),
             "trailing byte"
         );
+    }
+
+    #[test]
+    fn distant_minimap_peers_do_not_receive_combat_visual_bursts() {
+        let mut d = directory();
+        let w = d.worlds.get_mut(&-2).unwrap();
+        let healer = w.enter(ch(w), None).unwrap();
+        let mut character = ch(w);
+        character.id = 2;
+        character.account = 2;
+        let patient = w.enter(character.clone(), None).unwrap();
+        let (near_tx, mut near_packets) = mpsc::channel(64);
+        let (near_lost, near_loss) = watch::channel(false);
+        character.id = 3;
+        character.account = 3;
+        let near = w
+            .enter(
+                character.clone(),
+                Some(Output {
+                    packets: near_tx,
+                    lost: near_lost,
+                }),
+            )
+            .unwrap();
+        let (far_tx, mut far_packets) = mpsc::channel(64);
+        let (far_lost, far_loss) = watch::channel(false);
+        character.id = 4;
+        character.account = 4;
+        let far = w
+            .enter(
+                character,
+                Some(Output {
+                    packets: far_tx,
+                    lost: far_lost,
+                }),
+            )
+            .unwrap();
+        let origin = w.players[&healer].pos;
+        w.players.get_mut(&patient).unwrap().pos = origin;
+        w.players.get_mut(&near).unwrap().pos = Pos {
+            x: origin.x + 20.,
+            y: origin.y,
+        };
+        w.players.get_mut(&far).unwrap().pos = Pos {
+            x: origin.x + 20.01,
+            y: origin.y,
+        };
+        for observer in [near, far] {
+            w.updates(observer, true).unwrap();
+            assert!(w.players[&observer].known.contains(&healer));
+            assert!(w.players[&observer].known.contains(&patient));
+        }
+        while near_packets.try_recv().is_ok() {}
+        while far_packets.try_recv().is_ok() {}
+        let item = w.content.objects[&0xb25].clone();
+        let cap = w.players[&healer].effective(&w.content, w.now).unwrap()[0];
+        w.players.get_mut(&healer).unwrap().character.hp = cap;
+        for _ in 0..25 {
+            w.players.get_mut(&patient).unwrap().character.hp = 1;
+            w.heal_ability(healer, &item, 100, 8.).unwrap();
+            assert_eq!(w.players[&patient].character.hp, cap);
+            let mut packets = Vec::new();
+            while let Ok(packet) = near_packets.try_recv() {
+                packets.push(packet.id);
+            }
+            assert_eq!(
+                packets,
+                [wire::NOTIFICATION, wire::SHOW_EFFECT, wire::SHOW_EFFECT]
+            );
+        }
+        assert!(!*near_loss.borrow());
+        assert!(
+            !*far_loss.borrow(),
+            "distant healing overflowed the unchanged 64-packet queue"
+        );
+        assert!(far_packets.try_recv().is_err());
+
+        let spell = w.content.objects[&0xb24].clone();
+        w.players.get_mut(&healer).unwrap().character.items[1] = i32::from(spell.kind);
+        for _ in 0..5 {
+            w.now += 1000;
+            w.players.get_mut(&healer).unwrap().character.mp = 100;
+            let before = w.bullets.len();
+            w.activate_ability(
+                healer,
+                Slot {
+                    object: healer,
+                    slot: 1,
+                    kind: i32::from(spell.kind),
+                },
+                &spell,
+                origin,
+            )
+            .unwrap();
+            assert_eq!(w.bullets.len() - before, 20);
+            let mut count = 0;
+            while let Ok(packet) = near_packets.try_recv() {
+                assert_eq!(packet.id, 13);
+                count += 1;
+            }
+            assert_eq!(count, 20);
+        }
+        assert!(
+            !*far_loss.borrow(),
+            "distant Novas overflowed the unchanged queue"
+        );
+        assert!(far_packets.try_recv().is_err());
+
+        let weapon = w.players[&healer].character.items[0] as u16;
+        for _ in 0..65 {
+            w.now += 1000;
+            let before = w.bullets.len();
+            let bullet = w.players[&healer].next_bullet;
+            w.shoot(healer, w.now as i32, bullet, weapon, origin, 0.)
+                .unwrap();
+            assert_eq!(w.bullets.len() - before, 1);
+            assert_eq!(near_packets.try_recv().unwrap().id, 74);
+            assert!(near_packets.try_recv().is_err());
+        }
+        assert!(!*near_loss.borrow());
+        assert!(
+            !*far_loss.borrow(),
+            "distant ally shots overflowed the unchanged queue"
+        );
+        assert!(far_packets.try_recv().is_err());
     }
 
     #[test]

@@ -156,6 +156,8 @@ pub struct Character {
     pub beaches: u64,
     #[serde(default)]
     pub davy_lockers: u64,
+    #[serde(default)]
+    pub tombs: u64,
 }
 pub fn level_start(level: i32) -> Result<i32> {
     ensure!((1..=20).contains(&level), "invalid character level {level}");
@@ -821,6 +823,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 manors: 0,
                 beaches: 0,
                 davy_lockers: 0,
+                tombs: 0,
             };
             tx.execute(
                 "INSERT INTO characters(account,stats,items) VALUES(?1,?2,?3)",
@@ -990,7 +993,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let saved: Character = serde_json::from_str(&raw)?;
             ensure!(saved.schema == ch.schema && saved.class == ch.class && saved.base == ch.base
                 && saved.level == ch.level && saved.exp == ch.exp && saved.fame == ch.fame
-                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors && saved.beaches == ch.beaches && saved.davy_lockers == ch.davy_lockers
+                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors && saved.beaches == ch.beaches && saved.davy_lockers == ch.davy_lockers && saved.tombs == ch.tombs
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "permanent potion reservation changed");
             ch.base[index] += amount;
@@ -1066,7 +1069,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     pub async fn fame(&self, account: i32, id: i32) -> Result<String> {
         let legacy_base = self.legacy_base;
         // The legacy field is called CreatedOn, but the client labels it as the death date.
-        self.call(move|db|{let (snapshot,killer,died_at,bonus):(String,String,u64,i32)=db.query_row("SELECT snapshot,killed_by,died_at,equipment_fame FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(c.id==id && c.account==account && !c.alive && c.hp==0 && c.items.len()==12,"invalid archived death snapshot");let total=death_awards::total(&c,bonus)?;let equipment=if bonus>0 {format!("<Bonus id=\"Well Equipped\" desc=\"Bonus for equipment\">{bonus}</Bonus>")}else{String::new()};ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame>{}</Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),total,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],c.fame,equipment))}).await
+        self.call(move|db|{let (snapshot,killer,died_at,bonus):(String,String,u64,i32)=db.query_row("SELECT snapshot,killed_by,died_at,equipment_fame FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;let c = decode_character(&snapshot, legacy_base)?;ensure!(c.id==id && c.account==account && !c.alive && c.hp==0 && c.items.len()==12,"invalid archived death snapshot");let total=death_awards::total(&c,bonus)?;let equipment=if bonus>0 {format!("<Bonus id=\"Well Equipped\" desc=\"Bonus for equipment\">{bonus}</Bonus>")}else{String::new()};ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>0</GodKills><OryxKills>0</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>{}</TombsCompleted><LevelUpAssists>0</LevelUpAssists><BaseFame>{}</BaseFame>{}</Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),total,c.shots,c.hits,c.tiles,c.kills,c.quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],c.tombs,c.fame,equipment))}).await
     }
     #[cfg(test)]
     pub async fn rename(&self, account: i32, name: String) -> Result<()> {
@@ -1563,6 +1566,8 @@ mod tests {
             ch.jungles = 6;
             ch.manors = 7;
             ch.beaches = 8;
+            ch.davy_lockers = 10;
+            ch.tombs = 9;
             characters.push(ch);
         }
         characters[1].revision = 1;
@@ -1577,6 +1582,8 @@ mod tests {
             assert_eq!(saved.jungles, 0);
             assert_eq!(saved.manors, 0);
             assert_eq!(saved.beaches, 0);
+            assert_eq!(saved.davy_lockers, 0);
+            assert_eq!(saved.tombs, 0);
         }
         characters[1].revision = 0;
         s.progress_batch(characters.clone()).await.unwrap();
@@ -1590,6 +1597,8 @@ mod tests {
             assert_eq!(saved.jungles, 6);
             assert_eq!(saved.manors, 7);
             assert_eq!(saved.beaches, 8);
+            assert_eq!(saved.davy_lockers, 10);
+            assert_eq!(saved.tombs, 9);
             saved.alive = false;
             saved.hp = 0;
             s.death(saved, "test clear snapshot".into()).await.unwrap();

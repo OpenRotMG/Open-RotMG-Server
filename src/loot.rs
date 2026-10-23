@@ -113,6 +113,44 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xc25)),
         ],
         kind if crate::dungeon::davy::ROSTER.contains(&kind) || kind == 0x182e => &[],
+        // Trapped's ordered boss pool is reconstruction evidence, not official 123.5.1 RNG.
+        crate::dungeon::tomb::BES => &[
+            (0.009, Item(0xba2)),
+            (0.005, Item(0xc1e)),
+            (0.005, Item(crate::endgame::INCANTATION)),
+            (1., Item(0xae9)),
+        ],
+        crate::dungeon::tomb::GEB => &[
+            (0.05, Item(0xba1)),
+            (0.015, Item(crate::endgame::INCANTATION)),
+            (1., Item(0xae9)),
+        ],
+        crate::dungeon::tomb::NUT => &[
+            (0.009, Item(0xba0)),
+            (0.005, Item(crate::endgame::INCANTATION)),
+            (1., Item(0xae9)),
+        ],
+        crate::dungeon::tomb::SARCOPHAGUS => &[
+            (0.15, Item(0xa22)),
+            (0.15, Item(0xa23)),
+            (0.15, Item(0xb0e)),
+            (0.15, Item(0xb0d)),
+            (0.15, Item(0xb0c)),
+        ],
+        crate::dungeon::tomb::TREASURE => &[
+            (0.3, Item(0xa1f)),
+            (0.3, Item(0xa21)),
+            (0.3, Item(0xa20)),
+            (0.08, Tier(9, ARMOR)),
+            (0.08, Tier(9, WEAPONS)),
+            (0.06, Tier(10, ARMOR)),
+            (0.06, Tier(10, WEAPONS)),
+            (0.08, Tier(4, RINGS)),
+        ],
+        0xd2a | 0xd2b => &[(0.2, Item(0xa22)), (0.2, Item(0xa23))],
+        0xd2d..=0xd30 => &[(0.3, Item(0xa22)), (0.3, Item(0xa23))],
+        0xd10..=0xd1b | 0xd3a..=0xd3c => &[(0.01, Item(0xa22))],
+        kind if crate::dungeon::tomb::contains(kind) => &[],
         0x6c4 => &[
             (0.10, Tier(2, WEAPONS)),
             (0.10, Tier(2, ARMOR)),
@@ -193,6 +231,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         {
             &[]
         }
+        // Tombstone rewards are a no-drop reconstruction; selected XML establishes zero XP, not loot.
+        0x181f => &[],
         0x122 | 0x162 | 0x163 | 0xd57 | 0xd58 | 0xd5b..=0xd5f => &[],
         0xd5a => &[(0.05, Item(0xa3b))],
         0xd56 | 0xd59 | 0xd60 => &[
@@ -588,7 +628,8 @@ fn roll_table(content: &Content, picks: &[(f64, Pick)], rng: &mut impl Rng) -> O
     None
 }
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if crate::quest::final_root(kind)
+    let mut items = if kind == crate::dungeon::tomb::TREASURE
+        || crate::quest::final_root(kind)
         || matches!(kind, 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL)
         || matches!(
             kind,
@@ -664,7 +705,12 @@ pub fn fauna_private_rewards(
     rewards
 }
 pub fn private(kind: u16) -> bool {
-    crate::quest::final_root(kind)
+    crate::dungeon::tomb::BOSSES.contains(&kind)
+        || matches!(
+            kind,
+            crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
+        )
+        || crate::quest::final_root(kind)
         || kind == crate::dungeon::davy::BOSS
         || matches!(
             kind,
@@ -964,6 +1010,53 @@ mod tests {
         for kind in [0x20e, 0x206, 0x620, 0x622, 0x947, 0x948] {
             assert!(table(kind).is_empty() && bonus(kind).is_empty() && !private(kind));
         }
+    }
+    #[test]
+    fn tomb_life_potions_do_not_shadow_the_correct_boss_rings_or_white_bag() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (boss, ring) in [
+            (crate::dungeon::tomb::NUT, 0xba0),
+            (crate::dungeon::tomb::GEB, 0xba1),
+            (crate::dungeon::tomb::BES, 0xba2),
+        ] {
+            let mut observed = std::collections::BTreeSet::new();
+            for seed in 0..4096 {
+                let items = rewards(&content, boss, &mut StdRng::seed_from_u64(seed));
+                assert_eq!(items.len(), 1, "one ordered Tomb pool roll");
+                observed.extend(items);
+            }
+            assert!(
+                observed.contains(&ring),
+                "boss {boss:#x} never drops its ring"
+            );
+            assert!(
+                [0xba0, 0xba1, 0xba2]
+                    .into_iter()
+                    .all(|item| item == ring || !observed.contains(&item))
+            );
+            assert!(observed.contains(&0xae9));
+            assert!(observed.contains(&crate::endgame::INCANTATION));
+            if boss == crate::dungeon::tomb::BES {
+                assert!(observed.contains(&0xc1e));
+            }
+        }
+        let sarc_drops: Vec<_> = table(crate::dungeon::tomb::SARCOPHAGUS)
+            .iter()
+            .map(|(_, pick)| match pick {
+                Pick::Item(item) => *item,
+                _ => panic!("Sarcophagus must use selected consumable identities"),
+            })
+            .collect();
+        assert_eq!(sarc_drops, [0xa22, 0xa23, 0xb0e, 0xb0d, 0xb0c]);
+        assert!((0..64).any(|seed| {
+            rewards(
+                &content,
+                crate::dungeon::tomb::TREASURE,
+                &mut StdRng::seed_from_u64(seed),
+            )
+            .len()
+                > 1
+        }));
     }
     #[test]
     fn abyss_bosses_always_drop_the_vitality_and_defense_potions() {
