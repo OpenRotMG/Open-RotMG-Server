@@ -2009,7 +2009,7 @@ fn abyss_armed_missile_nonparalyzed_world_step_stays_stationary() {
 }
 
 #[test]
-fn abyss_generated_guard_simulation_twenty_tiles_preserves_aimed_range() {
+fn abyss_generated_guard_simulation_twenty_tiles_keeps_aimed_range() {
     let content = tests::world().content.clone();
     for name in ["Abyss of Demons", "Realm"] {
         for distance in [12., 16., 19.5, 20.] {
@@ -2061,7 +2061,6 @@ fn abyss_generated_guard_simulation_twenty_tiles_preserves_aimed_range() {
                 .unwrap();
             assert_eq!(w.players[&player].pos.distance(position), distance);
             w.step();
-            // Minimap-visible ordinary NPCs now simulate at twenty tiles in either world; aimed shots remain shorter-range.
             let active = distance < 20.;
             assert_eq!(
                 w.entities[&guard].activated.is_some(),
@@ -2103,11 +2102,12 @@ fn abyss_cowardice_routes_living_character_to_realm_not_nexus() {
         assert_eq!((account, id), (character.account, character.id));
         let (time, grant, _) = d.issue(account, id, destination).unwrap();
         let ch = d.worlds.get_mut(&origin).unwrap().leave(player).unwrap();
-        assert_eq!(
-            d.consume(account, destination, time, grant.clone())
-                .unwrap(),
-            character.id
-        );
+        let (consumed, authority) = d
+            .consume(account, destination, time, grant.clone())
+            .unwrap();
+        assert_eq!(consumed, character.id);
+        d.admit_transfer(authority, account, character.id, destination)
+            .unwrap();
         let arrival = d
             .worlds
             .get_mut(&destination)

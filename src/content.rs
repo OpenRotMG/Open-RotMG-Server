@@ -92,6 +92,22 @@ impl Projectile {
         )
     }
 }
+impl Object {
+    pub fn is_potion(&self) -> bool {
+        self.potion
+            && self.consumable
+            && (self.stat_increase.is_some()
+                || self.consumable_effects.iter().any(|effect| {
+                    matches!(
+                        effect,
+                        ConsumableEffect::Heal { .. }
+                            | ConsumableEffect::Mana { .. }
+                            | ConsumableEffect::Boost { .. }
+                    )
+                }))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct SpawnGroup {
     pub mean: usize,
@@ -158,6 +174,7 @@ pub struct Object {
     pub create_object: Option<String>,
     pub dungeon_name: Option<String>,
     pub consumable: bool,
+    pub potion: bool,
     pub resurrects: bool,
     pub textures: [Option<u32>; 2],
     pub successor: Option<String>,
@@ -170,6 +187,9 @@ pub struct Object {
     pub abilities: Vec<Ability>,
     pub cooldown_ms: u64,
     pub enemy: bool,
+    pub god: bool,
+    pub cube: bool,
+    pub oryx: bool,
     pub stasis_immune: bool,
     pub leach_health: bool,
     pub terrain: u8,
@@ -435,6 +455,7 @@ impl Content {
                     .transpose()?,
                 dungeon_name: child(n, "DungeonName").map(|_| text(n, "DungeonName")),
                 consumable: child(n, "Consumable").is_some(),
+                potion: child(n, "Potion").is_some(),
                 xp_boost: child(n, "XpBoost").is_some(),
                 resurrects: child(n, "Resurrects").is_some(),
                 textures: [texture(n, "Tex1")?, texture(n, "Tex2")?],
@@ -462,6 +483,9 @@ impl Content {
                     .as_millis()
                     .try_into()?,
                 enemy: child(n, "Enemy").is_some(),
+                god: child(n, "God").is_some(),
+                cube: child(n, "Cube").is_some(),
+                oryx: child(n, "Oryx").is_some(),
                 stasis_immune: child(n, "StasisImmune").is_some(),
                 leach_health: child(n, "LeachHealth").is_some(),
                 terrain: match text(n, "Terrain").as_str() {

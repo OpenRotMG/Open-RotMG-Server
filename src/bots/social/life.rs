@@ -405,7 +405,11 @@ impl Life {
         }
         if v.map.name == "Nexus"
             && !banking
-            && let Some(p) = v.objects.iter().find(|p| p.kind == 0x712)
+            && let Some(p) = v
+                .objects
+                .iter()
+                .filter(|p| p.kind == 0x712)
+                .max_by_key(|p| p.usable)
         {
             if !p.usable {
                 let (portal, since) = *self.waiting.get_or_insert((p.id, v.elapsed_ms));
@@ -718,7 +722,11 @@ pub(in crate::bots) async fn life(
                     t.offers[0] = mine;
                     t.ready = v.time_ms + 3000;
                     Some(TradeAction::Change { offer: mine })
-                } else if t.offers[1] == theirs && v.time_ms >= t.ready && g.acceptance.is_none() {
+                } else if t.offers[1] == theirs
+                    && v.time_ms >= t.ready
+                    && v.clock_at >= t.ready_at
+                    && g.acceptance.is_none()
+                {
                     Some(TradeAction::Accept { mine, theirs })
                 } else {
                     None
@@ -769,9 +777,14 @@ pub(in crate::bots) async fn life(
                     crate::server::persist_trade(app, plan).await?;
                 } else if changed {
                     let acknowledged = app.world.directory(move |d| d.player_view(id)).await?;
-                    if let Some(t) = brain.mind.market.trade.as_mut() {
-                        t.ready = acknowledged.time_ms + 3000;
-                    }
+                    let t = brain
+                        .mind
+                        .market
+                        .trade
+                        .as_mut()
+                        .context("gift trade disappeared after offer acknowledgement")?;
+                    t.ready = acknowledged.time_ms + 3000;
+                    t.ready_at = acknowledged.clock_at + std::time::Duration::from_millis(3000);
                 }
             }
             Err(error) => {

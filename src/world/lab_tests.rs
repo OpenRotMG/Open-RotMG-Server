@@ -665,6 +665,7 @@ async fn community_lab_real_store_retains_clear_pickup_and_permanent_death_witho
         damage: gas.min,
         spec: gas,
         hit: BTreeSet::new(),
+        hit_enemy: false,
     };
     w.damage_player(p, &bullet, false).unwrap();
     assert!(w.players[&p].death_pending);

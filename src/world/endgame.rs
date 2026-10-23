@@ -1132,7 +1132,7 @@ mod tests {
 
     #[test]
     fn realm_pool_large_collective_departure_drains_with_bounded_live_grants() {
-        fn arrive(d: &mut Directory, route: ForcedTransfer) -> (i32, Character, Vec<u8>) {
+        fn arrive(d: &mut Directory, route: ForcedTransfer) -> (i32, Character, TransferArrival) {
             let destination = route.destination.unwrap();
             let w = d.worlds.get_mut(&-3).unwrap();
             let account = w.players[&route.player].character.account;
@@ -1145,16 +1145,41 @@ mod tests {
             w.committed(route.player, Ok(())).unwrap();
             w.finish_departure(route.player).unwrap();
             d.realm_departed(-3, route.player);
-            assert_eq!(
-                d.consume(account, destination, route.key_time, route.key.clone())
-                    .unwrap(),
-                ch.id
-            );
+            let (character, arrival) = d
+                .consume(account, destination, route.key_time, route.key.clone())
+                .unwrap();
+            assert_eq!(character, ch.id);
             assert!(
                 d.consume(account, destination, route.key_time, route.key.clone())
                     .is_err()
             );
-            (destination, ch, route.key)
+            (destination, ch, arrival)
+        }
+        fn enter_arrived(
+            d: &mut Directory,
+            destination: i32,
+            ch: Character,
+            arrival: TransferArrival,
+        ) {
+            let key = arrival.key.clone();
+            d.admit_transfer(arrival, ch.account, ch.id, destination)
+                .unwrap();
+            d.worlds
+                .get_mut(&destination)
+                .unwrap()
+                .enter_admitted(
+                    ch,
+                    None,
+                    None,
+                    AccountPresentation {
+                        guild: None,
+                        credits: 0,
+                        fame: 0,
+                        best_fame: BTreeMap::new(),
+                    },
+                    Some(key),
+                )
+                .unwrap();
         }
         for count in [65, 85] {
             let mut d = Directory::load(
@@ -1192,7 +1217,7 @@ mod tests {
             assert_eq!(d.endgame.forced.len(), count as usize - 64);
             assert!(d.issue(1000, 1000, -2).is_err());
             for waiting in players.iter().skip(64) {
-                let (destination, ch, key) = arrive(&mut d, routes.pop().unwrap());
+                let (destination, ch, arrival) = arrive(&mut d, routes.pop().unwrap());
                 assert_eq!(destination, castle);
                 assert!(
                     d.forced_transfer(*waiting).unwrap().is_none(),
@@ -1201,46 +1226,16 @@ mod tests {
                 assert_eq!(d.grants.len(), 64);
                 assert!(!d.worlds[&-3].players[waiting].departing);
                 assert!(d.worlds[&-3].players[waiting].tx.is_some());
-                d.worlds
-                    .get_mut(&destination)
-                    .unwrap()
-                    .enter_admitted(
-                        ch,
-                        None,
-                        None,
-                        AccountPresentation {
-                            guild: None,
-                            fame: 0,
-                            best_fame: BTreeMap::new(),
-                            credits: 0,
-                        },
-                        Some(key),
-                    )
-                    .unwrap();
+                enter_arrived(&mut d, destination, ch, arrival);
                 let route = d.forced_transfer(*waiting).unwrap().unwrap();
                 assert_eq!(route.destination, Some(castle));
                 routes.push(route);
                 assert_eq!(d.grants.len(), 64);
             }
             for route in routes {
-                let (destination, ch, key) = arrive(&mut d, route);
+                let (destination, ch, arrival) = arrive(&mut d, route);
                 assert_eq!(destination, castle);
-                d.worlds
-                    .get_mut(&destination)
-                    .unwrap()
-                    .enter_admitted(
-                        ch,
-                        None,
-                        None,
-                        AccountPresentation {
-                            guild: None,
-                            fame: 0,
-                            best_fame: BTreeMap::new(),
-                            credits: 0,
-                        },
-                        Some(key),
-                    )
-                    .unwrap();
+                enter_arrived(&mut d, destination, ch, arrival);
             }
             d.retire_transfer_grants();
             assert!(d.grants.is_empty() && d.endgame.forced.is_empty());

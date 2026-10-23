@@ -211,9 +211,52 @@ fn jungle_generated_routes_rewards_and_transactional_clear() {
     w.finish_progress(player, progress[0].1.clone()).unwrap();
     assert!(w.entities[&exit].published);
     assert_eq!(w.players[&player].character.jungles, 1);
+    assert!(w.players[&player].character.lifetime.realm_exits.is_empty());
     assert!(w.pending_progress_where(|_, _| true).is_empty());
     assert!(w.entities.values().any(|e| e.items.contains(&0xc1a)));
     assert_eq!(crate::dungeon::portal_drop(0xdc2), Some((0x733, 0.2)));
+}
+
+#[test]
+fn coil_temples_keep_the_snake_and_chest_in_midland_habitat() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    for source in crate::terrain::realms::sources(std::path::Path::new("data")).unwrap() {
+        let original = source.open(&content).unwrap();
+        let mut world = World::new(content.clone(), original.clone()).unwrap();
+        world.realm_layout = Some(source.name().to_owned());
+        world.rng = rand::rngs::StdRng::seed_from_u64(315);
+        world.populate_tomb_entry().unwrap();
+        let first = world.setpieces.len();
+        world.populate_coil_snakes().unwrap();
+        assert_eq!(world.setpieces.len() - first, 2);
+        for area in &world.setpieces[first..] {
+            let center = (area.y + area.height / 2) * world.map.width + area.x + area.width / 2;
+            let terrain = original.cells[center as usize].terrain;
+            assert!(
+                matches!(terrain, 6 | 7),
+                "{}: temple habitat {terrain}",
+                source.name()
+            );
+            let snakes: Vec<_> = world
+                .actors()
+                .filter(|e| e.kind == COIL && area.distance(e.pos) == 0.)
+                .collect();
+            assert_eq!(snakes.len(), 1);
+            let snake = snakes[0];
+            assert!(world.walkable(snake.pos));
+            assert!(world.entities.values().any(|e| e.kind == 0x501
+                && e.pos.distance(snake.pos) == 0.
+                && !e.items.is_empty()));
+            assert!(
+                world
+                    .entities
+                    .values()
+                    .filter(|e| matches!(e.kind, 0x1f2..=0x1f4) && area.distance(e.pos) == 0.)
+                    .count()
+                    > 10
+            );
+        }
+    }
 }
 
 #[test]

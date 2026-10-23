@@ -22,6 +22,7 @@ mod events;
 mod events_tests;
 mod progression;
 pub(crate) mod pursuits;
+mod realms;
 mod social;
 
 #[derive(Clone, Copy)]
@@ -875,6 +876,11 @@ impl Brain {
             }
         }
         let peaceful = nearest.is_none_or(|e| e.position.distance(v.position) > 5.);
+        let realm = if v.map.name == "Nexus" && !banking && peaceful && health >= 0.75 {
+            self.realm_portal(v, &grid)?
+        } else {
+            None
+        };
         for portal in v
             .objects
             .iter()
@@ -884,7 +890,8 @@ impl Brain {
                     if banking {
                         p.kind == 0x720
                     } else {
-                        matches!(p.kind, 0x704 | 0x70e | 0x71c | 0x712)
+                        matches!(p.kind, 0x704 | 0x70e | 0x71c)
+                            || p.kind == 0x712 && Some(p.id) == realm
                     }
                 }
                 // The committed exit is public even when a straggler missed personal clear credit.
@@ -1316,6 +1323,8 @@ mod navigation_tests;
 #[path = "bots/community_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+mod realm_tests;
 mod runtime;
 pub(crate) const OUTPUT_CAPACITY: usize = 512;
 pub use runtime::start;

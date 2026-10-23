@@ -49,7 +49,7 @@ class PicturesBackup(unittest.TestCase):
 
     def test_artwork_bytes_ownership_high_water_restore_and_usable_reload(self):
         bundle = self.bundle
-        self.assertEqual(bundle['schema'], 16)
+        self.assertEqual(bundle['schema'], 17)
         self.assertEqual(len(bundle['game']['pictures']), 2)
         self.assertEqual(bundle['game']['picture_sequence'], [{'id': 1, 'next_id': 4}])
         with closing(sqlite3.connect(self.root / 'written/game.db')) as db:
@@ -69,8 +69,21 @@ class PicturesBackup(unittest.TestCase):
     def test_account_minds_and_trade_receipts_are_preserved_and_validated(self):
         self.assertEqual(len(self.bundle['game']['bot_minds']), 2)
         self.assertEqual(len(self.bundle['game']['trade_transactions']), 1)
+        community = {table: self.bundle['game'][table] for table in ['bot_minds', 'trade_transactions']}
+        for args, count in [(['--backup-validate-community'], 'validated_trade_receipts'),
+                            (['--backup-validate', 'community'], 'validated_trades')]:
+            result = subprocess.run([self.binary, *args], input=json.dumps(community),
+                                    text=True, capture_output=True, check=True)
+            self.assertEqual(json.loads(result.stdout), {'validated_minds': 2, count: 1})
+        mind = community['bot_minds'][0]
+        writes = community['trade_transactions'][0]['writes']
+        duplicate_mind = '{"account":' + str(mind['account']) + ',' + mind['mind'][1:]
+        duplicate_write = '[{"id":' + str(json.loads(writes)[0]['id']) + ',' + writes[2:]
         for table, field, value in [('bot_minds', 'revision', 999), ('bot_minds', 'account', 99999),
                                     ('bot_minds', 'mind', '{"schema":1,"password":"must-not-export"}'),
+                                    ('bot_minds', 'mind', duplicate_mind),
+                                    ('trade_transactions', 'id', 'not-a-canonical-receipt'),
+                                    ('trade_transactions', 'writes', duplicate_write),
                                     ('trade_transactions', 'owners', '[99999,99998]'),
                                     ('trade_transactions', 'revisions', '[0,0]'),
                                     ('trade_transactions', 'writes', '[]'),

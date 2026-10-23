@@ -28,6 +28,7 @@ fn example_cover() {
         damage: 8,
         spec: world.content.objects[&0x683].projectiles[&0].clone(),
         hit: BTreeSet::new(),
+        hit_enemy: false,
     });
     for _ in 0..5 {
         world.step();

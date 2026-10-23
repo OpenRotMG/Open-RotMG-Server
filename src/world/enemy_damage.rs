@@ -1,6 +1,46 @@
 use super::*;
 
 impl World {
+    pub(super) fn record_lifetime_kill(
+        &mut self,
+        owner: i32,
+        kind: u16,
+        final_blow: bool,
+    ) -> Result<()> {
+        let definition = &self.content.objects[&kind];
+        if definition.enemy
+            && let Some(p) = self
+                .players
+                .get_mut(&owner)
+                .filter(|p| p.character.alive && !p.death_started && !p.departing)
+        {
+            let mut lifetime = p.character.lifetime.clone();
+            lifetime.kills = lifetime
+                .kills
+                .checked_add(1)
+                .context("lifetime kill overflow")?;
+            if definition.god {
+                lifetime.god_kills = lifetime
+                    .god_kills
+                    .checked_add(1)
+                    .context("lifetime god kill overflow")?;
+            }
+            if definition.cube {
+                lifetime.cube_kills = lifetime
+                    .cube_kills
+                    .checked_add(1)
+                    .context("lifetime cube kill overflow")?;
+            }
+            if definition.oryx && final_blow {
+                lifetime.oryx_kills = lifetime
+                    .oryx_kills
+                    .checked_add(1)
+                    .context("lifetime Oryx kill overflow")?;
+            }
+            p.character.lifetime = lifetime;
+        }
+        Ok(())
+    }
     pub(super) fn damage_enemy(
         &mut self,
         owner: i32,
@@ -78,6 +118,9 @@ impl World {
                 }
             }
         }
+        if kill {
+            self.record_lifetime_kill(owner, self.entities[&target].kind, true)?;
+        }
         let mut o = Writer::new();
         o.i32(target)
             .u8(if affects { effects.len() as u8 } else { 0 });
@@ -118,7 +161,13 @@ impl World {
                 self.critical_killers
                     .insert(root, (kind, player.character.name.clone()));
             }
-            self.defeat_entity(target)?;
+            // Terminal authority seals NEW credit sources; damage and shared XP still resolve normally.
+            let killer = self
+                .players
+                .get(&owner)
+                .filter(|p| p.character.alive && !p.death_pending && !p.departing)
+                .map(|p| p.character.id);
+            self.defeat_entity_with_killer(target, killer)?;
             tracing::info!(entity = target, kind, owner = owner, "enemy defeated");
         }
         Ok(actual)

@@ -1,49 +1,64 @@
 use super::*;
 
 #[test]
-fn community_schema16_migrates_canonical15_without_recreating_committed_feature_tables() {
+fn community_schema17_migrates_canonical15_and16_without_recreating_committed_feature_tables() {
     let content = Content::load(Path::new("data")).unwrap();
-    for missing in ["bot_minds", "trade_transactions"] {
-        let dir = std::env::temp_dir().join(format!("community-schema-{}", rand::random::<u64>()));
-        std::fs::create_dir(&dir).unwrap();
-        let path = dir.join("game.db");
-        drop(Store::open(&path, &content).unwrap());
-        let db = Connection::open(&path).unwrap();
-        assert_eq!(
-            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
-                .unwrap(),
-            16
-        );
-        db.execute_batch(
-            "DROP TABLE bot_minds; DROP TABLE trade_transactions; PRAGMA user_version=15;",
-        )
-        .unwrap();
-        drop(db);
-        drop(Store::open(&path, &content).unwrap());
-        let db = Connection::open(&path).unwrap();
-        assert_eq!(
-            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
-                .unwrap(),
-            16
-        );
-        for table in ["bot_minds", "trade_transactions"] {
+    for version in [15, 16] {
+        for missing in ["bot_minds", "trade_transactions"] {
+            let dir =
+                std::env::temp_dir().join(format!("community-schema-{}", rand::random::<u64>()));
+            std::fs::create_dir(&dir).unwrap();
+            let path = dir.join("game.db");
+            drop(Store::open(&path, &content).unwrap());
+            let db = Connection::open(&path).unwrap();
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+                    .unwrap(),
+                17
+            );
+            if version == 16 {
+                db.pragma_update(None, "user_version", 16).unwrap();
+                let bytes = std::fs::read(&path).unwrap();
+                assert!(
+                    Store::open(&path, &content)
+                        .err()
+                        .unwrap()
+                        .to_string()
+                        .contains("private Fame schema16")
+                );
+                assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            }
+            db.execute_batch("DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt;").unwrap();
+            if version == 15 {
+                db.execute_batch("DROP TABLE bot_minds; DROP TABLE trade_transactions;")
+                    .unwrap();
+            }
+            db.pragma_update(None, "user_version", version).unwrap();
+            drop(Store::open(&path, &content).unwrap());
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+                    .unwrap(),
+                17
+            );
+            for table in ["bot_minds", "trade_transactions"] {
+                assert!(
+                    db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+                        [table],
+                        |r| r.get::<_, bool>(0)
+                    )
+                    .unwrap()
+                );
+            }
+            db.execute_batch(&format!("DROP TABLE {missing}")).unwrap();
             assert!(
-                db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
-                    [table],
-                    |r| r.get::<_, bool>(0)
-                )
-                .unwrap()
+                Store::open(&path, &content)
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("schema-16")
             );
         }
-        db.execute_batch(&format!("DROP TABLE {missing}")).unwrap();
-        assert!(
-            Store::open(&path, &content)
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("schema-16")
-        );
     }
 }
 
@@ -147,10 +162,12 @@ fn canonical_schema_rows(db: &Connection) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn community_schema16_committed_reopen_preserves_account_character_vault_mind_and_receipt() {
+async fn community_schema17_migrates_canonical16_and_committed_reopen_preserves_account_character_vault_mind_and_receipt()
+ {
     let content = Content::load(Path::new("data")).unwrap();
     let (path, account) = fresh_schema_account(&content).await;
     let db = Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; PRAGMA user_version=16;").unwrap();
     let before = canonical_schema_rows(&db);
     let feature_rows = |db: &Connection| -> Vec<String> {
         ["SELECT json_group_array(json_array(account,revision,mind)) FROM bot_minds",
@@ -164,7 +181,7 @@ async fn community_schema16_committed_reopen_preserves_account_character_vault_m
         16
     );
     let reopened = Store::open(&path, &content)
-        .expect("committed schema16 must reopen without losing canonical or community state");
+        .expect("committed schema17 must reopen without losing canonical or community state");
     assert_eq!(reopened.vaults(account).await.unwrap().len(), 2);
     assert_eq!(
         reopened.bot_mind(account).await.unwrap().unwrap().revision,
@@ -173,25 +190,25 @@ async fn community_schema16_committed_reopen_preserves_account_character_vault_m
     assert_eq!(canonical_schema_rows(&db), before);
     assert_eq!(feature_rows(&db), features);
     drop(reopened);
-    db.execute_batch("PRAGMA user_version=17").unwrap();
+    db.execute_batch("PRAGMA user_version=18").unwrap();
     let bytes = std::fs::read(&path).unwrap();
     assert!(
         Store::open(&path, &content)
             .err()
             .unwrap()
             .to_string()
-            .contains("unsupported game database schema 17")
+            .contains("unsupported game database schema 18")
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }
 
 #[tokio::test]
-async fn community_schema16_upgrades_fresh_canonical13_and14_with_owned_vault_rows_intact() {
+async fn community_schema17_upgrades_fresh_canonical13_and14_with_owned_vault_rows_intact() {
     let content = Content::load(Path::new("data")).unwrap();
     for version in [13, 14] {
         let (path, account) = fresh_schema_account(&content).await;
         let db = Connection::open(&path).unwrap();
-        db.execute_batch("DROP TABLE bot_minds; DROP TABLE trade_transactions; DROP TABLE pictures; DROP TABLE picture_sequence;").unwrap();
+        db.execute_batch("DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; DROP TABLE bot_minds; DROP TABLE trade_transactions; DROP TABLE pictures; DROP TABLE picture_sequence;").unwrap();
         // Canonical13 predates equipment awards; both versions predate picture and community tables.
         if version == 13 {
             db.execute_batch("ALTER TABLE deaths DROP COLUMN equipment_fame")
@@ -205,7 +222,7 @@ async fn community_schema16_upgrades_fresh_canonical13_and14_with_owned_vault_ro
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
                 .unwrap(),
-            16
+            17
         );
         assert_eq!(canonical_schema_rows(&db), before);
         assert_eq!(migrated.vaults(account).await.unwrap().len(), 2);
