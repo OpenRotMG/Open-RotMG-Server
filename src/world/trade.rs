@@ -796,10 +796,12 @@ mod community_tests {
                 .unwrap()
                 .is_none()
         );
-        w.change_trade(ids[1], [false; 12]).unwrap();
-        assert_eq!(w.trades[&w.trade_key(ids[0]).unwrap()].accepted, [false; 2]);
-        w.now += 10_000;
         w.clock.set_paused(true);
+        w.change_trade(ids[1], [false; 12]).unwrap();
+        let trade = &w.trades[&w.trade_key(ids[0]).unwrap()];
+        assert_eq!(trade.accepted, [false; 2]);
+        assert_eq!(trade.ready - w.clock.now(), Duration::from_millis(3000));
+        w.now += 10_000;
         tokio::time::sleep(Duration::from_millis(3050)).await;
         assert!(w.accept_trade(ids[0], masks[0], [false; 12]).is_err());
         w.clock.set_paused(false);
@@ -825,16 +827,21 @@ mod community_tests {
         assert!(w.change_trade(ids[0], masks[0]).is_err());
         assert!(!w.cancel_trade(ids[0], "pending commit"));
         assert_eq!(before, ids.map(|id| w.players[&id].character.items.clone()));
-        let expected = plan
-            .plans
-            .each_ref()
-            .map(|p| (p.account, p.character, p.revision + 1, p.items.clone()));
+        let expected = plan.plans.each_ref().map(|p| {
+            (
+                p.player,
+                p.account,
+                p.character,
+                p.revision + 1,
+                p.items.clone(),
+            )
+        });
         let revisions = store
             .exchange_trade(plan.transaction.clone(), writes(&plan), None)
             .await
             .unwrap();
         w.finish_trade(plan, Ok(revisions)).unwrap();
-        for (id, (account, character, revision, items)) in ids.into_iter().zip(expected) {
+        for (id, account, character, revision, items) in expected {
             let saved = store.load(account, character).await.unwrap();
             assert_eq!((saved.revision, saved.items), (revision, items.clone()));
             assert_eq!(w.players[&id].character.items, items);
