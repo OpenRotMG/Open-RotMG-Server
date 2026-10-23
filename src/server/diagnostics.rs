@@ -12,7 +12,48 @@ pub struct Diagnostics {
     pub binary_sha256: String,
     source_revision: Option<String>,
     browsers: Mutex<HashMap<String, std::sync::Weak<Mutex<Browser>>>>,
-    files: Mutex<BTreeSet<String>>,
+    files: Mutex<Reports>,
+}
+#[derive(Default)]
+struct Reports {
+    pending: BTreeSet<String>,
+    latest: HashMap<i32, (u64, String)>,
+}
+impl Reports {
+    fn remember(&mut self, report: &Value) -> Result<()> {
+        let account = serde_json::from_value(report["account_id"].clone())?;
+        let key = (
+            report["created_at_unix_ms"]
+                .as_u64()
+                .context("missing report timestamp")?,
+            report["id"]
+                .as_str()
+                .context("missing report ID")?
+                .to_string(),
+        );
+        self.latest
+            .entry(account)
+            .and_modify(|previous| {
+                if key > *previous {
+                    *previous = key.clone();
+                }
+            })
+            .or_insert(key);
+        Ok(())
+    }
+}
+fn note_progress(report: &Value) -> Result<(usize, usize)> {
+    let Some(notes) = report.get("notes") else {
+        return Ok((0, 0));
+    };
+    let total = notes.as_array().context("invalid stored bug notes")?.len();
+    let through = usize::try_from(
+        report["delivery"]["notes_through"]
+            .as_u64()
+            .context("invalid bug note progress")?,
+    )?;
+    ensure!(through <= total && total <= 32, "invalid bug note progress");
+    Ok((through, total))
 }
 #[derive(Default)]
 pub struct Browser {
@@ -70,7 +111,7 @@ impl Diagnostics {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
         }
-        let mut pending = BTreeSet::new();
+        let mut pending = Reports::default();
         for entry in std::fs::read_dir(&root)? {
             let path = entry?.path();
             if path.extension().is_some_and(|v| v == "json") {
@@ -82,11 +123,13 @@ impl Diagnostics {
                 );
                 match report["delivery"]["status"].as_str() {
                     Some("pending") => {
-                        pending.insert(id.into());
+                        pending.pending.insert(id.into());
                     }
                     Some("delivered") => {}
                     _ => bail!("invalid stored bug delivery state"),
                 }
+                note_progress(&report)?;
+                pending.remember(&report)?;
             }
         }
         let executable = std::env::current_exe()?;
@@ -132,8 +175,127 @@ impl Diagnostics {
             "Bug report storage full; notify an administrator."
         );
         self.write(report)?;
-        pending.insert(report["id"].as_str().context("missing report ID")?.into());
+        pending
+            .pending
+            .insert(report["id"].as_str().context("missing report ID")?.into());
+        pending.remember(report)?;
         Ok(())
+    }
+    fn add_info(&self, account: i32, message: &str) -> Result<()> {
+        ensure!(
+            !message.trim().is_empty() && message.chars().count() <= 500,
+            "Use /bug-info <details>, with 1–500 characters."
+        );
+        let mut files = self.files.lock().expect("diagnostics poisoned");
+        let id = files
+            .latest
+            .get(&account)
+            .context("No bug report yet. Use /bug <description> first.")?
+            .1
+            .clone();
+        let mut report: Value =
+            serde_json::from_slice(&std::fs::read(self.root.join(format!("{id}.json")))?)?;
+        ensure!(report["account_id"] == account, "bug report owner changed");
+        if report.get("notes").is_none() {
+            report["notes"] = json!([]);
+            report["delivery"]["notes_through"] = json!(0);
+        }
+        let (_, count) = note_progress(&report)?;
+        ensure!(
+            count < 32,
+            "This report already has 32 additions. Use /bug <description> for a new report."
+        );
+        report["notes"].as_array_mut().context("invalid stored bug notes")?.push(json!({
+            "created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis(),
+            "text_untrusted":message}));
+        report["delivery"]["status"] = json!("pending");
+        self.write(&report)?;
+        files.pending.insert(id.clone());
+        tracing::info!(report_id=%id, account, note=count+1, "bug report details saved; awaiting delivery");
+        Ok(())
+    }
+    fn next(&self) -> Result<Option<Value>> {
+        let mut files = self.files.lock().expect("diagnostics poisoned");
+        while let Some(id) = files.pending.first().cloned() {
+            let mut report: Value =
+                serde_json::from_slice(&std::fs::read(self.root.join(format!("{id}.json")))?)?;
+            if report["delivery"]["status"] == "pending" {
+                let (through, total) = note_progress(&report)?;
+                if through < total && report["delivery"]["note_batch"].is_null() {
+                    // A retry must identify the same comment even when more details arrive during publication.
+                    report["delivery"]["note_batch"] = json!({"from":through+1,"through":total});
+                    self.write(&report)?;
+                }
+                return Ok(Some(report));
+            }
+            ensure!(
+                report["delivery"]["status"] == "delivered",
+                "invalid stored bug delivery state"
+            );
+            files.pending.remove(&id);
+        }
+        Ok(None)
+    }
+    fn acknowledge(&self, id: &str, receipt: &Receipt) -> Result<Option<(i32, i32, String)>> {
+        ensure!(valid_id(id), "invalid bug report ID");
+        receipt.validate()?;
+        let mut files = self.files.lock().expect("diagnostics poisoned");
+        let mut report: Value =
+            serde_json::from_slice(&std::fs::read(self.root.join(format!("{id}.json")))?)?;
+        let notify =
+            receipt.target == "issue_number" && report["delivery"]["issue_number"].is_null();
+        if receipt.target == "notes" {
+            let through = receipt.through.context("missing bug note receipt range")?;
+            let (previous, _) = note_progress(&report)?;
+            if through == previous {
+                ensure!(
+                    report["delivery"]["note_comment_id"] == receipt.id,
+                    "conflicting bug note receipt"
+                );
+                return Ok(None);
+            }
+            let batch = &report["delivery"]["note_batch"];
+            ensure!(
+                batch["from"] == previous + 1 && batch["through"] == through,
+                "conflicting bug note receipt range"
+            );
+            ensure!(
+                through > previous && through <= note_progress(&report)?.1,
+                "invalid bug note receipt range"
+            );
+            report["delivery"]["notes_through"] = json!(through);
+            report["delivery"]["note_comment_id"] = json!(receipt.id);
+            report["delivery"]["note_batch"] = Value::Null;
+        } else {
+            ensure!(
+                report["delivery"][&receipt.target].is_null()
+                    || report["delivery"][&receipt.target] == receipt.id,
+                "conflicting delivery receipt"
+            );
+            report["delivery"][&receipt.target] = json!(receipt.id);
+        }
+        let (through, total) = note_progress(&report)?;
+        let complete = through == total
+            && ["public_message_id", "issue_number"]
+                .iter()
+                .all(|key| report["delivery"][*key].is_string());
+        report["delivery"]["status"] = json!(if complete { "delivered" } else { "pending" });
+        self.write(&report)?;
+        if complete {
+            files.pending.remove(id);
+        } else {
+            files.pending.insert(id.into());
+        }
+        tracing::info!(report_id=%id, target=%receipt.target, external_id=%receipt.id, notes_through=through, "bug report delivery acknowledged");
+        Ok(if notify {
+            Some((
+                serde_json::from_value(report["context"]["player_id"].clone())?,
+                serde_json::from_value(report["account_id"].clone())?,
+                receipt.id.clone(),
+            ))
+        } else {
+            None
+        })
     }
     fn write(&self, report: &Value) -> Result<()> {
         use std::io::Write;
@@ -487,19 +649,32 @@ pub async fn report(
     player: i32,
     message: &str,
     connection: &ConnectionDiagnostics,
-) -> Result<()> {
+    info: bool,
+) -> Result<&'static str> {
     ensure!(
         a.discord_link_token.is_some(),
         "Discord bug reporting is not configured."
     );
     ensure!(
         !message.trim().is_empty(),
-        "Usage: /bug <description>. Reports are public; do not include personal information."
+        if info {
+            "Usage: /bug-info <details>. Reports are public; do not include personal information."
+        } else {
+            "Usage: /bug <description>. Reports are public; do not include personal information."
+        }
     );
     ensure!(
         message.chars().count() <= 500,
         "Bug message is too long (maximum 500 characters)."
     );
+    if info {
+        let diagnostics = a.diagnostics.clone();
+        let message = message.to_owned();
+        tokio::task::spawn_blocking(move || diagnostics.add_info(account, &message)).await??;
+        return Ok(
+            "Info added to your latest bug report! Type /bug-info <details> to add more! <3",
+        );
+    }
     let requested = Instant::now();
     let context = a.world.directory(move |d| d.bug_context(player)).await?;
     let id = {
@@ -512,7 +687,7 @@ pub async fn report(
         .as_str()
         .context("bug reporter name missing")?;
     let mut report = json!({"schema": 3, "reporter_name": reporter_name, "id": id, "created_at_unix_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis(),
-        "delivery": {"status": "pending"}, "message_untrusted": message, "account_id": account,
+        "delivery": {"status": "pending", "notes_through": 0}, "notes": [], "message_untrusted": message, "account_id": account,
         "server_binary_sha256": a.diagnostics.binary_sha256, "server_source_revision": a.diagnostics.source_revision, "protocol_build": "123.5.1", "context": context,
         "server_uptime_ms": a.started.elapsed().as_millis(), "configured_player_cap": a.max_players,
         "context_request_ms": requested.elapsed().as_secs_f64() * 1000.0, "connection": connection.snapshot(),
@@ -528,7 +703,7 @@ pub async fn report(
     let diagnostics = a.diagnostics.clone();
     tokio::task::spawn_blocking(move || diagnostics.save(&report)).await??;
     tracing::info!(report_id=%id, account, player, "bug report saved; awaiting Discord delivery");
-    Ok(())
+    Ok("Report submitted! Type /bug-info <details> to add more and help us fix it faster! <3")
 }
 pub async fn browser_sample(
     State(a): State<App>,
@@ -581,6 +756,29 @@ pub async fn browser_sample(
 pub struct Receipt {
     target: String,
     id: String,
+    through: Option<usize>,
+}
+impl Receipt {
+    fn validate(&self) -> Result<()> {
+        ensure!(
+            !self.id.is_empty() && self.id.bytes().all(|b| b.is_ascii_digit()),
+            "invalid bug delivery receipt"
+        );
+        ensure!(
+            match self.target.as_str() {
+                "private_message_id" | "public_message_id" =>
+                    (17..=20).contains(&self.id.len()) && self.through.is_none(),
+                "issue_number" =>
+                    self.id.parse::<u32>().is_ok_and(|n| n > 0) && self.through.is_none(),
+                "notes" =>
+                    self.id.parse::<u64>().is_ok_and(|n| n > 0)
+                        && self.through.is_some_and(|n| n > 0),
+                _ => false,
+            },
+            "invalid bug delivery target or range"
+        );
+        Ok(())
+    }
 }
 pub async fn pending(
     State(a): State<App>,
@@ -591,21 +789,7 @@ pub async fn pending(
         return error(e);
     }
     let result = tokio::task::spawn_blocking(move || -> Result<Value> {
-        let mut pending = a.diagnostics.files.lock().expect("diagnostics poisoned");
-        while let Some(id) = pending.first().cloned() {
-            let value: Value = serde_json::from_slice(&std::fs::read(
-                a.diagnostics.root.join(format!("{id}.json")),
-            )?)?;
-            if value["delivery"]["status"] == "pending" {
-                return Ok(json!({"report": value}));
-            }
-            ensure!(
-                value["delivery"]["status"] == "delivered",
-                "invalid stored bug delivery state"
-            );
-            pending.remove(&id);
-        }
-        Ok(json!({"report": null}))
+        Ok(json!({"report": a.diagnostics.next()?}))
     })
     .await;
     match result {
@@ -623,12 +807,8 @@ pub async fn receipt(
 ) -> Response {
     let result: Result<()> = async {
         super::hiscores::authorize(&a, peer, &headers)?;
-        ensure!(valid_id(&id) && receipt.id.bytes().all(|b| b.is_ascii_digit()) && !receipt.id.is_empty(), "invalid bug delivery receipt");
-        ensure!(match receipt.target.as_str() {
-            "private_message_id" | "public_message_id" => (17..=20).contains(&receipt.id.len()),
-            "issue_number" => receipt.id.parse::<u32>().is_ok_and(|n| n > 0),
-            _ => false,
-        }, "invalid bug delivery target");
+        ensure!(valid_id(&id), "invalid bug report ID");
+        receipt.validate()?;
         if receipt.target == "issue_number" {
             let diagnostics = a.diagnostics.clone();
             let (id, issue) = (id.clone(), receipt.id.clone());
@@ -643,20 +823,7 @@ pub async fn receipt(
             super::gold::sync(&a, account).await?;
         }
         let world = a.world.clone();
-        let notification = tokio::task::spawn_blocking(move || -> Result<Option<(i32, i32, String)>> {
-            let mut pending = a.diagnostics.files.lock().expect("diagnostics poisoned");
-            let mut report: Value = serde_json::from_slice(&std::fs::read(a.diagnostics.root.join(format!("{id}.json")))?)?;
-            let notify = receipt.target == "issue_number" && report["delivery"]["issue_number"].is_null();
-            ensure!(report["delivery"][&receipt.target].is_null() || report["delivery"][&receipt.target] == receipt.id, "conflicting delivery receipt");
-            report["delivery"][&receipt.target] = json!(receipt.id);
-            if ["public_message_id", "issue_number"].iter().all(|key| report["delivery"][*key].is_string()) {
-                report["delivery"]["status"] = json!("delivered");
-            }
-            a.diagnostics.write(&report)?;
-            if report["delivery"]["status"] == "delivered" { pending.remove(&id); }
-            tracing::info!(report_id=%id, target=%receipt.target, external_id=%receipt.id, "bug report delivery acknowledged");
-            Ok(if notify { Some((report["context"]["player_id"].as_i64().context("missing report player")? as i32, report["account_id"].as_i64().context("missing report account")? as i32, receipt.id)) } else { None })
-        }).await??;
+        let notification = tokio::task::spawn_blocking(move || a.diagnostics.acknowledge(&id, &receipt)).await??;
         if let Some((player, account, issue)) = notification
             && let Err(error) = world.for_player(player).call(move |w| {
                 let p = w.players.get(&player).context("reporting player disconnected")?;
@@ -672,3 +839,6 @@ pub async fn receipt(
         Err(e) => error(e),
     }
 }
+
+#[cfg(test)]
+mod tests;
