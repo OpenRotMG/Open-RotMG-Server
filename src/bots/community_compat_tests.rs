@@ -197,6 +197,7 @@ fn realm_travel_weighs_combat_progress_without_a_max_level_exception() {
         "poorly equipped max-level characters still build up locally"
     );
     v.character.hp = 10;
+    v.character.items[4..].fill(-1);
     let decision = Brain::new(PROFILES[1], &v).decide(&v, &content).unwrap();
     assert_eq!(decision.goal, Goal::Recover);
     assert!(matches!(decision.journey, Some(Journey::Nexus)));
