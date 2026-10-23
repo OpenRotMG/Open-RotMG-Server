@@ -705,6 +705,58 @@ mod tests {
     }
 
     #[test]
+    fn septavius_summons_keep_distinct_slots_across_types_and_replacements() {
+        let mut w = arena(0);
+        let boss = w.spawn_entity(0xd90, CENTER, vec![]).unwrap();
+        let roster = [
+            (0xdaa, 1),
+            (0xdaf, 2),
+            (0xdac, 1),
+            (0xdad, 2),
+            (0xdae, 1),
+            (0xdab, 2),
+            (0xdb0, 2),
+            (0xdb1, 2),
+            (0xdb2, 2),
+        ];
+        for (elapsed, expected) in [(0, 9), (42000, 15)] {
+            w.now = elapsed;
+            w.encounter_mechanics(boss, None, elapsed).unwrap();
+            let children: Vec<_> = w.actors().filter(|e| e.parent == Some(boss)).collect();
+            assert_eq!(children.len(), expected);
+            for (i, a) in children.iter().enumerate() {
+                assert!(w.walkable(a.pos));
+                for b in &children[i + 1..] {
+                    assert!(
+                        a.pos.distance(b.pos) >= 0.25,
+                        "overlap: {:#x} and {:#x}",
+                        a.kind,
+                        b.kind
+                    );
+                }
+            }
+        }
+        for (kind, maximum) in roster {
+            let victim = w
+                .actors()
+                .find(|e| e.parent == Some(boss) && e.kind == kind)
+                .unwrap()
+                .id;
+            w.remove_entity(victim);
+            w.spawn_children(boss, kind, maximum, 2.).unwrap();
+            w.spawn_children(boss, kind, maximum, 2.).unwrap();
+            let children: Vec<_> = w.actors().filter(|e| e.parent == Some(boss)).collect();
+            assert_eq!(children.len(), 15);
+            assert_eq!(children.iter().filter(|e| e.kind == kind).count(), maximum);
+            for (i, a) in children.iter().enumerate() {
+                for b in &children[i + 1..] {
+                    assert!(a.pos.distance(b.pos) >= 0.25);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn area_damage_paused_players_keep_life_and_visuals_with_strict_radius() {
         let mut w = arena(1);
         let paused = actor(&mut w, true, CENTER);
