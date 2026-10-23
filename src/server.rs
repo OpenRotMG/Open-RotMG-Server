@@ -2004,8 +2004,19 @@ async fn reconnect(
                 return Ok(None);
             }
             let (keytime, key, name) = d.issue(account, character, destination)?;
-            d.bind_exit(id, portal, &key)?;
-            let reservation = d.reserve_transfer(key.clone())?;
+            let reservation = match d
+                .bind_exit(id, portal, &key)
+                .and_then(|()| d.reserve_transfer(key.clone()))
+            {
+                Ok(reservation) => reservation,
+                Err(primary) => {
+                    if let Err(cleanup) = d.cancel_admission(account, key) {
+                        return Err(primary
+                            .context(format!("transfer admission cleanup failed: {cleanup:#}")));
+                    }
+                    return Err(primary);
+                }
+            };
             Ok(Some((destination, keytime, key, name, reservation)))
         })
         .await?;

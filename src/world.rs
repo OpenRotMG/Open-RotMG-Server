@@ -1650,27 +1650,41 @@ impl Directory {
     pub(crate) fn bind_exit(&mut self, id: i32, portal: Option<i32>, key: &[u8]) -> Result<()> {
         let Some(portal) = portal else { return Ok(()) };
         let source = self.location(id)?;
-        let (account, character, destination) = self.destination(id, Some(portal))?;
-        if self.worlds[&destination].name != "Realm" {
+        let world = &self.worlds[&source];
+        let player = &world.players[&id];
+        let grant = self.grants.get(key).context("earned exit grant missing")?;
+        if self.worlds[&grant.destination].name != "Realm" {
             return Ok(());
         }
-        let Some(dungeon) =
-            crate::dungeon::HistoricalDungeon::from_world(&self.worlds[&source].name)
-        else {
+        let Some(dungeon) = crate::dungeon::HistoricalDungeon::from_world(&world.name) else {
             return Ok(());
         };
-        let grant = self
-            .grants
-            .get_mut(key)
-            .context("earned exit grant missing")?;
+        let entity = world
+            .entities
+            .get(&portal)
+            .context("earned exit portal missing")?;
         ensure!(
-            grant.account == account
-                && grant.character == character
-                && grant.destination == destination
+            player.character.alive
+                && player.character.hp > 0
+                && !player.death_pending
+                && !player.departing
+                && entity.published
+                && player.pos.distance(entity.pos) <= 2.
+                && (matches!(entity.kind, 0x704 | 0x70e | 0x71c)
+                    || entity.kind == 0x703
+                        && matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons")),
+            "earned exit source portal changed"
+        );
+        ensure!(
+            grant.origin == Some(source)
+                && grant.account == player.character.account
+                && grant.character == player.character.id
+                && grant.expires > self.tick
                 && grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
                 && grant.exit.is_none(),
             "earned exit grant binding changed"
         );
+        let grant = self.grants.get_mut(key).unwrap();
         grant.exit = Some(ExitIntent {
             source,
             portal,
@@ -6921,7 +6935,6 @@ impl World {
 mod tests {
     use super::*;
 
-    use super::community_cooperative_tests::receive;
     use crate::content::WIZARD;
     use std::path::Path;
 

@@ -906,7 +906,18 @@ mod tests {
             d.worlds
                 .get_mut(&destination)
                 .unwrap()
-                .enter_admitted(ch, None, None, Default::default(), Some(key))
+                .enter_admitted(
+                    ch,
+                    None,
+                    None,
+                    AccountPresentation {
+                        guild: None,
+                        credits: 0,
+                        fame: 0,
+                        best_fame: BTreeMap::new(),
+                    },
+                    Some(key),
+                )
                 .unwrap();
         }
         for count in [65, 85] {

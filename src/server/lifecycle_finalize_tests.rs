@@ -536,6 +536,21 @@ async fn all_death_fame_phase4_earned_realm_exit() {
                 .realm_exits
                 .is_empty()
         );
+        a.world
+            .directory(|d| {
+                let mut eligible = 0;
+                for w in d.worlds.values_mut().filter(|w| w.name == "Realm") {
+                    w.max_players = w.occupancy() + 1;
+                    eligible += 1;
+                }
+                assert!(
+                    eligible >= 2,
+                    "regression requires multiple eligible Realms"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         socket
             .send(Packet {
                 id: 3,
@@ -559,7 +574,25 @@ async fn all_death_fame_phase4_earned_realm_exit() {
                 .await
                 .unwrap()
         );
+        a.world
+            .directory(move |d| {
+                let full: Vec<_> = d
+                    .worlds
+                    .iter()
+                    .filter(|(_, w)| w.name == "Realm" && w.occupancy() == w.max_players)
+                    .map(|(id, _)| *id)
+                    .collect();
+                assert_eq!(
+                    full,
+                    vec![destination],
+                    "selected grant must own the last free slot without rerouting"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         let saved = a.store.load(account, character).await.unwrap();
+        assert_eq!(saved.lifetime.realm_exits.len(), 1);
         assert!(
             saved
                 .lifetime
@@ -618,6 +651,16 @@ async fn all_death_fame_phase4_earned_realm_exit() {
             replay.receive(0).await;
             drop(replay);
             released(&a, account).await;
+            assert_eq!(
+                a.store
+                    .load(account, character)
+                    .await
+                    .unwrap()
+                    .lifetime
+                    .realm_exits
+                    .len(),
+                1
+            );
             assert!(
                 a.world
                     .directory(move |d| Ok(d
