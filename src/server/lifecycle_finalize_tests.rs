@@ -1399,16 +1399,29 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
                 a.world
                     .directory(move |d| {
                         assert!(d.forced_transfer_candidates().is_empty());
+                        // Leave the second Realm available so refusal reaches the global grant limit.
+                        let destinations = [-2, -1, -4, -3];
+                        let mut identities = identities.into_iter();
                         let mut reservations = Vec::new();
-                        for (account, character) in identities {
-                            let (_, key, _) = d.issue(account, character, -2)?;
-                            reservations.push((account, key));
+                        for destination in destinations {
+                            assert_eq!(d.worlds[&destination].occupancy(), 0);
+                            for _ in 0..d.worlds[&destination].max_players {
+                                let (account, character) = identities.next().context(
+                                    "saturation fixture needs one distinct identity per slot",
+                                )?;
+                                let (_, key, _) = d.issue(account, character, destination)?;
+                                reservations.push((account, key));
+                            }
                         }
+                        assert!(identities.next().is_none());
                         assert_eq!(reservations.len(), 64);
                         assert_eq!(
                             d.worlds.values().map(|w| w.reserved_slots()).sum::<usize>(),
                             64
                         );
+                        let (_, _, routed) = d.destination(id, Some(portal))?;
+                        assert_eq!(d.worlds[&routed].name, "Realm");
+                        assert!(d.worlds[&routed].occupancy() < d.worlds[&routed].max_players);
                         let error = d.issue(account, character, -2).unwrap_err();
                         assert!(
                             error.to_string().contains("transfer grant limit reached"),
