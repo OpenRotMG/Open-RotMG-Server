@@ -217,6 +217,48 @@ fn jungle_generated_routes_rewards_and_transactional_clear() {
 }
 
 #[test]
+fn coil_temples_keep_the_snake_and_chest_in_midland_habitat() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    for source in crate::terrain::realms::sources(std::path::Path::new("data")).unwrap() {
+        let original = source.open(&content).unwrap();
+        let mut world = World::new(content.clone(), original.clone()).unwrap();
+        world.realm_layout = Some(source.name().to_owned());
+        world.rng = rand::rngs::StdRng::seed_from_u64(315);
+        world.populate_tomb_entry().unwrap();
+        let first = world.setpieces.len();
+        world.populate_coil_snakes().unwrap();
+        assert_eq!(world.setpieces.len() - first, 2);
+        for area in &world.setpieces[first..] {
+            let center = (area.y + area.height / 2) * world.map.width + area.x + area.width / 2;
+            let terrain = original.cells[center as usize].terrain;
+            assert!(
+                matches!(terrain, 6 | 7),
+                "{}: temple habitat {terrain}",
+                source.name()
+            );
+            let snakes: Vec<_> = world
+                .actors()
+                .filter(|e| e.kind == COIL && area.distance(e.pos) == 0.)
+                .collect();
+            assert_eq!(snakes.len(), 1);
+            let snake = snakes[0];
+            assert!(world.walkable(snake.pos));
+            assert!(world.entities.values().any(|e| e.kind == 0x501
+                && e.pos.distance(snake.pos) == 0.
+                && !e.items.is_empty()));
+            assert!(
+                world
+                    .entities
+                    .values()
+                    .filter(|e| matches!(e.kind, 0x1f2..=0x1f4) && area.distance(e.pos) == 0.)
+                    .count()
+                    > 10
+            );
+        }
+    }
+}
+
+#[test]
 fn jungle_entrance_is_earned_from_a_real_realm_coil_and_eggs_hatch() {
     let mut w = tests::arena(1);
     let coil = w
