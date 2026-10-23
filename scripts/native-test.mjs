@@ -198,7 +198,7 @@ export async function runCase(scenario, options) {
           check();let complete=false;const action=driver({op:'act',actor,...(Array.isArray(input)?{sequence:input}:{input}),pauseAfter:true}).finally(()=>complete=true);
           if(!captureSpec)return await action;
           const shot=(async()=>{
-            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor});return !view.paused&&captureSpec.when(view);},'Screenshot condition not observed',(Array.isArray(input)?input.flat().reduce((sum,s)=>sum+s.input.duration_ms,0):input.duration_ms)+10000);
+            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor});return !view.paused&&captureSpec.when(view)&&await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying');},'Screenshot condition not observed',(Array.isArray(input)?input.flat().reduce((sum,s)=>sum+s.input.duration_ms,0):input.duration_ms)+10000);
             assert(await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying'),'Client paused before capture');await capture(captureSpec.name,client.connection);
           })();
           const results=await Promise.allSettled([action,shot]);for(const r of results)if(r.status==='rejected')throw r.reason;return results[0].value;
