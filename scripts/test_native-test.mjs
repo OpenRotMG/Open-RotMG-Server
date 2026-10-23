@@ -20,7 +20,7 @@ async function publication(out,report,io={}) {
   assert(save.includes('const save=')&&cancellation.includes('const bounded=')&&failure&&finalSave&&tail,'Production publication boundaries must be present');
   const participants=[];
   return runInNewContext(`(()=>{
-    const controller=new AbortController(),started=0,timeout=180000,previousOwner=undefined;
+    const controller=new AbortController(),started=0,timeout=180000,previousOwner=undefined,archive=null;
     let primary,phase='setup',closing=false,activeCase=true;
     ${save}${cancellation}
     return {save,bounded,interrupted,get primary(){return primary;},
