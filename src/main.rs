@@ -174,6 +174,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
             Err(error) => return Err(error.into()),
         },
         owners: Arc::default(),
+        admission_started: Arc::default(),
         admission: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),

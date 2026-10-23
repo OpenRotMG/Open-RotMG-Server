@@ -616,7 +616,7 @@ impl Directory {
                 .get_mut(&grant.destination)
                 .unwrap()
                 .admissions
-                .remove(&(grant.account, grant.character));
+                .remove(&transfer.key);
             tracing::error!(
                 origin = grant.origin,
                 destination = grant.destination,

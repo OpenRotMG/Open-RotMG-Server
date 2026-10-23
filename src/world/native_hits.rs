@@ -10,6 +10,7 @@ pub(super) struct VisibleProjectile {
 // Five seconds of Arachna's webs need ~1,900 units; include each queue entry as well as its snapshots.
 pub(super) const MAX_PENDING_SHOOT_UNITS: usize = 4096;
 
+// Suspended native clients cannot acknowledge volleys while the shared game clock is paused.
 pub(super) fn expect_shoot_ack(
     p: &mut Player,
     bullets: Vec<Bullet>,
