@@ -23,6 +23,9 @@ impl World {
             e.reaction_until += delta;
         }
         e.attacks.suspend(delta);
+        if let Some(runtime) = &mut e.abyss {
+            runtime.suspend(delta);
+        }
         if let Some(charge) = &mut e.charge {
             charge.suspend(delta);
         }
@@ -33,6 +36,72 @@ impl World {
             endgame::{ORYX, ORYX2, OryxPhase},
         };
         let e = &self.entities[&id];
+        if crate::dungeon::abyss::ROSTER.contains(&e.kind)
+            || e.kind == 0x651 && self.name == "Abyss of Demons"
+        {
+            use crate::dungeon::abyss::{self, IDOL, MALPHAS};
+            let elapsed = if e.kind == MALPHAS {
+                let Some(super::abyss::Runtime::Boss(b)) = &e.abyss else {
+                    bail!("Abyss Malphas {id} attack runtime missing")
+                };
+                ensure!(
+                    b.identity == elapsed / 50200 * 7 + abyss::phase(elapsed),
+                    "Abyss Malphas {id} attack/phase identity mismatch"
+                );
+                b.identity / 7 * 50200
+                    + [0, 9000, 11500, 23500, 36500, 39000, 47000][(b.identity % 7) as usize]
+                    + self
+                        .now
+                        .checked_sub(b.entered)
+                        .context("Abyss phase entry is in the future")?
+            } else {
+                elapsed
+            };
+            let mut schedule = attacks::abyss_schedule(e.kind, elapsed);
+            if e.kind == 0x90b
+                && let Some(super::abyss::Runtime::Flamer {
+                    terminal: Some(deadline),
+                    emitted,
+                    ..
+                }) = e.abyss
+            {
+                schedule.state = 1;
+                schedule.age = self.now.saturating_sub(deadline);
+                schedule.attacks[0].enabled = false;
+                schedule.attacks[1].enabled = !emitted && self.now >= deadline;
+            }
+            if matches!(e.kind, MALPHAS | IDOL) {
+                ensure!(
+                    e.stage
+                        == Some(if e.kind == MALPHAS {
+                            abyss::phase(elapsed)
+                        } else {
+                            0
+                        }),
+                    "Abyss attack phase missing or inconsistent: entity={id} kind={:#x} stage={:?} elapsed={elapsed}",
+                    e.kind,
+                    e.stage
+                );
+            }
+            if e.kind == 0x909 {
+                match e.stage {
+                    None => schedule.attacks[0].enabled = false,
+                    Some(1) => {
+                        schedule.state = 1;
+                        let armed = e
+                            .next_aux
+                            .checked_sub(600)
+                            .context("Abyss missile arm deadline missing")?;
+                        schedule.age = self
+                            .now
+                            .checked_sub(armed)
+                            .context("Abyss missile armed in the future")?;
+                    }
+                    Some(stage) => bail!("invalid Abyss missile attack stage {stage}"),
+                }
+            }
+            return Ok(Some(schedule));
+        }
         if matches!(
             e.kind,
             crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
@@ -154,6 +223,11 @@ impl World {
     ) -> Result<Vec<(u8, f32)>> {
         let e = &self.entities[&id];
         let kind = e.kind;
+        ensure!(
+            !(crate::dungeon::abyss::ROSTER.contains(&kind)
+                || kind == 0x651 && self.name == "Abyss of Demons"),
+            "scheduled Abyss attacker reached legacy dispatch: entity={id} kind={kind:#x}"
+        );
         let heading = (target.y - e.pos.y).atan2(target.x - e.pos.x);
         if crate::dungeon::trench::ROSTER.contains(&kind) {
             self.ocean_shots(id, target)
@@ -169,11 +243,6 @@ impl World {
         {
             self.god_shots(id, target, heading, elapsed)
         } else {
-            let elapsed = if kind == 0x909 && e.stage == Some(1) {
-                5000
-            } else {
-                elapsed
-            };
             Ok(crate::encounter::phased_attacks(
                 kind, e.hp, heading, elapsed,
             ))
@@ -243,8 +312,11 @@ impl World {
                             |_| factor,
                         )?;
                     }
-                    if self.entities[&id].conditions(self.now) & condition::bit(condition::DAZED)
-                        != 0
+                    if !(self.entities[&id].kind == 0x90b
+                        && Self::abyss_flamer_armed(&self.entities[&id]))
+                        && self.entities[&id].conditions(self.now)
+                            & condition::bit(condition::DAZED)
+                            != 0
                     {
                         volley = enemy_shots::dazed(volley);
                     }
@@ -255,6 +327,7 @@ impl World {
                 entity = id,
                 slot,
                 phase = schedule.state,
+                phase_age = schedule.age,
                 now = self.now,
                 interval = ?attack.interval,
                 delay = attack.delay,

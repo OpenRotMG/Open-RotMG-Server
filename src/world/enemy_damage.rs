@@ -51,6 +51,9 @@ impl World {
         let kind = e.kind;
 
         let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
+        if e.kind == 0x90b {
+            self.abyss_flamer_damage(target, owner, actual, lethal)?;
+        }
         if let Some(p) = self.players.get_mut(&owner) {
             if damage > 0 && bullet.is_some() {
                 p.character.hits += 1;

@@ -358,7 +358,8 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
         return (Motion::Stationary, 0.);
     }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
-        return crate::dungeon::abyss::movement(kind, elapsed);
+        let p = crate::dungeon::abyss::profile(kind);
+        return (p.motion, p.speed);
     }
     let p = profile(kind).expect("validated encounter motion");
     match kind {
@@ -417,9 +418,6 @@ fn ring(index: u8, count: usize, offset: f32) -> Vec<(u8, f32)> {
 }
 
 pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
-    if crate::dungeon::abyss::ROSTER.contains(&kind) {
-        return crate::dungeon::abyss::attacks(kind, heading, elapsed);
-    }
     if let Some(schedule) = attacks::schedule(kind, hp, elapsed) {
         return schedule.snapshot(heading);
     }

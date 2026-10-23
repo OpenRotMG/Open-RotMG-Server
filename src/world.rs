@@ -80,6 +80,8 @@ mod tracked;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+#[cfg(test)]
+mod abyss_tests;
 mod beach;
 mod coil;
 mod jungle;
@@ -169,6 +171,8 @@ pub struct EntityData {
     charge: Option<charges::Charge>,
     #[serde(skip)]
     script: Option<landmark_ai::Script>,
+    #[serde(skip)]
+    abyss: Option<abyss::Runtime>,
     last_step: Pos,
     phase: f32,
     orbit: Option<realm_events::Orbit>,
@@ -550,6 +554,8 @@ pub struct World {
     pub players: BTreeMap<i32, Player>,
     pub guild: Option<(i32, i32)>,
     pub bullets: Vec<Bullet>,
+    // Collision callbacks can emit while the original batch is outside this vector.
+    detached_bullets: usize,
     grenades: Vec<mechanics::Grenade>,
     fauna_births: Vec<fauna_births::Birth>,
     named_births: Vec<named_births::Birth>,
@@ -1185,7 +1191,9 @@ impl Directory {
         };
         let destination = match kind {
             0x712 if origin == -2 && portal == Some(self.realm_portal) => self.initial(-3)?,
-            0x703 if world.name == "Snake Pit" => self.initial(-3)?,
+            0x703 if matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons") => {
+                self.initial(-3)?
+            }
             0x703 | 0x70d | 0x712 | 0x71d => -2,
             0x704 | 0x70e | 0x71c => self.initial(-3)?,
             0x720 => self.instance("vault", Some(account))?,
@@ -1707,6 +1715,7 @@ impl World {
                             strict_initialized: false,
                             charge: None,
                             script: None,
+                            abyss: None,
                             last_step: Pos { x: 0., y: 0. },
                             phase: 0.,
                             orbit: None,
@@ -1830,6 +1839,7 @@ impl World {
             players: BTreeMap::new(),
             guild: None,
             bullets: Vec::new(),
+            detached_bullets: 0,
             grenades: Vec::new(),
             fauna_births: Vec::new(),
             named_births: Vec::new(),
@@ -2041,6 +2051,7 @@ impl World {
                     strict_initialized: false,
                     charge: None,
                     script: None,
+                    abyss: None,
                     last_step: Pos { x: 0., y: 0. },
                     phase: 0.,
                     orbit: None,
@@ -2172,6 +2183,7 @@ impl World {
                 .expect("population count underflow");
         }
         self.orphan_satellites(&entity);
+        self.orphan_abyss(&entity);
         assert!(!entity.reserved, "cannot remove a reserved container");
         self.bag_expiry.remove(&id);
         if let Some(camp) = entity.camp {
@@ -4380,11 +4392,10 @@ impl World {
                 );
             }
             if self.clear_exit.is_none() {
-                let kind = if defeated.kind == crate::dungeon::abyss::MALPHAS {
-                    0x71c
-                } else if matches!(
+                let kind = if matches!(
                     defeated.kind,
-                    crate::dungeon::snake::BOSS
+                    crate::dungeon::abyss::MALPHAS
+                        | crate::dungeon::snake::BOSS
                         | crate::dungeon::jungle::BOSS
                         | crate::dungeon::beach::BOSS
                         | crate::dungeon::davy::BOSS
@@ -4425,6 +4436,9 @@ impl World {
         }
         if defeated.kind == crate::dungeon::spider::BOSS {
             return self.spider_loot(defeated);
+        }
+        if crate::dungeon::abyss::ROSTER.contains(&defeated.kind) {
+            return self.abyss_loot(defeated);
         }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
@@ -4716,11 +4730,14 @@ impl World {
             let profile = profile(kind).expect("validated encounter profile");
             // Self-destruction is a deadline, not target acquisition or a weapon cooldown.
             let shield_burst = self.shield_burst(id);
+            let armed_abyss_missile = kind == 0x909 && entity.stage == Some(1);
+            let armed_abyss_flamer = kind == 0x90b && Self::abyss_flamer_armed(entity);
             let burst = shield_burst
                 || (matches!(kind, 0x91a | crate::dungeon::manor::MINE)
                     && entity.expires == Some(self.now + 50)
                     && self.now >= entity.next_shot);
             if !burst
+                && !armed_abyss_flamer
                 && entity.conditions(self.now) & crate::condition::bit(crate::condition::STASIS)
                     != 0
             {
@@ -4777,7 +4794,15 @@ impl World {
             };
             // Activated enemies keep the same sight radius; they do not keep
             // shooting once the player leaves that radius.
-            let radius = wake;
+            let abyss = crate::dungeon::abyss::ROSTER.contains(&kind)
+                || kind == 0x651 && self.name == "Abyss of Demons";
+            let radius = if abyss
+                && (entity.activated.is_some() || kind != crate::dungeon::abyss::MALPHAS)
+            {
+                20.
+            } else {
+                wake
+            };
             let target = if burst && kind == crate::dungeon::manor::MINE {
                 nearest.filter(|p| pos.distance(*p) < 60.)
             } else if burst {
@@ -4794,7 +4819,13 @@ impl World {
             });
             let manor_clock =
                 crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
-            if !burst && target.is_none() && !nearby && !manor_clock {
+            if !burst
+                && !armed_abyss_missile
+                && !armed_abyss_flamer
+                && target.is_none()
+                && !nearby
+                && !manor_clock
+            {
                 self.suspend_npc(id, delta);
                 continue;
             }
@@ -4825,6 +4856,14 @@ impl World {
                     continue;
                 }
                 (Motion::Stationary, 0.)
+            } else if crate::dungeon::abyss::ROSTER.contains(&kind) {
+                match self.abyss_movement(id) {
+                    Ok(movement) => movement,
+                    Err(error) => {
+                        tracing::error!(entity=id,%error,"Abyss movement refused");
+                        continue;
+                    }
+                }
             } else if queued_hero {
                 match self.hero_movement(id, target, delta) {
                     Ok((motion, speed, completed)) => {
@@ -4838,8 +4877,6 @@ impl World {
                 }
             } else if crate::dungeon::davy::profile(kind).is_some() {
                 self.locker_movement(id, elapsed)
-            } else if kind == 0x909 && current.stage == Some(1) {
-                (Motion::Stationary, 0.)
             } else if crate::dungeon::jungle::ROSTER.contains(&kind) {
                 crate::encounter::jungle::movement(
                     kind,
@@ -4964,6 +5001,16 @@ impl World {
                         motion
                     };
                 let goal = match planned_motion {
+                    Motion::Wander if kind == crate::dungeon::abyss::MALPHAS => {
+                        match self.abyss_malphas_goal(id, target) {
+                            Ok(goal) => Some(goal),
+                            Err(error) => {
+                                tracing::error!(entity=id,%error,"Abyss movement goal refused");
+                                continue;
+                            }
+                        }
+                    }
+
                     Motion::Stationary => {
                         speed = 0.;
                         Some(pos)
@@ -5329,70 +5376,74 @@ impl World {
                 );
                 continue;
             }
-            let mut notices = Vec::with_capacity(shots.len());
-            for (index, angle) in shots {
-                let spec = self.content.objects[&kind]
-                    .projectiles
-                    .get(&index)
-                    .expect("selected encounter projectile missing")
-                    .clone();
-                let e = self.entities.get_mut(&id).unwrap();
-                e.bullet = e.bullet.wrapping_add(1);
-                let bullet = Bullet {
-                    owner: id,
-                    source_kind: kind,
-                    id: e.bullet,
-                    friendly: false,
-                    start: e.pos,
-                    pos: e.pos,
-                    angle,
-                    born: self.now,
-                    damage: if spec.min == spec.max {
-                        spec.min
-                    } else {
-                        self.rng.gen_range(spec.min..spec.max)
-                    },
-                    spec,
-                    hit: BTreeSet::new(),
-                };
-                notices.push(enemy_shots::EnemyShot {
-                    bullet: bullet.id,
-                    projectile: index,
-                    start: bullet.start,
-                    angle,
-                    damage: bullet.damage,
-                });
-                if kind == 0x927 {
-                    tracing::info!(
-                        boss = id,
-                        projectile = index,
-                        time_ms = self.now,
-                        "Dreadstump projectile emitted"
-                    );
-                }
-                self.bullets.push(bullet);
-            }
-            // Shoot then retire, independent of the proximity poll; keep the owner until publication: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.UndeadLair.cs#L462-L480
-            if matches!(kind, 0xda2 | 0xda3) && !notices.is_empty() {
-                self.entities.get_mut(&id).unwrap().expires.set(
-                    Some(self.now + 50),
-                    id,
-                    &mut self.timed_ids,
-                );
-                tracing::debug!(
-                    entity = id,
-                    kind,
-                    shots = notices.len(),
-                    "Lair trap detonated"
-                );
-            }
             packets.extend(
-                enemy_shots::packets(id, &notices)
+                self.emit_enemy_shots(id, shots)
                     .into_iter()
                     .map(|body| (id, body)),
             );
         }
         packets
+    }
+    pub(super) fn emit_enemy_shots(&mut self, id: i32, shots: Vec<(u8, f32)>) -> Vec<Vec<u8>> {
+        let kind = self.entities[&id].kind;
+        let mut notices = Vec::with_capacity(shots.len());
+        for (index, angle) in shots {
+            let spec = self.content.objects[&kind]
+                .projectiles
+                .get(&index)
+                .expect("selected encounter projectile missing")
+                .clone();
+            let e = self.entities.get_mut(&id).unwrap();
+            e.bullet = e.bullet.wrapping_add(1);
+            let bullet = Bullet {
+                owner: id,
+                source_kind: kind,
+                id: e.bullet,
+                friendly: false,
+                start: e.pos,
+                pos: e.pos,
+                angle,
+                born: self.now,
+                damage: if spec.min == spec.max {
+                    spec.min
+                } else {
+                    self.rng.gen_range(spec.min..spec.max)
+                },
+                spec,
+                hit: BTreeSet::new(),
+            };
+            notices.push(enemy_shots::EnemyShot {
+                bullet: bullet.id,
+                projectile: index,
+                start: bullet.start,
+                angle,
+                damage: bullet.damage,
+            });
+            if kind == 0x927 {
+                tracing::info!(
+                    boss = id,
+                    projectile = index,
+                    time_ms = self.now,
+                    "Dreadstump projectile emitted"
+                );
+            }
+            self.bullets.push(bullet);
+        }
+        // Shoot then retire, independent of the proximity poll; keep the owner until publication: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.UndeadLair.cs#L462-L480
+        if matches!(kind, 0xda2 | 0xda3) && !notices.is_empty() {
+            self.entities.get_mut(&id).unwrap().expires.set(
+                Some(self.now + 50),
+                id,
+                &mut self.timed_ids,
+            );
+            tracing::debug!(
+                entity = id,
+                kind,
+                shots = notices.len(),
+                "Lair trap detonated"
+            );
+        }
+        enemy_shots::packets(id, &notices)
     }
     pub fn step(&mut self) {
         let started = crate::performance::Measure::start();
@@ -5603,6 +5654,7 @@ impl World {
             self.send_enemy_shot(id, o.0);
         }
         let mut bullets = std::mem::take(&mut self.bullets);
+        self.detached_bullets = bullets.len();
         for b in &mut bullets {
             for sample in 1..=5 {
                 if b.hit.contains(&-1) || (!b.spec.multi_hit && !b.hit.is_empty()) {
@@ -5698,7 +5750,9 @@ impl World {
                 && !b.hit.contains(&-1)
                 && (b.spec.multi_hit || b.hit.is_empty())
         });
+        bullets.append(&mut self.bullets);
         self.bullets = bullets;
+        self.detached_bullets = 0;
         if self.tick.is_multiple_of(2) {
             // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
             // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
