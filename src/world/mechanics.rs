@@ -372,7 +372,7 @@ impl World {
                     tracing::debug!(entity = id, "Goblin horde commanded by wounded mage");
                 }
                 0xd06 if stage % 5 == 3 => {
-                    for radius in [9.5, 14.] {
+                    for radius in [6., 10.] {
                         for (kind, degrees) in
                             [(0xd07, 315f32), (0xd08, 225.), (0xd09, 135.), (0xd0a, 45.)]
                         {

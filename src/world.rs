@@ -6273,6 +6273,85 @@ mod tests {
     }
 
     #[test]
+    fn limon_box_fits_generated_arenas() {
+        let content = world().content.clone();
+        for seed in 0..16 {
+            let map = Arc::new(crate::dungeon::sprite::generate(&content, seed).unwrap());
+            let mut w = World::new(content.clone(), map).unwrap();
+            let id = w.entities.values().find(|e| e.kind == 0xd06).unwrap().id;
+            w.encounter_mechanics(id, None, 12300).unwrap();
+            assert_eq!(
+                w.entities
+                    .values()
+                    .filter(|e| e.parent == Some(id) && matches!(e.kind, 0xd07..=0xd0a))
+                    .count(),
+                8,
+                "seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn limon_returns_to_center_then_holds_the_box_phase() {
+        for offset in [6., 8.5] {
+            let mut w = arena(0);
+            w.now = 12300;
+            let player = w.enter(ch(&w), None).unwrap();
+            let home = Pos { x: 12.5, y: 100.5 };
+            w.players.get_mut(&player).unwrap().pos = Pos {
+                x: home.x,
+                y: home.y + 3.,
+            };
+            w.apply_condition(player, crate::condition::INVINCIBLE, 100000)
+                .unwrap();
+            let id = w.spawn_entity(0xd06, home, vec![]).unwrap();
+            w.position_entity(
+                id,
+                Pos {
+                    x: home.x + offset,
+                    y: home.y,
+                },
+            )
+            .unwrap();
+            let boss = w.entities.get_mut(&id).unwrap();
+            boss.activated = Some(0);
+            boss.stage = Some(2);
+            for _ in 0..60 {
+                let previous = w.entities[&id].pos;
+                w.step();
+                assert!(
+                    w.entities[&id].pos.distance(previous)
+                        <= crate::encounter::nr_speed(1.4) / 1.5 * 0.05 + 0.001
+                );
+            }
+            let boss = &w.entities[&id];
+            assert_eq!(boss.stage, Some(3));
+            assert!(
+                boss.pos.distance(home) <= 0.11,
+                "box-phase Limon did not return to center: {:?}",
+                boss.pos
+            );
+            assert_eq!(
+                w.entities
+                    .values()
+                    .filter(|e| e.parent == Some(id) && matches!(e.kind, 0xd07..=0xd0a))
+                    .count(),
+                8
+            );
+            let settled = boss.pos;
+            w.players.get_mut(&player).unwrap().pos = Pos {
+                x: home.x - 4.,
+                y: home.y,
+            };
+            for _ in 0..30 {
+                w.step();
+            }
+            assert!(w.entities[&id].pos.distance(settled) < 0.001);
+            assert!(w.entities[&id].home.distance(home) < 0.001);
+        }
+    }
+
+    #[test]
     fn sprite_god_predicts_only_the_quiet_boomerang() {
         let mut w = arena(0);
         let origin = Pos { x: 20.5, y: 20.5 };
