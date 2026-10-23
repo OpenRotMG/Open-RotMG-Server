@@ -184,7 +184,9 @@ async fn community_resources_stale_vault_revision_and_stock_cannot_mint_holdings
         };
         32 * 32
     ];
-    cells[11 * 32 + 12].region = 12;
+    for x in 12..32 {
+        cells[11 * 32 + x].region = 12;
+    }
     let mut world = World::new(
         c.clone(),
         Arc::new(Map {

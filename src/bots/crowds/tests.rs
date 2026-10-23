@@ -18,6 +18,7 @@ fn publish(v: &mut PlayerView) {
 }
 fn crowd(v: &mut PlayerView) {
     v.map.width = 128;
+    v.tiles = crate::bots::tests::tiles(v.map.width, v.map.height, v.tiles.points());
     for (id, x) in [(2, 48.5), (3, 49.5), (4, 50.5)] {
         let mut p = object(id, WIZARD, x, 11.5);
         p.name = format!("Independent{id}");

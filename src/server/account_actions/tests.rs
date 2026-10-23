@@ -88,33 +88,55 @@ async fn community_pursuit_prepare_supply(
     let account = character.account;
     let character_id = character.id;
     let presentation = app.store.presentation(account).await.unwrap();
-    let id = app
-        .world
-        .in_world(-3)
-        .call(move |w| w.enter_at(character, None, None, presentation))
-        .await
-        .unwrap();
+    let owner = app.claim(account).unwrap();
+    let (id, owner) = super::super::lifecycle::account(
+        app,
+        vec![account],
+        "community_supply_entry",
+        move |a| async move {
+            let mut owner = owner;
+            owner.arm_cleanup(&a, tokio::runtime::Handle::current());
+            let bind = super::super::lifecycle::binding(&a, account)?;
+            super::super::lifecycle::stage(super::super::lifecycle::Stage::Publication);
+            let id = a
+                .world
+                .in_world(-3)
+                .call(move |w| {
+                    let id = w.enter_at(character, None, None, presentation)?;
+                    bind(id)?;
+                    Ok(id)
+                })
+                .await?;
+            Ok((id, owner))
+        },
+    )
+    .await
+    .unwrap();
     let pos = app
         .world
         .directory(move |d| Ok(d.player_view(id)?.position))
         .await
         .unwrap();
-    let plan = app
-        .world
-        .for_player(id)
-        .call(move |w| {
-            w.drop_item(
-                id,
-                crate::world::Slot {
-                    object: id,
-                    slot: 4,
-                    kind: 0xa22,
-                },
-            )
-        })
-        .await
-        .unwrap();
-    super::super::persist(app, plan).await.unwrap();
+    super::super::lifecycle::player(app, id, "community_supply_drop", move |a| async move {
+        super::super::lifecycle::stage(super::super::lifecycle::Stage::Reservation);
+        let plan = a
+            .world
+            .for_player(id)
+            .call(move |w| {
+                w.drop_item(
+                    id,
+                    crate::world::Slot {
+                        object: id,
+                        slot: 4,
+                        kind: 0xa22,
+                    },
+                )
+            })
+            .await?;
+        super::super::persist(&a, plan).await
+    })
+    .await
+    .unwrap();
     app.world
         .for_player(id)
         .call(move |w| {
@@ -130,7 +152,17 @@ async fn community_pursuit_prepare_supply(
         })
         .await
         .unwrap();
-    super::super::depart(app, id).await.unwrap();
+    owner
+        .close(app, super::super::lifecycle::CloseReason::Controller)
+        .unwrap()
+        .expect("prepared supply owner lost its bound avatar")
+        .wait()
+        .await
+        .unwrap();
+    assert!(
+        super::super::lifecycle::state(app, account).is_none(),
+        "prepared supply custody must release before controller enrollment"
+    );
     let mut ch = app.store.load(account, character_id).await.unwrap();
     let spare = app
         .content

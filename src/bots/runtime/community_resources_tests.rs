@@ -109,7 +109,10 @@ async fn community_resources_transfer_gap_observer_rejects_loss_quarantine_timeo
         .unwrap();
     app.world.clock.set_paused(false);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while app.quarantined.lock().unwrap().is_empty() {
+    while !crate::server::lifecycle::state(&app, account)
+        .expect("empty-weapon controller lost its account claim")
+        .2
+    {
         assert!(
             Instant::now() < deadline,
             "empty-weapon controller did not fail within declared bound"
@@ -120,24 +123,47 @@ async fn community_resources_transfer_gap_observer_rejects_loss_quarantine_timeo
     app.shutdown.send_replace(true);
     let owned = app.owners.lock().unwrap().contains_key(&account);
     let alive = app.store.load(account, character).await.is_ok();
-    let quarantined = !app.quarantined.lock().unwrap().is_empty();
+    let fenced = crate::server::lifecycle::state(&app, account)
+        .expect("failed controller lost its diagnostic account claim")
+        .2;
     assert!(
-        owned && alive && quarantined,
+        owned && alive && fenced,
         "real failed controller retains its diagnostic owner, not a legal transfer gap"
     );
-    assert!(gap_guard(owned, alive, quarantined, Duration::ZERO).is_err());
+    assert!(gap_guard(owned, alive, fenced, Duration::ZERO).is_err());
     assert!(transfer_destination(&read_logs(&dir), account, character).is_err());
-    fs::write(dir.join("resource-controller-loss-result.json"), serde_json::to_vec_pretty(&json!({"initial_context":"ordinary selected runtime in Nexus with no equipped weapon, no after-start intervention","account":account,"character":character,"owned":owned,"alive":alive,"quarantined":quarantined,"classification":"rejected_not_transfer_gap","max_wall_ms":5000})).unwrap()).unwrap();
+    let mut result = json!({"initial_context":"ordinary selected runtime in Nexus with no equipped weapon, no after-start intervention","account":account,"character":character,"owned":owned,"alive":alive,"fenced":fenced,"failure_authority":"canonical_account_claim","classification":"rejected_not_transfer_gap","max_wall_ms":5000});
     println!(
         "resource genuine controller-loss evidence: {}",
         dir.display()
     );
     let owners = app.owners.clone();
     drop(app);
-    assert!(
-        owners.lock().unwrap().is_empty(),
-        "negative fixture release after complete diagnostic capture"
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "negative fixture registry references exceeded original five-second budget"
+        );
+        if Arc::strong_count(&owners) == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        owners.lock().unwrap().keys().copied().collect::<Vec<_>>(),
+        vec![account],
+        "failed diagnostic claim must remain, without a replacement claim"
     );
+    result["diagnostic_claim_retained"] = json!(true);
+    result["registry_references_after_app_drop"] = json!(1);
+    result["release_scope"] = json!(
+        "App/Owner/completion registry references only; not all World/Store threads or successful unfenced retirement"
+    );
+    fs::write(
+        dir.join("resource-controller-loss-result.json"),
+        serde_json::to_vec_pretty(&result).unwrap(),
+    )
+    .unwrap();
 }
 
 #[tokio::test]
@@ -362,7 +388,7 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
             serde_json::to_vec_pretty(&sequence).unwrap(),
         )
         .unwrap();
-        fs::write(dir.join("resources-result.json"),serde_json::to_vec_pretty(&json!({"label":label,"durable":durable,"vault":banked,"cleanup":{"owners":0,"players":0,"quarantined":0}})).unwrap()).unwrap();
+        let mut result = json!({"label":label,"durable":durable,"vault":banked,"cleanup":{"owners":0,"players":0,"quarantined":0}});
         println!("resource controller evidence: {}", dir.display());
         assert!(sequence.last().unwrap()["game_ms"].as_u64().unwrap() >= 32000);
         assert!(sequence.iter().any(|s| s["view"]["map"]["name"] == "Nexus"));
@@ -453,6 +479,43 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
             .map(|l| serde_json::from_str(l).unwrap())
             .collect();
         assert!(logs.iter().any(|l|l["fields"]["message"]=="autonomous private organization finished; continuing outing with retained holdings"));
+        let supervisor = app.world.supervisor.clone();
+        supervisor.ensure_running().unwrap();
+        assert!(app.owners.lock().unwrap().is_empty());
+        let disposal_started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        tracing::info!(
+            label,
+            account,
+            character,
+            disposal_started,
+            "resource fixture world disposal begins after committed cleanup"
+        );
+        // A retired fixture's worker must finish under its own subscriber, not the next label's.
+        drop(app);
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .expect("resource disposal exceeded original fifteen-second cleanup budget");
+        let incident = tokio::time::timeout(remaining, supervisor.failed())
+            .await
+            .expect("resource world disposal did not finish within original cleanup budget");
+        assert!(
+            Instant::now() <= deadline,
+            "resource disposal completed after original cleanup deadline"
+        );
+        assert_eq!(incident.component, "world");
+        assert_eq!(incident.failure, "exited");
+        assert!(incident.unix_ms >= disposal_started);
+        assert!(incident.fenced_accounts.is_empty());
+        tracing::info!(label, account, character, incident=%incident.id, incident_unix_ms=incident.unix_ms, "resource fixture world disposal observed");
+        result["disposal"] = json!({"started_unix_ms":disposal_started,"incident":incident});
+        fs::write(
+            dir.join("resources-result.json"),
+            serde_json::to_vec_pretty(&result).unwrap(),
+        )
+        .unwrap();
     }
 }
 
