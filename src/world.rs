@@ -6007,6 +6007,40 @@ mod tests {
     }
 
     #[test]
+    fn sprite_god_predicts_only_the_quiet_boomerang() {
+        let mut w = arena(0);
+        let origin = Pos { x: 20.5, y: 20.5 };
+        let god = w.spawn_entity(0x652, origin, vec![]).unwrap();
+        let player = w.enter(ch(&w), None).unwrap();
+        let target = Pos { x: 24.5, ..origin };
+        w.players.get_mut(&player).unwrap().pos = target;
+        for velocity in [-4., 0., 4.] {
+            w.players.get_mut(&player).unwrap().motion.velocity = Pos { x: 0., y: velocity };
+            w.players.get_mut(&player).unwrap().motion.at = w.now;
+            let schedule = w.npc_attack_schedule(god, 0).unwrap().unwrap();
+            let scheduled = w.scheduled_attacks(god, Some(target), &schedule).unwrap();
+            let legacy = w.legacy_enemy_shots(god, target, 0).unwrap();
+            let expected = (velocity * 4. / 6.).atan2(4.);
+            for shots in [scheduled, legacy] {
+                assert_eq!(shots.len(), 5);
+                for (i, (index, angle)) in shots.iter().enumerate() {
+                    assert_eq!(*index, u8::from(i == 4));
+                    let aim = if *index == 0 {
+                        (i as f32 - 1.5) * 10f32.to_radians()
+                    } else {
+                        expected
+                    };
+                    assert!(
+                        (angle - aim).abs() < 0.00001,
+                        "velocity {velocity}, projectile {index}: {angle} != {aim}"
+                    );
+                }
+            }
+            w.entities.get_mut(&god).unwrap().attacks = Default::default();
+        }
+    }
+
+    #[test]
     fn explicit_scenery_sizes_are_absolute_without_changing_blank_defaults() {
         let cases = [
             (398, "", 100),
