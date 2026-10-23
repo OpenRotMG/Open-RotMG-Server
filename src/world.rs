@@ -1445,6 +1445,9 @@ impl Directory {
             destination,
             x = self.worlds[&origin].entities[&id].pos.x,
             y = self.worlds[&origin].entities[&id].pos.y,
+            requested_x = pos.x,
+            requested_y = pos.y,
+            displacement = pos.distance(self.worlds[&origin].entities[&id].pos),
             "earned dungeon portal dropped"
         );
         Ok(id)
@@ -2230,15 +2233,15 @@ impl World {
         }
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
-        // Nearest-only interaction masks co-located loot or portals: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/game/GameSprite.as#L195-L225
-        let pos = (0..8)
-            .map(|i| {
+        // Keep the reference death point unless loot/portal clearance requires separation: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/DropPortalOnDeath.cs#L42
+        let pos = std::iter::once(loot)
+            .chain((0..8).map(|i| {
                 let angle = i as f32 * std::f32::consts::TAU / 8.;
                 Pos {
                     x: loot.x + 2. * angle.cos(),
                     y: loot.y + 2. * angle.sin(),
                 }
-            })
+            }))
             .find(|pos| {
                 self.walkable(*pos)
                     && self
@@ -6855,6 +6858,43 @@ mod tests {
             assert_eq!(r.i16().unwrap(), 0);
             r.done().unwrap();
         }
+    }
+
+    #[test]
+    fn ghost_god_portal_keeps_an_unobstructed_death_position() {
+        let mut d = directory();
+        let mut w = arena(1);
+        w.name = "Realm".into();
+        w.ids = d.ids.clone();
+        let player = w.enter(ch(&w), None).unwrap();
+        let death = Pos { x: 10.5, y: 10.5 };
+        let mut requests = 0;
+        for seed in 0..64 {
+            let ghost = w.spawn_entity(0x659, death, vec![]).unwrap();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.damage_enemy(player, ghost, 100000, false, &[], None)
+                .unwrap();
+            for (kind, pos) in std::mem::take(&mut w.portal_requests) {
+                assert_eq!(kind, 0x71a);
+                assert!(pos.distance(death) < 0.001);
+                requests += 1;
+            }
+            for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                w.remove_entity(bag);
+            }
+        }
+        assert!((1..64).contains(&requests));
+        let mut expected_rng = w.rng.clone();
+        d.worlds.insert(-3, w);
+        let portal = d.drop_dungeon_portal(-3, 0x71a, death).unwrap();
+        let w = &d.worlds[&-3];
+        assert!(w.entities[&portal].pos.distance(death) < 0.001);
+        assert_eq!(w.rng.clone().r#gen::<u64>(), expected_rng.r#gen::<u64>());
+        assert_eq!(d.portals[&portal].expires, d.tick + 600);
+        assert_eq!(
+            d.worlds[&d.portals[&portal].destination.unwrap()].name,
+            "Undead Lair"
+        );
     }
 
     #[test]
