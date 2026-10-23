@@ -5,6 +5,8 @@ mod community_social;
 mod finalize_tests;
 #[path = "native_pause_tests.rs"]
 mod native_pause_tests;
+#[path = "stat_modifier_tests.rs"]
+mod stat_modifier_tests;
 
 fn fixture() -> (PathBuf, App) {
     let (dir, mut app) = crate::server::account_actions::tests::fixture();
