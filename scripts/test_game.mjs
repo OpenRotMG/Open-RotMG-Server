@@ -51,9 +51,11 @@ async function fixture(t,transfer=false) {
   await writeFile(bootstrap,`
     import {appendFileSync} from 'node:fs';
     globalThis.WebSocket=class {
-      constructor(){this.binding=null;if(process.env.FIXTURE_FAULT==='network-enable')this.openSocket=setInterval(()=>{},1000);queueMicrotask(()=>this.onopen());}
+      constructor(){this.focused=false;this.binding=null;if(process.env.FIXTURE_FAULT==='network-enable')this.openSocket=setInterval(()=>{},1000);queueMicrotask(()=>this.onopen());}
       send(raw){const row=JSON.parse(raw);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({...row,at:Date.now()})+'\\n');
         let value=true,error;
+        if(row.method==='Emulation.setFocusEmulationEnabled')this.focused=row.params.enabled;
+        if(process.env.FIXTURE_FAULT==='hidden-frames'&&row.method==='Runtime.evaluate'&&row.params.expression.startsWith('new Promise(resolve=>requestAnimationFrame')&&!this.focused)error={message:'hidden cohort frame barrier requires page-local focus'};
         if(row.method==='Network.enable'&&process.env.FIXTURE_FAULT==='network-enable')error={message:'fixture Network.enable failure'};
         if(row.method==='Network.enable')setTimeout(()=>{const frame=payloadData=>this.onmessage({data:JSON.stringify({method:'Network.webSocketFrameReceived',params:{response:{opcode:2,payloadData}}})});frame(Buffer.from('000000090600000001','hex').toString('base64'));if(process.env.FIXTURE_FAULT==='combat-frames')for(let n=0;n<256;n++)frame(Buffer.from('000000094a00000001','hex').toString('base64'));},0);
         if(row.method==='Runtime.evaluate'&&row.params.expression.includes('playing:'))value={playing:true,binding:this.binding};
@@ -91,6 +93,15 @@ test('native request releases keys, coordinates pause, and replays without repea
   assert.equal(second.code,0,second.stderr);
   assert.equal(f.calls.length,before);
   assert.equal((await f.events()).length,events.length);
+  assert.equal(f.paused(),true);
+});
+test('page-local cohort focus follows clock resume and precedes the frame barrier',async t=>{
+  const f=await fixture(t),result=await f.run('hidden-cohort-focus',move,'hidden-frames');
+  assert.equal(result.code,0,result.stderr);
+  const events=await f.events(),clock=events.findIndex(e=>e.method==='Runtime.evaluate'&&e.params.expression.endsWith(')(false)'));
+  const focus=events.findIndex(e=>e.method==='Emulation.setFocusEmulationEnabled'&&e.params.enabled);
+  const frame=events.findIndex(e=>e.method==='Runtime.evaluate'&&e.params.expression.startsWith('new Promise(resolve=>requestAnimationFrame'));
+  assert.ok(clock>=0&&focus>clock&&frame>focus);
   assert.equal(f.paused(),true);
 });
 test('failed native CDP setup closes its still-live socket',async t=>{

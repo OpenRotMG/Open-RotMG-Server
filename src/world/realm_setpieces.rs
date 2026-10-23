@@ -1,5 +1,5 @@
 // GPL-3.0 reference; data/REALM-SRC-LICENSE: moistosaurus/realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff
-// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,TempleA,TempleB}.cs.
+// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -360,6 +360,29 @@ impl Piece {
                 }
                 p
             }
+            0x678 => {
+                let mut p = Self::new(30, 30);
+                let mut border = Vec::new();
+                for y in 0..30 {
+                    for x in 0..30 {
+                        let r = (x as f32 - 15.).hypot(y as f32 - 15.);
+                        if r <= 13. {
+                            p.set(x, y, if r <= 10. && r > 3. { 2 } else { 1 });
+                        }
+                        if (r <= 10. && r > 9.) || (r <= 3. && r > 2.) {
+                            border.push((x, y));
+                        }
+                    }
+                }
+                border.shuffle(rng);
+                // Cardinal approaches must stay clear rather than seal the island with palms.
+                for &(x, y) in border.iter().take(border.len().div_ceil(2)) {
+                    if x != 15 && y != 15 {
+                        p.set(x, y, 3);
+                    }
+                }
+                p
+            }
             0x67d => {
                 let mut p = Self::new(31, 40);
                 for (ox, oy) in [(0, 0), (18, 0), (0, 27), (18, 27)] {
@@ -576,6 +599,9 @@ impl Piece {
             (0x928, 1) => (0x60, None),
             (0x928, 2) => (0x60, Some(0x120)),
             (0x675 | 0xd5f, 1) | (0xd5f, 2) => (0xf2, None),
+            (0x678, 1) => (0x46, None),
+            (0x678, 2) => (0x73, None),
+            (0x678, 3) => (0x46, Some(0x18e)),
             (0x67d, 1 | 7) => (0x60, None),
             (0x67d, 2) => (0x73, None),
             (0x67d, 3) => (0xbc, None),
@@ -767,7 +793,9 @@ impl World {
                 if let Some(connection) = connection {
                     cell.config = format!("conn:{connection}");
                 }
-                if mark == 7 && kind == 0x67d || (x, y) == piece.boss && kind == 0x668 {
+                if mark == 7 && kind == 0x67d
+                    || (x, y) == piece.boss && matches!(kind, 0x668 | 0x678)
+                {
                     let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
                     self.spawn_entity(0x501, pos, items)?;
                 }
@@ -780,7 +808,7 @@ impl World {
                             .extra_stats
                             .push((41, connection));
                     }
-                    if object == 0x194 {
+                    if object == 0x194 || kind == 0x678 && object == 0x18e {
                         self.entities.get_mut(&id).unwrap().size =
                             if self.rng.gen_bool(0.5) { 120 } else { 140 };
                     }

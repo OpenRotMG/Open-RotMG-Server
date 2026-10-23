@@ -1,3 +1,4 @@
+// Oasis.cs / SpawnGroup.cs, realm-src@1855c017 (GPL-3.0; data/REALM-SRC-LICENSE), NR-Core and Skilly.
 use super::*;
 use crate::{
     condition,
@@ -46,8 +47,7 @@ impl World {
         let Some(tag) = self.entities[&id].quest else {
             return vec![];
         };
-        self.entities
-            .values()
+        self.actors()
             .filter(|e| e.quest == Some(tag) && e.kind == kind)
             .map(|e| e.id)
             .collect()
@@ -299,13 +299,17 @@ impl World {
         if matches!(kind, 0xd50..=0xd53) {
             return self.lost_lands_mechanics(id, target);
         }
-        if matches!(kind,0x65a..=0x65e|0x679..=0x67c) {
+        if matches!(kind, 0x65a..=0x65e) {
             if initial || self.now >= e.next_aux {
                 let choice = u64::from(self.rng.gen_bool(0.5));
                 let e = self.entities.get_mut(&id).unwrap();
                 e.stage = Some(choice);
                 e.next_aux = self.now + 500;
             }
+            return Ok(());
+        }
+        if matches!(kind, 0x679..=0x67c) {
+            self.entities.get_mut(&id).unwrap().stage = Some(0);
             return Ok(());
         }
         if matches!(kind, 0x935 | 0x941) {
@@ -340,49 +344,41 @@ impl World {
             self.landmark_fade(id, 17000);
             return Ok(());
         }
-        if kind == 0xd54 {
-            if initial {
-                self.landmark_birth(id, 0xd55, 4, 4, 4.)?;
-                self.entities.get_mut(&id).unwrap().stage = Some(0);
-            }
-            let t = elapsed % 33600;
-            self.landmark_shield(
-                id,
-                t < 2500 || (10600..13100).contains(&t) || (20100..22600).contains(&t),
-            );
-            if self.entities[&id].hp < self.content.objects[&kind].hp * 15 / 100 {
-                for child in self.landmark_members(id, 0xd55) {
-                    self.landmark_fade(child, 500);
-                }
-            }
-            return Ok(());
-        }
-        if kind == 0xd55 {
-            self.entities.get_mut(&id).unwrap().stage = Some(0);
-            self.landmark_shield(id, true);
-            if self.landmark_members(id, 0xd54).is_empty() {
-                self.landmark_fade(id, 500);
-            }
-            return Ok(());
+        if matches!(kind, 0xd54 | 0xd55) {
+            return self.sphinx_mechanics(id, target);
         }
         if !initial && self.now < e.next_aux {
             return Ok(());
         }
         match kind {
             0x678 => {
-                if initial {
-                    for child in 0x679..=0x67c {
-                        let count = self.rng.gen_range(1..=3);
-                        self.landmark_birth(id, child, 3, count, 3.)?;
-                    }
+                let spawned = e.script.as_ref().unwrap().spawned;
+                let count = if initial {
+                    10
                 } else {
-                    let role = self.rng.gen_range(0..=4);
-                    if role < 4 {
-                        let count = self.rng.gen_range(1..=3);
-                        self.landmark_birth(id, 0x679 + role, 3, count, 2.)?;
-                    }
+                    usize::from(spawned < 20)
+                };
+                ensure!(
+                    self.actors()
+                        .filter(|e| e.parent.is_some() || e.quest.is_some())
+                        .count()
+                        + self.named_births.len()
+                        + count
+                        <= 256,
+                    "Oasis group exceeds shared summon budget"
+                );
+                for _ in 0..count {
+                    let child = self.rng.gen_range(0x679..=0x67c);
+                    self.landmark_birth(id, child, 20, 1, 0.5)?;
+                    self.entities
+                        .get_mut(&id)
+                        .unwrap()
+                        .script
+                        .as_mut()
+                        .unwrap()
+                        .spawned += 1;
                 }
-                self.entities.get_mut(&id).unwrap().next_aux = self.now + 2000;
+                self.entities.get_mut(&id).unwrap().next_aux = self.now + 5000;
             }
             0x925 => {
                 for (child, min, max) in [
@@ -461,34 +457,49 @@ impl World {
                 (Motion::WanderHome { radius: 12. }, nr_speed(1.))
             });
         }
-        if e.kind == 0xd55 {
-            let t = elapsed % 17000;
-            return Ok(if t < 6000 {
-                (
-                    Motion::Chase {
-                        sight: 15.,
-                        stop: 0.,
-                    },
-                    4.,
-                )
-            } else if t < 9000
-                && self.landmark_members(id, 0xd54).into_iter().any(|root| {
-                    let d = e.pos.distance(self.entities[&root].pos);
-                    d > 30. && d < 40.
-                })
-            {
+        if matches!(e.kind, 0xd54 | 0xd55) {
+            return self.sphinx_movement(id);
+        }
+        if e.kind == 0x678 {
+            return Ok(if e.pos.distance(e.home) > 2. {
                 (
                     Motion::Protect {
-                        anchor: Anchor::QuestMember(0xd54),
-                        distance: 30.,
+                        anchor: Anchor::Home,
+                        distance: 1.,
                     },
-                    20.,
+                    nr_speed(0.3),
                 )
-            } else if t < 9000 {
-                (Motion::Wander, 20.)
             } else {
-                (Motion::Stationary, 0.)
+                (Motion::Wander, nr_speed(0.4))
             });
+        }
+        if matches!(e.kind, 0x679..=0x67c) {
+            let protection = 10. + f32::from(e.kind - 0x679);
+            let approach = 9. - 2. * f32::from(e.kind - 0x679);
+            if let Some(root) = self.landmark_members(id, 0x678).into_iter().next()
+                && e.pos.distance(self.entities[&root].pos) > protection
+            {
+                return Ok((
+                    Motion::Protect {
+                        anchor: Anchor::QuestMember(0x678),
+                        distance: protection,
+                    },
+                    nr_speed(0.5),
+                ));
+            }
+            return Ok(
+                if target.is_some_and(|p| e.pos.distance(p) > approach && e.pos.distance(p) < 10.) {
+                    (
+                        Motion::Chase {
+                            sight: 10.,
+                            stop: approach,
+                        },
+                        nr_speed(1.),
+                    )
+                } else {
+                    (Motion::Wander, nr_speed(0.5))
+                },
+            );
         }
         if e.pos.distance(e.home) > 16. {
             return Ok((
@@ -498,37 +509,6 @@ impl World {
                 },
                 8.,
             ));
-        }
-        if matches!(e.kind, 0x679..=0x67c) {
-            if let Some(root) = self.landmark_members(id, 0x678).into_iter().next()
-                && {
-                    let d = e.pos.distance(self.entities[&root].pos);
-                    d > 12. && d < 17.
-                }
-            {
-                return Ok((
-                    Motion::Protect {
-                        anchor: Anchor::QuestMember(0x678),
-                        distance: 12.,
-                    },
-                    5.,
-                ));
-            }
-            return Ok(
-                if e.stage == Some(0)
-                    && target.is_some_and(|p| e.pos.distance(p) > 2. && e.pos.distance(p) < 10.)
-                {
-                    (
-                        Motion::Chase {
-                            sight: 10.,
-                            stop: 2.,
-                        },
-                        5.,
-                    )
-                } else {
-                    (Motion::Wander, 5.)
-                },
-            );
         }
         if matches!(e.kind, 0x65a..=0x65e) {
             if elapsed % 3000 >= 2500 {

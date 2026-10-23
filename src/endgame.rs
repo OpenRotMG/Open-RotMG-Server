@@ -5,6 +5,9 @@ use crate::{
 use anyhow::{Result, ensure};
 use std::{collections::BTreeSet, f32::consts::TAU};
 
+pub const CLOSE_DELAY_MS: u64 = 120_000;
+pub const EARTHQUAKE_MS: u64 = 8_000;
+pub const REPLACEMENT_DELAY_MS: u64 = 2_000;
 pub const CASTLE: &str = "oryx-castle";
 pub const CHAMBER: &str = "oryx-chamber";
 pub const CELLAR: &str = "wine-cellar";
@@ -52,7 +55,7 @@ impl RealmCycle {
         }
         if self.remaining.is_empty() {
             self.stage = RealmStage::Closing {
-                deadline: now + 60_000,
+                deadline: now + CLOSE_DELAY_MS,
             };
         }
         true
@@ -61,7 +64,7 @@ impl RealmCycle {
         match self.stage {
             RealmStage::Closing { deadline } if now >= deadline => {
                 self.stage = RealmStage::Sealed {
-                    deadline: deadline + 22_000,
+                    deadline: deadline + EARTHQUAKE_MS,
                 };
                 true
             }
