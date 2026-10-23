@@ -11,7 +11,7 @@ pub mod tomb;
 pub mod trench;
 pub mod undead;
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 12] = [
+pub const DUNGEONS: [(u16, &str, &str, u16); 13] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
