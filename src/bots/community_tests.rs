@@ -29,6 +29,7 @@ pub(super) fn view(content: &Content) -> PlayerView {
         },
         tick: 100,
         time_ms: 5000,
+        clock_at: std::time::Instant::now(),
         elapsed_ms: 5000,
         position: Pos { x: 11.5, y: 11.5 },
         quest: None,

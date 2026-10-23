@@ -10,7 +10,8 @@ pub(super) struct Trade {
     items: [Vec<i32>; 2],
     offers: [[bool; 12]; 2],
     accepted: [bool; 2],
-    ready: u64,
+    // The client's countdown uses getTimer(), not simulation ticks: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/ui/TradeButton.as
+    ready: Instant,
     pending: bool,
 }
 pub struct TradePlan {
@@ -416,7 +417,7 @@ impl World {
                     items: players.map(|id| self.players[&id].character.items.clone()),
                     offers: [[false; 12]; 2],
                     accepted: [false; 2],
-                    ready: self.now + 3000,
+                    ready: self.clock.now() + Duration::from_millis(3000),
                     pending: false,
                 },
             );
@@ -481,7 +482,7 @@ impl World {
         trade.offers[side] = values;
         trade.accepted = [false; 2];
         trade.deliveries = [None, None];
-        trade.ready = self.now + 3000;
+        trade.ready = self.clock.now() + Duration::from_millis(3000);
         let other = trade.players[1 - side];
         let mut out = Writer::new();
         offer(&mut out, &values);
@@ -500,7 +501,7 @@ impl World {
         let trade = &self.trades[&key];
         ensure!(!trade.pending, "trade commit pending or offer settling");
         ensure!(
-            self.now >= trade.ready,
+            self.clock.now() >= trade.ready,
             controller("trade commit pending or offer settling")
         );
         let side = trade.players.iter().position(|p| *p == id).unwrap();
@@ -667,7 +668,7 @@ mod community_tests {
         pub(crate) fn market_consent_test_state(&self, id: i32) -> serde_json::Value {
             let trade = self.trade_key(id).map(|key| {
                 let t = &self.trades[&key];
-                serde_json::json!({"key":key,"transaction":t.transaction,"ready":t.ready,
+                serde_json::json!({"key":key,"transaction":t.transaction,"ready":format!("{:?}",t.ready),"settled":self.clock.now() >= t.ready,
                     "offers":t.offers,"accepted":t.accepted,"pending":t.pending,
                     "participants":t.players.map(|player| {
                         let p = &self.players[&player];
@@ -676,7 +677,7 @@ mod community_tests {
                             "revision":p.character.revision,"position":p.pos})
                     })})
             });
-            serde_json::json!({"world_now":self.now,"clock_paused":self.clock.paused(),"trade":trade})
+            serde_json::json!({"world_now":self.now,"trade_now":format!("{:?}",self.clock.now()),"clock_paused":self.clock.paused(),"trade":trade})
         }
     }
     async fn fixture() -> (World, Store, [i32; 2], [mpsc::Receiver<Packet>; 2]) {
@@ -739,13 +740,13 @@ mod community_tests {
         w.request_trade(players[1], w.players[&players[0]].character.name.clone())
             .unwrap();
     }
-    fn offers(w: &mut World, players: [i32; 2]) -> [[bool; 12]; 2] {
+    async fn offers(w: &mut World, players: [i32; 2]) -> [[bool; 12]; 2] {
         let mut offers = [[false; 12]; 2];
         offers[0][4] = true;
         offers[1][5] = true;
         w.change_trade(players[0], offers[0]).unwrap();
         w.change_trade(players[1], offers[1]).unwrap();
-        w.now += 3000;
+        tokio::time::sleep(Duration::from_millis(3050)).await;
         offers
     }
     fn writes(plan: &TradePlan) -> Vec<InventoryWrite> {
@@ -760,12 +761,103 @@ mod community_tests {
             .collect()
     }
     #[tokio::test]
+    async fn trade_settling_uses_pause_aware_elapsed_time_not_world_ticks() {
+        let (mut w, _, ids, _) = fixture().await;
+        start(&mut w, ids);
+        let mut masks = [[false; 12]; 2];
+        masks[0][4] = true;
+        masks[1][5] = true;
+        w.change_trade(ids[0], masks[0]).unwrap();
+        w.change_trade(ids[1], masks[1]).unwrap();
+        let tick_time = w.now;
+        w.clock.set_paused(true);
+        tokio::time::sleep(Duration::from_millis(3050)).await;
+        assert!(w.accept_trade(ids[0], masks[0], masks[1]).is_err());
+        w.clock.set_paused(false);
+        tokio::time::sleep(Duration::from_millis(3050)).await;
+        assert_eq!(
+            w.now, tick_time,
+            "no simulation ticks in this slow-world fixture"
+        );
+        assert!(
+            w.accept_trade(ids[0], masks[0], masks[1])
+                .expect("client countdown elapsed while world ticks lagged")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn trade_offer_reset_keeps_elapsed_settling_and_atomic_commit_guards() {
+        let (mut w, store, ids, _) = fixture().await;
+        start(&mut w, ids);
+        let masks = offers(&mut w, ids).await;
+        assert!(
+            w.accept_trade(ids[0], masks[0], masks[1])
+                .unwrap()
+                .is_none()
+        );
+        w.clock.set_paused(true);
+        w.change_trade(ids[1], [false; 12]).unwrap();
+        let trade = &w.trades[&w.trade_key(ids[0]).unwrap()];
+        assert_eq!(trade.accepted, [false; 2]);
+        assert_eq!(trade.ready - w.clock.now(), Duration::from_millis(3000));
+        w.now += 10_000;
+        tokio::time::sleep(Duration::from_millis(3050)).await;
+        assert!(w.accept_trade(ids[0], masks[0], [false; 12]).is_err());
+        w.clock.set_paused(false);
+        tokio::time::sleep(Duration::from_millis(3050)).await;
+        assert!(
+            w.accept_trade(ids[0], masks[0], masks[1])
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("stale trade acceptance")
+        );
+        assert!(
+            w.accept_trade(ids[0], masks[0], [false; 12])
+                .unwrap()
+                .is_none()
+        );
+        let before = ids.map(|id| w.players[&id].character.items.clone());
+        let plan = w
+            .accept_trade(ids[1], [false; 12], masks[0])
+            .unwrap()
+            .unwrap();
+        assert!(w.accept_trade(ids[1], [false; 12], masks[0]).is_err());
+        assert!(w.change_trade(ids[0], masks[0]).is_err());
+        assert!(!w.cancel_trade(ids[0], "pending commit"));
+        assert_eq!(before, ids.map(|id| w.players[&id].character.items.clone()));
+        let expected = plan.plans.each_ref().map(|p| {
+            (
+                p.player,
+                p.account,
+                p.character,
+                p.revision + 1,
+                p.items.clone(),
+            )
+        });
+        let revisions = store
+            .exchange_trade(plan.transaction.clone(), writes(&plan), None)
+            .await
+            .unwrap();
+        w.finish_trade(plan, Ok(revisions)).unwrap();
+        for (id, account, character, revision, items) in expected {
+            let saved = store.load(account, character).await.unwrap();
+            assert_eq!((saved.revision, saved.items), (revision, items.clone()));
+            assert_eq!(w.players[&id].character.items, items);
+        }
+        assert!(w.accept_trade(ids[0], masks[0], [false; 12]).is_err());
+    }
+
+    #[tokio::test]
     async fn community_market_expiry_is_revalidated_after_autonomous_native_acceptance_before_commit()
      {
         use crate::bots::pursuits::market::{Goods, Terms, now};
         let (mut w, store, ids, _) = fixture().await;
         w.players.get_mut(&ids[0]).unwrap().controller = Controller::Autonomous;
         w.updates(ids[0], true).unwrap();
+        start(&mut w, ids);
+        let masks = offers(&mut w, ids).await;
         let p = &w.players[&ids[0]];
         let t = Terms {
             version: 52,
@@ -787,8 +879,6 @@ mod community_tests {
         };
         let session = [-2, ids[0], p.character.id];
         let d = t.delivery(0).unwrap();
-        start(&mut w, ids);
-        let masks = offers(&mut w, ids);
         assert!(
             w.autonomous_trade(
                 ids[0],
@@ -898,7 +988,7 @@ mod community_tests {
             .is_err()
         );
         start(&mut w, ids);
-        let masks = offers(&mut w, ids);
+        let masks = offers(&mut w, ids).await;
         w.autonomous_trade(
             ids[0],
             session,

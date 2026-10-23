@@ -86,6 +86,8 @@ pub struct PlayerView {
     pub session: Session,
     pub tick: u64,
     pub time_ms: u64,
+    #[serde(skip)]
+    pub(crate) clock_at: Instant,
     pub elapsed_ms: u64,
     pub position: Pos,
     pub quest: Option<i32>,
@@ -290,6 +292,7 @@ impl Directory {
             },
             tick: w.tick,
             time_ms: w.now,
+            clock_at: w.clock.now(),
             elapsed_ms: self.tick * 50,
             position: p.pos,
             quest: p.quest.filter(|quest| p.known.contains(quest)),
