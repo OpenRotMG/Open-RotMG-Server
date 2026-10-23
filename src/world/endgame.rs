@@ -993,6 +993,16 @@ mod tests {
         let (_, mut peer) = listener(&mut d, origin);
         let (_, mut b) = listener(&mut d, other);
         let (_, mut nexus) = listener(&mut d, -2);
+        for rx in [&mut a, &mut peer, &mut b] {
+            assert_eq!(
+                texts(rx),
+                vec![(
+                    "#Oryx the Mad God".into(),
+                    "You are food for my minions!".into()
+                )]
+            );
+        }
+        assert!(texts(&mut nexus).is_empty());
         let w = d.worlds.get_mut(&origin).unwrap();
         w.event_reserves.clear();
         let pos = w.players[&owner].pos;
@@ -1031,7 +1041,17 @@ mod tests {
             .unwrap();
         d.tick = 2401;
         d.endgame_step();
-        assert!(texts(&mut a).is_empty());
+        let death = texts(&mut a);
+        assert!(
+            death
+                .iter()
+                .any(|(_, text)| text == "A Red Demon still guards me!")
+        );
+        assert!(
+            !death
+                .iter()
+                .any(|(_, text)| text.contains("My final Red Demon is unassailable!"))
+        );
         d.tick = 4800;
         d.endgame_step();
         assert_eq!(
@@ -1049,7 +1069,14 @@ mod tests {
         d.tick = 4801;
         d.endgame_step();
         assert!(!d.endgame.realms[&origin].cycle.admits());
-        assert_eq!(texts(&mut a).len(), 1);
+        assert_eq!(
+            texts(&mut a)
+                .iter()
+                .filter(|(_, text)| text
+                    == "I HAVE CLOSED THIS REALM! YOU WILL NOT LIVE TO SEE THE LIGHT OF DAY!")
+                .count(),
+            1
+        );
         d.tick = 7200;
         d.endgame_step();
         assert!(texts(&mut a).is_empty());

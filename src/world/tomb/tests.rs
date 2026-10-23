@@ -64,10 +64,6 @@ fn generated_realm_earns_one_reserved_sphinx_and_credits_its_real_death() {
         );
     }
     assert!(crate::quest::root(d::SPHINX));
-    let position = Pos {
-        x: world.map.spawns[0].0,
-        y: world.map.spawns[0].1,
-    };
     let player = world.enter(crate::world::tests::ch(world), None).unwrap();
     let source = world
         .actors()
@@ -77,32 +73,19 @@ fn generated_realm_earns_one_reserved_sphinx_and_credits_its_real_death() {
     world
         .damage_enemy(player, source, 100000, false, &[], None)
         .unwrap();
-    let owned = world
-        .actors()
-        .filter(|e| e.parent.is_some() || e.quest.is_some())
-        .count()
-        + world.named_births.len();
-    let clear: Vec<_> = world
+    let kinds: BTreeSet<_> = world
         .event_reserves
         .iter()
-        .enumerate()
-        .filter(|(_, event)| {
-            owned + 1 + event.children.len() <= 256 && event.root.pos.distance(position) >= 32.
-        })
-        .map(|(index, _)| index)
+        .map(|event| event.root.kind)
         .collect();
-    let selected = world
-        .event_reserves
-        .iter()
-        .position(|event| event.root.id == id)
-        .unwrap();
+    let kinds: Vec<_> = kinds.into_iter().collect();
     let seed = (0..1024)
         .find(|seed| {
             let mut rng = rand::rngs::StdRng::seed_from_u64(*seed);
-            rng.gen_bool(0.1) && clear.choose(&mut rng) == Some(&selected)
+            rng.gen_bool(0.25) && kinds.choose(&mut rng) == Some(&d::SPHINX)
         })
         .expect("bounded fixture can earn its Sphinx through the shared director");
-    world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+    world.event_rng = rand::rngs::StdRng::seed_from_u64(seed);
     directory.endgame_step();
     let world = directory.worlds.get_mut(&realm).unwrap();
     assert_eq!(world.actors().filter(|e| e.kind == d::SPHINX).count(), 1);

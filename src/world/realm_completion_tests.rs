@@ -172,16 +172,22 @@ fn lost_lands_minions_roll_both_potions_independently() {
     }
 }
 
-#[test]
-fn lost_lands_and_ship_real_deaths_have_private_one_percent_rewards_once() {
+#[tokio::test]
+async fn lost_lands_and_ship_real_deaths_have_private_one_percent_rewards_once() {
     for kind in [0xd50, 0xe37] {
         let mut w = tests::arena(0);
         w.name = "Realm".into();
+        let path =
+            std::env::temp_dir().join(format!("realm-reward-{kind:x}-{}", rand::random::<u64>()));
+        std::fs::create_dir(&path).unwrap();
+        let store = crate::store::Store::open(&path.join("game.db"), &w.content).unwrap();
         let mut players = Vec::new();
         for account in 1..=3 {
-            let mut ch = tests::ch(&w);
-            ch.account = account;
-            ch.id = account;
+            let owner = store.list(format!("realm-reward-{account}")).await.unwrap();
+            let ch = store
+                .create(owner.id, w.content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap();
             players.push(w.enter(ch, None).unwrap());
         }
         let pos = w.players[&players[0]].pos;
@@ -236,5 +242,59 @@ fn lost_lands_and_ship_real_deaths_have_private_one_percent_rewards_once() {
             0
         );
         assert_eq!(w.bag_expiry.len(), bags.len());
+        let bag = private[0];
+        let slot = bag.items.iter().position(|item| *item >= 0).unwrap();
+        let item = bag.items[slot];
+        w.players.get_mut(&players[1]).unwrap().pos = bag.pos;
+        let from = Slot {
+            object: bag.id,
+            slot,
+            kind: item,
+        };
+        let destination = (4..12)
+            .find(|slot| w.players[&players[0]].character.items[*slot] == -1)
+            .unwrap();
+        let to = |object| Slot {
+            object,
+            slot: destination,
+            kind: -1,
+        };
+        assert!(w.swap(players[1], from.clone(), to(players[1])).is_err());
+        w.players.get_mut(&players[0]).unwrap().pos = bag.pos;
+        let plan = w.swap(players[0], from, to(players[0])).unwrap();
+        let account = plan.account;
+        let character = plan.character;
+        let revision = plan.revision;
+        assert_eq!(
+            store.load(account, character).await.unwrap().items[destination],
+            -1
+        );
+        let revisions = store
+            .exchange_collected(
+                vec![crate::store::InventoryWrite {
+                    id: character,
+                    account,
+                    revision,
+                    items: plan.items.clone(),
+                }],
+                plan.vaults.clone(),
+                plan.collected,
+            )
+            .await
+            .unwrap();
+        w.finish_inventory(plan, Ok(revisions[0])).unwrap();
+        w.leave(players[0]).unwrap();
+        let loaded = store.load(account, character).await.unwrap();
+        assert!(loaded.alive && loaded.hp > 0);
+        assert_eq!(
+            (loaded.items[destination], loaded.revision),
+            (item, revision + 1)
+        );
+        let reentered = w.enter(loaded, None).unwrap();
+        assert_eq!(w.players[&reentered].character.items[destination], item);
+        eprintln!(
+            "durable private {kind:#x} reward evidence: {}",
+            path.display()
+        );
     }
 }
