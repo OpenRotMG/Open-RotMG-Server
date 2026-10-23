@@ -13,6 +13,402 @@ const CELLS: usize = SIDE * SIDE;
 const OBJECTS: &str = "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad91534b72";
 const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7";
 
+const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 10] = [
+    ("classic-world-04-reconstruction", WORLD04_SOURCE, 2000),
+    (
+        "classic-world-08-reconstruction",
+        "d0a544f4943991aa1265b7ebdfecb3a846215f297c1317ffb718ddd89e8d92bc",
+        2000,
+    ),
+    (
+        "classic-world-10-reconstruction",
+        "d7f3b0d274f4f6b0cf6093a336b8adbfaf322e9ce6d07c970b3219a8d24afd48",
+        2000,
+    ),
+    (
+        "classic-world-13-reconstruction",
+        "15cb5c88982275f3e72d4dc0bc9fb940177662013cacd6b76c1b95aeca46ecd1",
+        2000,
+    ),
+    (
+        "classic-world-06-reconstruction",
+        "f5dcb4af75cce476d80bc59760df78ec880211ba9d3d2847225fc3d3a6b1b30a",
+        2100,
+    ),
+    (WORLD05_ID, WORLD05_SOURCE, 2100),
+    (
+        "classic-world-07-reconstruction",
+        "f449de66330c98caf611c8575a2d731baa27b47a2eac96d043a232de2ab00372",
+        2100,
+    ),
+    (WORLD09_ID, WORLD09_SOURCE, 2100),
+    (WORLD11_ID, WORLD11_SOURCE, 2100),
+    (
+        "classic-world-12-reconstruction",
+        "fe91b3e5ecd63110f30455c6f63ff66b575483d2e39d40a5d4aaa33b838b73a0",
+        2100,
+    ),
+];
+
+const FULL_SOURCE_COMPAT_IDENTITIES: [(&str, &str, usize); 3] = [
+    ("classic-world-01-reconstruction", WORLD01_SOURCE, 2100),
+    (
+        "classic-world-02-reconstruction",
+        "b6db13154d1c78d905770305df725ac912e1de10dd3b52856326e8adc0ba2547",
+        2100,
+    ),
+    (
+        "classic-world-03-reconstruction",
+        "861351094192223962bc38def3c127b08c3cf80b663dd6bffb770b09ce47136e",
+        2100,
+    ),
+];
+
+fn source_local_transform(dimensions: [usize; 2]) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "source-local-v1",
+        "source_dimensions": dimensions,
+        "target_dimensions": dimensions,
+        "mapping": "tile_xy=source_xy",
+        "historical_coordinates": "UNKNOWN",
+        "status": "One source pixel per engineered cell does not prove original extent, pitch or origin."
+    })
+}
+
+impl ReviewedRecipe {
+    fn strict_source(&self) -> bool {
+        self.schema == 4 || matches!(self.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)
+    }
+    fn dimensions(&self) -> Result<[usize; 2]> {
+        let source = SOURCE_LOCAL_IDENTITIES
+            .iter()
+            .find(|(id, hash, _)| *id == self.id || *hash == self.provenance.source_sha256);
+        let expected = match self.schema {
+            2 => {
+                ensure!(
+                    source.is_none(),
+                    "reserved source-local identity {} requires schema 3, not schema 2 padding or alias",
+                    self.id
+                );
+                [SIDE, SIDE]
+            }
+            3 => {
+                ensure!(
+                    source
+                        .is_some_and(|(id, hash, _)| *id == self.id
+                            && *hash == self.provenance.source_sha256),
+                    "unapproved source-local identity {} source {}",
+                    self.id,
+                    self.provenance.source_sha256
+                );
+                let side = source.unwrap().2;
+                [side, side]
+            }
+            4 => {
+                let source = FULL_SOURCE_COMPAT_IDENTITIES
+                    .iter()
+                    .find(|(id, hash, _)| *id == self.id && *hash == self.provenance.source_sha256);
+                let side = source
+                    .with_context(|| {
+                        format!(
+                            "unapproved schema 4 source-local identity {} source {}",
+                            self.id, self.provenance.source_sha256
+                        )
+                    })?
+                    .2;
+                [side, side]
+            }
+            schema => bail!("unsupported reviewed recipe schema {schema}"),
+        };
+        ensure!(
+            [self.width, self.height] == expected,
+            "{} reviewed-cells-v1 schema {} source {}: expected dimensions {expected:?}, actual {:?}",
+            self.id,
+            self.schema,
+            self.provenance.source_sha256,
+            [self.width, self.height]
+        );
+        Ok(expected)
+    }
+    fn audit_inputs(&self, root: &Path) -> Result<Vec<u8>> {
+        let dimensions = self.dimensions()?;
+        let p = &self.provenance;
+        if self.strict_source() {
+            strict_source_paths(
+                root,
+                &[
+                    &self.inputs.dictionary.path,
+                    &self.inputs.indices.path,
+                    &p.policy.path,
+                    &p.annotations.path,
+                    &self.output,
+                ],
+            )?;
+        }
+        let policy = hashed_input(root, &p.policy.path, &p.policy.sha256, 64 * 1024)?;
+        let annotations =
+            hashed_input(root, &p.annotations.path, &p.annotations.sha256, 64 * 1024)?;
+        if self.strict_source() {
+            strict_source_audit(&policy, &annotations, self)?;
+        }
+        audit_scoped(
+            &policy,
+            &annotations,
+            p,
+            matches!(self.schema, 3 | 4).then_some(dimensions),
+        )?;
+        Ok(policy)
+    }
+}
+
+const WORLD01_SOURCE: &str = "7404dfa562627e015160a88820017cfbcfb2c6de3676a18dcca3395bd4fc2cc1";
+const WORLD01_LAVA_SUPPORT: &str =
+    "93f3410a461d0daa70d6efc79938a5a0938f69018bd32e9c5667bf6ee25a2b17";
+
+const WORLD04_SOURCE: &str = "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5";
+const WORLD04_LAVA_SUPPORT: &str =
+    "db7fa56ca8a4ea4396a75483b894262b66fe611b7fdf72b4b574f0999c1e8494";
+
+pub(super) const WORLD05_ID: &str = "classic-world-05-reconstruction";
+const WORLD05_SOURCE: &str = "9f57488fdccf12fc1ad5f8970d1feec746ea4e1bbc5ed6718fee7d3d4dbd55c0";
+const WORLD05_LAVA_SUPPORT: &str =
+    "4a899569757f859d8fe85b7ed06207ffa380b772ee02c87b212abc65904cd3ee";
+
+pub(super) const WORLD09_ID: &str = "classic-world-09-reconstruction";
+const WORLD09_SOURCE: &str = "726aa16890f7caaa73dc642b64901e94ed4f44cb974e5001c98897f1b8a89736";
+const WORLD09_LAVA_SUPPORT: &str =
+    "e1c603f40768fb8d49b945863f65d565bc944b5d2b68080cfa28ac45e0bab257";
+
+pub(super) const WORLD11_ID: &str = "classic-world-11-reconstruction";
+const WORLD11_SOURCE: &str = "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11cea6f65976bcb20";
+const WORLD11_LAVA_SUPPORT: &str =
+    "4f88fb5c98d4e7dbaa7fb6e5dde0dba336c559b9abbb99d3a8532dd2e0120b44";
+
+pub(super) struct ScopedLava {
+    world: u8,
+    terrain: u8,
+    side: usize,
+    source_side: usize,
+    offset: usize,
+    pixels: usize,
+    support: &'static str,
+}
+impl ScopedLava {
+    fn for_recipe(
+        r: &ReviewedRecipe,
+        policy: &serde_json::Value,
+        content: &Content,
+    ) -> Result<Option<Self>> {
+        let scope = Self::binding(r, policy)?;
+        if let Some(scope) = scope.as_ref() {
+            scope.validate_content(content)?;
+        }
+        Ok(scope)
+    }
+    fn binding(r: &ReviewedRecipe, policy: &serde_json::Value) -> Result<Option<Self>> {
+        let world01 = r.id == "classic-world-01-reconstruction"
+            || r.provenance.source_sha256 == WORLD01_SOURCE
+            || policy.get("world01_lava").is_some();
+        let world04 = policy.get("world04_lava").is_some();
+        let world05 = policy.get("world05_lava").is_some();
+        let world09 = policy.get("world09_lava").is_some();
+        let world11 = policy.get("world11_lava").is_some();
+        ensure!(
+            u8::from(world01)
+                + u8::from(world04)
+                + u8::from(world05)
+                + u8::from(world09)
+                + u8::from(world11)
+                <= 1,
+            "mixed World1/World4/World5/World9/World11 lava scopes"
+        );
+        let (scope, id, source, key, schema, transform) = if world01 {
+            let (side, offset, transform) = match r.schema {
+                2 => (
+                    SIDE,
+                    26,
+                    serde_json::json!({"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN","source_dimensions":[2100,2100],"tile":"source_pixel-26"}),
+                ),
+                4 => (2100, 0, source_local_transform([2100, 2100])),
+                schema => bail!("unapproved World1 lava recipe schema {schema}"),
+            };
+            (
+                Self {
+                    world: 1,
+                    terrain: 1,
+                    side,
+                    source_side: 2100,
+                    offset,
+                    pixels: 703,
+                    support: WORLD01_LAVA_SUPPORT,
+                },
+                "classic-world-01-reconstruction",
+                WORLD01_SOURCE,
+                "world01_lava",
+                r.schema,
+                transform,
+            )
+        } else if world04 {
+            (
+                Self {
+                    world: 4,
+                    terrain: 1,
+                    side: 2000,
+                    source_side: 2000,
+                    offset: 0,
+                    pixels: 506,
+                    support: WORLD04_LAVA_SUPPORT,
+                },
+                "classic-world-04-reconstruction",
+                WORLD04_SOURCE,
+                "world04_lava",
+                3,
+                source_local_transform([2000, 2000]),
+            )
+        } else if world05 {
+            (
+                Self {
+                    world: 5,
+                    terrain: 0,
+                    side: 2100,
+                    source_side: 2100,
+                    offset: 0,
+                    pixels: 112,
+                    support: WORLD05_LAVA_SUPPORT,
+                },
+                WORLD05_ID,
+                WORLD05_SOURCE,
+                "world05_lava",
+                3,
+                source_local_transform([2100, 2100]),
+            )
+        } else if world09 {
+            (
+                Self {
+                    world: 9,
+                    terrain: 1,
+                    side: 2100,
+                    source_side: 2100,
+                    offset: 0,
+                    pixels: 426,
+                    support: WORLD09_LAVA_SUPPORT,
+                },
+                WORLD09_ID,
+                WORLD09_SOURCE,
+                "world09_lava",
+                3,
+                source_local_transform([2100, 2100]),
+            )
+        } else if world11 {
+            (
+                Self {
+                    world: 11,
+                    terrain: 0,
+                    side: 2100,
+                    source_side: 2100,
+                    offset: 0,
+                    pixels: 577,
+                    support: WORLD11_LAVA_SUPPORT,
+                },
+                WORLD11_ID,
+                WORLD11_SOURCE,
+                "world11_lava",
+                3,
+                source_local_transform([2100, 2100]),
+            )
+        } else {
+            return Ok(None);
+        };
+        ensure!(
+            r.id == id
+                && r.provenance.source_sha256 == source
+                && r.schema == schema
+                && r.width == scope.side
+                && r.height == scope.side
+                && r.content.objects == OBJECTS
+                && r.content.grounds == GROUNDS
+                && policy["source_sha256"] == source
+                && policy["selected_client"] == "123.5.1"
+                && policy["transform"] == transform
+                && policy[key] == scope.choice(),
+            "unapproved World{} lava source/content/transform/cell support",
+            scope.world
+        );
+        Ok(Some(scope))
+    }
+    fn choice(&self) -> serde_json::Value {
+        let mut choice = lava_choice(self.pixels, self.support);
+        choice["cell"]["terrain"] = self.terrain.into();
+        choice
+    }
+    fn validate_content(&self, content: &Content) -> Result<()> {
+        ensure!(
+            matches!(content.hazards.get(&244), Some(h) if h.name == "Lava Blend" && h.min == 30 && h.max == 60)
+                && content.grounds.get(&244) == Some(&0.666)
+                && content.pushes.get(&244) == Some(&(0.0, 0.0)),
+            "selected World{} Lava Blend definition drift: hazard={:?}, speed={:?}, push={:?}",
+            self.world,
+            content.hazards.get(&244).map(|h| (&h.name, h.min, h.max)),
+            content.grounds.get(&244),
+            content.pushes.get(&244)
+        );
+        Ok(())
+    }
+    pub(super) fn validate_loaded(&self, map: &Map, content: &Content) -> Result<()> {
+        self.validate_content(content)?;
+        self.validate_support(map)
+    }
+    fn accepts(&self, c: &Cell) -> bool {
+        c.ground == 244
+            && c.object.is_none()
+            && c.config.is_empty()
+            && c.terrain == self.terrain
+            && c.region == 0
+    }
+    fn validate_support(&self, map: &Map) -> Result<()> {
+        ensure!(
+            map.width == self.side as i32
+                && map.height == self.side as i32
+                && map.cells.len() == self.side * self.side,
+            "invalid World{} lava map dimensions",
+            self.world
+        );
+        let mut support = Sha256::new();
+        let mut count = 0;
+        for (i, c) in map
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.ground == 244)
+        {
+            ensure!(
+                self.accepts(c),
+                "unapproved World{} lava cell at {},{}",
+                self.world,
+                i % self.side,
+                i / self.side
+            );
+            support.update(
+                (((i / self.side + self.offset) * self.source_side + i % self.side + self.offset)
+                    as u32)
+                    .to_le_bytes(),
+            );
+            count += 1;
+        }
+        let actual = format!("{:x}", support.finalize());
+        ensure!(
+            count == self.pixels && actual == self.support,
+            "World{} lava support differs from approved source positions: expected {}/{}, actual {}/{}",
+            self.world,
+            self.pixels,
+            self.support,
+            count,
+            actual
+        );
+        Ok(())
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "profile")]
 pub(super) enum Recipe {
@@ -170,6 +566,23 @@ pub(super) fn valid_id(id: &str) -> bool {
     })
 }
 impl Recipe {
+    pub(super) fn lava_scope(&self, root: &Path) -> Result<Option<ScopedLava>> {
+        match self {
+            Self::ReviewedCellsV1(r) if r.schema == 2 => Ok(None),
+            Self::ReviewedCellsV1(r) => {
+                let policy = r.audit_inputs(root)?;
+                ScopedLava::binding(r, &serde_json::from_slice(&policy)?)
+            }
+            Self::ClassicV1(r) => {
+                ensure!(
+                    !matches!(r.id.as_str(), WORLD09_ID | WORLD11_ID),
+                    "{} requires its reviewed source recipe",
+                    r.id
+                );
+                Ok(None)
+            }
+        }
+    }
     pub(super) fn id(&self) -> &str {
         match self {
             Self::ClassicV1(r) => &r.id,
@@ -188,6 +601,31 @@ impl Recipe {
             Self::ReviewedCellsV1(_) => "reviewed-cells-v1",
         }
     }
+    pub(super) fn content_identity(&self) -> Option<[String; 2]> {
+        match self {
+            Self::ReviewedCellsV1(r) if matches!(r.schema, 3 | 4) => {
+                Some([r.content.objects.clone(), r.content.grounds.clone()])
+            }
+            _ => None,
+        }
+    }
+    pub(super) fn dimensions(&self) -> [usize; 2] {
+        match self {
+            Self::ClassicV1(r) => [r.width, r.height],
+            Self::ReviewedCellsV1(r) => [r.width, r.height],
+        }
+    }
+    pub(super) fn contract(&self) -> String {
+        let (schema, source) = match self {
+            Self::ClassicV1(r) => (r.schema, &r.provenance.source_sha256),
+            Self::ReviewedCellsV1(r) => (r.schema, &r.provenance.source_sha256),
+        };
+        format!(
+            "{} {} schema {schema} source {source}",
+            self.id(),
+            self.profile()
+        )
+    }
     fn status(&self) -> &str {
         match self {
             Self::ClassicV1(r) => &r.provenance.status,
@@ -198,16 +636,8 @@ impl Recipe {
         match self {
             Self::ClassicV1(r) => r.validate(),
             Self::ReviewedCellsV1(r) => {
-                ensure!(
-                    r.schema == 2,
-                    "unsupported reviewed recipe schema {}",
-                    r.schema
-                );
+                r.dimensions()?;
                 ensure!(valid_id(&r.id), "invalid Realm ID {}", r.id);
-                ensure!(
-                    r.width == SIDE && r.height == SIDE,
-                    "expected 2048-square cells"
-                );
                 ensure!(
                     r.content.objects == OBJECTS && r.content.grounds == GROUNDS,
                     "unsupported content identity"
@@ -254,6 +684,13 @@ impl Recipe {
 }
 impl ClassicRecipe {
     fn validate(&self) -> Result<()> {
+        ensure!(
+            !SOURCE_LOCAL_IDENTITIES
+                .iter()
+                .any(|(id, hash, _)| *id == self.id || *hash == self.provenance.source_sha256),
+            "reserved source-local identity {} requires reviewed schema 3",
+            self.id
+        );
         ensure!(
             self.schema == 1,
             "unsupported recipe schema {}",
@@ -323,7 +760,7 @@ pub(super) fn read_recipe(root: &Path, relative: &str) -> Result<Recipe> {
         .with_context(|| format!("parse recipe {}", path.display()))?;
     recipe
         .validate()
-        .with_context(|| format!("validate recipe {}", path.display()))?;
+        .with_context(|| format!("validate recipe {}: {}", path.display(), recipe.contract()))?;
     let mut paths = BTreeSet::new();
     paths.insert(path.clone());
     for relative in std::iter::once(recipe.output()).chain(recipe.inputs()) {
@@ -333,6 +770,14 @@ pub(super) fn read_recipe(root: &Path, relative: &str) -> Result<Recipe> {
             paths.insert(input),
             "aliased recipe/input/output path {relative}"
         );
+    }
+    if let Recipe::ReviewedCellsV1(r) = &recipe
+        && matches!(r.schema, 3 | 4)
+    {
+        if r.strict_source() {
+            strict_source_paths(root, &[relative])?;
+        }
+        r.audit_inputs(root).with_context(|| recipe.contract())?;
     }
     Ok(recipe)
 }
@@ -556,71 +1001,120 @@ fn assemble(
 }
 
 type Entry = (u8, String, String, u8, u8);
+fn entry(
+    c: &Cell,
+    content: &Content,
+    validated_objects: &mut BTreeSet<u16>,
+    lava: Option<&ScopedLava>,
+) -> Result<Entry> {
+    ensure!(
+        content.grounds.contains_key(&c.ground)
+            && (!content.hazards.contains_key(&c.ground) || lava.is_some_and(|l| l.accepts(c))),
+        "unknown/hazardous output ground {:#x}",
+        c.ground
+    );
+    ensure!(
+        c.terrain <= 12 && c.region == 0,
+        "unsupported output terrain/region"
+    );
+    let name = match c.object {
+        Some(kind) => {
+            let object = content.get(kind)?;
+            ensure!(
+                object.static_object && (!object.enemy || object.passive_destructible()),
+                "non-scenery output object {kind:#x}"
+            );
+            if validated_objects.insert(kind) {
+                ensure!(
+                    content
+                        .objects
+                        .values()
+                        .filter(|o| o.name == object.name)
+                        .count()
+                        == 1,
+                    "ambiguous output object {}",
+                    object.name
+                );
+            }
+            ensure!(!object.name.is_empty(), "empty output object name");
+            if !(c.config.is_empty()
+                || kind == 0x1dd
+                    && matches!(
+                        c.config.as_str(),
+                        "conn:16843010"
+                            | "conn:16843265"
+                            | "conn:16908545"
+                            | "conn:16908802"
+                            | "conn:33620225"
+                            | "conn:33620482"
+                            | "conn:33685762"
+                            | "conn:33686017"
+                            | "conn:33686018"
+                    ))
+            {
+                let size: u16 = c
+                    .config
+                    .strip_prefix("size:")
+                    .context("unsupported scenery configuration")?
+                    .parse()?;
+                ensure!(
+                    ((matches!(kind, 0x100..=0x104 | 0x185..=0x18d | 0x197..=0x19f)
+                        && (130..=160).contains(&size)
+                        && size.is_multiple_of(5))
+                        || (kind == 0x18e && matches!(size, 140 | 160))
+                        || (kind == 0x194 && matches!(size, 120 | 140)))
+                        && c.config == format!("size:{size}"),
+                    "unsupported scenery size/configuration"
+                );
+            }
+            object.name.clone()
+        }
+        None => {
+            ensure!(c.config.is_empty(), "configuration without scenery");
+            String::new()
+        }
+    };
+
+    ensure!(
+        name.len() <= 1024 && c.config.len() <= 1024,
+        "output dictionary string exceeds limit"
+    );
+    Ok((c.ground, name, c.config.clone(), c.terrain, c.region))
+}
 fn encode(map: &Map, content: &Content) -> Result<(Vec<u8>, usize)> {
+    encode_scoped(map, content, None)
+}
+fn encode_scoped(
+    map: &Map,
+    content: &Content,
+    lava: Option<&ScopedLava>,
+) -> Result<(Vec<u8>, usize)> {
+    encode_reviewed(map, content, lava, None)
+}
+fn encode_reviewed(
+    map: &Map,
+    content: &Content,
+    lava: Option<&ScopedLava>,
+    recipe: Option<&ReviewedRecipe>,
+) -> Result<(Vec<u8>, usize)> {
+    let shape_matches = match recipe {
+        Some(recipe) => [map.width as usize, map.height as usize] == recipe.dimensions()?,
+        None => map.width <= SIDE as i32 && map.height <= SIDE as i32,
+    };
     ensure!(
         map.width > 0
             && map.height > 0
-            && map.width <= SIDE as i32
-            && map.height <= SIDE as i32
+            && shape_matches
             && map.cells.len() == map.width as usize * map.height as usize,
         "invalid output dimensions/cells"
     );
+    if let Some(lava) = lava {
+        lava.validate_support(map)?;
+    }
     let mut entries = BTreeSet::new();
     let mut validated_objects = BTreeSet::new();
     for c in &map.cells {
-        ensure!(
-            content.grounds.contains_key(&c.ground) && !content.hazards.contains_key(&c.ground),
-            "unknown/hazardous output ground {:#x}",
-            c.ground
-        );
-        ensure!(
-            c.terrain <= 12 && c.region == 0,
-            "unsupported output terrain/region"
-        );
-        let name = match c.object {
-            Some(kind) => {
-                let object = content.get(kind)?;
-                ensure!(
-                    object.static_object && (!object.enemy || object.passive_destructible()),
-                    "non-scenery output object {kind:#x}"
-                );
-                if validated_objects.insert(kind) {
-                    ensure!(
-                        content
-                            .objects
-                            .values()
-                            .filter(|o| o.name == object.name)
-                            .count()
-                            == 1,
-                        "ambiguous output object {}",
-                        object.name
-                    );
-                }
-                ensure!(!object.name.is_empty(), "empty output object name");
-                if !c.config.is_empty() {
-                    let size: u16 = c
-                        .config
-                        .strip_prefix("size:")
-                        .context("unsupported scenery configuration")?
-                        .parse()?;
-                    ensure!(
-                        ((matches!(kind, 0x100..=0x104 | 0x185..=0x18d | 0x197..=0x19f)
-                            && (130..=160).contains(&size)
-                            && size.is_multiple_of(5))
-                            || (kind == 0x18e && matches!(size, 140 | 160))
-                            || (kind == 0x194 && matches!(size, 120 | 140)))
-                            && c.config == format!("size:{size}"),
-                        "unsupported scenery size/configuration"
-                    );
-                }
-                object.name.clone()
-            }
-            None => {
-                ensure!(c.config.is_empty(), "configuration without scenery");
-                String::new()
-            }
-        };
-        entries.insert((c.ground, name, c.config.clone(), c.terrain, c.region));
+        entries.insert(entry(c, content, &mut validated_objects, lava)?);
     }
     ensure!(
         !entries.is_empty() && entries.len() <= i16::MAX as usize,
@@ -636,7 +1130,6 @@ fn encode(map: &Map, content: &Content) -> Result<(Vec<u8>, usize)> {
     for (ground, name, config, terrain, region) in dict.keys() {
         raw.extend((*ground as i16).to_le_bytes());
         for text in [name, config] {
-            ensure!(text.len() <= 1024, "output dictionary string exceeds limit");
             let mut length = text.len();
             while length >= 128 {
                 raw.push((length as u8 & 127) | 128);
@@ -676,6 +1169,13 @@ struct ReviewedCell {
     region: u8,
 }
 fn dictionary(bytes: &[u8], content: &Content) -> Result<Vec<Cell>> {
+    dictionary_scoped(bytes, content, None)
+}
+fn dictionary_scoped(
+    bytes: &[u8],
+    content: &Content,
+    lava: Option<&ScopedLava>,
+) -> Result<Vec<Cell>> {
     ensure!(
         bytes.len() <= 64 * 1024,
         "reviewed dictionary exceeds bound"
@@ -697,19 +1197,211 @@ fn dictionary(bytes: &[u8], content: &Content) -> Result<Vec<Cell>> {
         })
         .collect();
     // Unused entries must pass the same content/configuration guards as output cells.
-    for chunk in cells.chunks(SIDE) {
-        encode(
-            &Map {
-                width: chunk.len() as i32,
-                height: 1,
-                cells: chunk.to_vec(),
-                spawns: vec![],
-            },
-            content,
-        )
-        .context("validate reviewed dictionary")?;
+    let mut validated_objects = BTreeSet::new();
+    for c in &cells {
+        entry(c, content, &mut validated_objects, lava).context("validate reviewed dictionary")?;
     }
     Ok(cells)
+}
+fn lava_choice(pixels: usize, support: &str) -> serde_json::Value {
+    serde_json::json!({"rgb":"d44a00","pixels":pixels,"support_sha256_le_u32":support,
+        "cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}})
+}
+fn strict_source_paths(root: &Path, paths: &[&str]) -> Result<()> {
+    let normalized: PathBuf = root.components().collect();
+    ensure!(
+        !root.as_os_str().is_empty()
+            && normalized.as_os_str() == root.as_os_str()
+            && root
+                .components()
+                .all(|c| matches!(c, Component::RootDir | Component::Normal(_))),
+        "noncanonical strict-source root {}",
+        root.display()
+    );
+    let absolute = std::path::absolute(root)?;
+    for ancestor in absolute.ancestors() {
+        ensure!(
+            !ancestor.is_symlink(),
+            "strict-source symlink ancestor {}",
+            ancestor.display()
+        );
+    }
+    for &relative in paths {
+        let path = Path::new(relative);
+        let normalized: PathBuf = path.components().collect();
+        ensure!(
+            normalized.to_str() == Some(relative)
+                && path.components().all(|c| matches!(c, Component::Normal(_)))
+                && !relative.is_empty(),
+            "noncanonical strict-source path {relative}"
+        );
+        safe_path(&absolute, relative)?;
+    }
+    Ok(())
+}
+fn strict_keys(value: &serde_json::Value, expected: &[&str], label: &str) -> Result<()> {
+    let actual = value
+        .as_object()
+        .with_context(|| format!("strict-source {label} must be an object"))?;
+    ensure!(
+        actual.len() == expected.len() && expected.iter().all(|k| actual.contains_key(*k)),
+        "strict-source {label} keys: expected {expected:?}, actual {:?}",
+        actual.keys().collect::<Vec<_>>()
+    );
+    Ok(())
+}
+struct UniqueJson;
+impl<'de> serde::Deserialize<'de> for UniqueJson {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        d.deserialize_any(Self)
+    }
+}
+impl<'de> serde::de::Visitor<'de> for UniqueJson {
+    type Value = Self;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("JSON with unique object keys")
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(
+        self,
+        mut map: A,
+    ) -> std::result::Result<Self, A::Error> {
+        let mut keys = std::collections::BTreeSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !keys.insert(key.clone()) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate JSON key {key}"
+                )));
+            }
+            map.next_value::<Self>()?;
+        }
+        Ok(Self)
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(
+        self,
+        mut seq: A,
+    ) -> std::result::Result<Self, A::Error> {
+        while seq.next_element::<Self>()?.is_some() {}
+        Ok(Self)
+    }
+    fn visit_bool<E: serde::de::Error>(self, _: bool) -> std::result::Result<Self, E> {
+        Ok(Self)
+    }
+    fn visit_i64<E: serde::de::Error>(self, _: i64) -> std::result::Result<Self, E> {
+        Ok(Self)
+    }
+    fn visit_u64<E: serde::de::Error>(self, _: u64) -> std::result::Result<Self, E> {
+        Ok(Self)
+    }
+    fn visit_f64<E: serde::de::Error>(self, _: f64) -> std::result::Result<Self, E> {
+        Err(E::custom("floating-point source metadata"))
+    }
+    fn visit_str<E: serde::de::Error>(self, _: &str) -> std::result::Result<Self, E> {
+        Ok(Self)
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Self, E> {
+        Ok(Self)
+    }
+}
+fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecipe) -> Result<()> {
+    ensure!(
+        recipe.schema == 4
+            || (recipe.schema == 3
+                && matches!(recipe.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)),
+        "strict source audit requires an admitted source identity"
+    );
+    let _: UniqueJson = serde_json::from_slice(policy).context("strict-source policy keys")?;
+    let _: UniqueJson =
+        serde_json::from_slice(annotations).context("strict-source annotations keys")?;
+    let policy: serde_json::Value = serde_json::from_slice(policy)?;
+    let annotations: serde_json::Value = serde_json::from_slice(annotations)?;
+    let mut keys = vec![
+        "schema",
+        "selected_client",
+        "source_sha256",
+        "transform",
+        "audit",
+    ];
+    if recipe.id == "classic-world-01-reconstruction" {
+        keys.push("world01_lava");
+        ensure!(
+            policy["world01_lava"] == lava_choice(703, WORLD01_LAVA_SUPPORT),
+            "schema 4 World1 requires its exact703-cell lava choice"
+        );
+    }
+    if recipe.id == WORLD05_ID && policy.get("world05_lava").is_some() {
+        keys.push("world05_lava");
+        let mut choice = lava_choice(112, WORLD05_LAVA_SUPPORT);
+        choice["cell"]["terrain"] = 0.into();
+        ensure!(
+            policy["world05_lava"] == choice,
+            "World5 requires its exact112-cell terrain0 lava capability"
+        );
+    }
+    if recipe.id == WORLD09_ID && policy.get("world09_lava").is_some() {
+        keys.push("world09_lava");
+        ensure!(
+            policy["world09_lava"] == lava_choice(426, WORLD09_LAVA_SUPPORT),
+            "World9 requires its exact426-cell lava capability"
+        );
+    }
+    if recipe.id == WORLD11_ID && policy.get("world11_lava").is_some() {
+        keys.push("world11_lava");
+        let mut choice = lava_choice(577, WORLD11_LAVA_SUPPORT);
+        choice["cell"]["terrain"] = 0.into();
+        ensure!(
+            policy["world11_lava"] == choice,
+            "World11 requires its exact577-cell terrain0 lava capability"
+        );
+    }
+    strict_keys(&policy, &keys, "policy")?;
+    strict_keys(
+        &policy["audit"],
+        &["kind", "supports", "pixels"],
+        "support audit",
+    )?;
+    strict_keys(
+        &policy["transform"],
+        &[
+            "kind",
+            "source_dimensions",
+            "target_dimensions",
+            "mapping",
+            "historical_coordinates",
+            "status",
+        ],
+        "transform",
+    )?;
+    strict_keys(
+        &annotations,
+        &["source_sha256", "policy_sha256", "transform", "unknown"],
+        "annotations",
+    )?;
+    ensure!(
+        policy["audit"]["pixels"].as_u64() == Some((recipe.width * recipe.height) as u64),
+        "strict-source support audit must cover every source cell"
+    );
+    for row in annotations["unknown"]
+        .as_array()
+        .context("strict-source support rows required")?
+    {
+        strict_keys(
+            row,
+            &[
+                "support",
+                "pixels",
+                "support_sha256",
+                "status",
+                "reason",
+                "ground",
+                "object",
+                "config",
+                "terrain",
+                "region",
+            ],
+            "support row",
+        )?;
+    }
+    Ok(())
 }
 fn hashed_input(root: &Path, path: &str, expected: &str, bound: usize) -> Result<Vec<u8>> {
     let bytes = bounded_read(&safe_path(root, path)?, bound)?;
@@ -720,11 +1412,32 @@ fn hashed_input(root: &Path, path: &str, expected: &str, bound: usize) -> Result
     );
     Ok(bytes)
 }
+#[cfg(test)]
 fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Result<()> {
+    audit_scoped(policy, annotations, provenance, None)
+}
+fn audit_scoped(
+    policy: &[u8],
+    annotations: &[u8],
+    provenance: &ImageProvenance,
+    source_local: Option<[usize; 2]>,
+) -> Result<()> {
+    let cell_count = match source_local {
+        Some([width, height]) => width * height,
+        None => CELLS,
+    };
     let policy: serde_json::Value =
         serde_json::from_slice(policy).context("parse source policy")?;
     let annotations: serde_json::Value =
         serde_json::from_slice(annotations).context("parse source annotations")?;
+    if let Some(dimensions) = source_local {
+        ensure!(
+            policy["schema"] == 2
+                && policy["transform"] == source_local_transform(dimensions)
+                && annotations["transform"] == source_local_transform(dimensions),
+            "source-local-v1 requires exact policy/annotations transform and support audit schema 2"
+        );
+    }
     let (support_key, expected_count, expected_pixels) = match policy["schema"].as_u64() {
         Some(1) => ("component", 101, 20571),
         Some(2) => {
@@ -739,7 +1452,7 @@ fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Res
                 .context("invalid reviewed support count")?;
             let pixels = policy["audit"]["pixels"]
                 .as_u64()
-                .filter(|n| (1..=CELLS as u64).contains(n))
+                .filter(|n| (1..=cell_count as u64).contains(n))
                 .context("invalid reviewed support total")?;
             ("support", count, pixels)
         }
@@ -772,9 +1485,23 @@ fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Res
             "unreviewed UNKNOWN component {}",
             i + 1
         );
+        if source_local.is_some() {
+            // Metadata typing is not proof of a source-position/RGB/alpha partition.
+            let fields = ["ground", "object", "config", "terrain", "region"]
+                .into_iter()
+                .filter_map(|key| row.get(key).map(|value| (key.to_owned(), value.clone())))
+                .collect::<serde_json::Map<_, _>>();
+            let _: ReviewedCell = serde_json::from_value(serde_json::Value::Object(fields))
+                .with_context(|| {
+                    format!(
+                        "source-local support {} requires all five typed fields",
+                        i + 1
+                    )
+                })?;
+        }
         pixels += row["pixels"]
             .as_u64()
-            .filter(|p| *p > 0 && *p <= CELLS as u64)
+            .filter(|p| *p > 0 && *p <= cell_count as u64)
             .context("invalid UNKNOWN support size")?;
     }
     ensure!(
@@ -783,8 +1510,14 @@ fn audit(policy: &[u8], annotations: &[u8], provenance: &ImageProvenance) -> Res
     );
     Ok(())
 }
-fn indexed_map(raw: &[u8], dictionary: &[Cell]) -> Result<Map> {
-    ensure!(raw.len() == CELLS * 2, "invalid reviewed index length");
+fn indexed_map(raw: &[u8], dictionary: &[Cell], dimensions: [usize; 2]) -> Result<Map> {
+    let [width, height] = dimensions;
+    let bytes = index_bytes(dimensions)?;
+    ensure!(
+        raw.len() == bytes,
+        "invalid reviewed index length for {dimensions:?}: expected {bytes}, actual {}",
+        raw.len()
+    );
     let cells = raw
         .chunks_exact(2)
         .enumerate()
@@ -793,20 +1526,38 @@ fn indexed_map(raw: &[u8], dictionary: &[Cell]) -> Result<Map> {
             dictionary.get(index).cloned().with_context(|| {
                 format!(
                     "UNKNOWN dictionary index {index} at {},{}",
-                    i % SIDE,
-                    i / SIDE
+                    i % width,
+                    i / width
                 )
             })
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(Map {
-        width: SIDE as i32,
-        height: SIDE as i32,
+        width: width as i32,
+        height: height as i32,
         cells,
         spawns: vec![],
     })
 }
-fn reviewed_map(root: &Path, recipe: &ReviewedRecipe, content: &Content) -> Result<Map> {
+fn index_bytes([width, height]: [usize; 2]) -> Result<usize> {
+    ensure!(
+        width > 0
+            && height > 0
+            && ((width <= SIDE && height <= SIDE) || [width, height] == [2100, 2100]),
+        "invalid reviewed dimensions {width}x{height}"
+    );
+    width
+        .checked_mul(height)
+        .and_then(|n| n.checked_mul(2))
+        .context("reviewed index byte count overflow")
+}
+fn reviewed_map(
+    root: &Path,
+    recipe: &ReviewedRecipe,
+    content: &Content,
+) -> Result<(Map, Option<ScopedLava>)> {
+    let dimensions = recipe.dimensions()?;
+    let bytes = index_bytes(dimensions)?;
     let inputs = &recipe.inputs;
     let cells = hashed_input(
         root,
@@ -814,20 +1565,22 @@ fn reviewed_map(root: &Path, recipe: &ReviewedRecipe, content: &Content) -> Resu
         &inputs.dictionary.sha256,
         64 * 1024,
     )?;
-    let dictionary = dictionary(&cells, content)?;
-    let p = &recipe.provenance;
-    let policy = hashed_input(root, &p.policy.path, &p.policy.sha256, 64 * 1024)?;
-    let annotations = hashed_input(root, &p.annotations.path, &p.annotations.sha256, 64 * 1024)?;
-    audit(&policy, &annotations, p)?;
+    let policy = recipe.audit_inputs(root).with_context(|| {
+        format!(
+            "{} reviewed-cells-v1 schema {} source {}",
+            recipe.id, recipe.schema, recipe.provenance.source_sha256
+        )
+    })?;
+    let policy: serde_json::Value = serde_json::from_slice(&policy)?;
+    let lava = ScopedLava::for_recipe(recipe, &policy, content)?;
+    let dictionary = match lava.as_ref() {
+        Some(lava) => dictionary_scoped(&cells, content, Some(lava))?,
+        None => dictionary(&cells, content)?,
+    };
     let indices = &inputs.indices;
-    let compressed = hashed_input(root, &indices.path, &indices.sha256, 2 * CELLS + 4096)?;
-    let raw = inflate(
-        &compressed,
-        2 * CELLS,
-        2 * CELLS + 4096,
-        &indices.expanded_sha256,
-    )?;
-    indexed_map(&raw, &dictionary)
+    let compressed = hashed_input(root, &indices.path, &indices.sha256, bytes + 4096)?;
+    let raw = inflate(&compressed, bytes, bytes + 4096, &indices.expanded_sha256)?;
+    Ok((indexed_map(&raw, &dictionary, dimensions)?, lava))
 }
 
 pub(crate) fn run(args: &[String]) -> Result<bool> {
@@ -864,18 +1617,25 @@ pub(crate) fn run(args: &[String]) -> Result<bool> {
         );
     }
     let content = Content::load(&data).context("load selected-client content")?;
-    let (map, mainland) = match recipe {
+    let (map, mainland, lava) = match recipe {
         Recipe::ClassicV1(r) => {
             let e = load_layer(&root, &r.layers.elevation)?;
             let m = load_layer(&root, &r.layers.moisture)?;
             let o = load_layer(&root, &r.layers.overrides)?;
             let (map, mainland) = assemble(&e, &m, &o, r.width, r.height, r.scenery_seed)?;
-            (map, Some(mainland))
+            (map, Some(mainland), None)
         }
-        Recipe::ReviewedCellsV1(r) => (reviewed_map(&root, r, &content)?, None),
+        Recipe::ReviewedCellsV1(r) => {
+            let (map, lava) =
+                reviewed_map(&root, r, &content).with_context(|| recipe.contract())?;
+            (map, None, lava)
+        }
     };
     let prepared = started.elapsed();
-    let (bytes, dictionary) = encode(&map, &content)?;
+    let (bytes, dictionary) = match recipe {
+        Recipe::ReviewedCellsV1(r) => encode_reviewed(&map, &content, lava.as_ref(), Some(r))?,
+        Recipe::ClassicV1(_) => encode(&map, &content)?,
+    };
     let output = safe_path(&root, recipe.output())?;
     if check {
         ensure!(
@@ -924,7 +1684,1133 @@ mod tests {
     }
 
     fn reviewed_value() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../data/realms/world02.json")).unwrap()
+        // Legacy parser fixtures must not inherit a published Realm's changing extent.
+        serde_json::from_str(include_str!("prepare-fixtures/legacy-world02-recipe.json")).unwrap()
+    }
+
+    fn legacy_audit_values() -> (ReviewedRecipe, serde_json::Value, serde_json::Value) {
+        let Recipe::ReviewedCellsV1(mut r) = recipe(reviewed_value()).unwrap() else {
+            panic!("legacy reviewed fixture");
+        };
+        let policy = serde_json::json!({"schema":1,"selected_client":"123.5.1",
+            "source_sha256":r.provenance.source_sha256,
+            "transform":{"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN",
+                "source_dimensions":[2100,2100],"tile":"source_pixel-26"}});
+        r.provenance.policy.sha256 = sha256(&serde_json::to_vec(&policy).unwrap());
+        let rows = (1..=101)
+            .map(|component| {
+                serde_json::json!({
+            "component":component,"pixels":if component == 101 {20471} else {1},
+            "support_sha256":"0".repeat(64),"status":"REVIEWED_RECONSTRUCTION",
+            "reason":"Synthetic legacy audit only","ground":190,"object":null,
+            "config":"","terrain":11,"region":0})
+            })
+            .collect::<Vec<_>>();
+        let annotations = serde_json::json!({"source_sha256":r.provenance.source_sha256,
+            "policy_sha256":r.provenance.policy.sha256,"transform":policy["transform"],
+            "unknown":rows});
+        (r, policy, annotations)
+    }
+
+    // These metadata and cell fixtures are synthetic, not approved source payloads.
+    fn source_local_values(
+        index: usize,
+    ) -> (serde_json::Value, serde_json::Value, serde_json::Value) {
+        let (id, source, side) = SOURCE_LOCAL_IDENTITIES[index];
+        let mut value = reviewed_value();
+        value["schema"] = serde_json::json!(3);
+        value["id"] = serde_json::json!(id);
+        value["output"] = serde_json::json!(format!("{id}.wmap"));
+        value["width"] = serde_json::json!(side);
+        value["height"] = serde_json::json!(side);
+        value["provenance"]["source_sha256"] = serde_json::json!(source);
+        let policy = serde_json::json!({
+            "schema":2, "selected_client":"123.5.1", "source_sha256":source,
+            "transform":source_local_transform([side, side]),
+            "audit":{"kind":"reviewed-supports-v1","supports":1,"pixels":side * side}
+        });
+        value["provenance"]["policy"]["sha256"] =
+            serde_json::json!(sha256(&serde_json::to_vec(&policy).unwrap()));
+        let annotations = serde_json::json!({
+            "source_sha256":source, "policy_sha256":value["provenance"]["policy"]["sha256"],
+            "transform":source_local_transform([side, side]),
+            "unknown":[{"support":1,"pixels":side * side,"support_sha256":"0".repeat(64),
+                "status":"REVIEWED_RECONSTRUCTION","reason":"Synthetic geometry test only",
+                "ground":190,"object":null,"config":"","terrain":11,"region":0}]
+        });
+        value["provenance"]["annotations"]["sha256"] =
+            serde_json::json!(sha256(&serde_json::to_vec(&annotations).unwrap()));
+        (value, policy, annotations)
+    }
+    fn full_source_values(
+        index: usize,
+    ) -> (serde_json::Value, serde_json::Value, serde_json::Value) {
+        let (id, source, side) = FULL_SOURCE_COMPAT_IDENTITIES[index];
+        let (mut value, mut policy, mut annotations) = source_local_values(4);
+        value["schema"] = serde_json::json!(4);
+        value["id"] = serde_json::json!(id);
+        value["output"] = serde_json::json!(format!("{id}.wmap"));
+        value["width"] = serde_json::json!(side);
+        value["height"] = serde_json::json!(side);
+        value["provenance"]["source_sha256"] = serde_json::json!(source);
+        policy["source_sha256"] = serde_json::json!(source);
+        if index == 0 {
+            policy["world01_lava"] = lava_choice(703, WORLD01_LAVA_SUPPORT);
+        }
+        annotations["source_sha256"] = serde_json::json!(source);
+        bind_audit(&mut value, &policy, &mut annotations);
+        (value, policy, annotations)
+    }
+    fn bind_audit(
+        value: &mut serde_json::Value,
+        policy: &serde_json::Value,
+        annotations: &mut serde_json::Value,
+    ) {
+        value["provenance"]["policy"]["sha256"] =
+            serde_json::json!(sha256(&serde_json::to_vec(policy).unwrap()));
+        annotations["policy_sha256"] = value["provenance"]["policy"]["sha256"].clone();
+        value["provenance"]["annotations"]["sha256"] =
+            serde_json::json!(sha256(&serde_json::to_vec(annotations).unwrap()));
+    }
+
+    #[test]
+    fn realm_prepare_full_source_compatibility_is_explicit_and_strict() {
+        let root =
+            std::env::temp_dir().join(format!("full-source-contract-{}", rand::random::<u64>()));
+        for i in 0..FULL_SOURCE_COMPAT_IDENTITIES.len() {
+            let (value, policy, annotations) = full_source_values(i);
+            write_source_local(&root, &value, &policy, &annotations);
+            let parsed = read_recipe(&root, "synthetic.json").unwrap();
+            assert_eq!(parsed.dimensions(), [2100, 2100]);
+            assert_eq!(
+                parsed.content_identity(),
+                Some([OBJECTS.to_owned(), GROUNDS.to_owned()])
+            );
+            for (j, (id, source, _)) in FULL_SOURCE_COMPAT_IDENTITIES.iter().enumerate() {
+                for (key, replacement) in [("id", *id), ("source", *source)] {
+                    let mut bad = value.clone();
+                    if key == "id" {
+                        bad["id"] = serde_json::json!(replacement);
+                        bad["output"] = serde_json::json!(format!("{replacement}.wmap"));
+                    } else {
+                        bad["provenance"]["source_sha256"] = serde_json::json!(replacement);
+                    }
+                    assert_eq!(recipe(bad).is_ok(), i == j);
+                }
+            }
+            for (field, replacement) in [("schema", 3), ("width", 2048), ("height", 2000)] {
+                let mut bad = value.clone();
+                bad[field] = serde_json::json!(replacement);
+                assert!(recipe(bad).is_err());
+            }
+            for mutation in 0..12 {
+                let mut v = value.clone();
+                let mut p = policy.clone();
+                let mut a = annotations.clone();
+                match mutation {
+                    0 => p["extra"] = serde_json::json!(true),
+                    1 => a["extra"] = serde_json::json!(true),
+                    2 => a["unknown"][0]["extra"] = serde_json::json!(true),
+                    3 => p["audit"]["pixels"] = serde_json::json!(4410000.0),
+                    4 => p["audit"]["supports"] = serde_json::json!(1.0),
+                    5 => a["unknown"][0]["pixels"] = serde_json::json!(4410000.0),
+                    6 => a["unknown"][0]["object"] = serde_json::json!(false),
+                    7 => {
+                        a["unknown"][0].as_object_mut().unwrap().remove("object");
+                    }
+                    8 => a["unknown"][0]["region"] = serde_json::json!(0.0),
+                    9 => p["audit"]["pixels"] = serde_json::json!(4410000 - 1),
+                    10 => p["world04_lava"] = serde_json::Value::Null,
+                    11 => p["transform"]["extra"] = serde_json::json!(true),
+                    _ => unreachable!(),
+                }
+                bind_audit(&mut v, &p, &mut a);
+                write_source_local(&root, &v, &p, &a);
+                assert!(
+                    read_recipe(&root, "synthetic.json").is_err(),
+                    "source {i} mutation {mutation}"
+                );
+            }
+        }
+        let (value, policy, annotations) = full_source_values(0);
+        let Recipe::ReviewedCellsV1(r) = recipe(value).unwrap() else {
+            panic!()
+        };
+        let p = serde_json::to_string(&policy).unwrap();
+        let a = serde_json::to_string(&annotations).unwrap();
+        for duplicate in [
+            p.replacen('{', "{\"schema\":2,", 1),
+            p.replace(
+                "\"kind\":\"reviewed-supports-v1\"",
+                "\"kind\":\"reviewed-supports-v1\",\"kind\":\"reviewed-supports-v1\"",
+            ),
+        ] {
+            assert!(
+                format!(
+                    "{:#}",
+                    strict_source_audit(duplicate.as_bytes(), a.as_bytes(), &r).unwrap_err()
+                )
+                .contains("duplicate JSON key")
+            );
+        }
+        let duplicate = a.replace("\"ground\":190", "\"ground\":190,\"ground\":190");
+        assert!(
+            format!(
+                "{:#}",
+                strict_source_audit(p.as_bytes(), duplicate.as_bytes(), &r).unwrap_err()
+            )
+            .contains("duplicate JSON key")
+        );
+        let content = Content::load(Path::new("data")).unwrap();
+        for index in 1..3 {
+            let Recipe::ReviewedCellsV1(r) = recipe(full_source_values(index).0).unwrap() else {
+                panic!()
+            };
+            assert!(
+                ScopedLava::for_recipe(&r, &full_source_values(index).1, &content)
+                    .unwrap()
+                    .is_none()
+            );
+            let hazard = serde_json::to_vec(&serde_json::json!([
+                {"ground":244,"object":null,"config":"","terrain":1,"region":0}]))
+            .unwrap();
+            assert!(dictionary_scoped(&hazard, &content, None).is_err());
+        }
+        for relative in ["./x", "../x", "a/./x", "a//x", "a/x/", "/x", ""] {
+            assert!(
+                strict_source_paths(&root, &[relative]).is_err(),
+                "{relative}"
+            );
+        }
+        #[cfg(unix)]
+        {
+            let alias = root.with_extension("link");
+            std::os::unix::fs::symlink(&root, &alias).unwrap();
+            assert!(strict_source_paths(&alias, &["synthetic.json"]).is_err());
+            assert!(strict_source_paths(&alias.join("descendant"), &["x"]).is_err());
+            std::fs::remove_file(alias).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn write_json(root: &Path, relative: &str, value: &serde_json::Value) {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(value).unwrap()).unwrap();
+    }
+    fn write_source_local(
+        root: &Path,
+        value: &serde_json::Value,
+        policy: &serde_json::Value,
+        annotations: &serde_json::Value,
+    ) {
+        write_json(root, "synthetic.json", value);
+        for (key, data) in [("policy", policy), ("annotations", annotations)] {
+            write_json(
+                root,
+                value["provenance"][key]["path"].as_str().unwrap(),
+                data,
+            );
+        }
+    }
+
+    #[test]
+    fn realm_prepare_source_local_finite_geometry_contracts_and_identity_negatives() {
+        let root =
+            std::env::temp_dir().join(format!("source-local-metadata-{}", rand::random::<u64>()));
+        for (index, &(_, _, side)) in SOURCE_LOCAL_IDENTITIES.iter().enumerate() {
+            let (value, policy, annotations) = source_local_values(index);
+            write_source_local(&root, &value, &policy, &annotations);
+            assert_eq!(
+                read_recipe(&root, "synthetic.json").unwrap().dimensions(),
+                [side, side]
+            );
+            for (field, invalid) in [
+                ("schema", serde_json::json!(2)),
+                ("schema", serde_json::json!(4)),
+                ("profile", serde_json::json!("classic-v1")),
+                ("orientation", serde_json::json!("x-major")),
+            ] {
+                let mut bad = value.clone();
+                bad[field] = invalid;
+                assert!(recipe(bad).is_err(), "{field}");
+            }
+            for field in ["width", "height"] {
+                for invalid in [
+                    0i64,
+                    -1,
+                    side as i64 - 1,
+                    side as i64 + 1,
+                    2048,
+                    if side == 2000 { 2100 } else { 2000 },
+                    i64::MAX,
+                ] {
+                    let mut bad = value.clone();
+                    bad[field] = serde_json::json!(invalid);
+                    assert!(recipe(bad).is_err(), "{field} {invalid}");
+                }
+            }
+            for id in [
+                "unknown-source",
+                "classic-world-01-reconstruction",
+                "classic-world-02-reconstruction",
+                "classic-world-03-reconstruction",
+            ] {
+                let mut bad = value.clone();
+                bad["id"] = serde_json::json!(id);
+                bad["output"] = serde_json::json!(format!("{id}.wmap"));
+                assert!(recipe(bad).is_err(), "{id}");
+            }
+            for &(other_id, other_hash, _) in &SOURCE_LOCAL_IDENTITIES {
+                if other_id == value["id"].as_str().unwrap() {
+                    continue;
+                }
+                let mut bad = value.clone();
+                bad["id"] = serde_json::json!(other_id);
+                bad["output"] = serde_json::json!(format!("{other_id}.wmap"));
+                assert!(recipe(bad).is_err(), "cross-source ID {other_id}");
+                let mut bad = value.clone();
+                bad["provenance"]["source_sha256"] = serde_json::json!(other_hash);
+                assert!(recipe(bad).is_err(), "cross-source hash {other_hash}");
+            }
+            for (parent, field) in [
+                ("content", "objects"),
+                ("content", "grounds"),
+                ("provenance", "source_sha256"),
+            ] {
+                let mut bad = value.clone();
+                bad[parent][field] = serde_json::json!("0".repeat(64));
+                assert!(recipe(bad).is_err(), "{parent}.{field}");
+            }
+            let mut padded = value.clone();
+            padded["schema"] = serde_json::json!(2);
+            padded["width"] = serde_json::json!(2048);
+            padded["height"] = serde_json::json!(2048);
+            assert!(recipe(padded.clone()).is_err());
+            padded["id"] = serde_json::json!("source-hash-disguise");
+            padded["output"] = serde_json::json!("source-hash-disguise.wmap");
+            assert!(recipe(padded).is_err());
+            for key in ["policy", "annotations"] {
+                let mut bad = value.clone();
+                bad["provenance"][key]["sha256"] = serde_json::json!("0".repeat(64));
+                write_json(&root, "synthetic.json", &bad);
+                assert!(read_recipe(&root, "synthetic.json").is_err(), "{key} hash");
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn realm_prepare_source_local_identity_cannot_hide_in_classic_profile() {
+        let legacy = serde_json::json!({
+            "profile":"classic-v1", "schema":1, "id":"legacy-classic-control", "output":"legacy-classic-control.wmap",
+            "width":2048, "height":2048, "orientation":"x-major", "scenery_seed":12351,
+            "content":{"objects":OBJECTS,"grounds":GROUNDS},
+            "layers":{"elevation":{"path":"e.z","sha256":"0".repeat(64)},"moisture":{"path":"m.z","sha256":"0".repeat(64)},"overrides":{"path":"o.z","sha256":"0".repeat(64)}},
+            "provenance":{"source_url":"https://example.invalid/source","source_sha256":"0".repeat(64),"exporter_url":"https://example.invalid/exporter","exporter_sha256":"0".repeat(64),"emulator":"synthetic","mode":"Perlin","seed_variant":"synthetic","status":"Synthetic identity test only"}
+        });
+        recipe(legacy.clone()).unwrap();
+        for (id, hash, _) in SOURCE_LOCAL_IDENTITIES {
+            let mut bad = legacy.clone();
+            bad["id"] = serde_json::json!(id);
+            bad["output"] = serde_json::json!(format!("{id}.wmap"));
+            assert!(recipe(bad).is_err(), "reserved ID {id}");
+            let mut bad = legacy.clone();
+            bad["provenance"]["source_sha256"] = serde_json::json!(hash);
+            assert!(recipe(bad).is_err(), "reserved hash {hash}");
+        }
+    }
+
+    #[test]
+    fn realm_prepare_source_local_audit_exact_transform_and_explicit_fields() {
+        let (value, policy, annotations) = source_local_values(0);
+        let Recipe::ReviewedCellsV1(r) = recipe(value).unwrap() else {
+            panic!()
+        };
+        let check = |p: &serde_json::Value, a: &serde_json::Value| {
+            audit_scoped(
+                &serde_json::to_vec(p).unwrap(),
+                &serde_json::to_vec(a).unwrap(),
+                &r.provenance,
+                Some([r.width, r.height]),
+            )
+        };
+        check(&policy, &annotations).unwrap();
+        for key in source_local_transform([r.width, r.height])
+            .as_object()
+            .unwrap()
+            .keys()
+        {
+            let mut p = policy.clone();
+            let mut a = annotations.clone();
+            p["transform"].as_object_mut().unwrap().remove(key);
+            a["transform"] = p["transform"].clone();
+            assert!(check(&p, &a).is_err(), "missing {key}");
+            p["transform"][key] = serde_json::json!("CHANGED");
+            a["transform"] = p["transform"].clone();
+            assert!(check(&p, &a).is_err(), "changed {key}");
+        }
+        let mut p = policy.clone();
+        let mut a = annotations.clone();
+        p["transform"]["padding"] = serde_json::json!(0);
+        a["transform"] = p["transform"].clone();
+        assert!(check(&p, &a).is_err());
+        for (field, invalid) in [
+            ("selected_client", serde_json::json!("123.5.0")),
+            ("source_sha256", serde_json::json!("0".repeat(64))),
+            ("schema", serde_json::json!(1)),
+        ] {
+            let mut p = policy.clone();
+            p[field] = invalid;
+            assert!(check(&p, &annotations).is_err(), "{field}");
+        }
+        for (field, invalid) in [
+            ("object", serde_json::json!("UNKNOWN")),
+            ("config", serde_json::json!(null)),
+            ("region", serde_json::json!(256)),
+            ("ground", serde_json::json!(256)),
+            ("terrain", serde_json::json!(13)),
+            ("status", serde_json::json!("UNKNOWN")),
+        ] {
+            let mut a = annotations.clone();
+            a["unknown"][0][field] = invalid;
+            assert!(check(&policy, &a).is_err(), "{field}");
+        }
+        for field in ["ground", "object", "config", "terrain", "region"] {
+            let mut a = annotations.clone();
+            a["unknown"][0].as_object_mut().unwrap().remove(field);
+            assert!(check(&policy, &a).is_err(), "missing {field}");
+        }
+        for count in [4_000_001, CELLS] {
+            let mut p = policy.clone();
+            let mut a = annotations.clone();
+            p["audit"]["pixels"] = serde_json::json!(count);
+            a["unknown"][0]["pixels"] = serde_json::json!(count);
+            assert!(check(&p, &a).is_err());
+            assert!(check(&policy, &a).is_err());
+        }
+    }
+
+    #[test]
+    fn realm_prepare_source_local_synthetic_indices_stride_length_and_stream() {
+        let dimensions = [2000, 2000];
+        let size = index_bytes(dimensions).unwrap();
+        assert_eq!(size, 8_000_000);
+        let dictionary: Vec<_> = (0..6)
+            .map(|region| Cell {
+                ground: 190,
+                object: None,
+                config: String::new(),
+                terrain: 11,
+                region,
+            })
+            .collect();
+        let mut raw = vec![0; size];
+        let positions = [0, 1999, 2000, 3_998_000, 3_999_999];
+        for (n, i) in positions.into_iter().enumerate() {
+            raw[i * 2..i * 2 + 2].copy_from_slice(&(n as u16 + 1).to_le_bytes());
+        }
+        let map = indexed_map(&raw, &dictionary, dimensions).unwrap();
+        assert_eq!([map.width, map.height], [2000, 2000]);
+        assert_eq!(map.cells.len(), 4_000_000);
+        for (n, i) in positions.into_iter().enumerate() {
+            assert_eq!(
+                map.cell((i % 2000) as f32, (i / 2000) as f32)
+                    .unwrap()
+                    .region,
+                n as u8 + 1
+            );
+        }
+        assert!(map.cell(2000., 1999.).is_none());
+        assert!(map.cell(1999., 2000.).is_none());
+        drop(map);
+        for bad in [
+            &raw[..size - 1],
+            &raw[..size - 2],
+            &[raw.as_slice(), &[0, 0]].concat(),
+            &vec![0; CELLS * 2],
+        ] {
+            assert!(indexed_map(bad, &dictionary, dimensions).is_err());
+        }
+        let bytes = zipped(&raw);
+        let hash = sha256(&raw);
+        assert_eq!(inflate(&bytes, size, size + 4096, &hash).unwrap(), raw);
+        for bad in [
+            bytes[..bytes.len() - 1].to_vec(),
+            [bytes.as_slice(), &[0]].concat(),
+            [bytes.as_slice(), bytes.as_slice()].concat(),
+            zipped(&raw[..size - 1]),
+            zipped(&[raw.as_slice(), &[0, 0]].concat()),
+            vec![0; size + 4097],
+        ] {
+            assert!(inflate(&bad, size, size + 4096, &hash).is_err());
+        }
+        assert!(inflate(&bytes, size, size + 4096, &"0".repeat(64)).is_err());
+        raw[size - 2..].copy_from_slice(&6u16.to_le_bytes());
+        assert!(
+            indexed_map(&raw, &dictionary, dimensions)
+                .unwrap_err()
+                .to_string()
+                .contains("6 at 1999,1999")
+        );
+    }
+
+    #[test]
+    fn realm_prepare_world06_exact_extent_stride_stream_and_scope() {
+        let dimensions = [2100, 2100];
+        let size = index_bytes(dimensions).unwrap();
+        assert_eq!(size, 8_820_000);
+        for bad in [
+            [2100, 2048],
+            [2048, 2100],
+            [2099, 2100],
+            [2101, 2100],
+            [2100, 2101],
+        ] {
+            assert!(index_bytes(bad).is_err());
+        }
+        let content = Content::load(Path::new("data")).unwrap();
+        let dictionary = dictionary(
+            &serde_json::to_vec(&serde_json::json!([
+                {"ground":190,"object":null,"config":"","terrain":11,"region":0},
+                {"ground":1,"object":null,"config":"","terrain":1,"region":0},
+                {"ground":70,"object":398,"config":"size:140","terrain":2,"region":0},
+                {"ground":86,"object":6175,"config":"","terrain":3,"region":0},
+                {"ground":173,"object":354,"config":"","terrain":4,"region":0},
+                {"ground":70,"object":404,"config":"size:120","terrain":5,"region":0}
+            ]))
+            .unwrap(),
+            &content,
+        )
+        .unwrap();
+        let positions = [0, 2099, 2100, 4_407_900, 4_409_999];
+        let mut raw = vec![0; size];
+        for (n, i) in positions.into_iter().enumerate() {
+            raw[i * 2..i * 2 + 2].copy_from_slice(&(n as u16 + 1).to_le_bytes());
+        }
+        let map = indexed_map(&raw, &dictionary, dimensions).unwrap();
+        assert_eq!(map.cells.len(), 4_410_000);
+        for (n, i) in positions.into_iter().enumerate() {
+            assert_eq!(
+                map.cell((i % 2100) as f32, (i / 2100) as f32)
+                    .unwrap()
+                    .terrain,
+                n as u8 + 1
+            );
+        }
+        assert!(map.cell(2100., 2099.).is_none());
+        assert!(map.cell(2099., 2100.).is_none());
+        let (value, policy, annotations) = source_local_values(4);
+        let Recipe::ReviewedCellsV1(r) = recipe(value.clone()).unwrap() else {
+            panic!()
+        };
+        audit_scoped(
+            &serde_json::to_vec(&policy).unwrap(),
+            &serde_json::to_vec(&annotations).unwrap(),
+            &r.provenance,
+            Some(dimensions),
+        )
+        .unwrap();
+        let mut bad_policy = policy.clone();
+        let mut bad_annotations = annotations.clone();
+        bad_policy["transform"] = source_local_transform([2000, 2000]);
+        bad_annotations["transform"] = bad_policy["transform"].clone();
+        assert!(
+            audit_scoped(
+                &serde_json::to_vec(&bad_policy).unwrap(),
+                &serde_json::to_vec(&bad_annotations).unwrap(),
+                &r.provenance,
+                Some(dimensions)
+            )
+            .is_err()
+        );
+        bad_policy = policy.clone();
+        bad_annotations = annotations.clone();
+        bad_policy["audit"]["pixels"] = serde_json::json!(4_410_001);
+        bad_annotations["unknown"][0]["pixels"] = serde_json::json!(4_410_001);
+        assert!(
+            audit_scoped(
+                &serde_json::to_vec(&bad_policy).unwrap(),
+                &serde_json::to_vec(&bad_annotations).unwrap(),
+                &r.provenance,
+                Some(dimensions)
+            )
+            .is_err()
+        );
+        for invalid in [serde_json::json!(2100.0), serde_json::json!(true)] {
+            let mut bad = value.clone();
+            bad["width"] = invalid;
+            assert!(recipe(bad).is_err());
+        }
+        let (bytes, _) = encode_reviewed(&map, &content, None, Some(&r)).unwrap();
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, None, Some(&r)).unwrap().0
+        );
+        assert!(encode(&map, &content).is_err());
+        assert!(Map::decode_cells(&bytes, &content).is_err());
+        assert!(Map::decode_realm_cells(&bytes, &content, [2000, 2000]).is_err());
+        let decoded = Map::decode_realm_cells(&bytes, &content, dimensions).unwrap();
+        assert_eq!([decoded.width, decoded.height], [2100, 2100]);
+        assert_eq!(decoded.cells.len(), map.cells.len());
+        for (a, b) in map.cells.iter().zip(&decoded.cells) {
+            assert_eq!(
+                (a.ground, a.object, &a.config, a.terrain, a.region),
+                (b.ground, b.object, &b.config, b.terrain, b.region)
+            );
+        }
+        drop(map);
+        drop(decoded);
+        for bad in [
+            &raw[..size - 1],
+            &raw[..size - 2],
+            &[raw.as_slice(), &[0, 0]].concat(),
+            &vec![0; CELLS * 2],
+        ] {
+            assert!(indexed_map(bad, &dictionary, dimensions).is_err());
+        }
+        let compressed = zipped(&raw);
+        let hash = sha256(&raw);
+        assert_eq!(inflate(&compressed, size, size + 4096, &hash).unwrap(), raw);
+        for bad in [
+            compressed[..compressed.len() - 1].to_vec(),
+            [compressed.as_slice(), &[0]].concat(),
+            [compressed.as_slice(), compressed.as_slice()].concat(),
+            zipped(&raw[..size - 1]),
+        ] {
+            assert!(inflate(&bad, size, size + 4096, &hash).is_err());
+        }
+        raw[size - 2..].copy_from_slice(&6u16.to_le_bytes());
+        assert!(
+            indexed_map(&raw, &dictionary, dimensions)
+                .unwrap_err()
+                .to_string()
+                .contains("6 at 2099,2099")
+        );
+    }
+
+    #[test]
+    fn realm_source_open_source_local_synthetic_shape_policy_and_baseline_rejection() {
+        source_local_open(0);
+    }
+
+    #[test]
+    fn realm_source_open_world06_synthetic_shape_policy_and_baseline_rejection() {
+        source_local_open(4);
+    }
+
+    #[test]
+    fn realm_source_open_world05_synthetic_shape_policy_and_baseline_rejection() {
+        source_local_open(5);
+    }
+
+    #[test]
+    fn realm_source_open_remaining_2100_synthetic_shape_policy_and_baseline_rejection() {
+        for index in 6..SOURCE_LOCAL_IDENTITIES.len() {
+            source_local_open(index);
+        }
+    }
+
+    #[test]
+    fn realm_source_open_world04_lava_exact_support_and_loaded_xml_identity() {
+        source_local_open_scoped(0, true);
+    }
+
+    #[test]
+    fn realm_source_open_world05_raw_lava_requires_capability() {
+        let (value, policy, annotations) = source_local_values(5);
+        let root = std::env::temp_dir().join(format!("source5-raw-lava-{}", rand::random::<u64>()));
+        let realms = root.join("realms");
+        let content = Content::load(Path::new("data")).unwrap();
+        let cells = serde_json::json!([
+            {"ground":190,"object":null,"config":"","terrain":11,"region":0},
+            {"ground":190,"object":null,"config":"","terrain":1,"region":0},
+            {"ground":244,"object":null,"config":"","terrain":0,"region":0}
+        ]);
+        let mut indices = vec![0; 2100 * 2100 * 2];
+        indices[(1050 * 2100 + 1050) * 2] = 1;
+        indices[(42 * 2100 + 42) * 2] = 2;
+        let bytes = unchecked_loader_wmap(&cells, &indices, 2100, &content);
+        write_source_local(&realms, &value, &policy, &annotations);
+        std::fs::write(realms.join(value["output"].as_str().unwrap()), &bytes).unwrap();
+        write_json(
+            &root,
+            "realm-catalog.json",
+            &serde_json::json!([
+                {"kind":"reconstruction","recipe":"synthetic.json","sha256":sha256(&bytes)}
+            ]),
+        );
+        let sources = super::super::realms::sources(&root).unwrap();
+        let error = sources[0]
+            .open(&content)
+            .map(|_| ())
+            .expect_err("Source5 loader admitted bare lava without a capability")
+            .to_string();
+        assert!(error.contains("source-exact lava capability"), "{error}");
+        write_json(
+            &root,
+            "realm-catalog.json",
+            &serde_json::json!([
+                {"kind":"baseline","id":"classic-world-05-reconstruction",
+                 "path":format!("realms/{}", value["output"].as_str().unwrap()),"sha256":sha256(&bytes)}
+            ]),
+        );
+        assert!(super::super::realms::sources(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn realm_source_open_world05_lava_exact_support_and_loaded_xml_identity() {
+        source_open_case(source_local_values(5), Some(5));
+    }
+
+    #[test]
+    fn realm_source_open_world09_lava_exact_support_and_loaded_xml_identity() {
+        source_open_case(source_local_values(7), Some(9));
+    }
+
+    #[test]
+    fn realm_source_open_world11_lava_exact_support_and_loaded_xml_identity() {
+        source_open_case(source_local_values(8), Some(11));
+    }
+
+    fn source_local_open(index: usize) {
+        source_local_open_scoped(index, false);
+    }
+
+    fn source_local_open_scoped(index: usize, with_lava: bool) {
+        source_open_case(source_local_values(index), with_lava.then_some(4));
+    }
+
+    #[test]
+    fn realm_source_open_full_source_compatibility_and_source1_lava() {
+        for index in 0..FULL_SOURCE_COMPAT_IDENTITIES.len() {
+            source_open_case(full_source_values(index), (index == 0).then_some(1));
+        }
+    }
+
+    // Direct wire fixtures keep compiler refusals from masking loader regressions.
+    fn unchecked_loader_wmap(
+        cells: &serde_json::Value,
+        indices: &[u8],
+        side: usize,
+        content: &Content,
+    ) -> Vec<u8> {
+        let cells: Vec<ReviewedCell> = serde_json::from_value(cells.clone()).unwrap();
+        assert_eq!(indices.len(), side * side * 2);
+        let mut raw = (cells.len() as i16).to_le_bytes().to_vec();
+        for c in cells {
+            raw.extend((c.ground as i16).to_le_bytes());
+            let name = match c.object {
+                Some(kind) => content.get(kind).unwrap().name.as_str(),
+                None => "",
+            };
+            for text in [name, c.config.as_str()] {
+                assert!(text.len() < 128);
+                raw.push(text.len() as u8);
+                raw.extend(text.as_bytes());
+            }
+            raw.extend([c.terrain, c.region]);
+        }
+        raw.extend((side as i32).to_le_bytes());
+        raw.extend((side as i32).to_le_bytes());
+        raw.extend(indices);
+        zipped(&raw)
+    }
+
+    fn source_open_case(
+        (mut value, mut policy, mut annotations): (
+            serde_json::Value,
+            serde_json::Value,
+            serde_json::Value,
+        ),
+        lava_world: Option<u8>,
+    ) {
+        let side = value["width"].as_u64().unwrap() as usize;
+        let schema = value["schema"].as_u64().unwrap();
+        let root =
+            std::env::temp_dir().join(format!("source-local-open-{}", rand::random::<u64>()));
+        let realms = root.join("realms");
+        let mut cells = serde_json::json!([
+            {"ground":190,"object":null,"config":"","terrain":11,"region":0},
+            {"ground":190,"object":null,"config":"","terrain":1,"region":0}
+        ]);
+        let mut raw = vec![0; side * side * 2];
+        let source7_dark_panel = value["id"] == "classic-world-07-reconstruction";
+        if source7_dark_panel {
+            // Synthetic row-boundary sentinels do not claim actual panel membership.
+            for (n, ground) in [232, 25, 1].into_iter().enumerate() {
+                cells.as_array_mut().unwrap().push(serde_json::json!({
+                    "ground":ground,"object":null,"config":"","terrain":0,"region":0
+                }));
+                raw[(side - 1 + n) * 2] = n as u8 + 2;
+            }
+        }
+        raw[(side / 2 * side + side / 2) * 2] = 1;
+        if schema == 4 {
+            for (x, y) in [
+                (0, side - 3),
+                (side - 1, side - 2),
+                (0, side - 1),
+                (side - 1, side - 1),
+            ] {
+                raw[(y * side + x) * 2] = 1;
+            }
+        }
+        let binding = lava_world.map(|world| {
+            let bytes = match world {
+                1 => include_bytes!("../../data/realms/world01/lava-support.json").as_slice(),
+                4 => include_bytes!("../../data/realms/world04/lava-support.json").as_slice(),
+                5 => include_bytes!("../../data/realms/world05/lava-support.json").as_slice(),
+                9 => include_bytes!("../../data/realms/world09/lava-support.json").as_slice(),
+                11 => include_bytes!("../../data/realms/world11/lava-support.json").as_slice(),
+                _ => panic!("unsupported test lava scope"),
+            };
+            let binding: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(binding["source_sha256"], value["provenance"]["source_sha256"]);
+            value["provenance"]["status"] = serde_json::json!(format!(
+                "Approximate image-guided reconstruction: SYNTHETIC Source{world} lava loader control; only the bound lava positions authored, all other cells artificial."
+            ));
+            policy[format!("world{world:02}_lava")] = lava_choice(binding["pixels"].as_u64().unwrap() as usize,
+                binding["support_sha256_le_u32"].as_str().unwrap());
+            policy[format!("world{world:02}_lava")]["cell"]["terrain"] =
+                serde_json::json!(u8::from(!matches!(world, 5 | 11)));
+            assert_eq!(policy[format!("world{world:02}_lava")]["cell"], binding["cell"]);
+            cells.as_array_mut().unwrap().push(binding["cell"].clone());
+            for run in binding["source_positions_row_runs"].as_array().unwrap() {
+                let y = run[0].as_u64().unwrap() as usize;
+                for x in run[1].as_u64().unwrap() as usize..run[2].as_u64().unwrap() as usize {
+                    assert_eq!(raw[(y * side + x) * 2], 0);
+                    raw[(y * side + x) * 2] = 2;
+                }
+            }
+            binding
+        });
+        if binding.is_some() || schema == 4 {
+            let rows: Vec<_> = (0..cells.as_array().unwrap().len() as u8)
+                .map(|entry| {
+                    let mut support = Sha256::new();
+                    let mut count = 0;
+                    for (i, pair) in raw.chunks_exact(2).enumerate() {
+                        if pair == [entry, 0] {
+                            support.update((i as u32).to_le_bytes());
+                            count += 1;
+                        }
+                    }
+                    let mut row = annotations["unknown"][0].clone();
+                    for field in ["ground", "object", "config", "terrain", "region"] {
+                        row[field] = cells[entry as usize][field].clone();
+                    }
+                    row["support"] = serde_json::json!(entry + 1);
+                    row["pixels"] = serde_json::json!(count);
+                    row["support_sha256"] = serde_json::json!(format!("{:x}", support.finalize()));
+                    row
+                })
+                .collect();
+            if let Some(binding) = binding.as_ref() {
+                assert_eq!(rows[2]["pixels"], binding["pixels"]);
+                assert_eq!(rows[2]["support_sha256"], binding["support_sha256_le_u32"]);
+            }
+            policy["audit"]["supports"] = serde_json::json!(rows.len());
+            annotations["unknown"] = serde_json::json!(rows);
+            bind_audit(&mut value, &policy, &mut annotations);
+        }
+        let compressed = zipped(&raw);
+        value["inputs"]["dictionary"]["sha256"] =
+            serde_json::json!(sha256(&serde_json::to_vec(&cells).unwrap()));
+        value["inputs"]["indices"]["sha256"] = serde_json::json!(sha256(&compressed));
+        value["inputs"]["indices"]["expanded_sha256"] = serde_json::json!(sha256(&raw));
+        write_source_local(&realms, &value, &policy, &annotations);
+        write_json(
+            &realms,
+            value["inputs"]["dictionary"]["path"].as_str().unwrap(),
+            &cells,
+        );
+        std::fs::write(
+            realms.join(value["inputs"]["indices"]["path"].as_str().unwrap()),
+            &compressed,
+        )
+        .unwrap();
+        let content = Content::load(Path::new("data")).unwrap();
+        let Recipe::ReviewedCellsV1(r) = read_recipe(&realms, "synthetic.json").unwrap() else {
+            panic!()
+        };
+        let (map, lava) = reviewed_map(&realms, &r, &content).unwrap();
+        assert_eq!(lava.is_some(), lava_world.is_some());
+        let (bytes, _) = encode_reviewed(&map, &content, lava.as_ref(), Some(&r)).unwrap();
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, lava.as_ref(), Some(&r))
+                .unwrap()
+                .0
+        );
+        if side > SIDE {
+            assert!(encode(&map, &content).is_err());
+            assert!(Map::decode_cells(&bytes, &content).is_err());
+        }
+        let decoded = Map::decode_realm_cells(&bytes, &content, [side, side]).unwrap();
+        assert_eq!(decoded.cells.len(), side * side);
+        for (a, b) in map.cells.iter().zip(&decoded.cells) {
+            assert_eq!(
+                (a.ground, a.object, &a.config, a.terrain, a.region),
+                (b.ground, b.object, &b.config, b.terrain, b.region)
+            );
+        }
+        drop(decoded);
+        for field in ["sha256", "expanded_sha256"] {
+            let mut bad = value.clone();
+            bad["inputs"]["indices"][field] = serde_json::json!("0".repeat(64));
+            let Recipe::ReviewedCellsV1(r) = recipe(bad).unwrap() else {
+                panic!()
+            };
+            assert!(reviewed_map(&realms, &r, &content).is_err(), "{field}");
+        }
+        std::fs::write(realms.join(value["output"].as_str().unwrap()), &bytes).unwrap();
+        let entry = serde_json::json!({"kind":"reconstruction","recipe":"synthetic.json","sha256":sha256(&bytes)});
+        write_json(
+            &root,
+            "realm-catalog.json",
+            &serde_json::json!([entry.clone()]),
+        );
+        let sources = super::super::realms::sources(&root).unwrap();
+        let opened = sources[0].open(&content).unwrap();
+        assert_eq!([opened.width, opened.height], [side as i32, side as i32]);
+        assert_eq!(opened.cells.len(), side * side);
+        assert_eq!(opened.spawns.len(), 4);
+        if source7_dark_panel {
+            for (n, ground) in [232, 25, 1].into_iter().enumerate() {
+                let c = &opened.cells[side - 1 + n];
+                assert_eq!(
+                    (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                    (ground, None, "", 0, 0),
+                    "Source7 synthetic dark-panel sentinel {n}"
+                );
+            }
+        }
+        let mut arrival_changes = 0;
+        for (before, after) in map.cells.iter().zip(&opened.cells) {
+            assert_eq!(
+                (before.ground, before.object, &before.config, before.terrain),
+                (after.ground, after.object, &after.config, after.terrain)
+            );
+            if before.region != after.region {
+                assert_eq!(
+                    (before.region, after.region, before.ground, before.terrain),
+                    (0, 1, 190, 11)
+                );
+                arrival_changes += 1;
+            }
+        }
+        assert_eq!(arrival_changes, 36);
+        if let Some(lava) = lava.as_ref() {
+            lava.validate_support(&opened).unwrap();
+        }
+        if let Some(world @ (5 | 9 | 11)) = lava_world {
+            let mut unscoped_value = value.clone();
+            let mut unscoped_policy = policy.clone();
+            let mut unscoped_annotations = annotations.clone();
+            unscoped_policy
+                .as_object_mut()
+                .unwrap()
+                .remove(&format!("world{world:02}_lava"));
+            bind_audit(
+                &mut unscoped_value,
+                &unscoped_policy,
+                &mut unscoped_annotations,
+            );
+            write_source_local(
+                &realms,
+                &unscoped_value,
+                &unscoped_policy,
+                &unscoped_annotations,
+            );
+            let unscoped = super::super::realms::sources(&root).unwrap();
+            let error = unscoped[0]
+                .open(&content)
+                .map(|_| ())
+                .expect_err(&format!(
+                    "Source{world} loader accepted bare lava without a capability"
+                ))
+                .to_string();
+            assert!(error.contains("source-exact lava capability"), "{error}");
+            write_source_local(&realms, &value, &policy, &annotations);
+            let first = raw.chunks_exact(2).position(|p| p == [2, 0]).unwrap();
+            let alternate = raw
+                .chunks_exact(2)
+                .enumerate()
+                .find(|(i, p)| *i > first && *p == [0, 0])
+                .unwrap()
+                .0;
+            for case in 0..8 {
+                let mut dictionary = cells.clone();
+                let mut indices = raw.clone();
+                match case {
+                    0 => indices[first * 2] = 0,
+                    1 => indices[alternate * 2] = 2,
+                    2 => {
+                        indices[first * 2] = 0;
+                        indices[alternate * 2] = 2;
+                    }
+                    3 => dictionary[2]["object"] = serde_json::json!(339),
+                    4 => dictionary[2]["config"] = serde_json::json!("size:150"),
+                    5 => {
+                        dictionary[2]["terrain"] =
+                            serde_json::json!(u8::from(matches!(world, 5 | 11)))
+                    }
+                    6 => dictionary[2]["region"] = serde_json::json!(1),
+                    7 => dictionary[2]["ground"] = serde_json::json!(112),
+                    _ => unreachable!(),
+                }
+                let invalid = unchecked_loader_wmap(&dictionary, &indices, side, &content);
+                std::fs::write(realms.join(value["output"].as_str().unwrap()), &invalid).unwrap();
+                let mut invalid_entry = entry.clone();
+                invalid_entry["sha256"] = serde_json::json!(sha256(&invalid));
+                write_json(
+                    &root,
+                    "realm-catalog.json",
+                    &serde_json::json!([invalid_entry]),
+                );
+                let sources = super::super::realms::sources(&root).unwrap();
+                let error = sources[0].open(&content).map(|_| ()).expect_err(&format!(
+                    "Source{world} loader accepted an invalid lava payload"
+                ));
+                let error = format!("{error:#}");
+                assert!(
+                    error.contains(&format!("World{world} lava"))
+                        && error.contains("before arrivals"),
+                    "case {case}: {error}"
+                );
+            }
+            std::fs::write(realms.join(value["output"].as_str().unwrap()), &bytes).unwrap();
+            write_json(
+                &root,
+                "realm-catalog.json",
+                &serde_json::json!([entry.clone()]),
+            );
+        }
+        drop(opened);
+        drop(map);
+        let originals = [
+            std::fs::read_to_string("data/objects.xml").unwrap(),
+            std::fs::read_to_string("data/grounds.xml").unwrap(),
+        ];
+        for (name, data) in ["objects.xml", "grounds.xml"].into_iter().zip(&originals) {
+            std::fs::write(root.join(name), data).unwrap();
+        }
+        let selected = Content::load(&root).unwrap();
+        assert_eq!(selected.xml_sha256, content.xml_sha256);
+        drop(sources[0].open(&selected).unwrap());
+        for (file, needle, replacement, is_ground) in [
+            (
+                "grounds.xml",
+                "<Ground type=\"0xbe\" id=\"Dark Sand\">",
+                "<Ground type=\"0xbe\" id=\"Dark Sand\"><Speed>0.9</Speed>",
+                true,
+            ),
+            (
+                "objects.xml",
+                "<Object type=\"0x0100\" id=\"Tree A\">",
+                "<Object type=\"0x0100\" id=\"Tree A\"><Size>110</Size>",
+                false,
+            ),
+        ] {
+            let original = &originals[usize::from(is_ground)];
+            assert_eq!(original.matches(needle).count(), 1);
+            std::fs::write(root.join(file), original.replacen(needle, replacement, 1)).unwrap();
+            let drifted = Content::load(&root).unwrap();
+            if is_ground {
+                assert_eq!(drifted.grounds[&190], 0.9);
+            } else {
+                assert_eq!(drifted.get(256).unwrap().size, 110);
+            }
+            let error = sources[0].open(&drifted).unwrap_err().to_string();
+            assert!(
+                error.contains("loaded XML identity mismatch"),
+                "{file}: {error}"
+            );
+            assert!(
+                error.contains(&format!("schema {schema} source")),
+                "{error}"
+            );
+            std::fs::write(root.join(file), original).unwrap();
+        }
+        drop(sources);
+        for key in ["policy", "annotations"] {
+            write_json(
+                &realms,
+                value["provenance"][key]["path"].as_str().unwrap(),
+                &serde_json::json!({}),
+            );
+            assert!(
+                super::super::realms::sources(&root).is_err(),
+                "runtime {key} hash"
+            );
+            write_source_local(&realms, &value, &policy, &annotations);
+        }
+        let mut corrupt = entry.clone();
+        corrupt["sha256"] = serde_json::json!("0".repeat(64));
+        write_json(&root, "realm-catalog.json", &serde_json::json!([corrupt]));
+        assert!(super::super::realms::sources(&root).is_err());
+        write_json(
+            &root,
+            "realm-catalog.json",
+            &serde_json::json!([{"kind":"baseline","id":"synthetic-baseline","path":format!("realms/{}", value["output"].as_str().unwrap()),"sha256":sha256(&bytes)}]),
+        );
+        let sources = super::super::realms::sources(&root).unwrap();
+        let error = sources[0].open(&content).unwrap_err().to_string();
+        assert!(
+            error.contains("expected dimensions [2048, 2048]"),
+            "{error}"
+        );
+        if side <= SIDE {
+            assert!(
+                error.contains(&format!("actual [{side}, {side}]")),
+                "{error}"
+            );
+        }
+        let legacy = reviewed_value();
+        write_json(&realms, "legacy.json", &legacy);
+        std::fs::write(realms.join(legacy["output"].as_str().unwrap()), &bytes).unwrap();
+        write_json(
+            &root,
+            "realm-catalog.json",
+            &serde_json::json!([{"kind":"reconstruction","recipe":"legacy.json","sha256":sha256(&bytes)}]),
+        );
+        let sources = super::super::realms::sources(&root).unwrap();
+        let error = sources[0].open(&content).unwrap_err().to_string();
+        assert!(error.contains("schema 2 source"), "{error}");
+        assert!(
+            error.contains("expected dimensions [2048, 2048]"),
+            "{error}"
+        );
+        // No Godlands: a dimension error must precede any arrival error.
+        let mut wrong_shape = 1i16.to_le_bytes().to_vec();
+        wrong_shape.extend(190i16.to_le_bytes());
+        wrong_shape.extend([0, 0, 11, 0]);
+        wrong_shape.extend(2048i32.to_le_bytes());
+        wrong_shape.extend(2048i32.to_le_bytes());
+        wrong_shape.resize(wrong_shape.len() + CELLS * 2, 0);
+        let wrong_shape = zipped(&wrong_shape);
+        std::fs::write(realms.join(value["output"].as_str().unwrap()), &wrong_shape).unwrap();
+        let mut wrong_entry = entry;
+        wrong_entry["sha256"] = serde_json::json!(sha256(&wrong_shape));
+        write_json(
+            &root,
+            "realm-catalog.json",
+            &serde_json::json!([wrong_entry]),
+        );
+        let sources = super::super::realms::sources(&root).unwrap();
+        let error = sources[0].open(&content).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!("schema {schema} source")),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!("expected dimensions [{side}, {side}]")),
+            "{error}"
+        );
+        assert!(error.contains("actual [2048, 2048]"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1013,12 +2899,498 @@ mod tests {
     }
 
     #[test]
+    fn realm_prepare_world01_lava_requires_source_cells_and_exact_positions() {
+        check_scoped_lava(1, false);
+    }
+
+    #[test]
+    fn realm_prepare_world04_lava_requires_explicit_source_exact_scope() {
+        check_scoped_lava(4, false);
+    }
+
+    #[test]
+    fn realm_prepare_world01_full_source_lava_preserves_original_coordinates() {
+        check_scoped_lava(1, true);
+    }
+
+    #[test]
+    fn realm_prepare_world05_lava_requires_explicit_source_exact_scope() {
+        check_scoped_lava(5, false);
+    }
+
+    #[test]
+    fn realm_prepare_world05_source_metadata_rejects_duplicates_aliases_and_false_cells() {
+        check_source_metadata(
+            5,
+            5,
+            112,
+            "4a899569757f859d8fe85b7ed06207ffa380b772ee02c87b212abc65904cd3ee",
+        );
+    }
+
+    #[test]
+    fn realm_prepare_world09_lava_requires_explicit_source_exact_scope() {
+        check_scoped_lava(9, false);
+    }
+
+    #[test]
+    fn realm_prepare_world11_lava_requires_explicit_source_exact_scope() {
+        check_scoped_lava(11, false);
+    }
+
+    #[test]
+    fn realm_prepare_world09_source_metadata_rejects_duplicates_aliases_and_false_cells() {
+        check_source_metadata(7, 9, 426, WORLD09_LAVA_SUPPORT);
+    }
+
+    #[test]
+    fn realm_prepare_world11_source_metadata_rejects_duplicates_aliases_and_false_cells() {
+        check_source_metadata(8, 11, 577, WORLD11_LAVA_SUPPORT);
+    }
+
+    fn check_source_metadata(index: usize, world: u8, pixels: usize, support: &str) {
+        let root =
+            std::env::temp_dir().join(format!("source{world}-metadata-{}", rand::random::<u64>()));
+        let (mut value, mut policy, mut annotations) = source_local_values(index);
+        let key = format!("world{world:02}_lava");
+        let source = value["provenance"]["source_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        policy[&key] = lava_choice(pixels, support);
+        policy[&key]["cell"]["terrain"] = serde_json::json!(u8::from(!matches!(world, 5 | 11)));
+        bind_audit(&mut value, &policy, &mut annotations);
+        write_source_local(&root, &value, &policy, &annotations);
+        read_recipe(&root, "synthetic.json").unwrap();
+        for case in 0..5 {
+            let mut p = policy.clone();
+            match case {
+                3 => p["extra"] = serde_json::json!(false),
+                4 => p[&key]["cell"]["object"] = serde_json::json!(0),
+                _ => (),
+            }
+            let mut policy_raw = serde_json::to_string(&p).unwrap();
+            if case == 0 {
+                policy_raw = policy_raw.replacen(
+                    "\"selected_client\":\"123.5.1\"",
+                    "\"selected_client\":\"123.5.1\",\"selected_client\":\"123.5.1\"",
+                    1,
+                );
+            }
+            if case == 2 {
+                policy_raw = policy_raw.replacen("\"pixels\":4410000", "\"pixels\":4410000.0", 1);
+            }
+            let mut v = value.clone();
+            let mut a = annotations.clone();
+            v["provenance"]["policy"]["sha256"] = serde_json::json!(sha256(policy_raw.as_bytes()));
+            a["policy_sha256"] = v["provenance"]["policy"]["sha256"].clone();
+            let mut annotations_raw = serde_json::to_string(&a).unwrap();
+            if case == 1 {
+                annotations_raw = annotations_raw.replacen(
+                    "\"source_sha256\":",
+                    &format!("\"source_sha256\":\"{source}\",\"source_sha256\":"),
+                    1,
+                );
+            }
+            v["provenance"]["annotations"]["sha256"] =
+                serde_json::json!(sha256(annotations_raw.as_bytes()));
+            write_json(&root, "synthetic.json", &v);
+            std::fs::write(
+                root.join(v["provenance"]["policy"]["path"].as_str().unwrap()),
+                &policy_raw,
+            )
+            .unwrap();
+            std::fs::write(
+                root.join(v["provenance"]["annotations"]["path"].as_str().unwrap()),
+                &annotations_raw,
+            )
+            .unwrap();
+            assert!(read_recipe(&root, "synthetic.json").is_err(), "case {case}");
+        }
+        write_source_local(&root, &value, &policy, &annotations);
+        write_json(&root, "nested/synthetic.json", &value);
+        assert!(read_recipe(&root, "nested//synthetic.json").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn check_scoped_lava(world: u8, full_source: bool) {
+        assert!(matches!(world, 1 | 4 | 5 | 9 | 11));
+        let mut content = Content::load(Path::new("data")).unwrap();
+        let (mut value, id, source, key, support, binding_bytes, transform) = if world == 5 {
+            (
+                source_local_values(5).0,
+                "classic-world-05-reconstruction",
+                "9f57488fdccf12fc1ad5f8970d1feec746ea4e1bbc5ed6718fee7d3d4dbd55c0",
+                "world05_lava",
+                "4a899569757f859d8fe85b7ed06207ffa380b772ee02c87b212abc65904cd3ee",
+                include_bytes!("../../data/realms/world05/lava-support.json").as_slice(),
+                source_local_transform([2100, 2100]),
+            )
+        } else if world == 11 {
+            (
+                source_local_values(8).0,
+                "classic-world-11-reconstruction",
+                "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11cea6f65976bcb20",
+                "world11_lava",
+                "4f88fb5c98d4e7dbaa7fb6e5dde0dba336c559b9abbb99d3a8532dd2e0120b44",
+                include_bytes!("../../data/realms/world11/lava-support.json").as_slice(),
+                source_local_transform([2100, 2100]),
+            )
+        } else if world == 9 {
+            (
+                source_local_values(7).0,
+                WORLD09_ID,
+                WORLD09_SOURCE,
+                "world09_lava",
+                WORLD09_LAVA_SUPPORT,
+                include_bytes!("../../data/realms/world09/lava-support.json").as_slice(),
+                source_local_transform([2100, 2100]),
+            )
+        } else if world == 4 {
+            (
+                source_local_values(0).0,
+                "classic-world-04-reconstruction",
+                WORLD04_SOURCE,
+                "world04_lava",
+                WORLD04_LAVA_SUPPORT,
+                include_bytes!("../../data/realms/world04/lava-support.json").as_slice(),
+                source_local_transform([2000, 2000]),
+            )
+        } else {
+            let (value, transform) = if full_source {
+                (
+                    full_source_values(0).0,
+                    source_local_transform([2100, 2100]),
+                )
+            } else {
+                (
+                    reviewed_value(),
+                    serde_json::json!({"crop":[26,26,2074,2074],"historical_coordinates":"UNKNOWN","source_dimensions":[2100,2100],"tile":"source_pixel-26"}),
+                )
+            };
+            (
+                value,
+                "classic-world-01-reconstruction",
+                WORLD01_SOURCE,
+                "world01_lava",
+                WORLD01_LAVA_SUPPORT,
+                include_bytes!("../../data/realms/world01/lava-support.json").as_slice(),
+                transform,
+            )
+        };
+        value["id"] = serde_json::json!(id);
+        value["output"] = serde_json::json!(format!("{id}.wmap"));
+        value["provenance"]["source_sha256"] = serde_json::json!(source);
+        let Recipe::ReviewedCellsV1(recipe) = serde_json::from_value(value.clone()).unwrap() else {
+            panic!()
+        };
+        let binding: serde_json::Value = serde_json::from_slice(binding_bytes).unwrap();
+        assert_eq!(binding["source_sha256"], source);
+        assert_eq!(binding["support_sha256_le_u32"], support);
+        assert_eq!(
+            binding["pixels"],
+            match world {
+                1 => 703,
+                4 => 506,
+                5 => 112,
+                9 => 426,
+                11 => 577,
+                _ => unreachable!(),
+            }
+        );
+        let mut policy = serde_json::json!({"source_sha256":source,
+            "selected_client":"123.5.1", "transform":transform});
+        if world != 1 {
+            assert!(
+                ScopedLava::for_recipe(&recipe, &policy, &content)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        policy[key] = serde_json::json!({"rgb":"d44a00","pixels":binding["pixels"],
+            "support_sha256_le_u32":support,
+            "cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}});
+        policy[key]["cell"]["terrain"] = serde_json::json!(u8::from(!matches!(world, 5 | 11)));
+        assert_eq!(binding["cell"], policy[key]["cell"]);
+        for foreign in [
+            "world01_lava",
+            "world04_lava",
+            "world05_lava",
+            "world09_lava",
+            "world11_lava",
+        ] {
+            if foreign == key {
+                continue;
+            }
+            let mut mixed = policy.clone();
+            mixed[foreign] = serde_json::Value::Null;
+            assert!(
+                ScopedLava::for_recipe(&recipe, &mixed, &content).is_err(),
+                "{foreign}"
+            );
+        }
+        let lava = ScopedLava::for_recipe(&recipe, &policy, &content)
+            .unwrap()
+            .expect("source-exact lava capability was not admitted");
+        let c = Cell {
+            ground: 244,
+            object: None,
+            config: String::new(),
+            terrain: u8::from(!matches!(world, 5 | 11)),
+            region: 0,
+        };
+        let safe = Cell {
+            ground: 190,
+            object: None,
+            config: String::new(),
+            terrain: 11,
+            region: 0,
+        };
+        let mut map = Map {
+            width: lava.side as i32,
+            height: lava.side as i32,
+            cells: vec![safe.clone(); lava.side * lava.side],
+            spawns: vec![],
+        };
+        let mut positions = Vec::new();
+        for run in binding["source_positions_row_runs"].as_array().unwrap() {
+            let (y, x0, x1) = (
+                run[0].as_u64().unwrap() as usize,
+                run[1].as_u64().unwrap() as usize,
+                run[2].as_u64().unwrap() as usize,
+            );
+            let extent = lava.offset..lava.offset + lava.side;
+            assert!(extent.contains(&y) && extent.contains(&x0) && x1 <= extent.end && x0 < x1);
+            for x in x0..x1 {
+                let target = (y - lava.offset) * lava.side + x - lava.offset;
+                positions.push((target, y * lava.source_side + x));
+                assert_eq!(map.cells[target].ground, 190);
+                map.cells[target] = c.clone();
+            }
+        }
+        assert_eq!(positions.len(), lava.pixels);
+        assert!(positions.windows(2).all(|p| p[0].1 < p[1].1));
+        let source_le: Vec<_> = positions
+            .iter()
+            .flat_map(|p| (p.1 as u32).to_le_bytes())
+            .collect();
+        let source_be: Vec<_> = positions
+            .iter()
+            .flat_map(|p| (p.1 as u32).to_be_bytes())
+            .collect();
+        assert_eq!(sha256(&source_le), support);
+        assert_ne!(sha256(&source_be), support);
+        if world == 1 {
+            assert_eq!(
+                map.cells[(1086 - lava.offset) * lava.side + 1129 - lava.offset].ground,
+                244
+            );
+            assert_eq!(
+                map.cells[(1086 - lava.offset) * lava.side + 1128 - lava.offset].ground,
+                190
+            );
+        }
+        let dict = serde_json::to_vec(&vec![safe.clone(), c.clone()]).unwrap();
+        assert!(dictionary(&dict, &content).is_err());
+        dictionary_scoped(&dict, &content, Some(&lava)).unwrap();
+        let (bytes, _) = encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).unwrap();
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, Some(&lava), Some(&recipe))
+                .unwrap()
+                .0
+        );
+        if full_source {
+            assert!(Map::decode_cells(&bytes, &content).is_err());
+        }
+        let decoded = Map::decode_realm_cells(&bytes, &content, [lava.side, lava.side]).unwrap();
+        for (a, b) in map.cells.iter().zip(&decoded.cells) {
+            assert_eq!(
+                (a.ground, a.object, &a.config, a.terrain, a.region),
+                (b.ground, b.object, &b.config, b.terrain, b.region)
+            );
+        }
+        assert!(encode(&map, &content).is_err());
+        if full_source {
+            let shift = 26 * (lava.side + 1);
+            for &(i, _) in &positions {
+                map.cells[i] = safe.clone();
+            }
+            for &(i, _) in &positions {
+                map.cells[i - shift] = c.clone();
+            }
+            assert!(encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).is_err());
+            for &(i, _) in &positions {
+                map.cells[i - shift] = safe.clone();
+            }
+            for &(i, _) in &positions {
+                map.cells[i] = c.clone();
+            }
+        }
+        for (field, val) in [
+            ("id", serde_json::json!("other-world")),
+            ("schema", serde_json::json!(if world != 1 { 2 } else { 3 })),
+            ("width", serde_json::json!(1024)),
+            ("height", serde_json::json!(1024)),
+        ] {
+            let mut bad = value.clone();
+            bad[field] = val;
+            let Recipe::ReviewedCellsV1(r) = serde_json::from_value(bad).unwrap() else {
+                panic!()
+            };
+            assert!(
+                ScopedLava::for_recipe(&r, &policy, &content).is_err(),
+                "{field}"
+            );
+        }
+        for path in [
+            ["provenance", "source_sha256"],
+            ["content", "objects"],
+            ["content", "grounds"],
+        ] {
+            let mut bad = value.clone();
+            bad[path[0]][path[1]] = serde_json::json!("0".repeat(64));
+            let Recipe::ReviewedCellsV1(r) = serde_json::from_value(bad).unwrap() else {
+                panic!()
+            };
+            assert!(ScopedLava::for_recipe(&r, &policy, &content).is_err());
+        }
+        for field in ["source_sha256", "selected_client", "transform", key] {
+            let mut bad = policy.clone();
+            bad.as_object_mut().unwrap().remove(field);
+            if world != 1 && field == key {
+                assert!(
+                    ScopedLava::for_recipe(&recipe, &bad, &content)
+                        .unwrap()
+                        .is_none()
+                );
+                dictionary(&serde_json::to_vec(&vec![safe.clone()]).unwrap(), &content).unwrap();
+                assert!(dictionary(&dict, &content).is_err());
+            } else {
+                assert!(
+                    ScopedLava::for_recipe(&recipe, &bad, &content).is_err(),
+                    "{field}"
+                );
+            }
+        }
+        for flag in [serde_json::Value::Null, serde_json::json!(false)] {
+            let mut bad = policy.clone();
+            bad[key] = flag;
+            assert!(ScopedLava::for_recipe(&recipe, &bad, &content).is_err());
+        }
+        for (field, val) in [
+            ("rgb", serde_json::json!("d44a01")),
+            ("pixels", serde_json::json!(704)),
+            (
+                "pixels",
+                serde_json::json!(binding["pixels"].as_u64().unwrap() as f64),
+            ),
+            ("support_sha256_le_u32", serde_json::json!("0".repeat(64))),
+        ] {
+            let mut bad = policy.clone();
+            bad[key][field] = val;
+            assert!(ScopedLava::for_recipe(&recipe, &bad, &content).is_err());
+        }
+        let first = positions[0].0;
+        for (field, val) in [
+            ("ground", serde_json::json!(112)),
+            ("object", serde_json::json!(339)),
+            ("config", serde_json::json!("size:150")),
+            (
+                "terrain",
+                serde_json::json!(u8::from(matches!(world, 5 | 11))),
+            ),
+            ("region", serde_json::json!(1)),
+        ] {
+            let mut bad = policy.clone();
+            bad[key]["cell"][field] = val;
+            assert!(ScopedLava::for_recipe(&recipe, &bad, &content).is_err());
+            let mut cell = serde_json::to_value(&c).unwrap();
+            cell[field] = bad[key]["cell"][field].clone();
+            let cell: ReviewedCell = serde_json::from_value(cell).unwrap();
+            let cell = Cell {
+                ground: cell.ground,
+                object: cell.object,
+                config: cell.config,
+                terrain: cell.terrain,
+                region: cell.region,
+            };
+            assert!(
+                dictionary_scoped(
+                    &serde_json::to_vec(&vec![safe.clone(), cell.clone()]).unwrap(),
+                    &content,
+                    Some(&lava)
+                )
+                .is_err()
+            );
+            map.cells[first] = cell;
+            assert!(encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).is_err());
+            map.cells[first] = c.clone();
+        }
+        let alternate = (first + 1..map.cells.len())
+            .find(|&i| map.cells[i].ground == 190)
+            .unwrap();
+        if world == 1 {
+            assert_eq!(alternate, first + 1);
+        }
+        map.cells[first] = safe.clone();
+        assert!(encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).is_err());
+        map.cells[alternate] = c.clone();
+        assert!(encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).is_err());
+        map.cells[first] = c.clone();
+        assert!(encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).is_err());
+        map.cells[alternate] = safe.clone();
+        for &(i, _) in &positions {
+            map.cells[i] = safe.clone();
+        }
+        assert!(encode_reviewed(&map, &content, Some(&lava), Some(&recipe)).is_err());
+        for &kind in content.hazards.keys().filter(|&&g| g != 244) {
+            let mut bad = c.clone();
+            bad.ground = kind;
+            assert!(
+                dictionary_scoped(
+                    &serde_json::to_vec(&vec![bad]).unwrap(),
+                    &content,
+                    Some(&lava)
+                )
+                .is_err()
+            );
+        }
+        let small = Map {
+            width: 1,
+            height: 1,
+            cells: vec![c],
+            spawns: vec![],
+        };
+        assert!(encode_scoped(&small, &content, Some(&lava)).is_err());
+        content.hazards.get_mut(&244).unwrap().max = 61;
+        assert!(ScopedLava::for_recipe(&recipe, &policy, &content).is_err());
+        content.hazards.get_mut(&244).unwrap().max = 60;
+        content.grounds.insert(244, 1.0);
+        assert!(ScopedLava::for_recipe(&recipe, &policy, &content).is_err());
+        content.grounds.insert(244, 0.666);
+        content.pushes.insert(244, (0.33, 0.33));
+        assert!(ScopedLava::for_recipe(&recipe, &policy, &content).is_err());
+    }
+
+    #[test]
     fn realm_prepare_reviewed_dictionary_requires_every_safe_field() {
         let content = Content::load(Path::new("data")).unwrap();
         let valid =
             serde_json::json!({"ground":190,"object":null,"config":"","terrain":11,"region":0});
         let parse = |v: serde_json::Value| dictionary(&serde_json::to_vec(&v).unwrap(), &content);
         parse(serde_json::json!([valid.clone(), valid.clone()])).unwrap();
+        for ground in [232, 25, 1] {
+            let cells = parse(serde_json::json!([
+                {"ground":ground,"object":null,"config":"","terrain":0,"region":0}
+            ]))
+            .unwrap();
+            let c = &cells[0];
+            assert_eq!(
+                (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                (ground, None, "", 0, 0)
+            );
+        }
         for field in ["ground", "object", "config", "terrain", "region"] {
             let mut v = valid.clone();
             v.as_object_mut().unwrap().remove(field);
@@ -1102,6 +3474,244 @@ mod tests {
             bad.cells[2].config = config.into();
             assert!(encode(&bad, &content).is_err(), "{config}");
         }
+    }
+
+    #[test]
+    fn realm_prepare_tomb_connections_match_selected_finite_geometry() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let mut connections = BTreeSet::new();
+        for mut value in [
+            33686018u32,
+            16908802,
+            16843266,
+            16908546,
+            16843265,
+            16843009,
+        ] {
+            for _ in 0..4 {
+                connections.insert(value);
+                value = value.rotate_right(8);
+            }
+        }
+        let all_binary: BTreeSet<_> = (0..16)
+            .map(|mask| {
+                u32::from_le_bytes(std::array::from_fn(|i| {
+                    if mask & (1 << i) == 0 { 2 } else { 1 }
+                }))
+            })
+            .collect();
+        assert_eq!(connections, all_binary);
+        assert_eq!(connections.len(), 16);
+        assert!(!connections.contains(&0));
+        assert!(!connections.contains(&u32::MAX));
+        let binding: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world01/tomb-connections.json"
+        ))
+        .unwrap();
+        let source1: BTreeSet<u32> = binding["supports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                r["cell"]["config"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("conn:")
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(source1.len(), 8);
+        let source4: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world04/tomb-connections.json"
+        ))
+        .unwrap();
+        let allowed: BTreeSet<u32> = source1
+            .iter()
+            .copied()
+            .chain(source4["supports"].as_array().unwrap().iter().map(|r| {
+                r["cell"]["config"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("conn:")
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            }))
+            .collect();
+        assert_eq!(allowed.len(), 9);
+        assert_eq!(
+            allowed.difference(&source1).copied().collect::<Vec<_>>(),
+            [16843010]
+        );
+        assert!(allowed.is_subset(&connections));
+        assert_eq!(connections.difference(&allowed).count(), 7);
+        let cell = |kind, config: String| Cell {
+            ground: 247,
+            object: Some(kind),
+            config,
+            terrain: 0,
+            region: 0,
+        };
+        let map = Map {
+            width: 9,
+            height: 1,
+            cells: allowed
+                .iter()
+                .map(|c| cell(477, format!("conn:{c}")))
+                .collect(),
+            spawns: vec![],
+        };
+        let (bytes, _) = encode(&map, &content).unwrap();
+        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        let decoded = Map::decode_cells(&bytes, &content).unwrap();
+        assert_eq!(
+            serde_json::to_value(&map.cells).unwrap(),
+            serde_json::to_value(&decoded.cells).unwrap()
+        );
+        for config in [
+            "conn:0",
+            "conn:-1",
+            "conn:1",
+            "conn: 33686018",
+            "conn:33686018\0",
+            "size:100;conn:33686018",
+            "conn:4294967295",
+            "conn:16843008",
+            "conn:50529027",
+            "conn:302121474",
+            "conn:-2113797630",
+            "conn:285278466",
+            "conn:-2130640638",
+            "conn:016843010",
+            "conn:+16843010",
+            "conn:033686018",
+            "conn:+33686018",
+            "conn:0x02020202",
+            "conn:33686018;",
+            "conn:33686018;conn:16843009",
+            "size:100",
+        ] {
+            let mut bad = map.clone();
+            bad.cells[0] = cell(477, config.into());
+            assert!(encode(&bad, &content).is_err(), "{config}");
+            assert!(
+                dictionary(
+                    &serde_json::to_vec(&vec![map.cells[0].clone(), bad.cells[0].clone()]).unwrap(),
+                    &content
+                )
+                .is_err(),
+                "unused {config}"
+            );
+        }
+        for value in connections.difference(&allowed) {
+            let mut bad = map.clone();
+            bad.cells[0] = cell(477, format!("conn:{value}"));
+            assert!(encode(&bad, &content).is_err(), "valid but unused {value}");
+        }
+        for kind in [None, Some(288), Some(6175), Some(398)] {
+            for value in &allowed {
+                let mut bad = map.clone();
+                bad.cells[0].object = kind;
+                bad.cells[0].config = format!("conn:{value}");
+                assert!(encode(&bad, &content).is_err(), "{kind:?} {value}");
+            }
+        }
+        let mut blank = map;
+        blank.cells[0].config.clear();
+        encode(&blank, &content).unwrap();
+    }
+
+    #[test]
+    fn realm_prepare_world04_connections_preserve_source_topology_and_fields() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let binding: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../data/realms/world04/tomb-connections.json"
+        ))
+        .unwrap();
+        let source = "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5";
+        assert_eq!(binding["source_sha256"], source);
+        assert_eq!(
+            binding["source_dimensions"],
+            serde_json::json!([2000, 2000])
+        );
+        assert_eq!(binding["original_stat41"], "UNKNOWN");
+        let mut cells = BTreeMap::new();
+        for row in binding["supports"].as_array().unwrap() {
+            assert_eq!(row["source_sha256"], source);
+            assert_eq!(row["rgb"], "ffd56e");
+            let cell = dictionary(
+                &serde_json::to_vec(&[row["cell"].clone()]).unwrap(),
+                &content,
+            )
+            .unwrap()
+            .pop()
+            .unwrap();
+            assert!([245, 247].contains(&cell.ground));
+            assert_eq!((cell.object, cell.terrain, cell.region), (Some(477), 5, 0));
+            let positions: Vec<u32> = row["positions_le_u32_values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| u32::try_from(i.as_u64().unwrap()).unwrap())
+                .collect();
+            assert_eq!(row["pixels"], positions.len() as u64);
+            assert!(positions.windows(2).all(|p| p[0] < p[1]));
+            assert_eq!(
+                sha256(
+                    &positions
+                        .iter()
+                        .flat_map(|i| i.to_le_bytes())
+                        .collect::<Vec<_>>()
+                ),
+                row["support_sha256_le_u32"].as_str().unwrap()
+            );
+            for i in positions {
+                assert!(
+                    i < 4_000_000
+                        && i % 2000 > 0
+                        && i % 2000 < 1999
+                        && i / 2000 > 0
+                        && i / 2000 < 1999
+                );
+                assert!(cells.insert(i, cell.clone()).is_none());
+            }
+        }
+        assert_eq!(cells.len(), 24);
+        assert_eq!(binding["changed_source_pixels"], 24);
+        let support = sha256(
+            &cells
+                .keys()
+                .flat_map(|i| i.to_le_bytes())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            support,
+            "7c6c9ecb892a99dc47f44404a7255045a423afd5d818cc77b598af3cf7c8d906"
+        );
+        assert_eq!(binding["support_sha256_le_u32"], support);
+        for (&i, cell) in &cells {
+            let value = u32::from_be_bytes(
+                [i - 2000, i + 1, i + 2000, i - 1]
+                    .map(|n| if cells.contains_key(&n) { 1 } else { 2 }),
+            );
+            assert_eq!(cell.config, format!("conn:{value}"));
+        }
+        assert_eq!(cells[&1_882_447].config, "conn:16843010");
+        let map = Map {
+            width: 24,
+            height: 1,
+            cells: cells.into_values().collect(),
+            spawns: vec![],
+        };
+        let (bytes, _) = encode(&map, &content).unwrap();
+        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        let decoded = Map::decode_cells(&bytes, &content).unwrap();
+        assert_eq!(
+            serde_json::to_value(&map.cells).unwrap(),
+            serde_json::to_value(&decoded.cells).unwrap()
+        );
     }
 
     #[test]
@@ -1198,30 +3808,32 @@ mod tests {
         let mut raw = raw;
         raw[..2].copy_from_slice(&u16::MAX.to_le_bytes());
         assert!(
-            indexed_map(&raw, &[])
+            indexed_map(&raw, &[], [SIDE, SIDE])
                 .unwrap_err()
                 .to_string()
                 .contains("UNKNOWN")
         );
-        assert!(indexed_map(&raw[..raw.len() - 1], &[]).is_err());
+        assert!(indexed_map(&raw[..raw.len() - 1], &[], [SIDE, SIDE]).is_err());
     }
 
     #[test]
     fn realm_prepare_reviewed_audit_rejects_unreviewed_or_inconsistent_source() {
-        let Recipe::ReviewedCellsV1(r) = recipe(reviewed_value()).unwrap() else {
-            panic!("reviewed fixture");
+        let Recipe::ReviewedCellsV1(r) =
+            read_recipe(Path::new("data/realms"), "world02.json").unwrap()
+        else {
+            panic!("actual full-source World2");
         };
         let policy = include_bytes!("../../data/realms/world02/source-policy.json");
         let annotations: serde_json::Value = serde_json::from_slice(include_bytes!(
             "../../data/realms/world02/source-annotations.json"
         ))
         .unwrap();
-        audit(
-            policy,
-            &serde_json::to_vec(&annotations).unwrap(),
-            &r.provenance,
-        )
-        .unwrap();
+        let check = |annotations: &serde_json::Value| -> Result<()> {
+            let bytes = serde_json::to_vec(annotations)?;
+            strict_source_audit(policy, &bytes, &r)?;
+            audit_scoped(policy, &bytes, &r.provenance, Some(r.dimensions()?))
+        };
+        check(&annotations).unwrap();
         for (field, value) in [
             ("policy_sha256", serde_json::json!("0".repeat(64))),
             ("source_sha256", serde_json::json!("0".repeat(64))),
@@ -1230,11 +3842,11 @@ mod tests {
         ] {
             let mut v = annotations.clone();
             v[field] = value;
-            assert!(audit(policy, &serde_json::to_vec(&v).unwrap(), &r.provenance).is_err());
+            assert!(check(&v).is_err(), "{field}");
         }
         for (field, value) in [
             ("status", serde_json::json!("UNKNOWN")),
-            ("component", serde_json::json!(102)),
+            ("support", serde_json::json!(102)),
             ("support_sha256", serde_json::json!("UNKNOWN")),
             ("reason", serde_json::json!("")),
             ("pixels", serde_json::json!(0)),
@@ -1242,26 +3854,23 @@ mod tests {
         ] {
             let mut v = annotations.clone();
             v["unknown"][0][field] = value;
-            assert!(audit(policy, &serde_json::to_vec(&v).unwrap(), &r.provenance).is_err());
+            assert!(check(&v).is_err(), "{field}");
         }
     }
 
     #[test]
     fn realm_prepare_versioned_support_audit_requires_explicit_consistent_contract() {
-        let Recipe::ReviewedCellsV1(r) = recipe(reviewed_value()).unwrap() else {
-            panic!("reviewed fixture");
-        };
-        let mut p: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../../data/realms/world02/source-policy.json"
-        ))
-        .unwrap();
-        let mut a: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../../data/realms/world02/source-annotations.json"
-        ))
+        let (mut r, mut p, mut a) = legacy_audit_values();
+        audit(
+            &serde_json::to_vec(&p).unwrap(),
+            &serde_json::to_vec(&a).unwrap(),
+            &r.provenance,
+        )
         .unwrap();
         p["schema"] = serde_json::json!(2);
-        p["source_sha256"] = serde_json::json!(r.provenance.source_sha256);
         p["audit"] = serde_json::json!({"kind":"reviewed-supports-v1","supports":1,"pixels":3});
+        r.provenance.policy.sha256 = sha256(&serde_json::to_vec(&p).unwrap());
+        a["policy_sha256"] = serde_json::json!(r.provenance.policy.sha256);
         let mut row = a["unknown"][0].clone();
         row.as_object_mut().unwrap().remove("component");
         row["support"] = serde_json::json!(1);
@@ -1310,21 +3919,33 @@ mod tests {
         count: usize,
         size: usize,
         hash: &str,
+        expected_lava_pixels: Option<usize>,
     ) -> (Content, Map, ReviewedRecipe) {
         let content = Content::load(Path::new("data")).unwrap();
         let root = Path::new("data/realms");
         let Recipe::ReviewedCellsV1(r) = read_recipe(root, file).unwrap() else {
             panic!("reviewed fixture");
         };
-        let map = reviewed_map(root, &r, &content).unwrap();
-        let (bytes, actual_count) = encode(&map, &content).unwrap();
+        let (map, lava) = reviewed_map(root, &r, &content).unwrap();
+        assert_eq!(
+            lava.as_ref().map(|scope| scope.pixels),
+            expected_lava_pixels
+        );
+        let dimensions = r.dimensions().unwrap();
+        let (bytes, actual_count) =
+            encode_reviewed(&map, &content, lava.as_ref(), Some(&r)).unwrap();
         assert_eq!(actual_count, count);
         assert_eq!(bytes.len(), size);
         assert_eq!(sha256(&bytes), hash);
-        assert_eq!(bytes, encode(&map, &content).unwrap().0);
+        assert_eq!(
+            bytes,
+            encode_reviewed(&map, &content, lava.as_ref(), Some(&r))
+                .unwrap()
+                .0
+        );
         assert_eq!(bytes, std::fs::read(root.join(&r.output)).unwrap());
-        let decoded = Map::decode_cells(&bytes, &content).unwrap();
-        assert_eq!(decoded.cells.len(), CELLS);
+        let decoded = Map::decode_realm_cells(&bytes, &content, dimensions).unwrap();
+        assert_eq!(decoded.cells.len(), dimensions[0] * dimensions[1]);
         for (i, (a, b)) in decoded.cells.iter().zip(&map.cells).enumerate() {
             assert_eq!(
                 (a.ground, a.object, &a.config, a.terrain, a.region),
@@ -1336,13 +3957,177 @@ mod tests {
     }
 
     #[test]
-    fn realm_prepare_reviewed_world02_exact_two_encodes_and_all_fields() {
+    fn realm_prepare_passive_revisions_reverse_to_exact_published_payloads() {
+        for (world, count, restored, baseline) in [
+            (
+                2,
+                699,
+                "7f911d27fd4b28640cab696ab5ac817020640480ac66992976fe66a6141fed30",
+                "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594",
+            ),
+            (
+                3,
+                922,
+                "0b960c072c0544e9a911842edf36e1afffa91c9c12e410fb9d598fcfb72357a2",
+                "a6621e55c6a3d603bce33767051936f56aba6b6ba3eccab5251f931934b153af",
+            ),
+        ] {
+            let content = Content::load(Path::new("data")).unwrap();
+            let root = Path::new("data/realms");
+            let Recipe::ReviewedCellsV1(r) =
+                read_recipe(root, &format!("world{world:02}.json")).unwrap()
+            else {
+                panic!()
+            };
+            let mut map = Map::decode_realm_cells(
+                &std::fs::read(root.join(&r.output)).unwrap(),
+                &content,
+                r.dimensions().unwrap(),
+            )
+            .unwrap();
+            assert_eq!([map.width, map.height], [2100, 2100]);
+            // The immutable restoration ledgers describe the historical crops, not the new frames.
+            map.cells = (26..2074)
+                .flat_map(|y| map.cells[y * 2100 + 26..y * 2100 + 2074].iter().cloned())
+                .collect();
+            map.width = 2048;
+            map.height = 2048;
+            assert_eq!(sha256(&encode(&map, &content).unwrap().0), restored);
+            let ledger: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(root.join(format!("restoration/world{world:02}-passives.json")))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(ledger["source_sha256"], r.provenance.source_sha256);
+            assert_eq!(ledger["changed_output_pixels"], count);
+            let mut changed = BTreeSet::new();
+            for row in ledger["cohorts"].as_array().unwrap() {
+                let before: ReviewedCell = serde_json::from_value(row["before"].clone()).unwrap();
+                let after: ReviewedCell = serde_json::from_value(row["after"].clone()).unwrap();
+                assert_eq!(
+                    (before.ground, &before.config, before.terrain, before.region),
+                    (after.ground, &after.config, after.terrain, after.region)
+                );
+                assert!([Some(290), Some(354), Some(6175)].contains(&after.object));
+                let mut positions = Vec::new();
+                for run in row["runs"].as_array().unwrap() {
+                    let y = run[0].as_u64().unwrap() as usize;
+                    let start = run[1].as_u64().unwrap() as usize;
+                    let stop = run[2].as_u64().unwrap() as usize;
+                    assert!((26..2074).contains(&y) && start >= 26 && start < stop && stop <= 2074);
+                    for x in start..stop {
+                        let i = (y - 26) * 2048 + x - 26;
+                        assert!(changed.insert(i));
+                        positions.push(i as u32);
+                        let cell = &mut map.cells[i];
+                        assert_eq!(
+                            (
+                                cell.ground,
+                                cell.object,
+                                &cell.config,
+                                cell.terrain,
+                                cell.region
+                            ),
+                            (
+                                after.ground,
+                                after.object,
+                                &after.config,
+                                after.terrain,
+                                after.region
+                            ),
+                            "world{world} {x},{y}"
+                        );
+                        cell.object = before.object;
+                    }
+                }
+                assert_eq!(positions.len() as u64, row["count"].as_u64().unwrap());
+                assert!(positions.windows(2).all(|p| p[0] < p[1]));
+                assert_eq!(
+                    sha256(
+                        &positions
+                            .iter()
+                            .flat_map(|i| i.to_le_bytes())
+                            .collect::<Vec<_>>()
+                    ),
+                    row["output_sha256_le_u32"].as_str().unwrap()
+                );
+            }
+            assert_eq!(changed.len(), count as usize);
+            assert_eq!(
+                sha256(
+                    &changed
+                        .iter()
+                        .flat_map(|i| (*i as u32).to_le_bytes())
+                        .collect::<Vec<_>>()
+                ),
+                ledger["changed_output_support_sha256_le_u32"]
+                    .as_str()
+                    .unwrap()
+            );
+            // Reverting only the declared objects must recover every old field, not just matching counts.
+            assert_eq!(sha256(&encode(&map, &content).unwrap().0), baseline);
+            assert_eq!(map.cells[0].ground, 188);
+            map.cells[0].ground = 190;
+            assert_ne!(sha256(&encode(&map, &content).unwrap().0), baseline);
+        }
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_world01_exact_two_encodes_and_all_fields() {
         let (content, map, r) = reviewed_roundtrip(
-            "world02.json",
-            55,
-            452498,
-            "57ce63ef66783095ed6af1f461c838b7d9b457325040008038d16fe1ebcd5594",
+            "world01.json",
+            65,
+            457347,
+            "91386e05ae2a99bbb05a3d7ccefdf68eaf60b3e107ca630d30974779e90aa06e",
+            Some(703),
         );
+        assert_eq!(r.schema, 4);
+        assert_eq!([map.width, map.height], [2100, 2100]);
+        assert!(
+            Map::decode_cells(
+                &std::fs::read(Path::new("data/realms").join(&r.output)).unwrap(),
+                &content
+            )
+            .is_err()
+        );
+        for c in map.cells.iter().filter(|c| c.ground == 244) {
+            assert_eq!(
+                (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                (244, None, "", 1, 0)
+            );
+        }
+        for (ground, object, expected_count, expected_hash) in [
+            (
+                244,
+                None,
+                703,
+                "93f3410a461d0daa70d6efc79938a5a0938f69018bd32e9c5667bf6ee25a2b17",
+            ),
+            (
+                247,
+                Some(477),
+                19,
+                "8800a59eabb0cc59c63e23cb1123c59b425be0361dfdc8142de81a2e761ecc3e",
+            ),
+        ] {
+            let positions: Vec<_> = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.ground == ground && c.object == object)
+                .map(|(i, _)| i as u32)
+                .collect();
+            assert_eq!(positions.len(), expected_count);
+            assert_eq!(
+                sha256(
+                    &positions
+                        .iter()
+                        .flat_map(|i| i.to_le_bytes())
+                        .collect::<Vec<_>>()
+                ),
+                expected_hash
+            );
+        }
         let source = super::super::realms::sources(Path::new("data"))
             .unwrap()
             .into_iter()
@@ -1352,10 +4137,67 @@ mod tests {
         assert_eq!(
             arrived.spawns,
             [
-                (1024.5, 1676.5),
-                (1942.5, 1024.5),
-                (1024.5, 226.5),
-                (93.5, 1024.5)
+                (1050.5, 1859.5),
+                (1971.5, 1050.5),
+                (1050.5, 521.5),
+                (385.5, 1050.5)
+            ]
+        );
+        let mut changes = 0;
+        for (a, b) in map.cells.iter().zip(&arrived.cells) {
+            if (a.ground, a.object, &a.config, a.terrain, a.region)
+                != (b.ground, b.object, &b.config, b.terrain, b.region)
+            {
+                changes += 1;
+                assert_eq!(
+                    (a.ground, a.object, &a.config, a.terrain),
+                    (b.ground, b.object, &b.config, b.terrain)
+                );
+                assert_eq!((a.region, b.region), (0, 1));
+            }
+        }
+        assert_eq!(changes, 36);
+    }
+
+    #[test]
+    fn realm_prepare_reviewed_world02_exact_two_encodes_and_all_fields() {
+        let (content, map, r) = reviewed_roundtrip(
+            "world02.json",
+            55,
+            456061,
+            "c409996bc3a4bbe46ae872998a69ff5491cfdd8371eb06d6324707119f0f846b",
+            None,
+        );
+        assert_eq!(r.schema, 4);
+        assert_eq!([map.width, map.height], [2100, 2100]);
+        assert!(
+            Map::decode_cells(
+                &std::fs::read(Path::new("data/realms").join(&r.output)).unwrap(),
+                &content
+            )
+            .is_err()
+        );
+        let sources = super::super::realms::sources(Path::new("data")).unwrap();
+        assert_eq!(
+            sources.iter().map(|s| s.name()).collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "realm-fsod-1",
+                "realm-fsod-2",
+                "realm-fsod-3",
+                "classic-world-01-reconstruction",
+                "classic-world-02-reconstruction",
+                "classic-world-03-reconstruction"
+            ])
+        );
+        let source = sources.into_iter().find(|s| s.name() == r.id).unwrap();
+        let arrived = source.open(&content).unwrap();
+        assert_eq!(
+            arrived.spawns,
+            [
+                (1050.5, 1702.5),
+                (1968.5, 1050.5),
+                (1050.5, 252.5),
+                (119.5, 1050.5)
             ]
         );
         assert_eq!(
@@ -1373,11 +4215,47 @@ mod tests {
 
     #[test]
     fn realm_prepare_reviewed_world03_exact_two_encodes_and_all_fields() {
-        reviewed_roundtrip(
+        let (content, map, r) = reviewed_roundtrip(
             "world03.json",
-            54,
-            442418,
-            "a6621e55c6a3d603bce33767051936f56aba6b6ba3eccab5251f931934b153af",
+            55,
+            446160,
+            "a95371cbee6852c4b6f885a05418ba37db1b586ce866798a4fe11c656eed198f",
+            None,
         );
+        assert_eq!(r.schema, 4);
+        assert_eq!([map.width, map.height], [2100, 2100]);
+        assert!(
+            Map::decode_cells(
+                &std::fs::read(Path::new("data/realms").join(&r.output)).unwrap(),
+                &content
+            )
+            .is_err()
+        );
+        let source = super::super::realms::sources(Path::new("data"))
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name() == r.id)
+            .unwrap();
+        let arrived = source.open(&content).unwrap();
+        assert_eq!(
+            arrived.spawns,
+            [
+                (1050.5, 1621.5),
+                (1998.5, 1050.5),
+                (1050.5, 292.5),
+                (302.5, 1050.5)
+            ]
+        );
+        let mut changes = 0;
+        for (a, b) in map.cells.iter().zip(&arrived.cells) {
+            if (a.ground, a.object, &a.config, a.terrain, a.region)
+                != (b.ground, b.object, &b.config, b.terrain, b.region)
+            {
+                changes += 1;
+                assert_eq!((a.ground, a.terrain), (b.ground, b.terrain));
+                assert_eq!((b.object, b.config.as_str(), b.region), (None, "", 1));
+            }
+        }
+        assert_eq!(changes, 36);
     }
 }

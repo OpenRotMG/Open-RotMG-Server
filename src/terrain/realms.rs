@@ -3,7 +3,10 @@ use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
-use super::prepare::{bounded_read, read_recipe, safe_path, valid_hash, valid_id};
+use super::prepare::{
+    ScopedLava, WORLD05_ID, WORLD09_ID, WORLD11_ID, bounded_read, read_recipe, safe_path,
+    valid_hash, valid_id,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -25,6 +28,26 @@ pub(crate) struct Asset {
     pub(crate) bytes: Vec<u8>,
     sha256: String,
     profile: String,
+    contract: String,
+    expected_dimensions: [usize; 2],
+    expected_content: Option<[String; 2]>,
+    lava: Option<Box<ScopedLava>>,
+}
+impl Asset {
+    fn validate_lava(&self, map: &Map, content: &Content, phase: &str) -> Result<()> {
+        if let Some(lava) = &self.lava {
+            lava.validate_loaded(map, content)
+                .with_context(|| format!("{} lava support {phase}", self.contract))
+        } else {
+            ensure!(
+                !matches!(self.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)
+                    || !map.cells.iter().any(|c| c.ground == 244),
+                "{} requires its source-exact lava capability {phase}",
+                self.contract
+            );
+            Ok(())
+        }
+    }
 }
 
 pub(crate) enum Source {
@@ -46,14 +69,38 @@ impl Source {
                 let name = &asset.id;
                 let bytes = &asset.bytes;
                 let started = std::time::Instant::now();
-                let mut map = Map::decode_cells(bytes, content)
-                    .with_context(|| format!("decode Realm layout {name}"))?;
+                if let Some(expected) = &asset.expected_content {
+                    ensure!(
+                        &content.xml_sha256 == expected,
+                        "{}: loaded XML identity mismatch [objects, grounds]: expected {expected:?}, actual {:?}",
+                        asset.contract,
+                        content.xml_sha256
+                    );
+                }
+                let mut map = Map::decode_realm_cells(bytes, content, asset.expected_dimensions)
+                    .with_context(|| {
+                        format!(
+                            "decode Realm layout {} output SHA-256 {} expected dimensions {:?}",
+                            asset.contract, asset.sha256, asset.expected_dimensions
+                        )
+                    })?;
+                let [width, height] = asset.expected_dimensions;
                 ensure!(
-                    map.width == 2048 && map.height == 2048,
-                    "{name}: expected 2048-square layout"
+                    map.width == width as i32
+                        && map.height == height as i32
+                        && map.cells.len() == width * height,
+                    "{} output SHA-256 {}: expected dimensions {:?} / {} cells, actual {:?} / {} cells",
+                    asset.contract,
+                    asset.sha256,
+                    asset.expected_dimensions,
+                    width * height,
+                    [map.width, map.height],
+                    map.cells.len()
                 );
+                asset.validate_lava(&map, content, "before arrivals")?;
                 prepare_arrivals(&mut map, content)
                     .with_context(|| format!("prepare Realm layout {name}"))?;
+                asset.validate_lava(&map, content, "after arrivals")?;
                 tracing::info!(
                     layout = name,
                     sha256 = asset.sha256,
@@ -86,12 +133,37 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
         .enumerate()
         .map(|(index, entry)| {
             let load = || -> Result<Source> {
-                let (id, file, expected, profile) = match entry {
+                let (
+                    id,
+                    file,
+                    expected,
+                    profile,
+                    contract,
+                    expected_dimensions,
+                    expected_content,
+                    lava,
+                ) = match entry {
                     Entry::Baseline {
                         id,
                         path: relative,
                         sha256,
-                    } => (id, safe_path(path, &relative)?, sha256, "fsod".to_owned()),
+                    } => {
+                        ensure!(
+                            !matches!(id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID),
+                            "{id} requires its reviewed source recipe"
+                        );
+                        let contract = format!("{id} fsod baseline");
+                        (
+                            id,
+                            safe_path(path, &relative)?,
+                            sha256,
+                            "fsod".to_owned(),
+                            contract,
+                            [2048, 2048],
+                            None,
+                            None,
+                        )
+                    }
                     Entry::Reconstruction { recipe, sha256 } => {
                         let root = safe_path(path, "realms")?;
                         let metadata = read_recipe(&root, &recipe).with_context(|| {
@@ -103,6 +175,10 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                             file,
                             sha256,
                             metadata.profile().to_owned(),
+                            metadata.contract(),
+                            metadata.dimensions(),
+                            metadata.content_identity(),
+                            metadata.lava_scope(&root)?.map(Box::new),
                         )
                     }
                 };
@@ -128,6 +204,10 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                     bytes,
                     sha256: hash,
                     profile,
+                    contract,
+                    expected_dimensions,
+                    expected_content,
+                    lava,
                 }))
             };
             load().with_context(|| format!("Realm catalog {} entry {index}", catalog.display()))

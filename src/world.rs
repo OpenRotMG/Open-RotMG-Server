@@ -5898,6 +5898,10 @@ impl World {
                             && !p.departing
                             && !p.death_pending
                             && p.controller != Controller::Human
+                            && p.conditions(self.now)
+                                & (crate::condition::bit(crate::condition::STASIS)
+                                    | crate::condition::bit(crate::condition::INVINCIBLE))
+                                == 0
                             && !b.hit.contains(id)
                             && inside_box(p.pos, b.pos)
                         {
@@ -6172,6 +6176,646 @@ mod tests {
                 .iter()
                 .any(|id| [290, 354, 6175].contains(&w.entities[id].kind))
         );
+    }
+
+    #[test]
+    fn tomb_connections_reach_stat41_without_inventing_blank_defaults() {
+        use super::entity_store::EntityState;
+        for (raw, source_width, offset_x, offset_y, expected_count) in [
+            (
+                &include_bytes!("../data/realms/world01/tomb-connections.json")[..],
+                2100,
+                1526,
+                1118,
+                19,
+            ),
+            (
+                &include_bytes!("../data/realms/world04/tomb-connections.json")[..],
+                2000,
+                419,
+                926,
+                24,
+            ),
+        ] {
+            let binding: serde_json::Value = serde_json::from_slice(raw).unwrap();
+            let mut map = Map {
+                width: 30,
+                height: 31,
+                cells: vec![
+                    crate::content::Cell {
+                        ground: 247,
+                        object: None,
+                        config: String::new(),
+                        terrain: 0,
+                        region: 0
+                    };
+                    930
+                ],
+                spawns: vec![(15.5, 15.5)],
+            };
+            let mut expected = BTreeMap::new();
+            for row in binding["supports"].as_array().unwrap() {
+                let config = row["cell"]["config"].as_str().unwrap();
+                let value = config
+                    .strip_prefix("conn:")
+                    .unwrap()
+                    .parse::<i32>()
+                    .unwrap();
+                for source in row["positions_le_u32_values"].as_array().unwrap() {
+                    let source = source.as_u64().unwrap() as usize;
+                    let x = source % source_width - offset_x;
+                    let y = source / source_width - offset_y;
+                    assert!(x < 30 && y < 31);
+                    assert!(map.cells[y * 30 + x].object.is_none());
+                    assert_eq!(row["cell"]["object"], 477);
+                    map.cells[y * 30 + x] = crate::content::Cell {
+                        ground: u8::try_from(row["cell"]["ground"].as_u64().unwrap()).unwrap(),
+                        object: Some(477),
+                        config: config.into(),
+                        terrain: u8::try_from(row["cell"]["terrain"].as_u64().unwrap()).unwrap(),
+                        region: u8::try_from(row["cell"]["region"].as_u64().unwrap()).unwrap(),
+                    };
+                    assert!(expected.insert((x, y), value).is_none());
+                }
+            }
+            assert_eq!(expected.len(), expected_count);
+            map.cells[31].object = Some(477);
+            for x in [2, 3] {
+                map.cells[30 + x].object = Some(256);
+                map.cells[30 + x].config = "size:150".into();
+            }
+            let mut w = World::new(world().content, Arc::new(map)).unwrap();
+            assert!(w.actor_ids.is_empty());
+            let mut expected_ids = BTreeMap::new();
+            for (&id, e) in w.entities.iter().filter(|(_, e)| e.kind == 477) {
+                assert!(matches!(&e.state, EntityState::Owned(_)));
+                let bytes = w.stats(id, 0).unwrap();
+                let mut reader = wire::Reader::new(&bytes);
+                assert_eq!(reader.i32().unwrap(), id);
+                assert_eq!(reader.f32().unwrap(), e.pos.x);
+                assert_eq!(reader.f32().unwrap(), e.pos.y);
+                let count = reader.i16().unwrap();
+                let mut stats = BTreeMap::new();
+                for _ in 0..count {
+                    let key = reader.u8().unwrap();
+                    assert!(stats.insert(key, reader.i32().unwrap()).is_none());
+                }
+                reader.done().unwrap();
+                assert!(!stats.contains_key(&61));
+                if e.pos.x == 1.5 && e.pos.y == 1.5 {
+                    assert_eq!(count, 4);
+                    assert_eq!(bytes.len(), 34);
+                    assert!(!stats.contains_key(&41));
+                } else {
+                    let value = expected[&(e.pos.x as usize, e.pos.y as usize)];
+                    assert_eq!(count, 5);
+                    assert_eq!(bytes.len(), 39);
+                    assert_eq!(stats[&41], value);
+                    expected_ids.insert(id, value);
+                }
+            }
+            assert_eq!(expected_ids.len(), expected_count);
+            let shared: Vec<_> = w.entities.values().filter(|e| e.kind == 256).collect();
+            let (EntityState::Shared(a), EntityState::Shared(b)) =
+                (&shared[0].state, &shared[1].state)
+            else {
+                panic!("ordinary scenery sharing changed")
+            };
+            assert!(Arc::ptr_eq(a, b));
+            let (packets, mut rx) = mpsc::channel(4096);
+            let (lost, _loss) = watch::channel(false);
+            let player = w.enter(ch(&w), Some(Output { packets, lost })).unwrap();
+            let update = std::iter::from_fn(|| rx.try_recv().ok())
+                .find(|p| p.id == wire::UPDATE)
+                .unwrap();
+            let mut reader = wire::Reader::new(&update.body);
+            let tiles = reader.i16().unwrap();
+            assert!(tiles > 0);
+            for _ in 0..tiles {
+                let x = reader.i16().unwrap();
+                let y = reader.i16().unwrap();
+                assert!((0..30).contains(&x) && (0..31).contains(&y));
+                assert_eq!(
+                    reader.u8().unwrap(),
+                    w.map.cells[(y * 30 + x) as usize].ground
+                );
+            }
+            let added = reader.i16().unwrap();
+            let mut seen = BTreeMap::new();
+            let mut self_seen = false;
+            for _ in 0..added {
+                let kind = reader.i16().unwrap();
+                let id = reader.i32().unwrap();
+                let x = reader.f32().unwrap();
+                let y = reader.f32().unwrap();
+                let count = reader.i16().unwrap();
+                let mut numeric = BTreeMap::new();
+                for _ in 0..count {
+                    let key = reader.u8().unwrap();
+                    if matches!(key, 31 | 62) {
+                        reader.utf().unwrap();
+                    } else {
+                        assert!(numeric.insert(key, reader.i32().unwrap()).is_none());
+                    }
+                }
+                if id == player {
+                    self_seen = true;
+                }
+                if kind == 477 && expected_ids.contains_key(&id) {
+                    assert_eq!(x, w.entities[&id].pos.x);
+                    assert_eq!(y, w.entities[&id].pos.y);
+                    assert_eq!(count, 5);
+                    assert_eq!(numeric[&41], expected_ids[&id]);
+                    assert!(!numeric.contains_key(&61));
+                    assert!(seen.insert(id, numeric[&41]).is_none());
+                }
+            }
+            assert_eq!(reader.i16().unwrap(), 0);
+            reader.done().unwrap();
+            assert!(self_seen);
+            assert_eq!(seen, expected_ids);
+        }
+    }
+
+    #[test]
+    fn source5_exact_lava_survives_normal_realm_construction() {
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+        let hash = |raw: &[u8]| format!("{:x}", Sha256::digest(raw));
+        let zipped = |raw: &[u8]| {
+            let mut encoder =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+            encoder.write_all(raw).unwrap();
+            encoder.finish().unwrap()
+        };
+        let binding: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../data/realms/world05/lava-support.json"))
+                .unwrap();
+        let mut cells: Vec<_> = (1..=12)
+            .map(|terrain| {
+                serde_json::json!({
+                    "ground":190,"object":null,"config":"","terrain":terrain,"region":0
+                })
+            })
+            .collect();
+        cells.push(binding["cell"].clone());
+        let mut indices = vec![10u16; 2100 * 2100];
+        for y in 100..2000 {
+            for x in 100..2000 {
+                indices[y * 2100 + x] = (((y - 100) / 634) * 4 + (x - 100) / 475) as u16;
+            }
+        }
+        let mut lava = Vec::new();
+        for run in binding["source_positions_row_runs"].as_array().unwrap() {
+            let y = run[0].as_u64().unwrap() as usize;
+            for x in run[1].as_u64().unwrap() as usize..run[2].as_u64().unwrap() as usize {
+                let i = y * 2100 + x;
+                assert_ne!(indices[i], 12);
+                indices[i] = 12;
+                lava.push(i);
+            }
+        }
+        assert_eq!(lava.len(), 112);
+        let source_le: Vec<_> = lava
+            .iter()
+            .flat_map(|&i| (i as u32).to_le_bytes())
+            .collect();
+        assert_eq!(hash(&source_le), binding["support_sha256_le_u32"]);
+        let raw_indices: Vec<_> = indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+        let compressed_indices = zipped(&raw_indices);
+        let dictionary = serde_json::to_vec(&cells).unwrap();
+        // Artificial habitats isolate normal construction from any claim of a complete Source5 map.
+        let mut recipe: serde_json::Value =
+            serde_json::from_slice(&std::fs::read("data/realms/world01.json").unwrap()).unwrap();
+        recipe["schema"] = 3.into();
+        recipe["id"] = "classic-world-05-reconstruction".into();
+        recipe["output"] = "classic-world-05-reconstruction.wmap".into();
+        recipe["provenance"]["source_sha256"] = binding["source_sha256"].clone();
+        recipe["provenance"]["status"] = "Approximate image-guided reconstruction: SYNTHETIC Source5 construction fixture; exact112 lava only, all other cells artificial; not full-map adoption or original fidelity.".into();
+        for (kind, extension) in [("dictionary", "json"), ("indices", "zlib")] {
+            recipe["inputs"][kind]["path"] = format!("world05/cells.{kind}.{extension}").into();
+        }
+        recipe["inputs"]["dictionary"]["sha256"] = hash(&dictionary).into();
+        recipe["inputs"]["indices"]["sha256"] = hash(&compressed_indices).into();
+        recipe["inputs"]["indices"]["expanded_sha256"] = hash(&raw_indices).into();
+        let transform = serde_json::json!({
+            "kind":"source-local-v1","source_dimensions":[2100,2100],"target_dimensions":[2100,2100],
+            "mapping":"tile_xy=source_xy","historical_coordinates":"UNKNOWN",
+            "status":"One source pixel per engineered cell does not prove original extent, pitch or origin."
+        });
+        let policy = serde_json::json!({"schema":2,"selected_client":"123.5.1",
+            "source_sha256":binding["source_sha256"],"transform":transform,
+            "audit":{"kind":"reviewed-supports-v1","supports":13,"pixels":4410000},
+            "world05_lava":{"rgb":binding["rgb"],"pixels":binding["pixels"],
+                "support_sha256_le_u32":binding["support_sha256_le_u32"],"cell":binding["cell"]}});
+        let policy_bytes = serde_json::to_vec(&policy).unwrap();
+        let rows: Vec<_> = cells
+            .iter()
+            .enumerate()
+            .map(|(n, cell)| {
+                let support: Vec<_> = indices
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| **v == n as u16)
+                    .flat_map(|(i, _)| (i as u32).to_le_bytes())
+                    .collect();
+                let mut row = cell.clone();
+                row["support"] = (n + 1).into();
+                row["pixels"] = (support.len() / 4).into();
+                row["support_sha256"] = hash(&support).into();
+                row["status"] = "REVIEWED_RECONSTRUCTION".into();
+                row["reason"] =
+                    "SYNTHETIC constructor fixture, not Source5 source geography.".into();
+                row
+            })
+            .collect();
+        let annotations = serde_json::json!({"source_sha256":binding["source_sha256"],
+            "policy_sha256":hash(&policy_bytes),"transform":transform,"unknown":rows});
+        let annotations_bytes = serde_json::to_vec(&annotations).unwrap();
+        for (kind, name, bytes) in [
+            ("policy", "world05/source-policy.json", &policy_bytes),
+            (
+                "annotations",
+                "world05/source-annotations.json",
+                &annotations_bytes,
+            ),
+        ] {
+            recipe["provenance"][kind]["path"] = name.into();
+            recipe["provenance"][kind]["sha256"] = hash(bytes).into();
+        }
+        let mut wire = (cells.len() as i16).to_le_bytes().to_vec();
+        for cell in &cells {
+            wire.extend((cell["ground"].as_u64().unwrap() as i16).to_le_bytes());
+            wire.extend([0, 0, cell["terrain"].as_u64().unwrap() as u8, 0]);
+        }
+        wire.extend(2100i32.to_le_bytes());
+        wire.extend(2100i32.to_le_bytes());
+        wire.extend(&raw_indices);
+        let encoded = zipped(&wire);
+        let root = std::env::temp_dir().join(format!(
+            "source5-normal-constructor-{}",
+            rand::random::<u64>()
+        ));
+        let realms = root.join("realms");
+        std::fs::create_dir_all(realms.join("world05")).unwrap();
+        for (path, bytes) in [
+            ("world05/cells.dictionary.json", &dictionary),
+            ("world05/cells.indices.zlib", &compressed_indices),
+            ("world05/source-policy.json", &policy_bytes),
+            ("world05/source-annotations.json", &annotations_bytes),
+            ("classic-world-05-reconstruction.wmap", &encoded),
+        ] {
+            std::fs::write(realms.join(path), bytes).unwrap();
+        }
+        std::fs::write(
+            realms.join("world05.json"),
+            serde_json::to_vec(&recipe).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("realm-catalog.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"kind":"reconstruction","recipe":"world05.json","sha256":hash(&encoded)}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        let content = world().content;
+        let sources = crate::terrain::realms::sources(&root).unwrap();
+        let opened = sources[0].open(&content).unwrap();
+        let area1 = opened.cells.iter().filter(|c| c.terrain == 1).count();
+        let mut tier0 = World::new(content.clone(), opened.clone()).unwrap();
+        tier0.configure_population().unwrap();
+        assert_eq!(tier0.population_regions[0].target, 0);
+        assert_eq!(tier0.population_regions[1].target, area1 / 100);
+        let mut tier1_cells = opened.cells.clone();
+        for &i in &lava {
+            tier1_cells[i].terrain = 1;
+        }
+        let mut tier1 = World::new(
+            content.clone(),
+            Arc::new(crate::content::Map {
+                width: 2100,
+                height: 2100,
+                cells: tier1_cells,
+                spawns: opened.spawns.clone(),
+            }),
+        )
+        .unwrap();
+        tier1.configure_population().unwrap();
+        assert_eq!(tier1.population_regions[1].target, (area1 + 112) / 100);
+        drop(tier0);
+        drop(tier1);
+        let directory =
+            Directory::configured(Path::new("data"), content, 16, 51403, Some(51403), sources)
+                .unwrap();
+        let w = &directory.worlds[&-3];
+        assert_eq!(
+            w.realm_layout.as_deref(),
+            Some("classic-world-05-reconstruction")
+        );
+        assert_eq!(w.map.spawns, opened.spawns);
+        for i in lava {
+            let c = &w.map.cells[i];
+            assert_eq!(
+                (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                (244, None, "", 0, 0)
+            );
+        }
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (10, 21));
+        assert_eq!(w.population_counts[0], 0);
+        for terrain in 1..=12 {
+            let region = &w.population_regions[terrain];
+            assert!(region.target > 0);
+            assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn source1_lava_and_scenery_survive_normal_realm_construction() {
+        fn state(c: &crate::content::Cell) -> (u8, Option<u16>, &str, u8, u8) {
+            (c.ground, c.object, &c.config, c.terrain, c.region)
+        }
+        let content = world().content;
+        let sources: Vec<_> = crate::terrain::realms::sources(Path::new("data"))
+            .unwrap()
+            .into_iter()
+            .filter(|s| s.name() == "classic-world-01-reconstruction")
+            .collect();
+        assert_eq!(sources.len(), 1);
+        let opened = sources[0].open(&content).unwrap();
+        assert_eq!([opened.width, opened.height], [2100, 2100]);
+        let protected: Vec<_> = opened
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                c.ground == 244
+                    || c.object
+                        .is_some_and(|kind| content.objects[&kind].full_occupy || kind == 6175)
+            })
+            .map(|(i, c)| (i, c.clone()))
+            .collect();
+        assert_eq!(
+            protected.iter().filter(|(_, c)| c.ground == 244).count(),
+            703
+        );
+        assert_eq!(
+            protected
+                .iter()
+                .filter(|(_, c)| c.object == Some(477))
+                .count(),
+            19
+        );
+        let directory =
+            Directory::configured(Path::new("data"), content, 16, 51403, Some(51403), sources)
+                .unwrap();
+        let w = &directory.worlds[&-3];
+        assert_eq!(
+            w.realm_layout.as_deref(),
+            Some("classic-world-01-reconstruction")
+        );
+        assert_eq!(w.map.spawns, opened.spawns);
+        let entities: BTreeSet<_> = w
+            .entities
+            .values()
+            .map(|e| (e.pos.x as usize, e.pos.y as usize, e.kind))
+            .collect();
+        for (i, c) in protected {
+            assert_eq!(
+                state(&w.map.cells[i]),
+                state(&c),
+                "Source1 protected index {i}"
+            );
+            if let Some(kind) = c.object {
+                assert!(entities.contains(&(i % 2100, i / 2100, kind)));
+            }
+        }
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (10, 21));
+        for terrain in 1..=12 {
+            let region = &w.population_regions[terrain];
+            assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
+        }
+    }
+
+    #[test]
+    fn restored_passives_survive_normal_realm_construction_and_connected_approaches() {
+        use super::entity_store::EntityState;
+        let content = world().content;
+        for (world, count, side, source_offset) in [(2, 699, 2100, 0), (3, 922, 2100, 0)] {
+            let name = format!("classic-world-{world:02}-reconstruction");
+            let sources: Vec<_> = crate::terrain::realms::sources(Path::new("data"))
+                .unwrap()
+                .into_iter()
+                .filter(|s| s.name() == name)
+                .collect();
+            assert_eq!(sources.len(), 1);
+            let opened = sources[0].open(&content).unwrap();
+            assert_eq!([opened.width, opened.height], [side, side]);
+            let solid_cells: Vec<_> = opened
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    c.object
+                        .is_some_and(|kind| content.objects[&kind].full_occupy)
+                })
+                .map(|(i, c)| (i, c.clone()))
+                .collect();
+            let before_cells = &opened.cells;
+            let directory = Directory::configured(
+                Path::new("data"),
+                content.clone(),
+                16,
+                51403,
+                Some(51403),
+                sources,
+            )
+            .unwrap();
+            let w = &directory.worlds[&-3];
+            assert_eq!(w.realm_layout.as_deref(), Some(name.as_str()));
+            let mut changes = [0usize; 6];
+            for (a, b) in before_cells.iter().zip(&w.map.cells) {
+                let fields = [
+                    a.ground != b.ground,
+                    a.object != b.object,
+                    a.config != b.config,
+                    a.terrain != b.terrain,
+                    a.region != b.region,
+                ];
+                changes[0] += usize::from(fields.iter().any(|v| *v));
+                for (i, changed) in fields.into_iter().enumerate() {
+                    changes[i + 1] += usize::from(changed);
+                }
+            }
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"realm_constructor_fields",
+                "layout":name,"changed_cells":changes[0],"ground":changes[1],
+                "object":changes[2],"config":changes[3],"terrain":changes[4],"region":changes[5]})
+            );
+            let solid_entities: BTreeSet<_> = w
+                .entities
+                .values()
+                .filter(|e| content.objects[&e.kind].full_occupy)
+                .map(|e| (e.pos.x as usize, e.pos.y as usize, e.kind))
+                .collect();
+            assert!(!solid_cells.is_empty());
+            for (i, original) in &solid_cells {
+                let actual = &w.map.cells[*i];
+                assert_eq!(
+                    (
+                        actual.ground,
+                        actual.object,
+                        &actual.config,
+                        actual.terrain,
+                        actual.region
+                    ),
+                    (
+                        original.ground,
+                        original.object,
+                        &original.config,
+                        original.terrain,
+                        original.region
+                    ),
+                    "{name}: solid scenery changed at {},{}",
+                    i % w.map.width as usize,
+                    i / w.map.width as usize
+                );
+                assert!(solid_entities.contains(&(
+                    i % w.map.width as usize,
+                    i / w.map.width as usize,
+                    original.object.unwrap()
+                )));
+            }
+            let ledger: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(format!(
+                    "data/realms/restoration/world{world:02}-passives.json"
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+            let mut source_props = BTreeMap::new();
+            for e in w
+                .entities
+                .values()
+                .filter(|e| [290, 354, 6175].contains(&e.kind))
+            {
+                assert!(
+                    source_props
+                        .insert((e.pos.x as i32, e.pos.y as i32), e)
+                        .is_none()
+                );
+            }
+            let mut checked = 0;
+            for row in ledger["cohorts"].as_array().unwrap() {
+                let kind = row["after"]["object"].as_u64().unwrap() as u16;
+                for run in row["runs"].as_array().unwrap() {
+                    let y = run[0].as_i64().unwrap() as i32 - source_offset;
+                    for x in run[1].as_i64().unwrap() as i32 - source_offset
+                        ..run[2].as_i64().unwrap() as i32 - source_offset
+                    {
+                        let e = source_props[&(x, y)];
+                        assert_eq!(e.kind, kind);
+                        assert!(matches!(&e.state, EntityState::Owned(_)));
+                        assert!(!w.actor_ids.contains(&e.id));
+                        assert_eq!(e.hp, if kind == 6175 { 1000 } else { 100 });
+                        assert_eq!(e.size, if kind == 6175 { 120 } else { 100 });
+                        assert!(e.extra_stats.is_empty());
+                        assert_eq!(
+                            w.map.cells[(y * w.map.width + x) as usize].object,
+                            Some(kind)
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+            assert_eq!(checked, count);
+            assert_eq!(w.map.spawns.len(), 4);
+            let side = w.map.width as usize;
+            let walkable: Vec<_> = (0..w.map.cells.len())
+                .map(|i| {
+                    w.walkable(Pos {
+                        x: (i % side) as f32 + 0.5,
+                        y: (i / side) as f32 + 0.5,
+                    })
+                })
+                .collect();
+            let (x, y) = w.map.spawns[0];
+            let start = y as usize * side + x as usize;
+            let mut reached = vec![false; walkable.len()];
+            let mut queue = VecDeque::from([start]);
+            assert!(walkable[start]);
+            reached[start] = true;
+            while let Some(i) = queue.pop_front() {
+                for next in [
+                    i.wrapping_sub(side),
+                    i + side,
+                    if i % side > 0 { i - 1 } else { usize::MAX },
+                    if i % side + 1 < side {
+                        i + 1
+                    } else {
+                        usize::MAX
+                    },
+                ] {
+                    if next < reached.len() && walkable[next] && !reached[next] {
+                        reached[next] = true;
+                        queue.push_back(next);
+                    }
+                }
+            }
+            for &(x, y) in &w.map.spawns {
+                assert!(reached[y as usize * side + x as usize]);
+            }
+            let roots: Vec<_> = w
+                .hero_identities()
+                .into_iter()
+                .map(|id| &w.entities[&id])
+                .collect();
+            assert_eq!(roots.len(), 10);
+            let mut roster = BTreeMap::new();
+            for e in &roots {
+                *roster.entry(e.kind).or_insert(0usize) += 1;
+            }
+            assert_eq!(roster.remove(&0x668), Some(3));
+            assert_eq!(roster.remove(&0x67d), Some(3));
+            assert_eq!(
+                roster,
+                [(0x675, 1), (0x91b, 1), (0x91f, 1), (0x928, 1)]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>()
+            );
+            assert_eq!(w.setpieces.len(), 21);
+            for terrain in 1..=12 {
+                let region = &w.population_regions[terrain];
+                assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
+            }
+            for e in &roots {
+                assert!(
+                    (-4..=4).any(|dy| (-4..=4).any(|dx| {
+                        let x = e.pos.x as i32 + dx;
+                        let y = e.pos.y as i32 + dy;
+                        (dx != 0 || dy != 0)
+                            && x >= 0
+                            && y >= 0
+                            && x < w.map.width
+                            && y < w.map.height
+                            && reached[(y * w.map.width + x) as usize]
+                    })),
+                    "{name}: no connected approach to root {} kind{:x} at{:?}",
+                    e.id,
+                    e.kind,
+                    e.pos
+                );
+            }
+            eprintln!(
+                "{name}: prepared seed51403, {count} selected passive props, {} entities/{} actors/{} roots, all4arrivals/rootapproaches connected",
+                w.entities.len(),
+                w.actor_ids.len(),
+                roots.len()
+            );
+        }
     }
 
     #[test]
@@ -6779,6 +7423,157 @@ mod tests {
             .to_string()
             .contains("blocked tile")
         );
+    }
+
+    #[test]
+    fn hostile_projectiles_skip_invincible_and_stasis_but_collide_with_invulnerable() {
+        use crate::condition::{INVINCIBLE, INVULNERABLE, SLOWED, STASIS, bit};
+
+        let mut observed = Vec::new();
+        let mut expected = Vec::new();
+        for (controller, multi_hit, duration) in [
+            (Controller::Qa, false, 1000),
+            (Controller::Qa, true, 1000),
+            (Controller::Autonomous, false, 1000),
+            (Controller::Autonomous, true, 1000),
+            (Controller::Qa, false, 50),
+            (Controller::Qa, true, 50),
+            (Controller::Autonomous, false, 50),
+            (Controller::Autonomous, true, 50),
+        ] {
+            for protection in [INVULNERABLE, INVINCIBLE, STASIS] {
+                let mut w = arena(0);
+                let front = w.enter(ch(&w), None).unwrap();
+                let mut character = ch(&w);
+                character.id = 2;
+                character.account = 2;
+                let downstream = w.enter(character, None).unwrap();
+                for (id, x) in [(front, 11.5), (downstream, 12.5)] {
+                    let p = w.players.get_mut(&id).unwrap();
+                    assert_eq!(p.controller, Controller::Qa);
+                    p.controller = controller;
+                    p.pos = Pos { x, y: 100.5 };
+                }
+                w.apply_condition(front, protection, duration).unwrap();
+                let start = Pos { x: 10.5, y: 100.5 };
+                let mut spec = w.content.objects[&0x683].projectiles[&0].clone();
+                spec.speed = 200.;
+                spec.multi_hit = multi_hit;
+                spec.effects = vec![(SLOWED, 1000)];
+                w.bullets.push(Bullet {
+                    owner: 500,
+                    source_kind: 0x683,
+                    id: 1,
+                    friendly: false,
+                    start,
+                    pos: start,
+                    angle: 0.,
+                    born: 0,
+                    damage: 20,
+                    spec,
+                    hit: BTreeSet::new(),
+                });
+                w.step();
+                let active = duration > w.now;
+                assert_eq!(
+                    w.players[&front].conditions(w.now) & bit(protection),
+                    if active { bit(protection) } else { 0 }
+                );
+                let passed_front = w.bullets.len() == 1 && w.bullets[0].hit.is_empty();
+                w.step();
+                let hits: BTreeSet<_> = w
+                    .bullets
+                    .iter()
+                    .flat_map(|b| b.hit.iter().copied())
+                    .collect();
+                observed.push((
+                    (controller, multi_hit, duration, protection),
+                    w.players[&front].character.hp,
+                    w.players[&front].conditions(w.now) & bit(SLOWED),
+                    passed_front,
+                    w.players[&downstream].character.hp,
+                    w.players[&downstream].conditions(w.now) & bit(SLOWED),
+                    w.bullets.is_empty(),
+                    hits,
+                ));
+                let passes = active && protection != INVULNERABLE;
+                let downstream_hit = multi_hit || passes;
+                let hits = if multi_hit {
+                    if passes {
+                        BTreeSet::from([downstream])
+                    } else {
+                        BTreeSet::from([front, downstream])
+                    }
+                } else {
+                    BTreeSet::new()
+                };
+                expected.push((
+                    (controller, multi_hit, duration, protection),
+                    if active { 100 } else { 80 },
+                    if active { 0 } else { bit(SLOWED) },
+                    passes,
+                    if downstream_hit { 80 } else { 100 },
+                    if downstream_hit { bit(SLOWED) } else { 0 },
+                    !multi_hit,
+                    hits,
+                ));
+            }
+        }
+        assert_eq!(observed, expected);
+    }
+
+    #[test]
+    fn hostile_projectiles_from_world_gun_pass_protected_autonomous_players() {
+        use crate::condition::{INVINCIBLE, INVULNERABLE, STASIS};
+
+        for protection in [INVULNERABLE, INVINCIBLE, STASIS] {
+            let mut w = arena(0);
+            w.encounter = false;
+            let front = w.enter(ch(&w), None).unwrap();
+            let mut character = ch(&w);
+            character.id = 2;
+            character.account = 2;
+            let downstream = w.enter(character, None).unwrap();
+            for (id, x) in [(front, 11.5), (downstream, 12.5)] {
+                let p = w.players.get_mut(&id).unwrap();
+                p.controller = Controller::Autonomous;
+                p.pos = Pos { x, y: 100.5 };
+            }
+            w.apply_condition(front, protection, 1000).unwrap();
+            let gun = w
+                .spawn_entity(0x804, Pos { x: 10.5, y: 100.5 }, vec![])
+                .unwrap();
+            assert!(w.bullets.is_empty());
+            w.step();
+            assert_eq!(w.bullets.len(), 1);
+            let shot = &w.bullets[0];
+            assert_eq!(
+                (shot.owner, shot.source_kind, shot.born),
+                (gun, 0x804, w.now)
+            );
+            assert!(!shot.spec.multi_hit);
+            let damage = shot.damage;
+            assert_eq!(damage, w.content.objects[&0x804].projectiles[&0].min);
+            for _ in 0..20 {
+                w.step();
+                if w.bullets.is_empty() {
+                    break;
+                }
+                assert!(!w.bullets[0].hit.contains(&front));
+            }
+            assert!(w.now < 1000);
+            assert!(w.bullets.is_empty());
+            assert_eq!(w.players[&front].character.hp, 100, "{protection}");
+            assert_eq!(
+                w.players[&downstream].character.hp,
+                if protection == INVULNERABLE {
+                    100
+                } else {
+                    100 - damage
+                },
+                "{protection}"
+            );
+        }
     }
 
     #[test]
