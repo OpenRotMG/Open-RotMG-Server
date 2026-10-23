@@ -438,6 +438,27 @@ fn community_lab_cyborg_blinks_without_shooting_then_explodes_and_experiment_use
     assert_eq!(w.lab_shots(experiment, target), vec![(0, 0.)]);
 }
 
+fn commit_initial_exploration(w: &mut World) {
+    for p in w.players.values() {
+        assert!(!p.rewards_queued());
+        assert_eq!(p.committed_lifetime, crate::store::FameLifetime::complete());
+        let mut expected = p.committed_lifetime.clone();
+        expected.tiles = p.tiles.len() as u64;
+        assert!(expected.tiles > 0);
+        assert_eq!(p.character.lifetime, expected);
+    }
+    let plans = w.pending_progress_where(|_, _| true);
+    assert_eq!(plans.len(), w.players.len());
+    for (id, snapshot) in plans {
+        assert_eq!(
+            serde_json::to_value(&snapshot).unwrap(),
+            serde_json::to_value(&w.players[&id].character).unwrap()
+        );
+        w.finish_progress(id, snapshot).unwrap();
+    }
+    assert!(w.pending_progress_where(|_, _| true).is_empty());
+}
+
 #[test]
 fn community_lab_clear_private_rewards_and_exit_are_once_only_and_commit_gated() {
     let (mut w, p, boss) = boss_arena();
@@ -445,6 +466,7 @@ fn community_lab_clear_private_rewards_and_exit_are_once_only_and_commit_gated()
     visitor.id = 2;
     visitor.account = 2;
     let visitor = w.enter(visitor, None).unwrap();
+    commit_initial_exploration(&mut w);
     w.entities
         .get_mut(&boss)
         .unwrap()
@@ -481,6 +503,7 @@ fn community_lab_clear_private_rewards_and_exit_are_once_only_and_commit_gated()
 fn community_lab_dead_departing_and_zero_damage_players_cannot_receive_rewards_or_credit() {
     for (dead, departing, damage) in [(true, false, 1), (false, true, 1), (false, false, 0)] {
         let (mut w, p, boss) = boss_arena();
+        commit_initial_exploration(&mut w);
         w.entities.get_mut(&boss).unwrap().damage.insert(1, damage);
         w.players.get_mut(&p).unwrap().death_pending = dead;
         w.players.get_mut(&p).unwrap().departing = departing;

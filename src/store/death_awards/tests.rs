@@ -268,6 +268,16 @@ async fn equipment_death_legacy_migration_preserves_snapshots_wallet_and_paid_va
         .unwrap();
     let vaults = store.vaults(ch.account).await.unwrap();
     drop(store);
+    for table in ["bot_minds", "trade_transactions"] {
+        assert_eq!(
+            db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "historical schema13 fixture cannot discard community records"
+        );
+        db.execute_batch(&format!("DROP TABLE {table};")).unwrap();
+    }
     db.execute_batch("DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; ALTER TABLE deaths DROP COLUMN equipment_fame; DROP TABLE pictures; DROP TABLE picture_sequence; PRAGMA user_version=13;")
         .unwrap();
     let store = Store::open(&path, &content).unwrap();
