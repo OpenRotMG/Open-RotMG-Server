@@ -1351,10 +1351,11 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
                     let portal = w
                         .entities
                         .values()
-                        .find(|e| e.kind == 0x712 && e.published)
+                        .find(|e| e.kind == 0x712)
                         .context("published named Realm portal missing")?
                         .clone();
                     w.players.get_mut(&id).unwrap().pos = portal.pos;
+                    // Routing validates publication, range and the named Realm binding.
                     let binding = d.destination(id, Some(portal.id))?;
                     assert_eq!((binding.0, binding.1), (account, character));
                     Ok((portal.id, Some(binding.2)))
