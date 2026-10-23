@@ -281,14 +281,6 @@ async fn community_pursuit_pending_and_failed_results_do_not_complete_the_activi
         )
         .unwrap();
         let map = d.worlds[&-3].map.clone();
-        drop(d);
-        let mut d = crate::world::Directory::test_with_seed(
-            std::path::Path::new("data"),
-            c.clone(),
-            16,
-            101,
-        )
-        .unwrap();
         let mut w = crate::world::World::new(c.clone(), map).unwrap();
         w.name = "Realm".into();
         let (packets, _fresh_receiver) = tokio::sync::mpsc::channel(OUTPUT_CAPACITY);

@@ -400,7 +400,7 @@ pub(super) fn completed_oryx_key_lost_aftermath(
                 || branch["clear_character"] != character
                 || branch["clear_time_ms"].as_u64()? > normal["time_ms"].as_u64()?
                 || branch["pending"] != false
-                || branch["applicable_remedy"] != false
+                || !branch["applicable_remedy"].is_boolean()
                 || branch["loot_waiting"] != false
                 || branch["live_objective"] != false
             {
@@ -1032,14 +1032,15 @@ fn community_events_c13_safe_opening_held_key_visible_key_loot_or_missing_locked
     assert!(!c.classified());
 }
 #[test]
-fn community_events_c13_applicable_remedy_midfight_pending_override_unknown_or_stale_witness_reject()
- {
-    for flag in [
-        "applicable_remedy",
-        "live_objective",
-        "pending",
-        "loot_waiting",
-    ] {
+fn community_events_c13_postclear_remedy_does_not_override_bound_exit_or_hide_live_work() {
+    let mut remedied = nexus_context_with(|_| {});
+    remedied.fields[13]["applicable_remedy"] = json!(true);
+    assert!(remedied.classified());
+    for unknown in [Value::Null, json!("true")] {
+        remedied.fields[13]["applicable_remedy"] = unknown;
+        assert!(!remedied.classified());
+    }
+    for flag in ["live_objective", "pending", "loot_waiting"] {
         let mut c = nexus_context_with(|_| {});
         c.fields[13][flag] = json!(true);
         assert!(!c.classified(), "{flag}");
