@@ -231,9 +231,11 @@ async fn community_resources_actual_controllers_withdraw_store_and_continue_or_k
         let (scope, position) = app
             .world
             .directory(move |d| {
-                let realm = d.worlds.get_mut(&-3).unwrap();
-                for (x, y) in realm.map.spawns.clone() {
-                    realm.spawn_entity(0x205, Pos { x, y }, vec![])?;
+                // An ordinary next outing may select any open Realm in the pool.
+                for realm in d.worlds.values_mut().filter(|w| w.name == "Realm") {
+                    for (x, y) in realm.map.spawns.clone() {
+                        realm.spawn_entity(0x205, Pos { x, y }, vec![])?;
+                    }
                 }
                 let scope = d.instance("vault", Some(account))?;
                 let w = d.worlds.get_mut(&scope).unwrap();

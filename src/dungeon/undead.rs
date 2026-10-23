@@ -50,8 +50,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let mut entrance = None;
     for number in 1..rng.gen_range(32..=40) {
         let round = rng.gen_bool(0.1);
-        let w = if round { 13 } else { rng.gen_range(9..=13) };
-        let h = if round { w } else { rng.gen_range(9..=13) };
+        // Broader chambers relieve crowding without adding long corridors: https://web.archive.org/web/20120425182543/http://forums.wildshadow.com/wiki/realm-mad-god/undead-lair
+        let w = if round { 17 } else { rng.gen_range(13..=21) };
+        let h = if round { w } else { rng.gen_range(13..=21) };
         let mut candidates = vec![];
         for (parent, p) in rooms.iter().enumerate() {
             if p.depth == 10 || entrance == Some(parent) || parent == 0 && number > 1 {
@@ -347,6 +348,25 @@ mod tests {
                     "seed {seed}: unreachable endpoint/candle {p:?}"
                 );
             }
+            let mut bounds = BTreeMap::new();
+            for (i, c) in map.cells.iter().enumerate().filter(|(_, c)| c.region > 2) {
+                let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+                let b = bounds.entry(c.region).or_insert((x, y, x, y));
+                b.0 = b.0.min(x);
+                b.1 = b.1.min(y);
+                b.2 = b.2.max(x);
+                b.3 = b.3.max(y);
+            }
+            let mut broad = false;
+            for (x0, y0, x1, y1) in bounds.values() {
+                let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
+                assert!(
+                    (13..=21).contains(&w) && (13..=21).contains(&h),
+                    "seed {seed}: cramped room {w}x{h}"
+                );
+                broad |= w > 17 || h > 17;
+            }
+            assert!(broad, "seed {seed}: room size variation lost");
             let mut families = BTreeMap::new();
             for c in &map.cells {
                 if let Some(family) = FAMILIES

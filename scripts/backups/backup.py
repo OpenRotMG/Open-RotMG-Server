@@ -31,7 +31,12 @@ FAME_GAME = {**VAULTS_GAME, 'deaths': (*LEGACY_GAME['deaths'], 'equipment_fame')
 PICTURES_GAME = {**FAME_GAME, 'pictures': ('id', 'account', 'name', 'data_type', 'tags', 'png'), 'picture_sequence': ('id', 'next_id')}
 PICTURES_SQL = "CREATE TABLE pictures(id INTEGER PRIMARY KEY CHECK(id BETWEEN 1 AND 2147483647),account INTEGER NOT NULL REFERENCES accounts(id),name TEXT NOT NULL,data_type INTEGER NOT NULL CHECK(data_type BETWEEN 1 AND 7),tags TEXT NOT NULL,png BLOB NOT NULL CHECK(typeof(png)='blob' AND length(png)<=16384),UNIQUE(account,name))"
 PICTURE_SEQUENCE_SQL = "CREATE TABLE picture_sequence(id INTEGER PRIMARY KEY CHECK(id=1),next_id INTEGER NOT NULL CHECK(typeof(next_id)='integer' AND next_id BETWEEN 1 AND 2147483648))"
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME}
+COMMUNITY_GAME = {**PICTURES_GAME, 'trade_transactions': ('id', 'owners', 'writes', 'revisions', 'delivery', 'market_key'), 'bot_minds': ('account', 'revision', 'mind')}
+COMMUNITY_SQL = {
+    'trade_transactions': 'CREATE TABLE trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE)',
+    'bot_minds': 'CREATE TABLE bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)))',
+}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -45,7 +50,8 @@ AUTH_REWARDS_GAME = {**AUTH_GUILDS_GAME, 'gold_rewards': REWARDS_GAME['gold_rewa
 AUTH_SLOTS_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'character_slot_purchases': SLOTS_GAME['character_slot_purchases']}
 AUTH_VAULTS_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vaults': VAULTS_GAME['vaults']}
 RELOADED_FAME_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
-RELOADED_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
+RELOADED_PICTURES_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
+RELOADED_GAME = {**RELOADED_PICTURES_GAME, 'trade_transactions': COMMUNITY_GAME['trade_transactions'], 'bot_minds': COMMUNITY_GAME['bot_minds']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -154,6 +160,10 @@ def snapshot(path, schema, *, include_schema=False):
             for table, expected in [('pictures', PICTURES_SQL), ('picture_sequence', PICTURE_SEQUENCE_SQL)]:
                 if db.execute("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() != (expected,):
                     raise ValueError('Unsupported canonical picture metadata: ' + table)
+        if 'bot_minds' in schema:
+            for table, expected in COMMUNITY_SQL.items():
+                if db.execute("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() != (expected,):
+                    raise ValueError('Unsupported canonical community metadata: ' + table)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
@@ -282,6 +292,34 @@ def validate_deaths(game, version):
             raise ValueError('Guild contribution or earnings exceed account earned fame')
 
 
+def validate_community(game):
+    accounts = {row['id'] for row in game['accounts']}
+    characters = {row['id']: row['account'] for row in game['characters']}
+    minds, receipts = game['bot_minds'], game['trade_transactions']
+    if (any(type(row['account']) is not int or row['account'] not in accounts for row in minds)
+            or len({row['account'] for row in minds}) != len(minds)
+            or any(not isinstance(row['id'], str) for row in receipts)
+            or len({row['id'] for row in receipts}) != len(receipts)):
+        raise ValueError('Invalid or duplicate community identity')
+    for row in receipts:
+        writes = json.loads(row['writes'])
+        if not isinstance(writes, list) or any(not isinstance(w, dict) or characters.get(w.get('id')) != w.get('account') for w in writes):
+            raise ValueError('Trade receipt character ownership mismatch')
+    keys = [row['market_key'] for row in receipts if row['market_key'] is not None]
+    if any(not isinstance(key, str) for key in keys) or len(set(keys)) != len(keys):
+        raise ValueError('Duplicate market installment receipt')
+    binary = os.environ.get('OPENROTMG_BACKUP_BINARY')
+    if not binary:
+        raise RuntimeError('OPENROTMG_BACKUP_BINARY must name the matching release binary')
+    result = subprocess.run([binary, '--backup-validate-community'],
+                            input=json.dumps({'bot_minds': minds, 'trade_transactions': receipts}),
+                            text=True, capture_output=True, timeout=30)
+    if result.returncode:
+        raise ValueError('Release community validation failed: ' + result.stderr.strip())
+    if json.loads(result.stdout) != {'validated_minds': len(minds), 'validated_trade_receipts': len(receipts)}:
+        raise ValueError('Release community validator returned an invalid receipt')
+
+
 def validate(bundle):
     if set(bundle) != {'schema', 'created_at', 'revisions', 'game', 'discord'} or type(bundle['schema']) is not int or bundle['schema'] not in GAME_SCHEMAS:
         raise ValueError('Unsupported backup envelope')
@@ -367,12 +405,14 @@ def validate(bundle):
         validate_vaults(bundle['game'])
     if bundle['schema'] >= 15:
         validate_pictures(bundle['game'])
+    if bundle['schema'] >= 16:
+        validate_community(bundle['game'])
     validate_deaths(bundle['game'], bundle['schema'])
     return bundle
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if (stored_version > max(GAME_SCHEMAS) or (max(versions) >= 12 and stored_version != max(versions))
             or (stored_version >= 12 and stored_version not in versions)):
@@ -453,6 +493,8 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += "\nALTER TABLE deaths ADD COLUMN equipment_fame INTEGER NOT NULL CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647);"
     if bundle['schema'] >= 15:
         definitions['game'] += '\n' + PICTURES_SQL + ';\n' + PICTURE_SEQUENCE_SQL + ';'
+    if bundle['schema'] >= 16:
+        definitions['game'] += '\n' + ';\n'.join(COMMUNITY_SQL.values()) + ';'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')
