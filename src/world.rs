@@ -4627,7 +4627,13 @@ impl World {
         } else if private {
             eligible.len()
         } else {
-            (eligible.len() * 2).min(8)
+            // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
+            let multiplier = match defeated.kind {
+                0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 => 4,
+                0x62c => 3,
+                _ => 2,
+            };
+            (eligible.len() * multiplier).min(8)
         };
         for i in 0..attempts {
             let mut rewards = crate::loot::rewards(&self.content, defeated.kind, &mut self.rng);
@@ -4649,7 +4655,7 @@ impl World {
                 }
             }
         }
-        if matches!(defeated.kind, 0x20d | 0x952 | 0x949) {
+        if !crate::loot::fauna_private_table(defeated.kind).is_empty() {
             for (owner, item) in crate::loot::fauna_private_rewards(
                 &self.content,
                 defeated.kind,
