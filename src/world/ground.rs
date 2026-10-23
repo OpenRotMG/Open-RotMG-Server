@@ -40,6 +40,7 @@ impl World {
             .iter()
             .any(|id| self.content.objects[&self.entities[id].kind].protects_ground);
         let p = self.players.get_mut(&id).unwrap();
+        // Selected 123.5.1 Player.update requires lastDamage + 500 < currentTime per square.
         let ignored = self.safe
             || protected
             || !p.character.alive
@@ -48,7 +49,7 @@ impl World {
             || p.death_pending
             || p.ground_hits
                 .get(&i)
-                .is_some_and(|previous| time.saturating_sub(*previous) < 500);
+                .is_some_and(|previous| time.saturating_sub(*previous) <= 500);
         if ignored && p.controller != Controller::Human {
             return Ok(());
         }
@@ -107,5 +108,80 @@ impl World {
                 tracing::error!(player=id,%error,"actor ground damage refused");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::tests::{arena, ch};
+
+    fn lava_player(controller: Controller) -> (World, i32, Pos, usize) {
+        let mut w = arena(0);
+        let id = w.enter(ch(&w), None).unwrap();
+        let p = w.players.get_mut(&id).unwrap();
+        p.controller = controller;
+        p.character.hp = 1000;
+        p.seed = 51403;
+        let pos = p.pos;
+        let i = pos.y as usize * w.map.width as usize + pos.x as usize;
+        Arc::make_mut(&mut w.map).cells[i].ground = 244;
+        (w, id, pos, i)
+    }
+
+    #[test]
+    fn ground_damage_waits_past_500ms_per_square() {
+        for controller in [Controller::Qa, Controller::Autonomous, Controller::Human] {
+            let (mut w, id, pos, i) = lava_player(controller);
+            w.ground_damage(id, 1000, pos).unwrap();
+            let hp = w.players[&id].character.hp;
+            assert!((940..=970).contains(&hp));
+            for time in [1499, 1500] {
+                let seed = w.players[&id].seed;
+                w.ground_damage(id, time, pos).unwrap();
+                let p = &w.players[&id];
+                assert_eq!(
+                    p.character.hp,
+                    hp,
+                    "{controller:?}: elapsed {}ms",
+                    time - 1000
+                );
+                assert_eq!(p.ground_hits[&i], 1000);
+                assert_eq!(p.seed != seed, controller == Controller::Human);
+            }
+            w.ground_damage(id, 1501, pos).unwrap();
+            assert!((30..=60).contains(&(hp - w.players[&id].character.hp)));
+            assert_eq!(w.players[&id].ground_hits[&i], 1501);
+            let next = Pos {
+                x: pos.x + 1.,
+                ..pos
+            };
+            Arc::make_mut(&mut w.map).cells[i + 1].ground = 244;
+            w.players.get_mut(&id).unwrap().pos = next;
+            let hp = w.players[&id].character.hp;
+            w.ground_damage(id, 1501, next).unwrap();
+            assert!((30..=60).contains(&(hp - w.players[&id].character.hp)));
+            assert_eq!(w.players[&id].ground_hits[&(i + 1)], 1501);
+        }
+    }
+
+    #[test]
+    fn server_ground_steps_observe_the_native_strict_cooldown() {
+        let (mut w, id, _, i) = lava_player(Controller::Autonomous);
+        w.now = 1000;
+        w.ground_step();
+        let hp = w.players[&id].character.hp;
+        let seed = w.players[&id].seed;
+        for time in (1050..=1500).step_by(50) {
+            w.now = time;
+            w.ground_step();
+            assert_eq!(w.players[&id].character.hp, hp, "world time {time}");
+            assert_eq!(w.players[&id].ground_hits[&i], 1000);
+            assert_eq!(w.players[&id].seed, seed);
+        }
+        w.now = 1550;
+        w.ground_step();
+        assert!((30..=60).contains(&(hp - w.players[&id].character.hp)));
+        assert_eq!(w.players[&id].ground_hits[&i], 1550);
     }
 }
