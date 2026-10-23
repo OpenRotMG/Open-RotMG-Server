@@ -67,6 +67,13 @@ class BuildStorageTests(unittest.TestCase):
         self.assertIn('Cargo target:', self.stdout.getvalue())
         self.assertEqual(self.stderr.getvalue(), '')
 
+    def test_formatting_skips_cache_and_compiler_setup_and_preserves_failure(self):
+        with patch.object(guard, 'cache_root', side_effect=AssertionError('formatting must not use the cache')), \
+                patch.object(guard.subprocess, 'check_output', side_effect=AssertionError('compiler lookup')), \
+                patch.object(guard.subprocess, 'call', return_value=37) as cargo:
+            self.assertEqual(guard.main(['--toolchain', '1.94.1', 'fmt', '--all', '--', '--check']), 37)
+        cargo.assert_called_once_with(['cargo', '+1.94.1', 'fmt', '--all', '--', '--check'], cwd=self.source)
+
     def test_real_allocation_failures_are_reported_as_failures(self):
         for number in [errno.ENOSPC, errno.EDQUOT]:
             with self.subTest(errno=number), \

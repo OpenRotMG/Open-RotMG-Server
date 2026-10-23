@@ -130,6 +130,9 @@ def main(argv=None):
             raise RuntimeError('clean does not accept Cargo arguments')
         if args.output is not None and args.command != 'build':
             raise RuntimeError('--output requires build')
+        toolchain = ['+' + args.toolchain] if args.toolchain else []
+        if args.command == 'fmt':
+            return subprocess.call(['cargo', *toolchain, 'fmt', *args.arguments], cwd=ROOT)
         if any(arg.split('=', 1)[0] in ('--target-dir', '--config', '--manifest-path', '--out-dir', '--artifact-dir') for arg in args.arguments):
             raise RuntimeError('Storage/manifest overrides bypass the managed build cache and are not allowed')
         if 'CARGO_TARGET_DIR' in os.environ or 'CARGO_BUILD_TARGET_DIR' in os.environ or 'CARGO_BUILD_BUILD_DIR' in os.environ:
@@ -141,7 +144,6 @@ def main(argv=None):
             if args.command == 'clean':
                 clean(root)
                 return 0
-            toolchain = ['+' + args.toolchain] if args.toolchain else []
             version = subprocess.check_output(['rustc', *toolchain, '-vV'], cwd=ROOT, text=True)
             settings = {key: value for key, value in os.environ.items() if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))}
             # Cargo can treat an older sibling checkout's different inputs as fresh.
