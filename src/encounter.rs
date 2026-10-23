@@ -5,6 +5,7 @@ pub(crate) mod attacks;
 pub(crate) mod fauna;
 pub(crate) mod jungle;
 pub(crate) mod landmarks;
+pub(crate) mod tomb;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
@@ -15,6 +16,7 @@ pub enum Anchor {
     CampLeader,
     CampMember(u16),
     CampEntity(i32),
+    BoundEntity(i32),
     QuestMember(u16),
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,6 +93,9 @@ pub fn profile(kind: u16) -> Option<Profile> {
         return Some(crate::dungeon::manor::profile(kind));
     }
     if let Some(profile) = crate::dungeon::davy::profile(kind) {
+        return Some(profile);
+    }
+    if let Some(profile) = crate::dungeon::tomb::profile(kind) {
         return Some(profile);
     }
     if let Some(profile) = crate::dungeon::trench::profile(kind) {
@@ -541,6 +546,9 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
             }
         }
         return Ok(());
+    }
+    if crate::dungeon::tomb::contains(kind) {
+        return crate::dungeon::tomb::validate(content, kind);
     }
     if crate::dungeon::trench::ROSTER.contains(&kind) {
         return crate::dungeon::trench::validate(content, kind);
