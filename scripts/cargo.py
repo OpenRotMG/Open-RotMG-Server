@@ -145,7 +145,10 @@ def main(argv=None):
                 clean(root)
                 return 0
             version = subprocess.check_output(['rustc', *toolchain, '-vV'], cwd=ROOT, text=True)
-            settings = {key: value for key, value in os.environ.items() if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))}
+            # Cargo tracks env! inputs; runtime diagnostics and job counts need no separate target tree.
+            settings = {key: value for key, value in os.environ.items()
+                        if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))
+                        and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'CARGO_BUILD_JOBS')}
             # Cargo can treat an older sibling checkout's different inputs as fresh.
             key = hashlib.sha256(json.dumps([str(ROOT), version, settings], sort_keys=True).encode()).hexdigest()[:20]
             target = root / key
