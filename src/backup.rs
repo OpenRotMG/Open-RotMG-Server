@@ -58,6 +58,98 @@ pub async fn run(args: &[String]) -> Result<bool> {
             );
             validate(serde_json::from_slice(&input)?)?;
         }
+        ["--backup-validate-community"] => {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct MindRow {
+                account: i32,
+                revision: i64,
+                mind: String,
+            }
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct TradeRow {
+                id: String,
+                owners: String,
+                writes: String,
+                revisions: String,
+                delivery: Option<String>,
+                market_key: Option<String>,
+            }
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Community {
+                bot_minds: Vec<MindRow>,
+                trade_transactions: Vec<TradeRow>,
+            }
+            let mut input = Vec::new();
+            std::io::stdin()
+                .take(32 * 1024 * 1024 + 1)
+                .read_to_end(&mut input)?;
+            ensure!(
+                input.len() <= 32 * 1024 * 1024,
+                "Backup community input exceeds 32 MiB"
+            );
+            let state: Community = serde_json::from_slice(&input)
+                .map_err(|_| anyhow::anyhow!("Unsupported community backup payload"))?;
+            for row in &state.bot_minds {
+                let value: Value = serde_json::from_str(&row.mind)?;
+                let mind: crate::bots::pursuits::Mind = serde_json::from_value(value.clone())?;
+                mind.validate()?;
+                ensure!(
+                    row.revision > 0
+                        && mind.account == row.account
+                        && mind.revision == row.revision
+                        && known_fields(&value, &serde_json::to_value(&mind)?),
+                    "Invalid backup account mind"
+                );
+            }
+            for row in &state.trade_transactions {
+                let owners: Vec<i32> = serde_json::from_str(&row.owners)?;
+                let value: Value = serde_json::from_str(&row.writes)?;
+                let writes: Vec<store::InventoryWrite> = serde_json::from_value(value.clone())?;
+                let revisions: Vec<i32> = serde_json::from_str(&row.revisions)?;
+                ensure!(
+                    row.id.len() == 32
+                        && row.id.bytes().all(|b| b.is_ascii_hexdigit())
+                        && writes.len() == 2
+                        && revisions.len() == 2
+                        && owners == writes.iter().map(|w| w.account).collect::<Vec<_>>()
+                        && owners[0] != owners[1]
+                        && known_fields(&value, &serde_json::to_value(&writes)?)
+                        && writes.iter().zip(revisions).all(|(w, revision)| w.id > 0
+                            && w.account > 0
+                            && (0..i32::MAX).contains(&w.revision)
+                            && revision == w.revision + 1
+                            && w.items.len() == 12
+                            && w.items.iter().all(|i| (-1..=65535).contains(i))),
+                    "Invalid backup trade receipt"
+                );
+                if let Some(raw) = &row.delivery {
+                    let value: Value = serde_json::from_str(raw)?;
+                    let delivery: crate::bots::pursuits::market::Delivery =
+                        serde_json::from_value(value.clone())?;
+                    ensure!(
+                        delivery == delivery.terms.delivery(delivery.ordinal)?
+                            && delivery.terms.accounts.iter().all(|a| owners.contains(a))
+                            && row.market_key.as_deref()
+                                == Some(
+                                    format!("{:x}:{}", delivery.terms.version, delivery.ordinal)
+                                        .as_str()
+                                )
+                            && known_fields(&value, &serde_json::to_value(&delivery)?),
+                        "Invalid backup market receipt"
+                    );
+                } else {
+                    ensure!(row.market_key.is_none(), "Backup gift has a market key");
+                }
+            }
+            println!(
+                "{}",
+                serde_json::json!({"validated_minds": state.bot_minds.len(),
+                "validated_trade_receipts": state.trade_transactions.len()})
+            );
+        }
         ["--backup-validate-pictures"] => {
             use base64::Engine;
             #[derive(serde::Deserialize)]
@@ -133,6 +225,9 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         format!("backup-{alive}@example.invalid"),
                         "backup-fixture-password".into(),
                     )
+                    .await?;
+                store
+                    .save_bot_mind(crate::bots::pursuits::Mind::new(account.id))
                     .await?;
                 store
                     .save_picture(
@@ -230,6 +325,26 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         .create(account.id, content.get(content::WIZARD)?)
                         .await?;
                 } else {
+                    let peer: (i32, i32) = rusqlite::Connection::open(directory.join("game.db"))?.query_row(
+                        "SELECT account,id FROM characters WHERE account<>?1 AND alive=1 ORDER BY id LIMIT 1",
+                        [account.id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                    let peer = store.load(peer.0, peer.1).await?;
+                    let writes = [&peer, &character]
+                        .map(|ch| store::InventoryWrite {
+                            id: ch.id,
+                            account: ch.account,
+                            revision: ch.revision,
+                            items: ch.items.clone(),
+                        })
+                        .to_vec();
+                    let revisions = store
+                        .exchange_trade("1".repeat(32), writes.clone(), None)
+                        .await?;
+                    ensure!(
+                        store.exchange_trade("1".repeat(32), writes, None).await? == revisions,
+                        "backup fixture receipt replay changed revisions"
+                    );
+                    character.revision = revisions[1];
                     character.fame = 11000;
                     character.alive = false;
                     character.hp = 0;
