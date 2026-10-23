@@ -1,9 +1,12 @@
 use super::*;
 use crate::condition;
-use crate::dungeon::snake::{BOSS, PET, SWARM, phase, shield};
+use crate::dungeon::snake::{BOSS, BUTTON, DART, GUARD, PET, SPAWNER, SWARM, phase, shield};
 
 impl World {
     pub(super) fn snake_mechanics(&mut self, id: i32, elapsed: u64) -> Result<()> {
+        if self.entities[&id].kind != BOSS {
+            return self.snake_treasure(id);
+        }
         let (stage, age) = phase(elapsed);
         let changed = self.entities[&id].stage != Some(stage);
         let e = self.entities.get_mut(&id).unwrap();
@@ -53,7 +56,71 @@ impl World {
         }
         Ok(())
     }
+
+    fn snake_treasure(&mut self, id: i32) -> Result<()> {
+        let e = &self.entities[&id];
+        if e.kind != BUTTON || e.stage.is_some() {
+            return Ok(());
+        }
+        let pos = e.pos;
+        if !self
+            .players
+            .values()
+            .any(|p| p.active() && p.pos.distance(pos) <= 0.5)
+        {
+            return Ok(());
+        }
+        let spawners: Vec<_> = self
+            .actors()
+            .filter(|e| e.kind == SPAWNER && e.home.distance(pos) < 15.)
+            .map(|e| e.id)
+            .collect();
+        ensure!(
+            spawners.len() == 1,
+            "Snake Pit button {id} requires one local Guard spawner, found {}",
+            spawners.len()
+        );
+        let owner = spawners[0];
+        let center = self.entities[&owner].home;
+        let traps: Vec<_> = self
+            .actors()
+            .filter(|e| e.kind == DART && e.home.distance(center) < 15.)
+            .map(|e| e.id)
+            .collect();
+        ensure!(
+            traps.len() == 10,
+            "Snake Pit spawner {owner} requires ten local dart sources, found {}",
+            traps.len()
+        );
+        self.spawn_children(owner, GUARD, 1, 0.)?;
+        let guard = self
+            .actors()
+            .find(|e| e.kind == GUARD && e.parent == Some(owner))
+            .context("Snake Pit Guard missing after successful summon")?
+            .id;
+        self.entities.get_mut(&guard).unwrap().size = 100;
+        for trap in traps {
+            self.entities.get_mut(&trap).unwrap().parent.set(
+                Some(owner),
+                trap,
+                &mut self.timed_ids,
+            );
+        }
+        let button = self.entities.get_mut(&id).unwrap();
+        button.stage = Some(1);
+        button.extra_stats.push((61, 1));
+        tracing::info!(
+            button = id,
+            spawner = owner,
+            guard,
+            "Snake Pit treasure room activated once"
+        );
+        Ok(())
+    }
 }
+
+#[cfg(test)]
+mod treasure_tests;
 
 #[cfg(test)]
 mod tests {

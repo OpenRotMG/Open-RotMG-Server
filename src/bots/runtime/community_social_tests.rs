@@ -256,6 +256,8 @@ async fn community_social_six_actual_controllers_wait_reconsider_and_enter_after
                 w.spawn_entity(0x205, Pos { x: 62.5, y }, vec![])?;
             }
             d.worlds.insert(-3, w);
+            d.prepare_single_realm_fixture()?;
+            assert_eq!(d.available_realms(), vec![(-3, 0)]);
             let nexus = &d.worlds[&-2];
             let portal = nexus.entities.values().find(|p| p.kind == 0x712).unwrap();
             let portal_id = portal.id;

@@ -275,6 +275,19 @@ test('native join accepts explicit templates and function positions without weak
   assert.equal(spawn.spec.world,-11);assert.deepEqual(spawn.spec.position,{x:5.5,y:5.5});assert.equal(spawn.spec.controller,'native');assert.equal(spawn.spec.profile,null);
   assert.equal(f.participants.length,1);
 });
+test('native dungeon seeds preserve zero and stay out of character spawn requests',async t=>{
+  for(const worldSeed of [0,Number.MAX_SAFE_INTEGER]){
+    const f=joinFixture(t);await f.joins.add({...explicitFixture,world:'snake-pit',worldSeed});
+    assert.deepEqual(f.events.find(e=>e.op==='world'),{op:'world',template:'snake-pit',seed:worldSeed});
+    assert.equal(Object.hasOwn(f.events.find(e=>e.op==='spawn').spec,'worldSeed'),false);
+  }
+});
+test('invalid native dungeon seeds reject before allocating worlds or browsers',async t=>{
+  const f=joinFixture(t);
+  for(const spec of [{...explicitFixture,worldSeed:0},...[null,-1,1.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1,'0'].map(worldSeed=>({...explicitFixture,world:'snake-pit',worldSeed}))]){
+    await assert.rejects(f.joins.add(spec),/worldSeed requires/);assert.deepEqual(f.events,[]);
+  }
+});
 test('every native join validates complete constant fixtures before world or resource effects',async t=>{
   const f=joinFixture(t);let hooks=0;
   const bad=[{}, {...explicitFixture,class:-1},{...explicitFixture,level:21},{...explicitFixture,seed:Number.MAX_SAFE_INTEGER+1},{...explicitFixture,equipment:[-1]},{...explicitFixture,equipment:[-2,0,0,0]},{...explicitFixture,backpack:[]},{...explicitFixture,stats:[1]},{...explicitFixture,stats:Array(8).fill(-1)},{...explicitFixture,world:{}},{...explicitFixture,position:{x:NaN,y:1}}];

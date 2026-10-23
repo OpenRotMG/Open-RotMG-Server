@@ -67,6 +67,24 @@ test('native entry abort unwinds outer cleanup despite a noncooperating hook',as
   assert.equal(cleaned,true);assert.equal(f.calls.automatic,0);
 });
 
+test('native capture waits for browser play and rejects a later pause before taking an image',async()=>{
+  const source=await readFile(new URL('./native-test.mjs',import.meta.url),'utf8');
+  const gameFor=source.slice(source.indexOf('      const gameFor=client=>'),source.indexOf('      const game=gameFor(first);'));
+  for(const latePause of [false,true]){
+    const held=Promise.withResolvers();let playing=false,images=0;
+    const connection={};
+    const factory=runInNewContext(`(()=>{${gameFor}return gameFor;})()`,{
+      check(){},assert,driver:()=>held.promise,api:async()=>({paused:false}),
+      waitFor:async work=>{assert.equal(await work(),false);playing=true;assert.equal(await work(),true);if(latePause){playing=false;held.resolve({});}},
+      capture:async(name,actual)=>{assert.equal(name,'awake');assert.equal(actual,connection);assert(playing);images++;held.resolve({});},
+    });
+    const game=factory({actor:7,connection,evaluate:async()=>playing});
+    const pending=game.act({keys:[],duration_ms:100},{name:'awake',when:()=>true});
+    if(latePause)await assert.rejects(pending,/Client paused before capture/);else await pending;
+    assert.equal(images,latePause?0:1);
+  }
+});
+
 test('native gameFor inspect uses only closure actor and existing API abort and HTTP bounds',async()=>{
   const source=await readFile(new URL('./native-test.mjs',import.meta.url),'utf8');
   const api=source.slice(source.indexOf('  const api=async command=>{'),source.indexOf('  const call='));
@@ -74,9 +92,9 @@ test('native gameFor inspect uses only closure actor and existing API abort and 
   assert(api.includes('AbortSignal.timeout(10000)')&&gameFor.includes("inspect:()=>api({op:'inspect',actor})"),'Production read boundaries must be present');
   const abort=new AbortController(),commands=[],timeout=Symbol('HTTP deadline');let tokenReads=0;
   const factory=runInNewContext(`(()=>{${api}${gameFor}return gameFor;})()`,{
-    controller:abort,check:()=>abort.signal.throwIfAborted(),out:'/synthetic',port:8000,
+    controller:abort,check:()=>abort.signal.throwIfAborted(),out:'/synthetic',state:'/synthetic/state',port:8000,
     join:(...parts)=>parts.join('/'),randomUUID:()=>String(commands.length),assert,
-    readFile:async()=>{tokenReads++;return 'synthetic-token';},
+    readFile:async path=>{assert.equal(path,'/synthetic/state/control.token');tokenReads++;return 'synthetic-token';},
     fetch:async(url,options)=>{assert.equal(url,'http://127.0.0.1:8000/dev/testing');assert.equal(options.signal,abort.signal);commands.push(JSON.parse(options.body).command);return{ok:true,json:async()=>({status:'ok',view:{known:true}})};},
     AbortSignal:{timeout(ms){assert.equal(ms,10000);return timeout;},any(signals){assert.equal(signals.length,2);assert.equal(signals[0],abort.signal);assert.equal(signals[1],timeout);return abort.signal;}}
   });
