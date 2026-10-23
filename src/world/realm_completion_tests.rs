@@ -259,7 +259,7 @@ async fn lost_lands_and_ship_real_deaths_have_private_one_percent_rewards_once()
             slot: destination,
             kind: -1,
         };
-        assert!(w.swap(players[1], from.clone(), to(players[1])).is_err());
+        assert!(w.swap(players[1], from, to(players[1])).is_err());
         w.players.get_mut(&players[0]).unwrap().pos = bag.pos;
         let plan = w.swap(players[0], from, to(players[0])).unwrap();
         let account = plan.account;

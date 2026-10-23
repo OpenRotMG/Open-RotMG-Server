@@ -107,17 +107,16 @@ impl World {
                 && (crate::endgame::HEROES.contains(&kind)
                     || crate::quest::root(kind)
                     || crate::quest::final_root(kind))
-            {
-                if let Some(player) = self.players.get(&owner).filter(|p| {
+                && let Some(player) = self.players.get(&owner).filter(|p| {
                     p.character.alive
                         && !p.death_pending
                         && !p.departing
                         && !p.character.name.is_empty()
-                }) {
-                    let root = self.entities[&target].quest.unwrap_or(target);
-                    self.critical_killers
-                        .insert(root, (kind, player.character.name.clone()));
-                }
+                })
+            {
+                let root = self.entities[&target].quest.unwrap_or(target);
+                self.critical_killers
+                    .insert(root, (kind, player.character.name.clone()));
             }
             self.defeat_entity(target)?;
             tracing::info!(entity = target, kind, owner = owner, "enemy defeated");
