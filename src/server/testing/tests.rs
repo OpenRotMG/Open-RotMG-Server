@@ -3,6 +3,8 @@ mod community_crowd;
 mod community_social;
 #[path = "finalize_tests.rs"]
 mod finalize_tests;
+#[path = "stat_modifier_tests.rs"]
+mod stat_modifier_tests;
 
 fn fixture() -> (PathBuf, App) {
     let (dir, mut app) = crate::server::account_actions::tests::fixture();
