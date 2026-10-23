@@ -114,6 +114,7 @@ impl World {
             .context("ability cooldown overflow")?;
         let p = self.players.get_mut(&id).unwrap();
         p.character.mp -= item.mana_cost;
+        p.character.lifetime.ability_used = true;
         p.ability_ready_ms = ability_ready_ms;
         tracing::info!(
             player = id,
@@ -534,6 +535,12 @@ impl World {
             .clone();
         let p = self.players.get_mut(&id).unwrap();
         p.character.shots += 20;
+        p.character.lifetime.shots = p
+            .character
+            .lifetime
+            .shots
+            .checked_add(20)
+            .context("lifetime ability shots overflow")?;
         let mut messages = Vec::new();
         for i in 0..20 {
             let bullet = p.server_bullet;
@@ -552,6 +559,7 @@ impl World {
                 damage,
                 spec: spec.clone(),
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             });
             let mut out = Writer::new();
             out.u8(bullet)
@@ -966,6 +974,13 @@ mod passive_scenery_tests {
             assert!(w.walkable(pos));
             assert_eq!(w.damage_enemy(p2, id, hp, true, &[], Some(0)).unwrap(), 0);
             assert_eq!(w.players[&p2].character.kills, n as u64 + 1);
+            assert_eq!(w.players[&p1].character.lifetime.kills, 0);
+            let lifetime = &w.players[&p2].character.lifetime;
+            assert_eq!(lifetime.kills, n as u64 + 1);
+            assert_eq!(
+                (lifetime.god_kills, lifetime.cube_kills, lifetime.oryx_kills),
+                (0, 0, 0)
+            );
             assert_eq!(w.players[&p1].experience_queued, 0);
             assert_eq!(w.players[&p2].experience_queued, 0);
         }

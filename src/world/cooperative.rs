@@ -88,6 +88,13 @@ impl Directory {
             send(p, wire::SHOW_EFFECT, effect(2, id, position));
         }
         tracing::info!(player=id, account, target, x=position.x, y=position.y, world=%world.name, "player teleported");
+        world
+            .players
+            .get_mut(&id)
+            .unwrap()
+            .character
+            .lifetime
+            .teleported = true;
         self.teleports.insert(account, received);
         Ok(receipt)
     }

@@ -75,6 +75,62 @@ class UpdateTest(unittest.TestCase):
             with self.subTest(rows=rows), self.assertRaisesRegex(RuntimeError, 'Vault migration'):
                 update.verify_migration(before, {**after, 'vaults': rows})
 
+    def test_all_death_fame_phase2_migration_preserves_paid_bytes_and_known_only_history(self):
+        from copy import deepcopy
+        payload = {'schema': 1, 'class': 782, 'level': 20, 'fame': 19, 'tiles': 4000001, 'hits': 999999, 'quests': 999999}
+        raw = json.dumps(payload, indent=2)
+        lifetime = {'version': 1, 'completeness': 'known_only', 'shots': 0, 'projectile_hits': 0,
+                    'kills': 0, 'god_kills': 0, 'cube_kills': 0, 'oryx_kills': 0,
+                    'inventory_potion_used': False, 'ability_used': False, 'teleported': False,
+                    'tiles': 4000001, 'level_assists': 0, 'qualified_quests': 0, 'realm_exits': []}
+        before = {'accounts': [{'id': 1}], 'characters': [{'id': 3, 'account': 1, 'stats': raw}],
+                  'deaths': [{'character': 3, 'snapshot': raw, 'equipment_fame': 1, 'died_at': 1700000000}],
+                  'account_fame': [{'account': 1, 'balance': 20, 'earned': 20}]}
+        after = deepcopy(before)
+        after['characters'][0]['stats'] = json.dumps(dict(payload, lifetime=lifetime))
+        after['deaths'][0]['receipt'] = json.dumps({'version': 1, 'policy': 'legacy_paid', 'base': 19,
+                                                  'rows': [{'kind': 'well_equipped', 'amount': 1}], 'total': 20})
+        after['legacy_claims'], after['level_credits'] = [], []
+        update.verify_migration(before, after)
+        update.verify_migration(after, after)
+        for case in range(9):
+            bad = deepcopy(after)
+            if case == 0:
+                bad['characters'] = []
+            elif case == 1:
+                bad['characters'][0]['stats'] = json.dumps(dict(payload, hits=0, lifetime=lifetime))
+            elif case == 2:
+                bad['characters'][0]['stats'] = json.dumps(dict(payload, lifetime=dict(lifetime, completeness='complete')))
+            elif case == 3:
+                bad['characters'][0]['stats'] = json.dumps(dict(payload, lifetime=dict(lifetime, projectile_hits=999999)))
+            elif case == 4:
+                bad['deaths'][0]['snapshot'] += ' '
+            elif case == 5:
+                bad['deaths'][0]['receipt'] = after['deaths'][0]['receipt'].replace('"total": 20', '"total": 21')
+            elif case == 6:
+                bad['account_fame'][0]['earned'] += 1
+            elif case == 7:
+                bad['legacy_claims'] = [{'account': 1, 'class': 782, 'character': 3}]
+            else:
+                bad['level_credits'] = [{'recipient': 3, 'reached_level': 20, 'giver': 4}]
+            with self.subTest(case=case), self.assertRaises(RuntimeError):
+                update.verify_migration(before, bad)
+        legacy_zero = deepcopy(before)
+        legacy_payload = dict(payload, level=1, exp=0)
+        del legacy_payload['schema'], legacy_payload['class']
+        legacy_zero['characters'][0]['stats'] = json.dumps(legacy_payload)
+        migrated_zero = deepcopy(after)
+        migrated_zero['characters'][0]['stats'] = json.dumps(dict(legacy_payload, schema=1, **{'class': 782}, base=[100, 100, 12, 0, 10, 15, 12, 12], lifetime=lifetime))
+        update.verify_migration(legacy_zero, migrated_zero)
+        bad_zero = deepcopy(migrated_zero)
+        bad_zero['characters'][0]['stats'] = bad_zero['characters'][0]['stats'].replace('782', '784')
+        with self.assertRaisesRegex(RuntimeError, 'Fame migration'):
+            update.verify_migration(legacy_zero, bad_zero)
+        bad = deepcopy(after)
+        bad['deaths'][0]['receipt'] = after['deaths'][0]['receipt'].replace('20', '21')
+        with self.assertRaisesRegex(RuntimeError, 'Migration changed existing records'):
+            update.verify_migration(after, bad)
+
     def test_unpack_accepts_exact_files_and_rejects_hash_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

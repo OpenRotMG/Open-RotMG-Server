@@ -11,6 +11,52 @@ pub mod tomb;
 pub mod trench;
 pub mod undead;
 
+// Exit identities are historical rule inputs, not registrations of playable worlds.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoricalDungeon {
+    PirateCave,
+    SpiderDen,
+    ForbiddenJungle,
+    SnakePit,
+    SpriteWorld,
+    UndeadLair,
+    AbyssOfDemons,
+    TombOfTheAncients,
+    OceanTrench,
+    ManorOfTheImmortals,
+}
+impl HistoricalDungeon {
+    pub fn from_world(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| match kind {
+            Self::PirateCave => name == "Pirate Cave",
+            Self::SpiderDen => name == "Spider Den",
+            Self::ForbiddenJungle => name == "Forbidden Jungle",
+            Self::SnakePit => name == "Snake Pit",
+            Self::SpriteWorld => name == "Sprite World",
+            Self::UndeadLair => name == "Undead Lair",
+            Self::AbyssOfDemons => name == "Abyss of Demons",
+            Self::TombOfTheAncients => name == "Tomb of the Ancients",
+            Self::OceanTrench => name == "Ocean Trench",
+            Self::ManorOfTheImmortals => name == "Manor of the Immortals",
+        })
+    }
+    pub const ALL: [Self; 10] = [
+        Self::PirateCave,
+        Self::SpiderDen,
+        Self::ForbiddenJungle,
+        Self::SnakePit,
+        Self::SpriteWorld,
+        Self::UndeadLair,
+        Self::AbyssOfDemons,
+        Self::TombOfTheAncients,
+        Self::OceanTrench,
+        Self::ManorOfTheImmortals,
+    ];
+}
+
 pub const DUNGEONS: [(u16, &str, &str, u16); 13] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),

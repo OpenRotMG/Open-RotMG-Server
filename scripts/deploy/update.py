@@ -265,6 +265,37 @@ def verify_migration(before, after):
         require(sorted(after.get('vaults', []), key=lambda row: row['account'])
                 == sorted(expected, key=lambda row: row['account']), 'Vault migration changed stored items or ownership')
         before = {**before, 'vaults': sorted(expected, key=lambda row: row['account'])}
+    if 'deaths' in before and 'legacy_claims' not in before:
+        require(after.get('legacy_claims') == [] and after.get('level_credits') == [],
+                'Fame migration manufactured claims or credits')
+        require(len(before.get('characters', [])) == len(after.get('characters', [])),
+                'Migration changed existing records: character count')
+        updated = []
+        for old, new in zip(before.get('characters', []), after.get('characters', [])):
+            original, current = json.loads(old['stats']), json.loads(new['stats'])
+            expected = dict(original)
+            if 'schema' not in original:
+                # The old writer supported only level-one Wizards; do not accept arbitrary added class metadata.
+                require('class' not in original and 'base' not in original
+                        and original.get('level') == 1 and original.get('exp') == 0,
+                        'Unrecognized legacy character metadata')
+                expected.update(schema=1, **{'class': 782}, base=[100, 100, 12, 0, 10, 15, 12, 12])
+            if 'lifetime' not in original:
+                expected['lifetime'] = {'version': 1, 'completeness': 'known_only',
+                    'shots': 0, 'projectile_hits': 0, 'kills': 0, 'god_kills': 0,
+                    'cube_kills': 0, 'oryx_kills': 0, 'inventory_potion_used': False,
+                    'ability_used': False, 'teleported': False, 'tiles': original.get('tiles', 0),
+                    'level_assists': 0, 'qualified_quests': 0, 'realm_exits': []}
+            require(current == expected, 'Fame migration changed existing character history')
+            updated.append({**old, 'stats': new['stats']})
+        before = {**before, 'characters': updated}
+        for old, new in zip(before['deaths'], after.get('deaths', [])):
+            base = json.loads(old['snapshot'])['fame']
+            equipment = old.get('equipment_fame', 0)
+            expected = {'version': 1, 'policy': 'legacy_paid', 'base': base,
+                        'rows': [{'kind': 'well_equipped', 'amount': equipment}] if equipment else [],
+                        'total': base + equipment}
+            require(json.loads(new['receipt']) == expected, 'Fame migration changed a previously paid receipt')
     require(all(table in after and len(data) == len(after[table])
                 and all(a.items() <= b.items() for a, b in zip(data, after[table]))
                 for table, data in before.items()), 'Migration changed existing records')

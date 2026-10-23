@@ -162,10 +162,8 @@ mod tests {
             "native initial entry cannot steal promised slot"
         );
         assert!(d.consume(other.account, -3, time, key.clone()).is_err());
-        assert_eq!(
-            d.consume(first.account, -3, time, key.clone()).unwrap(),
-            first.id
-        );
+        let (character, arrival) = d.consume(first.account, -3, time, key.clone()).unwrap();
+        assert_eq!(character, first.id);
         assert!(
             d.consume(first.account, -3, time, key.clone()).is_err(),
             "grant is one use"
@@ -186,6 +184,8 @@ mod tests {
                 .is_err(),
             "wrong account/character cannot use consumed ticket"
         );
+        d.admit_transfer(arrival, first.account, first.id, -3)
+            .unwrap();
         let id = d
             .worlds
             .get_mut(&-3)

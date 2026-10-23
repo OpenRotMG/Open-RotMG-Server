@@ -350,6 +350,7 @@ fn tomb_boss_death_uses_two_shared_ordered_rolls_not_a_life_for_every_raider() {
 #[test]
 fn zero_hp_tomb_infrastructure_survives_hits_without_erasing_turret_status_susceptibility() {
     let (mut w, player) = tomb();
+    let lifetime = w.players[&player].character.lifetime.clone();
     let mut ids: Vec<_> = w
         .actors()
         .filter(|e| d::immortal(e.kind))
@@ -389,6 +390,7 @@ fn zero_hp_tomb_infrastructure_survives_hits_without_erasing_turret_status_susce
         }
     }
     assert_eq!(w.players[&player].character.kills, 0);
+    assert_eq!(w.players[&player].character.lifetime, lifetime);
     assert!(!w.cleared);
 }
 
@@ -592,25 +594,47 @@ fn worshipper_recovery_does_not_heal_its_sarcophagus_or_dying_peers() {
 
 #[test]
 fn worshipper_death_has_two_second_chase_then_one_burst_and_one_credit() {
-    let (mut w, player) = tomb();
-    let priest = w.actors().find(|e| e.kind == 0xd2a).unwrap().id;
-    activate(&mut w, priest);
-    w.damage_enemy(player, priest, 1000000, true, &[], None)
-        .unwrap();
-    assert_eq!(w.entities[&priest].stage, Some(4));
-    assert_eq!(w.players[&player].character.kills, 0);
-    w.now = 1999;
-    w.tomb_mechanics(priest, None).unwrap();
-    assert!(w.entities.contains_key(&priest));
-    w.now = 2000;
-    w.tomb_mechanics(priest, None).unwrap();
-    let burst = w.npc_attack_schedule(priest, 0).unwrap().unwrap();
-    assert_eq!(burst.attacks.len(), 1);
-    assert_eq!(burst.attacks[0].count, 9);
-    w.now = 2050;
-    w.tomb_mechanics(priest, None).unwrap();
-    assert!(!w.entities.contains_key(&priest));
-    assert_eq!(w.players[&player].character.kills, 1);
+    for (death_pending, departing) in [(false, false), (true, false), (false, true)] {
+        let (mut w, player) = tomb();
+        let priest = w.actors().find(|e| e.kind == 0xd2a).unwrap().id;
+        let definition = w.content.objects[&0xd2a].clone();
+        activate(&mut w, priest);
+        w.damage_enemy(player, priest, 1000000, true, &[], None)
+            .unwrap();
+        assert_eq!(w.entities[&priest].stage, Some(4));
+        assert_eq!(w.players[&player].character.kills, 0);
+        assert_eq!(w.players[&player].character.lifetime.kills, 0);
+        assert_eq!(
+            w.damage_enemy(player, priest, 1000000, true, &[], None)
+                .unwrap(),
+            0
+        );
+        w.players.get_mut(&player).unwrap().death_pending = death_pending;
+        w.players.get_mut(&player).unwrap().departing = departing;
+        w.now = 1999;
+        w.tomb_mechanics(priest, None).unwrap();
+        assert!(w.entities.contains_key(&priest));
+        w.now = 2000;
+        w.tomb_mechanics(priest, None).unwrap();
+        let burst = w.npc_attack_schedule(priest, 0).unwrap().unwrap();
+        assert_eq!(burst.attacks.len(), 1);
+        assert_eq!(burst.attacks[0].count, 9);
+        w.now = 2050;
+        w.tomb_mechanics(priest, None).unwrap();
+        assert!(!w.entities.contains_key(&priest));
+        assert_eq!(
+            w.damage_enemy(player, priest, 1000000, true, &[], None)
+                .unwrap(),
+            0
+        );
+        let kills = u64::from(!death_pending && !departing);
+        assert_eq!(w.players[&player].character.kills, kills);
+        let lifetime = &w.players[&player].character.lifetime;
+        assert_eq!(lifetime.kills, kills);
+        assert_eq!(lifetime.god_kills, kills * u64::from(definition.god));
+        assert_eq!(lifetime.cube_kills, kills * u64::from(definition.cube));
+        assert_eq!(lifetime.oryx_kills, 0);
+    }
 }
 
 #[test]
@@ -676,6 +700,7 @@ fn mummy_replenishment_and_death_leave_bounded_live_scarabs() {
     w.damage_enemy(player, mummy, 1000000, true, &[], None)
         .unwrap();
     assert!(!w.entities.contains_key(&mummy));
+    assert_eq!(w.players[&player].character.lifetime.kills, 1);
     let surviving = w.tomb_owned(mummy, 0xd1b);
     assert!((10..=13).contains(&surviving.len()));
     assert!(initial.iter().all(|id| surviving.contains(id)));
@@ -712,10 +737,22 @@ fn mummy_replenishment_and_death_leave_bounded_live_scarabs() {
     w.now = 5049;
     w.tomb_mechanics(mummy, None).unwrap();
     assert!(w.entities.contains_key(&mummy));
+    assert_eq!(w.players[&player].character.lifetime.kills, 1);
     w.now = 5050;
     w.tomb_mechanics(mummy, None).unwrap();
     assert!(!w.entities.contains_key(&mummy));
     assert_eq!(w.players[&player].character.kills, 2);
+    assert_eq!(
+        w.damage_enemy(player, mummy, 1000000, true, &[], None)
+            .unwrap(),
+        0
+    );
+    let lifetime = &w.players[&player].character.lifetime;
+    assert_eq!(lifetime.kills, 2);
+    assert_eq!(
+        (lifetime.god_kills, lifetime.cube_kills, lifetime.oryx_kills),
+        (0, 0, 0)
+    );
     assert!((10..=13).contains(&w.tomb_owned(mummy, 0xd1b).len()));
 }
 

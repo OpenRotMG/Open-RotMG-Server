@@ -625,7 +625,14 @@ impl Piece {
 }
 impl World {
     pub(super) fn outside_setpieces(&self, pos: Pos) -> bool {
-        self.setpieces.iter().all(|a| a.distance(pos) >= 4.)
+        // Most Realm cells are beyond the bounding box, so avoid millions of hypot calls.
+        self.setpieces.iter().all(|a| {
+            pos.x <= a.x as f32 - 4.
+                || pos.x >= (a.x + a.width) as f32 + 4.
+                || pos.y <= a.y as f32 - 4.
+                || pos.y >= (a.y + a.height) as f32 + 4.
+                || a.distance(pos) >= 4.
+        })
     }
     fn setpiece_cell_available(
         &self,
@@ -837,6 +844,38 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setpiece_bounds_preserve_exact_four_tile_corner_admission() {
+        let mut w = super::super::tests::world();
+        w.setpieces = vec![
+            Area {
+                x: 10,
+                y: 20,
+                width: 7,
+                height: 9,
+            },
+            Area {
+                x: -12,
+                y: -16,
+                width: 4,
+                height: 5,
+            },
+        ];
+        for x in -80..100 {
+            for y in -88..144 {
+                let pos = Pos {
+                    x: x as f32 / 4.,
+                    y: y as f32 / 4.,
+                };
+                assert_eq!(
+                    w.outside_setpieces(pos),
+                    w.setpieces.iter().all(|a| a.distance(pos) >= 4.),
+                    "{pos:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn transparent_cells_keep_main_admission_without_bypassing_authored_lava() {

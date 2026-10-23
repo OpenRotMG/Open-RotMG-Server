@@ -1,7 +1,7 @@
 use crate::server::lifecycle::{CloseReason, controller, protocol};
 use crate::{
     content::{Content, Map, PARALYZED, Projectile, SLOWED, SPEEDY, STUNNED},
-    store::{AccountLists, AccountPresentation, Character, Vault},
+    store::{AccountLists, AccountPresentation, Character, LevelAssist, Vault},
     wire::{self, Packet, Writer},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -11,7 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         Arc,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicI32, AtomicU8, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -56,6 +56,8 @@ mod manor_entry;
 mod midlands;
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod npc_visibility_tests;
 
 mod named_births;
 mod names;
@@ -311,6 +313,26 @@ struct ObservedMotion {
     velocity: Pos,
     at: u64,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProgressAnchor {
+    exp: i32,
+    level: i32,
+}
+impl ProgressAnchor {
+    fn of(ch: &Character) -> Self {
+        Self {
+            exp: ch.exp,
+            level: ch.level,
+        }
+    }
+}
+struct QueuedExperience {
+    amount: i32,
+    anchor: ProgressAnchor,
+    // A pending inventory commit can change the batch's starting boost state.
+    assists: [Vec<LevelAssist>; 2],
+}
+
 pub struct Player {
     pub character: Character,
     pub pos: Pos,
@@ -324,6 +346,8 @@ pub struct Player {
     pub known: BTreeSet<i32>,
     tick_stats: tick_stats::Cache,
     quest: Option<i32>,
+    qualified_quest: Option<i32>,
+    committed_lifetime: crate::store::FameLifetime,
     statuses: BTreeMap<u8, (u64, u64)>,
     lab_conditions: i32,
     known_since: BTreeMap<i32, u64>,
@@ -336,12 +360,17 @@ pub struct Player {
     tile_scan: Option<(i32, i32)>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
+    death_lifetime: Option<crate::store::FameLifetime>,
+    departure_snapshot: Option<Character>,
     killer: String,
     movement_credit: f32,
     hp_fraction: f32,
     mp_fraction: f32,
     pub pending: bool,
     pub experience_queued: i32,
+    experience_queue: Option<QueuedExperience>,
+    progress_snapshot: Option<Character>,
+    pub(crate) level_assists_prepared: Vec<LevelAssist>,
     clears_queued: [u64; crate::dungeon::DUNGEONS.len()],
     pub(crate) progress_started: bool,
     pub death_pending: bool,
@@ -369,6 +398,101 @@ pub struct Player {
     ability_shot: Option<(u16, i32, bool, i32)>,
 }
 impl Player {
+    fn acknowledge_lifetime(&mut self, committed: crate::store::FameLifetime) -> Result<()> {
+        committed.follows(&self.committed_lifetime)?;
+        self.character.lifetime.follows(&self.committed_lifetime)?;
+        self.character.lifetime.merge(&committed)?;
+        // Later live facts remain different from this acknowledged lower bound and must still save.
+        self.committed_lifetime = committed;
+        Ok(())
+    }
+    pub(crate) fn queue_experience(
+        &mut self,
+        amount: i32,
+        killer: Option<i32>,
+        positive_damage: bool,
+    ) -> Result<()> {
+        ensure!(
+            amount >= 0 && killer.is_none_or(|id| id > 0),
+            "invalid experience source for character {}",
+            self.character.id
+        );
+        let anchor = if self.progress_started {
+            ProgressAnchor::of(
+                self.progress_snapshot
+                    .as_ref()
+                    .context("pending progress lacks its prepared experience anchor")?,
+            )
+        } else {
+            ProgressAnchor::of(&self.character)
+        };
+        crate::store::level_start(anchor.level)?;
+        ensure!(anchor.exp >= 0, "negative experience anchor");
+        let queue = self
+            .experience_queue
+            .get_or_insert_with(|| QueuedExperience {
+                amount: 0,
+                anchor,
+                assists: [Vec::new(), Vec::new()],
+            });
+        ensure!(
+            queue.amount == self.experience_queued && queue.anchor == anchor,
+            "experience queue mismatch: character={} scalar={} sources={} queued_anchor={:?} current_anchor={:?}",
+            self.character.id,
+            self.experience_queued,
+            queue.amount,
+            queue.anchor,
+            anchor
+        );
+        let next = queue
+            .amount
+            .checked_add(amount)
+            .context("experience queue overflow")?;
+        for (mode, assists) in queue.assists.iter_mut().enumerate() {
+            let multiplier = (mode + 1) as u64;
+            let before = u64::try_from(anchor.exp)?
+                .checked_add(
+                    u64::try_from(queue.amount)?
+                        .checked_mul(multiplier)
+                        .context("experience projection overflow")?,
+                )
+                .context("experience projection overflow")?;
+            let after = u64::try_from(anchor.exp)?
+                .checked_add(
+                    u64::try_from(next)?
+                        .checked_mul(multiplier)
+                        .context("experience projection overflow")?,
+                )
+                .context("experience projection overflow")?;
+            for level in anchor.level + 1..=20 {
+                let threshold = u64::try_from(crate::store::level_start(level)?)?;
+                if before < threshold
+                    && threshold <= after
+                    && positive_damage
+                    && let Some(giver) = killer.filter(|giver| *giver != self.character.id)
+                {
+                    assists.push(LevelAssist {
+                        reached_level: u8::try_from(level)?,
+                        giver,
+                    });
+                }
+            }
+            ensure!(
+                assists.len() <= 19,
+                "experience projection exceeds lifetime levels"
+            );
+        }
+        queue.amount = next;
+        self.experience_queued = next;
+        Ok(())
+    }
+    fn owes_credit(&self, giver: i32) -> bool {
+        self.level_assists_prepared.iter().any(|a| a.giver == giver)
+            || self
+                .experience_queue
+                .as_ref()
+                .is_some_and(|q| q.assists.iter().flatten().any(|a| a.giver == giver))
+    }
     fn record_motion(&mut self, position: Pos, time: i32, at: u64, maximum_speed: f32) {
         let elapsed = i64::from(time) - i64::from(self.motion.time);
         if elapsed == 0 {
@@ -418,8 +542,13 @@ impl Player {
             );
         }
     }
+    fn rewards_queued(&self) -> bool {
+        self.experience_queued != 0
+            || self.experience_queue.is_some()
+            || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
+    }
     fn progress_queued(&self) -> bool {
-        self.experience_queued != 0 || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
+        self.character.lifetime != self.committed_lifetime || self.rewards_queued()
     }
     fn active(&self) -> bool {
         self.character.alive
@@ -429,6 +558,54 @@ impl Player {
     }
     pub(crate) fn native_time(&self) -> i32 {
         self.last_move
+    }
+    fn validate_progress_reservation(&self, snapshot: &Character) -> Result<()> {
+        ensure!(
+            self.pending
+                && self.progress_started
+                && self.character.id == snapshot.id
+                && self.character.account == snapshot.account
+                && self.character.revision == snapshot.revision
+                && self.progress_snapshot.as_ref() == Some(snapshot),
+            "progress reservation changed"
+        );
+        Ok(())
+    }
+    pub(crate) fn native_pause_progress(&self) -> Result<Option<&Character>> {
+        ensure!(
+            self.active() && self.character.hp > 0,
+            "native pause player is not active: alive={} hp={} departing={} death_pending={} persistence_failure={:?}",
+            self.character.alive,
+            self.character.hp,
+            self.departing,
+            self.death_pending,
+            self.persistence_failure
+        );
+        if self.pending || self.progress_started {
+            ensure!(
+                self.pending && self.progress_started,
+                "native pause has non-progress pending or malformed progress flags: pending={} progress_started={}",
+                self.pending,
+                self.progress_started
+            );
+            let snapshot = self
+                .progress_snapshot
+                .as_ref()
+                .context("native pause ordinary progress snapshot missing")?;
+            self.validate_progress_reservation(snapshot)
+                .context("native pause ordinary progress snapshot mismatch")?;
+            ensure!(
+                snapshot.alive,
+                "native pause progress snapshot is not living"
+            );
+            Ok(Some(snapshot))
+        } else {
+            ensure!(
+                self.progress_snapshot.is_none() && self.level_assists_prepared.is_empty(),
+                "native pause has an unowned progress snapshot"
+            );
+            Ok(None)
+        }
     }
     pub(crate) fn native_transferring(&self) -> bool {
         self.departing && self.persistence_failure.is_none()
@@ -472,6 +649,7 @@ pub struct Bullet {
     pub damage: i32,
     pub spec: Projectile,
     pub hit: BTreeSet<i32>,
+    pub hit_enemy: bool,
 }
 impl Player {
     pub(crate) fn conditions(&self, now: u64) -> i32 {
@@ -517,6 +695,7 @@ pub struct InventoryPlan {
     pub bags: Vec<(i32, Vec<i32>)>,
     pub effects: Vec<crate::content::ConsumableEffect>,
     pub stat_growth: Option<(Character, Slot, usize, i32)>,
+    pub potion: Option<Slot>,
     pub appearance: Option<(Slot, u32, u32)>,
     pub xp_boost: Option<Slot>,
     pub(crate) companion: Option<companions::Plan>,
@@ -639,14 +818,75 @@ enum Target {
     World(i32),
     Player(i32),
 }
+const TRANSFER_REVOKED: u8 = 1;
+const TRANSFER_WRITE: u8 = 2;
+const TRANSFER_DEPARTED: u8 = 4;
+const TRANSFER_CONSUMED: u8 = 8;
+const TRANSFER_ADMITTED: u8 = 16;
+const TRANSFER_RESERVED: u8 = 32;
+const TRANSFER_RETIRED: u8 = 64;
+#[derive(Clone)]
+struct TransferAuthority(Arc<AtomicU8>);
+impl TransferAuthority {
+    fn transition(&self, set: u8, required: u8, forbidden: u8) -> Result<()> {
+        self.0
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |state| {
+                (state & TRANSFER_REVOKED == 0
+                    && state & required == required
+                    && state & forbidden == 0)
+                    .then_some(state | set)
+            })
+            .map(|_| ())
+            .map_err(|_| protocol("transfer authority revoked or already used"))
+    }
+    fn state(&self) -> u8 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+pub(crate) struct TransferReservation {
+    key: Vec<u8>,
+    authority: TransferAuthority,
+    armed: bool,
+}
+impl TransferReservation {
+    pub(crate) fn key(&self) -> &[u8] {
+        &self.key
+    }
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+    pub(crate) fn revoke(&self) {
+        if self.armed {
+            self.authority
+                .0
+                .fetch_or(TRANSFER_REVOKED, Ordering::SeqCst);
+        }
+    }
+}
+impl Drop for TransferReservation {
+    fn drop(&mut self) {
+        self.revoke();
+    }
+}
+pub(crate) struct TransferArrival {
+    key: Vec<u8>,
+    authority: TransferAuthority,
+}
+struct ExitIntent {
+    source: i32,
+    portal: i32,
+    player: i32,
+    dungeon: crate::dungeon::HistoricalDungeon,
+}
 struct Grant {
+    exit: Option<ExitIntent>,
+    authority: TransferAuthority,
     origin: Option<i32>,
     account: i32,
     character: i32,
     destination: i32,
     key_time: i32,
     expires: u64,
-    consumed: bool,
 }
 struct Portal {
     origin: i32,
@@ -1086,9 +1326,10 @@ impl Directory {
         }
     }
     pub(crate) fn character_transferring(&self, character: i32) -> bool {
-        self.grants
-            .values()
-            .any(|g| g.character == character && !g.consumed)
+        self.grants.values().any(|g| {
+            g.character == character
+                && g.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
+        })
     }
     pub fn location(&self, player: i32) -> Result<i32> {
         self.worlds
@@ -1097,22 +1338,26 @@ impl Directory {
             .map(|(id, _)| *id)
             .context("player missing from world directory")
     }
+    pub(crate) fn available_realms(&self) -> Vec<(i32, usize)> {
+        self.endgame
+            .realms
+            .iter()
+            .filter(|(id, record)| {
+                record.enabled
+                    && self.worlds[id].admission_open
+                    && self.worlds[id].occupancy() < self.worlds[id].max_players
+            })
+            .map(|(id, _)| (*id, self.worlds[id].occupancy()))
+            .collect()
+    }
     pub fn initial(&self, game: i32) -> Result<i32> {
         let destination = match game {
             0 | -2 => -2,
             -1 => -1,
-            -3 => *self
-                .endgame
-                .realms
-                .iter()
-                .filter(|(id, record)| {
-                    record.enabled
-                        && self.worlds[id].admission_open
-                        && self.worlds[id].occupancy() < self.worlds[id].max_players
-                })
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>()
+            -3 => self
+                .available_realms()
                 .choose(&mut rand::thread_rng())
+                .map(|(id, _)| *id)
                 .ok_or_else(|| controller("no open Realm has capacity"))?,
             -4 => -4,
             _ => {
@@ -1154,7 +1399,10 @@ impl Directory {
             && self.worlds[&id].bag_expiry.is_empty()
             && self.worlds[&id].admissions.is_empty()
             && !self.endgame.references_world(id)
-            && !self.grants.values().any(|g| g.destination == id)
+            && !self
+                .grants
+                .values()
+                .any(|g| g.destination == id && g.authority.state() & TRANSFER_REVOKED == 0)
             && !self
                 .portals
                 .values()
@@ -1388,13 +1636,14 @@ impl Directory {
         self.grants.insert(
             key.clone(),
             Grant {
+                exit: None,
+                authority: TransferAuthority(Arc::new(AtomicU8::new(0))),
                 origin,
                 account,
                 character,
                 destination,
                 key_time,
                 expires: self.tick + 2400,
-                consumed: false,
             },
         );
         tracing::info!(
@@ -1406,18 +1655,284 @@ impl Directory {
         );
         Ok((key_time, key, name))
     }
+    pub(crate) fn bind_exit(&mut self, id: i32, portal: Option<i32>, key: &[u8]) -> Result<()> {
+        let Some(portal) = portal else { return Ok(()) };
+        let source = self.location(id)?;
+        let world = &self.worlds[&source];
+        let player = &world.players[&id];
+        let grant = self.grants.get(key).context("earned exit grant missing")?;
+        if self.worlds[&grant.destination].name != "Realm" {
+            return Ok(());
+        }
+        let Some(dungeon) = crate::dungeon::HistoricalDungeon::from_world(&world.name) else {
+            return Ok(());
+        };
+        let entity = world
+            .entities
+            .get(&portal)
+            .context("earned exit portal missing")?;
+        ensure!(
+            player.character.alive
+                && player.character.hp > 0
+                && !player.death_pending
+                && !player.departing
+                && entity.published
+                && player.pos.distance(entity.pos) <= 2.
+                && (matches!(entity.kind, 0x704 | 0x70e | 0x71c)
+                    || entity.kind == 0x703
+                        && matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons")),
+            "earned exit source portal changed"
+        );
+        ensure!(
+            grant.origin == Some(source)
+                && grant.account == player.character.account
+                && grant.character == player.character.id
+                && grant.expires > self.tick
+                && grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
+                && grant.exit.is_none(),
+            "earned exit grant binding changed"
+        );
+        let grant = self.grants.get_mut(key).unwrap();
+        grant.exit = Some(ExitIntent {
+            source,
+            portal,
+            player: id,
+            dungeon,
+        });
+        Ok(())
+    }
+    pub(crate) fn reserve_transfer(&mut self, key: Vec<u8>) -> Result<TransferReservation> {
+        let grant = self
+            .grants
+            .get(&key)
+            .context("transfer reservation missing")?;
+        grant
+            .authority
+            .transition(TRANSFER_RESERVED, 0, TRANSFER_RESERVED | TRANSFER_CONSUMED)?;
+        Ok(TransferReservation {
+            key,
+            authority: grant.authority.clone(),
+            armed: true,
+        })
+    }
+    pub(crate) fn accept_source_write(&mut self, id: i32, key: &[u8]) -> Result<()> {
+        self.validate_source_exit(id, key)?;
+        let grant = self.grants.get(key).context("source write grant missing")?;
+        // This transition owns the uncancellable write; cancellation cannot promise to undo accepted SQL.
+        grant.authority.transition(
+            TRANSFER_WRITE,
+            TRANSFER_RESERVED,
+            TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+        )
+    }
+    pub(crate) fn retire_replacement(
+        &mut self,
+        arrival: TransferArrival,
+        account: i32,
+        character: i32,
+        destination: i32,
+    ) -> Result<()> {
+        let grant = self
+            .grants
+            .get(&arrival.key)
+            .context("replacement source grant missing")?;
+        ensure!(
+            Arc::ptr_eq(&arrival.authority.0, &grant.authority.0)
+                && grant.account == account
+                && grant.character == character
+                && grant.destination == destination
+                && grant.expires > self.tick
+                && grant.exit.is_none(),
+            "replacement source grant binding changed"
+        );
+        grant.authority.transition(
+            TRANSFER_RETIRED,
+            TRANSFER_CONSUMED | TRANSFER_DEPARTED,
+            TRANSFER_ADMITTED | TRANSFER_RETIRED,
+        )
+    }
+    pub(crate) fn admit_transfer(
+        &mut self,
+        arrival: TransferArrival,
+        account: i32,
+        character: i32,
+        destination: i32,
+    ) -> Result<()> {
+        let grant = self
+            .grants
+            .get(&arrival.key)
+            .context("arrival grant missing")?;
+        ensure!(
+            Arc::ptr_eq(&arrival.authority.0, &grant.authority.0)
+                && grant.account == account
+                && grant.character == character
+                && grant.destination == destination
+                && grant.expires > self.tick,
+            "arrival grant changed or expired"
+        );
+        ensure!(
+            self.worlds
+                .get(&destination)
+                .is_some_and(|w| w.admission_open),
+            "arrival destination unavailable"
+        );
+        grant.authority.transition(
+            TRANSFER_ADMITTED,
+            TRANSFER_CONSUMED,
+            TRANSFER_ADMITTED | TRANSFER_RETIRED,
+        )
+    }
+    fn validate_exit_destination(&self, grant: &Grant) -> Result<()> {
+        let destination = self
+            .worlds
+            .get(&grant.destination)
+            .context("source transfer destination missing")?;
+        ensure!(
+            destination.admission_open,
+            "source transfer destination unavailable"
+        );
+        if grant.exit.is_some() {
+            ensure!(
+                destination.name == "Realm" && destination.players.len() < destination.max_players,
+                "earned exit destination is full or unavailable"
+            );
+        }
+        Ok(())
+    }
+    fn validate_source_exit(
+        &self,
+        id: i32,
+        key: &[u8],
+    ) -> Result<Option<crate::dungeon::HistoricalDungeon>> {
+        let source = self.location(id)?;
+        let p = &self.worlds[&source].players[&id];
+        let grant = self
+            .grants
+            .get(key)
+            .context("source transfer grant missing")?;
+        ensure!(
+            grant.account == p.character.account
+                && grant.character == p.character.id
+                && grant.authority.state()
+                    & (TRANSFER_REVOKED | TRANSFER_WRITE | TRANSFER_CONSUMED | TRANSFER_DEPARTED)
+                    == 0
+                && grant.authority.state() & TRANSFER_RESERVED != 0
+                && grant.expires > self.tick,
+            "source transfer grant stale or foreign"
+        );
+        self.validate_exit_destination(grant)?;
+        match &grant.exit {
+            None => Ok(None),
+            Some(exit) => {
+                ensure!(
+                    exit.source == source
+                        && exit.player == id
+                        && p.character.alive
+                        && !p.death_pending
+                        && self.worlds[&source]
+                            .entities
+                            .get(&exit.portal)
+                            .is_some_and(|e| e.published && e.pos.distance(p.pos) <= 2.),
+                    "earned exit source changed"
+                );
+                Ok(Some(exit.dungeon))
+            }
+        }
+    }
+    pub(crate) fn begin_source_departure(
+        &mut self,
+        id: i32,
+        key: Option<&[u8]>,
+    ) -> Result<Option<Character>> {
+        let source = self.location(id)?;
+        if let Some(key) = key {
+            let p = &self.worlds[&source].players[&id];
+            if p.death_pending || !p.character.alive {
+                let grant = self
+                    .grants
+                    .get_mut(key)
+                    .context("dying source transfer grant missing")?;
+                grant.authority.transition(
+                    0,
+                    0,
+                    TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+                )?;
+                grant.exit = None;
+            }
+        }
+        let exit = key
+            .map(|key| self.validate_source_exit(id, key))
+            .transpose()?
+            .flatten();
+        let w = self.worlds.get_mut(&source).unwrap();
+        let Some(mut snapshot) = w.begin_departure(id)? else {
+            return Ok(None);
+        };
+        if let Some(exit) = exit {
+            snapshot.lifetime.realm_exits.insert(exit);
+        }
+        w.players.get_mut(&id).unwrap().departure_snapshot = Some(snapshot.clone());
+        Ok(Some(snapshot))
+    }
+    pub(crate) fn finish_source_departure(
+        &mut self,
+        id: i32,
+        snapshot: Character,
+        key: Option<Vec<u8>>,
+    ) -> Result<()> {
+        let source = self.location(id)?;
+        ensure!(
+            self.worlds[&source].players[&id]
+                .departure_snapshot
+                .as_ref()
+                == Some(&snapshot),
+            "source departure snapshot changed"
+        );
+        if let Some(key) = key {
+            let grant = self
+                .grants
+                .get(&key)
+                .context("committed source transfer grant missing")?;
+            self.validate_exit_destination(grant)?;
+            let grant = self
+                .grants
+                .get_mut(&key)
+                .context("committed source transfer grant missing")?;
+            ensure!(
+                grant.account == snapshot.account
+                    && grant.character == snapshot.id
+                    && grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
+                    && grant.authority.state() & TRANSFER_DEPARTED == 0,
+                "committed source transfer binding changed"
+            );
+            grant.authority.transition(
+                TRANSFER_DEPARTED,
+                TRANSFER_WRITE,
+                TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+            )?;
+        }
+        self.worlds.get_mut(&source).unwrap().finish_departure(id)
+    }
     pub fn consume(
         &mut self,
         account: i32,
         destination: i32,
         key_time: i32,
         key: Vec<u8>,
-    ) -> Result<i32> {
+    ) -> Result<(i32, TransferArrival)> {
         let grant = self
             .grants
             .get(&key)
             .ok_or_else(|| protocol("unknown or already used transfer grant"))?;
-        ensure!(!grant.consumed, protocol("transfer grant already used"));
+        ensure!(
+            grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0,
+            protocol("transfer grant already used")
+        );
+        ensure!(
+            grant.authority.state() & TRANSFER_RESERVED == 0
+                || grant.authority.state() & TRANSFER_DEPARTED != 0,
+            protocol("earned exit source has not retired")
+        );
         ensure!(
             grant.expires > self.tick,
             protocol("transfer grant expired")
@@ -1461,13 +1976,25 @@ impl Directory {
             "transfer admission binding/expiry changed"
         );
         admission.consumed = true;
-        // HELLO consumes the key before LOAD enters the world; keep both bindings until entry.
-        self.grants.get_mut(&key).unwrap().consumed = true;
+        // HELLO consumes the key before LOAD enters the world; keep its capacity reservation until then.
+        grant.authority.transition(
+            TRANSFER_CONSUMED,
+            if grant.authority.state() & TRANSFER_RESERVED != 0 {
+                TRANSFER_DEPARTED
+            } else {
+                0
+            },
+            TRANSFER_CONSUMED,
+        )?;
+        let arrival = TransferArrival {
+            key: key.clone(),
+            authority: grant.authority.clone(),
+        };
         if destination > 0 {
             self.idle.insert(destination, self.tick);
         }
         tracing::info!(account, character, destination, "transfer grant consumed");
-        Ok(character)
+        Ok((character, arrival))
     }
     pub(crate) fn cancel_admission(&mut self, account: i32, key: Vec<u8>) -> Result<()> {
         if let Some(grant) = self.grants.get(&key) {
@@ -1528,14 +2055,24 @@ impl Directory {
         Ok(id)
     }
     fn retire_transfer_grants(&mut self) {
-        self.grants.retain(|_, g| {
-            g.expires > self.tick
-                && !(g.consumed
-                    && self.worlds[&g.destination]
-                        .players
-                        .values()
-                        .any(|p| p.character.account == g.account && p.character.id == g.character))
+        let mut retired = Vec::new();
+        self.grants.retain(|key, g| {
+            let keep = g.expires > self.tick
+                && g.authority.state() & TRANSFER_REVOKED == 0
+                && !(g.authority.state() & TRANSFER_CONSUMED != 0
+                    && self.worlds[&g.destination].players.values().any(|p| {
+                        p.character.account == g.account && p.character.id == g.character
+                    }));
+            if !keep {
+                retired.push((g.destination, key.clone()));
+            }
+            keep
         });
+        for (world, key) in retired {
+            if let Some(world) = self.worlds.get_mut(&world) {
+                world.admissions.remove(&key);
+            }
+        }
     }
     fn step(&mut self) {
         self.tick += 1;
@@ -1713,6 +2250,33 @@ impl Handle {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_pause_job(
+        &self,
+        call: usize,
+        before: bool,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        self.lifecycle_test_gate(call, before, false)
+    }
+    #[cfg(test)]
+    fn lifecycle_test_gate(
+        &self,
+        call: usize,
+        before: bool,
+        request_only: bool,
+    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        assert!(call > 0);
+        let (entered, ready) = oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        assert!(
+            self.lifecycle_job_gate
+                .lock()
+                .unwrap()
+                .replace((call, before, request_only, entered, wait))
+                .is_none()
+        );
+        (ready, release)
+    }
     #[cfg(test)]
     pub(crate) fn lifecycle_test_lose_reply(&self) {
         assert!(!self.lifecycle_lost_reply.swap(true, Ordering::SeqCst));
@@ -2527,6 +3091,7 @@ impl World {
             id,
             Player {
                 weapon_ticks: VecDeque::from([(-1, ch.items[0])]),
+                committed_lifetime: ch.lifetime.clone(),
                 character: ch,
                 pos,
                 departing: false,
@@ -2543,6 +3108,7 @@ impl World {
                 known: BTreeSet::new(),
                 tick_stats: tick_stats::Cache::default(),
                 quest: None,
+                qualified_quest: None,
                 statuses: BTreeMap::new(),
                 lab_conditions: 0,
                 known_since: BTreeMap::new(),
@@ -2554,12 +3120,17 @@ impl World {
                 tile_scan: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
+                death_lifetime: None,
+                departure_snapshot: None,
                 killer: String::new(),
                 movement_credit: 0.78,
                 hp_fraction: 0.,
                 mp_fraction: 0.,
                 pending: false,
                 experience_queued: 0,
+                experience_queue: None,
+                progress_snapshot: None,
+                level_assists_prepared: Vec::new(),
                 clears_queued: [0; crate::dungeon::DUNGEONS.len()],
                 progress_started: false,
                 death_pending: false,
@@ -2921,7 +3492,19 @@ impl World {
             let p = self.players.get_mut(&id).unwrap();
             for &(x, y, ground) in &tiles {
                 p.tiles.insert((x, y));
-                p.character.tiles += 1;
+                p.character.tiles = p
+                    .character
+                    .tiles
+                    .checked_add(1)
+                    .context("exploration counter overflow")?;
+                if p.character.alive && !p.death_started && !p.departing {
+                    p.character.lifetime.tiles = p
+                        .character
+                        .lifetime
+                        .tiles
+                        .checked_add(1)
+                        .context("lifetime exploration overflow")?;
+                }
                 o.i16(x).i16(y).u8(ground);
             }
             if !tiles.is_empty() {
@@ -2954,7 +3537,16 @@ impl World {
         }
         p.known = visible;
         p.tick_stats.retain(&p.known);
+        let quest_identity = quest.map(|id| {
+            let e = &self.entities[&id];
+            if crate::quest::root(e.kind) || crate::quest::final_root(e.kind) || e.kind == 0x6c2 {
+                e.quest.unwrap_or(id)
+            } else {
+                id
+            }
+        });
         let p = self.players.get_mut(&id).unwrap();
+        p.qualified_quest = quest_identity;
         if initial || p.quest != quest {
             p.quest = quest;
             let mut out = Writer::new();
@@ -3488,6 +4080,12 @@ impl World {
             return Ok(NativeInput::Applied);
         }
         p.character.shots += 1;
+        p.character.lifetime.shots = p
+            .character
+            .lifetime
+            .shots
+            .checked_add(1)
+            .context("lifetime admitted shots overflow")?;
         let multiplier = if ability {
             1.
         } else if condition & crate::condition::bit(crate::condition::WEAK) != 0 {
@@ -3513,6 +4111,7 @@ impl World {
             damage,
             spec,
             hit: BTreeSet::new(),
+            hit_enemy: false,
         });
         let mut o = Writer::new();
         o.u8(bullet).i32(id).i16(kind as i16).f32(angle);
@@ -3603,7 +4202,7 @@ impl World {
                 controller("XP boost is already active")
             );
             ensure!(
-                !p.progress_queued(),
+                !p.rewards_queued(),
                 controller("character progress is awaiting commit")
             );
             let mut plan = self.consumable_plan(id, slot, -1)?;
@@ -3715,6 +4314,7 @@ impl World {
             bags: bag.into_iter().collect(),
             effects: Vec::new(),
             stat_growth: None,
+            potion: None,
             appearance: None,
             xp_boost: None,
             companion: None,
@@ -4009,7 +4609,7 @@ impl World {
         p.character.items = plan.items;
         p.character.revision = revision;
         // Stat growth is silent in the 2013 comparator: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.UseItem.cs#L659-L679
-        if let Some((snapshot, _, index, amount)) = plan.stat_growth {
+        if let Some((snapshot, source, index, amount)) = plan.stat_growth {
             ensure!(
                 p.character.base == snapshot.base,
                 "reserved potion base stats changed"
@@ -4019,6 +4619,9 @@ impl World {
                 snapshot.base[index] + amount <= cap,
                 "reserved potion exceeds current class cap"
             );
+            let mut committed = snapshot.lifetime.clone();
+            committed.inventory_potion_used |= source.object == plan.player;
+            p.acknowledge_lifetime(committed)?;
             p.character.base[index] = snapshot.base[index] + amount;
             tracing::info!(
                 player = plan.player,
@@ -4027,6 +4630,11 @@ impl World {
                 revision,
                 "permanent stat potion committed"
             );
+        }
+        if plan.potion.is_some() {
+            let mut committed = p.committed_lifetime.clone();
+            committed.inventory_potion_used = true;
+            p.acknowledge_lifetime(committed)?;
         }
         if let Some((slot, tex1, tex2)) = plan.appearance {
             p.character.tex1 = tex1;
@@ -4191,21 +4799,63 @@ impl World {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn pending_progress(&mut self) -> Vec<(i32, Character)> {
+        self.pending_progress_where(|_, _| true)
+    }
     pub(crate) fn pending_progress_where(
         &mut self,
         mut accept: impl FnMut(i32, i32) -> bool,
     ) -> Vec<(i32, Character)> {
         let mut plans = Vec::new();
         for (id, p) in &mut self.players {
-            if !p.progress_queued() || p.pending || p.death_started {
+            if !p.progress_queued()
+                || p.pending
+                || p.death_started
+                || ((p.death_pending || p.departing) && !p.rewards_queued())
+            {
                 continue;
             }
             if !accept(*id, p.character.account) {
                 continue;
             }
             let mut snapshot = p.character.clone();
+            let mut assists = Vec::new();
             let result = (|| -> Result<()> {
-                snapshot.gain_experience(&self.content, p.experience_queued, &mut self.rng)?;
+                ensure!(
+                    p.level_assists_prepared.is_empty(),
+                    "unacknowledged level assists"
+                );
+                match &p.experience_queue {
+                    Some(queue) => {
+                        ensure!(
+                            queue.amount == p.experience_queued
+                                && queue.anchor == ProgressAnchor::of(&p.character),
+                            "experience queue mismatch: player={} character={} scalar={} sources={} queued_anchor={:?} current_anchor={:?}",
+                            id,
+                            p.character.id,
+                            p.experience_queued,
+                            queue.amount,
+                            queue.anchor,
+                            ProgressAnchor::of(&p.character)
+                        );
+                        assists = queue.assists[usize::from(p.character.xp_boost.active)].clone();
+                    }
+                    None => ensure!(
+                        p.experience_queued == 0,
+                        "missing experience sources: player={} character={} scalar={} sources=0",
+                        id,
+                        p.character.id,
+                        p.experience_queued
+                    ),
+                }
+                ensure!(
+                    assists.len() <= 19,
+                    "level assist preparation exceeds lifetime levels"
+                );
+                if p.rewards_queued() {
+                    snapshot.gain_experience(&self.content, p.experience_queued, &mut self.rng)?;
+                }
                 for (count, queued) in std::iter::once(&mut snapshot.pirate_caves)
                     .chain(snapshot.dungeons.iter_mut())
                     .chain(std::iter::once(&mut snapshot.abysses))
@@ -4231,6 +4881,9 @@ impl World {
             }
             snapshot.alive = true;
             p.experience_queued = 0;
+            p.experience_queue = None;
+            p.progress_snapshot = Some(snapshot.clone());
+            p.level_assists_prepared = assists;
             p.clears_queued = [0; crate::dungeon::DUNGEONS.len()];
             p.pending = true;
             p.progress_started = true;
@@ -4238,18 +4891,25 @@ impl World {
         }
         plans
     }
+    pub(crate) fn progress_assists(
+        &self,
+        id: i32,
+        snapshot: &Character,
+    ) -> Result<Vec<LevelAssist>> {
+        let p = self
+            .players
+            .get(&id)
+            .context("progress assist owner missing")?;
+        p.validate_progress_reservation(snapshot)?;
+        Ok(p.level_assists_prepared.clone())
+    }
     pub fn finish_progress(&mut self, id: i32, snapshot: Character) -> Result<()> {
         let p = self
             .players
             .get_mut(&id)
             .context("progress owner missing")?;
-        ensure!(
-            p.pending
-                && p.progress_started
-                && p.character.id == snapshot.id
-                && p.character.revision == snapshot.revision,
-            "progress reservation changed"
-        );
+        p.validate_progress_reservation(&snapshot)?;
+        p.acknowledge_lifetime(snapshot.lifetime.clone())?;
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
             || snapshot.jungles > p.character.jungles
@@ -4293,6 +4953,8 @@ impl World {
         }
         p.pending = false;
         p.progress_started = false;
+        p.progress_snapshot = None;
+        p.level_assists_prepared.clear();
         tracing::info!(
             player = id,
             level = p.character.level,
@@ -4346,13 +5008,14 @@ impl World {
             .filter_map(|id| {
                 self.cancel_trade(id, "Trade cancelled by permanent death.");
                 let p = self.players.get_mut(&id).unwrap();
-                if p.pending || p.progress_queued() || p.death_started {
+                if p.pending || p.rewards_queued() || p.death_started {
                     return None;
                 }
                 if !accept(id, p.character.account) {
                     return None;
                 }
                 p.death_started = true;
+                p.death_lifetime = Some(p.character.lifetime.clone());
                 let mut c = p.character.clone();
                 c.alive = false;
                 Some((id, c, p.killer.clone()))
@@ -4362,7 +5025,10 @@ impl World {
     pub fn finish_death(&mut self, id: i32) -> Result<()> {
         let p = self.players.get(&id).context("dying player missing")?;
         ensure!(
-            p.death_started && p.death_pending && p.persistence_failure.is_none(),
+            p.death_started
+                && p.death_pending
+                && p.persistence_failure.is_none()
+                && p.death_lifetime.as_ref() == Some(&p.character.lifetime),
             "death not pending or persistence failed"
         );
         let maxed = p
@@ -4390,6 +5056,13 @@ impl World {
             .set(lifetime.map(|ms| self.now + ms), grave, &mut self.timed_ids);
         tracing::info!(player=id, grave, kind, maxed, expires=?entity.expires, "gravestone created");
         let p = self.players.get_mut(&id).unwrap();
+        p.acknowledge_lifetime(
+            p.death_lifetime
+                .as_ref()
+                .context("fatal lifetime reservation missing")?
+                .clone(),
+        )?;
+        p.death_lifetime = None;
         p.character.alive = false;
         p.character.xp_boost.active = false;
         p.character.items.fill(-1);
@@ -4415,6 +5088,28 @@ impl World {
         p.bot_aim = None;
         Ok(())
     }
+    #[cfg(test)]
+    pub(crate) fn credit_reservation_for_test(&self, id: i32) -> (Option<Character>, bool) {
+        let p = &self.players[&id];
+        (p.progress_snapshot.clone(), p.departure_snapshot.is_some())
+    }
+    pub(crate) fn credit_recipients(&self, giver: i32) -> Vec<(i32, i32)> {
+        self.players
+            .iter()
+            .filter(|(_, p)| p.owes_credit(giver))
+            .map(|(id, p)| (*id, p.character.account))
+            .collect()
+    }
+    pub(crate) fn refresh_giver_credits(&mut self, id: i32, count: u64) -> Result<()> {
+        let p = self.players.get_mut(&id).context("credit giver missing")?;
+        ensure!(
+            p.departing || p.death_pending,
+            "outgoing assist authority is not sealed"
+        );
+        ensure!(p.persistence_failure.is_none(), "credit giver quarantined");
+        p.character.lifetime.level_assists = p.character.lifetime.level_assists.max(count);
+        Ok(())
+    }
     pub fn begin_departure(&mut self, id: i32) -> Result<Option<Character>> {
         self.cancel_trade(id, "Trade cancelled by departure.");
         let p = self
@@ -4431,13 +5126,29 @@ impl World {
             .players
             .get_mut(&id)
             .context("departing player missing")?;
-        if p.pending || p.death_pending || p.progress_queued() {
+        if p.pending || p.death_pending || p.rewards_queued() {
             return Ok(None);
         };
         p.pending = true;
+        p.departure_snapshot = Some(p.character.clone());
         Ok(Some(p.character.clone()))
     }
     pub fn finish_departure(&mut self, id: i32) -> Result<()> {
+        let p = self.players.get(&id).context("departing player missing")?;
+        let snapshot = p
+            .departure_snapshot
+            .as_ref()
+            .context("departure snapshot missing")?;
+        ensure!(
+            p.pending
+                && p.departing
+                && snapshot.id == p.character.id
+                && snapshot.account == p.character.account
+                && snapshot.revision == p.character.revision
+                && snapshot.items == p.character.items,
+            "departure reservation changed"
+        );
+        snapshot.lifetime.follows(&p.character.lifetime)?;
         self.players
             .get_mut(&id)
             .context("departing player missing")?
@@ -4536,6 +5247,9 @@ impl World {
         Ok(())
     }
     fn defeat_entity(&mut self, id: i32) -> Result<()> {
+        self.defeat_entity_with_killer(id, None)
+    }
+    fn defeat_entity_with_killer(&mut self, id: i32, killer: Option<i32>) -> Result<()> {
         let e = self.remove_entity(id);
         let definition = &self.content.objects[&e.kind];
         // Reference Reproduce suppresses follower XP; Pentaract Spawn explicitly allows eye XP.
@@ -4554,12 +5268,33 @@ impl World {
                     .expect("validated player level") as f32
                     * if definition.quest { 0.5 } else { 0.1 }) as i32;
                 let amount = reward.min(cap);
-                p.experience_queued = p
-                    .experience_queued
-                    .checked_add(amount)
-                    .expect("experience queue overflow");
-                if amount > 0 {
+                if amount != 0 {
+                    p.queue_experience(
+                        amount,
+                        killer,
+                        e.damage
+                            .get(&p.character.id)
+                            .is_some_and(|damage| *damage > 0),
+                    )?;
                     tracing::debug!(player = id, enemy = e.kind, amount, "experience queued");
+                }
+                let assigned = p.quest == Some(e.id)
+                    || (crate::quest::final_root(e.kind)
+                        && e.quest.is_some()
+                        && p.qualified_quest == e.quest);
+                if assigned
+                    && p.character.hp > 0
+                    && e.damage
+                        .get(&p.character.id)
+                        .is_some_and(|damage| *damage > 0)
+                {
+                    p.character.lifetime.qualified_quests = p
+                        .character
+                        .lifetime
+                        .qualified_quests
+                        .checked_add(1)
+                        .context("qualified quest counter overflow")?;
+                    p.qualified_quest = None;
                 }
                 if p.quest == Some(e.id) {
                     // This exact notification also starts the native client's quest-arrow completion delay.
@@ -4612,6 +5347,8 @@ impl World {
         if let Some(owner) = owner {
             let p = self.players.get_mut(&owner).unwrap();
             p.character.kills += 1;
+            self.record_lifetime_kill(owner, kind, false)?;
+            let p = self.players.get_mut(&owner).unwrap();
             if self.content.objects[&kind].quest {
                 p.character.quests += 1;
             }
@@ -5112,12 +5849,19 @@ impl World {
             } else {
                 nearest.filter(|p| pos.distance(*p) < radius)
             };
+            // Visible mobs need simulation, not longer-range targeting: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/Collision.cs#L187-L215
+            let simulation_radius =
+                if self.content.objects[&kind].quest && entity.activated.is_none() {
+                    radius
+                } else {
+                    radius.max(20.)
+                };
             let nearby = self.players.values().any(|p| {
                 p.character.alive
                     && !p.death_pending
                     && !p.departing
                     && !p.paused
-                    && pos.distance(p.pos) < radius
+                    && pos.distance(p.pos) < simulation_radius
             });
             let manor_clock =
                 crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
@@ -5723,6 +6467,7 @@ impl World {
                 },
                 spec,
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             };
             notices.push(enemy_shots::EnemyShot {
                 bullet: bullet.id,
@@ -5955,6 +6700,7 @@ impl World {
                 damage: spec.min,
                 spec,
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             };
             let mut o = Writer::new();
             o.u8(b.id)
@@ -6025,6 +6771,21 @@ impl World {
                         if self.players.get(&b.owner).is_some_and(|p| p.paused) {
                             b.hit.insert(*target);
                             break;
+                        }
+                        if !b.hit_enemy && self.content.objects[&self.entities[target].kind].enemy {
+                            b.hit_enemy = true;
+                            if let Some(p) = self
+                                .players
+                                .get_mut(&b.owner)
+                                .filter(|p| p.character.alive && !p.death_started && !p.departing)
+                            {
+                                p.character.lifetime.projectile_hits = p
+                                    .character
+                                    .lifetime
+                                    .projectile_hits
+                                    .checked_add(1)
+                                    .expect("lifetime projectile hit overflow");
+                            }
                         }
                         self.damage_enemy(
                             b.owner,
@@ -6206,7 +6967,6 @@ impl World {
 mod tests {
     use super::*;
 
-    use super::community_cooperative_tests::receive;
     use crate::content::WIZARD;
     use std::path::Path;
 
@@ -6239,6 +6999,7 @@ mod tests {
     pub(super) fn ch(w: &World) -> Character {
         Character {
             schema: 1,
+            lifetime: crate::store::FameLifetime::complete(),
             class: WIZARD,
             base: w.content.classes[&WIZARD].base,
             tex1: 0,
@@ -7840,6 +8601,7 @@ mod tests {
                     damage: 20,
                     spec,
                     hit: BTreeSet::new(),
+                    hit_enemy: false,
                 });
                 w.step();
                 let active = duration > w.now;
@@ -7980,6 +8742,7 @@ mod tests {
                 damage: 8,
                 spec,
                 hit: BTreeSet::new(),
+                hit_enemy: false,
             });
             for _ in 0..5 {
                 w.step();
@@ -7991,4 +8754,434 @@ mod tests {
             assert!(w.bullets.is_empty());
         }
     }
+    pub(super) fn receive(
+        d: &mut Directory,
+        world: i32,
+        account: i32,
+        class: u16,
+    ) -> (i32, mpsc::Receiver<Packet>) {
+        let w = d.worlds.get_mut(&world).unwrap();
+        let mut c = super::tests::ch(w);
+        c.id = account + 100;
+        c.account = account;
+        c.class = class;
+        c.base = w.content.classes[&class].base;
+        c.items = w.content.objects[&class].equipment.clone();
+        let (packets, mut rx) = mpsc::channel(128);
+        let (lost, _) = watch::channel(false);
+        let id = w.enter(c, Some(Output { packets, lost })).unwrap();
+        while rx.try_recv().is_ok() {}
+        (id, rx)
+    }
+
+    #[test]
+    fn all_death_fame_phase1_causal_levels_a_then_b() {
+        for boosted in [false, true] {
+            let mut w = world();
+            let mut content = (*w.content).clone();
+            let enemy = content.objects.get_mut(&0x600).unwrap();
+            enemy.hp = 100_000;
+            enemy.xp_multiplier = 1.;
+            enemy.quest = true;
+            w.content = Arc::new(content);
+            let mut recipient = ch(&w);
+            recipient.exp = 49;
+            recipient.xp_boost.active = boosted;
+            let recipient = w.enter(recipient, None).unwrap();
+            let pos = w.players[&recipient].pos;
+            let mut actors = Vec::new();
+            for character in 2..=4 {
+                let mut c = ch(&w);
+                c.id = character;
+                c.account = character;
+                let id = w.enter(c, None).unwrap();
+                w.players.get_mut(&id).unwrap().pos = pos;
+                actors.push(id);
+            }
+            let (a, b, unrelated) = (actors[0], actors[1], actors[2]);
+            for (index, killer) in std::iter::once(a)
+                .chain(std::iter::repeat_n(b, if boosted { 3 } else { 6 }))
+                .enumerate()
+            {
+                let enemy = w.spawn_entity(0x600, pos, vec![]).unwrap();
+                w.damage_enemy(recipient, enemy, 1, true, &[], Some(1))
+                    .unwrap();
+                // None is the existing delayed-damage path; it must retain the actual lethal owner too.
+                w.damage_enemy(
+                    killer,
+                    enemy,
+                    200_000,
+                    true,
+                    &[],
+                    if index == 0 { Some(2) } else { None },
+                )
+                .unwrap();
+            }
+            assert!(w.pending_progress_where(|_, _| false).is_empty());
+            assert_eq!(w.players[&recipient].character.level, 1);
+            let mut expected_rng = w.rng.clone();
+            let expected: BTreeMap<_, _> = w
+                .players
+                .iter()
+                .map(|(id, p)| {
+                    let mut ch = p.character.clone();
+                    ch.gain_experience(&w.content, p.experience_queued, &mut expected_rng)
+                        .unwrap();
+                    (*id, ch)
+                })
+                .collect();
+            let plans: BTreeMap<_, _> = w.pending_progress().into_iter().collect();
+            for (id, plan) in &plans {
+                assert_eq!(
+                    serde_json::to_value(plan).unwrap(),
+                    serde_json::to_value(&expected[id]).unwrap()
+                );
+            }
+            assert_eq!(
+                rand::RngCore::next_u64(&mut w.rng),
+                rand::RngCore::next_u64(&mut expected_rng)
+            );
+            assert_eq!(plans[&recipient].exp, if boosted { 249 } else { 224 });
+            assert_eq!(plans[&recipient].level, 3);
+            assert_eq!(
+                w.players[&recipient].level_assists_prepared,
+                [
+                    LevelAssist {
+                        reached_level: 2,
+                        giver: 2
+                    },
+                    LevelAssist {
+                        reached_level: 3,
+                        giver: 3
+                    }
+                ]
+            );
+            assert!(w.players[&unrelated].level_assists_prepared.is_empty());
+            assert!(w.players[&a].level_assists_prepared.is_empty());
+            assert!(w.players[&b].level_assists_prepared.is_empty());
+            assert!(w.pending_progress().is_empty());
+            assert!(w.begin_departure(recipient).unwrap().is_none());
+            w.finish_progress(recipient, plans[&recipient].clone())
+                .unwrap();
+            assert!(w.players[&recipient].level_assists_prepared.is_empty());
+            let saved = w.begin_departure(recipient).unwrap().unwrap();
+            w.finish_departure(recipient).unwrap();
+            let recipient = w.enter(saved, None).unwrap();
+            w.players.get_mut(&recipient).unwrap().pos = pos;
+            w.players.get_mut(&recipient).unwrap().pending = true;
+            for _ in 0..1000 {
+                let enemy = w.spawn_entity(0x600, pos, vec![]).unwrap();
+                w.damage_enemy(recipient, enemy, 1, true, &[], None)
+                    .unwrap();
+                w.damage_enemy(b, enemy, 200_000, true, &[], None).unwrap();
+                assert!(
+                    w.players[&recipient]
+                        .experience_queue
+                        .as_ref()
+                        .unwrap()
+                        .assists
+                        .iter()
+                        .map(Vec::len)
+                        .sum::<usize>()
+                        <= 38
+                );
+            }
+            assert!(w.pending_progress().is_empty());
+            w.players.get_mut(&recipient).unwrap().pending = false;
+            let plans = w.pending_progress();
+            assert_eq!(plans.len(), 1);
+            assert_eq!(plans[0].1.level, 20);
+            assert!(w.players[&recipient].level_assists_prepared.len() <= 19);
+        }
+        let mut w = world();
+        let mut c = ch(&w);
+        c.exp = 49;
+        let recipient = w.enter(c, None).unwrap();
+        let pos = w.players[&recipient].pos;
+        let enemy = w.spawn_entity(0x600, pos, vec![]).unwrap();
+        let mut contributor = ch(&w);
+        contributor.id = 2;
+        contributor.account = 2;
+        let contributor = w.enter(contributor, None).unwrap();
+        w.players.get_mut(&contributor).unwrap().pos = pos;
+        w.entities.get_mut(&enemy).unwrap().damage.insert(1, 1);
+        w.entities.get_mut(&enemy).unwrap().damage.insert(2, 100);
+        w.finish_timed_defeat(enemy).unwrap();
+        let plans: BTreeMap<_, _> = w.pending_progress().into_iter().collect();
+        assert_eq!(plans[&recipient].level, 2);
+        assert_eq!(w.players[&contributor].character.kills, 1);
+        assert!(
+            w.players[&recipient].level_assists_prepared.is_empty(),
+            "largest contributor is not an actual timed final blow"
+        );
+
+        let mut w = world();
+        let mut content = (*w.content).clone();
+        let e = content.objects.get_mut(&0x600).unwrap();
+        e.hp = 100_000;
+        e.xp_multiplier = 1.;
+        e.quest = true;
+        w.content = Arc::new(content);
+        let mut c = ch(&w);
+        c.gain_experience(&w.content, 17_999, &mut w.rng).unwrap();
+        c.xp_boost.active = true;
+        let recipient = w.enter(c, None).unwrap();
+        let pos = w.players[&recipient].pos;
+        let mut killer = ch(&w);
+        killer.id = 2;
+        killer.account = 2;
+        let killer = w.enter(killer, None).unwrap();
+        w.players.get_mut(&killer).unwrap().pos = pos;
+        for _ in 0..2 {
+            let e = w.spawn_entity(0x600, pos, vec![]).unwrap();
+            w.damage_enemy(recipient, e, 1, true, &[], None).unwrap();
+            w.damage_enemy(killer, e, 200_000, true, &[], None).unwrap();
+        }
+        let mut expected_rng = w.rng.clone();
+        let expected: BTreeMap<_, _> = w
+            .players
+            .iter()
+            .map(|(id, p)| {
+                let mut ch = p.character.clone();
+                ch.gain_experience(&w.content, p.experience_queued, &mut expected_rng)
+                    .unwrap();
+                (*id, ch)
+            })
+            .collect();
+        let plans: BTreeMap<_, _> = w.pending_progress().into_iter().collect();
+        for (id, plan) in &plans {
+            assert_eq!(
+                serde_json::to_value(plan).unwrap(),
+                serde_json::to_value(&expected[id]).unwrap()
+            );
+        }
+        assert_eq!(
+            rand::RngCore::next_u64(&mut w.rng),
+            rand::RngCore::next_u64(&mut expected_rng)
+        );
+        assert_eq!(
+            (
+                plans[&recipient].exp,
+                plans[&recipient].xp_boost.bonus_exp,
+                plans[&recipient].level
+            ),
+            (21_699, 1850, 20)
+        );
+        assert!(!plans[&recipient].xp_boost.active);
+        assert_eq!(
+            w.players[&recipient].level_assists_prepared,
+            [LevelAssist {
+                reached_level: 20,
+                giver: 2
+            }]
+        );
+        assert!(
+            w.players
+                .values()
+                .all(|p| p.level_assists_prepared.len() <= 19)
+        );
+    }
+
+    #[tokio::test]
+    async fn all_death_fame_phase1_causal_levels_a_then_b_inflight_actor() {
+        let mut d = directory();
+        d.clock.set_paused(true);
+        let mut w = world();
+        let mut content = (*w.content).clone();
+        let e = content.objects.get_mut(&0x600).unwrap();
+        e.hp = 100_000;
+        e.xp_multiplier = 1.;
+        e.quest = true;
+        w.content = Arc::new(content);
+        let mut c = ch(&w);
+        c.gain_experience(&w.content, 17_999, &mut w.rng).unwrap();
+        c.xp_boost.active = true;
+        let recipient = w.enter(c, None).unwrap();
+        let pos = w.players[&recipient].pos;
+        let mut killers = Vec::new();
+        for character in [2, 3] {
+            let mut c = ch(&w);
+            c.id = character;
+            c.account = character;
+            let id = w.enter(c, None).unwrap();
+            w.players.get_mut(&id).unwrap().pos = pos;
+            killers.push(id);
+        }
+        let (a, b) = (killers[0], killers[1]);
+        d.worlds.insert(-1, w);
+        let actor = Handle::spawn(d);
+        let first = actor
+            .call(move |w| {
+                let e = w.spawn_entity(0x600, pos, vec![])?;
+                w.damage_enemy(recipient, e, 1, true, &[], None)?;
+                w.damage_enemy(a, e, 200_000, true, &[], None)?;
+                Ok(w.pending_progress_where(|id, _| id == recipient)
+                    .pop()
+                    .unwrap()
+                    .1)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (first.level, first.exp, first.xp_boost.bonus_exp),
+            (20, 19_849, 925)
+        );
+        let second = actor
+            .call(move |w| {
+                let e = w.spawn_entity(0x600, pos, vec![])?;
+                w.damage_enemy(recipient, e, 1, true, &[], None)?;
+                w.damage_enemy(b, e, 200_000, true, &[], None)?;
+                assert_eq!(w.players[&recipient].character.level, 19);
+                assert_eq!(
+                    w.players[&recipient].level_assists_prepared,
+                    [LevelAssist {
+                        reached_level: 20,
+                        giver: 2
+                    }]
+                );
+                assert!(w.pending_progress_where(|id, _| id == recipient).is_empty());
+                w.finish_progress(recipient, first)?;
+                let plan = w
+                    .pending_progress_where(|id, _| id == recipient)
+                    .pop()
+                    .unwrap()
+                    .1;
+                assert!(w.players[&recipient].level_assists_prepared.is_empty());
+                Ok(plan)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                second.level,
+                second.exp,
+                second.xp_boost.bonus_exp,
+                second.fame
+            ),
+            (20, 20_774, 925, 19)
+        );
+        actor
+            .call(move |w| {
+                w.finish_progress(recipient, second)?;
+                assert_eq!(w.players[&recipient].character.exp, 20_774);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn all_death_fame_phase1_causal_levels_bounded_and_invalid_sources() {
+        let mut w = world();
+        let recipient = w.enter(ch(&w), None).unwrap();
+        let p = w.players.get_mut(&recipient).unwrap();
+        p.queue_experience(49, None, false).unwrap();
+        p.queue_experience(1, Some(2), true).unwrap();
+        p.queue_experience(149, None, false).unwrap();
+        p.queue_experience(1, Some(3), true).unwrap();
+        let plans = w.pending_progress();
+        assert_eq!(plans[0].1.level, 3);
+        assert_eq!(
+            w.players[&recipient].level_assists_prepared,
+            [
+                LevelAssist {
+                    reached_level: 2,
+                    giver: 2
+                },
+                LevelAssist {
+                    reached_level: 3,
+                    giver: 3
+                }
+            ]
+        );
+        w.finish_progress(recipient, plans[0].1.clone()).unwrap();
+        let mut w = world();
+        let recipient = w.enter(ch(&w), None).unwrap();
+        let p = w.players.get_mut(&recipient).unwrap();
+        p.pending = true;
+        for _ in 0..100_000 {
+            p.queue_experience(1, Some(2), true).unwrap();
+            assert!(
+                p.experience_queue
+                    .as_ref()
+                    .unwrap()
+                    .assists
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    <= 38
+            );
+        }
+        assert_eq!(
+            w.players[&recipient]
+                .experience_queue
+                .as_ref()
+                .unwrap()
+                .assists
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>(),
+            38
+        );
+        assert!(w.pending_progress().is_empty());
+        w.players.get_mut(&recipient).unwrap().pending = false;
+        let plans = w.pending_progress();
+        assert_eq!(plans[0].1.level, 20);
+        assert_eq!(w.players[&recipient].level_assists_prepared.len(), 19);
+        for corrupt in 0..4 {
+            let mut w = world();
+            let id = w.enter(ch(&w), None).unwrap();
+            let p = w.players.get_mut(&id).unwrap();
+            if corrupt != 0 {
+                p.queue_experience(50, Some(2), true).unwrap();
+            }
+            match corrupt {
+                0 => p.experience_queued = 50,
+                1 => p.experience_queued += 1,
+                2 => p.character.exp += 1,
+                3 => p.character.level = 2,
+                _ => unreachable!(),
+            }
+            assert!(w.pending_progress().is_empty());
+            let error = w.players[&id].persistence_failure.as_ref().unwrap();
+            assert!(
+                error.contains("character=1")
+                    && error.contains("scalar=")
+                    && error.contains("sources="),
+                "{error}"
+            );
+            assert!(w.begin_departure(id).is_err());
+        }
+        let mut w = world();
+        let mut c = ch(&w);
+        c.gain_experience(&w.content, i32::MAX - 1, &mut w.rng)
+            .unwrap();
+        let id = w.enter(c, None).unwrap();
+        w.players
+            .get_mut(&id)
+            .unwrap()
+            .queue_experience(1, Some(2), true)
+            .unwrap();
+        let plans = w.pending_progress();
+        assert_eq!(
+            plans[0].1.exp,
+            i32::MAX,
+            "unused boosted projection must not reject valid unboosted XP"
+        );
+    }
 }
+
+#[cfg(test)]
+mod complete_abilities_tests;
+
+#[cfg(test)]
+mod cooperative_tests;
+
+#[cfg(test)]
+mod quest_completion_tests;
+
+#[cfg(test)]
+mod xp_booster_tests;
+
+#[cfg(test)]
+mod lifecycle_departure_tests;
