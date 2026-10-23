@@ -445,6 +445,7 @@ async fn use_ground(app: &server::App, id: i32, bag: i32, kind: u16) -> Result<(
         )
     })
     .await?
+    .map(|_| ())
 }
 
 async fn state(app: &server::App, id: i32, bag: i32) -> serde_json::Value {

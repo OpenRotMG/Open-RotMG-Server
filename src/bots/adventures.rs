@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+mod community_tests;
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -114,8 +116,10 @@ impl Society {
     pub(super) fn leave(&mut self, account: i32) {
         self.offers
             .retain(|o| o.from.account != account && o.to.account != account);
-        self.trips
-            .retain(|t| !t.members.iter().any(|p| p.account == account));
+        for trip in &mut self.trips {
+            trip.members.retain(|p| p.account != account);
+        }
+        self.trips.retain(|t| !t.members.is_empty());
         tracing::info!(account, "autonomous adventure released");
     }
     fn expire(&mut self, now: u64) {
@@ -123,7 +127,7 @@ impl Society {
         self.trips.retain(|t| {
             if t.until <= now {
                 tracing::info!(
-                    leader = t.members[0].account,
+                    members = ?t.members,
                     finished = t.finished,
                     "autonomous adventure expired"
                 );
@@ -161,7 +165,7 @@ impl Society {
     ) -> Option<Plan> {
         let now = v.elapsed_ms;
         self.expire(now);
-        if brain.agreement.is_some() || self.occupied(v.session.account) || v.lifecycle.busy {
+        if brain.agreement.is_some() || v.lifecycle.busy {
             return None;
         }
         let controlled = self.actors.contains(&v.session.account);
@@ -192,7 +196,16 @@ impl Society {
         {
             return None;
         }
-        let purpose = if [0, 2].iter().any(|s| {
+        let trip = self
+            .trips
+            .iter()
+            .find(|t| t.members.iter().any(|m| m.account == v.session.account));
+        if trip.is_some_and(|t| t.finished || t.members.len() >= 6) {
+            return None;
+        }
+        let purpose = if let Some(trip) = trip {
+            trip.purpose
+        } else if [0, 2].iter().any(|s| {
             v.character.items[*s] < 0
                 || content.objects[&(v.character.items[*s] as u16)]
                     .tier
@@ -254,7 +267,21 @@ impl Society {
         })
     }
     pub(super) fn validate(&self, owner: i32, plan: &Plan, now: u64) -> Result<()> {
-        ensure!(!self.occupied(owner), "already committed to an adventure");
+        let purpose = match plan {
+            Plan::Invite { purpose, .. } => *purpose,
+            Plan::Answer(o) => o.purpose,
+        };
+        let organizer = match plan {
+            Plan::Invite { .. } => owner,
+            Plan::Answer(o) => o.from.account,
+        };
+        ensure!(
+            self.trips
+                .iter()
+                .find(|t| t.members.iter().any(|m| m.account == organizer))
+                .is_none_or(|t| !t.finished && t.members.len() < 6 && t.purpose == purpose),
+            "outing no longer recruiting for this purpose"
+        );
         match plan {
             Plan::Invite { peer, .. } => ensure!(
                 owner != peer.account
@@ -274,7 +301,6 @@ impl Society {
                         && o.purpose == offer.purpose
                         && (owner == o.from.account || owner == o.to.account)
                         && o.until > now)
-                    && !self.occupied(offer.from.account)
                     && !self.occupied(offer.to.account),
                 "invitation expired or participants committed elsewhere"
             ),
@@ -312,13 +338,21 @@ impl Society {
                     o.from.account != offer.from.account && o.to.account != offer.to.account
                 });
                 if joined {
-                    tracing::info!(leader=offer.from.account,peer=offer.to.account,?offer.purpose,"autonomous adventure joined");
-                    self.trips.push(Adventure {
-                        members: vec![offer.from, offer.to],
-                        purpose: offer.purpose,
-                        until: now + 600000,
-                        finished: false,
-                    });
+                    tracing::info!(account=offer.from.account,peer=offer.to.account,?offer.purpose,"autonomous adventure joined");
+                    if let Some(trip) = self
+                        .trips
+                        .iter_mut()
+                        .find(|t| t.members.iter().any(|p| p.account == offer.from.account))
+                    {
+                        trip.members.push(offer.to);
+                    } else {
+                        self.trips.push(Adventure {
+                            members: vec![offer.from, offer.to],
+                            purpose: offer.purpose,
+                            until: now + 600000,
+                            finished: false,
+                        });
+                    }
                 } else {
                     tracing::info!(account = owner.account, "autonomous adventure declined");
                 }
@@ -403,12 +437,6 @@ pub(super) fn ready(v: &PlayerView, content: &Content) -> bool {
         })
 }
 impl Brain {
-    pub(super) fn leader(&self) -> &str {
-        self.group
-            .as_ref()
-            .filter(|t| !t.finished)
-            .map_or(self.profile.name, |t| t.members[0].name.as_str())
-    }
     pub(super) fn adventure_request(
         &self,
         plan: Plan,
@@ -433,7 +461,7 @@ impl Brain {
                     dialogue::Intent::Decline
                 }],
                 format!(
-                    "{} invited you: {}. Join means accept that adventure with its organizer, not order them to follow you. Decline if not ready.",
+                    "{} invited you: {}. Join means share the activity while making your own travel and combat choices. Decline if not ready.",
                     o.from.name, o.text
                 ),
             ),
