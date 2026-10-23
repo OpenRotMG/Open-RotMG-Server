@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {test} from 'node:test';
+import vm from 'node:vm';
+const source=readFileSync(new URL('./game.mjs',import.meta.url),'utf8');
+const body=source.slice(source.indexOf('function verifiedNativeAck('),source.indexOf('async function bind(state)'));
+const emit=vm.runInNewContext('('+body+')',{Buffer,Error,Number});
+const hash='a'.repeat(64),context={runtime:'actual-native-state-runtime',actor:7,player:9},server={actor:7,player:9,nonce:-1,frame_sha256:hash};
+test('verifiedNativeAck: real negative server nonce and actual observed frame are retained distinctly',()=>{let row;emit(context,server,[hash],undefined,b=>{row=JSON.parse(b);return b.length;});assert.deepEqual(row.context,context);assert.deepEqual(row.server,server);assert.equal(row.observedBrowserFrameSha256,hash);assert.equal(row.event,'native_sync_verified_ack');assert(!Object.hasOwn(row.server,'runtime'));});
+test('verifiedNativeAck: zero/positive/i32MIN/fraction/unsafe/noninteger nonce never logs success',()=>{for(const nonce of [0,1,-2147483648,-2147483649,-1.5,Number.NaN,'-1',Number.MIN_SAFE_INTEGER]){let writes=0;assert.throws(()=>emit(context,{...server,nonce},[hash],undefined,()=>++writes));assert.equal(writes,0);}});
+test('verifiedNativeAck: mismatch and abort never emit a success diagnostic',()=>{for(const [s,frames,abort]of [[{...server,player:10},[hash]], [{...server,actor:8},[hash]],[server,[]],[server,[hash],Error('aborted')]]){let writes=0;assert.throws(()=>emit(context,s,frames,abort,()=>++writes));assert.equal(writes,0);}});
+test('verifiedNativeAck: short and thrown logging writes are fatal with original cause',()=>{assert.throws(()=>emit(context,server,[hash],undefined,()=>0),e=>e.cause.message==='Short native_sync ACK diagnostic write');const cause=Error('ENOSPC evidence');assert.throws(()=>emit(context,server,[hash],undefined,()=>{throw cause;}),e=>e.cause===cause);});
+test('verifiedNativeAck: diagnostic is after existing exact match and successful browser binding',()=>{const match=source.indexOf("if(actual.player!==acknowledgment.player||!c.frames.includes(acknowledgment.frame_sha256))throw"),binding=source.indexOf("await c.evaluate('globalThis[Symbol.for(\"openrotmg.testing.binding.v1\")]="),diagnostic=source.indexOf('      verifiedNativeAck({runtime:state.runtime');assert(match>0&&binding>match&&diagnostic>binding);assert(!body.includes('api(')&&!body.includes('setTimeout')&&!body.includes('evaluate('));});

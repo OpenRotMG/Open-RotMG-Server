@@ -28,7 +28,7 @@ async fn enter(
     world: i32,
     position: Option<Pos>,
 ) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
-    enter_admitted(app, profile, character, world, position, None).await
+    enter_admitted(app, profile, character, world, position, None, None).await
 }
 async fn enter_admitted(
     app: &App,
@@ -36,10 +36,21 @@ async fn enter_admitted(
     character: Character,
     world: i32,
     position: Option<Pos>,
+    arrival: Option<crate::world::TransferArrival>,
     admission: Option<Vec<u8>>,
 ) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
     let world = if world == -3 && position.is_none() && admission.is_none() {
-        app.world.directory(|d| d.initial(-3)).await?
+        let account = character.account;
+        app.world
+            .directory(move |d| {
+                let choices = d.available_realms();
+                ensure!(
+                    !choices.is_empty(),
+                    anyhow::anyhow!(CloseReason::Controller).context("no open Realm has capacity")
+                );
+                realms::choose(account, &choices, &mut rand::thread_rng())
+            })
+            .await?
     } else {
         world
     };
@@ -65,8 +76,14 @@ async fn enter_admitted(
     let bind = server::lifecycle::binding(app, character.account)?;
     let id = app
         .world
-        .in_world(world)
-        .call(move |w| {
+        .directory(move |d| {
+            if let Some(arrival) = arrival {
+                d.admit_transfer(arrival, character.account, character.id, world)?;
+            }
+            let w = d
+                .worlds
+                .get_mut(&world)
+                .context("autonomous entry world missing")?;
             if let Some(vault) = vault {
                 w.load_vaults(vault)?;
             }
@@ -174,7 +191,7 @@ async fn reenter(
             let result = async {
                 server::lifecycle::stage(server::lifecycle::Stage::Reservation);
                 let mut admission = None;
-                let (character, destination) = match request {
+                let (character, destination, arrival) = match request {
                     Reentry::Collective {
                         destination,
                         time,
@@ -182,7 +199,7 @@ async fn reenter(
                         character,
                     } => {
                         admission = Some(key.clone());
-                        let consumed = app
+                        let (consumed, arrival) = app
                             .world
                             .directory(move |d| d.consume(account, destination, time, key))
                             .await?;
@@ -191,7 +208,11 @@ async fn reenter(
                             "collective transfer character binding changed"
                         );
                         server::lifecycle::stage(server::lifecycle::Stage::Store);
-                        (app.store.load(account, consumed).await?, destination)
+                        (
+                            app.store.load(account, consumed).await?,
+                            destination,
+                            Some(arrival),
+                        )
                     }
                     Reentry::Portal {
                         destination,
@@ -201,7 +222,7 @@ async fn reenter(
                         selected,
                     } => {
                         let ticket = key.clone();
-                        let consumed = app
+                        let (consumed, arrival) = app
                             .world
                             .directory(move |d| d.consume(account, destination, time, key))
                             .await?;
@@ -210,30 +231,53 @@ async fn reenter(
                             "transfer character binding changed"
                         );
                         server::lifecycle::stage(server::lifecycle::Stage::Store);
-                        let next = match selected {
-                            Some(selected) => (
+                        if let Some(selected) = selected {
+                            ensure!(
+                                selected == consumed,
+                                "selected transfer character binding changed"
+                            );
+                            admission = Some(ticket);
+                            (
                                 continue_selected(&app.store, account, selected).await?,
                                 destination,
-                            ),
-                            None => {
-                                continue_character(
-                                    &app.store,
-                                    &app.content,
-                                    profile,
-                                    &session,
-                                    destination,
-                                )
-                                .await?
-                            }
-                        };
-                        if next.0.id == session.character {
+                                Some(arrival),
+                            )
+                        } else if app.store.source_character_alive(account, consumed).await? {
+                            let (character, destination) = continue_character(
+                                &app.store,
+                                &app.content,
+                                profile,
+                                &session,
+                                destination,
+                            )
+                            .await?;
+                            ensure!(
+                                character.id == consumed,
+                                "live source character changed during autonomous continuation"
+                            );
                             admission = Some(ticket);
+                            (character, destination, Some(arrival))
                         } else {
                             app.world
-                                .directory(move |d| d.cancel_admission(account, ticket))
+                                .directory(move |d| {
+                                    d.retire_replacement(arrival, account, consumed, destination)?;
+                                    d.cancel_admission(account, ticket)
+                                })
                                 .await?;
+                            let (character, destination) = continue_character(
+                                &app.store,
+                                &app.content,
+                                profile,
+                                &session,
+                                destination,
+                            )
+                            .await?;
+                            ensure!(
+                                character.id != consumed && destination == -2,
+                                "committed death did not select explicit replacement"
+                            );
+                            (character, destination, None)
                         }
-                        next
                     }
                     Reentry::Replacement { previous } => {
                         server::lifecycle::stage(server::lifecycle::Stage::Store);
@@ -258,11 +302,20 @@ async fn reenter(
                             destination = -2,
                             "autonomous replacement rebuilding arrival selected"
                         );
-                        (character, -2)
+                        (character, -2, None)
                     }
                 };
                 server::lifecycle::stage(server::lifecycle::Stage::Publication);
-                enter_admitted(&app, profile, character, destination, None, admission).await
+                enter_admitted(
+                    &app,
+                    profile,
+                    character,
+                    destination,
+                    None,
+                    arrival,
+                    admission,
+                )
+                .await
             }
             .await;
             if let Err(error) = &result {
@@ -717,9 +770,11 @@ async fn launch(
                                 let request = app.world.directory(move |d| {
                                     let (account, character, destination) = d.destination(id, portal)?;
                                     let (time, key, _) = d.issue(account, character, destination)?;
-                                    Ok((destination, time, key))
+                                    d.bind_exit(id,portal,&key)?;
+                                    let reservation=d.reserve_transfer(key.clone())?;
+                                    Ok((destination, time, key,reservation))
                                 }).await;
-                                let (destination, time, key) = match request {
+                                let (destination, time, key,reservation) = match request {
                                     Ok(request) => request,
                                     Err(error) => {
                                         brain.portal = None;
@@ -730,7 +785,7 @@ async fn launch(
                                 admission = Some(key.clone());
                                 dialogue::cancel(&app, &mut pending).await;
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
-                                lifecycle::finalize(&app, id, CloseReason::Controller)?.wait().await?;
+                                lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
                                 (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
                                 let current_character = brain.session.2;
@@ -838,6 +893,7 @@ fn close_controller(
     }
     owner.close(app, reason)
 }
+
 #[cfg(test)]
 mod community_crowd_tests;
 #[cfg(test)]
@@ -850,5 +906,7 @@ mod community_resources_tests;
 mod community_social_tests;
 #[cfg(test)]
 mod decision_timing_tests;
+#[cfg(test)]
+mod fame_transfer_tests;
 #[cfg(test)]
 mod market_consent_tests;

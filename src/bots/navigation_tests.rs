@@ -27,6 +27,7 @@ fn unseen_terrain_cannot_change_controller_decisions_or_randomness() {
         },
         tick: 0,
         time_ms: 0,
+        clock_at: std::time::Instant::now(),
         elapsed_ms: 0,
         position: Pos { x: 32.5, y: 32.5 },
         quest: None,

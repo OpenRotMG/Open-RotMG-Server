@@ -22,6 +22,7 @@ fn manor_life_steal_requires_an_acknowledged_once_only_hit_and_living_owner() {
         damage: 30,
         spec: w.content.objects[&BOSS].projectiles[&0].clone(),
         hit: BTreeSet::new(),
+        hit_enemy: false,
     };
     w.entities.get_mut(&boss).unwrap().hp = 14980;
     assert!(native_hits::expect_shoot_ack(
@@ -547,6 +548,7 @@ fn manor_spectral_mine_triggers_its_four_shots_on_a_cloaked_player() {
     w.now = 50;
     w.mechanic_expiry();
     assert!(!w.entities.contains_key(&mine));
+    assert!(w.begin_departure(player).unwrap().is_some());
     w.finish_departure(player).unwrap();
     let mine = w
         .spawn_entity(MINE, Pos { x: 20.5, y: 20.5 }, vec![])
@@ -807,13 +809,28 @@ fn manor_clear_is_committed_once_and_does_not_disappear_in_counter_zip() {
     assert!(!w.entities[&exit].published);
     w.finish_progress(player, saved).unwrap();
     assert_eq!(w.players[&player].character.manors, 1);
+    assert!(w.players[&player].character.lifetime.realm_exits.is_empty());
     assert!(w.pending_progress_where(|_, _| true).is_empty());
     assert!(w.clear_exit.is_none());
     assert!(w.entities[&exit].published);
     let mut late = tests::ch(&w);
     late.id = 2;
     late.account = 2;
+    let initial_lifetime = late.lifetime.clone();
     let late = w.enter(late, None).unwrap();
     assert_eq!(w.players[&late].character.manors, 0);
+    let mut progress = w.pending_progress_where(|_, _| true);
+    assert_eq!(progress.len(), 1);
+    let (id, snapshot) = progress.pop().unwrap();
+    assert_eq!(id, late);
+    assert_eq!((snapshot.id, snapshot.account, snapshot.manors), (2, 2, 0));
+    assert!(snapshot.lifetime.realm_exits.is_empty());
+    assert!(snapshot.lifetime.tiles > initial_lifetime.tiles);
+    let mut expected_lifetime = initial_lifetime;
+    expected_lifetime.tiles = snapshot.lifetime.tiles;
+    assert_eq!(snapshot.lifetime, expected_lifetime);
+    assert_eq!(w.players[&player].character.manors, 1);
+    w.finish_progress(late, snapshot).unwrap();
     assert!(w.pending_progress_where(|_, _| true).is_empty());
+    assert_eq!(w.players[&player].character.manors, 1);
 }

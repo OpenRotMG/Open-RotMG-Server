@@ -185,18 +185,19 @@ async fn community_social_consumed_last_slot_grant_keeps_its_exact_realm_destina
     let account = ch.account;
     let character = ch.id;
     let owner = app.claim(account).unwrap();
-    let key = app
+    let (key, arrival) = app
         .world
         .directory(move |d| {
             d.prepare_realm_capacity(1)?;
             let (time, key, _) = d.issue(account, character, -3)?;
-            assert_eq!(d.consume(account, -3, time, key.clone())?, character);
+            let (consumed, arrival) = d.consume(account, -3, time, key.clone())?;
+            assert_eq!(consumed, character);
             assert_ne!(d.initial(-3)?, -3);
-            Ok(key)
+            Ok((key, arrival))
         })
         .await
         .unwrap();
-    let (id, rx, sender, _) = enter_admitted(&app, p, ch, -3, None, Some(key))
+    let (id, rx, sender, _) = enter_admitted(&app, p, ch, -3, None, Some(arrival), Some(key))
         .await
         .expect("a consumed grant must retain its reserved Realm, not select another open Realm");
     app.world

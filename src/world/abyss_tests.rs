@@ -497,6 +497,33 @@ fn lifecycle_tick(w: &mut World, now: u64) {
     w.now = now;
     w.mechanic_expiry();
     w.npc_step();
+    assert_eq!(
+        w.abyss_flamer_ids,
+        w.actors()
+            .filter(|e| e.kind == 0x90b)
+            .map(|e| e.id)
+            .collect()
+    );
+}
+
+#[test]
+fn flamer_index_tracks_map_spawn_and_removal() {
+    let (mut w, _) = fixture();
+    let cell = &mut Arc::make_mut(&mut w.map).cells[0];
+    cell.object = Some(0x90b);
+    cell.config = String::new();
+    let mut w = World::new(w.content.clone(), w.map.clone()).unwrap();
+    let loaded = w.actors().find(|e| e.kind == 0x90b).unwrap().id;
+    assert_eq!(w.abyss_flamer_ids, BTreeSet::from([loaded]));
+    let spawned = w
+        .spawn_entity(0x90b, Pos { x: 12.5, y: 12.5 }, vec![])
+        .unwrap();
+    assert_eq!(w.abyss_flamer_ids, BTreeSet::from([loaded, spawned]));
+    for id in [loaded, spawned] {
+        w.remove_entity(id);
+    }
+    assert!(w.abyss_flamer_ids.is_empty());
+    w.abyss_terminal_step();
 }
 
 #[test]
@@ -2075,11 +2102,12 @@ fn abyss_cowardice_routes_living_character_to_realm_not_nexus() {
         assert_eq!((account, id), (character.account, character.id));
         let (time, grant, _) = d.issue(account, id, destination).unwrap();
         let ch = d.worlds.get_mut(&origin).unwrap().leave(player).unwrap();
-        assert_eq!(
-            d.consume(account, destination, time, grant.clone())
-                .unwrap(),
-            character.id
-        );
+        let (consumed, authority) = d
+            .consume(account, destination, time, grant.clone())
+            .unwrap();
+        assert_eq!(consumed, character.id);
+        d.admit_transfer(authority, account, character.id, destination)
+            .unwrap();
         let arrival = d
             .worlds
             .get_mut(&destination)

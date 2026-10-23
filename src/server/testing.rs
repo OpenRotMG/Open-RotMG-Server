@@ -172,9 +172,21 @@ enum Goal {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Cheat {
-    Stats { values: [i32; 8] },
-    Item { slot: usize, item: i32 },
-    Teleport { position: Pos },
+    Stats {
+        values: [i32; 8],
+    },
+    Item {
+        slot: usize,
+        item: i32,
+    },
+    Teleport {
+        position: Pos,
+    },
+    StatModifier {
+        index: usize,
+        amount: i32,
+        duration_ms: u64,
+    },
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -585,11 +597,14 @@ async fn pause(a: &App, native: &[i32], sessions: &[(i32, i32)]) -> Result<()> {
         "native pause requires at most eight unique actor/session pairs"
     );
     let sessions: BTreeMap<_, _> = sessions.iter().copied().collect();
+    let app = a.clone();
     a.world.directory(move |d| {
         for (id,p) in d.worlds.values().flat_map(|w|w.players.iter()).filter(|(_,p)|p.controller == crate::world::Controller::Human) {
             ensure!(native.contains(&p.character.id), "native character {} needs coordinated Ruffle pause through the managed native client",p.character.id);
             ensure!(sessions.get(&p.character.id)==Some(id), "native pause session changed; complete the actual reconnect before suspending");
-            ensure!(!p.departing && !p.pending && !p.progress_started && !p.death_pending, "native pause requires a settled current session, not an in-flight handoff");
+            if let Some(snapshot) = p.native_pause_progress()? {
+                lifecycle::require_progress_owner(&app, snapshot.account, *id)?;
+            }
         }
         d.clock.set_paused(true);
         Ok(())
@@ -673,6 +688,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
     );
     let mut preview = Character {
         schema: 1,
+        lifetime: crate::store::FameLifetime::complete(),
         class: spec.class,
         base: a.content.classes[&spec.class].base,
         tex1: 0,
@@ -985,13 +1001,15 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
             super::lifecycle::stage(Stage::Reservation);
             let mut ch=a.world.for_player(player).call(move |w| {let p=w.players.get(&player).context("player missing")?;ensure!(p.character.alive&&!p.pending&&!p.progress_started&&!p.death_pending&&!p.departing,"actor has pending gameplay or persistence");Ok(p.character.clone())}).await?;
             match change {
+                Cheat::StatModifier{index,amount,duration_ms}=>{a.world.for_player(player).call(move |w| w.prepare_stat_modifier(player,index,amount,duration_ms)).await?;},
                 Cheat::Teleport{position}=>{a.world.for_player(player).call(move |w| {ensure!(position.x.is_finite()&&position.y.is_finite()&&w.walkable(position),"teleport position invalid");let p=w.players.get_mut(&player).context("player missing")?;ensure!(p.controller!=crate::world::Controller::Human,"native teleport requires a verified client correction, not a server-only edit");p.pos=position;p.bot_goal=None;w.updates(player,true)}).await?;},
                 change=>{
+                    if let Cheat::Stats{values}=&change {let values=*values;a.world.for_player(player).call(move |w| w.validate_prepared_base_stats(player,values)).await?;}
                     super::lifecycle::stage(Stage::Store);
                     match change {
                         Cheat::Stats{values}=>{ch.base=values;let stats=ch.effective(&a.content)?;ch.hp=ch.hp.min(stats[0]);ch.mp=ch.mp.min(stats[1]);},
                         Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],Vec::new()).await?[0];},
-                        Cheat::Teleport{..}=>unreachable!(),
+                        Cheat::Teleport{..}|Cheat::StatModifier{..}=>unreachable!(),
                     }
                     let stats = ch.effective(&a.content)?;
                     ch.hp = ch.hp.min(stats[0]); ch.mp = ch.mp.min(stats[1]);

@@ -260,6 +260,7 @@ async fn drain(a: &App, deadline: tokio::time::Instant) -> Vec<String> {
                     avatar,
                     CloseReason::Shutdown,
                     &tokio::runtime::Handle::current(),
+                    None,
                 ) {
                     // A concurrent canonical close may have already published and released this claim.
                     let owners = a.owners.lock().expect("ownership registry poisoned");

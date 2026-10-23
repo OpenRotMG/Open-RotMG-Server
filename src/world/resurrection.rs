@@ -20,19 +20,23 @@ impl Directory {
                     && restored.hp > 0
                     && restored.account == p.character.account
                     && restored.id == p.character.id
-                    && restored.revision == p.character.revision + 1,
+                    && restored.revision == p.character.revision + 1
+                    && p.death_lifetime.as_ref() == Some(&restored.lifetime),
                 "stale or foreign resurrection completion"
             );
             Ok(restored)
         });
-        let restored = world.committed(id, result)?;
+        let mut restored = world.committed(id, result)?;
         let p = world
             .players
             .get_mut(&id)
             .context("resurrection owner missing")?;
+        p.acknowledge_lifetime(restored.lifetime.clone())?;
+        restored.lifetime = p.character.lifetime.clone();
         p.character = restored;
         p.death_pending = false;
         p.death_started = false;
+        p.death_lifetime = None;
         // Stay untargetable and reject inventory/input changes until the owned Nexus transfer consumes its grant.
         p.departing = true;
         p.statuses.clear();

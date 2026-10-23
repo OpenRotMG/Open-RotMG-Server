@@ -23,6 +23,80 @@ impl Player {
     }
 }
 impl World {
+    pub(crate) fn validate_prepared_base_stats(&self, id: i32, values: [i32; 8]) -> Result<()> {
+        let p = self.players.get(&id).context("player missing")?;
+        ensure!(
+            p.boosts
+                .iter()
+                .filter(|b| b.source == (0, 0) && b.until.is_some_and(|until| until > self.now))
+                .all(|b| values[b.index]
+                    .checked_add(b.amount.min(0))
+                    .is_some_and(|value| value >= 0)),
+            controller("base stats conflict with active prepared modifier")
+        );
+        Ok(())
+    }
+
+    pub(crate) fn prepare_stat_modifier(
+        &mut self,
+        id: i32,
+        index: usize,
+        amount: i32,
+        duration_ms: u64,
+    ) -> Result<()> {
+        ensure!(
+            (2..=7).contains(&index),
+            controller("prepared modifier requires a panel stat index 2–7")
+        );
+        ensure!(
+            amount != 0 && (-100..=100).contains(&amount),
+            controller("prepared modifier amount must be nonzero and within -100–100")
+        );
+        ensure!(
+            (1..=60_000).contains(&duration_ms),
+            controller("prepared modifier duration must be 1–60000ms")
+        );
+        let until = self
+            .now
+            .checked_add(duration_ms)
+            .context("prepared modifier deadline overflow")?;
+        let p = self.players.get(&id).context("player missing")?;
+        let value = p.effective(&self.content, self.now)?[index]
+            .checked_add(amount)
+            .context("prepared modifier overflow")?;
+        ensure!(
+            (0..=32767).contains(&value),
+            controller("prepared modifier effective stat out of range")
+        );
+        // Positive consumables and equipment may disappear before this prepared modifier expires.
+        ensure!(
+            p.character.base[index]
+                .checked_add(amount.min(0))
+                .is_some_and(|v| v >= 0),
+            controller("prepared modifier exceeds base stat")
+        );
+        let active = |b: &&Boost| b.until.is_none_or(|until| until > self.now);
+        ensure!(
+            p.boosts.iter().filter(active).count() < 128,
+            controller("temporary stat effect budget exhausted")
+        );
+        ensure!(
+            !p.boosts.iter().filter(active).any(|b| b.source == (0, 0)),
+            controller("prepared modifier already active")
+        );
+        let p = self.players.get_mut(&id).unwrap();
+        p.boosts
+            .retain(|b| b.until.is_none_or(|until| until > self.now));
+        p.boosts.push(Boost {
+            source: (0, 0),
+            activation: 0,
+            index,
+            amount,
+            until: Some(until),
+        });
+        self.updates(id, true)
+    }
+
     pub(super) fn expire_consumable_boosts(&mut self) {
         for p in self.players.values_mut() {
             p.boosts
@@ -133,6 +207,7 @@ impl World {
         }
         let mut plan = self.consumable_plan(id, slot, next)?;
         plan.effects = item.consumable_effects.clone();
+        plan.potion = (slot.object == id && item.is_potion()).then_some(slot);
         Ok(plan)
     }
     pub(super) fn discard_consumable(&mut self, source: (i32, i32)) {
