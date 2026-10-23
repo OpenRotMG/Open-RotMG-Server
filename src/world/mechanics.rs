@@ -255,6 +255,9 @@ impl World {
         if self.entities[&id].kind == crate::dungeon::snake::BOSS {
             return self.snake_mechanics(id, elapsed);
         }
+        if crate::dungeon::lab::ROSTER.contains(&self.entities[&id].kind) {
+            return self.lab_mechanics(id, target, elapsed);
+        }
         if crate::dungeon::trench::ROSTER.contains(&self.entities[&id].kind) {
             return self.ocean_mechanics(id, target, elapsed);
         }
@@ -603,6 +606,9 @@ impl World {
     }
 
     pub(super) fn encounter_death(&mut self, defeated: &Entity) -> Result<()> {
+        if crate::dungeon::lab::ROSTER.contains(&defeated.kind) {
+            return self.lab_death(defeated);
+        }
         if defeated.kind == crate::dungeon::beach::BUM {
             self.broadcast_text("Oryx the Mad God", "");
         }

@@ -80,6 +80,9 @@ pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
 pub fn profile(kind: u16) -> Option<Profile> {
+    if crate::dungeon::lab::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::lab::profile(kind));
+    }
     if matches!(
         kind,
         crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
@@ -514,6 +517,9 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if crate::dungeon::lab::ROSTER.contains(&kind) {
+        return crate::dungeon::lab::validate(content, kind);
+    }
     if matches!(
         kind,
         crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE

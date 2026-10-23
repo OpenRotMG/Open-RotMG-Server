@@ -244,7 +244,18 @@ impl World {
             "scheduled Abyss attacker reached legacy dispatch: entity={id} kind={kind:#x}"
         );
         let heading = (target.y - e.pos.y).atan2(target.x - e.pos.x);
-        if crate::dungeon::trench::ROSTER.contains(&kind) {
+        if crate::dungeon::lab::ROSTER.contains(&kind) {
+            let mut shots = self.lab_shots(id, target);
+            if matches!(kind, 0x980 | 0x981 | 0x1e23 | 0x1e24) {
+                self.predict_enemy_shots(
+                    id,
+                    target,
+                    &mut shots,
+                    |index| if index < 2 { 1. } else { 0. },
+                )?;
+            }
+            Ok(shots)
+        } else if crate::dungeon::trench::ROSTER.contains(&kind) {
             self.ocean_shots(id, target)
         } else if e.quest.is_some() {
             self.quest_shots(id, target, elapsed)

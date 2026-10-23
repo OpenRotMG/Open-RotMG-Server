@@ -159,6 +159,23 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
         ],
+        crate::dungeon::lab::BOSS => &[
+            (0.005, Item(0xc30)),
+            (0.005, Item(0xc32)),
+            (0.01, Item(0xc31)),
+            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.2, Tier(8, WEAPONS)),
+            (0.15, Tier(9, WEAPONS)),
+            (0.1, Tier(10, WEAPONS)),
+            (0.05, Tier(11, WEAPONS)),
+            (0.2, Tier(8, ARMOR)),
+            (0.15, Tier(9, ARMOR)),
+            (0.1, Tier(10, ARMOR)),
+            (0.05, Tier(11, ARMOR)),
+            (0.15, Tier(4, ABILITIES)),
+            (0.1, Tier(5, ABILITIES)),
+        ],
+        kind if crate::dungeon::lab::ROSTER.contains(&kind) => &[],
         crate::dungeon::jungle::BOSS => &[
             (1., Item(0xc1a)),
             (0.4, Item(0xc17)),
@@ -695,6 +712,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | 0xd78
                 | 0xd79
                 | crate::dungeon::spider::BOSS
+                | crate::dungeon::lab::BOSS
                 | crate::dungeon::jungle::BOSS
                 | crate::dungeon::beach::BOSS
                 | crate::dungeon::manor::BOSS
