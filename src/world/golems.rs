@@ -1,6 +1,10 @@
 use super::*;
 use crate::encounter::{Anchor, Motion};
 pub(super) const ROOTS: &[u16] = &[0x62d, 0x62e, 0x62f, 0x631, 0x632, 0x633];
+#[cfg(test)]
+thread_local! { static QUERY_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+mod tests;
 
 impl World {
     pub(super) fn golem_movement(&self, id: i32, elapsed: u64) -> Result<(Motion, f32)> {
@@ -27,12 +31,20 @@ impl World {
         };
         let root = self
             .camp_members(camp)
-            .filter(|x| ROOTS.contains(&x.kind))
+            .filter(|x| {
+                #[cfg(test)]
+                QUERY_VISITS.with(|visits| visits.set(visits.get() + 1));
+                ROOTS.contains(&x.kind)
+            })
             .min_by(nearest);
         if matches!(e.kind, 0x6d5..=0x6d7)
             && let Some(hub) = self
                 .camp_members(camp)
-                .filter(|x| matches!(x.kind, 0x6d2..=0x6d4))
+                .filter(|x| {
+                    #[cfg(test)]
+                    QUERY_VISITS.with(|visits| visits.set(visits.get() + 1));
+                    matches!(x.kind, 0x6d2..=0x6d4)
+                })
                 .min_by(nearest)
         {
             return Ok((

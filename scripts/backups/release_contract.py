@@ -23,6 +23,8 @@ def check(binary, data, directory, revision):
     version.write_text(revision + '\n')
     archive = directory / 'state.json.gz'
     bundle = backup.export(written / 'game.db', discord, archive, version, version, version)
+    if not bundle['game']['bot_minds'] or not bundle['game']['trade_transactions']:
+        raise RuntimeError('Release fixture omitted durable minds or committed trade receipts')
     if b'BACKUP_FIXTURE_SECRET' in gzip.decompress(archive.read_bytes()):
         raise RuntimeError('Release backup exported a login identity')
     restored = directory / 'restored'

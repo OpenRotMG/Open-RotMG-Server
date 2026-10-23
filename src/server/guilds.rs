@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+mod community_tests;
 use crate::store::GuildAction;
 use std::time::Instant;
 

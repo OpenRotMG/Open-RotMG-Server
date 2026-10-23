@@ -80,6 +80,9 @@ pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
 pub fn profile(kind: u16) -> Option<Profile> {
+    if crate::dungeon::lab::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::lab::profile(kind));
+    }
     if matches!(
         kind,
         crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
@@ -395,7 +398,14 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
                 },
                 10.8,
             ),
-            3 => (Motion::Stationary, 0.),
+            // Center the box phase rather than freezing at the orbit endpoint: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/logic/db/BehaviorDb.SpriteWorld.cs#L45-L58
+            3 => (
+                Motion::Protect {
+                    anchor: Anchor::Home,
+                    distance: 0.1,
+                },
+                nr_speed(1.4),
+            ),
             _ => unreachable!(),
         },
         _ => (p.motion, p.speed),
@@ -514,6 +524,9 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if crate::dungeon::lab::ROSTER.contains(&kind) {
+        return crate::dungeon::lab::validate(content, kind);
+    }
     if matches!(
         kind,
         crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE

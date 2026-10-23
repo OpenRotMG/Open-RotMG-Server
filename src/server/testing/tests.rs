@@ -1,4 +1,6 @@
 use super::*;
+mod community_crowd;
+mod community_social;
 #[path = "finalize_tests.rs"]
 mod finalize_tests;
 

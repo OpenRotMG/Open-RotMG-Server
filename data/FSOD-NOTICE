@@ -2,11 +2,13 @@ realm-fsod-{1,2,3}.wmap: private-server layouts, not authenticated official maps
 Source: wServer/realm/worlds/maps/world{1,2,3}.wmap at:
 https://github.com/ossimc82/fabiano-swagger-of-doom/tree/6fd20aad4a7905b13f25389c68368a942a2b68cb
 
-Reproduce with python3 scripts/import-realm-maps.py. Source Git blobs are
-pinned in that script. Conversion removes only unused per-cell elevation;
-grounds, objects, configurations, terrain and regions are retained. Runtime
-replaces arrival markers and clears four connected coastal 3x3 pads, then
-applies this server's bounded population and authored setpieces.
+Install scripts/requirements-realm-maps.txt, then reproduce with
+python3 scripts/import-realm-maps.py. Source Git blobs are pinned in that
+script. Conversion drops unused elevation and locally rounds sharp road
+bends, restoring vacated cells from the nearest source biome and clearing
+scenery only in the new road footprint. Water, region markers and road
+connectivity are retained. Runtime replaces arrival markers and clears four
+connected coastal 3x3 pads, then applies bounded population and setpieces.
 
 Upstream publishes GNU AGPL v3 (see ../LICENSE) and README attributions:
 ossimc82/Fabian Fischer; C453; Trapped; Donran; creepylava; Krazyshank; Barm;
