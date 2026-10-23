@@ -530,7 +530,7 @@ impl Piece {
                 }
                 p
             }
-            0x935 | 0xd59 => Self::new(5, 5),
+            0x935 | 0xd59 | 0xd50 => Self::new(5, 5),
             0xd5f => {
                 let mut p = Self::new(41, 41);
                 for n in 0..5 {
@@ -560,7 +560,7 @@ impl Piece {
         if kind == 0x668 {
             p.boss = (20, 20);
         }
-        if !matches!(kind, 0x935 | 0xd59 | 0xe37) {
+        if !matches!(kind, 0x935 | 0xd59 | 0xd50 | 0xe37) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
         }
         p
@@ -717,7 +717,7 @@ impl World {
                     && a.y > 0
                     && a.x + a.width < self.map.width
                     && a.y + a.height < self.map.height
-                    && (!matches!(kind, 0x935 | 0xd59)
+                    && (!matches!(kind, 0x935 | 0xd59 | 0xd50)
                         || self.walkable(Pos {
                             x: (a.x + a.width / 2) as f32 + 0.5,
                             y: (a.y + a.height / 2) as f32 + 0.5,

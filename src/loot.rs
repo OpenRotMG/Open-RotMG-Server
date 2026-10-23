@@ -246,6 +246,48 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
         ],
+        // GPL-3.0 realm-src@1855c017, BehaviorDb.{LotLL,GhostShip}.cs; NR-Core and Skilly.
+        0xd50 => &[
+            (0.15, Tier(8, WEAPONS)),
+            (0.1, Tier(9, WEAPONS)),
+            (0.07, Tier(10, WEAPONS)),
+            (0.05, Tier(11, WEAPONS)),
+            (0.15, Tier(4, ABILITIES)),
+            (0.07, Tier(5, ABILITIES)),
+            (0.2, Tier(8, ARMOR)),
+            (0.15, Tier(9, ARMOR)),
+            (0.1, Tier(10, ARMOR)),
+            (0.07, Tier(11, ARMOR)),
+            (0.04, Tier(12, ARMOR)),
+            (0.15, Tier(3, RINGS)),
+            (0.07, Tier(4, RINGS)),
+            (0.03, Tier(5, RINGS)),
+            (0.1, Item(0xa20)),
+            (0.1, Item(0xa1f)),
+            (0.1, Item(0xa34)),
+            (0.1, Item(0xa35)),
+            (0.1, Item(0xa21)),
+            (0.1, Item(0xa4c)),
+            (0.004, Item(0xc0f)),
+        ],
+        0xd52 | 0xd53 => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
+        0xe37 => &[
+            (0.1, Item(0xa35)),
+            (0.12, Tier(8, WEAPONS)),
+            (0.1, Tier(9, WEAPONS)),
+            (0.12, Tier(8, ARMOR)),
+            (0.1, Tier(9, ARMOR)),
+            (0.12, Tier(3, ABILITIES)),
+            (0.1, Tier(4, ABILITIES)),
+            (0.07, Tier(4, RINGS)),
+            (0.06, Tier(10, WEAPONS)),
+            (0.04, Tier(11, WEAPONS)),
+            (0.06, Tier(10, ARMOR)),
+            (0.04, Tier(11, ARMOR)),
+            (0.04, Tier(5, ABILITIES)),
+            (0.04, Tier(5, RINGS)),
+            (0.001, Item(crate::endgame::INCANTATION)),
+        ],
         // Behavior coverage alone does not establish new drop probabilities.
         kind if crate::encounter::fauna::ROSTER.contains(&kind)
             || crate::encounter::landmarks::ROSTER.contains(&kind) =>
@@ -702,7 +744,7 @@ fn roll_table(content: &Content, picks: &[(f64, Pick)], rng: &mut impl Rng) -> O
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     let mut items = if kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
-        || kind == crate::dungeon::trench::HERMIT
+        || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50 | 0xd52 | 0xd53)
         || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b)
         || matches!(kind, 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL)
         || matches!(
@@ -787,7 +829,7 @@ pub fn private(kind: u16) -> bool {
         )
         || crate::quest::final_root(kind)
         || kind == crate::dungeon::davy::BOSS
-        || kind == crate::dungeon::trench::HERMIT
+        || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50)
         || matches!(
             kind,
             0x679..=0x67c | 0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL

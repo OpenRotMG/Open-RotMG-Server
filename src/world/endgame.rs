@@ -372,7 +372,12 @@ impl Directory {
                         Ok(realm_events::EventAdmission::Miss) => {}
                     }
                 }
+                let killer = world.critical_killers.remove(&id);
                 if cycle.defeated(id, now) {
+                    if let Some((kind, player)) = killer {
+                        world.realm_killed_notice(kind, &player);
+                    }
+                    world.last_realm_enemy_notice(&cycle.remaining);
                     tracing::info!(
                         origin,
                         hero = id,
@@ -860,7 +865,7 @@ impl World {
         Ok(())
     }
     pub(super) fn oryx_notice(&self, text: &str) {
-        self.broadcast_text("Oryx the Mad God", text);
+        self.broadcast_text("#Oryx the Mad God", text);
     }
 }
 
@@ -1082,7 +1087,7 @@ mod tests {
                 .unwrap();
             assert_eq!(w.critical_deaths, vec![source]);
             let before = w.event_reserves.len();
-            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.event_rng = rand::rngs::StdRng::seed_from_u64(seed);
             d.endgame_step();
             let w = d.worlds.get_mut(&origin).unwrap();
             assert!(before - w.event_reserves.len() <= 1);
@@ -1143,7 +1148,7 @@ mod tests {
         d.tick = 200;
         w.damage_enemy(owner, source, 100000, false, &[], None)
             .unwrap();
-        w.rng = rand::rngs::StdRng::seed_from_u64(winning_seed.unwrap());
+        w.event_rng = rand::rngs::StdRng::seed_from_u64(winning_seed.unwrap());
         d.endgame_step();
         assert_eq!(d.worlds[&origin].event_waiting, Some(source));
         assert_eq!(
