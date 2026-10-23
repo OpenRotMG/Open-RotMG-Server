@@ -7264,6 +7264,7 @@ mod tests {
                     damage: 20,
                     spec,
                     hit: BTreeSet::new(),
+                    hit_enemy: false,
                 });
                 w.step();
                 let active = duration > w.now;
