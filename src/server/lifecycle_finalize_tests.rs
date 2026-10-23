@@ -792,7 +792,7 @@ async fn all_death_fame_phase4_transfer_cancellation_cutoff() {
                 .unwrap();
             (ready, release)
         } else {
-            // The eighth existing executor call is source snapshot reservation, before write acceptance.
+            // Canonical departure reads its origin before reaching source snapshot reservation.
             a.world.lifecycle_test_pause_job(9, true)
         };
         let release = HeldReply(Some(release));
