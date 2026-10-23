@@ -65,7 +65,15 @@ class ReleaseContract(unittest.TestCase):
                 value = json.loads(db.execute('SELECT stats FROM characters WHERE alive=1').fetchone()[0])
             self.assertEqual(value['dungeons'], [1, 2, 3])
             self.assertEqual(value['abysses'], 5)
+            self.assertEqual(value['tombs'], 9)
+            bundle = json.loads(gzip.decompress((Path(temporary) / 'contract/state.json.gz').read_bytes()))
+            exported = next(row for row in bundle['game']['characters'] if row['id'] == value['id'])
+            self.assertEqual(json.loads(exported['stats'])['tombs'], 9)
+            self.assertEqual(json.loads(next(row for row in bundle['game']['deaths']
+                if row['killed_by'] == 'Backup contract fixture')['snapshot'])['tombs'], 9)
             with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as db:
+                restored = json.loads(db.execute('SELECT stats FROM characters WHERE id=?', (value['id'],)).fetchone()[0])
+                self.assertEqual(restored['tombs'], 9)
                 self.assertEqual(db.execute('SELECT name,level,fame,earned,board FROM guilds').fetchone(),
                                  ('Backup Guild', 2, 3270, 13270, 'Welcome & prepare!\n日本語 🧙'))
                 self.assertEqual(db.execute('SELECT rank,fame FROM guild_members').fetchone(), (40, 13270))
@@ -88,8 +96,14 @@ class ReleaseContract(unittest.TestCase):
                 for row in [(owner, 'discord_link', 123, None), (owner, 'invalid', 123, None), (owner, 'collection_top_half', 0, None), (owner, 'collection_top_half', 123, 0), (99999, 'discord_link', 123, None)]:
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
-            bundle = json.loads(gzip.decompress((Path(temporary) / 'contract/state.json.gz').read_bytes()))
             self.assertEqual(bundle['schema'], 16)
+            for field, invalid in [('tombs', -1), ('unknown_tombs', 9)]:
+                malformed = deepcopy(bundle)
+                stats = json.loads(malformed['game']['characters'][0]['stats'])
+                stats[field] = invalid
+                malformed['game']['characters'][0]['stats'] = json.dumps(stats)
+                with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'character payload'):
+                    backup.validate(malformed)
             self.assertEqual([r['equipment_fame'] for r in bundle['game']['deaths']], [0, 750])
             for award in [None, True, -1, 1.5, '750', 2147483648, 751]:
                 malformed = deepcopy(bundle)

@@ -227,6 +227,19 @@ async fn lifecycle_finalize_real_socket_manual_and_resurrection_transfer_retire_
                 )
                 .await
                 .unwrap()[0];
+            let mut mismatch = ch.clone();
+            mismatch.alive = false;
+            mismatch.hp = 0;
+            mismatch.tombs += 1;
+            assert!(
+                a.store
+                    .resurrect(mismatch, 3, a.content.clone())
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("resurrection reservation changed")
+            );
+            assert_eq!(a.store.load(account, ch.id).await.unwrap().tombs, ch.tombs);
         }
         let mut socket = NativeSocket::connect(port, &a.origin).await;
         let id = socket_load(&mut socket, &dir, &guid, ch.id).await;

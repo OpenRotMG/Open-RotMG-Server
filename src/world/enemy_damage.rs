@@ -68,6 +68,8 @@ impl World {
         } else {
             damage
         };
+        let tomb_immortal = crate::dungeon::tomb::immortal(e.kind);
+        let damage = if tomb_immortal { 0 } else { damage };
         let actual = damage.min(e.hp).max(0);
         if affects {
             for (index, duration) in effects {
@@ -83,7 +85,18 @@ impl World {
         if e.kind == 0x909 {
             e.hp = e.hp.max(1);
         }
-        let lethal = e.hp <= 0;
+        let tomb_dying = e.hp <= 0 && matches!(e.kind, 0xd2a | 0xd2b);
+        if tomb_dying {
+            e.hp = 1;
+            e.stage = Some(4);
+            e.activated = Some(self.now);
+            e.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
+            e.tomb
+                .as_mut()
+                .context("lethal worshipper state missing")?
+                .initialized = true;
+        }
+        let lethal = e.hp <= 0 && !tomb_immortal;
         let transform =
             lethal && e.quest.is_some() && matches!(e.kind, 0x675 | 0x6c2 | 0x92a | 0x92b);
         let lantern = lethal && e.kind == crate::dungeon::davy::UNLIT && self.locker.is_some();
@@ -121,6 +134,9 @@ impl World {
             if p.known.contains(&target) {
                 send(p, 47, o.0.clone());
             }
+        }
+        if tomb_dying {
+            self.flash_inland(target, 0xffff0000, 0.1, 20.);
         }
         if lantern {
             self.light_locker_lantern(target)?;

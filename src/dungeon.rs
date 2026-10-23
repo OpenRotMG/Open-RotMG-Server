@@ -6,6 +6,7 @@ pub mod manor;
 pub mod snake;
 pub mod spider;
 pub mod sprite;
+pub mod tomb;
 pub mod trench;
 pub mod undead;
 
@@ -55,7 +56,7 @@ impl HistoricalDungeon {
     ];
 }
 
-pub const DUNGEONS: [(u16, &str, &str, u16); 11] = [
+pub const DUNGEONS: [(u16, &str, &str, u16); 12] = [
     (0x717, "pirate-cave", "Pirate Cave", 0x927),
     (0x718, "snake-pit", "Snake Pit", 0x917),
     (0x70c, "sprite-world", "Sprite World", 0xd06),
@@ -72,6 +73,12 @@ pub const DUNGEONS: [(u16, &str, &str, u16); 11] = [
     ),
     (0x742, "beachzone", "Beachzone", beach::BOSS),
     (0x741, davy::TEMPLATE, davy::NAME, davy::BOSS),
+    (
+        tomb::PORTAL,
+        "tomb-of-the-ancients",
+        "Tomb of the Ancients",
+        tomb::ANCHOR,
+    ),
 ];
 
 pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
@@ -80,6 +87,7 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
         trench::HERMIT => Some((0x730, 1.)),
         0xdc2 => Some((0x733, 0.2)),
         0x6db => Some((0x739, 0.5)),
+        tomb::SPHINX => Some((tomb::PORTAL, 1.)),
         0x60e..=0x610 => Some((0x717, 0.01)),
         0x654 => Some((0x71b, 0.1)),
         0x62c | 0x637 => Some((0x719, 0.1)),

@@ -207,6 +207,11 @@ pub struct Object {
     pub protects_ground: bool,
     pub destructible: bool,
 }
+impl Object {
+    pub fn passive_destructible(&self) -> bool {
+        matches!(self.kind, 0x122 | 0x162 | 0x181f)
+    }
+}
 #[derive(Clone)]
 pub struct Hazard {
     pub name: String,
@@ -655,6 +660,34 @@ impl Content {
             hazards,
             classes,
         };
+        for (kind, name, class, hp, size, full) in [
+            (0x122, "Destructible Grey Wall", "Wall", 100, 100, true),
+            (0x162, "Destructible Blue Wall", "Wall", 100, 100, true),
+            (0x181f, "Tombstone", "GameObject", 1000, 120, false),
+        ] {
+            let o = out.get(kind)?;
+            ensure!(
+                o.name == name
+                    && o.class == class
+                    && o.hp == hp
+                    && o.size == size
+                    && o.static_object
+                    && o.enemy
+                    && o.destructible
+                    && o.blocks
+                    && o.occupy_square
+                    && o.enemy_occupy_square
+                    && o.full_occupy == full
+                    && o.xp_multiplier == 0.
+                    && o.defense == 0
+                    && !o.stasis_immune
+                    && !o.protects_ground
+                    && !o.quest
+                    && o.projectiles.is_empty()
+                    && o.equipment.is_empty(),
+                "selected passive scenery signature changed for {kind:#x}"
+            );
+        }
         let w = out.get(WIZARD)?;
         ensure!(
             out.unlocked(WIZARD, &BTreeMap::new())?,
@@ -809,5 +842,48 @@ impl Map {
         }
         self.cells
             .get(y.floor() as usize * self.width as usize + x.floor() as usize)
+    }
+}
+
+#[cfg(test)]
+mod passive_signature_tests {
+    use super::*;
+
+    #[test]
+    fn passive_signature_rejects_damage_and_protection_drift_on_load() {
+        let root =
+            std::env::temp_dir().join(format!("rotmg-passive-signature-{}", rand::random::<u64>()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::copy("data/grounds.xml", root.join("grounds.xml")).unwrap();
+        let original = std::fs::read_to_string("data/objects.xml").unwrap();
+        std::fs::write(root.join("objects.xml"), &original).unwrap();
+        assert!(Content::load(&root).is_ok());
+        for name in [
+            "Destructible Grey Wall",
+            "Destructible Blue Wall",
+            "Tombstone",
+        ] {
+            let start = original.find(&format!("id=\"{name}\"")).unwrap();
+            let end = start + original[start..].find("</Object>").unwrap();
+            for field in [
+                "<Defense>999</Defense>",
+                "<StasisImmune/>",
+                "<ProtectFromGroundDamage/>",
+            ] {
+                let mut changed = original.clone();
+                changed.insert_str(end, field);
+                std::fs::write(root.join("objects.xml"), changed).unwrap();
+                let error = Content::load(&root)
+                    .err()
+                    .expect("changed passive signature accepted");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("selected passive scenery signature changed"),
+                    "{name} {field}: {error:#}"
+                );
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

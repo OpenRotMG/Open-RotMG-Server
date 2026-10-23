@@ -622,7 +622,41 @@ async fn all_death_fame_phase1_ordered_rules() {
         );
         lifetime.realm_exits.insert(dungeon);
     }
-    assert_eq!(crate::dungeon::DUNGEONS.len(), 11);
+    assert_eq!(crate::dungeon::DUNGEONS.len(), 12);
+    use crate::dungeon::{HistoricalDungeon, tomb};
+    assert_eq!(
+        HistoricalDungeon::ALL,
+        [
+            HistoricalDungeon::PirateCave,
+            HistoricalDungeon::SpiderDen,
+            HistoricalDungeon::ForbiddenJungle,
+            HistoricalDungeon::SnakePit,
+            HistoricalDungeon::SpriteWorld,
+            HistoricalDungeon::UndeadLair,
+            HistoricalDungeon::AbyssOfDemons,
+            HistoricalDungeon::TombOfTheAncients,
+            HistoricalDungeon::OceanTrench,
+            HistoricalDungeon::ManorOfTheImmortals,
+        ]
+    );
+    assert_eq!(
+        HistoricalDungeon::from_world("Tomb of the Ancients"),
+        Some(HistoricalDungeon::TombOfTheAncients)
+    );
+    let tomb_registrations: Vec<_> = crate::dungeon::DUNGEONS
+        .iter()
+        .filter(|(portal, _, name, _)| *portal == tomb::PORTAL || *name == "Tomb of the Ancients")
+        .copied()
+        .collect();
+    assert_eq!(
+        tomb_registrations,
+        [(
+            tomb::PORTAL,
+            "tomb-of-the-ancients",
+            "Tomb of the Ancients",
+            tomb::ANCHOR
+        )]
+    );
     lifetime = FameLifetime::known_only();
     lifetime.oryx_kills = 1;
     lifetime.kills = 1;
@@ -1459,6 +1493,7 @@ async fn all_death_fame_phase5_paid_readers_and_sort() {
 #[tokio::test]
 async fn all_death_fame_phase5_archived_counter_policy() {
     let (path, content, store, mut ch) = setup().await;
+    ch.tombs = 9;
     ch.shots = 101;
     ch.hits = 102;
     ch.tiles = 103;
@@ -1490,6 +1525,7 @@ async fn all_death_fame_phase5_archived_counter_policy() {
     ];
     let before = phase5_state(&db);
     let xml = store.fame(ch.account, ch.id).await.unwrap();
+    assert!(xml.contains("<TombsCompleted>9</TombsCompleted>"));
     for (tag, value) in fields.iter().zip([7, 3, 12, 8, 4, 1, 13, 14]) {
         assert!(xml.contains(&format!("<{tag}>{value}</{tag}>")));
     }
@@ -1524,6 +1560,7 @@ async fn all_death_fame_phase5_archived_counter_policy() {
         tx.commit().unwrap();
         let before = phase5_state(&db);
         let xml = store.fame(old.account, old.id).await.unwrap();
+        assert!(xml.contains("<TombsCompleted>0</TombsCompleted>"));
         for (tag, value) in fields.iter().zip([101, 102, 103, 104, 0, 0, 105, 0]) {
             assert!(xml.contains(&format!("<{tag}>{value}</{tag}>")));
         }

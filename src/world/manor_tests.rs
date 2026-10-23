@@ -585,12 +585,19 @@ fn manor_realms_have_two_walkable_highland_graveyards_without_closure_membership
                 && area.distance(e.pos) == 0.
                 && w.walkable(e.pos)
                 && e.quest.is_none()));
-            assert_eq!(
-                w.actors()
-                    .filter(|e| e.kind == GRAVE && area.distance(e.pos) == 0.)
-                    .count(),
-                24
-            );
+            let graves: Vec<_> = w
+                .entities
+                .values()
+                .filter(|e| e.kind == GRAVE && area.distance(e.pos) == 0.)
+                .collect();
+            assert_eq!(graves.len(), 24);
+            assert!(graves.iter().all(|e| {
+                !w.actor_ids.contains(&e.id)
+                    && e.quest.is_none()
+                    && w.cells
+                        .ids(e.pos.y as usize * w.map.width as usize + e.pos.x as usize)
+                        .contains(&e.id)
+            }));
         }
     }
 }

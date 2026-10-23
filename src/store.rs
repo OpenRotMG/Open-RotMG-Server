@@ -291,6 +291,8 @@ pub struct Character {
     pub beaches: u64,
     #[serde(default)]
     pub davy_lockers: u64,
+    #[serde(default)]
+    pub tombs: u64,
 }
 // Keep one field declaration while validating every direct Character decode, not just Store readers.
 impl<'de> Deserialize<'de> for Character {
@@ -1055,6 +1057,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 manors: 0,
                 beaches: 0,
                 davy_lockers: 0,
+                tombs: 0,
             };
             tx.execute(
                 "INSERT INTO characters(account,stats,items) VALUES(?1,?2,?3)",
@@ -1228,7 +1231,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let saved: Character = serde_json::from_str(&raw)?;
             ensure!(saved.schema == ch.schema && saved.class == ch.class && saved.base == ch.base
                 && saved.level == ch.level && saved.exp == ch.exp && saved.fame == ch.fame
-                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors && saved.beaches == ch.beaches && saved.davy_lockers == ch.davy_lockers
+                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors && saved.beaches == ch.beaches && saved.davy_lockers == ch.davy_lockers && saved.tombs == ch.tombs
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "permanent potion reservation changed");
             ch.lifetime.follows(&saved.lifetime)?;
@@ -1368,7 +1371,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             death_awards::ReceiptPolicy::Historical=>{let l=&c.lifetime;[l.shots,l.projectile_hits,l.tiles,l.kills,l.god_kills,l.oryx_kills,l.qualified_quests,l.level_assists]},
             death_awards::ReceiptPolicy::LegacyPaid|death_awards::ReceiptPolicy::EquipmentOnly=>[c.shots,c.hits,c.tiles,c.kills,0,0,c.quests,0],
         };
-        let equipment=receipt.rows.iter().map(|r|format!("<Bonus id=\"{}\" desc=\"{}\">{}</Bonus>",r.kind.id(),r.kind.description(),r.amount)).collect::<String>();ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>{}</GodKills><OryxKills>{}</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>0</TombsCompleted><LevelUpAssists>{}</LevelUpAssists><BaseFame>{}</BaseFame>{}</Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),total,shots,hits,tiles,kills,gods,oryx,quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],assists,c.fame,equipment))}).await
+        let equipment=receipt.rows.iter().map(|r|format!("<Bonus id=\"{}\" desc=\"{}\">{}</Bonus>",r.kind.id(),r.kind.description(),r.amount)).collect::<String>();ensure!(died_at>0 && died_at<=8_640_000_000_000,"invalid recorded death time");Ok(format!("<Fame><Char id=\"{}\"><Account><Name>{}</Name></Account><ObjectType>{}</ObjectType><Level>{}</Level><Tex1>{}</Tex1><Tex2>{}</Tex2></Char><CreatedOn>{}</CreatedOn><KilledBy>{}</KilledBy><TotalFame>{}</TotalFame><Shots>{}</Shots><ShotsThatDamage>{}</ShotsThatDamage><TilesUncovered>{}</TilesUncovered><MonsterKills>{}</MonsterKills><GodKills>{}</GodKills><OryxKills>{}</OryxKills><QuestsCompleted>{}</QuestsCompleted><PirateCavesCompleted>{}</PirateCavesCompleted><UndeadLairsCompleted>{}</UndeadLairsCompleted><AbyssOfDemonsCompleted>{}</AbyssOfDemonsCompleted><SnakePitsCompleted>{}</SnakePitsCompleted><SpiderDensCompleted>{}</SpiderDensCompleted><SpriteWorldsCompleted>{}</SpriteWorldsCompleted><TombsCompleted>{}</TombsCompleted><LevelUpAssists>{}</LevelUpAssists><BaseFame>{}</BaseFame>{}</Fame>",c.id,xml_escape(&c.name),c.class,c.level,c.tex1,c.tex2,died_at,xml_escape(&killer),total,shots,hits,tiles,kills,gods,oryx,quests,c.pirate_caves,c.dungeons[2],c.abysses,c.dungeons[0],c.spider_dens,c.dungeons[1],c.tombs,assists,c.fame,equipment))}).await
     }
     #[cfg(test)]
     pub async fn rename(&self, account: i32, name: String) -> Result<()> {
@@ -1545,23 +1548,39 @@ mod tests {
         let mut value = serde_json::to_value(&character).unwrap();
         value["lifetime"]["shots"] = serde_json::json!(89);
         value["lifetime"]["projectile_hits"] = serde_json::json!(30);
-        for field in ["jungles", "manors", "beaches", "davy_lockers"] {
+        for field in ["jungles", "manors", "beaches", "davy_lockers", "tombs"] {
             value.as_object_mut().unwrap().remove(field);
         }
         let old = decode_character(&value.to_string(), [0; 8]).unwrap();
         assert_eq!(
-            [old.jungles, old.manors, old.beaches, old.davy_lockers],
-            [0; 4]
+            [
+                old.jungles,
+                old.manors,
+                old.beaches,
+                old.davy_lockers,
+                old.tombs
+            ],
+            [0; 5]
         );
         assert_eq!(
             serde_json::to_value(&old.lifetime).unwrap(),
             value["lifetime"]
         );
+        assert!(old.lifetime.realm_exits.is_empty());
+        value["tombs"] = serde_json::json!(0);
+        let zero = decode_character(&value.to_string(), [0; 8]).unwrap();
+        assert_eq!(zero.tombs, 0);
+        assert_eq!(
+            serde_json::to_value(&zero.lifetime).unwrap(),
+            value["lifetime"]
+        );
+        assert!(zero.lifetime.realm_exits.is_empty());
         for (field, count) in [
             ("jungles", 7),
             ("manors", 8),
             ("beaches", 9),
             ("davy_lockers", 10),
+            ("tombs", 11),
         ] {
             value[field] = serde_json::json!(count);
             let current = decode_character(&value.to_string(), [0; 8]).unwrap();
@@ -1666,6 +1685,15 @@ mod tests {
                 .await
                 .unwrap()[0];
             let before = ch.base;
+            let mut mismatch = ch.clone();
+            mismatch.tombs += 1;
+            assert!(
+                s.consume_stat(mismatch, Some(slot), index, 1, Vec::new())
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("permanent potion reservation changed")
+            );
             let revision = s
                 .consume_stat(ch.clone(), Some(slot), index, 1, Vec::new())
                 .await
@@ -1915,7 +1943,8 @@ mod tests {
             ch.jungles = 6;
             ch.manors = 7;
             ch.beaches = 8;
-            ch.davy_lockers = 9;
+            ch.davy_lockers = 10;
+            ch.tombs = 9;
             characters.push(ch);
         }
         characters[1].revision = 1;
@@ -1931,6 +1960,7 @@ mod tests {
             assert_eq!(saved.manors, 0);
             assert_eq!(saved.beaches, 0);
             assert_eq!(saved.davy_lockers, 0);
+            assert_eq!(saved.tombs, 0);
         }
         characters[1].revision = 0;
         s.progress_batch(characters.clone()).await.unwrap();
@@ -1944,7 +1974,8 @@ mod tests {
             assert_eq!(saved.jungles, 6);
             assert_eq!(saved.manors, 7);
             assert_eq!(saved.beaches, 8);
-            assert_eq!(saved.davy_lockers, 9);
+            assert_eq!(saved.davy_lockers, 10);
+            assert_eq!(saved.tombs, 9);
             saved.alive = false;
             saved.hp = 0;
             s.death(saved, "test clear snapshot".into()).await.unwrap();
@@ -1953,6 +1984,7 @@ mod tests {
                 "<PirateCavesCompleted>1</PirateCavesCompleted>",
                 "<SnakePitsCompleted>1</SnakePitsCompleted>",
                 "<SpriteWorldsCompleted>2</SpriteWorldsCompleted>",
+                "<TombsCompleted>9</TombsCompleted>",
                 "<UndeadLairsCompleted>3</UndeadLairsCompleted>",
                 "<AbyssOfDemonsCompleted>4</AbyssOfDemonsCompleted>",
                 "<SpiderDensCompleted>5</SpiderDensCompleted>",

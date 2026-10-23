@@ -143,12 +143,24 @@ impl World {
             .collect()
     }
     fn ability_enemies(&self, pos: Pos, radius: f32) -> Vec<i32> {
-        self.actors()
+        let mut ids: Vec<_> = self
+            .near_entities(
+                Pos {
+                    x: pos.x - radius,
+                    y: pos.y - radius,
+                },
+                Pos {
+                    x: pos.x + radius,
+                    y: pos.y + radius,
+                },
+            )
             .filter(|e| {
                 e.hp > 0 && self.content.objects[&e.kind].enemy && e.pos.distance(pos) <= radius
             })
             .map(|e| e.id)
-            .collect()
+            .collect();
+        ids.sort_unstable();
+        ids
     }
     fn ability_effect(&self, kind: u8, owner: i32, a: Pos, b: Pos, color: u32) {
         let mut out = Writer::new();
@@ -445,7 +457,9 @@ impl World {
                     == 0
         };
         let first = self
-            .actors()
+            .ability_enemies(origin, 14.)
+            .into_iter()
+            .map(|id| &self.entities[&id])
             .filter(eligible)
             .filter(|e| {
                 origin.distance(e.pos) <= 14.
@@ -463,7 +477,9 @@ impl World {
             while chain.len() < maximum {
                 let from = self.entities[chain.last().unwrap()].pos;
                 let next = self
-                    .actors()
+                    .ability_enemies(from, 10.)
+                    .into_iter()
+                    .map(|id| &self.entities[&id])
                     .filter(eligible)
                     .filter(|e| !chain.contains(&e.id) && from.distance(e.pos) <= 10.)
                     .min_by(|a, b| from.distance(a.pos).total_cmp(&from.distance(b.pos)))
@@ -558,6 +574,7 @@ impl World {
         for body in messages {
             for (peer, p) in &mut self.players {
                 if p.known.contains(&id)
+                    && (*peer == id || p.pos.distance(pos) <= 20.)
                     && (*peer != id || native_hits::expect_shoot_ack(p, vec![], &self.clock))
                 {
                     send(p, 13, body.clone());
@@ -789,6 +806,240 @@ impl World {
             }
             self.ability_state.objects.insert(id, object);
         }
+    }
+}
+
+#[cfg(test)]
+mod passive_scenery_tests {
+    use super::*;
+    use crate::world::entity_store::EntityState;
+
+    fn fixture() -> World {
+        let content = crate::world::tests::world().content;
+        let mut cells = vec![
+            crate::content::Cell {
+                ground: 0x61,
+                object: None,
+                config: String::new(),
+                terrain: 0,
+                region: 0,
+            };
+            16 * 16
+        ];
+        for (x, kind) in [0x122, 0x162, 0x181f].into_iter().enumerate() {
+            cells[4 * 16 + 4 + x].object = Some(kind);
+        }
+        let mut world = World::new(
+            content,
+            Arc::new(Map {
+                width: 16,
+                height: 16,
+                cells,
+                spawns: vec![(1.5, 1.5)],
+            }),
+        )
+        .unwrap();
+        world.encounter = true;
+        world
+    }
+
+    #[test]
+    fn passive_scenery_is_individually_mutable_spatial_but_not_simulated() {
+        let mut w = fixture();
+        let authored: Vec<_> = w.entities.keys().copied().collect();
+        let rock = w
+            .spawn_entity(0x107, Pos { x: 12.5, y: 12.5 }, vec![])
+            .unwrap();
+        let active = w
+            .spawn_entity(0x683, Pos { x: 14.5, y: 14.5 }, vec![])
+            .unwrap();
+        assert!(w.actor_ids.contains(&active));
+        let mut passive = authored.clone();
+        for id in authored {
+            let (kind, pos, hp) = {
+                let e = &w.entities[&id];
+                (e.kind, e.pos, e.hp)
+            };
+            let copy = w.spawn_entity(kind, Pos { y: 8.5, ..pos }, vec![]).unwrap();
+            passive.push(copy);
+            assert!(matches!(&w.entities[&id].state, EntityState::Owned(_)));
+            assert!(matches!(&w.entities[&copy].state, EntityState::Owned(_)));
+            assert!(!w.walkable(pos));
+            w.entities.get_mut(&id).unwrap().hp -= 1;
+            assert_eq!(w.entities[&copy].hp, hp);
+            assert_eq!(w.entities[&id].size, w.content.objects[&kind].size);
+        }
+        assert!(w.content.objects[&0x107].static_object);
+        for id in &passive {
+            let e = &w.entities[id];
+            assert!(!w.actor_ids.contains(id));
+            assert!(!w.npc_global_ids.contains(id));
+            assert!(!w.non_population_ids.contains(id));
+            assert!(
+                w.cells
+                    .ids(e.pos.y as usize * 16 + e.pos.x as usize)
+                    .contains(id)
+            );
+        }
+        for now in [50, 100, 150] {
+            w.now = now;
+            let candidates = w.npc_candidates(&[Pos { x: 10., y: 10. }]);
+            assert!(candidates.contains(&active));
+            assert!(passive.iter().all(|id| !candidates.contains(id)));
+            w.npc_step();
+        }
+        assert!(
+            passive
+                .iter()
+                .all(|id| w.entities[id].activated.is_none() && w.entities[id].next_shot == 0)
+        );
+        assert!(w.entities.contains_key(&rock));
+    }
+
+    #[test]
+    fn timed_passive_scenery_expires_and_loses_orphans_without_actor_simulation() {
+        let mut w = fixture();
+        let parent = w
+            .spawn_entity(0x683, Pos { x: 14.5, y: 14.5 }, vec![])
+            .unwrap();
+        let active = w
+            .spawn_entity(0x683, Pos { x: 12.5, y: 12.5 }, vec![])
+            .unwrap();
+        let expiring = w
+            .spawn_entity(0x122, Pos { x: 8.5, y: 8.5 }, vec![])
+            .unwrap();
+        let orphan = w
+            .spawn_entity(0x162, Pos { x: 10.5, y: 8.5 }, vec![])
+            .unwrap();
+        for id in [active, expiring] {
+            w.entities
+                .get_mut(&id)
+                .unwrap()
+                .expires
+                .set(Some(100), id, &mut w.timed_ids);
+        }
+        w.entities
+            .get_mut(&orphan)
+            .unwrap()
+            .parent
+            .set(Some(parent), orphan, &mut w.timed_ids);
+        assert!(w.actor_ids.contains(&active));
+        assert!(
+            [expiring, orphan]
+                .iter()
+                .all(|id| !w.actor_ids.contains(id))
+        );
+        w.now = 99;
+        w.mechanic_expiry();
+        assert!(
+            [active, expiring, orphan]
+                .iter()
+                .all(|id| w.entities.contains_key(id))
+        );
+        w.remove_entity(parent);
+        w.mechanic_expiry();
+        assert!(!w.entities.contains_key(&orphan));
+        assert!(w.entities.contains_key(&expiring));
+        w.now = 100;
+        w.mechanic_expiry();
+        assert!(
+            [active, expiring, orphan]
+                .iter()
+                .all(|id| { !w.entities.contains_key(id) && !w.timed_ids.contains(id) })
+        );
+        assert!(!w.actor_ids.contains(&active));
+        assert!(w.bag_expiry.is_empty());
+    }
+
+    #[test]
+    fn passive_scenery_damage_removal_and_zero_xp_are_once_only() {
+        let mut w = fixture();
+        let p1 = w.enter(crate::world::tests::ch(&w), None).unwrap();
+        let mut second = crate::world::tests::ch(&w);
+        second.id = 2;
+        second.account = 2;
+        let p2 = w.enter(second, None).unwrap();
+        let targets: Vec<_> = w.entities.keys().copied().collect();
+        for (n, id) in targets.into_iter().enumerate() {
+            let e = &w.entities[&id];
+            let (pos, hp) = (e.pos, e.hp);
+            assert_eq!(
+                w.damage_enemy(p1, id, hp - 1, true, &[], Some(0)).unwrap(),
+                hp - 1
+            );
+            assert_eq!(w.entities[&id].hp, 1);
+            assert_eq!(w.entities[&id].damage[&1], hp - 1);
+            assert_eq!(w.damage_enemy(p2, id, 1, true, &[], Some(0)).unwrap(), 1);
+            assert!(!w.entities.contains_key(&id));
+            assert!(w.walkable(pos));
+            assert_eq!(w.damage_enemy(p2, id, hp, true, &[], Some(0)).unwrap(), 0);
+            assert_eq!(w.players[&p2].character.kills, n as u64 + 1);
+            assert_eq!(w.players[&p1].character.lifetime.kills, 0);
+            let lifetime = &w.players[&p2].character.lifetime;
+            assert_eq!(lifetime.kills, n as u64 + 1);
+            assert_eq!(
+                (lifetime.god_kills, lifetime.cube_kills, lifetime.oryx_kills),
+                (0, 0, 0)
+            );
+            assert_eq!(w.players[&p1].experience_queued, 0);
+            assert_eq!(w.players[&p2].experience_queued, 0);
+        }
+        assert!(w.entities.is_empty());
+        assert!(w.actor_ids.is_empty());
+        assert!(w.npc_global_ids.is_empty());
+    }
+
+    #[test]
+    fn passive_scenery_abilities_keep_inclusive_edges_id_ties_and_protection() {
+        let mut w = fixture();
+        for id in w.entities.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(id);
+        }
+        let p = w.enter(crate::world::tests::ch(&w), None).unwrap();
+        let origin = Pos { x: 10.5, y: 10.5 };
+        w.players.get_mut(&p).unwrap().pos = origin;
+        let low = w
+            .spawn_entity(0x181f, Pos { x: 12.5, y: 11.5 }, vec![])
+            .unwrap();
+        let high = w
+            .spawn_entity(0x162, Pos { x: 12.5, y: 9.5 }, vec![])
+            .unwrap();
+        let edge = w
+            .spawn_entity(0x122, Pos { x: 10.5, y: 13.5 }, vec![])
+            .unwrap();
+        let outside = w
+            .spawn_entity(0x122, Pos { x: 7.499, y: 10.5 }, vec![])
+            .unwrap();
+        w.spawn_entity(0x107, Pos { x: 11.5, y: 10.5 }, vec![])
+            .unwrap();
+        assert_eq!(w.ability_enemies(origin, 3.), vec![low, high, edge]);
+        let legacy_first = [low, high]
+            .into_iter()
+            .map(|id| &w.entities[&id])
+            .min_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)))
+            .unwrap()
+            .id;
+        assert_eq!(legacy_first, low);
+        let aim = Pos { x: 15.5, ..origin };
+        w.ability_lightning(p, aim, 10, 1, None, 0).unwrap();
+        assert_eq!((w.entities[&low].hp, w.entities[&high].hp), (990, 100));
+        w.apply_condition(low, crate::condition::STASIS, 1000)
+            .unwrap();
+        w.ability_lightning(p, aim, 10, 2, None, 0).unwrap();
+        assert_eq!(
+            (
+                w.entities[&low].hp,
+                w.entities[&edge].hp,
+                w.entities[&high].hp
+            ),
+            (990, 90, 90)
+        );
+        assert_eq!(w.entities[&outside].hp, 100);
+        assert!(
+            [low, high, edge, outside]
+                .into_iter()
+                .all(|id| !w.actor_ids.contains(&id))
+        );
     }
 }
 
