@@ -3,7 +3,7 @@ use super::*;
 fn report(id: char, account: i32, at: u64) -> Value {
     json!({"id":id.to_string().repeat(24),"schema":3,"account_id":account,
         "created_at_unix_ms":at,"message_untrusted":"Original description",
-        "context":{"player_id":9},"diagnostics":{"capture":"original"},
+        "context":{"player_id":9},"diagnostics":{"capture":"original","work_wall_sum_ms":0.036449999999999996},
         "delivery":{"status":"pending"}})
 }
 fn receipt(target: &str, id: &str, through: Option<usize>) -> Receipt {
