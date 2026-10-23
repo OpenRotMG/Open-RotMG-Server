@@ -353,7 +353,7 @@ export async function runCase(scenario, options) {
     if(guardian)try{
       const closed=await Promise.race([guardian.closed.then(value=>({value})),delay(5000,undefined,{ref:false}).then(()=>null)]);
       if(!closed)cleanupError(Error('Cleanup guardian exceeded original 5000ms wait: '+guardian.child.pid));
-      const value=closed?closed.value:await stopChild(guardian,0);report.children.push({name:'guardian',...value});assert.equal(value.code,0,'Cleanup guardian failed');
+      const value=closed?closed.value:await stopChild(guardian,0);report.children.push({name:'guardian',...value});await guardian.started;assert.equal(value.code,0,'Cleanup guardian failed');
     }catch(error){report.children.push({name:'guardian',pid:guardian.child.pid,identity:guardian.identity,error:String(error)});cleanupError(error);}
     if(registryState&&report.cleanupErrors.length)try{registryState.done=false;register();}catch(error){cleanupError(error);}
     for(const f of files)try{await f.close();}catch(error){cleanupError(error);}

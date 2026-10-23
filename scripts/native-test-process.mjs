@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {readFileSync,accessSync,writeFileSync,renameSync} from 'node:fs';
+import {readFileSync,openSync,closeSync,accessSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -14,17 +14,27 @@ function vanished(pid,error) {
 }
 function readIdentity(pid,group=false) {
   if(!Number.isSafeInteger(pid)||pid<=0)throw Error('Invalid owned PID: '+pid);
-  const path='/proc/'+pid;let status,stat;
-  try{status=readFileSync(path+'/status','utf8');}catch(error){return vanished(pid,error);}
-  const credentials=/^Uid:[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]*$/m.exec(status),uid=process.getuid();
-  if(!credentials||!credentials.slice(1).every(value=>Number.isSafeInteger(Number(value))&&Number(value)===uid))throw Error('Owned PID kernel UID mismatch or invalid credentials: '+pid+' expected='+uid+' observed='+JSON.stringify(credentials?.slice(1)));
-  if(/^State:[ \t]+[ZXx](?:[ \t]|$)/m.test(status))return null;
-  try{stat=readFileSync(path+'/stat','utf8');}catch(error){return vanished(pid,error);}
-  const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/);
-  if(!stat.startsWith(pid+' (')||!/^\d+$/.test(fields[19]))throw Error('Invalid owned PID stat/start metadata: '+pid);
-  if(['Z','X','x'].includes(fields[0]))return null;
-  if(group&&(fields[2]!==String(pid)||fields[3]!==String(pid)))throw Error('Owned PID process group/session mismatch: '+pid);
-  return {pid,uid,start:fields[19]};
+  let fd;
+  try{fd=openSync('/proc/'+pid,'r');}catch(error){return vanished(pid,error);}
+  let primary;
+  try{
+    const path='/proc/self/fd/'+fd;let status,stat;
+    try{status=readFileSync(path+'/status','utf8');}catch(error){return vanished(pid,error);}
+    const credentials=/^Uid:[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]*$/m.exec(status),uid=process.getuid();
+    if(!credentials||!credentials.slice(1).every(value=>Number.isSafeInteger(Number(value))&&Number(value)===uid))throw Error('Owned PID kernel UID mismatch or invalid credentials: '+pid+' expected='+uid+' observed='+JSON.stringify(credentials?.slice(1)));
+    if(/^State:[ \t]+[ZXx](?:[ \t]|$)/m.test(status))return null;
+    try{stat=readFileSync(path+'/stat','utf8');}catch(error){return vanished(pid,error);}
+    const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/);
+    if(!stat.startsWith(pid+' (')||!/^\d+$/.test(fields[19]))throw Error('Invalid owned PID stat/start metadata: '+pid);
+    if(['Z','X','x'].includes(fields[0]))return null;
+    if(group&&(fields[2]!==String(pid)||fields[3]!==String(pid)))throw Error('Owned PID process group/session mismatch: '+pid);
+    return {pid,uid,start:fields[19]};
+  }catch(error){primary=error;throw error;}finally{
+    try{closeSync(fd);}catch(error){
+      if(primary)throw new AggregateError([primary,error],'Owned proc descriptor close failed after metadata failure: '+pid,{cause:primary});
+      throw error;
+    }
+  }
 }
 export function identity(pid) {return readIdentity(pid);}
 function checkedProcess(row,group=false) {
@@ -49,14 +59,15 @@ export function startChild(command,args,options,signal) {
   row.closed=new Promise(resolve=>child.once('close',(code,killed)=>{row.done=true;resolve({pid:child.pid,code,signal:killed});}));
   // Promise continuation lets the caller retain the creation before metadata can fail.
   row.started=new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);}).then(()=>{
+    if(row.done||child.exitCode!==null||child.signalCode!==null)throw Error('Owned child exited before bootstrap identity: '+child.pid);
     row.identity=identity(child.pid);
     if(!row.identity)throw Error('Owned child has no live bootstrap identity: '+child.pid);
   });row.started.catch(()=>{});
   return row;
 }
 export async function stopChild(row,grace=3000) {
-  if(row.done)return await row.closed;
   await row.started;
+  if(row.done)return await row.closed;
   for(const [name,ms]of [['SIGINT',grace],['SIGTERM',2000],['SIGKILL',5000]]){
     if(row.done)return await row.closed;
     signalProcess(row.identity,name,true);

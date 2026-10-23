@@ -13,7 +13,7 @@ import {join} from 'node:path';
 async function publication(out,report,io={}) {
   const source=await readFile(new URL('./native-test.mjs',import.meta.url),'utf8');
   const save=source.slice(source.indexOf('  const elapsed='),source.indexOf('  const register='));
-  const cancellation=source.slice(source.indexOf('  const fail='),source.indexOf('  const log='));
+  const cancellation=source.slice(source.indexOf('  const cleanupCauses='),source.indexOf('  const log='));
   const failure=source.match(/    primary=error;report\.status='failed';[\s\S]*?    await save\(\);/)?.[0];
   const finalSave=source.match(/    try\{await save\(\);\}finally\{process\.removeListener[^\n]+/)?.[0];
   const tail=source.match(/      participants\.push\(\{actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env\.DISPLAY\}\);[\s\S]*?return participants\.at\(-1\);/)?.[0];
