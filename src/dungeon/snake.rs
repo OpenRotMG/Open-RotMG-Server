@@ -171,6 +171,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     map.cells[(sy * width + sx) as usize].region = 1;
     map.cells[(sy * width + sx) as usize].object = Some(0x703);
     let (bx, by) = centers[6];
+    // Boss cover is permanent, unlike tunnel blocks: https://bluenosersguide.weebly.com/snake-pit.html
     for (dx, dy) in [(-6, 0), (6, 0), (0, -6), (0, 6)] {
         for along in -2..=2 {
             for thick in 0..2 {
@@ -180,7 +181,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                     (bx + dx + thick * dx.signum(), by + along)
                 };
                 map.cells[(y * width + x) as usize].ground = 0x16;
-                map.cells[(y * width + x) as usize].object = Some(0x172);
+                map.cells[(y * width + x) as usize].object = Some(0x170);
             }
         }
     }
@@ -202,4 +203,41 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         "generated branching Snake Pit with diggable tunnels"
     );
     Ok(map)
+}
+
+#[cfg(test)]
+#[test]
+fn generated_boss_cover_is_permanent_but_tunnels_remain_diggable() {
+    let content = Content::load(std::path::Path::new("data")).unwrap();
+    for seed in 0..64 {
+        let map = generate(&content, seed).unwrap();
+        let boss = map
+            .cells
+            .iter()
+            .position(|c| c.object == Some(BOSS))
+            .unwrap();
+        let (bx, by) = (boss as i32 % map.width, boss as i32 / map.width);
+        for (dx, dy) in [(-6, 0), (6, 0), (0, -6), (0, 6)] {
+            for along in -2..=2 {
+                for thick in 0..2 {
+                    let (x, y) = if dx == 0 {
+                        (bx + along, by + dy + thick * dy.signum())
+                    } else {
+                        (bx + dx + thick * dx.signum(), by + along)
+                    };
+                    let kind = map.cells[(y * map.width + x) as usize].object.unwrap();
+                    let wall = content.get(kind).unwrap();
+                    assert!(
+                        wall.blocks && wall.static_object && !wall.destructible,
+                        "seed {seed}: Stheno cover ({x}, {y}) is damageable {kind:#x} with {} HP",
+                        wall.hp
+                    );
+                }
+            }
+        }
+        assert!(
+            map.cells.iter().any(|c| c.object == Some(0x172)),
+            "seed {seed}: no diggable tunnel walls"
+        );
+    }
 }

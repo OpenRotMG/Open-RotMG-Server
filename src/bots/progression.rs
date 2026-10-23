@@ -77,68 +77,32 @@ pub(super) fn pickup(
     v: &PlayerView,
     content: &Content,
     bag: &crate::world::view::VisibleObject,
+    future: Option<u16>,
 ) -> Result<Option<Action>> {
-    let empty = v
-        .character
-        .items
-        .iter()
-        .enumerate()
-        .skip(4)
-        .find(|(_, kind)| **kind == -1)
-        .map(|(slot, _)| slot);
-    let spare = v
-        .character
-        .items
-        .iter()
-        .enumerate()
-        .skip(4)
-        .filter(|(_, kind)| **kind >= 0)
-        .filter_map(|(slot, kind)| {
-            let item = &content.objects[&(*kind as u16)];
-            (!item.unsupported_equipment && item.slot_type != 10)
-                .then_some(item.tier)
-                .flatten()
-                .map(|tier| (tier, slot))
-        })
-        .min()
-        .map(|(_, slot)| slot);
-    let mut selected = None;
-    for (slot, kind) in bag
-        .contents
-        .iter()
-        .enumerate()
-        .filter(|(_, kind)| **kind >= 0)
-    {
-        if !useful(content, v, *kind)? {
+    let mut best = None;
+    for (slot, kind) in bag.contents.iter().enumerate().filter(|(_, k)| **k >= 0) {
+        let value = priority(v, content, *kind, false, future)?;
+        if value == 0 {
             continue;
         }
-        let needed = potion_index(content, *kind)?.is_some_and(|index| {
-            v.character.base_stats[index] < content.classes[&v.character.class].caps[index]
-        }) || (content.objects[&(*kind as u16)].activate == "Magic"
-            && v.character.items[1] >= 0
-            && v.character.mp / 2 < content.get(v.character.items[1] as u16)?.mana_cost);
-        let destination = match empty {
-            Some(slot) => Some(slot),
-            None if needed => spare,
-            None => None,
-        };
-        if let Some(to) = destination {
-            if selected.is_none() || needed {
-                selected = Some(Action::Swap {
-                    from: Slot {
-                        object: bag.id,
-                        slot,
-                        kind: *kind,
+        for to in 4..v.character.items.len() {
+            let held = priority(v, content, v.character.items[to], true, future)?;
+            if value > held && best.as_ref().is_none_or(|(gain, _)| value - held > *gain) {
+                best = Some((
+                    value - held,
+                    Action::Swap {
+                        from: Slot {
+                            object: bag.id,
+                            slot,
+                            kind: *kind,
+                        },
+                        to: own(v, to),
                     },
-                    to: own(v, to),
-                });
-            }
-            if needed {
-                break;
+                ));
             }
         }
     }
-    Ok(selected)
+    Ok(best.map(|(_, action)| action))
 }
 
 pub(super) fn ready(v: &PlayerView, content: &Content, portal: u16) -> bool {
@@ -152,13 +116,15 @@ pub(super) fn ready(v: &PlayerView, content: &Content, portal: u16) -> bool {
                     .tier
                     .is_some_and(|tier| tier >= 4)
         }
+        0x890 | 0xd7b | 0x700 => events::ready(v, content),
         _ => false,
     }
 }
 
 pub(super) fn vulnerable(enemy: &crate::world::view::VisibleObject) -> bool {
     enemy.condition_mask.is_none_or(|mask| {
-        mask & (crate::condition::bit(crate::condition::INVULNERABLE)
+        mask & (crate::condition::bit(crate::condition::INVINCIBLE)
+            | crate::condition::bit(crate::condition::INVULNERABLE)
             | crate::condition::bit(crate::condition::STASIS))
             == 0
     })
@@ -175,8 +141,17 @@ pub(super) fn can_fight(
         .values()
         .map(|p| p.max)
         .fold(0, i32::max);
-    damage - v.character.stats[3] <= (v.character.stats[0] as f32 * 0.4) as i32
-        && enemy.max_hp <= v.character.stats[0] * 50
+    let shared_ready = events::shared(&v.map.name) && events::equipped(v, content);
+    damage - v.character.stats[3]
+        <= (v.character.stats[0] as f32 * if shared_ready { 0.65 } else { 0.4 }) as i32
+        && (enemy.max_hp <= v.character.stats[0] * 50 || shared_ready)
+        && (!events::shared(&v.map.name)
+            || !matches!(
+                enemy.kind,
+                crate::dungeon::lab::HEXXER
+                    | crate::dungeon::lab::DEHEXXER
+                    | crate::dungeon::lab::BUBBLE
+            ))
 }
 
 pub(super) fn stash(v: &PlayerView, content: &Content) -> Result<bool> {
@@ -188,51 +163,101 @@ pub(super) fn stash(v: &PlayerView, content: &Content) -> Result<bool> {
     Ok(false)
 }
 
-pub(super) fn bank(v: &PlayerView, content: &Content, grid: &Grid) -> Result<Option<Decision>> {
+pub(super) fn bank(
+    v: &PlayerView,
+    content: &Content,
+    grid: &Grid,
+    future: Option<u16>,
+) -> Result<Option<Decision>> {
     let Some(chest) = v.objects.iter().find(|o| o.kind == 0x504) else {
         return Ok(None);
     };
-    for (from, kind) in v
-        .character
-        .items
-        .iter()
-        .enumerate()
-        .skip(4)
-        .filter(|(_, k)| **k >= 0)
-    {
-        if spare(content, *kind)?
-            && let Some(to) = chest.contents.iter().position(|k| *k == -1)
+    let mut transfer = None;
+    let mut reason = "private_stock_satisfied_or_unavailable";
+    // Withdraw only for a current use; saved future/exchange goods must not cycle through the backpack.
+    for (slot, kind) in chest.contents.iter().enumerate().filter(|(_, k)| **k >= 0) {
+        let value = priority(v, content, *kind, false, future)?;
+        if value < 100 {
+            continue;
+        }
+        for to in 4..v.character.items.len() {
+            if value > priority(v, content, v.character.items[to], true, future)? {
+                transfer = Some(Action::Swap {
+                    from: Slot {
+                        object: chest.id,
+                        slot,
+                        kind: *kind,
+                    },
+                    to: own(v, to),
+                });
+                reason = "withdraw_for_current_use";
+                break;
+            }
+        }
+        if transfer.is_some() {
+            break;
+        }
+    }
+    if transfer.is_none() {
+        for (from, kind) in v
+            .character
+            .items
+            .iter()
+            .enumerate()
+            .skip(4)
+            .filter(|(_, k)| **k >= 0)
         {
-            return Ok(Some(Decision {
-                goal: Goal::Bank(chest.id),
-                movement: if v.position.distance(chest.position) < 1.4 {
-                    None
-                } else {
-                    Some(
-                        grid.towards(v.position, chest.position)
-                            .context("observed Vault chest has no known route")?,
-                    )
-                },
-                item: (v.position.distance(chest.position) < 1.4).then(|| Action::Swap {
+            let value = priority(v, content, *kind, true, future)?;
+            if value >= 100 || !spare(content, *kind)? {
+                continue;
+            }
+            let to = chest.contents.iter().position(|k| *k == -1);
+            if let Some(to) = to {
+                transfer = Some(Action::Swap {
                     from: own(v, from),
                     to: Slot {
                         object: chest.id,
                         slot: to,
                         kind: -1,
                     },
-                }),
-                aim: None,
-                journey: None,
-                chat: None,
-            }));
+                });
+                reason = "store_future_or_exchange_spare";
+                break;
+            }
         }
     }
-    if stash(v, content)? {
+    if let Some(action) = transfer {
+        let near = v.position.distance(chest.position) < 1.4;
         tracing::info!(
-            player = v.session.player,
-            "autonomous Vault full; retaining carried items and deferring banking"
+            account = v.session.account,
+            character = v.session.character,
+            revision = v.character.inventory_revision,
+            ?action,
+            reason,
+            "autonomous private stock choice"
         );
+        return Ok(Some(Decision {
+            goal: Goal::Bank(chest.id),
+            movement: if near {
+                None
+            } else {
+                Some(
+                    grid.towards(v.position, chest.position)
+                        .context("observed Vault chest has no known route")?,
+                )
+            },
+            item: near.then_some(action),
+            aim: None,
+            journey: None,
+            chat: None,
+        }));
     }
+    tracing::info!(
+        account = v.session.account,
+        revision = v.character.inventory_revision,
+        reason,
+        "autonomous private organization finished; continuing outing with retained holdings"
+    );
     Ok(Some(Decision {
         goal: Goal::Wait,
         movement: None,
@@ -241,6 +266,112 @@ pub(super) fn bank(v: &PlayerView, content: &Content, grid: &Grid) -> Result<Opt
         journey: Some(Journey::Nexus),
         chat: None,
     }))
+}
+
+pub(super) fn priority(
+    v: &PlayerView,
+    content: &Content,
+    kind: i32,
+    held: bool,
+    future: Option<u16>,
+) -> Result<i32> {
+    if kind < 0 {
+        return Ok(-1);
+    }
+    let item = content.get(kind as u16)?;
+    if matches!(item.activate.as_str(), "Heal" | "Magic") {
+        let count = v
+            .character
+            .items
+            .iter()
+            .skip(4)
+            .filter(|k| **k == kind)
+            .count();
+        let needed = item.activate == "Heal" || v.character.items[1] >= 0;
+        return Ok(
+            if needed && ((held && item.activate == "Heal") || count < 2 + usize::from(held)) {
+                120
+            } else {
+                0
+            },
+        );
+    }
+    if let Some(index) = potion_index(content, kind)? {
+        return Ok(
+            if v.character.base_stats[index] < content.classes[&v.character.class].caps[index] {
+                110
+            } else {
+                30
+            },
+        );
+    }
+    if item.unsupported_equipment || (!held && v.character.items.contains(&kind)) {
+        return Ok(0);
+    }
+    if let Some(slot) = content
+        .get(v.character.class)?
+        .slots
+        .iter()
+        .take(4)
+        .position(|s| *s == item.slot_type)
+        && quality(v, content, kind)? > quality(v, content, v.character.items[slot])?
+    {
+        return Ok(140);
+    }
+    if let Some(class) = future
+        && item.tier.is_some_and(|t| t >= 3)
+        && content
+            .get(class)?
+            .slots
+            .iter()
+            .take(4)
+            .any(|s| *s == item.slot_type)
+    {
+        return Ok(60 + i32::from(item.tier.unwrap()));
+    }
+    Ok(match item.tier {
+        Some(tier) if spare(content, kind)? && (held || tier >= 6) => {
+            i32::from(tier) + if tier >= 6 { 30 } else { 0 }
+        }
+        _ => 0,
+    })
+}
+
+pub(super) fn quality(v: &PlayerView, content: &Content, kind: i32) -> Result<f32> {
+    if kind < 0 {
+        return Ok(-1.);
+    }
+    let item = content.get(kind as u16)?;
+    let damage = item
+        .projectiles
+        .get(&0)
+        .map_or(0., |p| (p.min + p.max) as f32 * 0.5 * item.rate);
+    let bonuses: f32 = item
+        .bonuses
+        .iter()
+        .map(|(stat, n)| {
+            *n as f32
+                * match stat {
+                    0 => {
+                        if v.character.hp * 2 < v.character.stats[0] {
+                            3.
+                        } else {
+                            1.
+                        }
+                    }
+                    3 => {
+                        if v.character.mp * 2 < v.character.stats[1] {
+                            3.
+                        } else {
+                            0.5
+                        }
+                    }
+                    21 => 5.,
+                    _ => 1.,
+                }
+        })
+        .sum();
+    Ok(damage + bonuses + item.heal as f32 * 0.1)
 }
 
 pub(super) fn clear_cover(
@@ -278,3 +409,6 @@ pub(super) fn clear_cover(
         chat: None,
     })
 }
+
+#[cfg(test)]
+mod tests;

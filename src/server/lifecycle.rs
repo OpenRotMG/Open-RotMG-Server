@@ -467,6 +467,8 @@ impl App {
             "account already has an active session"
         );
         let generation = Arc::new(());
+        self.admission_started
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         owners.insert(
             id,
             Claim {
