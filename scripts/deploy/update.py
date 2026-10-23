@@ -265,7 +265,7 @@ def verify_migration(before, after):
         require(sorted(after.get('vaults', []), key=lambda row: row['account'])
                 == sorted(expected, key=lambda row: row['account']), 'Vault migration changed stored items or ownership')
         before = {**before, 'vaults': sorted(expected, key=lambda row: row['account'])}
-    if 'deaths' in before and 'legacy_claims' not in before:
+    if 'deaths' in before and 'legacy_claims' not in before and ('legacy_claims' in after or 'level_credits' in after):
         require(after.get('legacy_claims') == [] and after.get('level_credits') == [],
                 'Fame migration manufactured claims or credits')
         require(len(before.get('characters', [])) == len(after.get('characters', [])),

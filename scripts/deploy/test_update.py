@@ -86,6 +86,10 @@ class UpdateTest(unittest.TestCase):
         before = {'accounts': [{'id': 1}], 'characters': [{'id': 3, 'account': 1, 'stats': raw}],
                   'deaths': [{'character': 3, 'snapshot': raw, 'equipment_fame': 1, 'died_at': 1700000000}],
                   'account_fame': [{'account': 1, 'balance': 20, 'earned': 20}]}
+        update.verify_migration(before, before)
+        for partial in [{**before, 'legacy_claims': []}, {**before, 'level_credits': []}]:
+            with self.subTest(partial=list(partial)), self.assertRaises(RuntimeError):
+                update.verify_migration(before, partial)
         after = deepcopy(before)
         after['characters'][0]['stats'] = json.dumps(dict(payload, lifetime=lifetime))
         after['deaths'][0]['receipt'] = json.dumps({'version': 1, 'policy': 'legacy_paid', 'base': 19,
