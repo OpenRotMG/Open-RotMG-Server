@@ -105,12 +105,14 @@ async fn serve(args: Vec<String>) -> Result<()> {
             content.clone(),
             config.max_players,
             config.realm_seed,
+            config.realm_count,
         )?,
         None => world::Directory::with_seed(
             &config.data,
             content.clone(),
             config.max_players,
             config.realm_seed,
+            config.realm_count,
         )?,
     };
     if testing.is_some() {
@@ -172,6 +174,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
             Err(error) => return Err(error.into()),
         },
         owners: Arc::default(),
+        admission_started: Arc::default(),
         admission: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),

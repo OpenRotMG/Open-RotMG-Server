@@ -30,7 +30,7 @@ fn activate(w: &mut World, id: i32) {
 #[test]
 fn generated_realm_earns_one_reserved_sphinx_and_credits_its_real_death() {
     let mut directory = crate::world::tests::directory();
-    let realm = directory.endgame.active;
+    let realm = -3;
     let world = directory.worlds.get_mut(&realm).unwrap();
     let sphinx: Vec<_> = world
         .event_reserves
@@ -114,6 +114,16 @@ fn generated_realm_earns_one_reserved_sphinx_and_credits_its_real_death() {
             .any(|event| event.root.kind == d::SPHINX)
     );
     world.players.get_mut(&player).unwrap().pos = world.entities[&id].pos;
+    assert_eq!(
+        world
+            .damage_enemy(player, id, 1000000, true, &[], None)
+            .unwrap(),
+        0
+    );
+    assert_eq!(world.landmark_members(id, 0xd55).len(), 4);
+    assert!(world.portal_requests.is_empty());
+    world.now += 500;
+    world.sphinx_mechanics(id, None).unwrap();
     world
         .damage_enemy(player, id, 1000000, true, &[], None)
         .unwrap();
@@ -154,7 +164,7 @@ fn generated_realm_earns_one_reserved_sphinx_and_credits_its_real_death() {
 #[test]
 fn prepared_sphinx_death_opens_one_shared_portal_and_tomb_instances_are_independent() {
     let mut directory = crate::world::tests::directory();
-    let realm = directory.endgame.active;
+    let realm = -3;
     let world = directory.worlds.get_mut(&realm).unwrap();
     // Realm progression owns natural Sphinx activation; this fixture tests only Tomb admission.
     let (x, y) = world.map.spawns[0];

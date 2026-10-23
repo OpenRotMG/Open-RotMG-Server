@@ -1,5 +1,5 @@
 // Behavior reference (GPL-3.0; data/REALM-SRC-LICENSE): https://github.com/moistosaurus/realm-src/tree/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db
-// EntAncient/Lich/GhostKing/Phoenix contracts, credited upstream to NR-Core and Skilly; Rust reconstruction, not official AI.
+// EntAncient/Lich/GhostKing/Phoenix/Oasis contracts, credited upstream to NR-Core and Skilly; Rust reconstruction, not official AI.
 // Stable encounter identity survives transformations; summon parenthood would delete surviving followers.
 use super::*;
 use crate::{
@@ -14,17 +14,22 @@ impl World {
             quest::validate(&self.content, *kind)?;
             crate::loot::validate(&self.content, *kind)?;
         }
+        for kind in 0x678..=0x67c {
+            crate::encounter::validate(&self.content, kind)?;
+            crate::loot::validate(&self.content, kind)?;
+        }
         for (kind, terrains) in [
             (0x91f, &[7, 6][..]),
             (0x91b, &[6, 7][..]),
             (0x928, &[4, 3][..]),
             (0x675, &[5, 2][..]),
+            (0x678, &[8, 5][..]),
         ] {
             let pos = self.place_named_setpiece(kind, terrains)?;
             let id = self.spawn_entity(kind, pos, vec![])?;
             let e = self.entities.get_mut(&id).unwrap();
             e.quest = Some(id);
-            e.stage = Some(0);
+            e.stage = (kind != 0x678).then_some(0);
             e.size = self.content.objects[&kind].size;
             tracing::info!(
                 entity = id,
@@ -148,6 +153,7 @@ impl World {
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + self.named_births.len()
+                + self.abyss_pending_count()
                 + count
                 <= 256,
             "shared summon budget exhausted"

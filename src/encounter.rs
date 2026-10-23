@@ -80,6 +80,9 @@ pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
 pub fn profile(kind: u16) -> Option<Profile> {
+    if crate::dungeon::lab::ROSTER.contains(&kind) {
+        return Some(crate::dungeon::lab::profile(kind));
+    }
     if matches!(
         kind,
         crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
@@ -363,7 +366,8 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
         return (Motion::Stationary, 0.);
     }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
-        return crate::dungeon::abyss::movement(kind, elapsed);
+        let p = crate::dungeon::abyss::profile(kind);
+        return (p.motion, p.speed);
     }
     let p = profile(kind).expect("validated encounter motion");
     match kind {
@@ -422,9 +426,6 @@ fn ring(index: u8, count: usize, offset: f32) -> Vec<(u8, f32)> {
 }
 
 pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8, f32)> {
-    if crate::dungeon::abyss::ROSTER.contains(&kind) {
-        return crate::dungeon::abyss::attacks(kind, heading, elapsed);
-    }
     if let Some(schedule) = attacks::schedule(kind, hp, elapsed) {
         return schedule.snapshot(heading);
     }
@@ -516,6 +517,9 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
     }
 }
 pub fn validate(content: &Content, kind: u16) -> Result<()> {
+    if crate::dungeon::lab::ROSTER.contains(&kind) {
+        return crate::dungeon::lab::validate(content, kind);
+    }
     if matches!(
         kind,
         crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE

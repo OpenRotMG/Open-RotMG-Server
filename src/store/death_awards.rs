@@ -11,11 +11,15 @@ pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
         q.query_map([], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
+    ensure!(
+        version != 16 || !columns.iter().any(|column| column == "receipt"),
+        "private Fame schema16 is not canonical community schema16; preserve database and request an explicit migration"
+    );
     let mut expected = vec!["character", "snapshot", "killed_by", "died_at"];
     if version >= 14 {
         expected.push("equipment_fame");
     }
-    if version >= 16 {
+    if version >= 17 {
         expected.push("receipt");
     }
     ensure!(
@@ -52,13 +56,13 @@ pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
                 r.get(0)
             })
             .optional()?;
-        if version >= 16 {
+        if version >= 17 {
             ensure!(
                 sql.as_deref() == Some(definition),
                 "unsupported canonical death fame metadata: {name}"
             );
         } else if name != "deaths" {
-            ensure!(sql.is_none(), "unexpected {name} before schema 16");
+            ensure!(sql.is_none(), "unexpected {name} before schema 17");
         }
     }
     Ok(())
@@ -68,7 +72,7 @@ pub(super) fn migrate(db: &Connection, version: i32, legacy_base: [i32; 8]) -> R
     if version < 14 {
         db.execute_batch("ALTER TABLE deaths ADD COLUMN equipment_fame INTEGER NOT NULL DEFAULT 0 CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647)")?;
     }
-    if version < 16 {
+    if version < 17 {
         let records = {
             let mut q=db.prepare("SELECT character,snapshot,killed_by,died_at,equipment_fame FROM deaths ORDER BY character")?;
             q.query_map([], |r| {
@@ -96,7 +100,7 @@ pub(super) fn migrate(db: &Connection, version: i32, legacy_base: [i32; 8]) -> R
         db.execute_batch(CREDITS_SQL)?;
         db.execute_batch(CREDITS_INDEX_SQL)?;
     }
-    check_schema(db, 16)?;
+    check_schema(db, 17)?;
     Ok(())
 }
 

@@ -237,7 +237,7 @@ fn jungle_entrance_is_earned_from_a_real_realm_coil_and_eggs_hatch() {
     assert!((1..=2).contains(&w.actors().filter(|e| e.kind == SNAKE).count()));
     let mut d = tests::directory();
     assert!(d.portals.is_empty());
-    let realm = d.endgame.active;
+    let realm = -3;
     let w = d.worlds.get_mut(&realm).unwrap();
     let coils: Vec<_> = w
         .actors()

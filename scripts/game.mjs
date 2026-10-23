@@ -16,6 +16,7 @@ Spawn: {op:"spawn",spec:{guid,class,level,seed,equipment:[weapon,ability,armor,r
 Direct act: {op:"act",actor,action:{command:...},duration_ms,pauseAfter:true} uses ordinary server actions. run {actor,goal,max_game_ms,pauseAfter:true} delegates only advertised goals to the actual gameplay bot; unsupported classes/goals fail.
 Native CONFIG also requires browserTools:"/absolute/managed/direct-cdp.mjs" and native:[{port,target,actor}] for EVERY connected native actor. Native act uses input:{keys:["d"],duration_ms:600,mouse:{x:450,y:300}}; mouse is optional left firing in the unclipped 800x600 client. Keys and durations are bounded. Native inventory drag uses input:{keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}}. expect:{world,items:{slot:item},inventory_revision} asserts outcomes; require:{world,inventory_revision} checks starting state. No desktop activation.
 pauseAfter defaults to true: the whole isolated session does not progress while you inspect and think. Native pause requires Ruffle suspension, pause-adjusted page clocks and server pause; simulation-only pause is not native acceptance. Initialize while Ruffle is playing; an earlier untracked pause requires normal reconnection of the same living character. Native operations cannot return unpaused: capture during a bounded action. A lost controller's 1500ms lease stops the prepared simulation and closes native connections; expiry makes that session terminal.
+Starting context only: prepare_realm_capacity {limit} lowers only the active Realm once, before any enrollment/ownership claims, with the prepared clock paused and 1 <= limit < global capacity. Normal portal publication and guarded admission remain authoritative; capabilities returns the prepared receipt. Other worlds/global capacity are unchanged.
 Explicit paused mutations: world {template}; cheat {actor,change:{kind:"stats",values}|{kind:"item",slot,item}|{kind:"teleport",position}}. These are recorded cheats, never earned gameplay.
 A reached time window is not a dungeon clear. Inspect actual effects and goal_reached. cancel {request} addresses a running server request by stable id. Compact receipts point to bounded evidence in STATE/testing; preserve failed receipts and dead characters.
 `;
@@ -218,6 +219,8 @@ async function resumeAll() {
   await startLease();mayProgress=true;
   await api({op:'resume'});
   await eachClient(clients,c=>c.clock(false));
+  // Focus can autoresume Ruffle; hidden members need it only after cohort clocks run.
+  await eachClient(clients,c=>c.call('Emulation.setFocusEmulationEnabled',{enabled:true}));
   const after=await states(true,undefined,before);
   await bind(after);
   await eachClient(clients,c=>c.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))'));
@@ -260,7 +263,7 @@ async function nativeAct(value) {
   if(value.require){const current=await api({op:'observe',actor:value.actor});if(current.world!==value.require.world||value.require.inventory_revision!==undefined&&current.character.inventory_revision!==value.require.inventory_revision)throw Error('Native action precondition changed during resume');}
   let primary;const cleanup=[],stepEvidence=[];
   try{
-   await eachClient(clients,async client=>{await client.call('Emulation.setFocusEmulationEnabled',{enabled:true});await client.evaluate('document.querySelector("ruffle-player").focus({preventScroll:true})');});
+   await eachClient(clients,client=>client.evaluate('document.querySelector("ruffle-player").focus({preventScroll:true})'));
    for(const group of groups){const prepared=await Promise.allSettled(group.map(async({client,input})=>{
     const current=await api({op:'observe',actor:client.actor});
     if(current.controller!=='native'||!current.lifecycle.alive)throw Error('Native sequence requires living configured participants');

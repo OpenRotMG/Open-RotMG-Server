@@ -34,7 +34,7 @@ impl TransferFixture {
             &app,
             vec![account],
             "phase4_autonomous_fixture",
-            move |app| async move { enter(&app, profile, character, world, None, None).await },
+            move |app| async move { enter(&app, profile, character, world, None).await },
         )
         .await
         .unwrap();
@@ -240,7 +240,7 @@ async fn all_death_fame_phase4_autonomous_committed_death_not_grant_fallback() {
                     .directory(move |d| Ok(d.player_view(new.0)?.map.name.clone()))
                     .await
                     .unwrap(),
-                "Realm"
+                "Nexus"
             );
             f.close(Some(new.0)).await;
         }

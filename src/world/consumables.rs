@@ -230,7 +230,8 @@ impl World {
                             p.character.mp = (p.character.mp + amount)
                                 .min(p.effective(&self.content, self.now)?[1]);
                             let restored = p.character.mp - before;
-                            self.consumable_restored(target, restored, 0xff9000ff);
+                            // Match requested cyan without changing shared notification styling: https://github.com/OpenRotMG/Open-RotMG-Server/issues/322
+                            self.consumable_restored(target, restored, 0xff00ffff);
                         }
                     }
                     if let Some(range) = range {
@@ -246,14 +247,14 @@ impl World {
                     if check.is_none_or(|c| p.conditions(self.now) & crate::condition::bit(c) != 0)
                     {
                         p.statuses.remove(&effect);
+                        p.lab_conditions &= !crate::condition::bit(effect);
                     }
                 }
                 ConsumableEffect::Cleanse => {
-                    self.players
-                        .get_mut(&player)
-                        .unwrap()
-                        .statuses
+                    let p = self.players.get_mut(&player).unwrap();
+                    p.statuses
                         .retain(|effect, _| !matches!(effect, 2..=11 | 14 | 16 | 27 | 28));
+                    p.lab_conditions &= !(crate::condition::bit(crate::condition::HEXED) | STUNNED);
                     self.consumable_feedback(player, None, Some(1.));
                 }
                 ConsumableEffect::Boost { .. } => unreachable!(),
@@ -272,5 +273,73 @@ impl World {
             );
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::tests::{ch, world};
+
+    #[test]
+    fn restored_resource_text_has_the_actual_gain_and_resource_color() {
+        for (mana, initial, quiet, gain) in [
+            (true, 0, false, 100),
+            (true, 75, false, 25),
+            (true, 100, false, 0),
+            (true, 0, true, 0),
+            (false, 75, false, 25),
+        ] {
+            let mut w = world();
+            let mut c = ch(&w);
+            c.items = vec![-1; 12];
+            let (packets, mut received) = mpsc::channel(4096);
+            let (lost, _loss) = watch::channel(false);
+            let id = w.enter(c, Some(Output { packets, lost })).unwrap();
+            let p = w.players.get_mut(&id).unwrap();
+            p.pending = false;
+            p.known.insert(id);
+            if mana {
+                p.character.mp = initial;
+            } else {
+                p.character.hp = initial;
+            }
+            if quiet {
+                w.apply_condition(id, crate::condition::QUIET, 1000)
+                    .unwrap();
+            }
+            while received.try_recv().is_ok() {}
+            let effect = if mana {
+                ConsumableEffect::Mana {
+                    amount: 100,
+                    range: None,
+                }
+            } else {
+                ConsumableEffect::Heal {
+                    amount: 100,
+                    range: None,
+                }
+            };
+            w.finish_consumable(id, (id, 1), vec![effect]).unwrap();
+            let p = &w.players[&id];
+            assert_eq!(
+                if mana { p.character.mp } else { p.character.hp },
+                initial + gain
+            );
+            let notifications: Vec<_> = std::iter::from_fn(|| received.try_recv().ok())
+                .filter(|packet| packet.id == wire::NOTIFICATION)
+                .collect();
+            assert_eq!(notifications.len(), usize::from(gain > 0));
+            if gain > 0 {
+                let mut reader = wire::Reader::new(&notifications[0].body);
+                assert_eq!(reader.i32().unwrap(), id);
+                assert_eq!(reader.utf().unwrap(), format!("+{gain}"));
+                assert_eq!(
+                    reader.i32().unwrap() as u32,
+                    if mana { 0xff00ffff } else { 0xff00ff00 }
+                );
+                reader.done().unwrap();
+            }
+        }
     }
 }

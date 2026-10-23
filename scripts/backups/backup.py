@@ -31,12 +31,15 @@ FAME_GAME = {**VAULTS_GAME, 'deaths': (*LEGACY_GAME['deaths'], 'equipment_fame')
 PICTURES_GAME = {**FAME_GAME, 'pictures': ('id', 'account', 'name', 'data_type', 'tags', 'png'), 'picture_sequence': ('id', 'next_id')}
 PICTURES_SQL = "CREATE TABLE pictures(id INTEGER PRIMARY KEY CHECK(id BETWEEN 1 AND 2147483647),account INTEGER NOT NULL REFERENCES accounts(id),name TEXT NOT NULL,data_type INTEGER NOT NULL CHECK(data_type BETWEEN 1 AND 7),tags TEXT NOT NULL,png BLOB NOT NULL CHECK(typeof(png)='blob' AND length(png)<=16384),UNIQUE(account,name))"
 PICTURE_SEQUENCE_SQL = "CREATE TABLE picture_sequence(id INTEGER PRIMARY KEY CHECK(id=1),next_id INTEGER NOT NULL CHECK(typeof(next_id)='integer' AND next_id BETWEEN 1 AND 2147483648))"
-DEATH_FAME_GAME = {**PICTURES_GAME, 'deaths': (*FAME_GAME['deaths'], 'receipt'), 'legacy_claims': ('account', 'class', 'character'), 'level_credits': ('recipient', 'reached_level', 'giver')}
+COMMUNITY_GAME = {**PICTURES_GAME, 'trade_transactions': ('id', 'owners', 'writes', 'revisions', 'delivery', 'market_key'), 'bot_minds': ('account', 'revision', 'mind')}
+TRADES_SQL = "CREATE TABLE trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE)"
+MINDS_SQL = "CREATE TABLE bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)))"
+DEATH_FAME_GAME = {**COMMUNITY_GAME, 'deaths': (*FAME_GAME['deaths'], 'receipt'), 'legacy_claims': ('account', 'class', 'character'), 'level_credits': ('recipient', 'reached_level', 'giver')}
 DEATHS_SQL = "CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()),equipment_fame INTEGER NOT NULL CHECK(typeof(equipment_fame)='integer' AND equipment_fame BETWEEN 0 AND 2147483647),receipt TEXT NOT NULL CHECK(json_valid(receipt)))"
 CLAIMS_SQL = "CREATE TABLE legacy_claims(account INTEGER NOT NULL REFERENCES accounts(id),class INTEGER NOT NULL CHECK(typeof(class)='integer' AND class BETWEEN 0 AND 65535),character INTEGER NOT NULL UNIQUE REFERENCES deaths(character),PRIMARY KEY(account,class))"
 CREDITS_SQL = "CREATE TABLE level_credits(recipient INTEGER NOT NULL REFERENCES characters(id),reached_level INTEGER NOT NULL CHECK(typeof(reached_level)='integer' AND reached_level BETWEEN 2 AND 20),giver INTEGER NOT NULL REFERENCES characters(id),PRIMARY KEY(recipient,reached_level),CHECK(recipient<>giver))"
 CREDITS_INDEX_SQL = 'CREATE INDEX level_credits_by_giver ON level_credits(giver)'
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: DEATH_FAME_GAME}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -51,7 +54,8 @@ AUTH_SLOTS_GAME = {**AUTH_REWARDS_GAME, 'accounts': SLOTS_GAME['accounts'], 'cha
 AUTH_VAULTS_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vaults': VAULTS_GAME['vaults']}
 RELOADED_FAME_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
 RELOADED_PICTURES_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
-RELOADED_GAME = {**RELOADED_PICTURES_GAME, 'deaths': DEATH_FAME_GAME['deaths'], 'legacy_claims': DEATH_FAME_GAME['legacy_claims'], 'level_credits': DEATH_FAME_GAME['level_credits']}
+RELOADED_COMMUNITY_GAME = {**RELOADED_PICTURES_GAME, 'trade_transactions': COMMUNITY_GAME['trade_transactions'], 'bot_minds': COMMUNITY_GAME['bot_minds']}
+RELOADED_GAME = {**RELOADED_COMMUNITY_GAME, 'deaths': DEATH_FAME_GAME['deaths'], 'legacy_claims': DEATH_FAME_GAME['legacy_claims'], 'level_credits': DEATH_FAME_GAME['level_credits']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -156,6 +160,10 @@ def snapshot(path, schema, *, include_schema=False):
                 metadata = db.execute('SELECT type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(\'deaths\') WHERE name=?', (column,)).fetchone()
                 if metadata != (kind, not_null, default, key, 0):
                     raise ValueError('Unsupported canonical death metadata: ' + column)
+        if 'bot_minds' in schema:
+            for table, expected in [('trade_transactions', TRADES_SQL), ('bot_minds', MINDS_SQL)]:
+                if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (table,)).fetchone() != (expected,):
+                    raise ValueError('Unsupported canonical community metadata: ' + table)
         if 'legacy_claims' in schema:
             for table, expected in [('deaths', DEATHS_SQL), ('legacy_claims', CLAIMS_SQL), ('level_credits', CREDITS_SQL), ('level_credits_by_giver', CREDITS_INDEX_SQL)]:
                 if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (table,)).fetchone() != (expected,):
@@ -340,7 +348,7 @@ def validate_deaths(game, version):
                 or type(bonus) is not int or bonus < 0 or snapshot['fame'] + bonus > 2147483647):
             raise ValueError('Invalid archived death award or ownership')
         total = snapshot['fame'] + bonus
-        if version >= 16:
+        if version >= 17:
             receipt = paid_receipt(row['receipt'])
             equipment = next((r['amount'] for r in receipt['rows'] if r['kind'] == 'well_equipped'), 0)
             if receipt['base'] != snapshot['fame'] or equipment != bonus:
@@ -348,7 +356,7 @@ def validate_deaths(game, version):
             total = receipt['total']
         seen.add(character)
         earned[snapshot['account']] += total
-    if version >= 16:
+    if version >= 17:
         validate_fame_records(game, saved)
     if version >= 5:
         for row in game['account_fame']:
@@ -359,6 +367,41 @@ def validate_deaths(game, version):
         if (any(row['fame'] > wallets[row['account']] for row in game['guild_members'])
                 or sum(row['earned'] for row in game['guilds']) > sum(wallets.values())):
             raise ValueError('Guild contribution or earnings exceed account earned fame')
+
+
+def validate_community(game):
+    accounts = {row['id'] for row in game['accounts']}
+    saved = {row['id']: row['account'] for row in game['characters']}
+    ids, keys, minds = set(), set(), set()
+    for row in game['bot_minds']:
+        if (type(row['account']) is not int or row['account'] not in accounts or row['account'] in minds
+                or type(row['revision']) is not int or row['revision'] <= 0 or type(row['mind']) is not str):
+            raise ValueError('Invalid community mind ownership or revision')
+        minds.add(row['account'])
+    for row in game['trade_transactions']:
+        if (type(row['id']) is not str or row['id'] in ids
+                or any(type(row[k]) is not str for k in ('owners', 'writes', 'revisions'))
+                or (row['delivery'] is not None and type(row['delivery']) is not str)
+                or (row['market_key'] is not None and (type(row['market_key']) is not str or row['market_key'] in keys))):
+            raise ValueError('Invalid community trade identity or payload')
+        ids.add(row['id'])
+        if row['market_key'] is not None:
+            keys.add(row['market_key'])
+        writes = json.loads(row['writes'])
+        if type(writes) is not list or any(type(w) is not dict or type(w.get('id')) is not int
+                or type(w.get('account')) is not int or w['account'] not in accounts
+                or saved.get(w['id']) != w['account'] for w in writes):
+            raise ValueError('Invalid community trade character ownership')
+    binary = os.environ.get('OPENROTMG_BACKUP_BINARY')
+    if not binary:
+        raise RuntimeError('OPENROTMG_BACKUP_BINARY must name the matching release binary')
+    result = subprocess.run([binary, '--backup-validate', 'community'],
+                            input=json.dumps({k: game[k] for k in ('bot_minds', 'trade_transactions')}),
+                            text=True, capture_output=True, timeout=30)
+    if result.returncode:
+        raise ValueError('Release community validation failed: ' + result.stderr.strip())
+    if json.loads(result.stdout) != {'validated_minds': len(minds), 'validated_trades': len(ids)}:
+        raise ValueError('Release community validator returned an invalid receipt')
 
 
 def validate(bundle):
@@ -375,9 +418,11 @@ def validate(bundle):
             allowed = set(columns) - {'guid'}
             if not isinstance(data[table], list) or any(not isinstance(r, dict) or set(r) != allowed for r in data[table]):
                 raise ValueError('Unsupported backup fields: ' + table)
+    if bundle['schema'] >= 16:
+        validate_community(bundle['game'])
     current = [json.loads(row['stats']) for row in bundle['game']['characters']]
     legacy = []
-    if bundle['schema'] < 16:
+    if bundle['schema'] < 17:
         legacy = current + [json.loads(row['snapshot']) for row in bundle['game']['deaths']]
         current = []
     else:
@@ -461,7 +506,7 @@ def validate(bundle):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if (stored_version > max(GAME_SCHEMAS) or (max(versions) >= 12 and stored_version != max(versions))
             or (stored_version >= 12 and stored_version not in versions)):
@@ -543,6 +588,8 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
     if bundle['schema'] >= 15:
         definitions['game'] += '\n' + PICTURES_SQL + ';\n' + PICTURE_SEQUENCE_SQL + ';'
     if bundle['schema'] >= 16:
+        definitions['game'] += '\n' + TRADES_SQL + ';\n' + MINDS_SQL + ';'
+    if bundle['schema'] >= 17:
         definitions['game'] += '\nDROP TABLE deaths;\n' + DEATHS_SQL + ';\n' + CLAIMS_SQL + ';\n' + CREDITS_SQL + ';\n' + CREDITS_INDEX_SQL + ';\nCREATE INDEX deaths_by_time ON deaths(died_at);'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:

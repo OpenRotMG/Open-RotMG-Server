@@ -51,6 +51,104 @@ pub async fn run(args: &[String]) -> Result<bool> {
         .collect::<Vec<_>>()
         .as_slice()
     {
+        ["--backup-validate", "community"] => {
+            let mut input = Vec::new();
+            std::io::stdin()
+                .take(32 * 1024 * 1024 + 1)
+                .read_to_end(&mut input)?;
+            ensure!(
+                input.len() <= 32 * 1024 * 1024,
+                "Backup community input exceeds 32 MiB"
+            );
+            let game: Value = serde_json::from_slice(&input)?;
+            ensure!(
+                game.as_object().is_some_and(|o| o.len() == 2),
+                "Invalid community envelope"
+            );
+            let minds = game["bot_minds"]
+                .as_array()
+                .context("Missing community minds")?;
+            for row in minds {
+                let raw = row["mind"]
+                    .as_str()
+                    .context("Invalid community mind JSON")?;
+                let mind: crate::bots::pursuits::Mind = serde_json::from_str(raw)?;
+                mind.validate()?;
+                ensure!(
+                    Some(i64::from(mind.account)) == row["account"].as_i64()
+                        && mind.revision > 0
+                        && Some(mind.revision) == row["revision"].as_i64()
+                        && known_fields(&serde_json::from_str(raw)?, &serde_json::to_value(mind)?),
+                    "Invalid community mind binding or fields"
+                );
+            }
+            let trades = game["trade_transactions"]
+                .as_array()
+                .context("Missing community trades")?;
+            for row in trades {
+                let raw = row["writes"].as_str().context("Invalid trade writes")?;
+                let writes: Vec<store::InventoryWrite> = serde_json::from_str(raw)?;
+                let owners: Vec<i32> =
+                    serde_json::from_str(row["owners"].as_str().context("Invalid trade owners")?)?;
+                let revisions: Vec<i32> = serde_json::from_str(
+                    row["revisions"]
+                        .as_str()
+                        .context("Invalid trade revisions")?,
+                )?;
+                ensure!(
+                    (1..=2).contains(&writes.len())
+                        && revisions.len() == writes.len()
+                        && owners == writes.iter().map(|w| w.account).collect::<Vec<_>>()
+                        && owners
+                            .iter()
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .len()
+                            == owners.len()
+                        && writes.iter().zip(revisions).all(|(w, r)| w.id > 0
+                            && w.account > 0
+                            && w.revision >= 0
+                            && w.revision.checked_add(1) == Some(r)
+                            && w.items.len() == 12
+                            && w.items.iter().all(|i| (-1..=65535).contains(i)))
+                        && known_fields(
+                            &serde_json::from_str(raw)?,
+                            &serde_json::to_value(&writes)?
+                        ),
+                    "Invalid community trade payload or revisions"
+                );
+                let key = if row["delivery"].is_null() {
+                    None
+                } else {
+                    let raw = row["delivery"]
+                        .as_str()
+                        .context("Invalid community delivery")?;
+                    let delivery: crate::bots::pursuits::market::Delivery =
+                        serde_json::from_str(raw)?;
+                    ensure!(
+                        delivery == delivery.terms.delivery(delivery.ordinal)?
+                            && owners
+                                .iter()
+                                .copied()
+                                .collect::<std::collections::BTreeSet<_>>()
+                                == delivery.terms.accounts.into_iter().collect()
+                            && known_fields(
+                                &serde_json::from_str(raw)?,
+                                &serde_json::to_value(&delivery)?
+                            ),
+                        "Invalid community delivery binding"
+                    );
+                    Some(format!("{:x}:{}", delivery.terms.version, delivery.ordinal))
+                };
+                ensure!(
+                    row["market_key"] == serde_json::to_value(key)?,
+                    "Invalid community market key"
+                );
+            }
+            println!(
+                "{}",
+                serde_json::json!({"validated_minds": minds.len(), "validated_trades": trades.len()})
+            );
+        }
         ["--backup-validate"] | ["--backup-validate", "legacy"] => {
             let mut input = Vec::new();
             std::io::stdin()
@@ -147,6 +245,9 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         fixture_png(),
                         true,
                     )
+                    .await?;
+                store
+                    .save_bot_mind(crate::bots::pursuits::Mind::new(account.id))
                     .await?;
                 if !alive {
                     let removed = store
@@ -280,6 +381,23 @@ pub async fn run(args: &[String]) -> Result<bool> {
                         .guild_board(account.id, Some("Welcome & prepare!\n日本語 🧙".into()))
                         .await?;
                 }
+            }
+            {
+                let mut db = rusqlite::Connection::open(directory.join("game.db"))?;
+                let tx = db.transaction()?;
+                let (id, account, revision, items): (i32,i32,i32,String) = tx.query_row("SELECT id,account,revision,items FROM characters WHERE alive=1 ORDER BY id LIMIT 1", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+                let write = store::InventoryWrite {
+                    id,
+                    account,
+                    revision,
+                    items: serde_json::from_str(&items)?,
+                };
+                tx.execute(
+                    "UPDATE characters SET revision=revision+1 WHERE id=?1",
+                    [write.id],
+                )?;
+                tx.execute("INSERT INTO trade_transactions(id,owners,writes,revisions) VALUES('backup-fixture-trade',?1,?2,?3)", rusqlite::params![serde_json::to_string(&vec![write.account])?, serde_json::to_string(&vec![write.clone()])?, serde_json::to_string(&vec![write.revision+1])?])?;
+                tx.commit()?;
             }
             store
                 .sync_updates(store::UpdateSnapshot {

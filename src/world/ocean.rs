@@ -51,6 +51,7 @@ impl World {
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + self.named_births.len()
+                + self.abyss_pending_count()
                 < 256,
             "ocean summon budget exhausted"
         );
@@ -103,6 +104,7 @@ impl World {
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + self.named_births.len()
+                + self.abyss_pending_count()
                 + positions.len()
                 <= 256,
             "Hermit wave exceeds summon budget"
@@ -176,6 +178,7 @@ impl World {
                 .filter(|e| e.parent.is_some() || e.quest.is_some())
                 .count()
                 + self.named_births.len()
+                + self.abyss_pending_count()
                 + count
                 <= 256,
             "ocean toss exceeds summon budget"
@@ -216,10 +219,29 @@ impl World {
         match kind {
             trench::HERMIT => match stage {
                 Some(0) => {
+                    let minions = self.ocean_children(id, 0xd62).len();
+                    let missing = 20usize.saturating_sub(minions).min(8);
+                    ensure!(
+                        self.summon_occupancy() + 8 + missing <= self.summon_limit(),
+                        "Hermit initial wave and minions exceed summon budget"
+                    );
+                    // The mandatory wave cannot commit before its companion minions can be admitted.
+                    ensure!(
+                        (0..32)
+                            .filter(|n| {
+                                let a = *n as f32 * TAU / 32.;
+                                self.walkable(Pos {
+                                    x: e.pos.x + 10. * a.cos(),
+                                    y: e.pos.y + 10. * a.sin(),
+                                })
+                            })
+                            .count()
+                            >= missing,
+                        "Hermit initial minions have insufficient walkable summon positions"
+                    );
                     self.ocean_wave(id, 0xd64)?;
+                    self.spawn_children(id, 0xd62, (minions + 8).min(20), 10.)?;
                     self.ocean_stage(id, 1);
-                    let maximum = (self.ocean_children(id, 0xd62).len() + 8).min(20);
-                    self.spawn_children(id, 0xd62, maximum, 10.)?;
                     let e = self.entities.get_mut(&id).unwrap();
                     e.condition |= condition::bit(condition::INVINCIBLE);
                     e.extra_stats = vec![(61, 2)];

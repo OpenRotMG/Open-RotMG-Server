@@ -284,6 +284,8 @@ pub struct Character {
     #[serde(default)]
     pub spider_dens: u64,
     #[serde(default)]
+    pub mad_labs: u64,
+    #[serde(default)]
     pub jungles: u64,
     #[serde(default)]
     pub manors: u64,
@@ -449,12 +451,38 @@ pub struct Vault {
     pub items: Vec<i32>,
     pub revision: i32,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InventoryWrite {
     pub id: i32,
     pub account: i32,
     pub revision: i32,
     pub items: Vec<i32>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GiftParticipant {
+    pub account: i32,
+    pub character: i32,
+    pub revision: i32,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GiftAcceptance {
+    pub transaction: String,
+    pub session: [i32; 3],
+    pub own: GiftParticipant,
+    pub peer: GiftParticipant,
+    pub peer_player: i32,
+    pub peer_name: String,
+    pub giving: bool,
+    pub writes_hash: [u8; 32],
+}
+impl GiftAcceptance {
+    pub(crate) fn payload_hash(giving: bool, writes: &str) -> [u8; 32] {
+        use sha2::Digest;
+        let mut hash = sha2::Sha256::new();
+        hash.update([u8::from(giving)]);
+        hash.update(writes.as_bytes());
+        hash.finalize().into()
+    }
 }
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 #[cfg(test)]
@@ -527,11 +555,29 @@ impl Store {
         ensure!(
             matches!(
                 version,
-                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16
+                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
             ),
             "unsupported game database schema {version}"
         );
+        let trades_exist: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='trade_transactions')", [], |r| r.get(0))?;
+        let minds_exist: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='bot_minds')",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            !matches!(version, 13 | 14) || !(trades_exist || minds_exist),
+            "experimental community schema {version} conflicts with canonical migrations; preserve this database and request an explicit migration"
+        );
         death_awards::check_schema(&c, version)?;
+        ensure!(
+            version < 16 || trades_exist,
+            "schema-16 trade receipts missing; restore committed settlements instead of allowing duplicate payment"
+        );
+        ensure!(
+            version < 16 || minds_exist,
+            "schema-16 account minds missing; restore reviewed state instead of erasing purposes"
+        );
         let rewards_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gold_rewards')",
             [],
@@ -574,7 +620,7 @@ impl Store {
             version < 7 || updates_exist,
             "schema-7 update feed missing; restore reviewed state instead of clearing published news"
         );
-        if version == 16 {
+        if version == 17 {
             guilds::migrate(&c, version)?;
             death_awards::validate_state(&c, legacy_base)?;
         }
@@ -608,6 +654,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         );
         tracing::info!(%journal, synchronous, "account store durability configured");
         let migration = c.transaction()?;
+        migration.execute_batch("CREATE TABLE IF NOT EXISTS trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE);
+ CREATE TABLE IF NOT EXISTS bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)));")?;
         guilds::migrate(&migration, version)?;
         gold::migrate(&migration, version, rewards_exist)?;
         if !credits_exist {
@@ -624,7 +672,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         };
         let mut migrated = 0;
         for (id, raw) in records {
-            let ch = if version < 16 {
+            let ch = if version < 17 {
                 decode_legacy_character(&raw, legacy_base)
             } else {
                 decode_character(&raw, legacy_base)
@@ -644,7 +692,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 "invalid persisted class stats for character {id}"
             );
             let legacy_value: serde_json::Value = serde_json::from_str(&raw)?;
-            if version < 16
+            if version < 17
                 && (legacy_value.get("schema").is_none() || legacy_value.get("lifetime").is_none())
             {
                 let mut value = legacy_value;
@@ -703,7 +751,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 16)?;
+        migration.pragma_update(None, "user_version", 17)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -877,6 +925,56 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = read_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,character_slots,next_slot_price,guild:presentation.guild,credits:presentation.credits,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
         self.vaults(account.id).await?;
         Ok(account)
+    }
+    pub(crate) async fn bot_mind(
+        &self,
+        account: i32,
+    ) -> Result<Option<crate::bots::pursuits::Mind>> {
+        self.call(move |db| {
+            let raw: Option<(i64, String)> = db
+                .query_row(
+                    "SELECT revision,mind FROM bot_minds WHERE account=?1",
+                    [account],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            raw.map(|(revision, raw)| {
+                let mind: crate::bots::pursuits::Mind =
+                    serde_json::from_str(&raw).context("decode durable account mind")?;
+                mind.validate()?;
+                ensure!(
+                    mind.account == account && mind.revision == revision,
+                    "durable account mind binding/revision changed"
+                );
+                Ok(mind)
+            })
+            .transpose()
+        })
+        .await
+    }
+    pub(crate) async fn save_bot_mind(&self, mut mind: crate::bots::pursuits::Mind) -> Result<i64> {
+        mind.validate()?;
+        self.call(move |db| {
+            let expected = mind.revision;
+            mind.revision = expected
+                .checked_add(1)
+                .context("account mind revision exhausted")?;
+            let raw = serde_json::to_string(&mind)?;
+            let changed = if expected == 0 {
+                db.execute(
+                    "INSERT INTO bot_minds(account,revision,mind) VALUES(?1,?2,?3)",
+                    params![mind.account, mind.revision, raw],
+                )?
+            } else {
+                db.execute(
+                    "UPDATE bot_minds SET revision=?1,mind=?2 WHERE account=?3 AND revision=?4",
+                    params![mind.revision, raw, mind.account, expected],
+                )?
+            };
+            ensure!(changed == 1, "stale account mind write rejected");
+            Ok(mind.revision)
+        })
+        .await
     }
     pub async fn shore_account(&self, identity: String) -> Result<Option<i32>> {
         self.call(move |db| {
@@ -1054,6 +1152,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 abysses: 0,
                 trenches: 0,
                 spider_dens: 0,
+                mad_labs: 0,
                 manors: 0,
                 beaches: 0,
                 davy_lockers: 0,
@@ -1110,6 +1209,116 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         vaults: Vec<Vault>,
         collected: Option<u16>,
     ) -> Result<Vec<i32>> {
+        self.exchange_transaction(writes, vaults, collected, None)
+            .await
+    }
+    pub(crate) async fn exchange_trade(
+        &self,
+        transaction: String,
+        writes: Vec<InventoryWrite>,
+        delivery: Option<crate::bots::pursuits::market::Delivery>,
+    ) -> Result<Vec<i32>> {
+        ensure!(
+            transaction.len() == 32
+                && transaction.chars().all(|c| c.is_ascii_hexdigit())
+                && writes.len() == 2,
+            "invalid trade transaction identity"
+        );
+        if let Some(d) = &delivery {
+            ensure!(
+                *d == d.terms.delivery(d.ordinal)?,
+                "invalid installment identity or quantities"
+            );
+            ensure!(
+                writes
+                    .iter()
+                    .map(|w| w.account)
+                    .collect::<std::collections::BTreeSet<_>>()
+                    == d.terms.accounts.into_iter().collect(),
+                "installment owners differ from negotiated accounts"
+            );
+        }
+        self.exchange_transaction(writes, vec![], None, Some((transaction, delivery)))
+            .await
+    }
+    pub(crate) async fn gift_committed(&self, acceptance: GiftAcceptance) -> Result<bool> {
+        ensure!(
+            acceptance.transaction.len() == 32
+                && acceptance
+                    .transaction
+                    .bytes()
+                    .all(|c| c.is_ascii_hexdigit())
+                && acceptance.session[1] > 0
+                && acceptance.session[2] == acceptance.own.character
+                && acceptance.peer_player > 0
+                && acceptance.own.account != acceptance.peer.account
+                && [acceptance.own, acceptance.peer]
+                    .iter()
+                    .all(|p| p.account > 0
+                        && p.character > 0
+                        && (0..i32::MAX).contains(&p.revision)),
+            "invalid gift acceptance witness"
+        );
+        self.call(move |c| {
+            let row: Option<(String, String, String, Option<String>)> = c
+                .query_row(
+                    "SELECT owners,writes,revisions,delivery FROM trade_transactions WHERE id=?1",
+                    [&acceptance.transaction],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .optional()?;
+            let Some((owners, raw_writes, revisions, delivery)) = row else {
+                return Ok(false);
+            };
+            let owners: Vec<i32> = serde_json::from_str(&owners)?;
+            let writes: Vec<InventoryWrite> = serde_json::from_str(&raw_writes)?;
+            let revisions: Vec<i32> = serde_json::from_str(&revisions)?;
+            ensure!(
+                delivery.is_none()
+                    && writes.len() == 2
+                    && revisions.len() == 2
+                    && owners == writes.iter().map(|w| w.account).collect::<Vec<_>>()
+                    && [acceptance.own, acceptance.peer]
+                        .iter()
+                        .all(|p| writes.iter().any(|w| w.account == p.account
+                            && w.id == p.character
+                            && w.revision == p.revision))
+                    && writes
+                        .iter()
+                        .zip(revisions)
+                        .all(|(w, revision)| w.revision.checked_add(1) == Some(revision))
+                    && GiftAcceptance::payload_hash(acceptance.giving, &raw_writes)
+                        == acceptance.writes_hash,
+                "gift committed transaction payload/participants mismatch: {}",
+                acceptance.transaction
+            );
+            Ok(true)
+        })
+        .await
+    }
+    pub(crate) async fn market_receipts(
+        &self,
+        account: i32,
+        version: u64,
+    ) -> Result<Vec<crate::bots::pursuits::market::Delivery>> {
+        self.call(move |c| {
+            let mut q=c.prepare("SELECT delivery FROM trade_transactions WHERE delivery IS NOT NULL AND EXISTS(SELECT 1 FROM json_each(owners) WHERE value=?1)")?;
+            let mut receipts=Vec::new();
+            for row in q.query_map([account],|r|r.get::<_,String>(0))? {
+                let d:crate::bots::pursuits::market::Delivery=serde_json::from_str(&row?)?;
+                if d.terms.version==version { receipts.push(d); }
+            }
+            receipts.sort_by_key(|d|d.ordinal);
+            Ok(receipts)
+        }).await
+    }
+    async fn exchange_transaction(
+        &self,
+        writes: Vec<InventoryWrite>,
+        vaults: Vec<Vault>,
+        collected: Option<u16>,
+        receipt: Option<(String, Option<crate::bots::pursuits::market::Delivery>)>,
+    ) -> Result<Vec<i32>> {
         ensure!(
             collected.is_none() || writes.len() == 1,
             "collection requires one pickup owner"
@@ -1150,8 +1359,16 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         self.call(move |c| {
             let tx = c.transaction()?;
+            let raw_writes = serde_json::to_string(&writes)?;
+            if let Some((id,delivery)) = &receipt {
+                let prior:Option<(String,String,Option<String>)>=tx.query_row("SELECT writes,revisions,delivery FROM trade_transactions WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+                if let Some((previous,revisions,recorded))=prior {
+                    ensure!(previous==raw_writes && recorded==delivery.as_ref().map(serde_json::to_string).transpose()?, "trade transaction replay changed its payload");
+                    return Ok(serde_json::from_str(&revisions)?);
+                }
+            }
             let mut revisions = Vec::new();
-            for write in writes {
+            for write in &writes {
                 let n = tx.execute("UPDATE characters SET items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1", params![write.id, write.account, write.revision, serde_json::to_string(&write.items)?])?;
                 ensure!(n == 1, "inventory conflict: character {}, account {}, expected revision {}", write.id, write.account, write.revision);
                 revisions.push(write.revision + 1);
@@ -1161,6 +1378,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                     && gold::collection(&tx, collector)?
             } else { false };
             for vault in vaults { vaults::save(&tx, &vault)?; }
+            if let Some((id,delivery))=receipt {
+                let owners=serde_json::to_string(&writes.iter().map(|w|w.account).collect::<Vec<_>>())?;
+                let market_key=delivery.as_ref().map(|d|format!("{:x}:{}",d.terms.version,d.ordinal));
+                tx.execute("INSERT INTO trade_transactions(id,owners,writes,revisions,delivery,market_key) VALUES(?1,?2,?3,?4,?5,?6)",params![id,owners,raw_writes,serde_json::to_string(&revisions)?,delivery.as_ref().map(serde_json::to_string).transpose()?,market_key])?;
+            }
             tx.commit()?;
             if rewarded {
                 tracing::info!(account=collector, amount=gold::AMOUNT, reward="collection_top_half", "gold reward committed");
@@ -1231,7 +1453,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let saved: Character = serde_json::from_str(&raw)?;
             ensure!(saved.schema == ch.schema && saved.class == ch.class && saved.base == ch.base
                 && saved.level == ch.level && saved.exp == ch.exp && saved.fame == ch.fame
-                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.jungles == ch.jungles && saved.manors == ch.manors && saved.beaches == ch.beaches && saved.davy_lockers == ch.davy_lockers && saved.tombs == ch.tombs
+                && saved.pirate_caves == ch.pirate_caves && saved.dungeons == ch.dungeons && saved.abysses == ch.abysses && saved.trenches == ch.trenches && saved.spider_dens == ch.spider_dens && saved.mad_labs == ch.mad_labs && saved.jungles == ch.jungles && saved.manors == ch.manors && saved.beaches == ch.beaches && saved.davy_lockers == ch.davy_lockers && saved.tombs == ch.tombs
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "permanent potion reservation changed");
             ch.lifetime.follows(&saved.lifetime)?;
@@ -1530,6 +1752,8 @@ impl Account {
         )
     }
 }
+#[cfg(test)]
+mod community_schema_tests;
 #[cfg(test)]
 mod tests {
     use super::*;

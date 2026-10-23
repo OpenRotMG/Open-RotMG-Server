@@ -1,4 +1,6 @@
 use super::*;
+mod community_crowd;
+mod community_social;
 #[path = "finalize_tests.rs"]
 mod finalize_tests;
 #[path = "native_pause_tests.rs"]
@@ -34,6 +36,78 @@ async fn request(app: &App, id: &str, command: Value) -> Value {
 }
 fn spec(pos: Pos) -> Value {
     json!({"guid":"qa-interface-unit","class":WIZARD,"level":8,"seed":12351,"equipment":[2712,-1,-1,-1],"backpack":[2599,2594,-1,-1,-1,-1,-1,-1],"world":-1,"position":pos,"controller":"direct","stats":null})
+}
+
+#[tokio::test]
+async fn named_realm_full_of_admissions_refuses_nonfatally_without_retargeting() {
+    let (dir, app) = fixture();
+    let (portal, pos) = app
+        .world
+        .directory(|d| {
+            let portal = d.worlds[&-2]
+                .entities
+                .values()
+                .find(|e| e.kind == 0x712)
+                .unwrap();
+            Ok((portal.id, portal.pos))
+        })
+        .await
+        .unwrap();
+    let mut input = spec(pos);
+    input["world"] = (-2).into();
+    let created = request(&app, "full-realm-spawn", json!({"op":"spawn","spec":input})).await;
+    assert_eq!(created["status"], "succeeded");
+    let actor = created["result"]["actor"].as_i64().unwrap();
+    let before = request(
+        &app,
+        "full-realm-before",
+        json!({"op":"observe","actor":actor}),
+    )
+    .await;
+    let player = before["session"]["player"].as_i64().unwrap() as i32;
+    let destination = app
+        .world
+        .directory(move |d| {
+            let (_, _, destination) = d.destination(player, Some(portal))?;
+            let capacity = d.worlds[&destination].max_players;
+            for index in 0..capacity {
+                let account = 1000 + index as i32;
+                d.issue(account, account, destination)?;
+            }
+            assert!(d.worlds[&destination].players.is_empty());
+            assert_eq!(d.worlds[&destination].occupancy(), capacity);
+            Ok(destination)
+        })
+        .await
+        .unwrap();
+    let mut session = crate::server::Session {
+        player: Some(player),
+        ..Default::default()
+    };
+    crate::server::reconnect(
+        &app,
+        &mut session,
+        crate::server::Reconnect::Portal(Some(portal)),
+        std::time::Instant::now(),
+    )
+    .await
+    .unwrap();
+    assert!(session.transfer.is_none());
+    app.world
+        .directory(move |d| {
+            assert_eq!(d.location(player)?, -2);
+            assert!(d.worlds[&-2].players[&player].character.alive);
+            assert!(d.worlds[&destination].players.is_empty());
+            assert_eq!(
+                d.worlds[&destination].occupancy(),
+                d.worlds[&destination].max_players
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    app.shutdown.send_replace(true);
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]

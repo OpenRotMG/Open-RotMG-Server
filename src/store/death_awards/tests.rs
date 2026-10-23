@@ -622,7 +622,7 @@ async fn all_death_fame_phase1_ordered_rules() {
         );
         lifetime.realm_exits.insert(dungeon);
     }
-    assert_eq!(crate::dungeon::DUNGEONS.len(), 12);
+    assert_eq!(crate::dungeon::DUNGEONS.len(), 13);
     use crate::dungeon::{HistoricalDungeon, tomb};
     assert_eq!(
         HistoricalDungeon::ALL,
@@ -920,7 +920,7 @@ async fn all_death_fame_phase1_receipt_validation() {
 }
 
 #[tokio::test]
-async fn all_death_fame_phase2_schema16_roundtrip_corruption() {
+async fn all_death_fame_phase2_schema17_roundtrip_corruption() {
     let (path, content, store, mut ch) = setup().await;
     assert_eq!(ch.lifetime.completeness, LifetimeCompleteness::Complete);
     let mut missing = serde_json::to_value(&ch).unwrap();
@@ -946,7 +946,7 @@ async fn all_death_fame_phase2_schema16_roundtrip_corruption() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        16
+        17
     );
     let original: String = db
         .query_row(
@@ -1078,7 +1078,7 @@ async fn all_death_fame_phase2_schema16_roundtrip_corruption() {
 }
 
 #[test]
-fn all_death_fame_phase2_schema16_exact_metadata() {
+fn all_death_fame_phase2_schema17_exact_metadata() {
     for (table, old, new) in [
         ("deaths", "receipt TEXT NOT NULL", "receipt TEXT"),
         (
@@ -1111,7 +1111,7 @@ fn all_death_fame_phase2_schema16_exact_metadata() {
             }
             db.execute_batch(&definition).unwrap();
         }
-        assert!(check_schema(&db, 16).is_err(), "metadata {table}");
+        assert!(check_schema(&db, 17).is_err(), "metadata {table}");
     }
 }
 

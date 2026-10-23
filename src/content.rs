@@ -5,6 +5,7 @@ pub use abilities::Ability;
 mod consumables;
 pub use consumables::{Companion, ConsumableEffect};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const WIZARD: u16 = 0x030e;
@@ -220,6 +221,7 @@ pub struct Hazard {
 }
 #[derive(Clone)]
 pub struct Content {
+    pub(crate) xml_sha256: [String; 2],
     pub objects: BTreeMap<u16, Object>,
     pub grounds: BTreeMap<u8, f32>,
     pub pushes: BTreeMap<u8, (f32, f32)>,
@@ -310,6 +312,7 @@ fn fame_bonus(n: Node<'_, '_>) -> Result<u32> {
 impl Content {
     pub fn load(dir: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(dir.join("objects.xml"))?;
+        let objects_sha256 = format!("{:x}", Sha256::digest(data.as_bytes()));
         let doc = roxmltree::Document::parse(&data)?;
         let mut objects = BTreeMap::new();
         for n in doc.root_element().children().filter(|n| n.is_element()) {
@@ -604,6 +607,7 @@ impl Content {
         }
         ensure!(classes.len() == 13, "unexpected player class count");
         let data = std::fs::read_to_string(dir.join("grounds.xml"))?;
+        let grounds_sha256 = format!("{:x}", Sha256::digest(data.as_bytes()));
         let doc = roxmltree::Document::parse(&data)?;
         let mut grounds = BTreeMap::new();
         let mut pushes = BTreeMap::new();
@@ -654,6 +658,7 @@ impl Content {
             "unexpected 123.5.1 content counts"
         );
         let out = Self {
+            xml_sha256: [objects_sha256, grounds_sha256],
             objects,
             grounds,
             pushes,
@@ -770,6 +775,20 @@ impl Map {
         Ok(map)
     }
     pub(crate) fn decode_cells(bytes: &[u8], content: &Content) -> Result<Self> {
+        Self::decode_bounded_cells(bytes, content, false)
+    }
+    pub(crate) fn decode_realm_cells(
+        bytes: &[u8],
+        content: &Content,
+        dimensions: [usize; 2],
+    ) -> Result<Self> {
+        Self::decode_bounded_cells(bytes, content, dimensions == [2100, 2100])
+    }
+    fn decode_bounded_cells(
+        bytes: &[u8],
+        content: &Content,
+        source_local_2100: bool,
+    ) -> Result<Self> {
         let mut data = Vec::new();
         flate2::read::ZlibDecoder::new(bytes)
             .take(16 * 1024 * 1024 + 1)
@@ -813,8 +832,11 @@ impl Map {
         let width = r.int()?;
         let height = r.int()?;
         ensure!(
-            width > 0 && height > 0 && width <= 2048 && height <= 2048,
-            "map dimensions must be within 1..=2048"
+            width > 0
+                && height > 0
+                && ((width <= 2048 && height <= 2048)
+                    || (source_local_2100 && width == 2100 && height == 2100)),
+            "map dimensions {width}x{height} exceed ordinary limit 2048; admitted 2100-square Realm: {source_local_2100}"
         );
         let mut cells = Vec::new();
         let mut spawns = Vec::new();

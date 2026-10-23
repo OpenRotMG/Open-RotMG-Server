@@ -192,6 +192,45 @@ fn dense_native_backlog_drains_and_retains_exactly_once_hit_authority() {
     assert!(!*loss.borrow());
 }
 
+fn shared_pause_past_shoot_ack_wall_deadline(w: &World) {
+    let clock = w.clock.clone();
+    clock.set_paused(true);
+    let frozen = clock.now();
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    assert_eq!(clock.now(), frozen);
+    clock.set_paused(false);
+}
+
+#[test]
+fn native_shoot_ack_arrival_excludes_legitimate_shared_pause() {
+    let (mut w, id, _rx, loss) = native();
+    let owner = offer(&mut w, id, None, 3, 20);
+    let hp = w.players[&id].character.hp;
+    assert_eq!(w.players[&id].shoot_acks.len(), 1);
+    shared_pause_past_shoot_ack_wall_deadline(&w);
+    w.acknowledge_shoot(id, 100).unwrap();
+    assert!(!*loss.borrow());
+    assert!(w.players[&id].shoot_acks.is_empty());
+    assert!(w.acknowledge_shoot(id, 100).is_err());
+    w.native_player_hit(id, owner + 1, 3).unwrap();
+    assert_eq!(w.players[&id].character.hp, hp);
+    w.native_player_hit(id, owner, 3).unwrap();
+    w.native_player_hit(id, owner, 3).unwrap();
+    assert_eq!(w.players[&id].character.hp, hp - 20);
+}
+
+#[test]
+fn native_shoot_ack_expiration_excludes_legitimate_shared_pause() {
+    let (mut w, id, _rx, loss) = native();
+    offer(&mut w, id, None, 3, 20);
+    shared_pause_past_shoot_ack_wall_deadline(&w);
+    w.expire_native_projectiles();
+    assert!(!*loss.borrow());
+    assert!(!w.players[&id].departing);
+    assert_eq!(w.players[&id].shoot_acks.len(), 1);
+    w.acknowledge_shoot(id, 100).unwrap();
+}
+
 #[test]
 fn native_shoot_ack_survives_repeated_global_pauses_without_world_ticks() {
     let (mut w, id, _rx, loss) = native();

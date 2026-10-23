@@ -31,7 +31,7 @@ class DeathSchema(unittest.TestCase):
             backup.restore(legacy, baseline)
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(baseline / 'game.db'), str(root / 'data')], check=True)
             valid = backup.export(baseline / 'game.db', baseline / 'levels.sqlite', directory / 'valid.gz', revision, revision, revision)
-            self.assertEqual(valid['schema'], 16)
+            self.assertEqual(valid['schema'], 17)
             self.assertEqual(valid['game']['legacy_claims'], [])
             for case, (old, new) in enumerate([
                 ('character INTEGER PRIMARY KEY', 'character INTEGER'),
@@ -103,7 +103,26 @@ class DeathSchema(unittest.TestCase):
             self.assertEqual(len(proof['level_credits']), 2)
             archive = directory / 'paid.gz'
             bundle = backup.export(written / 'game.db', directory / 'levels.sqlite', archive, revision, revision, revision)
-            self.assertEqual(bundle['schema'], 16)
+            self.assertEqual(bundle['schema'], 17)
+            self.assertEqual(len(bundle['game']['bot_minds']), 2)
+            self.assertEqual(len(bundle['game']['trade_transactions']), 1)
+            for case in ('revision', 'unknown_mind', 'owners', 'revisions', 'market_key'):
+                bad = deepcopy(bundle)
+                if case == 'revision':
+                    bad['game']['bot_minds'][0]['revision'] += 1
+                elif case == 'unknown_mind':
+                    mind = json.loads(bad['game']['bot_minds'][0]['mind'])
+                    mind['credential'] = 'must-not-export'
+                    bad['game']['bot_minds'][0]['mind'] = json.dumps(mind)
+                elif case == 'owners':
+                    bad['game']['trade_transactions'][0]['owners'] = '[2147483647]'
+                elif case == 'revisions':
+                    bad['game']['trade_transactions'][0]['revisions'] = '[2147483647]'
+                else:
+                    bad['game']['trade_transactions'][0]['market_key'] = 'unbound:0'
+                with self.subTest(community=case), self.assertRaises(ValueError):
+                    backup.validate(bad)
+
             self.assertEqual(len(bundle['game']['legacy_claims']), 1)
             self.assertEqual(len(bundle['game']['level_credits']), 2)
             restored = directory / 'restored'
@@ -168,7 +187,7 @@ class DeathSchema(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Duplicate death receipt'):
                 backup.validate(bad)
 
-    def test_all_death_fame_phase2_schema15_old_paid_bytes_no_retrocredit(self):
+    def test_all_death_fame_phase2_schema15_and16_old_paid_bytes_no_retrocredit(self):
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -179,34 +198,41 @@ class DeathSchema(unittest.TestCase):
             revision = directory / 'REVISION'
             revision.write_text('a' * 40)
             original = backup.export(directory / 'written/game.db', directory / 'levels.sqlite', directory / 'original.gz', revision, revision, revision)
-            old = legacy_copy(original)
-            for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
-                for row in old['game'][table]:
-                    payload = json.loads(row[field])
-                    payload['tiles'] = 4_000_001
-                    row[field] = json.dumps(payload, indent=2)
-            archive = directory / 'schema15.gz'
-            archive.write_bytes(gzip.compress(json.dumps(old).encode()))
-            restored = directory / 'schema15'
-            backup.restore(archive, restored)
-            for _ in range(2):
-                subprocess.run([binary, '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
-                migrated = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
-                self.assertEqual(migrated['account_fame'], old['game']['account_fame'])
-                self.assertEqual(migrated['guilds'], old['game']['guilds'])
-                self.assertEqual(migrated['guild_members'], old['game']['guild_members'])
-                self.assertEqual(migrated['picture_sequence'], old['game']['picture_sequence'])
-                self.assertEqual(migrated['legacy_claims'], [])
-                self.assertEqual(migrated['level_credits'], [])
-                for row, prior in zip(migrated['deaths'], old['game']['deaths']):
-                    self.assertEqual({k: v for k, v in row.items() if k != 'receipt'}, prior)
-                    receipt = backup.paid_receipt(row['receipt'])
-                    self.assertEqual(receipt['policy'], 'legacy_paid')
-                    self.assertEqual(receipt['total'], json.loads(prior['snapshot'])['fame'] + prior['equipment_fame'])
-                    self.assertFalse(any(r['kind'] == 'explorer' for r in receipt['rows']))
-                for row in migrated['characters']:
-                    lifetime = json.loads(row['stats'])['lifetime']
-                    self.assertEqual((lifetime['completeness'], lifetime['tiles'], lifetime['projectile_hits'], lifetime['qualified_quests']), ('known_only', 4_000_001, 0, 0))
+            for version in (15, 16):
+                old = legacy_copy(original)
+                if version == 16:
+                    old['schema'] = 16
+                    for table in ('bot_minds', 'trade_transactions'):
+                        old['game'][table] = deepcopy(original['game'][table])
+                for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
+                    for row in old['game'][table]:
+                        payload = json.loads(row[field])
+                        payload['tiles'] = 4_000_001
+                        row[field] = json.dumps(payload, indent=2)
+                archive = directory / f'schema{version}.gz'
+                archive.write_bytes(gzip.compress(json.dumps(old).encode()))
+                restored = directory / f'schema{version}'
+                backup.restore(archive, restored)
+                for _ in range(2):
+                    subprocess.run([binary, '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
+                    migrated = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+                    self.assertEqual(migrated['account_fame'], old['game']['account_fame'])
+                    for table in ('bot_minds', 'trade_transactions'):
+                        self.assertEqual(migrated[table], old['game'][table] if version == 16 else [])
+                    self.assertEqual(migrated['guilds'], old['game']['guilds'])
+                    self.assertEqual(migrated['guild_members'], old['game']['guild_members'])
+                    self.assertEqual(migrated['picture_sequence'], old['game']['picture_sequence'])
+                    self.assertEqual(migrated['legacy_claims'], [])
+                    self.assertEqual(migrated['level_credits'], [])
+                    for row, prior in zip(migrated['deaths'], old['game']['deaths']):
+                        self.assertEqual({k: v for k, v in row.items() if k != 'receipt'}, prior)
+                        receipt = backup.paid_receipt(row['receipt'])
+                        self.assertEqual(receipt['policy'], 'legacy_paid')
+                        self.assertEqual(receipt['total'], json.loads(prior['snapshot'])['fame'] + prior['equipment_fame'])
+                        self.assertFalse(any(r['kind'] == 'explorer' for r in receipt['rows']))
+                    for row in migrated['characters']:
+                        lifetime = json.loads(row['stats'])['lifetime']
+                        self.assertEqual((lifetime['completeness'], lifetime['tiles'], lifetime['projectile_hits'], lifetime['qualified_quests']), ('known_only', 4_000_001, 0, 0))
             for version in [0, 2, 255]:
                 bad = deepcopy(old)
                 payload = json.loads(bad['game']['characters'][0]['stats'])

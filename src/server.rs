@@ -3,6 +3,9 @@ mod input;
 #[cfg(test)]
 mod password_tests;
 mod pictures;
+#[cfg(test)]
+#[path = "server/community_queue_tests.rs"]
+mod queue_tests;
 
 use crate::{
     content::{Content, WIZARD},
@@ -29,7 +32,10 @@ use std::{
     collections::{BTreeMap, HashMap},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 pub(crate) mod lifecycle;
 pub use lifecycle::Owner;
@@ -61,11 +67,42 @@ impl App {
         );
         Ok(usage)
     }
+    pub(crate) fn begin_admission(&self) {
+        // The owners lock orders this irreversible latch against capacity preparation.
+        let _owners = self.owners.lock().expect("ownership registry poisoned");
+        self.admission_started.store(true, Ordering::Relaxed);
+    }
 }
 use tokio::sync::mpsc;
 mod account_actions;
 #[cfg(test)]
-pub(crate) use account_actions::tests::fixture as test_app;
+pub(crate) use account_actions::tests::{fixture, fixture as test_app};
+
+#[cfg(test)]
+pub(crate) async fn fixture_persistence_tick(a: &App) -> Result<()> {
+    a.world.supervisor.ensure_running()?;
+    let mut accounts: std::collections::BTreeSet<_> =
+        a.owners.lock().unwrap().keys().copied().collect();
+    persistence_tick(a).await?;
+    a.world.supervisor.ensure_running()?;
+    // Store rejections can poison World without fencing the owning claim.
+    a.world
+        .directory(|d| {
+            for (world, w) in &d.worlds {
+                w.fixture_persistence_health(*world)?;
+            }
+            Ok(())
+        })
+        .await?;
+    accounts.extend(a.owners.lock().unwrap().keys().copied());
+    for account in accounts {
+        a.world.supervisor.check_account(account)?;
+        if let Some((_, _, failed)) = lifecycle::state(a, account) {
+            ensure!(!failed, "fixture persistence fenced account={account}");
+        }
+    }
+    Ok(())
+}
 pub(crate) mod browser_link;
 pub(crate) mod diagnostics;
 mod gold;
@@ -99,6 +136,7 @@ pub struct App {
     pub discord_link_token: Option<String>,
     pub(crate) browser_links: Arc<browser_link::Service>,
     pub owners: Arc<Mutex<BTreeMap<i32, lifecycle::Claim>>>,
+    pub(crate) admission_started: Arc<AtomicBool>,
     pub authentication: Arc<tokio::sync::RwLock<()>>,
     pub guild_actions: Arc<tokio::sync::Mutex<()>>,
     pub gold_updates: Arc<tokio::sync::Mutex<()>>,
@@ -755,16 +793,16 @@ pub(crate) async fn inventory(
     a: &App,
     id: i32,
     prepare: impl FnOnce(&mut World) -> Result<Option<InventoryPlan>> + Send + 'static,
-) -> Result<Result<()>> {
+) -> Result<Result<bool>> {
     lifecycle::player(a, id, "inventory", move |a| async move {
         lifecycle::stage(Stage::Reservation);
         let prepared = a.world.for_player(id).call(move |w| Ok(prepare(w))).await?;
         match prepared {
             Ok(Some(plan)) => {
                 persist(&a, plan).await?;
-                Ok(Ok(()))
+                Ok(Ok(true))
             }
-            Ok(None) => Ok(Ok(())),
+            Ok(None) => Ok(Ok(false)),
             Err(error) if lifecycle::rule_rejection(&error) => {
                 lifecycle::stage(Stage::Rejected);
                 Ok(Err(error))
@@ -946,7 +984,7 @@ async fn persist_death_inner(
             .await
     }
 }
-async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
+pub(crate) async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
     let report_failure = lifecycle::failure_reporter(
         a,
         &plan.plans.iter().map(|p| p.account).collect::<Vec<_>>(),
@@ -965,7 +1003,10 @@ async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
                 items: p.items.clone(),
             })
             .collect();
-        let result = a.store.exchange(writes, Vec::new()).await;
+        let result = a
+            .store
+            .exchange_trade(plan.transaction.clone(), writes, plan.delivery.clone())
+            .await;
         lifecycle::stage(Stage::Publication);
         a.world
             .for_player(id)
@@ -1015,6 +1056,7 @@ struct Session {
     player: Option<i32>,
     expected: Option<i32>,
     arrival: Option<crate::world::TransferArrival>,
+    admission: Option<Vec<u8>>,
     reconnecting: bool,
     transfer: Option<PreparedTransfer>,
     runtime: Option<tokio::runtime::Handle>,
@@ -1131,6 +1173,7 @@ async fn handle_inner(
         player,
         expected,
         arrival,
+        admission,
         reconnecting,
         transfer: _,
         runtime,
@@ -1213,6 +1256,7 @@ async fn handle_inner(
                 .map(|t| t.native_entry(id))
                 .transpose()?
                 .flatten();
+            let transfer_key = (!key.is_empty()).then(|| key.clone());
             let (destination, character, transfer_arrival) = a
                 .world
                 .directory(move |d| {
@@ -1234,6 +1278,7 @@ async fn handle_inner(
                 .await?;
             *expected = character;
             *arrival = transfer_arrival;
+            *admission = transfer_key;
             diagnostics.world = Some(destination);
             a.world = a.world.in_world(destination);
             let body = a.world.call(|w| Ok(w.map_info())).await?;
@@ -1304,6 +1349,7 @@ async fn handle_inner(
                 .map(|t| t.native_entry(account))
                 .transpose()?
                 .flatten();
+            let ticket = admission.clone();
             let bind = lifecycle::binding(a, account)?;
             let transfer_arrival = arrival.take();
             let destination = diagnostics.world.context("LOAD destination missing")?;
@@ -1321,11 +1367,12 @@ async fn handle_inner(
                         if let Some(vault) = vault {
                             w.load_vaults(vault)?;
                         }
-                        let id = w.enter_at(
+                        let id = w.enter_admitted(
                             ch,
                             Some(output),
                             prepared.map(|(_, pos)| pos),
                             presentation,
+                            ticket,
                         )?;
                         bind(id)?;
                         w.sync_account_lists(id, Some(lists))?;
@@ -1947,7 +1994,7 @@ async fn reconnect(
                 }
             };
             let world = &d.worlds[&destination];
-            if world.players.len() >= world.max_players {
+            if world.occupancy() >= world.max_players {
                 let message = crate::world::chat_info("Destination is full.");
                 crate::world::send(
                     &d.worlds[&d.location(id)?].players[&id],
@@ -1965,6 +2012,7 @@ async fn reconnect(
     let Some((destination, keytime, key, name, reservation)) = transfer else {
         return Ok(());
     };
+
     let mut o = Writer::new();
     o.utf(&name)
         .utf("")
@@ -2212,6 +2260,10 @@ async fn connection_io<S, I>(
     }
     input_task.abort();
     // Publish custody before diagnostics; neither a cancelled socket task nor its sink owns cleanup.
+    let cancelled_admission = session
+        .admission
+        .take()
+        .zip(session.account.as_ref().map(|owner| owner.id));
     let finalization = session
         .account
         .take()
@@ -2234,6 +2286,14 @@ async fn connection_io<S, I>(
             );
         }
     }
+    if let Some((key, account)) = cancelled_admission
+        && let Err(error) = a
+            .world
+            .directory(move |d| d.cancel_admission(account, key))
+            .await
+    {
+        tracing::error!(account,%error,"disconnected admission cancellation failed");
+    }
     if let Some(result) = finalization {
         let result = match result {
             Ok(Some(finalization)) => finalization.wait().await,
@@ -2250,10 +2310,19 @@ pub(crate) async fn automatic_transfer(
     id: i32,
 ) -> Result<Option<crate::world::ForcedTransfer>> {
     let transfer = a.world.directory(move |d| d.forced_transfer(id)).await?;
-    if transfer.is_some() {
-        depart(a, id).await?;
+    if let Some(transfer) = transfer {
+        if let Err(error) = depart(a, id).await {
+            return a
+                .world
+                .directory(move |d| {
+                    d.cancel_forced_transfer(&transfer);
+                    Err(error)
+                })
+                .await;
+        }
+        return Ok(Some(transfer));
     }
-    Ok(transfer)
+    Ok(None)
 }
 pub(crate) async fn depart(a: &App, id: i32) -> Result<()> {
     // Legacy owned adapter continuations retain custody until their Phase2 conversion.
@@ -2303,6 +2372,8 @@ async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> R
         })
         .await?;
     refresh_giver_credits(a, id).await?;
+    lifecycle::stage(Stage::Reservation);
+    let origin = a.world.directory(move |d| d.location(id)).await?;
     loop {
         lifecycle::stage(Stage::Reservation);
         let transfer = key.clone();
@@ -2369,6 +2440,12 @@ async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> R
             .await?;
         lifecycle::stage(Stage::Retirement);
         retirement()?;
+        a.world
+            .directory(move |d| {
+                d.realm_departed(origin, id);
+                Ok(())
+            })
+            .await?;
         lifecycle::stage(Stage::Settled);
         return Ok(());
     }
