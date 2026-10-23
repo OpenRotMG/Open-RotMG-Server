@@ -36,7 +36,18 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
     app.store.progress(old.clone()).await.unwrap();
     let mut owner = Some(app.claim(old.account).unwrap());
     let mut owners = vec![];
-    let (old_id, old_rx, old_sender, _) = enter(&app, p, old.clone(), -3, None).await.unwrap();
+    let position = app
+        .world
+        .in_world(-3)
+        .call(|w| {
+            let (x, y) = w.map.spawns[0];
+            Ok(Pos { x, y })
+        })
+        .await
+        .unwrap();
+    let (old_id, old_rx, old_sender, _) = enter(&app, p, old.clone(), -3, Some(position))
+        .await
+        .unwrap();
     let session = app
         .world
         .directory(move |d| Ok(d.player_view(old_id)?.session))
@@ -72,7 +83,7 @@ async fn community_social_replacement_arrives_in_nexus_when_dead_realms_slot_is_
             .await
             .unwrap();
         owners.push(app.claim(ch.account).unwrap());
-        others.push(enter(&app, *p, ch, -3, None).await.unwrap());
+        others.push(enter(&app, *p, ch, -3, Some(position)).await.unwrap());
     }
     assert_eq!(
         app.world

@@ -793,7 +793,7 @@ async fn all_death_fame_phase4_transfer_cancellation_cutoff() {
             (ready, release)
         } else {
             // The eighth existing executor call is source snapshot reservation, before write acceptance.
-            a.world.lifecycle_test_pause_job(8, true)
+            a.world.lifecycle_test_pause_job(9, true)
         };
         let release = HeldReply(Some(release));
         let finalization = lifecycle::finalize_transfer(&a, id, reservation).unwrap();
@@ -1188,7 +1188,7 @@ async fn all_death_fame_phase4_capacity_acceptance_boundaries() {
         let (_owner, id, ch, destination, time, key, reservation) =
             earned_source(&a, "phase4-capacity-boundary").await;
         let gate = if boundary == 1 {
-            Some(a.world.lifecycle_test_pause_job(8, false))
+            Some(a.world.lifecycle_test_pause_job(9, false))
         } else if boundary == 2 {
             let (entered, ready) = tokio::sync::oneshot::channel();
             let (release, wait) = std::sync::mpsc::channel();
