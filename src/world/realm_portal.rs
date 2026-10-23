@@ -6,6 +6,34 @@ pub(super) const NAMES: &[&str] = &[
 ];
 
 impl Directory {
+    #[cfg(test)]
+    pub(crate) fn prepare_single_realm_fixture(&mut self) -> Result<()> {
+        ensure!(
+            self.clock.paused(),
+            "single Realm fixture requires a paused clock"
+        );
+        ensure!(
+            self.worlds
+                .values()
+                .all(|w| w.players.is_empty() && w.reserved_slots() == 0),
+            "single Realm fixture requires no enrolled players or reservations"
+        );
+        ensure!(
+            self.worlds.get(&-3).is_some_and(|w| w.name == "Realm"),
+            "primary fixture Realm missing"
+        );
+        for (world, record) in &mut self.endgame.realms {
+            if *world != -3 {
+                record.enabled = false;
+                self.worlds
+                    .get_mut(world)
+                    .context("fixture Realm missing")?
+                    .admission_open = false;
+            }
+        }
+        self.sync_realm_portal();
+        Ok(())
+    }
     pub(crate) fn prepare_realm_capacity(&mut self, limit: usize) -> Result<i32> {
         ensure!(
             self.clock.paused(),

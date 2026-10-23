@@ -871,7 +871,7 @@ mod tests {
 
     #[test]
     fn realm_pool_large_collective_departure_drains_with_bounded_live_grants() {
-        fn arrive(d: &mut Directory, route: ForcedTransfer) -> (i32, Character) {
+        fn arrive(d: &mut Directory, route: ForcedTransfer) -> (i32, Character, Vec<u8>) {
             let destination = route.destination.unwrap();
             let w = d.worlds.get_mut(&-3).unwrap();
             let account = w.players[&route.player].character.account;
@@ -890,10 +890,10 @@ mod tests {
                 ch.id
             );
             assert!(
-                d.consume(account, destination, route.key_time, route.key)
+                d.consume(account, destination, route.key_time, route.key.clone())
                     .is_err()
             );
-            (destination, ch)
+            (destination, ch, route.key)
         }
         for count in [65, 85] {
             let mut d = Directory::load(
@@ -931,7 +931,7 @@ mod tests {
             assert_eq!(d.endgame.forced.len(), count as usize - 64);
             assert!(d.issue(1000, 1000, -2).is_err());
             for waiting in players.iter().skip(64) {
-                let (destination, ch) = arrive(&mut d, routes.pop().unwrap());
+                let (destination, ch, key) = arrive(&mut d, routes.pop().unwrap());
                 assert_eq!(destination, castle);
                 assert!(
                     d.forced_transfer(*waiting).unwrap().is_none(),
@@ -943,7 +943,18 @@ mod tests {
                 d.worlds
                     .get_mut(&destination)
                     .unwrap()
-                    .enter(ch, None)
+                    .enter_admitted(
+                        ch,
+                        None,
+                        None,
+                        AccountPresentation {
+                            guild: None,
+                            fame: 0,
+                            best_fame: BTreeMap::new(),
+                            credits: 0,
+                        },
+                        Some(key),
+                    )
                     .unwrap();
                 let route = d.forced_transfer(*waiting).unwrap().unwrap();
                 assert_eq!(route.destination, Some(castle));
@@ -951,12 +962,23 @@ mod tests {
                 assert_eq!(d.grants.len(), 64);
             }
             for route in routes {
-                let (destination, ch) = arrive(&mut d, route);
+                let (destination, ch, key) = arrive(&mut d, route);
                 assert_eq!(destination, castle);
                 d.worlds
                     .get_mut(&destination)
                     .unwrap()
-                    .enter(ch, None)
+                    .enter_admitted(
+                        ch,
+                        None,
+                        None,
+                        AccountPresentation {
+                            guild: None,
+                            fame: 0,
+                            best_fame: BTreeMap::new(),
+                            credits: 0,
+                        },
+                        Some(key),
+                    )
                     .unwrap();
             }
             d.retire_transfer_grants();
