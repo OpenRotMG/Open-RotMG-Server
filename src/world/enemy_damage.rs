@@ -146,6 +146,21 @@ impl World {
         } else if transform {
             self.quest_lethal_transform(target)?;
         } else if kill {
+            if self.name == "Realm"
+                && (crate::endgame::HEROES.contains(&kind)
+                    || crate::quest::root(kind)
+                    || crate::quest::final_root(kind))
+                && let Some(player) = self.players.get(&owner).filter(|p| {
+                    p.character.alive
+                        && !p.death_pending
+                        && !p.departing
+                        && !p.character.name.is_empty()
+                })
+            {
+                let root = self.entities[&target].quest.unwrap_or(target);
+                self.critical_killers
+                    .insert(root, (kind, player.character.name.clone()));
+            }
             // Terminal authority seals NEW credit sources; damage and shared XP still resolve normally.
             let killer = self
                 .players

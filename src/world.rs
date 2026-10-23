@@ -70,7 +70,10 @@ mod population_density;
 #[cfg(test)]
 mod quest_tests;
 
+#[cfg(test)]
+mod realm_completion_tests;
 mod realm_events;
+mod realm_voice;
 
 mod realm_portal;
 mod realm_quests;
@@ -790,8 +793,11 @@ pub struct World {
     setpieces: Vec<realm_setpieces::Area>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
+    critical_killers: BTreeMap<i32, (u16, String)>,
     event_reserves: Vec<realm_events::ReservedEvent>,
     event_waiting: Option<i32>,
+    event_choice: Option<u16>,
+    event_rng: rand::rngs::StdRng,
     admission_open: bool,
     bag_expiry: BTreeMap<i32, u64>,
     cleared: bool,
@@ -1225,6 +1231,7 @@ impl Directory {
         if let Some(seed) = self.prepared_seed {
             let seed = seed ^ self.next_world as u64;
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
             world.prepared_seed = Some(seed);
         }
         world.name = name.into();
@@ -1258,6 +1265,7 @@ impl Directory {
             world.populate_hermit()?;
             world.populate_manor_entry()?;
             world.populate_ghost_ship()?;
+            world.populate_lost_lands()?;
             world.populate_realm_population()?;
             // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
             let crystal = world.place_named_setpiece(0x935, &[1])?;
@@ -2632,8 +2640,11 @@ impl World {
             setpieces: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
+            critical_killers: BTreeMap::new(),
             event_reserves: vec![],
             event_waiting: None,
+            event_choice: None,
+            event_rng: rand::rngs::StdRng::from_entropy(),
             admission_open: true,
             bag_expiry: BTreeMap::new(),
             cleared: false,
@@ -3181,6 +3192,11 @@ impl World {
         o.i32(id).i32(char_id);
         send(&self.players[&id], wire::CREATE_SUCCESS, o.0);
         self.updates(id, true)?;
+        if self.name == "Realm" {
+            let welcome =
+                chat::text_packet("#Oryx the Mad God", -1, 0, "You are food for my minions!");
+            send(&self.players[&id], welcome.id, welcome.body);
+        }
         self.locker_key_ui(id);
         tracing::info!(
             player = id,
@@ -5462,6 +5478,21 @@ impl World {
         if crate::dungeon::abyss::ROSTER.contains(&defeated.kind) {
             return self.abyss_loot(defeated);
         }
+        // Rum is outside the comparator's private threshold; roll it once, not once per raider.
+        if defeated.kind == 0xe37
+            && self.players.values().any(|p| {
+                p.character.alive
+                    && !p.death_pending
+                    && !p.departing
+                    && defeated
+                        .damage
+                        .get(&p.character.id)
+                        .is_some_and(|damage| *damage > 0)
+            })
+            && self.rng.gen_bool(0.2)
+        {
+            self.loot_bags(defeated.pos, None, &[0xc25])?;
+        }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
@@ -5472,7 +5503,7 @@ impl World {
             self.content.objects[&defeated.kind].hp / 20
         } else if matches!(
             defeated.kind,
-            0xd5a | 0xd60 | crate::dungeon::tomb::SPHINX | 0x1705
+            0xd50 | 0xe37 | 0xd5a | 0xd60 | crate::dungeon::tomb::SPHINX | 0x1705
         ) || matches!(
             defeated.kind,
             crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
@@ -7570,7 +7601,7 @@ mod tests {
                 (244, None, "", 0, 0)
             );
         }
-        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (11, 22));
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (11, 26));
         assert_eq!(w.population_counts[0], 0);
         for terrain in 1..=12 {
             let region = &w.population_regions[terrain];
@@ -7647,7 +7678,7 @@ mod tests {
                 assert!(entities.contains(&(i % 2100, i / 2100, kind)));
             }
         }
-        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (11, 22));
+        assert_eq!((w.hero_identities().len(), w.setpieces.len()), (11, 26));
         for terrain in 1..=12 {
             let region = &w.population_regions[terrain];
             assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));
@@ -7842,7 +7873,7 @@ mod tests {
                     .into_iter()
                     .collect::<BTreeMap<_, _>>()
             );
-            assert_eq!(w.setpieces.len(), 22);
+            assert_eq!(w.setpieces.len(), 26);
             for terrain in 1..=12 {
                 let region = &w.population_regions[terrain];
                 assert!((region.target..=region.limit).contains(&w.population_counts[terrain]));

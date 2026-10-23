@@ -380,7 +380,12 @@ impl Directory {
                         Ok(realm_events::EventAdmission::Miss) => {}
                     }
                 }
+                let killer = world.critical_killers.remove(&id);
                 if cycle.defeated(id, now) {
+                    if let Some((kind, player)) = killer {
+                        world.realm_killed_notice(kind, &player);
+                    }
+                    world.last_realm_enemy_notice(&cycle.remaining);
                     tracing::info!(
                         origin,
                         hero = id,
@@ -988,6 +993,16 @@ mod tests {
         let (_, mut peer) = listener(&mut d, origin);
         let (_, mut b) = listener(&mut d, other);
         let (_, mut nexus) = listener(&mut d, -2);
+        for rx in [&mut a, &mut peer, &mut b] {
+            assert_eq!(
+                texts(rx),
+                vec![(
+                    "#Oryx the Mad God".into(),
+                    "You are food for my minions!".into()
+                )]
+            );
+        }
+        assert!(texts(&mut nexus).is_empty());
         let w = d.worlds.get_mut(&origin).unwrap();
         w.event_reserves.clear();
         let pos = w.players[&owner].pos;
@@ -1026,7 +1041,17 @@ mod tests {
             .unwrap();
         d.tick = 2401;
         d.endgame_step();
-        assert!(texts(&mut a).is_empty());
+        let death = texts(&mut a);
+        assert!(
+            death
+                .iter()
+                .any(|(_, text)| text == "A Red Demon still guards me!")
+        );
+        assert!(
+            !death
+                .iter()
+                .any(|(_, text)| text.contains("My final Red Demon is unassailable!"))
+        );
         d.tick = 4800;
         d.endgame_step();
         assert_eq!(
@@ -1044,7 +1069,14 @@ mod tests {
         d.tick = 4801;
         d.endgame_step();
         assert!(!d.endgame.realms[&origin].cycle.admits());
-        assert_eq!(texts(&mut a).len(), 1);
+        assert_eq!(
+            texts(&mut a)
+                .iter()
+                .filter(|(_, text)| text
+                    == "I HAVE CLOSED THIS REALM! YOU WILL NOT LIVE TO SEE THE LIGHT OF DAY!")
+                .count(),
+            1
+        );
         d.tick = 7200;
         d.endgame_step();
         assert!(texts(&mut a).is_empty());
@@ -1328,7 +1360,7 @@ mod tests {
                 .unwrap();
             assert_eq!(w.critical_deaths, vec![source]);
             let before = w.event_reserves.len();
-            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.event_rng = rand::rngs::StdRng::seed_from_u64(seed);
             d.endgame_step();
             let w = d.worlds.get_mut(&origin).unwrap();
             assert!(before - w.event_reserves.len() <= 1);
@@ -1389,7 +1421,7 @@ mod tests {
         d.tick = 200;
         w.damage_enemy(owner, source, 100000, false, &[], None)
             .unwrap();
-        w.rng = rand::rngs::StdRng::seed_from_u64(winning_seed.unwrap());
+        w.event_rng = rand::rngs::StdRng::seed_from_u64(winning_seed.unwrap());
         d.endgame_step();
         assert_eq!(d.worlds[&origin].event_waiting, Some(source));
         assert_eq!(

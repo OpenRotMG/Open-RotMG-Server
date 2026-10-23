@@ -4,6 +4,16 @@ use crate::{
     encounter::{Anchor, Motion, nr_speed},
 };
 impl World {
+    pub(super) fn populate_lost_lands(&mut self) -> Result<()> {
+        for kind in 0xd50..=0xd53 {
+            crate::encounter::validate(&self.content, kind)?;
+            crate::loot::validate(&self.content, kind)?;
+        }
+        let pos = self.place_named_setpiece(0xd50, &[1])?;
+        let id = self.spawn_entity(0xd50, pos, vec![])?;
+        self.landmark_bind(id)?;
+        Ok(())
+    }
     pub(super) fn lost_lands_mechanics(&mut self, id: i32, target: Option<Pos>) -> Result<()> {
         let kind = self.entities[&id].kind;
         if kind != 0xd50 {

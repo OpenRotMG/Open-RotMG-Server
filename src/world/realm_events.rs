@@ -214,11 +214,20 @@ impl World {
                 return Ok(EventAdmission::Waiting);
             }
         } else {
-            if self.event_reserves.is_empty() || !self.rng.gen_bool(0.1) {
+            if self.event_reserves.is_empty() || !self.event_rng.gen_bool(0.25) {
                 return Ok(EventAdmission::Miss);
             }
             self.event_waiting = Some(source);
             tracing::info!(source, "quest defeat earned a pending Realm event");
+        }
+        if self.event_choice.is_none() {
+            let kinds: BTreeSet<_> = self.event_reserves.iter().map(|e| e.root.kind).collect();
+            let kinds: Vec<_> = kinds.into_iter().collect();
+            self.event_choice = Some(
+                *kinds
+                    .choose(&mut self.event_rng)
+                    .context("pending event has no eligible type")?,
+            );
         }
         let owned = self.summon_occupancy();
         let clear: Vec<_> = self
@@ -227,7 +236,9 @@ impl World {
             .enumerate()
             .filter(|(_, event)| {
                 // Admission is not a reservation: actual initial-group dispatch rechecks its budget.
-                owned + 1 + event.children.len() + mandatory_initial_summons(event.root.kind) <= 256
+                Some(event.root.kind) == self.event_choice
+                    && owned + 1 + event.children.len() + mandatory_initial_summons(event.root.kind)
+                        <= 256
                     && self
                         .players
                         .values()
@@ -235,7 +246,7 @@ impl World {
             })
             .map(|(index, _)| index)
             .collect();
-        let Some(index) = clear.choose(&mut self.rng).copied() else {
+        let Some(index) = clear.first().copied() else {
             return Ok(EventAdmission::Waiting);
         };
         let event = self.event_reserves.remove(index);
@@ -271,6 +282,7 @@ impl World {
             ));
         }
         self.event_waiting = None;
+        self.event_choice = None;
         self.oryx_notice(match kind {
             0xd56 => "Your futile efforts are no match for a Skull Shrine!",
             0xd59 => "Your meager abilities cannot possibly challenge a Cube God!",
@@ -297,7 +309,8 @@ impl World {
             quest::validate(&self.content, kind)?;
             crate::loot::validate(&self.content, kind)?;
         }
-        for kind in quest::EVENTS {
+        // Two independent prebuilt sites enforce the approved lifetime cap without reusing dead identities.
+        for kind in quest::EVENTS.into_iter().chain(quest::EVENTS) {
             let pos = self.place_named_setpiece(kind, &[1])?;
             let root = self.spawn_entity(kind, pos, vec![])?;
             let e = self.entities.get_mut(&root).unwrap();
