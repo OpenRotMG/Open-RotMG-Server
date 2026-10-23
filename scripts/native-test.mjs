@@ -168,20 +168,21 @@ export async function runCase(scenario, options) {
     try{await writeFile(join(out,'result.tmp'),bytes,{mode:0o600});await rename(join(out,'result.tmp'),join(out,'result.json'));}finally{release();}
   };
   const register=()=>{registryState.children=children.filter(r=>r.identity).map(r=>({...r.identity,name:r.name}));registry(join(out,'children.json'),registryState);};
-  const fail=error=>{if(closing)report.cleanupErrors.push(String(error));else if(!controller.signal.aborted)controller.abort(error);};
+  const cleanupCauses=[],cleanupError=error=>{cleanupCauses.push(error);report.cleanupErrors.push(String(error));};
+  const fail=error=>{if(closing)cleanupError(error);else if(!controller.signal.aborted)controller.abort(error);};
   const interrupted=()=>fail(Error('Native test interrupted'));
   process.once('SIGINT',interrupted);process.once('SIGTERM',interrupted);
   const timer=setTimeout(()=>fail(Error('Native test active deadline reached; cleanup reserve retained')),(archive?archive.deadline-Date.now():timeout)-120000);
   let rejectStop;const stopped=new Promise((_,bad)=>{rejectStop=bad;});stopped.catch(()=>{});
   controller.signal.addEventListener('abort',()=>rejectStop(controller.signal.reason),{once:true});
   const check=()=>controller.signal.throwIfAborted();
-  const connections=nativeConnections({signal:controller.signal,closing:()=>closing,cleanupError:error=>report.cleanupErrors.push(String(error)),diagnose:message=>console.error(message)});
+  const connections=nativeConnections({signal:controller.signal,closing:()=>closing,cleanupError,diagnose:message=>console.error(message)});
   const bounded=async(name,work)=>{check();phase=name;report.phase=name;await save();check();const t=performance.now();try{return await Promise.race([work(),stopped]);}finally{report.phases[name]=(report.phases[name]??0)+Math.round(performance.now()-t);}};
   const log=async name=>{const f=await open(join(out,name),'a',0o600);files.push(f);return f.fd;};
   const launch=(name,command,args,stdio,env=process.env)=>{
-    check();const row=startChild(command,args,{cwd:root,stdio,env},controller.signal);row.name=name;children.push(row);register();
-    row.started.then(()=>{if(!row.identity){row.identity=identity(row.child.pid);register();}},fail);
-    row.closed.then(value=>{row.done=true;if(!row.stopping)fail(Error(name+' exited before cleanup: '+JSON.stringify(value)));});return row;
+    check();const row=startChild(command,args,{cwd:root,stdio,env},controller.signal);row.name=name;children.push(row);
+    row.started.then(register).catch(fail);
+    row.closed.then(value=>{row.done=true;if(!row.stopping)fail(Error(name+' exited before cleanup: '+JSON.stringify(value)));});register();return row;
   };
   const waitFor=async(work,description,limit=30000)=>{
     const end=performance.now()+limit;
@@ -210,9 +211,9 @@ export async function runCase(scenario, options) {
   try {
     await save();
     registryState={parent:identity(process.pid),boot:readFileSync('/proc/sys/kernel/random/boot_id','utf8'),deadline:archive?archive.deadline:Date.now()+timeout,children:[],done:false};register();
-    guardian=startChild(process.execPath,[join(root,'scripts/native-test-process.mjs'),out],{stdio:['ignore','ignore',await log('guardian.log')]},controller.signal);await guardian.started;
+    guardian=startChild(process.execPath,[join(root,'scripts/native-test-process.mjs'),out],{stdio:['ignore','ignore',await log('guardian.log')]},controller.signal);
     guardian.closed.then(value=>{if(!closing)fail(Error('Cleanup guardian exited early: '+JSON.stringify(value)));});
-    report.guardian=guardian.child.pid;
+    report.guardian=guardian.child.pid;await guardian.started;
     report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]])report.inputs[name]=createHash('sha256').update(await readFile(path)).digest('hex');
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);if(archive)assert(typeof fixtureModule.readArchive==='function'&&!Object.hasOwn(fixtureModule,'prepare')&&!Object.hasOwn(fixtureModule,'enter')&&!Object.hasOwn(fixtureModule,'fixture')&&!Object.hasOwn(fixtureModule,'run'),'Archive requires readArchive only: no fixture/prepare/enter/run');else assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');hasNativeEntry(fixtureModule);
     let spec=archive?null:fixtureModule.prepare===undefined?await prepareFixture(fixtureModule,api,controller.signal):null;
@@ -341,21 +342,26 @@ export async function runCase(scenario, options) {
       for(const b of ownedBrowsers)for(const page of (await managed.liveTargets(b.port)).targets.filter(p=>p.type==='page')){
         const tab={...b,target:page.targetId};await managed.ensureTarget(tab);managed.assertOwner(tab,owner);tabs.push(tab);
       }
-    }catch(error){report.cleanupErrors.push(String(error));}
+    }catch(error){cleanupError(error);}
     connections.close();
     // One graceful browser shutdown drains renderer work before retiring its owned targets.
     for(const row of children.reverse()){
       row.stopping=true;
-      try{report.children.push({name:row.name,...await stopChild(row)});if(row.name==='Chrome')for(const tab of tabs.filter(t=>t.pid===row.child.pid))managed.released(tab);}catch(error){report.cleanupErrors.push(String(error));}
+      try{report.children.push({name:row.name,...await stopChild(row)});if(row.name==='Chrome')for(const tab of tabs.filter(t=>t.pid===row.child.pid))managed.released(tab);}catch(error){report.children.push({name:row.name,pid:row.child.pid,identity:row.identity,error:String(error)});cleanupError(error);}
     }
-    if(registryState){registryState.done=true;register();}
-    if(guardian)try{const end=setTimeout(()=>guardian.child.kill('SIGTERM'),5000);try{const value=await guardian.closed;report.children.push({name:'guardian',...value});assert.equal(value.code,0,'Cleanup guardian failed');}finally{clearTimeout(end);}}catch(error){report.cleanupErrors.push(String(error));}
-    for(const f of files)try{await f.close();}catch(error){report.cleanupErrors.push(String(error));}
+    try{if(registryState){registryState.done=report.cleanupErrors.length===0;register();}}catch(error){cleanupError(error);}
+    if(guardian)try{
+      const closed=await Promise.race([guardian.closed.then(value=>({value})),delay(5000,undefined,{ref:false}).then(()=>null)]);
+      if(!closed)cleanupError(Error('Cleanup guardian exceeded original 5000ms wait: '+guardian.child.pid));
+      const value=closed?closed.value:await stopChild(guardian,0);report.children.push({name:'guardian',...value});assert.equal(value.code,0,'Cleanup guardian failed');
+    }catch(error){report.children.push({name:'guardian',pid:guardian.child.pid,identity:guardian.identity,error:String(error)});cleanupError(error);}
+    if(registryState&&report.cleanupErrors.length)try{registryState.done=false;register();}catch(error){cleanupError(error);}
+    for(const f of files)try{await f.close();}catch(error){cleanupError(error);}
     report.phases.cleanup=Math.round(performance.now()-cleanup);if(report.cleanupErrors.length)report.status='failed';
     try{await save();}finally{process.removeListener('SIGINT',interrupted);process.removeListener('SIGTERM',interrupted);activeCase=false;if(previousOwner===undefined)delete process.env.PI_BROWSER_OWNER;else process.env.PI_BROWSER_OWNER=previousOwner;}
   }
-  if(primary)throw Error('Native test failed during '+report.failure.phase+': '+String(primary)+'; '+join(out,'result.json'));
-  if(report.cleanupErrors.length)throw Error('Native test cleanup failed: '+report.cleanupErrors.join('; ')+'; '+join(out,'result.json'));
+  if(primary)throw new AggregateError([primary,...cleanupCauses],'Native test failed during '+report.failure.phase+': '+String(primary)+'; '+join(out,'result.json'),{cause:primary});
+  if(report.cleanupErrors.length)throw new AggregateError(cleanupCauses,'Native test cleanup failed: '+report.cleanupErrors.join('; ')+'; '+join(out,'result.json'));
   return {...report,wallMs:elapsed(),report:join(out,'result.json')};
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
