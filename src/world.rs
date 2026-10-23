@@ -1099,22 +1099,26 @@ impl Directory {
             .map(|(id, _)| *id)
             .context("player missing from world directory")
     }
+    pub(crate) fn available_realms(&self) -> Vec<(i32, usize)> {
+        self.endgame
+            .realms
+            .iter()
+            .filter(|(id, record)| {
+                record.enabled
+                    && self.worlds[id].admission_open
+                    && self.worlds[id].occupancy() < self.worlds[id].max_players
+            })
+            .map(|(id, _)| (*id, self.worlds[id].occupancy()))
+            .collect()
+    }
     pub fn initial(&self, game: i32) -> Result<i32> {
         let destination = match game {
             0 | -2 => -2,
             -1 => -1,
-            -3 => *self
-                .endgame
-                .realms
-                .iter()
-                .filter(|(id, record)| {
-                    record.enabled
-                        && self.worlds[id].admission_open
-                        && self.worlds[id].occupancy() < self.worlds[id].max_players
-                })
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>()
+            -3 => self
+                .available_realms()
                 .choose(&mut rand::thread_rng())
+                .map(|(id, _)| *id)
                 .ok_or_else(|| controller("no open Realm has capacity"))?,
             -4 => -4,
             _ => {

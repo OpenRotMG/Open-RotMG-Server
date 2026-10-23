@@ -39,7 +39,17 @@ async fn enter_admitted(
     admission: Option<Vec<u8>>,
 ) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
     let world = if world == -3 && position.is_none() && admission.is_none() {
-        app.world.directory(|d| d.initial(-3)).await?
+        let account = character.account;
+        app.world
+            .directory(move |d| {
+                let choices = d.available_realms();
+                ensure!(
+                    !choices.is_empty(),
+                    anyhow::anyhow!(CloseReason::Controller).context("no open Realm has capacity")
+                );
+                realms::choose(account, &choices, &mut rand::thread_rng())
+            })
+            .await?
     } else {
         world
     };
