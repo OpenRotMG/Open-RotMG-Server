@@ -83,6 +83,133 @@ fn complete_positive_progression(
         && engaged_accounts(sequence, actors) >= 3
 }
 
+fn completed_oryx_readiness_retreat(
+    fields: &[Value],
+    final_views: &[Value],
+    actors: &[(i32, i32)],
+    deaths: &std::collections::BTreeMap<(i32, i32), i32>,
+) -> bool {
+    if !earned_chamber_prefix(fields)
+        || fields.iter().any(|f| {
+            f["message"] == "consumable committed; bound dungeon portal published"
+                && f["kind"] == 0x700
+        })
+    {
+        return false;
+    }
+    let mut retained_key = false;
+    for &(account, character) in actors {
+        if deaths.contains_key(&(account, character)) {
+            continue;
+        }
+        let Some(final_view) = final_views
+            .iter()
+            .find(|p| p["session"]["account"] == account && p["session"]["character"] == character)
+        else {
+            return false;
+        };
+        if events::shared(final_view["map"].as_str().unwrap())
+            || final_view["lifecycle"]["alive"] != true
+            || final_view["lifecycle"]["busy"] != false
+            || final_view["lifecycle"]["quarantined"] != false
+            || final_view["diagnostic"]["pending"] != false
+        {
+            return false;
+        }
+        if guarded_exit(fields, account) || readiness_exit(fields, account) {
+            continue;
+        }
+        let proved = fields.iter().enumerate().any(|(index, selected)| {
+            if selected["message"] != "prepared postclear final selected decision"
+                || selected["account"] != account
+                || selected["character"] != character
+                || selected["journey"] != "Some(Nexus)"
+                || selected["item"] != "None"
+            {
+                return false;
+            }
+            let Some(audit) = fields[..index]
+                .iter()
+                .rev()
+                .filter(|f| f["message"] == "prepared postclear evaluator key audit")
+                .map(|f| serde_json::from_str::<Value>(f["audit"].as_str().unwrap()).unwrap())
+                .find(|a| a["normal_view_sha256"] == selected["normal_view_sha256"])
+            else {
+                return false;
+            };
+            let raw = audit["normal_view_raw"].as_str().unwrap();
+            let normal: Value = serde_json::from_str(raw).unwrap();
+            if format!("{:x}", sha2::Sha256::digest(raw.as_bytes()))
+                != selected["normal_view_sha256"].as_str().unwrap()
+                || normal["session"]["account"] != account
+                || normal["session"]["character"] != character
+                || normal["tick"] != selected["tick"]
+                || normal["time_ms"] != selected["time_ms"]
+                || normal["map"]["name"] != "Oryx's Chamber"
+                || audit["chamber_cleared"] != true
+                || audit["any_pending"] != false
+                || audit["pending_opening"] != false
+                || audit["open_cellar"] != false
+            {
+                return false;
+            }
+            let key = json!(crate::endgame::INCANTATION);
+            let holds_key = normal["character"]["items"]
+                .as_array()
+                .unwrap()
+                .contains(&key);
+            let cause = if holds_key {
+                let injured = normal["character"]["hp"].as_f64().unwrap() * 4.
+                    < normal["character"]["stats"][0].as_f64().unwrap() * 3.;
+                (account, character) == actors[1]
+                    && injured
+                    && final_view["character"]["items"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&key) && fields[..index].iter().rev().any(|f| {
+                    f["message"]
+                        == "autonomous Cellar opening abandoned; opportunity or readiness expired"
+                        && f["account"] == account
+                        && normal["objects"].as_array().unwrap().iter().any(|o| {
+                            o["kind"] == crate::endgame::LOCKED_CELLAR && o["id"] == f["portal"]
+                        })
+                })
+            } else {
+                fields[..index].iter().rev().any(|f| {
+                    f["message"] == "autonomous postclear own-view branch witness"
+                        && f["normal_view"] == raw
+                        && f["pending"] == false
+                        && f["loot_waiting"] == false
+                        && f["live_objective"] == false
+                })
+            };
+            let acknowledged = fields[index + 1..].iter().any(|f| {
+                f["message"] == "prepared postclear durable transfer ACK"
+                    && f["account"] == account
+                    && f["character"] == character
+                    && f["normal_view_sha256"] == selected["normal_view_sha256"]
+                    && f["origin_world"] == normal["session"]["world"]
+                    && f["origin_player"] == normal["session"]["player"]
+                    && f["tick"] == normal["tick"]
+                    && f["time_ms"] == normal["time_ms"]
+                    && f["destination"] == final_view["session"]["world"]
+                    && f["player"] == final_view["session"]["player"]
+                    && f["portal"] == "None"
+            });
+            if cause && acknowledged {
+                retained_key |= holds_key;
+                true
+            } else {
+                false
+            }
+        });
+        if !proved {
+            return false;
+        }
+    }
+    retained_key
+}
+
 #[test]
 fn community_events_castle_positive_stop_requires_complete_earned_owned_acknowledged_progression() {
     let actors: Vec<_> = (1..=6).map(|a| (a, a)).collect();
@@ -445,7 +572,28 @@ async fn community_events_actual_castle_controllers_progress_or_causally_abandon
     let deaths = super::aftermath::canonical_death_revisions(&dir, &actors);
     let completed_oryx_key_lost_aftermath =
         super::aftermath::completed_oryx_key_lost_aftermath(&fields, &sequence, &initial, &deaths);
+    let readiness_retreat =
+        completed_oryx_readiness_retreat(&positive_fields, final_views, &actors, &deaths);
+    if readiness_retreat {
+        for message in [
+            "actual Oryx defeat opened earned exits",
+            "autonomous Cellar opening abandoned; opportunity or readiness expired",
+            "prepared postclear evaluator key audit",
+            "prepared postclear durable transfer ACK",
+        ] {
+            let missing: Vec<_> = positive_fields
+                .iter()
+                .filter(|f| f["message"] != message)
+                .cloned()
+                .collect();
+            assert!(
+                !completed_oryx_readiness_retreat(&missing, final_views, &actors, &deaths),
+                "missing {message}"
+            );
+        }
+    }
     let result = json!({"original":dir,"positive_continuous_chain_observed":positive,"causal_all_participant_abandon":abandoned,
+        "completed_oryx_readiness_retreat_key_retained":readiness_retreat,
         "completed_oryx_key_lost_aftermath_cellar_negative":completed_oryx_key_lost_aftermath,
         "engaged_accounts":engaged,"consumables_committed":published.len(),"simulation_step_ms":step_ms,"active_wall_ms":wall_ms,"stop_cause":stop_cause});
     fs::write(
@@ -465,8 +613,8 @@ async fn community_events_actual_castle_controllers_progress_or_causally_abandon
         dir.display()
     );
     assert!(
-        positive || abandoned || completed_oryx_key_lost_aftermath.is_some(),
-        "neither continuous progression, causal complete abandon nor verified completed-Oryx/key-lost aftermath: {}",
+        positive || abandoned || completed_oryx_key_lost_aftermath.is_some() || readiness_retreat,
+        "neither continuous progression, causal complete abandon nor verified completed-Oryx aftermath: {}",
         dir.display()
     );
 }

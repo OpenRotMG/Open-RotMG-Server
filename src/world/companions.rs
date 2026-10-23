@@ -32,11 +32,48 @@ impl State {
 fn duration(kind: u16) -> Result<Option<u64>> {
     match kind {
         0x1401 => Ok(Some(60_000)),
-        0x1400 | 0x1402..=0x1405 => Ok(Some(30_000)),
+        0x1400 | 0x1402..=0x1405 | 0x140a => Ok(Some(30_000)),
         0x1407 | 0x1408 => Ok(None),
         _ => bail!("This temporary companion is not implemented yet."),
     }
 }
+fn castle_successor(content: &Content, item: &Object) -> Result<i32> {
+    let doses = match item.kind {
+        // The selected terminal pail omits Doses; the loader represents it as one dose.
+        0xc34..=0xc38 => Some((0xc39 - item.kind) as u8),
+        _ => bail!("Sand Castle activation requires a selected Sand Pail"),
+    };
+    let metadata = item
+        .companion
+        .as_ref()
+        .context("Sand Pail activation missing")?;
+    ensure!(
+        item.doses == doses
+            && item.class == "Equipment"
+            && item.consumable
+            && item.slot_type == 10
+            && item.activations == 1
+            && !metadata.permanent
+            && metadata.object == "Sand Castle",
+        "invalid selected Sand Pail dose metadata"
+    );
+    if item.kind == 0xc38 {
+        ensure!(item.successor.is_none(), "last Sand Pail has a successor");
+        return Ok(-1);
+    }
+    let next = content.named(
+        item.successor
+            .as_deref()
+            .context("Sand Pail successor missing")?,
+    )?;
+    ensure!(
+        next.kind == item.kind + 1,
+        "Sand Pail successor is not the next dose"
+    );
+    castle_successor(content, next)?;
+    Ok(i32::from(next.kind))
+}
+
 impl World {
     fn reserve_companion(
         &mut self,
@@ -119,7 +156,14 @@ impl World {
         if !pet.permanent {
             pet.until = duration(pet.kind)?.map(|duration| self.now + duration);
         }
-        pet.pulse = self.now + if pet.remaining > 0 { 0 } else { 50 };
+        pet.pulse = self.now
+            + if pet.remaining > 0 {
+                0
+            } else if pet.kind == 0x140a {
+                1000
+            } else {
+                50
+            };
         let e = self
             .entities
             .get_mut(&id)
@@ -178,7 +222,11 @@ impl World {
         let pos = p.pos;
         let mut items = p.character.items.clone();
         if item.consumable {
-            items[slot.slot] = -1;
+            items[slot.slot] = if kind == 0x140a {
+                castle_successor(&self.content, item)?
+            } else {
+                -1
+            };
         }
         let entity = if selected.is_some() {
             Some(self.reserve_companion(id, kind, metadata.permanent, pos)?)
@@ -375,6 +423,38 @@ impl World {
                 }
                 continue;
             }
+            if kind == 0x140a {
+                if pet.pulse <= self.now {
+                    self.companions.active.get_mut(&id).unwrap().pulse = self.now + 1000;
+                    let position = self.entities[&id].pos;
+                    // Numeric rules are a conservative reconstruction; selected XML specifies nearby healing only.
+                    let mut healed = Vec::new();
+                    for (target, p) in &mut self.players {
+                        if !p.active()
+                            || p.paused
+                            || p.pending
+                            || p.death_started
+                            || p.character.hp <= 0
+                            || p.pos.distance(position) >= 3.
+                            || p.conditions(self.now)
+                                & crate::condition::bit(crate::condition::SICK)
+                                != 0
+                        {
+                            continue;
+                        }
+                        let cap = p.effective(&self.content, self.now)?[0];
+                        let amount = (cap - p.character.hp).clamp(0, 10);
+                        p.character.hp += amount;
+                        if amount > 0 {
+                            healed.push((*target, amount));
+                        }
+                    }
+                    for (target, amount) in healed {
+                        self.consumable_restored(target, amount, 0xff00ff00);
+                    }
+                }
+                continue;
+            }
             let goal = owner.pos;
             let pos = self.entities[&id].pos;
             let distance = pos.distance(goal);
@@ -525,6 +605,272 @@ mod tests {
         let revision = plan.revision + 1;
         w.finish_inventory(plan, Ok(revision)).unwrap();
     }
+    #[test]
+    fn sand_pail_commits_five_doses_and_never_publishes_before_commit() {
+        let (mut w, id) = fixture(0xc34);
+        assert_eq!(w.content.get(0xc38).unwrap().doses, Some(1));
+        for (before, after) in [
+            (0xc34, 0xc35),
+            (0xc35, 0xc36),
+            (0xc36, 0xc37),
+            (0xc37, 0xc38),
+            (0xc38, -1),
+        ] {
+            assert_eq!(w.players[&id].character.items[5], before);
+            let plan = stage(&mut w, id, 5);
+            let entity = plan.companion.as_ref().unwrap().entity.unwrap();
+            assert!(!w.entities[&entity].published);
+            assert_eq!(w.players[&id].character.items[5], before);
+            commit(&mut w, plan);
+            assert_eq!(w.players[&id].character.items[5], after);
+            assert!(w.entities[&entity].published);
+            assert_eq!(w.companions.active[&entity].until, Some(w.now + 30_000));
+            assert_eq!(w.companions.active[&entity].pulse, w.now + 1000);
+        }
+        assert_eq!(w.companions.active.len(), 5);
+        for failure in [true, false] {
+            let (mut failed, id) = fixture(0xc34);
+            failed.players.get_mut(&id).unwrap().character.hp = 50;
+            let plan = stage(&mut failed, id, 5);
+            failed.now += 5000;
+            failed.companion_step().unwrap();
+            assert_eq!(failed.players[&id].character.hp, 50);
+            let result = if failure {
+                Err(anyhow::anyhow!("store failure"))
+            } else {
+                Ok(plan.revision + 2)
+            };
+            assert!(failed.finish_inventory(plan, result).is_err());
+            assert_eq!(failed.players[&id].character.items[5], 0xc34);
+            assert!(failed.companions.active.is_empty());
+            assert!(failed.players[&id].persistence_failure.is_some());
+        }
+    }
+
+    #[test]
+    fn sand_castle_is_stationary_heals_nearby_players_and_expires_without_catchup() {
+        let (mut w, id) = fixture(0xc34);
+        let origin = w.players[&id].pos;
+        let plan = stage(&mut w, id, 5);
+        let entity = plan.companion.as_ref().unwrap().entity.unwrap();
+        commit(&mut w, plan);
+        let mut character = fixtures::ch(&w);
+        character.id = 2;
+        character.account = 2;
+        let peer = w.enter(character, None).unwrap();
+        for player in [id, peer] {
+            let p = w.players.get_mut(&player).unwrap();
+            p.pos = origin;
+            p.character.hp = 50;
+        }
+        w.now = 999;
+        w.companion_step().unwrap();
+        assert_eq!(w.players[&id].character.hp, 50);
+        w.now = 1000;
+        w.companion_step().unwrap();
+        assert_eq!(w.players[&id].character.hp, 60);
+        assert_eq!(w.players[&peer].character.hp, 60);
+        w.players.get_mut(&id).unwrap().pos.x += 20.;
+        w.players.get_mut(&peer).unwrap().pos.x += 3.;
+        w.now = 2000;
+        w.companion_step().unwrap();
+        assert_eq!(w.entities[&entity].pos.distance(origin), 0.);
+        assert_eq!(w.players[&peer].character.hp, 60);
+        w.players.get_mut(&peer).unwrap().pos = origin;
+        w.players.get_mut(&peer).unwrap().pending = true;
+        w.now = 3000;
+        w.companion_step().unwrap();
+        assert_eq!(w.players[&peer].character.hp, 60);
+        w.players.get_mut(&peer).unwrap().pending = false;
+        w.now = 9000;
+        w.companion_step().unwrap();
+        assert_eq!(w.players[&peer].character.hp, 70);
+        w.players.get_mut(&id).unwrap().paused = true;
+        w.now = 10000;
+        w.companion_step().unwrap();
+        assert_eq!(w.players[&peer].character.hp, 70);
+        w.now = 30000;
+        w.companion_step().unwrap();
+        assert!(!w.entities.contains_key(&entity));
+        assert!(w.companions.active.is_empty());
+    }
+
+    #[test]
+    fn sand_pail_rejects_malformed_chain_before_reservation() {
+        for malformed in 0..6 {
+            let (mut w, id) = fixture(0xc34);
+            let content = Arc::make_mut(&mut w.content);
+            match malformed {
+                0 => content.objects.get_mut(&0xc34).unwrap().successor = None,
+                1 => content.objects.get_mut(&0xc35).unwrap().doses = Some(3),
+                2 => content.objects.get_mut(&0xc38).unwrap().doses = Some(2),
+                3 => {
+                    content.objects.get_mut(&0xc38).unwrap().successor = Some("Sand Pail 5".into())
+                }
+                4 => content.objects.get_mut(&0xc35).unwrap().companion = None,
+                5 => content.objects.get_mut(&0xc36).unwrap().name = "Sand Pail 4".into(),
+                _ => unreachable!(),
+            }
+            let revision = w.players[&id].character.revision;
+            assert!(
+                w.use_item(
+                    id,
+                    Slot {
+                        object: id,
+                        slot: 5,
+                        kind: 0xc34
+                    },
+                    w.players[&id].pos
+                )
+                .is_err()
+            );
+            assert_eq!(w.players[&id].character.items[5], 0xc34);
+            assert_eq!(w.players[&id].character.revision, revision);
+            assert!(!w.players[&id].pending);
+            assert!(w.companions.active.is_empty());
+        }
+    }
+
+    #[test]
+    fn sand_castle_excludes_sick_and_ineligible_recipients_and_caps_actual_healing() {
+        let (mut w, owner) = fixture(0xc34);
+        let mut character = fixtures::ch(&w);
+        character.id = 2;
+        character.account = 2;
+        let peer = w.enter(character, None).unwrap();
+        let plan = stage(&mut w, owner, 5);
+        commit(&mut w, plan);
+        w.players.get_mut(&peer).unwrap().pos = w.players[&owner].pos;
+        for excluded in 0..9 {
+            let p = w.players.get_mut(&peer).unwrap();
+            p.character.hp = if excluded == 8 { 0 } else { 50 };
+            p.paused = excluded == 0;
+            p.pending = excluded == 1;
+            p.death_pending = excluded == 2;
+            p.death_started = excluded == 3;
+            p.departing = excluded == 4;
+            p.persistence_failure = (excluded == 5).then(|| "injected quarantine".into());
+            p.character.alive = excluded != 6;
+            if excluded == 7 {
+                w.apply_condition(peer, crate::condition::SICK, 2000)
+                    .unwrap();
+            }
+            w.now += 1000;
+            w.companion_step().unwrap();
+            assert_eq!(
+                w.players[&peer].character.hp,
+                if excluded == 8 { 0 } else { 50 },
+                "exclusion {excluded}"
+            );
+        }
+        w.now += 2000;
+        let cap = w.players[&peer].effective(&w.content, w.now).unwrap()[0];
+        w.players.get_mut(&peer).unwrap().character.hp = cap - 3;
+        w.companion_step().unwrap();
+        assert_eq!(w.players[&peer].character.hp, cap);
+        w.now += 1000;
+        w.companion_step().unwrap();
+        assert_eq!(w.players[&peer].character.hp, cap);
+        w.leave(owner).unwrap();
+        assert!(w.companions.active.is_empty());
+        let (mut w, owner) = fixture(0xc34);
+        let plan = stage(&mut w, owner, 5);
+        commit(&mut w, plan);
+        w.players.get_mut(&owner).unwrap().death_pending = true;
+        w.companion_step().unwrap();
+        assert!(w.companions.active.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sand_pail_doses_survive_store_reopen_without_replacing_permanent_pet() {
+        let mut w = fixtures::world();
+        let path = std::env::temp_dir().join(format!(
+            "openrotmg-sand-pail-{:016x}.db",
+            rand::random::<u64>()
+        ));
+        let store = Store::open(&path, &w.content).unwrap();
+        let account = store.list("prepared-sand-pail".into()).await.unwrap().id;
+        let mut ch = store
+            .create(account, w.content.get(0x030e).unwrap())
+            .await
+            .unwrap();
+        let pet = w
+            .content
+            .objects
+            .keys()
+            .copied()
+            .find(|kind| w.content.permanent_companion(*kind).is_ok())
+            .unwrap();
+        ch.pet_kind = Some(pet);
+        store.progress(ch.clone()).await.unwrap();
+        ch.items[5] = 0xc34;
+        ch.revision = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: ch.id,
+                    account,
+                    revision: ch.revision,
+                    items: ch.items.clone(),
+                }],
+                vec![],
+            )
+            .await
+            .unwrap()[0];
+        let character = ch.id;
+        let initial_revision = ch.revision;
+        let id = w.enter(ch, None).unwrap();
+        for successor in [0xc35, 0xc36, 0xc37, 0xc38, -1] {
+            let plan = stage(&mut w, id, 5);
+            let write = InventoryWrite {
+                id: character,
+                account,
+                revision: plan.revision,
+                items: plan.items.clone(),
+            };
+            let mut foreign = write.clone();
+            foreign.account += 1;
+            assert!(
+                store
+                    .exchange_collected(vec![foreign], vec![], None)
+                    .await
+                    .is_err()
+            );
+            let revision = store
+                .exchange_collected(vec![write.clone()], vec![], None)
+                .await
+                .unwrap()[0];
+            assert!(
+                store
+                    .exchange_collected(vec![write], vec![], None)
+                    .await
+                    .is_err()
+            );
+            w.finish_inventory(plan, Ok(revision)).unwrap();
+            assert_eq!(w.players[&id].character.items[5], successor);
+            assert_eq!(w.players[&id].character.pet_kind, Some(pet));
+        }
+        assert_eq!(
+            w.companions.active.values().filter(|p| p.permanent).count(),
+            1
+        );
+        assert_eq!(
+            w.companions
+                .active
+                .values()
+                .filter(|p| !p.permanent)
+                .count(),
+            5
+        );
+        w.leave(id).unwrap();
+        assert!(w.companions.active.is_empty());
+        drop(store);
+        let reopened = Store::open(&path, &w.content).unwrap();
+        let saved = reopened.load(account, character).await.unwrap();
+        assert_eq!(saved.items[5], -1);
+        assert_eq!(saved.revision, initial_revision + 5);
+        assert_eq!(saved.pet_kind, Some(pet));
+    }
+
     fn target(w: &mut World, id: i32) -> i32 {
         let pos = w.players[&id].pos;
         let enemy = w
