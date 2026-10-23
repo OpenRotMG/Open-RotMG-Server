@@ -281,7 +281,7 @@ impl Context {
                 .observe_latch("fixed_stall_original_window_unready")
                 .await;
             let now = observed["world_now"].as_u64().unwrap();
-            assert!(now < observed["trade"]["ready"].as_u64().unwrap());
+            assert!(observed["trade"]["settled"].as_bool().unwrap());
             assert!(now < self.brain.mind.market.trade.as_ref().unwrap().ready);
             assert_eq!(
                 observed["trade"]["accepted"],
@@ -317,10 +317,7 @@ impl Context {
                 assert_eq!(trade.binding, binding);
                 assert_eq!(trade.peer, self.terms.names[0]);
                 assert!(decision_time >= controller_ready);
-                assert!(
-                    observed["world_now"].as_u64().unwrap()
-                        >= observed["trade"]["ready"].as_u64().unwrap()
-                );
+                assert!(observed["trade"]["settled"].as_bool().unwrap());
                 assert_eq!(
                     observed["trade"]["accepted"],
                     serde_json::json!([true, false])

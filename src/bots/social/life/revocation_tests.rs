@@ -31,6 +31,21 @@ async fn tick(app: &App, brain: &mut Brain) -> bool {
         .unwrap();
     life(app, brain, &v).await.unwrap()
 }
+async fn settle_trade_clock(app: &App) {
+    // Holding this fixture's worker avoids inventing ticks or filling synthetic clients' output queues.
+    let clock = app.world.clock.clone();
+    app.world
+        .in_world(-2)
+        .call(move |_| {
+            assert!(clock.paused());
+            clock.set_paused(false);
+            std::thread::sleep(std::time::Duration::from_millis(3050));
+            clock.set_paused(true);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
 enum Ending {
     WithdrawBeforeCommit,
     CommitBeforeWithdrawal,
@@ -218,6 +233,7 @@ async fn withdrawal(ending: Ending) {
         })
         .await
         .unwrap();
+    settle_trade_clock(&app).await;
     tick(&app, &mut brain).await;
     let original = brain
         .mind
@@ -269,6 +285,7 @@ async fn withdrawal(ending: Ending) {
         })
         .await
         .unwrap();
+    settle_trade_clock(&app).await;
     tick(&app, &mut brain).await;
     let acceptance = brain
         .mind
@@ -570,15 +587,21 @@ async fn community_social_gift_unrelated_pending_commit_cannot_credit_a_new_offe
     brain.mind.market.name = "Kadabu".into();
     let mut health_offer = [false; 12];
     health_offer[4] = true;
-    let plan = app
-        .world
+    app.world
         .in_world(-2)
         .call(move |w| {
             w.request_trade(own, "ActualDonor".into())?;
             w.request_trade(donor, "Kadabu".into())?;
             w.change_trade(own, [false; 12])?;
-            w.change_trade(donor, health_offer)?;
-            w.now += 3000;
+            w.change_trade(donor, health_offer)
+        })
+        .await
+        .unwrap();
+    settle_trade_clock(&app).await;
+    let plan = app
+        .world
+        .in_world(-2)
+        .call(move |w| {
             assert!(w.accept_trade(own, [false; 12], health_offer)?.is_none());
             w.accept_trade(donor, health_offer, [false; 12])?
                 .context("unrelated native commit was not reserved")
