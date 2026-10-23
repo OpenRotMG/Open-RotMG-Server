@@ -34,6 +34,7 @@ fn unseen_terrain_cannot_change_controller_decisions_or_randomness() {
             name: "Realm".into(),
             width: 130,
             height: 130,
+            allow_teleport: true,
         },
         character: OwnCharacter {
             conditions: 0,
@@ -60,6 +61,7 @@ fn unseen_terrain_cannot_change_controller_decisions_or_randomness() {
         },
         tiles: Arc::new(Tiles::new(geometry, observed.clone())),
         objects: vec![],
+        player_markers: vec![],
         projectiles: vec![],
     };
     let describe = |d: &Decision| {
