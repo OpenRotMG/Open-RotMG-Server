@@ -1128,6 +1128,17 @@ impl Directory {
         );
         Ok(destination)
     }
+    pub(crate) fn prepared_instance_with_seed(&mut self, template: &str, seed: u64) -> Result<i32> {
+        ensure!(
+            self.prepared_seed.is_some(),
+            "prepared encounter requires isolated test state"
+        );
+        let previous = self.prepared_seed;
+        self.prepared_seed = Some(seed ^ self.next_world as u64);
+        let result = self.prepared_instance(template);
+        self.prepared_seed = previous;
+        result
+    }
     pub(crate) fn prepared_instance(&mut self, template: &str) -> Result<i32> {
         ensure!(
             self.prepared_seed.is_some(),
@@ -5070,6 +5081,7 @@ impl World {
                 | crate::dungeon::manor::CHASER
                 | crate::dungeon::manor::DECOY
                 | 0x1727 => 20.,
+                crate::dungeon::snake::GUARD | crate::dungeon::snake::DART => 25.,
                 kind if crate::dungeon::tomb::contains(kind) => 30.,
                 0x953 | 0x954 => 6.,
                 0x619 => 8.,
@@ -7086,6 +7098,28 @@ mod tests {
                 roots.len()
             );
         }
+    }
+
+    #[test]
+    fn prepared_dungeon_seed_is_exact_and_does_not_leak_to_other_worlds() {
+        let mut d = directory();
+        d.prepared_seed = Some(12351);
+        let world = d.prepared_instance_with_seed("snake-pit", 0).unwrap();
+        assert_eq!(d.worlds[&world].prepared_seed, Some(0));
+        let expected = crate::dungeon::snake::generate(&d.content, 0).unwrap();
+        assert_eq!(
+            serde_json::to_vec(d.worlds[&world].map.as_ref()).unwrap(),
+            serde_json::to_vec(&expected).unwrap()
+        );
+        assert_eq!(d.prepared_seed, Some(12351));
+        assert!(
+            d.prepared_instance_with_seed("invalid-template", 7)
+                .is_err()
+        );
+        assert_eq!(d.prepared_seed, Some(12351));
+        d.prepared_seed = None;
+        assert!(d.prepared_instance_with_seed("snake-pit", 0).is_err());
+        assert_eq!(d.prepared_seed, None);
     }
 
     #[test]

@@ -260,7 +260,14 @@ impl World {
         if crate::dungeon::tomb::contains(self.entities[&id].kind) {
             return self.tomb_mechanics(id, target);
         }
-        if self.entities[&id].kind == crate::dungeon::snake::BOSS {
+        if matches!(
+            self.entities[&id].kind,
+            crate::dungeon::snake::BOSS
+                | crate::dungeon::snake::GUARD
+                | crate::dungeon::snake::BUTTON
+                | crate::dungeon::snake::SPAWNER
+                | crate::dungeon::snake::DART
+        ) {
             return self.snake_mechanics(id, elapsed);
         }
         if crate::dungeon::lab::ROSTER.contains(&self.entities[&id].kind) {

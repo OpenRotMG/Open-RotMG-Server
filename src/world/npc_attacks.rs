@@ -39,6 +39,34 @@ impl World {
             endgame::{ORYX, ORYX2, OryxPhase},
         };
         let e = &self.entities[&id];
+        if e.kind == crate::dungeon::snake::DART {
+            let active = if let Some(owner) = *e.parent {
+                ensure!(
+                    self.entities
+                        .get(&owner)
+                        .is_some_and(|e| e.kind == crate::dungeon::snake::SPAWNER),
+                    "Snake Pit dart {id} has a missing or invalid room owner {owner}"
+                );
+                self.actors()
+                    .any(|e| e.kind == crate::dungeon::snake::GUARD && e.parent == Some(owner))
+            } else {
+                false
+            };
+            let mut schedule = attacks::schedule(e.kind, e.hp, elapsed)
+                .context("Snake Pit dart schedule missing")?;
+            schedule.state = u64::from(active);
+            schedule.attacks[0].enabled = active;
+            let neighbor = self
+                .map
+                .cell(e.home.x + 1., e.home.y)
+                .context("Snake Pit dart has no adjacent map cell")?;
+            schedule.attacks[0].aim = Aim::Fixed(if neighbor.object.is_some() {
+                std::f32::consts::PI
+            } else {
+                0.
+            });
+            return Ok(Some(schedule));
+        }
         if crate::dungeon::abyss::ROSTER.contains(&e.kind)
             || e.kind == 0x651 && self.name == "Abyss of Demons"
         {

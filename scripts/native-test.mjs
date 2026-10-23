@@ -135,7 +135,9 @@ export async function runCase(scenario, options) {
     async function addClient(spec){
       assert(participants.length<3,'At most three prepared native clients');
       assert(Number.isInteger(spec.world)||typeof spec.world==='string','Fixture requires world ID or explicit prepared template');
-      const worldId=typeof spec.world==='string'?(await api({op:'world',template:spec.world})).result.world:spec.world;
+      const {worldSeed,...actorSpec}=spec;
+      assert(worldSeed===undefined||typeof spec.world==='string'&&Number.isSafeInteger(worldSeed)&&worldSeed>=0,'worldSeed requires a dungeon template and a nonnegative safe integer');
+      const worldId=typeof spec.world==='string'?(await api({op:'world',template:spec.world,seed:worldSeed})).result.world:spec.world;
       const chromePort=await freePort(),env=await privateDisplay(participants.length);
       let connection,browser,actor,account;
       const call=(method,params={})=>{check();return connection.call(method,params);};
@@ -159,7 +161,7 @@ export async function runCase(scenario, options) {
           const world=await api({op:'world_info',world:worldId});const point=spec.position==='spawn'?world.spawn_points[0]:null;
           if(spec.position==='spawn')assert(Array.isArray(point)&&point.length===2&&point.every(Number.isFinite),'Invalid observed spawn tuple');
           const position=spec.position==='spawn'?{x:point[0],y:point[1]}:typeof spec.position==='function'?spec.position(world):spec.position;
-          const result=await api({op:'spawn',spec:{...spec,world:worldId,guid,position,controller:'native',profile:null}});actor=result.result.actor;account=result.result.account;
+          const result=await api({op:'spawn',spec:{...actorSpec,world:worldId,guid,position,controller:'native',profile:null}});actor=result.result.actor;account=result.result.account;
           await writeFile(join(out,participants.length?'fixture-'+participants.length+'.json':'fixture.json'),JSON.stringify({actor,account,spec:{...spec,world:worldId,position},prepared:true}),{mode:0o600});
           await call('Fetch.continueRequest',{requestId:e.requestId});guestDone=true;resolveGuest();
         })().catch(error=>{rejectGuest(error);fail(error);});

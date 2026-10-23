@@ -453,9 +453,18 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.3, Tier(4, ARMOR)),
             (0.4, Tier(4, WEAPONS)),
         ],
-        0x172 | 0x173 | 0x175..=0x179 | 0x653 | 0xd07..=0xd0a | 0xda2 | 0xda3 | 0x918 | 0x919 => {
-            &[]
-        }
+        0x172
+        | 0x173
+        | 0x175..=0x179
+        | 0x653
+        | 0xd07..=0xd0a
+        | 0xda2
+        | 0xda3
+        | 0x918
+        | 0x919
+        | crate::dungeon::snake::BUTTON
+        | crate::dungeon::snake::SPAWNER
+        | crate::dungeon::snake::DART => &[],
         0xdaa..=0xdaf => &[(0.25, Item(0xa22)), (0.25, Item(0xa23))],
         0x605..=0x607
         | 0x60a
@@ -534,7 +543,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.1, Tier(3, ABILITIES)),
             (0.1, Tier(3, RINGS)),
         ],
-        0x917 => &[
+        0x917 | crate::dungeon::snake::GUARD => &[
             (1., Item(0xa21)),
             (0.05, Item(crate::endgame::INCANTATION)),
             (0.05, Item(0xc04)),
@@ -750,6 +759,7 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
         || matches!(
             kind,
             0x917
+                | crate::dungeon::snake::GUARD
                 | 0xd06
                 | 0xd90
                 | 0xd78
@@ -835,7 +845,7 @@ pub fn private(kind: u16) -> bool {
             0x679..=0x67c | 0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL
         )
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
-        | 0xd05 | 0x917 | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
+        | 0xd05 | 0x917 | crate::dungeon::snake::GUARD | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
         | crate::dungeon::jungle::BOSS | crate::dungeon::beach::BOSS
         | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
