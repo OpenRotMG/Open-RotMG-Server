@@ -1359,23 +1359,30 @@ async fn handle_inner(
             };
             let id = player.ok_or_else(|| lifecycle::protocol("chat before character"))?;
 
-            if let Some(message) = text
-                .trim()
-                .strip_prefix("/bug")
-                .filter(|s| s.is_empty() || s.starts_with(char::is_whitespace))
-            {
+            if let Some(command @ ("/bug" | "/bug-info")) = text.split_whitespace().next() {
+                let message = text.trim()[command.len()..].trim();
                 let owner = account
                     .as_ref()
                     .context("authenticated session required")?
                     .id;
-                if let Err(error) =
-                    diagnostics::report(a, owner, id, message.trim(), diagnostics).await
+                match diagnostics::report(
+                    a,
+                    owner,
+                    id,
+                    message,
+                    diagnostics,
+                    command == "/bug-info",
+                )
+                .await
                 {
-                    tracing::error!(account=owner, player=id, error=%error, "bug report failed");
-                    enqueue_reply(
-                        tx,
-                        crate::world::chat_info(&format!("Could not submit bug report: {error}")),
-                    )?;
+                    Ok(reply) => enqueue_reply(tx, crate::world::chat_info(reply))?,
+                    Err(error) => {
+                        tracing::error!(account=owner, player=id, command, error=%error, "bug report failed");
+                        enqueue_reply(
+                            tx,
+                            crate::world::chat_info(&format!("Could not save bug report: {error}")),
+                        )?;
+                    }
                 }
             } else if matches!(
                 text.trim(),

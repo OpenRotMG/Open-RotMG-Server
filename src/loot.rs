@@ -10,9 +10,12 @@ pub(crate) const WEAPONS: &[i32] = &[1, 2, 3, 8, 17];
 pub(crate) const ABILITIES: &[i32] = &[4, 5, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23];
 pub(crate) const ARMOR: &[i32] = &[6, 7, 14];
 pub(crate) const RINGS: &[i32] = &[9];
-fn gray_blob_private_table(kind: u16) -> &'static [(f64, Pick)] {
+fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
+    use Pick::Tier;
     match kind {
         0x20d => &[(0.005, Pick::Item(0xa51))],
+        0x952 => &[(0.03, Tier(2, RINGS))],
+        0x949 => &[(0.03, Tier(6, WEAPONS)), (0.03, Tier(6, ARMOR))],
         _ => &[],
     }
 }
@@ -188,6 +191,13 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.15, Tier(1, RINGS)),
         ],
         // Trapped 593e490 engineering tables, not authenticated 123.5.1 probabilities.
+        0x952 => &[(0.05, Tier(5, WEAPONS)), (0.05, Tier(5, ARMOR))],
+        0x949 => &[
+            (0.10, Tier(3, WEAPONS)),
+            (0.05, Tier(4, WEAPONS)),
+            (0.10, Tier(3, ARMOR)),
+            (0.05, Tier(4, ARMOR)),
+        ],
         0x205 | 0x20d | 0x20f | 0x202 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
         0x204 => &[
             (0.01, Tier(2, ARMOR)),
@@ -516,7 +526,7 @@ pub fn collectibles(content: &Content) -> std::collections::BTreeSet<u16> {
         .flat_map(|kind| {
             table(kind)
                 .iter()
-                .chain(gray_blob_private_table(kind))
+                .chain(fauna_private_table(kind))
                 .flat_map(|(_, pick)| candidates(content, *pick))
                 .chain(bonus(kind).iter().map(|(_, item)| *item))
         })
@@ -563,7 +573,7 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
             );
         }
     }
-    for (_, pick) in table(kind).iter().chain(gray_blob_private_table(kind)) {
+    for (_, pick) in table(kind).iter().chain(fauna_private_table(kind)) {
         let items = candidates(content, *pick);
         ensure!(
             !items.is_empty(),
@@ -638,22 +648,33 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     }
     items
 }
-pub fn gray_blob_rewards(
+pub fn fauna_private_rewards(
     content: &Content,
+    kind: u16,
     contributors_by_damage: &[(i32, i32)],
     rng: &mut impl Rng,
 ) -> Vec<(i32, u16)> {
+    let multiplier = match kind {
+        0x20d | 0x952 => 1,
+        0x949 => 2,
+        _ => unreachable!("unsupported dual-channel fauna kind {kind:#x}"),
+    };
     let owners: Vec<_> = contributors_by_damage
         .iter()
         .filter(|(_, damage)| *damage > 1)
         .map(|(account, _)| *account)
         .collect();
     let mut rewards = Vec::new();
-    for _ in 0..owners.len() {
-        if let Some(item) = roll_table(content, gray_blob_private_table(0x20d), rng) {
-            // Successful rolls advance allocation, not failed attempts or independent player rolls.
-            rewards.push((owners[rewards.len()], item));
-            if rewards.len() == 8 {
+    let mut successes = 0;
+    for _ in 0..owners.len() * multiplier {
+        if let Some(item) = roll_table(content, fauna_private_table(kind), rng) {
+            // Allocation and the cap count successful rolls, including deduplicated items.
+            let reward = (owners[successes % owners.len()], item);
+            if !rewards.contains(&reward) {
+                rewards.push(reward);
+            }
+            successes += 1;
+            if successes == 8 {
                 break;
             }
         }
@@ -757,10 +778,140 @@ mod tests {
         }
     }
     #[test]
+    fn midland_great_lizard_and_warrior_wasp_ordered_public_tables() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, name, expected) in [
+            (
+                0x952,
+                "Great Lizard",
+                vec![
+                    (0.05, vec![0xa06, 0xa16, 0xa1c, 0xa3b, 0xa9c]),
+                    (0.05, vec![0xa10, 0xa80, 0xad0]),
+                ],
+            ),
+            (
+                0x949,
+                "Warrior Wasp",
+                vec![
+                    (0.10, vec![0xa01, 0xa05, 0xa73, 0xa76, 0xa9a]),
+                    (0.05, vec![0xa6e, 0xa71, 0xa74, 0xa77, 0xa9b]),
+                    (0.10, vec![0xa5d, 0xa79, 0xa7c]),
+                    (0.05, vec![0xa7a, 0xa7d, 0xa7f]),
+                ],
+            ),
+        ] {
+            assert_eq!(content.get(kind).unwrap().name, name);
+            assert_eq!(
+                table(kind)
+                    .iter()
+                    .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for (branch, (_, items)) in expected.iter().enumerate() {
+                let mut rng = Branch(vec![u64::MAX; branch]);
+                rng.0.push(0);
+                let result = rewards(&content, kind, &mut rng);
+                assert_eq!(result.len(), 1);
+                assert!(items.contains(&result[0]) && rng.0.is_empty());
+            }
+            let mut misses = Branch(vec![u64::MAX; expected.len()]);
+            assert!(rewards(&content, kind, &mut misses).is_empty() && misses.0.is_empty());
+            assert!(!private(kind) && bonus(kind).is_empty());
+            validate(&content, kind).unwrap();
+            assert!(
+                expected
+                    .iter()
+                    .flat_map(|(_, items)| items)
+                    .all(|item| collectibles(&content).contains(item))
+            );
+        }
+    }
+    #[test]
+    #[should_panic(expected = "unsupported dual-channel fauna kind 0x947")]
+    fn midland_private_rewards_reject_unsupported_enemy_kind() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        fauna_private_rewards(&content, 0x947, &[], &mut Branch(vec![]));
+    }
+    #[test]
+    fn midland_private_tables_use_strict_threshold_ordered_success_allocation_and_dedup_cap() {
+        let mut content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, expected) in [
+            (
+                0x952,
+                vec![(
+                    0.03,
+                    vec![0xa29, 0xa2a, 0xa2b, 0xa2c, 0xa2d, 0xa38, 0xa39, 0xa4e],
+                )],
+            ),
+            (
+                0x949,
+                vec![
+                    (0.03, vec![0xa17, 0xa1d, 0xa3c, 0xa3d, 0xa9d]),
+                    (0.03, vec![0xa11, 0xa5e, 0xad1]),
+                ],
+            ),
+        ] {
+            assert_eq!(
+                fauna_private_table(kind)
+                    .iter()
+                    .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for (branch, (_, items)) in expected.iter().enumerate() {
+                let mut rng = Branch(vec![u64::MAX; branch]);
+                rng.0.push(0);
+                if kind == 0x949 {
+                    rng.0.extend([u64::MAX; 2]);
+                }
+                let rewards = fauna_private_rewards(&content, kind, &[(9, 2), (8, 1)], &mut rng);
+                assert_eq!(rewards.len(), 1);
+                assert_eq!(rewards[0].0, 9);
+                assert!(items.contains(&rewards[0].1) && rng.0.is_empty());
+            }
+            let mut misses = Branch(vec![
+                u64::MAX;
+                expected.len() * if kind == 0x949 { 2 } else { 1 }
+            ]);
+            assert!(
+                fauna_private_rewards(&content, kind, &[(9, 2)], &mut misses).is_empty()
+                    && misses.0.is_empty()
+            );
+            let mut no_draws = Branch(vec![]);
+            assert!(fauna_private_rewards(&content, kind, &[(9, 1)], &mut no_draws).is_empty());
+            for item in expected.iter().flat_map(|(_, items)| items) {
+                assert!(collectibles(&content).contains(item));
+                assert!(!content.get(*item).unwrap().soulbound);
+            }
+        }
+        let mut delayed = Branch(vec![u64::MAX, u64::MAX, u64::MAX, 0, 0, u64::MAX, u64::MAX]);
+        assert_eq!(
+            fauna_private_rewards(&content, 0x949, &[(9, 3), (8, 2), (7, 1)], &mut delayed),
+            vec![(9, 0xa11), (8, 0xa17)]
+        );
+        assert!(delayed.0.is_empty());
+        let owners: Vec<_> = (1..=6).map(|owner| (owner, 2)).collect();
+        let mut eight_successes = Branch(vec![0; 8]);
+        assert_eq!(
+            fauna_private_rewards(&content, 0x949, &owners, &mut eight_successes),
+            (1..=6).map(|owner| (owner, 0xa17)).collect::<Vec<_>>()
+        );
+        assert!(
+            eight_successes.0.is_empty(),
+            "cap eight successes before per-owner dedup; not twelve attempts"
+        );
+        content.objects.get_mut(&0xa29).unwrap().bag_type = 5;
+        assert!(validate(&content, 0x952).is_err());
+        validate(&content, 0x949).unwrap();
+        content.objects.get_mut(&0xa17).unwrap().bag_type = 5;
+        assert!(validate(&content, 0x949).is_err());
+    }
+    #[test]
     fn starter_gray_private_rolls_use_strict_threshold_success_order_and_eight_success_cap() {
         let mut content = Content::load(std::path::Path::new("data")).unwrap();
         assert_eq!(
-            gray_blob_private_table(0x20d)
+            fauna_private_table(0x20d)
                 .iter()
                 .map(|(chance, pick)| (*chance, candidates(&content, *pick)))
                 .collect::<Vec<_>>(),
@@ -768,18 +919,18 @@ mod tests {
         );
         let mut second_roll = Branch(vec![u64::MAX, 0]);
         assert_eq!(
-            gray_blob_rewards(&content, &[(1, 3), (2, 2), (3, 1)], &mut second_roll),
+            fauna_private_rewards(&content, 0x20d, &[(1, 3), (2, 2), (3, 1)], &mut second_roll),
             vec![(1, 0xa51)]
         );
         assert!(second_roll.0.is_empty());
         let owners: Vec<_> = (1..=12).map(|account| (account, 2)).collect();
         let mut hits = rand::rngs::mock::StepRng::new(0, 0);
         assert_eq!(
-            gray_blob_rewards(&content, &owners, &mut hits),
+            fauna_private_rewards(&content, 0x20d, &owners, &mut hits),
             (1..=8).map(|account| (account, 0xa51)).collect::<Vec<_>>()
         );
         let mut misses = rand::rngs::mock::StepRng::new(u64::MAX, 0);
-        assert!(gray_blob_rewards(&content, &owners, &mut misses).is_empty());
+        assert!(fauna_private_rewards(&content, 0x20d, &owners, &mut misses).is_empty());
         content.objects.get_mut(&0xa51).unwrap().bag_type = 5;
         assert!(validate(&content, 0x20d).is_err());
         validate(&content, 0x205).unwrap();
@@ -828,7 +979,7 @@ mod tests {
             ),
             ("Magic Mushroom", 1, false)
         );
-        for kind in [0x20e, 0x206, 0x620, 0x622, 0x947, 0x948, 0x949, 0x952] {
+        for kind in [0x20e, 0x206, 0x620, 0x622, 0x947, 0x948] {
             assert!(table(kind).is_empty() && bonus(kind).is_empty() && !private(kind));
         }
     }
