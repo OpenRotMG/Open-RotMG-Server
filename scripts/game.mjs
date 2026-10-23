@@ -1,3 +1,4 @@
+import {writeSync} from 'node:fs';
 import {readFile, writeFile, readdir, rename, open} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
@@ -162,6 +163,15 @@ async function states(waitForReady=false,expect,previous){
   }while(Date.now()<deadline);
   throw Error('Native readiness/outcome not observed: '+JSON.stringify({expect,state}));
 }
+function verifiedNativeAck(context,server,frames,abort,write) {
+  if(abort)throw abort;
+  const observedBrowserFrameSha256=frames.find(frame=>frame===server.frame_sha256);
+  if(server.actor!==context.actor||server.player!==context.player||!Number.isSafeInteger(server.nonce)||server.nonce<=-2147483648||server.nonce>=0||!observedBrowserFrameSha256)throw Error('No verified native_sync server/browser ACK');
+  const row={event:'native_sync_verified_ack',context,server:{actor:server.actor,player:server.player,nonce:server.nonce,frame_sha256:server.frame_sha256},observedBrowserFrameSha256};
+  const bytes=Buffer.from(JSON.stringify(row)+'\n');
+  try{if(write(bytes)!==bytes.length)throw Error('Short native_sync ACK diagnostic write');}
+  catch(cause){throw Error('Verified native_sync ACK diagnostic could not be retained',{cause});}
+}
 async function bind(state){
   const fresh=[];
   const pages=await eachClient(clients,async c=>({c,page:await c.evaluate('({playing:document.querySelector("ruffle-player").ruffle().isPlaying,binding:globalThis[Symbol.for("openrotmg.testing.binding.v1")]})')}));
@@ -183,6 +193,7 @@ async function bind(state){
       while(!c.frames.includes(acknowledgment.frame_sha256)&&Date.now()<deadline)await wait(10);
       if(actual.player!==acknowledgment.player||!c.frames.includes(acknowledgment.frame_sha256))throw Error('Native browser/character binding mismatch for actor '+c.actor);
       await c.evaluate('globalThis[Symbol.for("openrotmg.testing.binding.v1")]='+JSON.stringify({runtime:state.runtime,actor:c.actor,player:actual.player}));
+      verifiedNativeAck({runtime:state.runtime,actor:c.actor,player:actual.player},acknowledgment,c.frames,leaseError,bytes=>writeSync(2,bytes));
     });
   }
 }

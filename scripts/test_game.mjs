@@ -33,7 +33,7 @@ async function fixture(t,transfer=false,actors=[1]) {
     if(c.op==='native_sync'){
       if(activeFault==='sync-rejected')return res.end(JSON.stringify({status:'failed',error:'native input acknowledgement timed out: deadline has elapsed'}));
       if(activeFault==='binding-renew-timeout'&&!paused)await new Promise(resolve=>setTimeout(resolve,900));
-      return res.end(JSON.stringify({acknowledged:c.actors.map(actor=>({actor,player:actor,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('0000000906'+actor.toString(16).padStart(8,'0'),'hex')).digest('hex')}))}));
+      return res.end(JSON.stringify({acknowledged:c.actors.map(actor=>({actor,player:actor,nonce:-actor,frame_sha256:createHash('sha256').update(activeFault==='binding'?Buffer.from('wrong-frame'):Buffer.from('0000000906'+(-actor>>>0).toString(16).padStart(8,'0'),'hex')).digest('hex')}))}));
     }
     if(c.op==='native_lease'&&c.operation==='renew'&&['binding-renew-timeout','layout-renew-timeout'].includes(activeFault)){
       await new Promise(resolve=>setTimeout(resolve,1000));
@@ -56,7 +56,7 @@ async function fixture(t,transfer=false,actors=[1]) {
       send(raw){const row=JSON.parse(raw);appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({...row,actor:this.actor,at:Date.now()})+'\\n');
         let value=true,error;
         if(row.method==='Network.enable'&&process.env.FIXTURE_FAULT==='network-enable')error={message:'fixture Network.enable failure'};
-        if(row.method==='Network.enable')setTimeout(()=>{const frame=payloadData=>this.onmessage({data:JSON.stringify({method:'Network.webSocketFrameReceived',params:{response:{opcode:2,payloadData}}})});frame(Buffer.from('0000000906'+this.actor.toString(16).padStart(8,'0'),'hex').toString('base64'));if(process.env.FIXTURE_FAULT==='combat-frames')for(let n=0;n<256;n++)frame(Buffer.from('000000094a00000001','hex').toString('base64'));},0);
+        if(row.method==='Network.enable')setTimeout(()=>{const frame=payloadData=>this.onmessage({data:JSON.stringify({method:'Network.webSocketFrameReceived',params:{response:{opcode:2,payloadData}}})});frame(Buffer.from('0000000906'+(-this.actor>>>0).toString(16).padStart(8,'0'),'hex').toString('base64'));if(process.env.FIXTURE_FAULT==='combat-frames')for(let n=0;n<256;n++)frame(Buffer.from('000000094a00000001','hex').toString('base64'));},0);
         if(row.method==='Runtime.evaluate'&&row.params.expression.includes('playing:'))value={playing:true,binding:this.binding};
         if(row.method==='Runtime.evaluate'&&row.params.expression.startsWith('globalThis[Symbol.for("openrotmg.testing.binding.v1")]=')){this.binding=JSON.parse(row.params.expression.split(']=')[1]);value=this.binding;}
         if(row.method==='Runtime.evaluate'&&row.params.expression.endsWith(')(null)'))value={initialized:false,paused:true,clock_ms:100};
@@ -306,7 +306,7 @@ test('native_sync rejection retains safe held binding context without more proto
   const context=JSON.parse(failed.error.slice('Error: native_sync failed: '.length));
   assert.deepEqual(context.freshActors,[1]);
   assert.deepEqual(context.sessions.map(c=>[c.actor,c.player,c.stage]),[[1,1,'ready']]);
-  assert.deepEqual(context.pages,[{actor:1,playing:true,bindingActor:null,bindingPlayer:null,bindingRuntimeMatches:null,pingFrameCount:1,pingFrameHashes:[createHash('sha256').update(Buffer.from('000000090600000001','hex')).digest('hex')]}]);
+  assert.deepEqual(context.pages,[{actor:1,playing:true,bindingActor:null,bindingPlayer:null,bindingRuntimeMatches:null,pingFrameCount:1,pingFrameHashes:[createHash('sha256').update(Buffer.from('0000000906ffffffff','hex')).digest('hex')]}]);
   assert.deepEqual(f.calls.map(c=>c.command.op),['native_state','native_sync']);
   assert.ok(!(await f.events()).some(e=>e.method.startsWith('Input.')||e.method==='Runtime.evaluate'&&e.params.expression.endsWith(')(null)')));
   assert.ok(!failed.error.includes('fixture-control')&&!failed.error.includes('fixture-runtime'));
