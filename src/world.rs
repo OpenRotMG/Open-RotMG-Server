@@ -4481,17 +4481,18 @@ impl World {
         }
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
-        let threshold = if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
+        let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
+            0
+        } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
         } else if matches!(defeated.kind, 0xd56 | 0xd59) {
             self.content.objects[&defeated.kind].hp / 20
-        } else if matches!(
-            defeated.kind,
-            0xd5a | 0xd60 | crate::dungeon::trench::HERMIT | 0x1705
-        ) || matches!(
-            defeated.kind,
-            crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
-        ) {
+        } else if matches!(defeated.kind, 0xd5a | 0xd60 | 0x1705)
+            || matches!(
+                defeated.kind,
+                crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
+            )
+        {
             self.content.objects[&defeated.kind].hp / 100
         } else if defeated.kind == crate::dungeon::manor::BOSS {
             100
@@ -4548,6 +4549,18 @@ impl World {
                 let items = drops.entry(owner).or_default();
                 if !items.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
                     items.push(item as i32);
+                }
+            }
+        }
+        if defeated.kind == crate::dungeon::trench::HERMIT {
+            // NumRequired is an encounter-wide private floor, not a pair per raider: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs
+            for item in [0xa34, 0xa4c] {
+                if !drops.values().any(|items| items.contains(&item)) {
+                    let owner = eligible
+                        .choose(&mut self.rng)
+                        .expect("nonempty Hermit contributors")
+                        .0;
+                    drops.entry(owner).or_default().push(item);
                 }
             }
         }
