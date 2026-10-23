@@ -177,6 +177,13 @@ mod tests {
                 let mut w = World::new(content.clone(), map.clone()).unwrap();
                 w.realm_layout = Some(source.name().to_owned());
                 w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.populate_tomb_entry().unwrap();
+                assert_eq!(
+                    w.actors()
+                        .filter(|e| e.kind == crate::dungeon::tomb::SPHINX)
+                        .count(),
+                    1
+                );
                 w.populate_coil_snakes().unwrap();
                 w.populate_beach_bum().unwrap();
                 assert_eq!(

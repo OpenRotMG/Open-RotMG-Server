@@ -56,6 +56,40 @@ impl Piece {
     }
     fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
         let mut p = match kind {
+            // Arena measurements: trapped/rotmg_svr@593e490, realm/setpieces/Sphinx.cs; the center motif is reconstructed.
+            crate::dungeon::tomb::SPHINX => {
+                let mut p = Self::new(81, 81);
+                for y in 0..81 {
+                    for x in 0..81 {
+                        let dx = x as f32 - 40.;
+                        let dy = y as f32 - 40.;
+                        if dx.hypot(dy) + rng.gen_range(-2.0..2.0) <= 35. {
+                            p.set(x, y, if dx.abs() + dy.abs() <= 10. { 2 } else { 1 });
+                        }
+                    }
+                }
+                for distance in [4, 10] {
+                    for dx in [-distance, distance] {
+                        for dy in [-distance, distance] {
+                            p.set(
+                                (40 + dx) as usize,
+                                (40 + dy) as usize,
+                                if distance == 4 { 3 } else { 4 },
+                            );
+                        }
+                    }
+                }
+                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                    for (r, s) in [(14, 0), (13, 0), (13, -1), (13, 1)] {
+                        p.set(
+                            (40 + dx * r - dy * s) as usize,
+                            (40 + dy * r + dx * s) as usize,
+                            4,
+                        );
+                    }
+                }
+                p
+            }
             crate::dungeon::beach::BUM => {
                 let mut p = Self::new(42, 42);
                 for y in 0..42 {
@@ -510,6 +544,10 @@ impl Piece {
     }
     fn tile(kind: u16, mark: u8) -> (u8, Option<u16>) {
         match (kind, mark) {
+            (crate::dungeon::tomb::SPHINX, 1) => (0xf5, None),
+            (crate::dungeon::tomb::SPHINX, 2) => (0xf7, None),
+            (crate::dungeon::tomb::SPHINX, 3) => (0xf7, Some(crate::dungeon::tomb::WALL)),
+            (crate::dungeon::tomb::SPHINX, 4) => (0xf5, Some(crate::dungeon::tomb::WALL)),
             (crate::dungeon::beach::BUM, 1 | 3) => (0x72, None),
             (crate::dungeon::beach::BUM, 2) => (0x73, None),
             (crate::dungeon::beach::BUM, 4) => (0x72, Some(0x18e)),
@@ -674,10 +712,12 @@ impl World {
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
-                            let untouched = matches!(kind, 0xdc2 | crate::dungeon::beach::BUM)
-                                && piece.cells
-                                    [(y - a.y) as usize * piece.width + (x - a.x) as usize]
-                                    == 0;
+                            let untouched = matches!(
+                                kind,
+                                0xdc2 | crate::dungeon::beach::BUM | crate::dungeon::tomb::SPHINX
+                            ) && piece.cells
+                                [(y - a.y) as usize * piece.width + (x - a.x) as usize]
+                                == 0;
                             self.setpiece_cell_available(c, untouched, retain_authored_lava)
                         })
                     })
@@ -708,12 +748,38 @@ impl World {
                 cell.ground = ground;
                 cell.object = object;
                 cell.config.clear();
+                let connection = (object == Some(crate::dungeon::tomb::WALL)).then(|| {
+                    [(0, -1), (1, 0), (0, 1), (-1, 0)]
+                        .into_iter()
+                        .fold(0_i32, |bytes, (dx, dy)| {
+                            let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                            let joined = nx >= 0
+                                && ny >= 0
+                                && nx < piece.width as i32
+                                && ny < piece.height as i32
+                                && matches!(
+                                    piece.cells[ny as usize * piece.width + nx as usize],
+                                    3 | 4
+                                );
+                            (bytes << 8) | if joined { 1 } else { 2 }
+                        })
+                });
+                if let Some(connection) = connection {
+                    cell.config = format!("conn:{connection}");
+                }
                 if mark == 7 && kind == 0x67d || (x, y) == piece.boss && kind == 0x668 {
                     let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
                     self.spawn_entity(0x501, pos, items)?;
                 }
                 if let Some(object) = object {
                     let id = self.spawn_entity(object, pos, vec![])?;
+                    if let Some(connection) = connection {
+                        self.entities
+                            .get_mut(&id)
+                            .unwrap()
+                            .extra_stats
+                            .push((41, connection));
+                    }
                     if object == 0x194 {
                         self.entities.get_mut(&id).unwrap().size =
                             if self.rng.gen_bool(0.5) { 120 } else { 140 };

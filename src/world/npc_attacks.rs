@@ -26,6 +26,9 @@ impl World {
         if let Some(charge) = &mut e.charge {
             charge.suspend(delta);
         }
+        if let Some(tomb) = &mut e.tomb {
+            tomb.suspend(delta);
+        }
     }
     pub(super) fn npc_attack_schedule(&self, id: i32, elapsed: u64) -> Result<Option<Schedule>> {
         use crate::{
@@ -60,6 +63,14 @@ impl World {
                 };
             }
             return Ok(Some(schedule));
+        }
+        if crate::dungeon::tomb::contains(e.kind) {
+            return Ok(Some(crate::encounter::tomb::schedule(
+                e.kind,
+                e.stage.context("Tomb attack phase missing")?,
+                elapsed,
+                self.tomb_guard(id).is_some(),
+            )));
         }
         if crate::encounter::landmarks::ROSTER.contains(&e.kind) {
             let state = e.stage.context("landmark attack phase missing")?;
