@@ -799,7 +799,27 @@ impl Brain {
             let protected = !progression::vulnerable(enemy);
             let score = 45. - d * 2.
                 + if d < range {
-                    35. + (enemy.max_hp as f32).sqrt().min(20.)
+                    // Gear-ready players seek stronger central enemies: https://gaming.stackexchange.com/a/63268
+                    let interest = if v.map.name == "Realm" {
+                        let reward = (enemy.max_hp as f32
+                            * content.objects[&enemy.kind].xp_multiplier
+                            / 10.)
+                            .ceil();
+                        let cap = crate::store::experience_goal(v.character.level)? as f32 * 0.1;
+                        let value = (reward / cap).min(1.);
+                        tracing::debug!(
+                            player = v.session.player,
+                            enemy = enemy.id,
+                            reward,
+                            cap,
+                            value,
+                            "autonomous Realm combat interest"
+                        );
+                        value
+                    } else {
+                        1.
+                    };
+                    (35. + (enemy.max_hp as f32).sqrt().min(20.)) * interest
                 } else {
                     0.
                 };
@@ -1176,7 +1196,7 @@ impl Brain {
             decision.movement = movement;
             if (self.agreement.is_some()
                 && matches!(decision.goal, Goal::Follow(_) | Goal::Gather(_))
-                || matches!(decision.goal, Goal::Survey(..)))
+                || matches!(decision.goal, Goal::Survey(..) | Goal::Venture))
                 && let Some(enemy) =
                     combat::target(v, content, &grid, &enemies, range, projectile.passes_cover)
             {

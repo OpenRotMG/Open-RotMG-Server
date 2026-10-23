@@ -120,6 +120,89 @@ fn held_resources_compatible_upgrades_and_margin_survive_seeded_replay() {
     assert_eq!(left.decide(&v, &content).unwrap().goal, Goal::Fight(2));
 }
 #[test]
+fn realm_travel_weighs_combat_progress_without_a_max_level_exception() {
+    let content = content();
+    let mut v = view(&content);
+    v.map.width = 120;
+    v.map.height = 80;
+    v.tiles = tiles(120, 80, (0..60).flat_map(|y| (0..80).map(move |x| (x, y))));
+    v.character.stats = [650, 200, 40, 15, 35, 35, 20, 35];
+    v.character.hp = 650;
+    v.character.mp = 200;
+    v.character.items[0] = content
+        .objects
+        .values()
+        .find(|o| o.slot_type == 17 && o.tier == Some(6))
+        .unwrap()
+        .kind as i32;
+    v.objects = vec![object(2, 0x205, 14.5, 11.5)];
+    let inland = Pos { x: 60., y: 40. };
+    for level in [14, 17, 20] {
+        v.character.level = level;
+        for profile in PROFILES {
+            let mut brain = Brain::new(profile, &v);
+            brain.goal = Goal::Fight(2);
+            let decision = brain.decide(&v, &content).unwrap();
+            assert_eq!(
+                decision.goal,
+                Goal::Venture,
+                "level {level}, {}",
+                profile.name
+            );
+            assert!(decision.movement.unwrap().distance(inland) < v.position.distance(inland));
+            assert!(
+                decision.aim.is_some(),
+                "travel still permits free opportunistic shots"
+            );
+            assert!(decision.journey.is_none());
+        }
+    }
+    v.character.level = 10;
+    assert_eq!(
+        Brain::new(PROFILES[1], &v)
+            .decide(&v, &content)
+            .unwrap()
+            .goal,
+        Goal::Fight(2)
+    );
+    v.character.level = 20;
+    v.objects[0] = object(2, 0x652, 14.5, 11.5);
+    v.objects[0].max_hp = content.objects[&0x652].hp;
+    assert_eq!(
+        Brain::new(PROFILES[1], &v)
+            .decide(&v, &content)
+            .unwrap()
+            .goal,
+        Goal::Fight(2),
+        "a worthwhile God still competes with travel"
+    );
+    v.objects[0] = object(2, 0x205, 14.5, 11.5);
+    v.map.name = "Snake Pit".into();
+    assert_eq!(
+        Brain::new(PROFILES[1], &v)
+            .decide(&v, &content)
+            .unwrap()
+            .goal,
+        Goal::Fight(2),
+        "dungeon clearing is unchanged"
+    );
+    v.map.name = "Realm".into();
+    v.character.items[0] = content.objects[&WIZARD].equipment[0];
+    assert_eq!(
+        Brain::new(PROFILES[1], &v)
+            .decide(&v, &content)
+            .unwrap()
+            .goal,
+        Goal::Fight(2),
+        "poorly equipped max-level characters still build up locally"
+    );
+    v.character.hp = 10;
+    v.character.items[4..].fill(-1);
+    let decision = Brain::new(PROFILES[1], &v).decide(&v, &content).unwrap();
+    assert_eq!(decision.goal, Goal::Recover);
+    assert!(matches!(decision.journey, Some(Journey::Nexus)));
+}
+#[test]
 fn only_addressed_native_chat_changes_companion_memory() {
     let content = content();
     let mut v = view(&content);

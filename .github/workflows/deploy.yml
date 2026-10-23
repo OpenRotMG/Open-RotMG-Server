@@ -10,3 +10,4 @@ jobs:
     uses: OpenRotMG/.github/.github/workflows/deploy.yml@main
     secrets:
       DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+      PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}

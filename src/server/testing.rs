@@ -170,9 +170,21 @@ enum Goal {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Cheat {
-    Stats { values: [i32; 8] },
-    Item { slot: usize, item: i32 },
-    Teleport { position: Pos },
+    Stats {
+        values: [i32; 8],
+    },
+    Item {
+        slot: usize,
+        item: i32,
+    },
+    Teleport {
+        position: Pos,
+    },
+    StatModifier {
+        index: usize,
+        amount: i32,
+        duration_ms: u64,
+    },
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -911,7 +923,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::Capabilities => Ok(json!({"schema":1,"provenance":"prepared","pause_scope":"isolated server and all registered native clients","controllers":["direct","native","game_bot"],"game_bot_profiles":crate::bots::profiles(),"goals":["time","level","kills","pirate_caves"],"max_game_ms":600000,"trace_page_limit":40,"request_bytes_limit":MAX_REQUEST_BYTES,"mutation_limit":MAX_MUTATIONS,"starting_context_operations":["prepare_realm_capacity"],"prepared_realm_capacity":if t.root.join("prepared-realm-capacity.json").exists(){serde_json::from_slice::<Value>(&fs::read(t.root.join("prepared-realm-capacity.json"))?)?}else{Value::Null}})),
         Command::PrepareRealmCapacity{limit} => prepare_realm_capacity(a,t,limit).await,
         Command::Catalog{search,limit} => {ensure!(!search.is_empty() && search.len()<=80 && (1..=20).contains(&limit),"catalog needs search and limit 1–20");let matches=a.content.objects.values().filter(|o|o.name.to_lowercase().contains(&search.to_lowercase())).collect::<Vec<_>>();Ok(json!({"items":matches.iter().take(limit).map(|o|json!({"id":o.kind,"name":o.name,"class":o.class,"slot_type":o.slot_type,"unsupported_equipment":o.unsupported_equipment})).collect::<Vec<_>>(),"omitted":matches.len().saturating_sub(limit)}))},
-        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed,"privileged":true,"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0xd7a|0xd7b|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
+        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed,"privileged":true,"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0xd06|0xd7a|0xd7b|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
         Command::Spawn{spec} => spawn(a,t,spec).await,
         Command::World{template} => { let world=a.world.directory(move |d|d.prepared_instance(&template)).await?; Ok(json!({"world":world,"provenance":"prepared"})) },
         Command::Observe{actor} => {t.registration(actor)?;snapshot(a,actor,false).await},
@@ -983,13 +995,15 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
             super::lifecycle::stage(Stage::Reservation);
             let mut ch=a.world.for_player(player).call(move |w| {let p=w.players.get(&player).context("player missing")?;ensure!(p.character.alive&&!p.pending&&!p.progress_started&&!p.death_pending&&!p.departing,"actor has pending gameplay or persistence");Ok(p.character.clone())}).await?;
             match change {
+                Cheat::StatModifier{index,amount,duration_ms}=>{a.world.for_player(player).call(move |w| w.prepare_stat_modifier(player,index,amount,duration_ms)).await?;},
                 Cheat::Teleport{position}=>{a.world.for_player(player).call(move |w| {ensure!(position.x.is_finite()&&position.y.is_finite()&&w.walkable(position),"teleport position invalid");let p=w.players.get_mut(&player).context("player missing")?;ensure!(p.controller!=crate::world::Controller::Human,"native teleport requires a verified client correction, not a server-only edit");p.pos=position;p.bot_goal=None;w.updates(player,true)}).await?;},
                 change=>{
+                    if let Cheat::Stats{values}=&change {let values=*values;a.world.for_player(player).call(move |w| w.validate_prepared_base_stats(player,values)).await?;}
                     super::lifecycle::stage(Stage::Store);
                     match change {
                         Cheat::Stats{values}=>{ch.base=values;let stats=ch.effective(&a.content)?;ch.hp=ch.hp.min(stats[0]);ch.mp=ch.mp.min(stats[1]);},
                         Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],Vec::new()).await?[0];},
-                        Cheat::Teleport{..}=>unreachable!(),
+                        Cheat::Teleport{..}|Cheat::StatModifier{..}=>unreachable!(),
                     }
                     let stats = ch.effective(&a.content)?;
                     ch.hp = ch.hp.min(stats[0]); ch.mp = ch.mp.min(stats[1]);

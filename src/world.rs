@@ -56,6 +56,8 @@ mod manor_entry;
 mod midlands;
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod npc_visibility_tests;
 
 mod named_births;
 mod names;
@@ -566,6 +568,8 @@ pub struct World {
     timed_ids: BTreeSet<i32>,
     gun_ids: BTreeSet<i32>,
     pentaract_ids: BTreeSet<i32>,
+    // Terminal deadlines run in every world, including Realms without any Flamers.
+    abyss_flamer_ids: BTreeSet<i32>,
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
@@ -1509,7 +1513,7 @@ impl Directory {
             .worlds
             .get_mut(&origin)
             .unwrap()
-            .spawn_exit(kind, pos)?;
+            .spawn_clear_portal(kind, pos, true)?;
         self.portals.insert(
             id,
             Portal {
@@ -1526,6 +1530,9 @@ impl Directory {
             destination,
             x = self.worlds[&origin].entities[&id].pos.x,
             y = self.worlds[&origin].entities[&id].pos.y,
+            requested_x = pos.x,
+            requested_y = pos.y,
+            displacement = pos.distance(self.worlds[&origin].entities[&id].pos),
             "earned dungeon portal dropped"
         );
         Ok(id)
@@ -2003,6 +2010,11 @@ impl World {
             realm_layout: None,
             timed_ids: BTreeSet::new(),
             gun_ids,
+            abyss_flamer_ids: actor_ids
+                .iter()
+                .copied()
+                .filter(|id| entities[id].kind == 0x90b)
+                .collect(),
             pentaract_ids: entities
                 .values()
                 .filter(|e| e.kind == 0xd5f)
@@ -2306,6 +2318,9 @@ impl World {
         if kind == 0xd5f {
             self.pentaract_ids.insert(id);
         }
+        if kind == 0x90b {
+            self.abyss_flamer_ids.insert(id);
+        }
         self.npc_global_ids.insert(id);
         self.non_population_ids.insert(id);
         if definition.quest {
@@ -2316,15 +2331,19 @@ impl World {
         }
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
-        // Nearest-only interaction masks co-located loot or portals: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/game/GameSprite.as#L195-L225
-        let pos = (0..8)
-            .map(|i| {
+        self.spawn_clear_portal(kind, loot, false)
+    }
+    fn spawn_clear_portal(&mut self, kind: u16, loot: Pos, keep_origin: bool) -> Result<i32> {
+        // Keep the reference death point unless loot/portal clearance requires separation: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/DropPortalOnDeath.cs#L42
+        let pos = std::iter::once(loot)
+            .filter(|_| keep_origin)
+            .chain((0..8).map(|i| {
                 let angle = i as f32 * std::f32::consts::TAU / 8.;
                 Pos {
                     x: loot.x + 2. * angle.cos(),
                     y: loot.y + 2. * angle.sin(),
                 }
-            })
+            }))
             .find(|pos| {
                 self.walkable(*pos)
                     && self
@@ -2345,6 +2364,7 @@ impl World {
         self.timed_ids.remove(&id);
         self.gun_ids.remove(&id);
         self.pentaract_ids.remove(&id);
+        self.abyss_flamer_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
         self.ability_state.objects.remove(&id);
@@ -5125,12 +5145,19 @@ impl World {
             } else {
                 nearest.filter(|p| pos.distance(*p) < radius)
             };
+            // Visible mobs need simulation, not longer-range targeting: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/Collision.cs#L187-L215
+            let simulation_radius =
+                if self.content.objects[&kind].quest && entity.activated.is_none() {
+                    radius
+                } else {
+                    radius.max(20.)
+                };
             let nearby = self.players.values().any(|p| {
                 p.character.alive
                     && !p.death_pending
                     && !p.departing
                     && !p.paused
-                    && pos.distance(p.pos) < radius
+                    && pos.distance(p.pos) < simulation_radius
             });
             let manor_clock =
                 crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
@@ -6174,6 +6201,8 @@ mod hermit_loot_tests;
 #[cfg(test)]
 mod lair_trap_tests;
 #[cfg(test)]
+mod loot_bag_tests;
+#[cfg(test)]
 mod manor_tests;
 #[cfg(test)]
 mod starter_loot_tests;
@@ -6292,6 +6321,85 @@ mod tests {
             16,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn limon_box_fits_generated_arenas() {
+        let content = world().content.clone();
+        for seed in 0..16 {
+            let map = Arc::new(crate::dungeon::sprite::generate(&content, seed).unwrap());
+            let mut w = World::new(content.clone(), map).unwrap();
+            let id = w.entities.values().find(|e| e.kind == 0xd06).unwrap().id;
+            w.encounter_mechanics(id, None, 12300).unwrap();
+            assert_eq!(
+                w.entities
+                    .values()
+                    .filter(|e| e.parent == Some(id) && matches!(e.kind, 0xd07..=0xd0a))
+                    .count(),
+                8,
+                "seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn limon_returns_to_center_then_holds_the_box_phase() {
+        for offset in [6., 8.5] {
+            let mut w = arena(0);
+            w.now = 12300;
+            let player = w.enter(ch(&w), None).unwrap();
+            let home = Pos { x: 12.5, y: 100.5 };
+            w.players.get_mut(&player).unwrap().pos = Pos {
+                x: home.x,
+                y: home.y + 3.,
+            };
+            w.apply_condition(player, crate::condition::INVINCIBLE, 100000)
+                .unwrap();
+            let id = w.spawn_entity(0xd06, home, vec![]).unwrap();
+            w.position_entity(
+                id,
+                Pos {
+                    x: home.x + offset,
+                    y: home.y,
+                },
+            )
+            .unwrap();
+            let boss = w.entities.get_mut(&id).unwrap();
+            boss.activated = Some(0);
+            boss.stage = Some(2);
+            for _ in 0..60 {
+                let previous = w.entities[&id].pos;
+                w.step();
+                assert!(
+                    w.entities[&id].pos.distance(previous)
+                        <= crate::encounter::nr_speed(1.4) / 1.5 * 0.05 + 0.001
+                );
+            }
+            let boss = &w.entities[&id];
+            assert_eq!(boss.stage, Some(3));
+            assert!(
+                boss.pos.distance(home) <= 0.11,
+                "box-phase Limon did not return to center: {:?}",
+                boss.pos
+            );
+            assert_eq!(
+                w.entities
+                    .values()
+                    .filter(|e| e.parent == Some(id) && matches!(e.kind, 0xd07..=0xd0a))
+                    .count(),
+                8
+            );
+            let settled = boss.pos;
+            w.players.get_mut(&player).unwrap().pos = Pos {
+                x: home.x - 4.,
+                y: home.y,
+            };
+            for _ in 0..30 {
+                w.step();
+            }
+            assert!(w.entities[&id].pos.distance(settled) < 0.001);
+            assert!(w.entities[&id].home.distance(home) < 0.001);
+        }
     }
 
     #[test]
@@ -7059,6 +7167,43 @@ mod tests {
             assert_eq!(r.i16().unwrap(), 0);
             r.done().unwrap();
         }
+    }
+
+    #[test]
+    fn ghost_god_portal_keeps_an_unobstructed_death_position() {
+        let mut d = directory();
+        let mut w = arena(1);
+        w.name = "Realm".into();
+        w.ids = d.ids.clone();
+        let player = w.enter(ch(&w), None).unwrap();
+        let death = Pos { x: 10.5, y: 10.5 };
+        let mut requests = 0;
+        for seed in 0..64 {
+            let ghost = w.spawn_entity(0x659, death, vec![]).unwrap();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.damage_enemy(player, ghost, 100000, false, &[], None)
+                .unwrap();
+            for (kind, pos) in std::mem::take(&mut w.portal_requests) {
+                assert_eq!(kind, 0x71a);
+                assert!(pos.distance(death) < 0.001);
+                requests += 1;
+            }
+            for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                w.remove_entity(bag);
+            }
+        }
+        assert!((1..64).contains(&requests));
+        let mut expected_rng = w.rng.clone();
+        d.worlds.insert(-3, w);
+        let portal = d.drop_dungeon_portal(-3, 0x71a, death).unwrap();
+        let w = &d.worlds[&-3];
+        assert!(w.entities[&portal].pos.distance(death) < 0.001);
+        assert_eq!(w.rng.clone().r#gen::<u64>(), expected_rng.r#gen::<u64>());
+        assert_eq!(d.portals[&portal].expires, d.tick + 600);
+        assert_eq!(
+            d.worlds[&d.portals[&portal].destination.unwrap()].name,
+            "Undead Lair"
+        );
     }
 
     #[test]
