@@ -48,6 +48,66 @@ fn gray_world(count: i32) -> (World, Vec<i32>, i32) {
     (w, players, enemy)
 }
 
+#[test]
+fn realm_progression_leaders_preserve_reference_attempt_counts() {
+    for (kind, multiplier) in [
+        (0x600, 2),
+        (0x609, 4),
+        (0x614, 4),
+        (0x617, 4),
+        (0x61a, 4),
+        (0x60d, 4),
+        (0x6c4, 4),
+        (0x62c, 3),
+    ] {
+        for count in [0, 1, 2, 3, 5] {
+            let (mut w, players, old) = gray_world(count);
+            w.remove_entity(old);
+            let enemy = w
+                .spawn_entity(kind, Pos { x: 1.5, y: 1.5 }, vec![])
+                .unwrap();
+            for player in players {
+                w.entities
+                    .get_mut(&enemy)
+                    .unwrap()
+                    .damage
+                    .insert(w.players[&player].character.id, 1);
+            }
+            for seed in 0..16 {
+                for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+                    w.remove_entity(bag);
+                }
+                let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let mut expected = Vec::new();
+                for _ in 0..(count * multiplier).min(8) {
+                    for item in crate::loot::rewards(&w.content, kind, &mut rng) {
+                        if !expected.contains(&i32::from(item)) || matches!(item, 0xa22 | 0xa23) {
+                            expected.push(i32::from(item));
+                        }
+                    }
+                }
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.drop_loot(&w.entities[&enemy].clone()).unwrap();
+                let expected = if expected.is_empty() {
+                    BTreeMap::new()
+                } else {
+                    BTreeMap::from([(-1, expected)])
+                };
+                assert_eq!(
+                    actual_drops(&w),
+                    expected,
+                    "kind {kind:x} count {count} seed {seed}"
+                );
+                assert_eq!(
+                    w.rng.next_u64(),
+                    rng.next_u64(),
+                    "kind {kind:x} count {count} seed {seed}"
+                );
+            }
+        }
+    }
+}
+
 fn actual_drops(w: &World) -> BTreeMap<i32, Vec<i32>> {
     let mut result = BTreeMap::<i32, Vec<i32>>::new();
     for bag in w
@@ -279,7 +339,7 @@ fn expected_midland(
         .map(|(owner, _)| *owner)
         .collect();
     let mut successes = 0;
-    for _ in 0..owners.len() * if kind == 0x949 { 2 } else { 1 } {
+    for _ in 0..owners.len() * if matches!(kind, 0x949 | 0x950) { 2 } else { 1 } {
         for (chance, pool) in private {
             if rng.gen_bool(*chance) {
                 let item = *pool.choose(&mut rng).unwrap();
@@ -300,7 +360,7 @@ fn expected_midland(
 
 #[test]
 fn midland_world_dual_rewards_preserve_living_credit_thresholds_and_exact_attempt_counts() {
-    for kind in [0x952, 0x949] {
+    for kind in [0x952, 0x949, 0x950] {
         for count in [0, 1, 3, 5, 10] {
             let (mut w, players, old) = gray_world(count + 4);
             w.remove_entity(old);
