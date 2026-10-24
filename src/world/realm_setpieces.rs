@@ -121,7 +121,8 @@ impl Piece {
                     for x in 1..64 {
                         let radius = (x as f32 - 32.).hypot(y as f32 - 32.);
                         if radius < 28. + rng.gen_range(0.0..4.) {
-                            let mark = if radius > 19. && rng.gen_ratio(1, 7) {
+                            // Trees also occupy the grave field: realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff, common/resources/worlds/SP_KageKami.jm.
+                            let mark = if rng.gen_ratio(1, if radius > 19. { 7 } else { 30 }) {
                                 3
                             } else if rng.gen_ratio(1, 15) {
                                 4
@@ -930,5 +931,63 @@ impl World {
         );
         self.setpieces.push(area);
         Ok(pos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kage_cover_reaches_the_graves_without_sealing_their_approaches() {
+        for seed in 0..64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let p = Piece::build(crate::dungeon::manor::KAGE, &mut rng);
+            let inner_trees = p
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(i, mark)| {
+                    **mark == 3
+                        && (((*i % p.width) as f32 - 32.).hypot((*i / p.width) as f32 - 32.) < 19.)
+                })
+                .count();
+            assert!(
+                inner_trees > 0,
+                "seed {seed}: the playable graveyard has no tree cover"
+            );
+            let start = p.boss.1 * p.width + p.boss.0;
+            assert_eq!(p.cells[start], 1);
+            assert_eq!(p.cells.iter().filter(|mark| **mark == 7).count(), 24);
+            let mut reached = BTreeSet::from([start]);
+            let mut queue = std::collections::VecDeque::from([start]);
+            while let Some(i) = queue.pop_front() {
+                let (x, y) = ((i % p.width) as i32, (i / p.width) as i32);
+                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= p.width as i32 || ny >= p.height as i32 {
+                        continue;
+                    }
+                    let next = ny as usize * p.width + nx as usize;
+                    if matches!(p.cells[next], 1 | 2 | 4 | 5 | 6) && reached.insert(next) {
+                        queue.push_back(next);
+                    }
+                }
+            }
+            for (i, _) in p.cells.iter().enumerate().filter(|(_, m)| **m == 7) {
+                assert!(
+                    [i - p.width, i + 1, i + p.width, i - 1]
+                        .iter()
+                        .any(|next| reached.contains(next)),
+                    "seed {seed}: grave {i} has no reachable approach"
+                );
+            }
+            for (x, y) in [(32, 10), (32, 54), (10, 32), (54, 32)] {
+                assert!(
+                    reached.contains(&(y * p.width + x)),
+                    "seed {seed}: approach {x},{y} is blocked"
+                );
+            }
+        }
     }
 }
