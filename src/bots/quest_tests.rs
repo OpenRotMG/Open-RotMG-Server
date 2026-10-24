@@ -1,7 +1,7 @@
 use super::*;
 use crate::world::view::{Lifecycle, MapInfo, OwnCharacter, Session, VisibleObject};
 
-fn fixture() -> (Content, PlayerView) {
+pub(super) fn fixture() -> (Content, PlayerView) {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let geometry = crate::navigation::Geometry::new(
         (128, 128),
@@ -366,4 +366,196 @@ fn recovery_footprint_preserves_half_cell_and_object_boundaries() {
     assert!(recovery_step_valid(&view, &content, &grid, step));
     view.objects[0].position = step;
     assert!(!recovery_step_valid(&view, &content, &grid, step));
+}
+
+fn familiar_social_scene(world: &str) -> (Content, PlayerView, Brain) {
+    let (content, mut v) = fixture();
+    v.map.name = world.into();
+    v.session.world = if world == "Nexus" { -2 } else { -3 };
+    v.character.level = 5;
+    v.character.items[4..6].fill(0xa22);
+    v.quest = None;
+    let peer = &mut v.objects[0];
+    peer.id = 2;
+    peer.account = Some(2);
+    peer.kind = crate::content::PRIEST;
+    peer.name = "Peer".into();
+    peer.position = Pos { x: 2.5, y: 10.5 };
+    peer.hp = 500;
+    peer.max_hp = 500;
+    peer.level = Some(20);
+    peer.equipped = vec![0xa3d, 0xa31, -1, -1];
+    if world == "Nexus" {
+        v.objects.push(VisibleObject {
+            id: 3,
+            account: None,
+            kind: 0x712,
+            name: "Test (0/85)".into(),
+            position: Pos { x: 20.5, y: 10.5 },
+            hp: 0,
+            max_hp: 0,
+            level: None,
+            equipped: vec![],
+            contents: vec![],
+            blocks: false,
+            usable: true,
+            condition_mask: None,
+        });
+    }
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.mind.market.name = brain.profile.name.into();
+    brain.mind.social.episodes.push_back(
+        serde_json::from_value(serde_json::json!({
+            "account":2,"name":"Peer","own_character":v.session.character,
+            "interaction":"HealedBy","amount":20
+        }))
+        .unwrap(),
+    );
+    v.tick += 400;
+    v.time_ms += 20_000;
+    v.elapsed_ms += 20_000;
+    (content, v, brain)
+}
+
+#[test]
+fn nexus_familiar_peer_does_not_beat_open_realm_entry() {
+    let (c, v, mut brain) = familiar_social_scene("Nexus");
+    brain.goal = Goal::Follow(2);
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Portal(3));
+    assert!(d.movement.unwrap().x > v.position.x);
+}
+
+#[test]
+fn nexus_exclusion_preserves_realm_follow_and_explicit_agreements() {
+    let (c, v, mut brain) = familiar_social_scene("Realm");
+    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Follow(2));
+    for waiting in [None, Some(Pos { x: 10.5, y: 10.5 })] {
+        let (c, v, mut brain) = familiar_social_scene("Nexus");
+        brain.agreement = Some(dialogue::Agreement {
+            partner: "Peer".into(),
+            player: 2,
+            waiting,
+        });
+        brain.invitation_until = v.time_ms + 120_000;
+        let d = brain.decide(&v, &c).unwrap();
+        assert_eq!(
+            d.goal,
+            if waiting.is_some() {
+                Goal::Gather(v.session.player)
+            } else {
+                Goal::Follow(2)
+            }
+        );
+        assert!(d.journey.is_none());
+    }
+}
+
+#[test]
+fn nexus_exclusion_preserves_active_business_and_admitted_market() {
+    let (c, v, mut brain) = familiar_social_scene("Nexus");
+    let mut w = wire::Writer::new();
+    for (index, items) in [v.character.items.clone(), vec![-1; 12]].iter().enumerate() {
+        if index == 1 {
+            w.utf("Peer");
+        }
+        w.i16(12);
+        for item in items {
+            w.i32(*item).i32(0).u8(0).u8(0);
+        }
+    }
+    brain
+        .mind
+        .market
+        .receive(&Packet { id: 67, body: w.0 }, &v, &c, None)
+        .unwrap();
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Wait);
+    assert!(d.journey.is_none());
+
+    let (c, mut v, mut brain) = familiar_social_scene("Nexus");
+    v.character.items[4] = 0xa1d;
+    v.character.items[5] = 0xa1d;
+    v.character.items[6..8].fill(0xa22);
+    let grid = Grid::terrain(&v);
+    assert!(
+        brain
+            .mind
+            .market
+            .decide(
+                &v,
+                &c,
+                None,
+                &grid,
+                &mut rand::rngs::mock::StepRng::new(0, 1)
+            )
+            .unwrap()
+            .is_some()
+    );
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Wait);
+    assert!(d.journey.is_none());
+
+    let (c, mut v, mut brain) = familiar_social_scene("Nexus");
+    v.character.items[6] = 0xa22;
+    let grid = Grid::terrain(&v);
+    brain
+        .mind
+        .market
+        .decide(
+            &v,
+            &c,
+            None,
+            &grid,
+            &mut rand::rngs::mock::StepRng::new(u64::MAX, 1),
+        )
+        .unwrap();
+    let mut w = wire::Writer::new();
+    w.utf("Peer")
+        .i32(2)
+        .i32(0)
+        .u8(0)
+        .utf("")
+        .utf("Triceps, spare health?")
+        .utf("");
+    brain
+        .mind
+        .social
+        .receive(
+            &Packet {
+                id: wire::TEXT,
+                body: w.0,
+            },
+            &v,
+            "Triceps",
+            3.,
+            brain.mind.market.incoming.is_some(),
+        )
+        .unwrap();
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Wait);
+    assert!(d.journey.is_none());
+}
+
+#[test]
+fn nexus_familiarity_does_not_preempt_banking() {
+    let (c, mut v, mut brain) = familiar_social_scene("Nexus");
+    v.character.items[4] = 0xa1d;
+    v.character.items[5] = 0xa1d;
+    v.character.items[6..8].fill(0xa22);
+    v.objects[1].kind = 0x720;
+    v.objects[1].name = "Vault".into();
+    brain
+        .mind
+        .market
+        .decide(
+            &v,
+            &c,
+            None,
+            &Grid::terrain(&v),
+            &mut rand::rngs::mock::StepRng::new(u64::MAX, 1),
+        )
+        .unwrap();
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Portal(3));
 }

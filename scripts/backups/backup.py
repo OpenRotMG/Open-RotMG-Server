@@ -41,7 +41,7 @@ DEATHS_SQL = "CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES chara
 CLAIMS_SQL = "CREATE TABLE legacy_claims(account INTEGER NOT NULL REFERENCES accounts(id),class INTEGER NOT NULL CHECK(typeof(class)='integer' AND class BETWEEN 0 AND 65535),character INTEGER NOT NULL UNIQUE REFERENCES deaths(character),PRIMARY KEY(account,class))"
 CREDITS_SQL = "CREATE TABLE level_credits(recipient INTEGER NOT NULL REFERENCES characters(id),reached_level INTEGER NOT NULL CHECK(typeof(reached_level)='integer' AND reached_level BETWEEN 2 AND 20),giver INTEGER NOT NULL REFERENCES characters(id),PRIMARY KEY(recipient,reached_level),CHECK(recipient<>giver))"
 CREDITS_INDEX_SQL = 'CREATE INDEX level_credits_by_giver ON level_credits(giver)'
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -469,7 +469,7 @@ def validate(bundle):
         if len(set(identities)) != len(rows) or (table == 'discord_links' and len({r['discord_id'] for r in rows}) != len(rows)):
             raise ValueError('Duplicate hiscores identity: ' + table)
     rewards = bundle['game'].get('gold_rewards', [])
-    reward_types = ('discord_link', 'collection_top_half') + (('first_bug_report',) if bundle['schema'] >= 11 else ())
+    reward_types = gold_reward_types(bundle['schema'])
     for row in rewards:
         if type(row['account']) is not int or row['account'] not in accounts or row['reward'] not in reward_types or type(row['awarded_at']) is not int or row['awarded_at'] <= 0 or (row['notified_at'] is not None and (type(row['notified_at']) is not int or row['notified_at'] <= 0)):
             raise ValueError('Invalid gold reward')
@@ -507,12 +507,25 @@ def validate(bundle):
     return bundle
 
 
+def gold_reward_types(version):
+    return ('discord_link', 'collection_top_half') + (('first_bug_report',) if version >= 11 else ()) + (('class_star_blue', 'class_star_red', 'class_star_orange', 'class_star_yellow', 'class_star_white') if version >= 18 else ())
+
+
+def gold_reward_sql(version):
+    rewards = ','.join(repr(r) for r in gold_reward_types(version))
+    return f"CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ({rewards})),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward))"
+
+
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
     game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
-    if (stored_version > max(GAME_SCHEMAS) or (max(versions) >= 12 and stored_version != max(versions))
-            or (stored_version >= 12 and stored_version not in versions)):
+    if (stored_version > max(GAME_SCHEMAS) or
+            ((max(versions) >= 12 or stored_version >= 12) and stored_version not in versions)):
         raise ValueError('Unsupported database schema version')
+    if stored_version >= 18:
+        with closing(sqlite3.connect(game)) as db:
+            if db.execute("SELECT sql FROM sqlite_schema WHERE name='gold_rewards'").fetchone() != (gold_reward_sql(stored_version),):
+                raise ValueError('Schema-18 gold reward metadata mismatch')
     if len(versions) > 1 and stored_version not in versions:
         raise ValueError('Unsupported gold reward schema version')
     version = stored_version if len(versions) > 1 else versions[0]
@@ -570,8 +583,7 @@ CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
 CREATE INDEX guild_roster ON guild_members(guild);
 CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;'''
     if bundle['schema'] >= 10:
-        rewards = "'discord_link','collection_top_half'" + (",'first_bug_report'" if bundle['schema'] >= 11 else '')
-        definitions['game'] += f"\nCREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ({rewards})),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));"
+        definitions['game'] += '\n' + gold_reward_sql(bundle['schema']) + ';'
     if bundle['schema'] >= 12:
         definitions['game'] += '''
 ALTER TABLE accounts ADD COLUMN character_slots INTEGER NOT NULL DEFAULT 1 CHECK(typeof(character_slots)='integer' AND character_slots BETWEEN 1 AND 14);

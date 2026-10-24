@@ -996,7 +996,7 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        // Multiple finite quest sites must fit without relaxing production placement guards.
+        // Restored Grove populations need room alongside both finite 65-tile graveyards.
         let map = Arc::new(crate::terrain::generate(&content, seed, 1024)?);
         Self::configured(
             path,
@@ -4987,6 +4987,14 @@ impl World {
         p.validate_progress_reservation(snapshot)?;
         Ok(p.level_assists_prepared.clone())
     }
+    pub(crate) fn class_quest_rank(&self, id: i32) -> Result<i32> {
+        let player = self
+            .players
+            .get(&id)
+            .context("class-quest rank player missing")?;
+        Ok(player.presentation.stars() / self.content.classes.len() as i32)
+    }
+
     pub fn finish_progress(&mut self, id: i32, snapshot: Character) -> Result<()> {
         let p = self
             .players
@@ -7028,3 +7036,19 @@ mod sphinx_site_tests;
 
 #[cfg(test)]
 impl World {}
+
+#[cfg(test)]
+#[test]
+fn populated_realm_fixture_retains_graveyard_space() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for seed in [730, 1093] {
+        let directory = Directory::fixture(data, content.clone(), 16, 12351, Some(seed))
+            .unwrap_or_else(|error| panic!("fixture population seed {seed}: {error:#}"));
+        for world in directory.worlds.values().filter(|w| w.name == "Realm") {
+            let count = |kind| world.entities.values().filter(|e| e.kind == kind).count();
+            assert_eq!(count(crate::dungeon::manor::KAGE), 2);
+            assert!((17..25).contains(&count(0x91f)));
+        }
+    }
+}

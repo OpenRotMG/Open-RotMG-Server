@@ -553,7 +553,7 @@ impl Store {
         ensure!(
             matches!(
                 version,
-                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
+                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18
             ),
             "unsupported game database schema {version}"
         );
@@ -585,6 +585,7 @@ impl Store {
             version < 10 || rewards_exist,
             "gold reward history missing; restore reviewed state instead of allowing duplicate grants"
         );
+        gold::check_schema(&c, version)?;
         let credits_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
             [],
@@ -618,7 +619,7 @@ impl Store {
             version < 7 || updates_exist,
             "schema-7 update feed missing; restore reviewed state instead of clearing published news"
         );
-        if version == 17 {
+        if version >= 17 {
             guilds::migrate(&c, version)?;
             death_awards::validate_state(&c, legacy_base)?;
         }
@@ -749,7 +750,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 17)?;
+        migration.pragma_update(None, "user_version", 18)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -882,7 +883,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         let classes = self.classes.clone();
         self.call(move |db| {
             let tx = db.transaction()?;
-            let (presentation, _) = read_presentation(&tx, account, legacy_base, &classes)?;
+            let (presentation, _) = rewarded_presentation(&tx, account, legacy_base, &classes)?;
             tx.commit()?;
             Ok(presentation)
         })
@@ -897,7 +898,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let next_slot_price=character_slots::price(character_slots)?;
             let mut characters=Vec::new();{let mut q=tx.prepare("SELECT id,stats,items,revision,alive FROM characters WHERE account=?1 AND alive=1 ORDER BY id")?;let rows=q.query_map([id],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i32>(3)?,r.get::<_,bool>(4)?)))?;
             for row in rows{let(cid,stats,items,rev,alive)=row?;let mut ch:Character=serde_json::from_str(&stats)?;ch.id=cid;ch.account=id;ch.name=name.clone();ch.items=serde_json::from_str(&items)?;ch.revision=rev;ch.alive=alive;characters.push(ch);}}
-            let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = read_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,character_slots,next_slot_price,guild:presentation.guild,credits:presentation.credits,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
+            let next_id:i32=tx.query_row("SELECT coalesce(max(id),0)+1 FROM characters WHERE account=?1",[id],|r|r.get(0))?;let best_levels = { let mut q = tx.prepare("SELECT json_extract(stats,'$.class'),max(json_extract(stats,'$.level')) FROM characters WHERE account=?1 GROUP BY json_extract(stats,'$.class')")?; q.query_map([id], |r| Ok((r.get::<_,u16>(0)?, r.get::<_,i32>(1)?)))?.collect::<rusqlite::Result<std::collections::BTreeMap<_,_>>>()? };let (presentation,earned_fame) = rewarded_presentation(&tx, id, legacy_base, &classes)?;tx.commit()?;Ok(Account{id,name,next_id,character_slots,next_slot_price,guild:presentation.guild,credits:presentation.credits,fame:i64::from(presentation.fame),earned_fame,best_levels,best_fame:presentation.best_fame,characters})}).await?;
         self.vaults(account.id).await?;
         Ok(account)
     }
@@ -1658,6 +1659,21 @@ fn read_presentation(
         },
         earned,
     ))
+}
+fn rewarded_presentation(
+    db: &Connection,
+    account: i32,
+    legacy_base: [i32; 8],
+    classes: &BTreeMap<u16, Class>,
+) -> Result<(AccountPresentation, i64)> {
+    let (mut presentation, earned) = read_presentation(db, account, legacy_base, classes)?;
+    if gold::class_quests(db, account, presentation.stars(), classes.len())? {
+        presentation.credits =
+            db.query_row("SELECT credits FROM accounts WHERE id=?1", [account], |r| {
+                r.get(0)
+            })?;
+    }
+    Ok((presentation, earned))
 }
 pub fn name_chosen(account: i32, name: &str) -> bool {
     name != format!("Guest{account}")
