@@ -213,7 +213,7 @@ impl Piece {
                         _ => unreachable!("invalid Temple ground marker"),
                     })
                     .collect();
-                if rng.gen_bool(0.5) {
+                let bas = if rng.gen_bool(0.5) {
                     for n in 0..20 {
                         p.set(17 + n, 17, if n == 19 { 3 } else { 2 });
                         p.set(17 + n, 18, 3);
@@ -242,6 +242,7 @@ impl Piece {
                     ] {
                         p.set(x, y, 4);
                     }
+                    17
                 } else {
                     for n in 0..23 {
                         if (10..=12).contains(&n) {
@@ -264,11 +265,15 @@ impl Piece {
                         }
                     }
                     p.boss = (27, 27);
-                }
-                for y in 6..54 {
-                    for x in 6..54 {
+                    16
+                };
+                for y in 0..60 {
+                    for x in 0..60 {
                         if p.cells[y * 60 + x] == 5
-                            && (!(17..=43).contains(&x) || !(17..=43).contains(&y))
+                            && ((x > 5 && x < bas)
+                                || (x < 55 && x > 60 - bas)
+                                || (y > 5 && y < bas)
+                                || (y < 55 && y > 60 - bas))
                         {
                             let r: f32 = rng.r#gen();
                             if r > 0.33 {
@@ -1021,6 +1026,7 @@ mod tests {
         world.place_named_setpiece(0xdc2, &[6, 7]).unwrap();
         let area = world.setpieces.last().unwrap();
         let mut kept_under_objects = 0;
+        let mut plant_kinds = BTreeSet::new();
         for (i, mark) in plan.cells.iter().copied().enumerate() {
             let (x, y) = (
                 area.x + (i % plan.width) as i32,
@@ -1066,8 +1072,14 @@ mod tests {
                 if matches!(kind, 0x1f2..=0x1f4) {
                     assert!(!world.walkable(pos));
                 }
+                if matches!(kind, 0xdd4 | 0xdd5 | 0xdda) {
+                    plant_kinds.insert(kind);
+                    assert_eq!(after.ground, 0x56);
+                    assert_eq!(world.walkable(pos), kind != 0xdda);
+                }
             }
         }
+        assert_eq!(plant_kinds, BTreeSet::from([0xdd4, 0xdd5, 0xdda]));
         assert!(kept_under_objects > 0);
         assert!(!Arc::ptr_eq(&original, &world.map));
         let grass_under_masonry = (area.y..area.y + area.height)
@@ -1080,6 +1092,56 @@ mod tests {
         assert!(
             grass_under_masonry > 0,
             "Temple objects must not manufacture floor beneath every wall and column"
+        );
+    }
+
+    #[test]
+    fn temple_plants_use_variant_strips_without_clipping_the_other_axis() {
+        let mut witnessed = BTreeSet::new();
+        for seed in 0..16 {
+            let mut p = Piece::build(0xdc2, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            let (bas, anchor) = match p.cells.iter().filter(|&&mark| mark == 4).count() {
+                8 => (17, 30),
+                16 => (16, 27),
+                count => panic!("unexpected Temple column count {count}"),
+            };
+            for _ in 0..4 {
+                if p.boss == (anchor, anchor) {
+                    break;
+                }
+                p = p.rotate();
+            }
+            assert_eq!(p.boss, (anchor, anchor));
+            for (i, &mark) in p
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, mark)| matches!(**mark, 6..=8))
+            {
+                let (x, y) = (i % 60, i / 60);
+                assert!(
+                    (x > 5 && x < bas)
+                        || (x < 55 && x > 60 - bas)
+                        || (y > 5 && y < bas)
+                        || (y < 55 && y > 60 - bas),
+                    "seed {seed}, bas {bas}: forbidden plant at {x},{y}"
+                );
+                assert_eq!(p.temple_ground[i], GroundWrite::Set(0x56));
+                assert!(matches!(
+                    Piece::tile(0xdc2, mark).1,
+                    Some(0xdd4 | 0xdd5 | 0xdda)
+                ));
+                if x == 54 || y == 54 {
+                    witnessed.insert((bas, 1));
+                }
+                if !(6..=54).contains(&x) || !(6..=54).contains(&y) {
+                    witnessed.insert((bas, 2));
+                }
+            }
+        }
+        assert_eq!(
+            witnessed,
+            BTreeSet::from([(16, 1), (16, 2), (17, 1), (17, 2)])
         );
     }
 
