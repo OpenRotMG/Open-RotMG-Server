@@ -999,6 +999,7 @@ impl World {
 fn landmark_hero_boundaries_fit_published_layouts() {
     let data = std::path::Path::new("data");
     let content = Arc::new(Content::load(data).unwrap());
+    let mut cyclops_anchors = BTreeSet::new();
     for source in crate::terrain::realms::sources(data).unwrap() {
         for counts in [[3, 4], [4, 6]] {
             let mut world = World::new(content.clone(), source.open(&content).unwrap()).unwrap();
@@ -1023,6 +1024,42 @@ fn landmark_hero_boundaries_fit_published_layouts() {
             for id in &ids {
                 let e = &world.entities[id];
                 assert!(e.published && e.hp > 0 && e.quest.is_none() && e.camp.is_none());
+                if e.kind == HEROES[1] {
+                    let area = world
+                        .setpieces
+                        .iter()
+                        .find(|a| a.distance(e.pos) == 0.)
+                        .unwrap();
+                    let chest = world
+                        .entities
+                        .values()
+                        .find(|c| c.kind == 0x501 && area.distance(c.pos) == 0.)
+                        .unwrap();
+                    assert_eq!((chest.pos.x.fract(), chest.pos.y.fract()), (0.5, 0.5));
+                    let local = match (
+                        area.width,
+                        area.height,
+                        ((chest.pos.x - area.x as f32) * 2.) as i32,
+                        ((chest.pos.y - area.y as f32) * 2.) as i32,
+                    ) {
+                        (31, 40, 31, 55) => (15, 20),
+                        (40, 31, 25, 31) => (19, 15),
+                        (31, 40, 31, 25) => (15, 19),
+                        (40, 31, 55, 31) => (20, 15),
+                        other => panic!("unexpected rotated Castle/chest {other:?}"),
+                    };
+                    let expected = ((area.x + local.0) as f32, (area.y + local.1) as f32);
+                    assert_eq!((e.pos.x, e.pos.y), expected, "{}: Cyclops", source.name());
+                    assert_eq!((e.home.x, e.home.y), expected);
+                    assert!(
+                        world.walkable(e.pos)
+                            && matches!(world.map.cell(e.pos.x, e.pos.y).unwrap().terrain, 3 | 4)
+                    );
+                    let index = e.pos.y as usize * world.map.width as usize + e.pos.x as usize;
+                    assert!(world.cells.ids(index).contains(id));
+                    assert!(e.pos.distance(chest.pos) > 6. && chest.items.len() == 8);
+                    cyclops_anchors.insert(local);
+                }
                 assert!(
                     ids.iter()
                         .filter(|other| *other != id)
@@ -1039,4 +1076,8 @@ fn landmark_hero_boundaries_fit_published_layouts() {
             );
         }
     }
+    assert_eq!(
+        cyclops_anchors,
+        BTreeSet::from([(15, 20), (19, 15), (15, 19), (20, 15)])
+    );
 }

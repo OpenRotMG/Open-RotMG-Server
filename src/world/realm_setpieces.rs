@@ -66,17 +66,15 @@ impl Piece {
         self.cells[y * self.width + x] = value;
     }
     fn boss_position(&self, kind: u16, area: Area) -> Pos {
-        // Temple actors use fixed post-rotation anchors; Grove uses integer Size / 2 + 1.
+        // Castle bosses use raw rotated markers; Temple actors stay fixed and Grove uses integer Size / 2 + 1.
         let offset = match self.boss_anchor {
             BossAnchor::TempleA => 0.,
             BossAnchor::TempleB => 0.5,
-            BossAnchor::Marker => {
-                if kind == 0x91f {
-                    1.
-                } else {
-                    0.5
-                }
-            }
+            BossAnchor::Marker => match kind {
+                0x91f => 1.,
+                0x67d => 0.,
+                _ => 0.5,
+            },
         };
         Pos {
             x: (area.x + self.boss.0 as i32) as f32 + offset,
@@ -916,8 +914,8 @@ impl World {
                         .iter()
                         .all(|(x, y)| a.distance(Pos { x: *x, y: *y }) >= 64.)
                     && protected.iter().all(|p| a.distance(*p) >= 4.)
-                    // Fixed anchors must retain habitat at the actual destination, not only the sampled center.
-                    && (!matches!(kind, 0x91f | 0xdc2)
+                    // Offset anchors must retain habitat at the actual destination, not only the sampled center.
+                    && (!matches!(kind, 0x91f | 0xdc2 | 0x67d)
                         || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
                     && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
@@ -1088,6 +1086,66 @@ mod tests {
             ],
             spawns: vec![(1., 1.)],
         }
+    }
+
+    #[test]
+    fn cyclops_raw_destination_preserves_spacing_and_habitat_before_writes() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut witnessed = BTreeSet::new();
+        for seed in 0..16 {
+            let plan = Piece::build(0x67d, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            let (dx, dy) = (
+                plan.boss.0 as i32 - plan.width as i32 / 2,
+                plan.boss.1 as i32 - plan.height as i32 / 2,
+            );
+            let expected = Pos {
+                x: (96 + dx) as f32,
+                y: (96 + dy) as f32,
+            };
+            witnessed.insert((plan.width, plan.height, plan.boss));
+            for mode in 0..3 {
+                if mode == 2 && (dx, dy) == (0, 0) {
+                    continue;
+                }
+                let mut map = temple_test_map(0);
+                map.cells[96 * 192 + 96].terrain = 3;
+                if mode != 2 {
+                    map.cells[expected.y as usize * 192 + expected.x as usize].terrain = 3;
+                }
+                let original = Arc::new(map);
+                let mut world = World::new(content.clone(), original.clone()).unwrap();
+                let previous = world
+                    .spawn_entity(
+                        0x91b,
+                        Pos {
+                            x: expected.x - if mode == 1 { 31.75 } else { 32. },
+                            y: expected.y,
+                        },
+                        vec![],
+                    )
+                    .unwrap();
+                world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let result = world.place_named_setpiece(0x67d, &[3]);
+                assert_eq!(
+                    result.is_ok(),
+                    mode == 0,
+                    "seed {seed}, mode {mode}: {result:?}"
+                );
+                if let Ok(pos) = result {
+                    assert_eq!((pos.x, pos.y), (expected.x, expected.y));
+                    assert!(
+                        world.walkable(pos) && pos.distance(world.entities[&previous].pos) == 32.
+                    );
+                    assert_eq!(world.map.cell(pos.x, pos.y).unwrap().terrain, 3);
+                } else {
+                    assert!(Arc::ptr_eq(&original, &world.map) && world.setpieces.is_empty());
+                    assert_eq!(world.entities.len(), 1);
+                    assert!(world.entities.contains_key(&previous));
+                }
+            }
+        }
+        assert_eq!(witnessed.len(), 4);
     }
 
     #[test]
