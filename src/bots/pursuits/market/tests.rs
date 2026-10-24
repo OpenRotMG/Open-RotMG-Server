@@ -99,6 +99,73 @@ fn message(text: String) -> Packet {
 }
 
 #[test]
+fn only_unsolicited_local_ads_are_optional_without_rewriting_terms() {
+    let mut message = Message {
+        text: "sell 2589x2; want 2595".into(),
+        channel: Channel::Local,
+        consent: false,
+    };
+    assert_eq!(message.optional_public(), Some(message.text.as_str()));
+    assert_eq!(message.chat(), message.text);
+    message.channel = Channel::Guild;
+    assert!(message.optional_public().is_none());
+    message.channel = Channel::Tell("Peer".into());
+    assert!(message.optional_public().is_none());
+    message.channel = Channel::Local;
+    for verb in ["offer", "counter", "agree", "no deal:"] {
+        message.text = format!("Peer, {verb} exact terms");
+        assert!(message.optional_public().is_none());
+        assert_eq!(message.chat(), message.text);
+    }
+    message.text = "sell 2589x2; want 2595".into();
+    message.consent = true;
+    assert!(message.optional_public().is_none());
+}
+
+#[test]
+fn market_named_ads_resolve_exact_items_without_inventing_consent() {
+    let mut c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut market, v) = fixture(&c, [0xa23, 0xa23, 0xa23, -1, -1, -1, -1, -1]);
+    market
+        .receive(
+            &message("sell Health Potion x2; want Magic Potion".into()),
+            &v,
+            &c,
+            None,
+        )
+        .unwrap();
+    let bargain = market.bargain.as_ref().unwrap();
+    assert_eq!(
+        bargain.terms.goods,
+        [
+            Goods {
+                kind: 0xa23,
+                quantity: 1
+            },
+            Goods {
+                kind: 0xa22,
+                quantity: 1
+            }
+        ]
+    );
+    assert!(!bargain.own_consent && !bargain.agreed && bargain.peer_consent.is_none());
+    for ad in [
+        "2594x2; want 2595",
+        "Unknown Potion x1; want Magic Potion",
+        "Health Potion x0; want Magic Potion",
+        "Health Potion x17; want Magic Potion",
+        "Health Potion x1; want Unknown Potion",
+        "Ent Ancient x1; want Magic Potion",
+    ] {
+        assert!(parse_ad(ad, &c).is_none(), "{ad}");
+    }
+    let mut duplicate = c.get(0xa22).unwrap().clone();
+    duplicate.kind = u16::MAX;
+    c.objects.insert(duplicate.kind, duplicate);
+    assert!(parse_ad("Health Potion x2; want Magic Potion", &c).is_none());
+}
+
+#[test]
 fn market_counter_reduces_useful_offer_without_inventing_goods_or_consent() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
     let (mut market, v) = fixture(&c, [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1]);

@@ -291,6 +291,63 @@ impl World {
         }
         Ok(GiftOutcome::default())
     }
+    pub(crate) fn autonomous_incoming_trade(
+        &mut self,
+        id: i32,
+        session: [i32; 3],
+        peer: i32,
+        binding: (i32, String),
+        action: TradeAction,
+    ) -> Result<Option<TradePlan>> {
+        let p = self.players.get(&id).context("incoming trader missing")?;
+        ensure!(
+            p.controller == Controller::Autonomous && session[1..] == [id, p.character.id],
+            "incoming trade controller/session changed"
+        );
+        if matches!(action, TradeAction::Cancel) {
+            self.cancel_trade(id, "Incoming gift declined or contact changed.");
+            return Ok(None);
+        }
+        self.trade_ready(id)?;
+        self.trade_ready(peer)?;
+        let q = &self.players[&peer];
+        ensure!(
+            self.name == "Nexus"
+                && p.known.contains(&peer)
+                && p.pos.distance(q.pos) < 2.
+                && q.character.account == binding.0
+                && q.character.name == binding.1,
+            "incoming trade observed contact/world changed"
+        );
+        match action {
+            TradeAction::Request { name } => {
+                ensure!(
+                    name == binding.1
+                        && p.character.items.iter().skip(4).any(|k| *k < 0)
+                        && self
+                            .trade_requests
+                            .get(&peer)
+                            .is_some_and(|(to, until)| *to == id && *until > self.now),
+                    "incoming request expired or capacity changed"
+                );
+                self.request_trade(id, name)?;
+            }
+            TradeAction::Accept { mine, theirs } => {
+                let key = self.trade_key(id).context("incoming trade missing")?;
+                let t = &self.trades[&key];
+                ensure!(
+                    t.players.contains(&peer)
+                        && t.deliveries == [None, None]
+                        && mine.iter().all(|b| !b)
+                        && theirs.iter().any(|b| *b),
+                    "incoming gift must be free and nonempty, without negotiated deliveries"
+                );
+                return self.accept_trade(id, mine, theirs);
+            }
+            _ => bail!("incoming request cannot authorize bot goods"),
+        }
+        Ok(None)
+    }
     pub fn script_trade(&mut self, id: i32, action: TradeAction) -> Result<Option<TradePlan>> {
         ensure!(
             self.players
@@ -738,6 +795,99 @@ mod community_tests {
         assert_eq!(w.trade_requests[&ids[0]].0, ids[1]);
         assert_eq!(receivers[1].try_recv().unwrap().id, 61);
         assert!(w.trades.is_empty(), "a request is not reciprocal consent");
+    }
+    #[tokio::test]
+    async fn incoming_free_gift_opens_only_real_requests_and_commits_without_bot_goods() {
+        let (mut w, store, ids, _) = fixture().await;
+        w.name = "Nexus".into();
+        w.players.get_mut(&ids[1]).unwrap().controller = Controller::Autonomous;
+        w.updates(ids[1], true).unwrap();
+        let p = &w.players[&ids[1]];
+        let session = [-2, ids[1], p.character.id];
+        let bot_before = p.character.items.clone();
+        let binding = (
+            w.players[&ids[0]].character.account,
+            w.players[&ids[0]].character.name.clone(),
+        );
+        let request = || TradeAction::Request {
+            name: binding.1.clone(),
+        };
+        assert!(
+            w.autonomous_incoming_trade(ids[1], session, ids[0], binding.clone(), request())
+                .is_err()
+        );
+        w.request_trade(ids[0], w.players[&ids[1]].character.name.clone())
+            .unwrap();
+        w.autonomous_incoming_trade(ids[1], session, ids[0], binding.clone(), request())
+            .unwrap();
+        let mut gift = [false; 12];
+        gift[4] = true;
+        w.change_trade(ids[0], gift).unwrap();
+        assert!(
+            w.autonomous_incoming_trade(
+                ids[1],
+                session,
+                ids[0],
+                binding.clone(),
+                TradeAction::Change { offer: gift }
+            )
+            .is_err()
+        );
+        assert!(
+            w.autonomous_incoming_trade(
+                ids[1],
+                session,
+                ids[0],
+                binding.clone(),
+                TradeAction::Accept {
+                    mine: gift,
+                    theirs: gift
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            w.autonomous_incoming_trade(
+                ids[1],
+                session,
+                ids[0],
+                binding.clone(),
+                TradeAction::Accept {
+                    mine: [false; 12],
+                    theirs: gift
+                }
+            )
+            .is_err()
+        );
+        tokio::time::sleep(Duration::from_millis(3050)).await;
+        w.autonomous_incoming_trade(
+            ids[1],
+            session,
+            ids[0],
+            binding,
+            TradeAction::Accept {
+                mine: [false; 12],
+                theirs: gift,
+            },
+        )
+        .unwrap();
+        let plan = w.accept_trade(ids[0], gift, [false; 12]).unwrap().unwrap();
+        let transaction = plan.transaction.clone();
+        let revisions = store
+            .exchange_trade(transaction, writes(&plan), None)
+            .await
+            .unwrap();
+        w.finish_trade(plan, Ok(revisions)).unwrap();
+        assert_eq!(w.players[&ids[1]].character.items[5], bot_before[5]);
+        for id in ids {
+            let p = &w.players[&id];
+            let saved = store
+                .load(p.character.account, p.character.id)
+                .await
+                .unwrap();
+            assert_eq!(saved.items, p.character.items);
+            assert_eq!(saved.revision, p.character.revision);
+        }
     }
     #[tokio::test]
     async fn trade_settling_uses_pause_aware_elapsed_time_not_world_ticks() {
