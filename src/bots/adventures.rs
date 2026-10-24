@@ -12,8 +12,8 @@ pub(super) enum Purpose {
 impl Purpose {
     fn description(self) -> &'static str {
         match self {
-            Self::Equipment => "hunt for better equipment and a Pirate Cave",
-            Self::Experience => "gain levels together and look for a Pirate Cave",
+            Self::Equipment => "look for better gear together",
+            Self::Experience => "level up together",
             Self::Speed => "hunt for a Snake Pit and earn a Speed potion",
         }
     }
@@ -96,6 +96,7 @@ pub(crate) struct Society {
     friends: BTreeMap<i32, BTreeSet<i32>>,
     ignored: BTreeMap<i32, BTreeSet<i32>>,
     next_call: u64,
+    pub(super) speech: dialogue::PublicSpeech,
 }
 impl Society {
     pub(super) fn register(&mut self, account: i32, lists: crate::store::AccountLists) {
@@ -470,7 +471,7 @@ impl Brain {
             .iter()
             .find(|o| o.account == Some(peer.account))
             .context("invitation peer no longer visible")?;
-        let payload = serde_json::json!({"bot":{"name":self.profile.name,"world":v.map.name,"level":v.character.level,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp},"speaker":{"name":peer.name,"level":actor.level},"allowed_intents":intents,"message":event});
+        let payload = serde_json::json!({"bot":{"name":self.profile.name,"world":v.map.name,"level":v.character.level,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"priorities":{"recovery":self.profile.recovery,"resources":self.profile.resources,"companions":self.profile.companions}},"speaker":{"name":peer.name,"level":actor.level},"allowed_intents":intents,"message":event});
         Ok(dialogue::Request {
             speaker: actor.id,
             name: peer.name.clone(),

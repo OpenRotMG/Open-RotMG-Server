@@ -172,6 +172,10 @@ pub(in crate::bots) struct Message {
     pub consent: bool,
 }
 impl Message {
+    pub(in crate::bots) fn optional_public(&self) -> Option<&str> {
+        (!self.consent && self.text.starts_with("sell ") && self.channel == Channel::Local)
+            .then_some(self.text.as_str())
+    }
     pub(in crate::bots) fn chat(&self) -> String {
         match &self.channel {
             Channel::Local => self.text.clone(),
