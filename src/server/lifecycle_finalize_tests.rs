@@ -1,4 +1,5 @@
 use super::*;
+use crate::world::DungeonReturn;
 use std::time::Duration;
 
 pub(super) struct NativeSocket {
@@ -489,7 +490,7 @@ async fn all_death_fame_phase4_earned_realm_exit() {
         let (scope, time, key) = a
             .world
             .directory(move |d| {
-                let scope = d.instance("snake-pit", None)?;
+                let scope = d.instance("snake-pit", None, Some(DungeonReturn::Realm(1)))?;
                 let (time, key, _) = d.issue(account, character, scope)?;
                 Ok((scope, time, key))
             })
@@ -563,6 +564,10 @@ async fn all_death_fame_phase4_earned_realm_exit() {
         r.utf().unwrap();
         r.i32().unwrap();
         let destination = r.i32().unwrap();
+        assert_eq!(
+            destination, 1,
+            "RECONNECT must retain the dungeon's source Realm"
+        );
         let keytime = r.i32().unwrap();
         let n = usize::try_from(r.i16().unwrap()).unwrap();
         let exit_key = r.take(n).unwrap().to_vec();
@@ -700,7 +705,7 @@ async fn earned_source(
     let (id, destination, time, key, reservation) = a
         .world
         .directory(move |d| {
-            let source = d.instance("snake-pit", None)?;
+            let source = d.instance("snake-pit", None, Some(DungeonReturn::Realm(1)))?;
             let w = d.worlds.get_mut(&source).unwrap();
             let id = w.enter(ch, None)?;
             bind(id)?;
@@ -1322,7 +1327,7 @@ async fn all_death_fame_phase4_native_rejected_capacity_and_save() {
                 let scope = if failure == 0 {
                     -2
                 } else {
-                    d.instance("snake-pit", None)?
+                    d.instance("snake-pit", None, Some(DungeonReturn::Realm(1)))?
                 };
                 let (time, key, _) = d.issue(account, character, scope)?;
                 Ok((scope, time, key))
