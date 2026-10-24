@@ -1,7 +1,7 @@
 use super::*;
 use crate::world::view::{Lifecycle, MapInfo, OutputState, OwnCharacter, Session, VisibleObject};
 
-fn fixture(c: &Content, backpack: [i32; 8]) -> (Market, PlayerView) {
+pub(super) fn fixture(c: &Content, backpack: [i32; 8]) -> (Market, PlayerView) {
     let stats = c.classes[&crate::content::WIZARD].base;
     let v = PlayerView {
         session: Session {
