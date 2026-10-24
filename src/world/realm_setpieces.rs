@@ -1,5 +1,5 @@
 // GPL-3.0 reference; data/REALM-SRC-LICENSE: moistosaurus/realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff
-// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,Sphinx,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
+// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,Sphinx,Temple,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -32,10 +32,16 @@ impl Area {
             || other.y + other.height + 2 <= self.y
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum GroundWrite {
+    Keep,
+    Set(u8),
+}
 struct Piece {
     width: usize,
     height: usize,
     cells: Vec<u8>,
+    temple_ground: Vec<GroundWrite>,
     boss: (usize, usize),
 }
 impl Piece {
@@ -44,6 +50,7 @@ impl Piece {
             width,
             height,
             cells: vec![0; width * height],
+            temple_ground: Vec::new(),
             boss: (width / 2, height / 2),
         }
     }
@@ -52,9 +59,17 @@ impl Piece {
     }
     fn rotate(self) -> Self {
         let mut out = Self::new(self.height, self.width);
+        if !self.temple_ground.is_empty() {
+            assert_eq!(self.temple_ground.len(), self.cells.len());
+            out.temple_ground = vec![GroundWrite::Keep; self.cells.len()];
+        }
         for y in 0..self.height {
             for x in 0..self.width {
                 out.set(self.height - 1 - y, x, self.cells[y * self.width + x]);
+                if !self.temple_ground.is_empty() {
+                    out.temple_ground[x * out.width + self.height - 1 - y] =
+                        self.temple_ground[y * self.width + x];
+                }
             }
         }
         out.boss = (self.height - 1 - self.boss.1, self.boss.0);
@@ -187,6 +202,17 @@ impl Piece {
                         }
                     }
                 }
+                // Temple.cs writes objects over independent ground, including deliberately unwritten holes.
+                p.temple_ground = p
+                    .cells
+                    .iter()
+                    .map(|mark| match mark {
+                        0 => GroundWrite::Keep,
+                        1 => GroundWrite::Set(0xc5),
+                        5 => GroundWrite::Set(0x56),
+                        _ => unreachable!("invalid Temple ground marker"),
+                    })
+                    .collect();
                 if rng.gen_bool(0.5) {
                     for n in 0..20 {
                         p.set(17 + n, 17, if n == 19 { 3 } else { 2 });
@@ -591,6 +617,9 @@ impl Piece {
             0x935 | 0xd59 | 0xd50 | 0xe37 | crate::dungeon::tomb::SPHINX
         ) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
+            if kind == 0xdc2 {
+                p.temple_ground[p.boss.1 * p.width + p.boss.0] = GroundWrite::Set(0xc5);
+            }
         }
         p
     }
@@ -767,6 +796,18 @@ impl World {
             )
         );
         let piece = Piece::build(kind, &mut self.rng);
+        ensure!(
+            kind != 0xdc2 || piece.temple_ground.len() == piece.cells.len(),
+            "Temple ground plane is incomplete"
+        );
+        for write in &piece.temple_ground {
+            if let GroundWrite::Set(ground) = write {
+                ensure!(
+                    self.content.grounds.contains_key(ground),
+                    "Temple missing selected ground {ground:#x}"
+                );
+            }
+        }
         for mark in piece.cells.iter().copied().filter(|m| *m != 0) {
             let (ground, object) = Piece::tile(kind, mark);
             ensure!(
@@ -893,7 +934,14 @@ impl World {
                     self.remove_entity(id);
                 }
                 let cell = &mut Arc::make_mut(&mut self.map).cells[index];
-                cell.ground = ground;
+                cell.ground = if kind == 0xdc2 {
+                    match piece.temple_ground[y * piece.width + x] {
+                        GroundWrite::Keep => cell.ground,
+                        GroundWrite::Set(ground) => ground,
+                    }
+                } else {
+                    ground
+                };
                 cell.object = object;
                 cell.config.clear();
                 let connection = (object == Some(crate::dungeon::tomb::WALL)).then(|| {
@@ -959,6 +1007,129 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temple_masonry_can_retain_dark_grass_underlay() {
+        let data = std::path::Path::new("data");
+        let content = Arc::new(Content::load(data).unwrap());
+        let source = crate::terrain::realms::sources(data).unwrap().remove(0);
+        let mut world = World::new(content.clone(), source.open(&content).unwrap()).unwrap();
+        world.realm_layout = Some(source.name().to_owned());
+        world.rng = rand::rngs::StdRng::seed_from_u64(12351);
+        let original = world.map.clone();
+        let plan = Piece::build(0xdc2, &mut world.rng.clone());
+        world.place_named_setpiece(0xdc2, &[6, 7]).unwrap();
+        let area = world.setpieces.last().unwrap();
+        let mut kept_under_objects = 0;
+        for (i, mark) in plan.cells.iter().copied().enumerate() {
+            let (x, y) = (
+                area.x + (i % plan.width) as i32,
+                area.y + (i / plan.width) as i32,
+            );
+            let before = original.cell(x as f32, y as f32).unwrap();
+            let after = world.map.cell(x as f32, y as f32).unwrap();
+            assert_eq!(
+                (after.terrain, after.region),
+                (before.terrain, before.region)
+            );
+            if mark == 0 {
+                assert_eq!(
+                    (after.ground, after.object, &after.config),
+                    (before.ground, before.object, &before.config)
+                );
+                assert_eq!(plan.temple_ground[i], GroundWrite::Keep);
+                continue;
+            }
+            let expected = match plan.temple_ground[i] {
+                GroundWrite::Keep => {
+                    kept_under_objects += 1;
+                    before.ground
+                }
+                GroundWrite::Set(ground) => ground,
+            };
+            assert_eq!(after.ground, expected);
+            assert_eq!(after.object, Piece::tile(0xdc2, mark).1);
+            assert!(after.config.is_empty());
+            if let Some(kind) = after.object {
+                let pos = Pos {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                };
+                let index = y as usize * world.map.width as usize + x as usize;
+                assert!(
+                    world
+                        .cells
+                        .ids(index)
+                        .iter()
+                        .any(|id| world.entities[id].kind == kind && world.entities[id].published)
+                );
+                if matches!(kind, 0x1f2..=0x1f4) {
+                    assert!(!world.walkable(pos));
+                }
+            }
+        }
+        assert!(kept_under_objects > 0);
+        assert!(!Arc::ptr_eq(&original, &world.map));
+        let grass_under_masonry = (area.y..area.y + area.height)
+            .flat_map(|y| (area.x..area.x + area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let cell = world.map.cell(x as f32, y as f32).unwrap();
+                cell.ground == 0x56 && matches!(cell.object, Some(0x1f2..=0x1f4))
+            })
+            .count();
+        assert!(
+            grass_under_masonry > 0,
+            "Temple objects must not manufacture floor beneath every wall and column"
+        );
+    }
+
+    #[test]
+    fn temple_ground_and_objects_rotate_together_without_filling_holes() {
+        let mut roles = BTreeSet::new();
+        let mut variants = BTreeSet::new();
+        for seed in 0..16 {
+            let mut p = Piece::build(0xdc2, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            variants.insert(p.cells.iter().filter(|&&mark| mark == 4).count());
+            for _ in 0..4 {
+                assert_eq!(p.temple_ground.len(), p.cells.len());
+                assert_eq!(
+                    p.temple_ground[p.boss.1 * p.width + p.boss.0],
+                    GroundWrite::Set(0xc5)
+                );
+                for (i, &mark) in p.cells.iter().enumerate() {
+                    if mark == 0 {
+                        assert_eq!(p.temple_ground[i], GroundWrite::Keep);
+                    }
+                    if matches!(mark, 2..=4) {
+                        let ground = match p.temple_ground[i] {
+                            GroundWrite::Keep => 0,
+                            GroundWrite::Set(0xc5) => 1,
+                            GroundWrite::Set(0x56) => 2,
+                            _ => panic!("unexpected Temple ground"),
+                        };
+                        roles.insert((mark, ground));
+                    }
+                }
+                let before_cells = p.cells.clone();
+                let before_ground = p.temple_ground.clone();
+                p = p.rotate();
+                for y in 0..60 {
+                    for x in 0..60 {
+                        let rotated = x * 60 + 59 - y;
+                        assert_eq!(p.cells[rotated], before_cells[y * 60 + x]);
+                        assert_eq!(p.temple_ground[rotated], before_ground[y * 60 + x]);
+                    }
+                }
+            }
+        }
+        assert_eq!(variants, BTreeSet::from([8, 16]));
+        assert_eq!(
+            roles,
+            (2..=4)
+                .flat_map(|mark| (0..3).map(move |ground| (mark, ground)))
+                .collect()
+        );
+    }
 
     #[test]
     fn oasis_keeps_forty_palms_and_clear_cardinal_approaches() {
