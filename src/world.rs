@@ -5482,7 +5482,13 @@ impl World {
                 defeated
                     .damage
                     .get(&p.character.id)
-                    .filter(|damage| **damage > if private { threshold } else { 0 })
+                    .filter(|damage| {
+                        if defeated.kind == crate::dungeon::tomb::SPHINX {
+                            **damage >= threshold
+                        } else {
+                            **damage > if private { threshold } else { 0 }
+                        }
+                    })
                     .map(|damage| (p.character.account, *damage))
             })
             .collect();
@@ -5529,13 +5535,19 @@ impl World {
                 }
             }
         }
-        if defeated.kind == crate::dungeon::trench::HERMIT {
+        let required = match defeated.kind {
+            crate::dungeon::trench::HERMIT => Some([0xa34, 0xa4c]),
+            // Sphinx's 1%-threshold potion rolls also have required counts: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.Sphinx.cs
+            crate::dungeon::tomb::SPHINX => Some([0xa34, 0xa35]),
+            _ => None,
+        };
+        if let Some(required) = required {
             // NumRequired is an encounter-wide private floor, not a pair per raider: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs
-            for item in [0xa34, 0xa4c] {
+            for item in required {
                 if !drops.values().any(|items| items.contains(&item)) {
                     let owner = eligible
                         .choose(&mut self.rng)
-                        .expect("nonempty Hermit contributors")
+                        .expect("nonempty event contributors")
                         .0;
                     drops.entry(owner).or_default().push(item);
                 }
@@ -6902,6 +6914,9 @@ impl World {
 fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }
+
+#[cfg(test)]
+mod sphinx_loot_tests;
 
 #[cfg(test)]
 impl World {}
