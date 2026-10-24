@@ -104,14 +104,32 @@ impl Crowd {
         &'a self,
         v: &PlayerView,
         group: Option<&adventures::Adventure>,
+        eligible_position: impl Fn(Pos) -> bool,
     ) -> Option<&'a PlayerMarker> {
         if !matches!(v.map.name.as_str(), "Realm" | "Pirate Cave" | "Snake Pit") {
             return None;
         }
+        self.attended_destination(
+            v.time_ms,
+            v.position,
+            v.session.account,
+            group,
+            eligible_position,
+        )
+    }
+    fn attended_destination(
+        &self,
+        time_ms: u64,
+        position: Pos,
+        account: i32,
+        group: Option<&adventures::Adventure>,
+        eligible_position: impl Fn(Pos) -> bool,
+    ) -> Option<&PlayerMarker> {
         self.contacts
             .values()
             .filter(|(p, seen)| {
-                *seen == v.time_ms
+                *seen == time_ms
+                    && eligible_position(p.position)
                     && !self.completed.contains(&(p.id, p.account))
                     && (group.is_some_and(|g| {
                         !g.finished && g.members.iter().any(|m| m.account == p.account)
@@ -123,12 +141,86 @@ impl Crowd {
             .min_by(|(a, _), (b, _)| {
                 // Different accounts approach different edges; nobody owns the outing's destination.
                 let score = |p: &PlayerMarker| {
-                    p.position.distance(v.position)
-                        + ((p.account as u32 ^ v.session.account as u32).wrapping_mul(2654435761)
-                            % 9) as f32
+                    p.position.distance(position)
+                        + ((p.account as u32 ^ account as u32).wrapping_mul(2654435761) % 9) as f32
                 };
-                score(a).total_cmp(&score(b)).then(a.id.cmp(&b.id))
+                // Small score changes do not justify abandoning company already being approached.
+                let approaching = |p: &PlayerMarker| self.approaching == Some((p.id, p.account));
+                approaching(b)
+                    .cmp(&approaching(a))
+                    .then_with(|| score(a).total_cmp(&score(b)))
+                    .then(a.id.cmp(&b.id))
             })
             .map(|(p, _)| p)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn company() -> Crowd {
+        let mut crowd = Crowd::new(true);
+        for (id, account, x, y) in [(10, 1, 7.5, 0.), (20, 3, 9., 5.)] {
+            crowd.contacts.insert(
+                id,
+                (
+                    PlayerMarker {
+                        id,
+                        account,
+                        name: format!("peer{account}"),
+                        position: Pos { x, y },
+                    },
+                    1000,
+                ),
+            );
+        }
+        crowd
+    }
+
+    fn destination(crowd: &Crowd, x: f32) -> Option<i32> {
+        crowd
+            .attended_destination(1000, Pos { x, y: 0. }, 2, None, |_| true)
+            .map(|p| p.id)
+    }
+
+    #[test]
+    fn selected_company_survives_a_better_scoring_peer() {
+        let mut crowd = company();
+        assert_eq!(destination(&crowd, 0.), Some(10));
+        crowd.approach_selected(10);
+        crowd.contacts.get_mut(&10).unwrap().0.position.x = 10.;
+        assert_eq!(destination(&crowd, 2.5), Some(10));
+        crowd.approaching = None;
+        assert_eq!(destination(&crowd, 2.5), Some(20));
+    }
+
+    #[test]
+    fn blocked_approach_yields_to_reachable_company() {
+        let mut crowd = company();
+        crowd.approach_selected(10);
+        crowd.contacts.get_mut(&10).unwrap().0.position.x = 10.;
+        assert_eq!(destination(&crowd, 2.5), Some(10));
+        let blocked = BTreeSet::from([tile(Pos { x: 10., y: 0. })]);
+        let peer = crowd.attended_destination(1000, Pos { x: 2.5, y: 0. }, 2, None, |p| {
+            !blocked.contains(&tile(p))
+        });
+        assert_eq!(peer.map(|p| p.id), Some(20));
+    }
+
+    #[test]
+    fn persistence_does_not_override_freshness_completion_or_company_eligibility() {
+        let mut crowd = company();
+        crowd.approach_selected(10);
+        crowd.contacts.get_mut(&10).unwrap().1 = 999;
+        assert_eq!(destination(&crowd, 0.), Some(20));
+        crowd.contacts.get_mut(&10).unwrap().1 = 1000;
+        crowd.completed.insert((10, 1));
+        assert_eq!(destination(&crowd, 0.), Some(20));
+        crowd.completed.clear();
+        crowd.contacts.get_mut(&10).unwrap().0.position.x = 100.;
+        assert_eq!(destination(&crowd, 0.), None);
+        crowd.contacts.remove(&10);
+        assert_eq!(destination(&crowd, 0.), None);
     }
 }
