@@ -57,6 +57,14 @@ impl Piece {
     fn set(&mut self, x: usize, y: usize, value: u8) {
         self.cells[y * self.width + x] = value;
     }
+    fn boss_position(&self, kind: u16, area: Area) -> Pos {
+        // Grove.cs uses integer Size / 2 + 1, not the stencil cell midpoint.
+        let offset = if kind == 0x91f { 1. } else { 0.5 };
+        Pos {
+            x: (area.x + self.boss.0 as i32) as f32 + offset,
+            y: (area.y + self.boss.1 as i32) as f32 + offset,
+        }
+    }
     fn rotate(self) -> Self {
         let mut out = Self::new(self.height, self.width);
         if !self.temple_ground.is_empty() {
@@ -867,6 +875,7 @@ impl World {
                 height: piece.height as i32,
             })
             .find(|a| {
+                let boss = piece.boss_position(kind, *a);
                 a.x > 0
                     && a.y > 0
                     && a.x + a.width < self.map.width
@@ -883,12 +892,10 @@ impl World {
                         .iter()
                         .all(|(x, y)| a.distance(Pos { x: *x, y: *y }) >= 64.)
                     && protected.iter().all(|p| a.distance(*p) >= 4.)
-                    && quest_positions.iter().all(|p| {
-                        p.distance(Pos {
-                            x: (a.x + piece.boss.0 as i32) as f32 + 0.5,
-                            y: (a.y + piece.boss.1 as i32) as f32 + 0.5,
-                        }) >= 32.
-                    })
+                    // Grove's integer anchor crosses into the next tile, not the sampled center tile.
+                    && (kind != 0x91f
+                        || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
+                    && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
                             let c = &self.map.cells[(y * self.map.width + x) as usize];
@@ -990,10 +997,7 @@ impl World {
                 }
             }
         }
-        let pos = Pos {
-            x: (area.x + piece.boss.0 as i32) as f32 + 0.5,
-            y: (area.y + piece.boss.1 as i32) as f32 + 0.5,
-        };
+        let pos = piece.boss_position(kind, area);
         tracing::info!(
             kind,
             layout = ?self.realm_layout,
