@@ -174,7 +174,10 @@ fn market_session_observation_drops_only_expired_ads_before_publication() {
     m.decide(&v, &c, None, &grid, &mut rng).unwrap();
     let session = m.session.clone();
     let ad = m.outgoing.clone();
-    assert!(ad.as_ref().unwrap().text.starts_with("sell "));
+    assert_eq!(
+        ad.as_ref().unwrap().text,
+        "sell Double Bow x2; want Magic Potion"
+    );
     m.trade = Some(SessionTrade {
         binding: [-2, 10, 1],
         peer: "Peer".into(),
