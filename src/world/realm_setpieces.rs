@@ -399,11 +399,13 @@ impl Piece {
                     }
                 }
                 border.shuffle(rng);
-                // Cardinal approaches must stay clear rather than seal the island with palms.
-                for &(x, y) in border.iter().take(border.len().div_ceil(2)) {
-                    if x != 15 && y != 15 {
-                        p.set(x, y, 3);
-                    }
+                // Keep cardinal approaches open without underplanting the reference's half-border count.
+                for &(x, y) in border
+                    .iter()
+                    .filter(|&&(x, y)| x != 15 && y != 15)
+                    .take(border.len().div_ceil(2))
+                {
+                    p.set(x, y, 3);
                 }
                 p
             }
@@ -957,6 +959,39 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oasis_keeps_forty_palms_and_clear_cardinal_approaches() {
+        for seed in 0..16 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let p = Piece::build(0x678, &mut rng);
+            assert_eq!((p.width, p.height, p.boss), (30, 30, (15, 15)));
+            assert_eq!(
+                p.cells.iter().filter(|&&mark| mark == 3).count(),
+                40,
+                "seed {seed}"
+            );
+            for (i, &mark) in p.cells.iter().enumerate() {
+                let (x, y) = ((i % p.width) as i32 - 15, (i / p.width) as i32 - 15);
+                let r2 = x * x + y * y;
+                if mark == 3 {
+                    assert!(x != 0 && y != 0 && ((81 < r2 && r2 <= 100) || (4 < r2 && r2 <= 9)));
+                    assert_eq!(Piece::tile(0x678, mark), (0x46, Some(0x18e)));
+                } else {
+                    assert_eq!(
+                        mark,
+                        if r2 > 169 {
+                            0
+                        } else if 9 < r2 && r2 <= 100 {
+                            2
+                        } else {
+                            1
+                        }
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn kage_cover_reaches_the_graves_without_sealing_their_approaches() {

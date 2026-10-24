@@ -842,6 +842,7 @@ impl World {
 fn named_site_populations_match_reference_ranges() {
     let data = std::path::Path::new("data");
     let content = Arc::new(Content::load(data).unwrap());
+    let mut oasis_sites = 0;
     for source in crate::terrain::realms::sources(data).unwrap() {
         let layout = source.name().to_owned();
         // Fixed boundary requests avoid depending on a lucky population draw.
@@ -928,6 +929,24 @@ fn named_site_populations_match_reference_ranges() {
             for (index, root) in roots.iter().enumerate() {
                 assert!(root.published && root.hp > 0 && root.camp.is_none());
                 assert_eq!(root.quest, Some(root.id));
+                if root.kind == 0x678 {
+                    oasis_sites += 1;
+                    let palms: Vec<_> = world
+                        .entities
+                        .values()
+                        .filter(|e| e.kind == 0x18e && e.pos.distance(root.pos) <= 13.)
+                        .collect();
+                    assert_eq!(palms.len(), 40, "{layout}: Oasis {}", root.id);
+                    for palm in palms {
+                        let cell = world.map.cell(palm.pos.x, palm.pos.y).unwrap();
+                        assert_eq!((cell.ground, cell.object), (0x46, Some(0x18e)));
+                        assert!(palm.published && matches!(palm.size, 120 | 140));
+                        assert!(!world.walkable(palm.pos));
+                        let index =
+                            palm.pos.y as usize * world.map.width as usize + palm.pos.x as usize;
+                        assert!(world.cells.ids(index).contains(&palm.id));
+                    }
+                }
                 for other in &roots[index + 1..] {
                     assert!(root.pos.distance(other.pos) >= 32.);
                 }
@@ -964,6 +983,10 @@ fn named_site_populations_match_reference_ranges() {
             }
         }
     }
+    assert!(
+        oasis_sites > 0,
+        "sampled construction must exercise actual Oasis palms"
+    );
 }
 
 #[cfg(test)]
