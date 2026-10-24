@@ -162,6 +162,7 @@ fn witnessed_entry_commitment_uses_ordinary_portal_journey_and_expires() {
     let d = b.decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Portal(3));
     assert!(matches!(d.journey, Some(Journey::Portal(3))));
+    assert!(d.chat.is_none());
     v.elapsed_ms = 14900;
     assert_eq!(
         b.entries
@@ -169,6 +170,24 @@ fn witnessed_entry_commitment_uses_ordinary_portal_journey_and_expires() {
         None
     );
     assert!(b.entries.target.is_none());
+}
+
+#[test]
+fn witnessed_entry_all_public_dungeons_use_silent_ordinary_journeys() {
+    for (kind, _, _, _) in crate::dungeon::DUNGEONS {
+        let (c, mut v, _) = fixture();
+        v.character.level = 20;
+        assert!(events::ready(&v, &c));
+        v.objects[0].kind = kind;
+        v.dungeon_entries[0].portal_kind = kind;
+        let mut b = Brain::new(ARCHETYPES[0], &v);
+        b.entries
+            .choose(&v, &BTreeSet::from([3]), &mut StepRng::new(0, 0));
+        let d = b.decide(&v, &c).unwrap();
+        assert_eq!(d.goal, Goal::Portal(3), "{kind:#x}");
+        assert!(matches!(d.journey, Some(Journey::Portal(3))), "{kind:#x}");
+        assert!(d.chat.is_none(), "{kind:#x}");
+    }
 }
 
 #[test]

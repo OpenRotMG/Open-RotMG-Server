@@ -1091,7 +1091,8 @@ impl Brain {
                 ));
             }
         }
-        if let Some(portal) = self.witnessed_portal(v, content, &choices, range) {
+        let witnessed_portal = self.witnessed_portal(v, content, &choices, range);
+        if let Some(portal) = witnessed_portal {
             let position = v
                 .objects
                 .iter()
@@ -1339,6 +1340,7 @@ impl Brain {
                 },
             };
             if let Goal::Portal(portal) = goal
+                && witnessed_portal != Some(portal)
                 && self.goal != goal
                 && v.map.name == "Realm"
             {
