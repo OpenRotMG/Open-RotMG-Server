@@ -1064,8 +1064,26 @@ impl Brain {
         }
         self.crowd
             .attend(v, content, &self.mind.cognition, inspecting);
+        let recent_company = self
+            .crowd
+            .cooperator(v, |position| !self.blocked.contains_key(&tile(position)));
+        let cooperative_goal = if self.agreement.is_none()
+            && self.companion.is_none()
+            && crowds::cooperative_available(&choices, v.position, range)
+            && let Some(peer) = &recent_company
+        {
+            choices.push((
+                80. + self.profile.companions,
+                Goal::Follow(peer.id),
+                peer.position,
+            ));
+            Some(peer.id)
+        } else {
+            None
+        };
         if self.agreement.is_none()
             && self.companion.is_none()
+            && recent_company.is_none()
             && let Some(marker) = self.crowd.destination(v, self.group.as_ref(), |position| {
                 !self.blocked.contains_key(&tile(position))
             })
@@ -1273,6 +1291,7 @@ impl Brain {
                 });
             }
             if let Goal::Follow(id) = goal
+                && cooperative_goal != Some(id)
                 && v.position.distance(destination) > 8.
                 && v.time_ms >= self.next_teleport
                 && decision.item.is_none()
@@ -1289,6 +1308,7 @@ impl Brain {
             if self.agreement.is_none()
                 && self.companion.is_none()
                 && let Goal::Follow(id) = goal
+                && cooperative_goal != Some(id)
             {
                 self.crowd.approach_selected(id);
             }
