@@ -703,27 +703,14 @@ impl Brain {
             } else {
                 Goal::Dodge
             };
-            let held_heal = v
-                .character
-                .items
-                .iter()
-                .filter(|kind| **kind >= 0)
-                .any(|kind| content.objects[&(*kind as u16)].activate == "Heal");
-            if ((health < self.profile.recovery && !held_heal)
-                || (outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.)))
-                && decision.item.is_none()
-                && v.map.name != "Nexus"
-            {
-                decision.journey = Some(Journey::Nexus);
-                return Ok(decision);
-            }
             let opponent = if retreat {
                 None
             } else {
                 combat::target(v, content, &grid, &enemies, range, projectile.passes_cover)
             };
-            if threatened || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3)
-            {
+            let pressured = threatened
+                || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3);
+            if pressured {
                 let focus = if retreat {
                     nearest.map(|e| e.position)
                 } else if let Some(blue) = remedy {
@@ -738,6 +725,55 @@ impl Brain {
                 };
                 decision.movement =
                     combat::movement(v, &grid, &enemies, focus, spacing, retreat, &perception);
+            }
+            let held_heal = v
+                .character
+                .items
+                .iter()
+                .filter(|kind| **kind >= 0)
+                .any(|kind| content.objects[&(*kind as u16)].activate == "Heal");
+            let emergency = self.profile.recovery * 0.5;
+            let separation = |p: Pos| {
+                enemies
+                    .iter()
+                    .map(|e| e.position.distance(p))
+                    .fold(f32::INFINITY, f32::min)
+            };
+            let escape =
+                if outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.) {
+                    Some("near_outmatched")
+                } else if !held_heal && health < emergency {
+                    Some("critical_health")
+                } else if !held_heal
+                    && retreat
+                    && pressured
+                    && !decision.movement.is_some_and(|p| {
+                        combat::speed(v) > 0.
+                            && recovery_step_valid(v, content, &grid, p)
+                            && (enemies.is_empty() || separation(p) > separation(v.position))
+                            && combat::clearance(v, p, &perception)
+                                >= self.mind.cognition.pickup_clearance
+                    })
+                {
+                    Some("no_viable_backstep")
+                } else {
+                    None
+                };
+            if let Some(reason) = escape
+                && decision.item.is_none()
+                && v.map.name != "Nexus"
+            {
+                tracing::info!(
+                    account = v.session.account,
+                    character = v.session.character,
+                    hp = v.character.hp,
+                    max_hp = v.character.stats[0],
+                    emergency_threshold = emergency,
+                    reason,
+                    "autonomous recovery escape selected"
+                );
+                decision.journey = Some(Journey::Nexus);
+                return Ok(decision);
             }
             if retreat {
                 for (slot, kind) in v
@@ -1362,6 +1398,41 @@ fn peaceful(enemies: &[&crate::world::view::VisibleObject], position: Pos) -> bo
     enemies
         .iter()
         .all(|enemy| enemy.position.distance(position) > 5.)
+}
+fn recovery_step_valid(v: &PlayerView, content: &Content, grid: &Grid, pos: Pos) -> bool {
+    if !pos.x.is_finite() || !pos.y.is_finite() || !grid.walkable.contains(&tile(pos)) {
+        return false;
+    }
+    let own = tile(pos);
+    let side = |n: f32| {
+        if n.fract() < 0.5 {
+            -1
+        } else if n.fract() > 0.5 {
+            1
+        } else {
+            0
+        }
+    };
+    let (dx, dy) = (side(pos.x), side(pos.y));
+    let neighbors = [
+        (own.0 + dx, own.1),
+        (own.0, own.1 + dy),
+        (own.0 + dx, own.1 + dy),
+    ];
+    // World::player_position_valid checks the half-cell footprint, not just the route centerline.
+    neighbors.iter().all(|point| {
+        v.tiles
+            .iter()
+            .find(|t| (t.x, t.y) == *point)
+            .is_some_and(|t| t.ground != 255)
+    }) && v.objects.iter().all(|o| {
+        let point = tile(o.position);
+        if point == own {
+            !content.objects[&o.kind].blocks
+        } else {
+            !neighbors.contains(&point) || !content.objects[&o.kind].full_occupy
+        }
+    })
 }
 fn hostile(v: &PlayerView, owner: i32) -> bool {
     owner != v.session.player
