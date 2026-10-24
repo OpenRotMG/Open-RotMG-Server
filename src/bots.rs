@@ -19,6 +19,8 @@ mod crowds;
 pub(crate) mod dialogue;
 mod events;
 
+#[cfg(test)]
+mod population_tests;
 mod progression;
 pub(crate) mod pursuits;
 mod realms;
@@ -34,9 +36,10 @@ struct Profile {
     companions: f32,
     reaction: u64,
     healer: bool,
+    archetype: usize,
 }
 // Names transcribed from Whcxy3RJKIA 4:46, fubGzGmVqpI 9:33 and Ex_Ix3dlB4U 5:33 (YouTube).
-const PROFILES: [Profile; 6] = [
+const ARCHETYPES: [Profile; 6] = [
     Profile {
         identity: "Bayleaf",
         name: "Triceps",
@@ -45,6 +48,7 @@ const PROFILES: [Profile; 6] = [
         companions: 3.,
         reaction: 6,
         healer: true,
+        archetype: 0,
     },
     Profile {
         identity: "Mossy",
@@ -54,6 +58,7 @@ const PROFILES: [Profile; 6] = [
         companions: 3.,
         reaction: 4,
         healer: false,
+        archetype: 1,
     },
     Profile {
         identity: "Trellis",
@@ -63,6 +68,7 @@ const PROFILES: [Profile; 6] = [
         companions: 8.,
         reaction: 5,
         healer: false,
+        archetype: 2,
     },
     Profile {
         identity: "Juniper",
@@ -72,6 +78,7 @@ const PROFILES: [Profile; 6] = [
         companions: 7.,
         reaction: 5,
         healer: true,
+        archetype: 3,
     },
     Profile {
         identity: "Reed",
@@ -81,6 +88,7 @@ const PROFILES: [Profile; 6] = [
         companions: 5.,
         reaction: 6,
         healer: false,
+        archetype: 4,
     },
     Profile {
         identity: "Bramble",
@@ -90,6 +98,86 @@ const PROFILES: [Profile; 6] = [
         companions: 6.,
         reaction: 4,
         healer: false,
+        archetype: 5,
+    },
+];
+pub(crate) const POPULATION: usize = 20;
+const PROFILES: [Profile; POPULATION] = [
+    ARCHETYPES[0],
+    ARCHETYPES[1],
+    ARCHETYPES[2],
+    ARCHETYPES[3],
+    ARCHETYPES[4],
+    ARCHETYPES[5],
+    Profile {
+        identity: "Population07",
+        name: "Rune",
+        ..ARCHETYPES[0]
+    },
+    Profile {
+        identity: "Population08",
+        name: "Frosty",
+        ..ARCHETYPES[1]
+    },
+    Profile {
+        identity: "Population09",
+        name: "Cobalt",
+        ..ARCHETYPES[2]
+    },
+    Profile {
+        identity: "Population10",
+        name: "Wisp",
+        ..ARCHETYPES[3]
+    },
+    Profile {
+        identity: "Population11",
+        name: "Rook",
+        ..ARCHETYPES[4]
+    },
+    Profile {
+        identity: "Population12",
+        name: "Ashen",
+        ..ARCHETYPES[5]
+    },
+    Profile {
+        identity: "Population13",
+        name: "Sparrow",
+        ..ARCHETYPES[0]
+    },
+    Profile {
+        identity: "Population14",
+        name: "Lyra",
+        ..ARCHETYPES[1]
+    },
+    Profile {
+        identity: "Population15",
+        name: "Raven",
+        ..ARCHETYPES[2]
+    },
+    Profile {
+        identity: "Population16",
+        name: "Mistral",
+        ..ARCHETYPES[3]
+    },
+    Profile {
+        identity: "Population17",
+        name: "Drift",
+        ..ARCHETYPES[4]
+    },
+    Profile {
+        identity: "Population18",
+        name: "Ember",
+        ..ARCHETYPES[5]
+    },
+    Profile {
+        identity: "Population19",
+        name: "Silver",
+        ..ARCHETYPES[0]
+    },
+    Profile {
+        identity: "Population20",
+        name: "Thorn",
+        ..ARCHETYPES[1]
     },
 ];
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -171,10 +259,7 @@ impl Brain {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let heading = rng.gen_range(0.0..std::f32::consts::TAU);
         let mut mind = pursuits::Mind::new(view.session.account);
-        let index = PROFILES
-            .iter()
-            .position(|p| p.identity == profile.identity)
-            .expect("registered cognitive profile");
+        let index = profile.archetype;
         mind.cognition = pursuits::Cognition {
             attention: [4, 8, 2, 6, 3, 5][index],
             velocity_step: [1., 0.25, 2., 0.5, 2., 1.][index],

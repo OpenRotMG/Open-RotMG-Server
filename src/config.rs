@@ -170,8 +170,9 @@ impl Config {
             "development control cannot be enabled behind a public proxy"
         );
         ensure!(
-            !self.shore_bots || self.max_players >= 7,
-            "adventuring bots require capacity for six bots plus a human"
+            !self.shore_bots || self.max_players > crate::bots::POPULATION,
+            "adventuring bots require capacity for {} bots plus a human",
+            crate::bots::POPULATION
         );
         ensure!(
             (1..=85).contains(&self.max_players),
