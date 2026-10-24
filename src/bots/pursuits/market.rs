@@ -1021,6 +1021,22 @@ impl Market {
             return Ok(None);
         };
         if self.session.is_none() {
+            self.session_used = true;
+            let admitted = rng.gen_ratio(1, 5);
+            tracing::info!(
+                account = v.session.account,
+                admitted,
+                probability = 0.2,
+                reason = if admitted {
+                    "visit_admitted"
+                } else {
+                    "visit_declined"
+                },
+                "market autonomous session admission"
+            );
+            if !admitted {
+                return Ok(None);
+            }
             let duration_ms = rng.gen_range(60..=1800) * 1000u64;
             self.session = Some(MarketSession {
                 anchor: tile(v.position),
@@ -1031,7 +1047,6 @@ impl Market {
                 next_move: v.elapsed_ms + 10_000,
                 destination: None,
             });
-            self.session_used = true;
             tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,duration_ms,session=?self.session,?goods,want,"market intentional session started");
         }
         let s = self

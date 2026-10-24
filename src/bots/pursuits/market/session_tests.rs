@@ -1,6 +1,9 @@
 use super::tests::fixture;
 use super::*;
-use rand::{RngCore, rngs::StdRng};
+use rand::{
+    RngCore,
+    rngs::{StdRng, mock::StepRng},
+};
 
 const STOCK: [i32; 8] = [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1];
 fn terrain(v: &mut PlayerView) -> Grid {
@@ -13,6 +16,15 @@ fn terrain(v: &mut PlayerView) -> Grid {
     Grid::terrain(v)
 }
 
+fn admit_session(m: &mut Market, v: &PlayerView, c: &Content, grid: &Grid) {
+    assert!(
+        m.decide(v, c, None, grid, &mut StepRng::new(0, 1))
+            .unwrap()
+            .is_some()
+    );
+    assert!(m.session.is_some() && m.session_used);
+}
+
 #[test]
 fn market_session_clock_is_sampled_once_and_expiry_releases_this_visit() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
@@ -22,6 +34,12 @@ fn market_session_clock_is_sampled_once_and_expiry_releases_this_visit() {
         let grid = terrain(&mut v);
         let mut rng = StdRng::seed_from_u64(seed);
         let mut replay = rng.clone();
+        if !replay.gen_ratio(1, 5) {
+            assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
+            assert!(m.session.is_none() && m.session_used);
+            assert_eq!(rng.clone().next_u64(), replay.next_u64());
+            continue;
+        }
         let duration = replay.gen_range(60..=1800) * 1000u64;
         assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
         let session = m.session.clone().unwrap();
@@ -47,9 +65,19 @@ fn market_session_clock_is_sampled_once_and_expiry_releases_this_visit() {
         m.observe(&v);
         v.map.name = "Nexus".into();
         v.position = Pos { x: 8.5, y: 8.5 };
-        assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
-        assert_eq!(m.session.as_ref().unwrap().anchor, (8, 8));
-        assert!(m.session.as_ref().unwrap().until > v.elapsed_ms);
+        let mut visit_replay = rng.clone();
+        let admitted = visit_replay.gen_ratio(1, 5);
+        assert_eq!(
+            m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some(),
+            admitted
+        );
+        assert!(m.session_used);
+        if admitted {
+            assert_eq!(m.session.as_ref().unwrap().anchor, (8, 8));
+            assert!(m.session.as_ref().unwrap().until > v.elapsed_ms);
+        } else {
+            assert!(m.session.is_none());
+        }
     }
     assert!(durations.len() > 1);
 }
@@ -60,7 +88,7 @@ fn market_session_moves_only_on_cadence_with_local_clear_segments() {
     let (mut m, mut v) = fixture(&c, STOCK);
     let mut grid = terrain(&mut v);
     let mut rng = StdRng::seed_from_u64(17);
-    m.decide(&v, &c, None, &grid, &mut rng).unwrap();
+    admit_session(&mut m, &v, &c, &grid);
     v.elapsed_ms = m.session.as_ref().unwrap().next_move;
     let d = m.decide(&v, &c, None, &grid, &mut rng).unwrap().unwrap();
     let target = d.movement.unwrap();
@@ -102,7 +130,7 @@ fn market_session_requires_real_stock_and_need_and_native_trade_preempts_expiry(
     assert!(!m.session_used);
     assert_eq!(rng.clone().next_u64(), next_random);
     v.character.items[4..12].copy_from_slice(&STOCK);
-    m.decide(&v, &c, None, &grid, &mut rng).unwrap();
+    admit_session(&mut m, &v, &c, &grid);
     v.elapsed_ms = m.session.as_ref().unwrap().until;
     m.trade = Some(SessionTrade {
         binding: [-2, 10, 1],
@@ -171,7 +199,7 @@ fn market_session_observation_drops_only_expired_ads_before_publication() {
     let (mut m, mut v) = fixture(&c, STOCK);
     let grid = terrain(&mut v);
     let mut rng = StdRng::seed_from_u64(9);
-    m.decide(&v, &c, None, &grid, &mut rng).unwrap();
+    admit_session(&mut m, &v, &c, &grid);
     let session = m.session.clone();
     let ad = m.outgoing.clone();
     assert_eq!(
@@ -227,7 +255,7 @@ fn market_session_observation_drops_only_expired_ads_before_publication() {
 fn market_session_idle_hook_preserves_item_and_releases_normal_portal_choice() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
     let (_, mut v) = fixture(&c, [0xa1d, 0xa1d, 0xa22, 0xa22, 0xa23, -1, -1, -1]);
-    terrain(&mut v);
+    let grid = terrain(&mut v);
     v.objects[0].kind = 0x720;
     v.objects[0].account = None;
     v.objects[0].equipped.clear();
@@ -237,6 +265,7 @@ fn market_session_idle_hook_preserves_item_and_releases_normal_portal_choice() {
     v.elapsed_ms = 100_000;
     v.time_ms = 100_000;
     v.character.mp = 0;
+    admit_session(&mut brain.mind.market, &v, &c, &grid);
     let d = brain.decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Wait);
     assert!(d.journey.is_none());
@@ -248,4 +277,89 @@ fn market_session_idle_hook_preserves_item_and_releases_normal_portal_choice() {
     let d = brain.decide(&v, &c).unwrap();
     assert!(matches!(d.journey, Some(Journey::Portal(20))));
     assert!(brain.mind.market.session.is_none());
+}
+
+#[test]
+fn autonomous_session_decline_is_once_per_eligible_visit_not_per_poll() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, mut v) = fixture(&c, STOCK);
+    let grid = terrain(&mut v);
+    let mut rng = StepRng::new(u64::MAX, 1);
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
+    assert!(m.session_used && m.session.is_none() && m.outgoing.is_none());
+    assert_eq!(rng.clone().next_u64(), 0);
+    for elapsed in [1001, 9000, 60_000, 1_800_000] {
+        v.elapsed_ms = elapsed;
+        assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
+        assert!(m.session.is_none() && m.session_used);
+        assert_eq!(rng.clone().next_u64(), 0);
+    }
+    m.trade = Some(SessionTrade {
+        binding: [-2, 10, 1],
+        peer: "Peer".into(),
+        items: [vec![], vec![]],
+        tradeable: [false; 12],
+        offers: [[false; 12]; 2],
+        ready: 0,
+        ready_at: Instant::now(),
+        changed: false,
+    });
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
+    assert_eq!(rng.clone().next_u64(), 0);
+    assert!(m.session.is_none() && m.session_used);
+    m.trade = None;
+    v.map.name = "Realm".into();
+    m.observe(&v);
+    assert!(!m.session_used);
+    v.map.name = "Nexus".into();
+    v.position = Pos { x: 8.5, y: 8.5 };
+    let mut replay = rng.clone();
+    assert!(replay.gen_ratio(1, 5));
+    let duration = replay.gen_range(60..=1800) * 1000u64;
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
+    assert_eq!(m.session.as_ref().unwrap().anchor, (8, 8));
+    assert_eq!(m.session.as_ref().unwrap().until, v.elapsed_ms + duration);
+    assert_eq!(rng.next_u64(), replay.next_u64());
+}
+
+#[test]
+fn autonomous_session_admission_waits_for_eligibility_without_using_rng() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, mut v) = fixture(&c, STOCK);
+    let grid = terrain(&mut v);
+    let mut rng = StepRng::new(0, 1);
+    v.lifecycle.busy = true;
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
+    assert!(!m.session_used);
+    assert_eq!(rng.clone().next_u64(), 0);
+    v.lifecycle.busy = false;
+    v.map.name = "Realm".into();
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
+    assert!(!m.session_used);
+    assert_eq!(rng.clone().next_u64(), 0);
+    v.map.name = "Nexus".into();
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
+    assert!(m.session_used && m.session.is_some());
+}
+
+#[test]
+fn fixed_native_actor_accounts_replay_their_first_seeded_admission() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    for (account, name) in [(2, "Pixl"), (3, "ExElite")] {
+        let (mut m, mut v) = fixture(&c, STOCK);
+        v.session.account = account;
+        let grid = terrain(&mut v);
+        let mut brain = Brain::new(selected_profile(name).unwrap(), &v);
+        let mut replay = brain.rng.clone();
+        let admitted = replay.gen_ratio(1, 5);
+        assert_eq!(
+            m.decide(&v, &c, None, &grid, &mut brain.rng)
+                .unwrap()
+                .is_some(),
+            admitted
+        );
+        assert_eq!(m.session.is_some(), admitted);
+        assert!(m.session_used);
+        eprintln!("fixed native fixture account={account} profile={name} admitted={admitted}");
+    }
 }
