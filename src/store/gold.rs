@@ -166,6 +166,19 @@ impl Store {
             Ok(Gold { balance, rewards })
         }).await
     }
+    pub(crate) async fn swap_fame(&self, account: i32, fame: i32) -> Result<(i32, i32)> {
+        ensure!(fame > 0 && fame % 2 == 0, "invalid fame swap amount {fame}");
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let balance: i32 = tx.query_row("SELECT balance FROM account_fame WHERE account=?1", [account], |r| r.get(0)).context("account fame wallet missing")?;
+            ensure!(balance >= fame, Rejected("Not enough fame."));
+            tx.execute("UPDATE account_fame SET balance=balance-?2 WHERE account=?1", params![account, fame])?;
+            tx.execute("UPDATE accounts SET credits=credits+?2 WHERE id=?1", params![account, fame / 2])?;
+            let balances = tx.query_row("SELECT balance,credits FROM account_fame JOIN accounts ON accounts.id=account WHERE account=?1", [account], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            tx.commit()?;
+            Ok(balances)
+        }).await
+    }
     pub(crate) async fn gold_notified(&self, account: i32, rewards: Vec<String>) -> Result<()> {
         self.call(move |db| {
             let tx = db.transaction()?;
