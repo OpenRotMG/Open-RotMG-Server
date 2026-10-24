@@ -81,8 +81,8 @@ impl Piece {
                 let mut p = Self::new(81, 81);
                 for y in 0..81 {
                     for x in 0..81 {
-                        let dx = x as f32 - 40.;
-                        let dy = y as f32 - 40.;
+                        let dx = x as f32 - 40.5;
+                        let dy = y as f32 - 40.5;
                         if dx.hypot(dy) + rng.gen_range(-2.0..2.0) <= 35. {
                             p.set(x, y, 1);
                         }
@@ -1012,6 +1012,37 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sphinx_outer_floor_uses_reference_index_space_center() {
+        use rand::RngCore;
+        let mut changes = [0, 0];
+        for seed in 0..16 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut expected_rng = rng.clone();
+            let piece = Piece::build(crate::dungeon::tomb::SPHINX, &mut rng);
+            assert_eq!((piece.width, piece.height, piece.boss), (81, 81, (40, 40)));
+            for y in 0..81 {
+                for x in 0..81 {
+                    let jitter = expected_rng.gen_range(-2.0_f32..2.0);
+                    let expected = (x as f32 - 40.5).hypot(y as f32 - 40.5) + jitter <= 35.;
+                    let old = (x as f32 - 40.).hypot(y as f32 - 40.) + jitter <= 35.;
+                    let mark = piece.cells[y * 81 + x];
+                    assert!(mark <= 4);
+                    if mark >= 2 {
+                        continue;
+                    }
+                    assert_eq!(mark == 1, expected, "seed {seed}, local ({x},{y})");
+                    changes[0] += usize::from(expected && !old);
+                    changes[1] += usize::from(old && !expected);
+                }
+            }
+            for _ in 0..8 {
+                assert_eq!(rng.next_u64(), expected_rng.next_u64());
+            }
+        }
+        assert!(changes.into_iter().all(|count| count > 0));
+    }
 
     #[test]
     fn temple_masonry_can_retain_dark_grass_underlay() {
