@@ -5,23 +5,7 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 const TREES: [u16; 5] = [0x175, 0x176, 0x177, 0x178, 0x179];
 const SPRITES: [u16; 5] = [0xd00, 0xd01, 0xd02, 0xd03, 0xd04];
 
-#[derive(Clone, Copy, Debug)]
-enum FloorPattern {
-    White,
-    YellowChecker,
-}
-
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
-    // Reconstructed per-world visual choice; do not consume layout/population RNG draws.
-    let pattern = if seed & 1 == 0 {
-        FloorPattern::White
-    } else {
-        FloorPattern::YellowChecker
-    };
-    generate_with_pattern(content, seed, pattern)
-}
-
-fn generate_with_pattern(content: &Content, seed: u64, pattern: FloorPattern) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let directions = [(1i32, 0), (-1, 0), (0, 1), (0, -1)];
     let mut rooms = vec![(0i32, 0i32)];
@@ -79,7 +63,7 @@ fn generate_with_pattern(content: &Content, seed: u64, pattern: FloorPattern) ->
         ],
         spawns: vec![],
     };
-    // Leave void between unlinked platforms; smaller rooms/two-tile bridges match the preserved map:
+    // White stationary floors and compact platforms/two-tile bridges match the preserved map:
     // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
     for (i, &(cx, cy)) in centers.iter().enumerate() {
         let radius = if i == boss {
@@ -91,7 +75,7 @@ fn generate_with_pattern(content: &Content, seed: u64, pattern: FloorPattern) ->
         };
         for y in cy - radius..=cy + radius {
             for x in cx - radius..=cx + radius {
-                paint(&mut map, x, y, pattern);
+                paint(&mut map, x, y);
             }
         }
     }
@@ -99,7 +83,7 @@ fn generate_with_pattern(content: &Content, seed: u64, pattern: FloorPattern) ->
         let ((x0, y0), (x1, y1)) = (centers[a], centers[b]);
         for y in y0.min(y1)..=y0.max(y1) + 1 {
             for x in x0.min(x1)..=x0.max(x1) + 1 {
-                paint(&mut map, x, y, pattern);
+                paint(&mut map, x, y);
             }
         }
     }
@@ -158,7 +142,7 @@ fn generate_with_pattern(content: &Content, seed: u64, pattern: FloorPattern) ->
         seed,
         rooms = rooms.len(),
         gods,
-        floor_pattern = ?pattern,
+        floor_pattern = "White",
         width,
         height,
         "generated varied Sprite World"
@@ -166,22 +150,43 @@ fn generate_with_pattern(content: &Content, seed: u64, pattern: FloorPattern) ->
     Ok(map)
 }
 
-fn paint(map: &mut Map, x: i32, y: i32, pattern: FloorPattern) {
-    // Keep conveyor positions/vectors identical; white and yellow are both stationary.
+fn paint(map: &mut Map, x: i32, y: i32) {
     map.cells[(y * map.width + x) as usize].ground =
         match ((x - 12).rem_euclid(8), (y - 12).rem_euclid(8)) {
             (_, 2) => 0xa1,
             (_, 3) => 0xa2,
             (2, _) => 0xa3,
             (3, _) => 0xa4,
-            _ if matches!(pattern, FloorPattern::YellowChecker) && (x + y) % 2 != 0 => 0xa5,
             _ => 0xa0,
         };
 }
 
 fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
     let cell = &mut map.cells[(y * map.width + x) as usize];
-    if (0xa0..=0xa5).contains(&cell.ground) && cell.object.is_none() {
+    if (0xa0..=0xa4).contains(&cell.ground) && cell.object.is_none() {
         cell.object = Some(kind);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn sprite_floor_uses_reference_palette() {
+        let content = Content::load(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data"
+        )))
+        .unwrap();
+        for seed in 0..16 {
+            let map = generate(&content, seed).unwrap();
+            assert_eq!(
+                map.cells.iter().map(|c| c.ground).collect::<BTreeSet<_>>(),
+                BTreeSet::from([0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xfe]),
+                "seed {seed}"
+            );
+        }
     }
 }
