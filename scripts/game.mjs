@@ -223,7 +223,6 @@ async function resumeAll() {
   await eachClient(clients,c=>c.call('Emulation.setFocusEmulationEnabled',{enabled:true}));
   const after=await states(true,undefined,before);
   await bind(after);
-  await eachClient(clients,c=>c.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))'));
   if(leaseError)throw leaseError;
 }
 const bindings = {
@@ -283,8 +282,8 @@ async function nativeAct(value) {
       }
       mouse={x:rect.x+from.x,y:rect.y+from.y};
       if(input.drag)dragTo={x:rect.x+input.drag.to.x,y:rect.y+input.drag.to.y};
+      // Ordered CDP input needs no paint between pointer placement and DOWN.
       await client.call('Input.dispatchMouseEvent',{type:'mouseMoved',...mouse});
-      await client.evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
     }
     return async()=>{
     const press=await client.hold(keys,input.target?.fire===false?undefined:mouse,input.duration_ms,dragTo);
