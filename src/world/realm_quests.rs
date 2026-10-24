@@ -839,6 +839,71 @@ impl World {
 
 #[cfg(test)]
 #[test]
+fn grove_root_uses_source_anchor_for_birth_habitat_and_spacing() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    for (label, existing_x, destination_habitat, accepted) in [
+        ("exact 32-unit boundary", 32., true, true),
+        ("inside 32-unit boundary", 95.75, true, false),
+        ("destination outside habitat", 20., false, false),
+    ] {
+        let mut map = Map {
+            width: 192,
+            height: 192,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x46,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0,
+                };
+                192 * 192
+            ],
+            spawns: vec![(1., 1.)],
+        };
+        // The adjacent candidate's destination is outside habitat, isolating the spacing boundary.
+        map.cells[63 * 192 + 63].terrain = 7;
+        if destination_habitat {
+            map.cells[64 * 192 + 64].terrain = 7;
+        }
+        let map = Arc::new(map);
+        let mut world = World::new(content.clone(), map.clone()).unwrap();
+        world.rng = rand::rngs::StdRng::seed_from_u64(12351);
+        let previous = world
+            .spawn_entity(
+                0x91b,
+                Pos {
+                    x: existing_x,
+                    y: 64.,
+                },
+                vec![],
+            )
+            .unwrap();
+        world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+        let result = world.populate_named_sites(0x91f, &[7], 1);
+        assert_eq!(result.is_ok(), accepted, "{label}: {result:?}");
+        if accepted {
+            let root = world.entities.values().find(|e| e.kind == 0x91f).unwrap();
+            assert_eq!((root.pos.x, root.pos.y), (64., 64.), "{label}");
+            assert_eq!((root.home.x, root.home.y), (root.pos.x, root.pos.y));
+            assert!(root.published && root.hp > 0 && root.quest == Some(root.id));
+            assert_eq!(root.size, 140);
+            assert!(world.walkable(root.pos));
+            assert_eq!(world.map.cell(root.pos.x, root.pos.y).unwrap().terrain, 7);
+            assert!(world.cells.ids(64 * 192 + 64).contains(&root.id));
+            assert!(root.pos.distance(world.entities[&previous].pos) >= 32.);
+        } else {
+            assert!(world.entities.values().all(|e| e.kind != 0x91f));
+            assert!(
+                Arc::ptr_eq(&map, &world.map),
+                "rejected site mutated ground"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
 fn named_site_populations_match_reference_ranges() {
     let data = std::path::Path::new("data");
     let content = Arc::new(Content::load(data).unwrap());
@@ -945,6 +1010,21 @@ fn named_site_populations_match_reference_ranges() {
             for (index, root) in roots.iter().enumerate() {
                 assert!(root.published && root.hp > 0 && root.camp.is_none());
                 assert_eq!(root.quest, Some(root.id));
+                if root.kind == 0x91f {
+                    let area = world
+                        .setpieces
+                        .iter()
+                        .find(|a| a.distance(root.pos) == 0.)
+                        .unwrap();
+                    assert_eq!(
+                        (root.pos.x - area.x as f32, root.pos.y - area.y as f32),
+                        (13., 13.)
+                    );
+                    assert_eq!((root.home.x, root.home.y), (root.pos.x, root.pos.y));
+                    assert!(
+                        [6, 7].contains(&world.map.cell(root.pos.x, root.pos.y).unwrap().terrain)
+                    );
+                }
                 if root.kind == 0x678 {
                     oasis_sites += 1;
                     let palms: Vec<_> = world
