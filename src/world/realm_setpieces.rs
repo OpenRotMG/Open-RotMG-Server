@@ -1,5 +1,5 @@
 // GPL-3.0 reference; data/REALM-SRC-LICENSE: moistosaurus/realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff
-// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
+// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,Sphinx,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -62,7 +62,6 @@ impl Piece {
     }
     fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
         let mut p = match kind {
-            // Arena measurements: trapped/rotmg_svr@593e490, realm/setpieces/Sphinx.cs; the center motif is reconstructed.
             crate::dungeon::tomb::SPHINX => {
                 let mut p = Self::new(81, 81);
                 for y in 0..81 {
@@ -70,7 +69,25 @@ impl Piece {
                         let dx = x as f32 - 40.;
                         let dy = y as f32 - 40.;
                         if dx.hypot(dy) + rng.gen_range(-2.0..2.0) <= 35. {
-                            p.set(x, y, if dx.abs() + dy.abs() <= 10. { 2 } else { 1 });
+                            p.set(x, y, 1);
+                        }
+                    }
+                }
+                let center = [
+                    0x1ffff_u32,
+                    0x7ffc,
+                    0x1ff0,
+                    0x3ff8,
+                    0x3ff8,
+                    0x3bb8,
+                    0x380,
+                    0x100,
+                    0x100,
+                ];
+                for y in 0_usize..17 {
+                    for x in 0..17 {
+                        if center[y.abs_diff(8)] & (1 << x) != 0 {
+                            p.set(32 + x, 32 + y, 2);
                         }
                     }
                 }
@@ -121,7 +138,8 @@ impl Piece {
                     for x in 1..64 {
                         let radius = (x as f32 - 32.).hypot(y as f32 - 32.);
                         if radius < 28. + rng.gen_range(0.0..4.) {
-                            let mark = if radius > 19. && rng.gen_ratio(1, 7) {
+                            // Trees also occupy the grave field: realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff, common/resources/worlds/SP_KageKami.jm.
+                            let mark = if rng.gen_ratio(1, if radius > 19. { 7 } else { 30 }) {
                                 3
                             } else if rng.gen_ratio(1, 15) {
                                 4
@@ -566,7 +584,10 @@ impl Piece {
         if kind == 0x668 {
             p.boss = (20, 20);
         }
-        if !matches!(kind, 0x935 | 0xd59 | 0xd50 | 0xe37) {
+        if !matches!(
+            kind,
+            0x935 | 0xd59 | 0xd50 | 0xe37 | crate::dungeon::tomb::SPHINX
+        ) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
         }
         p
@@ -930,5 +951,63 @@ impl World {
         );
         self.setpieces.push(area);
         Ok(pos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kage_cover_reaches_the_graves_without_sealing_their_approaches() {
+        for seed in 0..64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let p = Piece::build(crate::dungeon::manor::KAGE, &mut rng);
+            let inner_trees = p
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(i, mark)| {
+                    **mark == 3
+                        && (((*i % p.width) as f32 - 32.).hypot((*i / p.width) as f32 - 32.) < 19.)
+                })
+                .count();
+            assert!(
+                inner_trees > 0,
+                "seed {seed}: the playable graveyard has no tree cover"
+            );
+            let start = p.boss.1 * p.width + p.boss.0;
+            assert_eq!(p.cells[start], 1);
+            assert_eq!(p.cells.iter().filter(|mark| **mark == 7).count(), 24);
+            let mut reached = BTreeSet::from([start]);
+            let mut queue = std::collections::VecDeque::from([start]);
+            while let Some(i) = queue.pop_front() {
+                let (x, y) = ((i % p.width) as i32, (i / p.width) as i32);
+                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= p.width as i32 || ny >= p.height as i32 {
+                        continue;
+                    }
+                    let next = ny as usize * p.width + nx as usize;
+                    if matches!(p.cells[next], 1 | 2 | 4 | 5 | 6) && reached.insert(next) {
+                        queue.push_back(next);
+                    }
+                }
+            }
+            for (i, _) in p.cells.iter().enumerate().filter(|(_, m)| **m == 7) {
+                assert!(
+                    [i - p.width, i + 1, i + p.width, i - 1]
+                        .iter()
+                        .any(|next| reached.contains(next)),
+                    "seed {seed}: grave {i} has no reachable approach"
+                );
+            }
+            for (x, y) in [(32, 10), (32, 54), (10, 32), (54, 32)] {
+                assert!(
+                    reached.contains(&(y * p.width + x)),
+                    "seed {seed}: approach {x},{y} is blocked"
+                );
+            }
+        }
     }
 }
