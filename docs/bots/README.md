@@ -10,7 +10,7 @@ Run `./run.sh 18923 --release`: no fixed crews. Visible needs trigger invitation
 
 Wizards predict visible projectile paths, lead an observed target, kite within weapon range, cast equipped spells and commit to recovery. Crews remember recent contacts, explore reachable known terrain, revisit observed Realm hunting grounds and respond to Pirate Cave calls. Visible crewmates regroup through normal teleports; separated crews can arrange a Nexus meeting through public chat. Priests cast equipped tomes for actual nearby injury, MP and accepted cooldowns.
 
-Bots start by default; `--no-shore-bots` or explicit `"shore_bots": false` disables it. Reserve seven slots for six bots and a human; QA control remains separate. Living saves resume unchanged. After committed permanent death, a fresh character receives normal starter gear; Triceps/Kadabu choose Priest only if that same account earned its Wizard-level-five unlock. Dead inventory is never inherited.
+Bots start by default; `--no-shore-bots` or explicit `"shore_bots": false` disables it. Reserve at least twenty-one slots for twenty bots and a human; QA control remains separate. Living saves resume unchanged. After committed permanent death, a fresh character receives normal starter gear; Triceps/Kadabu choose Priest only if that same account earned its Wizard-level-five unlock. Dead inventory is never inherited.
 
 Ordinary crews earned Snake Pit clears and returns. Prepared full-backpack clears verify reward exchange and consumption; native media is prepared.
 
