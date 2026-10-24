@@ -1774,3 +1774,57 @@ async fn all_death_fame_phase4_owned_arrival_takeover_and_drain() {
         assert!(server.await.unwrap_err().is_cancelled());
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_input_backlog_survives_overrunning_world() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let (port, server) = socket_server(&a).await;
+    let account = a.store.list("input-backlog".into()).await.unwrap().id;
+    let ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    let id = socket_load(&mut socket, &dir, "input-backlog", ch.id).await;
+    // Every world job waits behind a 60ms overrunning tick, as during the #486 Lord of the Lost Lands fight.
+    let world = a.world.for_player(id);
+    let overrun = tokio::spawn(async move {
+        loop {
+            world
+                .call(|_| {
+                    std::thread::sleep(Duration::from_millis(60));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+    });
+    for _ in 0..150 {
+        let mut hit = Writer::new();
+        hit.u8(0).i32(id);
+        socket
+            .send(Packet {
+                id: 24,
+                body: hit.0,
+            })
+            .await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    overrun.abort();
+    socket
+        .send(Packet {
+            id: wire::TELEPORT,
+            body: id.to_be_bytes().to_vec(),
+        })
+        .await;
+    let reply = socket.receive(wire::TEXT).await;
+    assert!(
+        String::from_utf8_lossy(&reply.body).contains("already at yourself"),
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    drop(socket);
+    server.abort();
+}

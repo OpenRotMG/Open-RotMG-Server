@@ -33,6 +33,7 @@ mod endgame_ai;
 mod enemy_damage;
 mod enemy_shots;
 mod entity_store;
+mod execution;
 mod families;
 mod fauna;
 mod fauna_births;
@@ -901,7 +902,7 @@ pub(crate) enum DungeonReturn {
 }
 pub struct Directory {
     pub clock: crate::clock::Clock,
-    pub worlds: BTreeMap<i32, World>,
+    pub worlds: execution::Worlds,
     templates: BTreeMap<String, Arc<Map>>,
     realms: Vec<crate::terrain::realms::Source>,
     realm_rng: rand::rngs::StdRng,
@@ -924,11 +925,15 @@ pub struct Directory {
 }
 impl Directory {
     pub fn bug_context(&self, player: i32) -> Result<serde_json::Value> {
-        let (world_id, world, p) = self
+        let world_id = self.location(player)?;
+        let (total_players, total_entities, total_projectiles) = self
             .worlds
-            .iter()
-            .find_map(|(id, w)| w.players.get(&player).map(|p| (*id, w, p)))
-            .context("bug player missing")?;
+            .summaries()
+            .fold((0, 0, 0), |(p, e, b), (_, w)| {
+                (p + w.players.len(), e + w.entities, b + w.bullets)
+            });
+        let world = self.worlds.get(&world_id).context("bug world missing")?;
+        let p = world.players.get(&player).context("bug player missing")?;
         let ticks = self.diagnostic_ticks.iter().filter(|(t, _, _)| t.elapsed().as_secs() <= 120).map(|(time, duration, late)| serde_json::json!({"age_ms": time.elapsed().as_millis(), "execution_us": duration, "scheduling_lateness_us": late})).collect::<Vec<_>>();
         Ok(
             serde_json::json!({"world_id": world_id, "world_name": world.name, "player_id": player,
@@ -939,9 +944,8 @@ impl Directory {
                 "oldest_goto_ms":p.goto_acks.front().map(|(_,at)|at.elapsed().as_millis()),
                 "oldest_shoot_pause_excluding_ms":p.shoot_acks.front().map(|(at,_)|world.clock.now().duration_since(*at).as_millis())},
             "tick_interval_ms": 50, "recent_ticks": ticks, "tick": self.tick,
-            "total_worlds": self.worlds.len(), "total_players": self.worlds.values().map(|w| w.players.len()).sum::<usize>(),
-            "total_entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
-            "total_projectiles": self.worlds.values().map(|w| w.bullets.len()).sum::<usize>()}),
+            "total_worlds": self.worlds.len(), "total_players": total_players,
+            "total_entities": total_entities, "total_projectiles": total_projectiles, "recent_tick_scope":"coordinator"}),
         )
     }
     pub fn announce(&self, text: &str) -> usize {
@@ -959,26 +963,26 @@ impl Directory {
             .collect()
     }
     pub fn health(&self, started: Instant) -> serde_json::Value {
-        let players: usize = self.worlds.values().map(|w| w.players.len()).sum();
-        let qa_actors: usize = self
-            .worlds
-            .values()
-            .flat_map(|w| w.players.values())
+        let worlds: Vec<_> = self.worlds.summaries().collect();
+        let players: usize = worlds.iter().map(|(_, w)| w.players.len()).sum();
+        let qa_actors = worlds
+            .iter()
+            .flat_map(|(_, w)| w.players.values())
             .filter(|p| p.controller == Controller::Qa)
             .count();
-        let bots = self
-            .worlds
-            .values()
-            .flat_map(|w| w.players.values())
+        let bots = worlds
+            .iter()
+            .flat_map(|(_, w)| w.players.values())
             .filter(|p| p.controller == Controller::Autonomous)
             .count();
         serde_json::json!({
-            "status": "development", "uptime_seconds": started.elapsed().as_secs(),
-            "worlds": self.worlds.len(), "players": players - qa_actors - bots, "bots": bots, "qa_actors": qa_actors,
-            "entities": self.worlds.values().map(|w| w.entities.len()).sum::<usize>(),
-            "projectiles": self.worlds.values().map(|w| w.bullets.len()).sum::<usize>(),
-            "tick": self.tick, "max_tick_us": self.max_tick_us,
-            "paused": self.clock.paused(), "process": std::process::id(), "revision": option_env!("GITHUB_SHA"),
+            "status":"development","uptime_seconds":started.elapsed().as_secs(),
+            "worlds":worlds.len(),"players":players-qa_actors-bots,"bots":bots,"qa_actors":qa_actors,
+            "entities":worlds.iter().map(|(_,w)|w.entities).sum::<usize>(),
+            "projectiles":worlds.iter().map(|(_,w)|w.bullets).sum::<usize>(),
+            "tick":self.tick,"max_tick_us":self.max_tick_us,"tick_scope":"coordinator, not world simulation",
+            "world_progress":worlds.iter().map(|(_,w)|serde_json::json!({"tick":w.tick,"simulation_ms":w.now,"published_age_ms":w.published.elapsed().as_millis()})).collect::<Vec<_>>(),
+            "paused":self.clock.paused(),"process":std::process::id(),"revision":option_env!("GITHUB_SHA"),
         })
     }
 
@@ -1081,7 +1085,7 @@ impl Directory {
         }
         let mut d = Self {
             clock: crate::clock::Clock::default(),
-            worlds: BTreeMap::new(),
+            worlds: execution::Worlds::new(),
             templates,
             realms,
             realm_rng: rand::rngs::StdRng::seed_from_u64(seed),
@@ -1342,7 +1346,7 @@ impl Directory {
     }
     pub fn location(&self, player: i32) -> Result<i32> {
         self.worlds
-            .iter()
+            .summaries()
             .find(|(_, w)| w.players.contains_key(&player))
             .map(|(id, _)| *id)
             .context("player missing from world directory")
@@ -1351,12 +1355,11 @@ impl Directory {
         self.endgame
             .realms
             .iter()
-            .filter(|(id, record)| {
-                record.enabled
-                    && self.worlds[id].admission_open
-                    && self.worlds[id].occupancy() < self.worlds[id].max_players
+            .filter_map(|(id, record)| {
+                let world = self.worlds.summary(id).expect("Realm metadata missing");
+                (record.enabled && world.admission_open && world.occupancy < world.max_players)
+                    .then_some((*id, world.occupancy))
             })
-            .map(|(id, _)| (*id, self.worlds[id].occupancy()))
             .collect()
     }
     pub fn initial(&self, game: i32) -> Result<i32> {
@@ -1414,10 +1417,16 @@ impl Directory {
         Ok(id)
     }
     fn reclaimable_world(&self, id: i32) -> bool {
-        id > 0
-            && self.worlds[&id].players.is_empty()
-            && self.worlds[&id].bag_expiry.is_empty()
-            && self.worlds[&id].admissions.is_empty()
+        if id <= 0 {
+            return false;
+        }
+        let world = self
+            .worlds
+            .summary(&id)
+            .expect("reclaimable world metadata missing");
+        world.players.is_empty()
+            && world.bags_empty
+            && world.admissions_empty
             && !self.endgame.references_world(id)
             && !self
                 .grants
@@ -1448,6 +1457,13 @@ impl Directory {
             retired.len()
         );
         for id in retired {
+            self.worlds
+                .get(&id)
+                .expect("selected reclaimable world missing");
+            ensure!(
+                self.reclaimable_world(id),
+                "world {id} changed before capacity reclamation"
+            );
             let world = self.worlds.remove(&id).unwrap();
             self.idle.remove(&id);
             tracing::info!(
@@ -2141,32 +2157,49 @@ impl Directory {
         Ok(id)
     }
     fn retire_transfer_grants(&mut self) {
+        self.retire_grants(|_, _| {});
+    }
+    fn retire_grants(&mut self, after: impl Fn(&mut execution::Worlds, i32)) {
         let mut retired = Vec::new();
         self.grants.retain(|key, g| {
             let keep = g.expires > self.tick
                 && g.authority.state() & TRANSFER_REVOKED == 0
                 && !(g.authority.state() & TRANSFER_CONSUMED != 0
-                    && self.worlds[&g.destination].players.values().any(|p| {
-                        p.character.account == g.account && p.character.id == g.character
-                    }));
+                    && self
+                        .worlds
+                        .summary(&g.destination)
+                        .expect("grant destination metadata missing")
+                        .players
+                        .values()
+                        .any(|p| p.account == g.account && p.character == g.character));
             if !keep {
                 retired.push((g.destination, key.clone()));
             }
             keep
         });
-        for (world, key) in retired {
-            if let Some(world) = self.worlds.get_mut(&world) {
+        for (id, key) in retired {
+            if let Some(world) = self.worlds.get_mut(&id) {
                 world.admissions.remove(&key);
+                after(&mut self.worlds, id);
             }
         }
     }
+    #[cfg(test)]
     fn step(&mut self) {
+        self.step_using(|worlds, tick| {
+            for (id, world) in worlds {
+                let _context = crate::supervision::world(*id, tick);
+                world.step();
+                world.report_performance(*id);
+            }
+        });
+    }
+    #[cfg(test)]
+    fn step_using(&mut self, simulate: impl FnOnce(&mut execution::Worlds, u64)) {
         self.tick += 1;
         self.retire_transfer_grants();
+        simulate(&mut self.worlds, self.tick);
         for (id, world) in &mut self.worlds {
-            let _context = crate::supervision::world(*id, self.tick);
-            world.step();
-            world.report_performance(*id);
             if *id > 0 && !self.endgame.realms.contains_key(id) {
                 if world.players.is_empty() {
                     self.idle.entry(*id).or_insert(self.tick);
@@ -2175,15 +2208,46 @@ impl Directory {
                 }
             }
         }
-        self.endgame_step();
+        let ready: Vec<_> = self.worlds.keys().copied().collect();
+        self.coordinate(&ready);
+    }
+    fn coordinator_step(&mut self) {
+        self.tick += 1;
+        self.retire_grants(|worlds, id| worlds.release_world(&id));
+        for (id, world) in self.worlds.summaries() {
+            if *id > 0 && !self.endgame.realms.contains_key(id) {
+                if world.players.is_empty() {
+                    self.idle.entry(*id).or_insert(self.tick);
+                } else {
+                    self.idle.remove(id);
+                }
+            }
+        }
+        self.coordinate(&[]);
+    }
+    // Another world's completion or a timer must not publish this world's queued effects early.
+    fn coordinate(&mut self, ready: &[i32]) {
+        self.endgame_step(ready);
         self.sync_realm_portal();
-        let requests: Vec<_> = self
+        self.worlds.release_world(&-2);
+        let requesting: Vec<_> = self
             .worlds
-            .iter_mut()
-            .flat_map(|(id, world)| {
-                std::mem::take(&mut world.portal_requests)
-                    .into_iter()
-                    .map(|pos| (*id, pos))
+            .summaries()
+            .filter(|(id, w)| ready.contains(id) && w.portals_pending)
+            .map(|(id, _)| *id)
+            .collect();
+        let requests: Vec<_> = requesting
+            .into_iter()
+            .flat_map(|id| {
+                std::mem::take(
+                    &mut self
+                        .worlds
+                        .get_mut(&id)
+                        .expect("portal source missing")
+                        .portal_requests,
+                )
+                .into_iter()
+                .map(move |pos| (id, pos))
             })
             .collect();
         for (origin, (kind, pos)) in requests {
@@ -2194,23 +2258,17 @@ impl Directory {
         let expired_portals: Vec<_> = self
             .portals
             .iter()
-            .filter(|(id, binding)| {
-                binding.expires <= self.tick
-                    && self
-                        .worlds
-                        .get(&binding.origin)
-                        .and_then(|w| w.entities.get(id))
-                        .is_none_or(|e| !e.reserved)
-            })
+            .filter(|(_, binding)| binding.expires <= self.tick)
             .map(|(id, binding)| (*id, binding.origin))
             .collect();
         for (id, origin) in expired_portals {
-            self.worlds
-                .get_mut(&origin)
-                .expect("portal origin exists")
-                .remove_entity(id);
-            self.portals.remove(&id);
-            tracing::info!(portal = id, origin, "dungeon portal expired");
+            let world = self.worlds.get_mut(&origin).expect("portal origin exists");
+            if world.entities.get(&id).is_none_or(|e| !e.reserved) {
+                world.remove_entity(id);
+                self.portals.remove(&id);
+                tracing::info!(portal = id, origin, "dungeon portal expired");
+            }
+            self.worlds.release_world(&origin);
         }
         let expired: Vec<_> = self
             .idle
@@ -2219,19 +2277,37 @@ impl Directory {
             .map(|(id, _)| *id)
             .collect();
         for id in expired {
+            self.worlds.get(&id).expect("idle world missing");
+            if !self.reclaimable_world(id) {
+                tracing::debug!(world = id, "idle world changed before reclamation");
+                self.worlds.release_world(&id);
+                continue;
+            }
             self.worlds.remove(&id);
             self.idle.remove(&id);
             tracing::info!(world = id, "idle world removed");
         }
+        self.worlds.routing.tick.store(self.tick, Ordering::Release);
     }
 }
-type Job = Box<dyn FnOnce(&mut Directory) + Send>;
-async fn service_queued_jobs(directory: &mut Directory, rx: &mut mpsc::Receiver<Job>) {
+type Reply = Box<dyn FnOnce() + Send>;
+type Job<S> = Box<dyn FnOnce(&mut S) -> Reply + Send>;
+fn execute_directory_job(directory: &mut Directory, job: Job<Directory>) {
+    let reply = job(directory);
+    directory
+        .worlds
+        .routing
+        .tick
+        .store(directory.tick, Ordering::Release);
+    directory.worlds.release();
+    reply();
+}
+async fn service_queued_jobs(directory: &mut Directory, rx: &mut mpsc::Receiver<Job<Directory>>) {
     for _ in 0..16 {
         // Serial packet handlers must receive their replies before they can enqueue the next acknowledgement.
         tokio::task::yield_now().await;
         let Ok(job) = rx.try_recv() else { break };
-        job(directory);
+        execute_directory_job(directory, job);
     }
 }
 #[cfg(test)]
@@ -2252,7 +2328,8 @@ pub struct Handle {
     lifecycle_lost_reply: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(test)]
     lifecycle_job_gate: LifecycleJobGate,
-    tx: mpsc::Sender<Job>,
+    tx: mpsc::Sender<Job<Directory>>,
+    routing: Arc<execution::Routing>,
     target: Target,
     pub clock: crate::clock::Clock,
     pub supervisor: crate::supervision::Supervisor,
@@ -2262,10 +2339,21 @@ impl Handle {
     pub fn spawn(directory: Directory) -> Self {
         Self::supervised(directory, crate::supervision::Supervisor::default())
     }
-    pub fn supervised(directory: Directory, supervisor: crate::supervision::Supervisor) -> Self {
-        let (tx, mut rx) = mpsc::channel::<Job>(256);
+    pub fn supervised(
+        mut directory: Directory,
+        supervisor: crate::supervision::Supervisor,
+    ) -> Self {
+        let (tx, mut rx) = mpsc::channel::<Job<Directory>>(256);
         let clock = directory.clock.clone();
-        supervisor.spawn("world", async move {
+        let routing = directory.worlds.routing.clone();
+        directory
+            .worlds
+            .start(clock.clone(), supervisor.clone(), tx.downgrade())
+            .expect("world actors could not start");
+        // Preserve the incident component consumed by shutdown and account-fence readers.
+        supervisor.spawn_finite_thread("world", move || {
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build()?;
+            runtime.block_on(async move {
             let mut directory = directory;
             let mut timer = tokio::time::interval(std::time::Duration::from_millis(50));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -2275,37 +2363,41 @@ impl Handle {
                         if directory.clock.paused() { continue; }
                         let late=scheduled.elapsed().as_micros() as u64;
                         let measuring=crate::performance::Measure::start();
-                        let start=Instant::now(); directory.step();
+                        let start=Instant::now(); directory.coordinator_step();
                         let us=start.elapsed().as_micros() as u64;
                         directory.max_tick_us=directory.max_tick_us.max(us);
-                        directory.performance.work("step", measuring);
+                        directory.performance.work("coordination_step", measuring);
                         directory.performance.record("scheduling_lateness", std::time::Duration::from_micros(late));
                         directory.diagnostic_ticks.push_back((start, us, late));
                         while directory.diagnostic_ticks.front().is_some_and(|(t, _, _)| t.elapsed().as_secs() > 120) { directory.diagnostic_ticks.pop_front(); }
-                        if us>25_000 {tracing::warn!(tick=directory.tick,elapsed_us=us,"slow aggregate simulation tick");}
+                        if us>25_000 {tracing::warn!(tick=directory.tick,elapsed_us=us,"slow world coordination tick");}
                         if directory.tick.is_multiple_of(100) { directory.max_tick_us=0; }
                         if let Some(timings)=directory.performance.report() {
                             tracing::info!(tick=directory.tick,worlds=directory.worlds.len(),
-                                players=directory.worlds.values().map(|w|w.players.len()).sum::<usize>(),
-                                entities=directory.worlds.values().map(|w|w.entities.len()).sum::<usize>(),
-                                actors=directory.worlds.values().map(|w|w.actor_ids.len()).sum::<usize>(),
+                                players=directory.worlds.summaries().map(|(_,w)|w.players.len()).sum::<usize>(),
+                                entities=directory.worlds.summaries().map(|(_,w)|w.entities).sum::<usize>(),
+                                actors=directory.worlds.summaries().map(|(_,w)|w.actors).sum::<usize>(),
+                                scope="coordinator only; per-world simulation is reported separately",
                                 diagnostic_tick_samples=directory.diagnostic_ticks.len(),queued_jobs=rx.len(),
                                 memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
                         // Over-budget ticks must not repeatedly win select and starve queued input or lease renewals.
+                        directory.worlds.release();
                         service_queued_jobs(&mut directory, &mut rx).await;
                     },
-                    job=rx.recv()=>match job{Some(f)=>f(&mut directory),None=>break}
+                    job=rx.recv()=>match job{Some(f)=>execute_directory_job(&mut directory,f),None=>break}
                 }
             }
             Ok(())
-        });
+            })
+        }).expect("directory worker could not start");
         Self {
             #[cfg(test)]
             lifecycle_lost_reply: Default::default(),
             #[cfg(test)]
             lifecycle_job_gate: Default::default(),
             tx,
+            routing,
             target: Target::World(-1),
             clock,
             supervisor,
@@ -2318,6 +2410,7 @@ impl Handle {
             #[cfg(test)]
             lifecycle_job_gate: self.lifecycle_job_gate.clone(),
             tx: self.tx.clone(),
+            routing: self.routing.clone(),
             target: Target::World(id),
             clock: self.clock.clone(),
             supervisor: self.supervisor.clone(),
@@ -2330,6 +2423,7 @@ impl Handle {
             #[cfg(test)]
             lifecycle_job_gate: self.lifecycle_job_gate.clone(),
             tx: self.tx.clone(),
+            routing: self.routing.clone(),
             target: Target::Player(id),
             clock: self.clock.clone(),
             supervisor: self.supervisor.clone(),
@@ -2368,6 +2462,17 @@ impl Handle {
         &self,
         f: impl FnOnce(&mut Directory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.request(&self.tx, "directory", |d| &mut d.performance, f)
+            .await
+    }
+    async fn request<S: Send + 'static, T: Send + 'static>(
+        &self,
+        sender: &mpsc::Sender<Job<S>>,
+        actor: &'static str,
+        timings: fn(&mut S) -> &mut crate::performance::Window,
+        f: impl FnOnce(&mut S) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.supervisor.ensure_running()?;
         let (tx, rx) = oneshot::channel();
         let request = crate::performance::REQUEST.try_with(Arc::clone).ok();
         let trace = request.as_ref().and_then(|r| {
@@ -2384,11 +2489,10 @@ impl Handle {
         };
         let start = Instant::now();
         record("capacity_wait", tx.is_closed());
-        let permit = self
-            .tx
+        let permit = sender
             .reserve()
             .await
-            .map_err(|_| anyhow::anyhow!("world directory stopped"))?;
+            .map_err(|_| anyhow::anyhow!("{actor} request queue stopped"))?;
         let send_wait = start.elapsed();
         record("capacity_acquired", tx.is_closed());
         let queued = Instant::now();
@@ -2410,19 +2514,20 @@ impl Handle {
                 None
             }
         };
-        permit.send(Box::new(move |d| {
+        permit.send(Box::new(move |d: &mut S| -> Reply {
             let queue_wait = queued.elapsed();
             work_record("started", tx.is_closed());
-            d.performance.record("job_send_wait", send_wait);
-            d.performance.record("job_wait", queue_wait);
+            timings(d).record("job_send_wait", send_wait);
+            timings(d).record("job_wait", queue_wait);
             let started = crate::performance::Measure::start();
             #[cfg(test)]
             if gate.as_ref().is_some_and(|(_, before, _, _, _)| *before) {
                 let (_, _, _, entered, wait) = gate.take().unwrap();
                 let _ = entered.send(());
                 if wait.recv().is_err() {
-                    let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
-                    return;
+                    return Box::new(move || {
+                        let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                    });
                 }
             }
             let result = f(d);
@@ -2430,13 +2535,14 @@ impl Handle {
             if let Some((_, _, _, entered, wait)) = gate {
                 let _ = entered.send(());
                 if wait.recv().is_err() {
-                    let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
-                    return;
+                    return Box::new(move || {
+                        let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                    });
                 }
             }
 
             let measurement = started.finish();
-            d.performance.completed("job", measurement);
+            timings(d).completed("job", measurement);
             if let Some(r) = work_request {
                 let mut r = r.lock().expect("request timings poisoned");
                 r.completed += 1;
@@ -2450,14 +2556,16 @@ impl Handle {
             work_record("completed", tx.is_closed());
             #[cfg(test)]
             if lost.swap(false, Ordering::SeqCst) {
-                return;
+                return Box::new(|| {});
             }
-            let receiver_closed = tx.send(result).is_err();
-            work_record("result_send", receiver_closed);
+            Box::new(move || {
+                let receiver_closed = tx.send(result).is_err();
+                work_record("result_send", receiver_closed);
+            })
         }));
         // The receiver cannot be dropped until this poll yields.
         record("enqueued", false);
-        let result = rx.await.context("world directory worker failed");
+        let result = rx.await.with_context(|| format!("{actor} worker failed"));
         if let Some(r) = request {
             r.lock().expect("request timings poisoned").round_trip += start.elapsed();
         }
@@ -2467,8 +2575,47 @@ impl Handle {
         &self,
         f: impl FnOnce(&mut World) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.call_scoped(move |world, _| f(world)).await
+    }
+    async fn call_scoped<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut World, i32) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
         let target = self.target;
-        self.directory(move |d| f(d.resolve(target)?)).await
+        let slot = self.routing.resolve(target)?;
+        let scope = slot.id;
+        self.request(
+            &slot.mailbox,
+            "world",
+            |world| world.performance.get_mut(),
+            move |world| {
+                if let Target::Player(player) = target {
+                    ensure!(
+                        world.players.contains_key(&player),
+                        "player missing from world actor"
+                    );
+                }
+                f(world, scope)
+            },
+        )
+        .await
+    }
+    pub(crate) async fn registered_world<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut World) -> Result<T> + Send + 'static,
+    ) -> Result<Option<T>> {
+        let Target::World(scope) = self.target else {
+            bail!("world enumeration requires an explicit world target")
+        };
+        self.directory(move |d| d.worlds.get_mut(&scope).map(f).transpose())
+            .await
+    }
+    pub(crate) fn worlds(&self) -> Vec<Self> {
+        self.routing
+            .ids()
+            .into_iter()
+            .map(|id| self.in_world(id))
+            .collect()
     }
 }
 pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {

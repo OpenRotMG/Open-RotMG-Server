@@ -163,8 +163,11 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 }
                 let i = (y * width + x) as usize;
                 map.cells[i].region = number as u8 + 2; // room identity, region 1 marks the spawn
-                map.cells[i].ground = if number == 0 && (16..=25).contains(&(dx * dx + dy * dy)) {
-                    0x61
+                let radius = dx * dx + dy * dy;
+                map.cells[i].ground = if number == 0 && (13..=18).contains(&radius)
+                    || (number == 0 || number == entrance) && radius <= 1
+                {
+                    0x65
                 } else if rng.gen_ratio(1, 32) {
                     0xd4
                 } else {
@@ -218,17 +221,31 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     map.cells[(by * width + bx) as usize].object = Some(0xd90);
     let (sx, sy) = rooms[entrance].center();
     let cell = &mut map.cells[(sy * width + sx) as usize];
-    cell.ground = 0x61;
+    cell.ground = 0x65;
     cell.object = Some(0x703);
     cell.region = 1;
     map.spawns.push((sx as f32 + 0.5, sy as f32 + 0.5));
-    // Build 122 names endpoint candles; their count/spacing and blood frequency are reconstructed.
+    // The 2012 footage shows dark endpoint motifs and eight boss candles: https://www.youtube.com/watch?v=SXTEcrN4bII&t=237s (tile raster reconstructed, not an original template).
     for (endpoint, x, y) in [("entrance", sx, sy), ("boss", bx, by)] {
-        for (dx, kind) in [(-2, 0x1801), (2, 0x1802)] {
-            let x = x + dx;
+        let candles: &[(i32, i32, u16)] = if endpoint == "boss" {
+            &[
+                (-4, 0, 0x1802),
+                (4, 0, 0x1802),
+                (0, -4, 0x1802),
+                (0, 4, 0x1802),
+                (-3, -3, 0x1802),
+                (-3, 3, 0x1802),
+                (3, -3, 0x1802),
+                (3, 3, 0x1802),
+            ]
+        } else {
+            &[(-2, 0, 0x1801), (2, 0, 0x1802)]
+        };
+        for &(dx, dy, kind) in candles {
+            let (x, y) = (x + dx, y + dy);
             let cell = &mut map.cells[(y * width + x) as usize];
             ensure!(
-                matches!(cell.ground, 5 | 0xd4) && cell.object.is_none(),
+                matches!(cell.ground, 5 | 0x65 | 0xd4) && cell.object.is_none(),
                 "Undead Lair seed {seed}: {endpoint} candle requires empty floor at ({x}, {y}); ground={:#x}, object={:?}, region={}",
                 cell.ground,
                 cell.object,
@@ -254,4 +271,96 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         "generated reconstructed Undead Lair"
     );
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+    #[test]
+    fn endpoint_motifs_keep_eight_boss_candles_and_connected_room_families() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert_eq!(content.grounds[&0x65], content.grounds[&5]);
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            let locate = |kind| {
+                let found: Vec<_> = map
+                    .cells
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.object == Some(kind))
+                    .map(|(i, _)| i)
+                    .collect();
+                assert_eq!(found.len(), 1, "seed {seed}, kind {kind:#x}");
+                (found[0] as i32 % map.width, found[0] as i32 / map.width)
+            };
+            let boss = locate(0xd90);
+            let spawn = locate(0x703);
+            assert_eq!(
+                map.spawns,
+                vec![(spawn.0 as f32 + 0.5, spawn.1 as f32 + 0.5)]
+            );
+            let cell = |x, y| &map.cells[(y * map.width + x) as usize];
+            for (point, region) in [(boss, 2), (spawn, 1)] {
+                for (dx, dy) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    assert_eq!(cell(point.0 + dx, point.1 + dy).ground, 0x65);
+                }
+                assert_eq!(cell(point.0, point.1).region, region);
+            }
+            let mut candles = 0;
+            for dy in -5_i32..=5 {
+                for dx in -5_i32..=5 {
+                    let c = cell(boss.0 + dx, boss.1 + dy);
+                    assert_eq!(
+                        c.ground == 0x65,
+                        dx * dx + dy * dy <= 1 || (13..=18).contains(&(dx * dx + dy * dy))
+                    );
+                    let candle = (dx.abs() == 4 && dy == 0)
+                        || (dy.abs() == 4 && dx == 0)
+                        || (dx.abs() == 3 && dy.abs() == 3);
+                    assert_eq!(c.object == Some(0x1802), candle);
+                    candles += usize::from(candle);
+                }
+            }
+            assert_eq!(candles, 8);
+            assert!(!map.cells.iter().any(|c| c.ground == 0x61));
+            let mut families = BTreeMap::<u8, Vec<u16>>::new();
+            for c in &map.cells {
+                if let Some(kind) = c.object.filter(|k| FAMILIES.iter().any(|f| f.contains(k))) {
+                    families.entry(c.region).or_default().push(kind);
+                }
+            }
+            assert!((30..=38).contains(&families.len()));
+            for actors in families.values() {
+                // Corridor carving can clear edge spawn sites, so six is not a final population minimum.
+                assert!((1..=10).contains(&actors.len()));
+                assert!(
+                    FAMILIES
+                        .iter()
+                        .any(|f| actors.iter().all(|k| f.contains(k)))
+                );
+            }
+            let passable = |x, y| {
+                (0..map.width).contains(&x)
+                    && (0..map.height).contains(&y)
+                    && cell(x, y).ground != 0xfe
+            };
+            let mut seen = BTreeSet::from([spawn]);
+            let mut queue = VecDeque::from([spawn]);
+            while let Some((x, y)) = queue.pop_front() {
+                for p in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                    if passable(p.0, p.1) && seen.insert(p) {
+                        queue.push_back(p);
+                    }
+                }
+            }
+            assert!(seen.contains(&boss));
+            assert_eq!(
+                seen.len(),
+                map.cells.iter().filter(|c| c.ground != 0xfe).count(),
+                "seed {seed}"
+            );
+        }
+    }
 }
