@@ -209,6 +209,34 @@ impl Store {
         .await
     }
 
+    // Prepared relations must not manufacture paid Fame or class-star history.
+    pub(crate) async fn create_prepared_guild(
+        &self,
+        accounts: Vec<i32>,
+        name: String,
+    ) -> Result<Vec<(i32, AccountPresentation)>> {
+        let base = self.legacy_base;
+        let classes = self.classes.clone();
+        self.call(move |db| {
+            ensure!(!name.is_empty() && name.len()<=20 && name.trim()==name && name.bytes().all(|c|c.is_ascii_alphabetic()||c==b' '),Rejected("prepared guild name must contain 1–20 letters and spaces without surrounding spaces"));
+            ensure!((1..=50).contains(&accounts.len()) && accounts.iter().collect::<std::collections::BTreeSet<_>>().len()==accounts.len(),Rejected("prepared guild requires 1–50 distinct registered actor accounts"));
+            let tx=db.transaction()?;
+            let taken:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM guilds WHERE name=?1 COLLATE NOCASE)",[&name],|r|r.get(0))?;
+            ensure!(!taken,Rejected("prepared guild name is already taken"));
+            for account in &accounts {
+                ensure!(membership(&tx,*account)?.is_none(),Rejected("prepared actor is already in a guild"));
+                read_presentation(&tx,*account,base,&classes)?;
+            }
+            tx.execute("INSERT INTO guilds(name) VALUES(?1)",[name])?;
+            let guild=i32::try_from(tx.last_insert_rowid())?;
+            for (index,account) in accounts.iter().enumerate() {
+                tx.execute("INSERT INTO guild_members(account,guild,rank) VALUES(?1,?2,?3)",params![account,guild,if index==0 {40}else{0}])?;
+            }
+            let presentations=accounts.into_iter().map(|account|Ok((account,read_presentation(&tx,account,base,&classes)?.0))).collect::<Result<Vec<_>>>()?;
+            tx.commit()?;Ok(presentations)
+        }).await
+    }
+
     pub async fn change_guild(&self, account: i32, action: GuildAction) -> Result<(i32, i32)> {
         let base = self.legacy_base;
         let classes = self.classes.clone();

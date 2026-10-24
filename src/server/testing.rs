@@ -13,6 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+mod guild_tests;
+
 const MAX_REQUEST_BYTES: usize = 8192;
 const MAX_MUTATIONS: usize = 1024;
 
@@ -185,6 +188,10 @@ enum Cheat {
         index: usize,
         amount: i32,
         duration_ms: u64,
+    },
+    Guild {
+        name: String,
+        members: Vec<i32>,
     },
 }
 
@@ -909,6 +916,91 @@ async fn prepare_realm_capacity(a: &App, t: &Testing, limit: usize) -> Result<Va
         .await?;
     Ok(receipt)
 }
+async fn prepare_guild(
+    a: &App,
+    t: &Testing,
+    actor: i32,
+    name: String,
+    members: Vec<i32>,
+) -> Result<Value> {
+    ensure!(
+        a.world.clock.paused(),
+        "guild preparation requires an explicitly paused test session"
+    );
+    let mut actors = vec![actor];
+    actors.extend(members);
+    ensure!(
+        (1..=50).contains(&actors.len())
+            && actors.iter().collect::<BTreeSet<_>>().len() == actors.len(),
+        "prepared guild requires 1–50 distinct registered actors"
+    );
+    let mut players = Vec::new();
+    let mut accounts = Vec::new();
+    for actor in &actors {
+        t.registration(*actor)?;
+        let player = resolve(a, *actor).await?;
+        let account = a
+            .world
+            .for_player(player)
+            .call(move |w| {
+                Ok(w.players
+                    .get(&player)
+                    .context("guild player missing")?
+                    .character
+                    .account)
+            })
+            .await?;
+        players.push(player);
+        accounts.push(account);
+    }
+    let guild = super::lifecycle::account(a, accounts.clone(), "qa_guild", move |a| async move {
+        super::lifecycle::stage(Stage::Reservation);
+        for player in &players {
+            let player = *player;
+            a.world
+                .for_player(player)
+                .call(move |w| {
+                    let p = w.players.get(&player).context("guild player missing")?;
+                    ensure!(
+                        p.character.alive
+                            && !p.pending
+                            && !p.progress_started
+                            && !p.death_pending
+                            && !p.departing,
+                        super::lifecycle::controller(
+                            "guild actor has pending gameplay or persistence"
+                        )
+                    );
+                    Ok(())
+                })
+                .await?;
+        }
+        super::lifecycle::stage(Stage::Store);
+        let presentations = a.store.create_prepared_guild(accounts, name).await?;
+        let guild = presentations
+            .first()
+            .context("prepared guild has no founder")?
+            .1
+            .guild
+            .clone()
+            .context("prepared membership missing after commit")?;
+        super::lifecycle::stage(Stage::Publication);
+        a.world
+            .directory(move |d| {
+                for (account, presentation) in presentations {
+                    d.sync_guild(account, presentation, false)?;
+                }
+                Ok(())
+            })
+            .await?;
+        Ok(guild)
+    })
+    .await?;
+    let mut state = snapshot(a, actor, false).await?;
+    state["prepared_guild"] = json!({"unearned":true,"guild":guild,"actors":actors,"client_publication":"next_ordinary_unpaused_tick"});
+    Ok(state)
+}
+
 async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Value> {
     ensure!(
         t.stopped.borrow().is_none()
@@ -992,6 +1084,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
             }}.await;
             finish_action(a,actor,result,pause_after,true).await
         },
+        Command::Cheat{actor,change:Cheat::Guild{name,members}} => prepare_guild(a,t,actor,name,members).await,
         Command::Cheat{actor,change} => {
             t.registration(actor)?;
             ensure!(a.world.clock.paused(),"cheats require an explicitly paused test session");
@@ -1008,7 +1101,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
                     match change {
                         Cheat::Stats{values}=>{ch.base=values;let stats=ch.effective(&a.content)?;ch.hp=ch.hp.min(stats[0]);ch.mp=ch.mp.min(stats[1]);},
                         Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],Vec::new()).await?[0];},
-                        Cheat::Teleport{..}|Cheat::StatModifier{..}=>unreachable!(),
+                        Cheat::Teleport{..}|Cheat::StatModifier{..}|Cheat::Guild{..}=>unreachable!(),
                     }
                     let stats = ch.effective(&a.content)?;
                     ch.hp = ch.hp.min(stats[0]); ch.mp = ch.mp.min(stats[1]);
