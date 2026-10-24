@@ -93,15 +93,32 @@ impl World {
     }
 
     pub(super) fn change_ground(&mut self, i: usize, ground: u8) {
-        Arc::make_mut(&mut self.map).cells[i].ground = ground;
-        let tile = (
-            (i % self.map.width as usize) as i16,
-            (i / self.map.width as usize) as i16,
-        );
-        let mut out = Writer::new();
-        out.i16(1).i16(tile.0).i16(tile.1).u8(ground).i16(0).i16(0);
-        for p in self.players.values().filter(|p| p.tiles.contains(&tile)) {
-            send(p, wire::UPDATE, out.0.clone());
+        self.change_grounds(&[(i, ground)]);
+    }
+
+    fn change_grounds(&mut self, changes: &[(usize, u8)]) {
+        let width = self.map.width as usize;
+        let map = Arc::make_mut(&mut self.map);
+        for &(i, ground) in changes {
+            map.cells[i].ground = ground;
+        }
+        for p in self.players.values() {
+            let tiles: Vec<_> = changes
+                .iter()
+                .filter_map(|&(i, ground)| {
+                    let tile = ((i % width) as i16, (i / width) as i16);
+                    p.tiles.contains(&tile).then_some((tile, ground))
+                })
+                .collect();
+            for batch in tiles.chunks(i16::MAX as usize) {
+                let mut out = Writer::new();
+                out.i16(batch.len() as i16);
+                for &((x, y), ground) in batch {
+                    out.i16(x).i16(y).u8(ground);
+                }
+                out.i16(0).i16(0);
+                send(p, wire::UPDATE, out.0);
+            }
         }
     }
 
@@ -137,10 +154,10 @@ impl World {
                 .filter(|(i, _)| self.map.cells[**i].region == region)
                 .map(|(i, (_, g))| (*i, *g))
                 .collect();
-            for (i, g) in patches {
-                self.change_ground(i, g);
+            for &(i, _) in &patches {
                 self.lava_patches.get_mut(&i).unwrap().0 = self.now;
             }
+            self.change_grounds(&patches);
         }
         tracing::info!(region, restore, "Abyss Idol treasure entrance changed");
         Ok(())

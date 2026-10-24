@@ -23,6 +23,8 @@ mod events;
 mod population_tests;
 mod progression;
 pub(crate) mod pursuits;
+#[cfg(test)]
+mod quest_tests;
 mod realms;
 mod social;
 
@@ -915,14 +917,12 @@ impl Brain {
             {
                 choices.push((110., Goal::Hunt(enemy.id), enemy.position));
             }
-            if v.quest == Some(enemy.id)
-                && !protected
-                && (v.character.level >= 3 || d <= 48.)
-                && (v.map.name != "Realm" || !progression::ready(v, content, 0x718) || d <= 32.)
-            {
+            if v.quest == Some(enemy.id) && !protected && (v.character.level >= 3 || d <= 48.) {
                 choices.push((
                     if v.map.name == "Snake Pit" || events::shared(&v.map.name) {
                         97.
+                    } else if v.map.name == "Realm" {
+                        70. + self.profile.resources
                     } else {
                         55. + self.profile.resources
                     },

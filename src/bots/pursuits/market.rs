@@ -1,6 +1,9 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -666,28 +669,36 @@ impl Market {
                 self.queue(text, channel, true);
             } else {
                 self.finish("unsuitable_terms_refused_no_payment_due");
-                if let (Some(want), Some(spare)) =
-                    (self.want(v, c, future)?, self.stock(v, c, future)?.first())
-                {
-                    let n = spare.quantity.min(self.wanted(v, c, future, want)?);
+                let [offered, asked] = &t.goods;
+                let available = self.spare(v, c, future, asked.kind)?.min(asked.quantity);
+                let desired = self.wanted(v, c, future, offered.kind)?;
+                // Smaller trades must preserve the offered exchange rate, not invent another want.
+                let quantities = (1..=available).rev().find_map(|pay| {
+                    let receive = u16::from(pay) * u16::from(offered.quantity);
+                    let denominator = u16::from(asked.quantity);
+                    (receive % denominator == 0 && receive / denominator <= u16::from(desired))
+                        .then_some((pay, (receive / denominator) as u8))
+                });
+                if let Some((pay, receive)) = quantities {
                     let counter = Terms {
                         version: rand::random::<u64>().max(1),
                         accounts: [v.session.account, account],
                         names: [self.name.as_str().into(), name.clone()],
                         goods: [
                             Goods {
-                                kind: spare.kind,
-                                quantity: n,
+                                kind: asked.kind,
+                                quantity: pay,
                             },
                             Goods {
-                                kind: want,
-                                quantity: n,
+                                kind: offered.kind,
+                                quantity: receive,
                             },
                         ],
                         meeting,
                         expires,
-                        batch: capacity(v, spare.kind),
+                        batch: capacity(v, asked.kind),
                     };
+                    tracing::info!(account=v.session.account,requested=?t.goods,counter=?counter.goods,"market counteroffer reduced to actual needs and spare stock");
                     let text = counter.text(&name, "counter");
                     self.replace(counter);
                     self.queue(text, channel, false);
