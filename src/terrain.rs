@@ -129,8 +129,8 @@ fn decorate(cell: &mut Cell, random: u64) -> Result<()> {
 #[cfg(test)]
 pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
     ensure!(
-        (192..=768).contains(&size),
-        "Realm size must be 192–768 tiles"
+        (192..=1024).contains(&size),
+        "Test Realm size must be 192–1024 tiles"
     );
     let started = std::time::Instant::now();
     let center = size as f64 / 2.;

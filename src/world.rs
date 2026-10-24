@@ -996,8 +996,8 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        // The fixture must fit both finite 65-tile graveyards alongside the other setpieces.
-        let map = Arc::new(crate::terrain::generate(&content, seed, 768)?);
+        // Multiple finite quest sites must fit without relaxing production placement guards.
+        let map = Arc::new(crate::terrain::generate(&content, seed, 1024)?);
         Self::configured(
             path,
             content,
