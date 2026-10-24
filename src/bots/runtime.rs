@@ -77,6 +77,14 @@ async fn enter_admitted(
     let id = app
         .world
         .directory(move |d| {
+            let entry_key = arrival
+                .as_ref()
+                .map(|_| {
+                    admission
+                        .clone()
+                        .context("autonomous arrival admission key missing")
+                })
+                .transpose()?;
             if let Some(arrival) = arrival {
                 d.admit_transfer(arrival, character.account, character.id, world)?;
             }
@@ -99,6 +107,9 @@ async fn enter_admitted(
                 .get_mut(&id)
                 .context("new autonomous player missing")?
                 .controller = crate::world::Controller::Autonomous;
+            if let Some(key) = entry_key {
+                d.complete_dungeon_entry(&key, id)?;
+            }
             Ok(id)
         })
         .await?;

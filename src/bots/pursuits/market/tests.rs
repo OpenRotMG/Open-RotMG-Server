@@ -63,6 +63,7 @@ pub(super) fn fixture(c: &Content, backpack: [i32; 8]) -> (Market, PlayerView) {
         }],
         player_markers: vec![],
         projectiles: vec![],
+        dungeon_entries: vec![],
     };
     (
         Market {

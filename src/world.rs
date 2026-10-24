@@ -27,6 +27,7 @@ mod community_postclear_audit;
 mod companions;
 mod consumables;
 mod davy;
+mod dungeon_entry;
 mod endgame;
 mod endgame_ai;
 mod enemy_damage;
@@ -325,6 +326,7 @@ struct QueuedExperience {
 }
 
 pub struct Player {
+    dungeon_entries: VecDeque<view::ObservedDungeonEntry>,
     pub character: Character,
     pub pos: Pos,
     pub tx: Option<Output>,
@@ -876,6 +878,8 @@ struct ExitIntent {
     dungeon: crate::dungeon::HistoricalDungeon,
 }
 struct Grant {
+    entry_portal: Option<i32>,
+    entry_witness: Option<dungeon_entry::Witness>,
     exit: Option<ExitIntent>,
     authority: TransferAuthority,
     origin: Option<i32>,
@@ -1705,6 +1709,8 @@ impl Directory {
         self.grants.insert(
             key.clone(),
             Grant {
+                entry_portal: None,
+                entry_witness: None,
                 exit: None,
                 authority: TransferAuthority(Arc::new(AtomicU8::new(0))),
                 origin,
@@ -1726,6 +1732,10 @@ impl Directory {
     }
     pub(crate) fn bind_exit(&mut self, id: i32, portal: Option<i32>, key: &[u8]) -> Result<()> {
         let Some(portal) = portal else { return Ok(()) };
+        self.grants
+            .get_mut(key)
+            .context("portal grant missing")?
+            .entry_portal = Some(portal);
         let source = self.location(id)?;
         let world = &self.worlds[&source];
         let player = &world.players[&id];
@@ -1957,15 +1967,15 @@ impl Directory {
                 == Some(&snapshot),
             "source departure snapshot changed"
         );
-        if let Some(key) = key {
+        if let Some(key) = key.as_ref() {
             let grant = self
                 .grants
-                .get(&key)
+                .get(key)
                 .context("committed source transfer grant missing")?;
             self.validate_exit_destination(grant)?;
             let grant = self
                 .grants
-                .get_mut(&key)
+                .get_mut(key)
                 .context("committed source transfer grant missing")?;
             ensure!(
                 grant.account == snapshot.account
@@ -1979,6 +1989,13 @@ impl Directory {
                 TRANSFER_WRITE,
                 TRANSFER_DEPARTED | TRANSFER_CONSUMED,
             )?;
+        }
+        if let Some(key) = key.as_ref() {
+            let witness = self.capture_dungeon_entry(id, key);
+            self.grants
+                .get_mut(key)
+                .context("departed grant missing")?
+                .entry_witness = witness;
         }
         self.worlds.get_mut(&source).unwrap().finish_departure(id)
     }
@@ -3161,6 +3178,7 @@ impl World {
         self.players.insert(
             id,
             Player {
+                dungeon_entries: VecDeque::new(),
                 weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
                 committed_lifetime: ch.lifetime.clone(),
                 character: ch,
