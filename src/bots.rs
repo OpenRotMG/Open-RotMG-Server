@@ -14,6 +14,7 @@ use std::{
 };
 
 pub(crate) mod adventures;
+mod calls;
 mod combat;
 mod crowds;
 pub(crate) mod dialogue;
@@ -235,6 +236,7 @@ struct Brain {
     cover: BTreeSet<(i16, i16)>,
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
+    calls: calls::Calls,
     agreement: Option<dialogue::Agreement>,
     invitation_until: u64,
     next_decision: u64,
@@ -294,6 +296,7 @@ impl Brain {
             cover: BTreeSet::new(),
             visits: BTreeMap::new(),
             companion: None,
+            calls: calls::Calls::default(),
             agreement: None,
             invitation_until: 0,
             next_decision: view.tick + seed % profile.reaction,
@@ -324,12 +327,13 @@ impl Brain {
         packet: Packet,
         view: &PlayerView,
         legacy_invitations: bool,
+        content: &Content,
     ) -> Result<bool> {
         if packet.id != wire::TEXT {
             return Ok(false);
         }
         let mut r = Reader::new(&packet.body);
-        r.utf()?;
+        let name = r.utf()?;
         let actor = r.i32()?;
         r.i32()?;
         r.u8()?;
@@ -337,6 +341,7 @@ impl Brain {
         let text = r.utf()?;
         r.utf()?;
         r.done()?;
+        self.receive_call(view, content, actor, &name, &recipient, &text)?;
         if legacy_invitations
             && actor > 0
             && actor != self.session.1
@@ -502,6 +507,7 @@ impl Brain {
             "projectile trajectory cannot be inferred from observation"
         );
         self.last_tick = Some(v.tick);
+        self.calls.observe(v);
         self.next_decision = v.tick + self.profile.reaction;
         self.blocked.retain(|_, until| *until > v.tick);
         if v.time_ms >= self.invitation_until {
@@ -862,6 +868,12 @@ impl Brain {
             if self.group.is_some() {
                 decision.chat = Some("nexus");
             }
+            return Ok(decision);
+        }
+        if let Some(target) = self.call_target(v, content)? {
+            self.next_teleport = v.time_ms + 10_000;
+            decision.goal = Goal::Follow(target);
+            decision.journey = Some(Journey::Regroup(target));
             return Ok(decision);
         }
         let mut choices = Vec::new();
