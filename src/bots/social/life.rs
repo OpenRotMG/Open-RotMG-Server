@@ -541,10 +541,7 @@ pub(in crate::bots) async fn receive_life(
             })
             .await?;
         if verified {
-            let settled = app
-                .world
-                .directory(move |d| d.player_view(session[1]))
-                .await?;
+            let settled = app.world.player_view(session[1]).await?;
             ensure!(
                 [
                     settled.session.world,
@@ -772,7 +769,7 @@ pub(in crate::bots) async fn life(
                 if let Some(plan) = outcome.plan {
                     crate::server::persist_trade(app, plan).await?;
                 } else if changed {
-                    let acknowledged = app.world.directory(move |d| d.player_view(id)).await?;
+                    let acknowledged = app.world.player_view(id).await?;
                     let t = brain
                         .mind
                         .market

@@ -2153,6 +2153,33 @@ impl Directory {
             }
         }
     }
+    #[cfg(test)]
+    fn step(&mut self) {
+        self.step_using(|worlds, tick| {
+            for (id, world) in worlds {
+                let _context = crate::supervision::world(*id, tick);
+                world.step();
+                world.report_performance(*id);
+            }
+        });
+    }
+    #[cfg(test)]
+    fn step_using(&mut self, simulate: impl FnOnce(&mut execution::Worlds, u64)) {
+        self.tick += 1;
+        self.retire_transfer_grants();
+        simulate(&mut self.worlds, self.tick);
+        for (id, world) in &mut self.worlds {
+            if *id > 0 && !self.endgame.realms.contains_key(id) {
+                if world.players.is_empty() {
+                    self.idle.entry(*id).or_insert(self.tick);
+                } else {
+                    self.idle.remove(id);
+                }
+            }
+        }
+        let ready: Vec<_> = self.worlds.keys().copied().collect();
+        self.coordinate(&ready);
+    }
     fn coordinator_step(&mut self) {
         self.tick += 1;
         self.retire_grants(|worlds, id| worlds.release_world(&id));

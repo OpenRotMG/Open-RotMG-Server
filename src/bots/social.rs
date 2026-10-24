@@ -138,7 +138,7 @@ pub(super) async fn receive_market(
         // The other accept may have committed before the revocation job: receipts, never holdings, decide.
         recover_market(app, brain).await?;
         let id = brain.session.1;
-        let current = app.world.directory(move |d| d.player_view(id)).await?;
+        let current = app.world.player_view(id).await?;
         // A sender bound at receipt cannot undo its withdrawal by leaving during the commit fence.
         next = brain.mind.market.clone();
         ensure!(
