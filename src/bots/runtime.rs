@@ -599,7 +599,7 @@ async fn launch(
                             }
                             continue;
                         }
-                        if brain.receive(packet, &view, app.dialogue.is_none())? {
+                        if brain.receive(packet, &view, app.dialogue.is_none(), &app.content)? {
                             let received = app.world.clock.now();
                             if let Err(error) = app.world.directory(move |d| d.chat(id, "omw".into(), received)).await {
                                 tracing::warn!(player=id,%error,"invitation acknowledgement rejected");

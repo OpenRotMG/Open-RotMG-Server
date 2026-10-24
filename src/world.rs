@@ -2441,13 +2441,22 @@ impl Handle {
     }
 }
 pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
+    let packet_bytes = body.len();
     if let Some(tx) = &p.tx
-        && tx.packets.try_send(Packet { id, body }).is_err()
+        && let Err(error) = tx.packets.try_send(Packet { id, body })
     {
         tx.lost.send_replace(true);
+        let queue_state = match error {
+            mpsc::error::TrySendError::Full(_) => "full",
+            mpsc::error::TrySendError::Closed(_) => "closed",
+        };
         tracing::warn!(
             character = p.character.id,
-            "slow/closed connection; packet queue full"
+            packet = id,
+            packet_bytes,
+            queue_state,
+            queue_capacity = tx.packets.max_capacity(),
+            "outbound game packet rejected; closing connection"
         );
     }
 }
