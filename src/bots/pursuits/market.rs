@@ -1,5 +1,11 @@
 use super::*;
+use rand::seq::IteratorRandom;
 use std::time::{Duration, Instant};
+
+#[cfg(test)]
+mod session_tests;
+#[cfg(test)]
+mod tests;
 
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
@@ -112,8 +118,19 @@ impl Bargain {
         format!("{recipient}, {verb} {}", self.body())
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MarketSession {
+    anchor: TilePoint,
+    until: u64,
+    next_move: u64,
+    destination: Option<TilePoint>,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Market {
+    #[serde(skip)]
+    session: Option<MarketSession>,
+    #[serde(skip)]
+    session_used: bool,
     #[serde(skip)]
     pub(in crate::bots) name: String,
     #[serde(skip)]
@@ -192,6 +209,8 @@ impl Market {
         Ok(())
     }
     pub(in crate::bots) fn bind(&mut self) {
+        self.session = None;
+        self.session_used = false;
         self.outgoing = None;
         self.trade = None;
         self.announced = false;
@@ -210,6 +229,22 @@ impl Market {
         true
     }
     pub(in crate::bots) fn observe(&mut self, v: &PlayerView) {
+        // Publication runs before decide can retire an expired session.
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|s| v.elapsed_ms >= s.until)
+            && self
+                .outgoing
+                .as_ref()
+                .is_some_and(|m| m.text.starts_with("sell "))
+        {
+            self.outgoing = None;
+        }
+        if v.map.name != "Nexus" {
+            self.end_session(v, "left_nexus");
+            self.session_used = false;
+        }
         for p in v
             .objects
             .iter()
@@ -666,28 +701,36 @@ impl Market {
                 self.queue(text, channel, true);
             } else {
                 self.finish("unsuitable_terms_refused_no_payment_due");
-                if let (Some(want), Some(spare)) =
-                    (self.want(v, c, future)?, self.stock(v, c, future)?.first())
-                {
-                    let n = spare.quantity.min(self.wanted(v, c, future, want)?);
+                let [offered, asked] = &t.goods;
+                let available = self.spare(v, c, future, asked.kind)?.min(asked.quantity);
+                let desired = self.wanted(v, c, future, offered.kind)?;
+                // Smaller trades must preserve the offered exchange rate, not invent another want.
+                let quantities = (1..=available).rev().find_map(|pay| {
+                    let receive = u16::from(pay) * u16::from(offered.quantity);
+                    let denominator = u16::from(asked.quantity);
+                    (receive % denominator == 0 && receive / denominator <= u16::from(desired))
+                        .then_some((pay, (receive / denominator) as u8))
+                });
+                if let Some((pay, receive)) = quantities {
                     let counter = Terms {
                         version: rand::random::<u64>().max(1),
                         accounts: [v.session.account, account],
                         names: [self.name.as_str().into(), name.clone()],
                         goods: [
                             Goods {
-                                kind: spare.kind,
-                                quantity: n,
+                                kind: asked.kind,
+                                quantity: pay,
                             },
                             Goods {
-                                kind: want,
-                                quantity: n,
+                                kind: offered.kind,
+                                quantity: receive,
                             },
                         ],
                         meeting,
                         expires,
-                        batch: capacity(v, spare.kind),
+                        batch: capacity(v, asked.kind),
                     };
+                    tracing::info!(account=v.session.account,requested=?t.goods,counter=?counter.goods,"market counteroffer reduced to actual needs and spare stock");
                     let text = counter.text(&name, "counter");
                     self.replace(counter);
                     self.queue(text, channel, false);
@@ -757,12 +800,25 @@ impl Market {
         }
         Ok(())
     }
+    fn end_session(&mut self, v: &PlayerView, reason: &str) {
+        if let Some(s) = self.session.take() {
+            tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,anchor=?s.anchor,until=s.until,reason,"market intentional session ended");
+        }
+        if self
+            .outgoing
+            .as_ref()
+            .is_some_and(|m| m.text.starts_with("sell "))
+        {
+            self.outgoing = None;
+        }
+    }
     pub(in crate::bots) fn decide(
         &mut self,
         v: &PlayerView,
         c: &Content,
         future: Option<u16>,
         grid: &Grid,
+        rng: &mut impl Rng,
     ) -> Result<Option<Decision>> {
         self.observe(v);
         if !super::settled(v) {
@@ -934,23 +990,91 @@ impl Market {
             }
             return Ok(Some(d));
         }
-        if v.map.name == "Nexus" && now() >= self.next_ad && self.outgoing.is_none() {
-            if let (Some(goods), Some(want)) =
-                (self.stock(v, c, future)?.first(), self.want(v, c, future)?)
-            {
-                self.queue(
-                    format!("sell {}x{}; want {want}", goods.kind, goods.quantity),
-                    if self.guild {
-                        Channel::Guild
-                    } else {
-                        Channel::Local
-                    },
-                    false,
-                );
-            }
+        if v.map.name != "Nexus" {
+            return Ok(None);
+        }
+        let mut d = Decision {
+            goal: Goal::Wait,
+            movement: None,
+            aim: None,
+            item: None,
+            journey: None,
+            chat: None,
+        };
+        if self.trade.is_some() {
+            return Ok(Some(d));
+        }
+        if self.session.is_none() && self.session_used {
+            return Ok(None);
+        }
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|s| v.elapsed_ms >= s.until)
+        {
+            self.end_session(v, "elapsed");
+            return Ok(None);
+        }
+        let Some(goods) = self.stock(v, c, future)?.into_iter().next() else {
+            self.end_session(v, "no_spare_stock");
+            return Ok(None);
+        };
+        let Some(want) = self.want(v, c, future)? else {
+            self.end_session(v, "needs_satisfied");
+            return Ok(None);
+        };
+        if self.session.is_none() {
+            let duration_ms = rng.gen_range(60..=1800) * 1000u64;
+            self.session = Some(MarketSession {
+                anchor: tile(v.position),
+                until: v
+                    .elapsed_ms
+                    .checked_add(duration_ms)
+                    .context("market session deadline overflow")?,
+                next_move: v.elapsed_ms + 10_000,
+                destination: None,
+            });
+            self.session_used = true;
+            tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,duration_ms,session=?self.session,?goods,want,"market intentional session started");
+        }
+        let s = self
+            .session
+            .as_mut()
+            .expect("market session just initialized");
+        if v.position.distance(center(s.anchor)) > 2. {
+            self.end_session(v, "displaced_from_local_area");
+            return Ok(None);
+        }
+        if v.elapsed_ms >= s.next_move {
+            s.next_move = v.elapsed_ms + 10_000;
+            let (x, y) = tile(v.position);
+            // The half-tile margin leaves room for ordinary controller reaction steps.
+            s.destination = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+                .into_iter()
+                .filter(|p| {
+                    center(*p).distance(center(s.anchor)) <= 1.5
+                        && grid.segment(v.position, center(*p))
+                })
+                .choose(rng);
+            tracing::info!(account=v.session.account,anchor=?s.anchor,target=?s.destination,"market intentional session local step");
+        }
+        d.movement = s
+            .destination
+            .map(center)
+            .filter(|p| v.position.distance(*p) > 0.2 && grid.segment(v.position, *p));
+        if now() >= self.next_ad && self.outgoing.is_none() {
+            self.queue(
+                format!("sell {}x{}; want {want}", goods.kind, goods.quantity),
+                if self.guild {
+                    Channel::Guild
+                } else {
+                    Channel::Local
+                },
+                false,
+            );
             self.next_ad = now() + 60;
         }
-        Ok(None)
+        Ok(Some(d))
     }
     fn trade_packet(&mut self, p: &Packet, v: &PlayerView) -> Result<bool> {
         let mut r = Reader::new(&p.body);

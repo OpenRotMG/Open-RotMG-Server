@@ -498,8 +498,9 @@ impl World {
         Ok(())
     }
     fn ghost_wave(&mut self, id: i32, tier: u64, company: bool) -> Result<()> {
+        let mut kinds = Vec::new();
         if company || tier == 0 {
-            self.quest_spawn(id, 0x929, 1, 1, 4.)?;
+            kinds.push(0x929);
         }
         let (small, medium, large) = if tier == 0 {
             (4, 0, 0)
@@ -510,8 +511,18 @@ impl World {
         } else {
             (3, 0, 3)
         };
-        for (k, n) in [(0x92a, small), (0x92b, medium), (0x92c, large)] {
-            self.quest_spawn(id, k, 24, n, 4.)?;
+        for (kind, count) in [(0x92a, small), (0x92b, medium), (0x92c, large)] {
+            kinds.extend(std::iter::repeat_n(kind, count));
+        }
+        let center = self.entities[&id].pos;
+        // TossEnemy delays birth until the 1500ms throw lands: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/attack/TossEnemy.cs
+        for (i, &kind) in kinds.iter().enumerate() {
+            let angle = i as f32 * std::f32::consts::TAU / kinds.len() as f32;
+            let position = Pos {
+                x: center.x + 4. * angle.cos(),
+                y: center.y + 4. * angle.sin(),
+            };
+            self.named_toss(id, kind, if kind == 0x929 { 1 } else { 24 }, &[position])?;
         }
         Ok(())
     }
@@ -812,5 +823,112 @@ impl World {
         };
         self.predict_enemy_shots(id, target, &mut shots, |_| factor)?;
         Ok(shots)
+    }
+}
+
+#[cfg(test)]
+mod ghost_throw_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ghost_waves_throw_one_ring_before_owned_children_can_move() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+        for cell in &mut map.cells {
+            cell.ground = 0x61;
+            cell.object = None;
+        }
+        let map = Arc::new(map);
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let account = store.list("ghost-throw".into()).await.unwrap();
+        let ch = store
+            .create(account.id, content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        for tier in 0..4 {
+            for company in [false, true] {
+                let mut w = World::new(content.clone(), map.clone()).unwrap();
+                for id in w.entities.keys().copied().collect::<Vec<_>>() {
+                    w.remove_entity(id);
+                }
+                w.now = 10000;
+                let center = Pos { x: 12.5, y: 12.5 };
+                let root = w.spawn_entity(0x928, center, vec![]).unwrap();
+                w.entities.get_mut(&root).unwrap().quest = Some(root);
+                let (tx, mut rx) = mpsc::channel(64);
+                let player = w
+                    .enter(
+                        ch.clone(),
+                        Some(Output {
+                            packets: tx,
+                            lost: watch::channel(false).0,
+                        }),
+                    )
+                    .unwrap();
+                w.players.get_mut(&player).unwrap().known.insert(root);
+                w.ghost_wave(root, tier, company).unwrap();
+                let expected = if tier == 0 { 5 } else { 6 };
+                assert_eq!(
+                    w.entities
+                        .values()
+                        .filter(|e| (0x929..=0x92c).contains(&e.kind))
+                        .count(),
+                    0,
+                    "tier {tier}, company {company}: no minions before landing"
+                );
+                assert_eq!(w.pending_named(root, None), expected);
+                let mut landings = Vec::new();
+                while let Ok(packet) = rx.try_recv() {
+                    if packet.id != wire::SHOW_EFFECT {
+                        continue;
+                    }
+                    let mut r = wire::Reader::new(&packet.body);
+                    assert_eq!(r.u8().unwrap(), 4);
+                    assert_eq!(r.i32().unwrap(), root);
+                    let position = Pos {
+                        x: r.f32().unwrap(),
+                        y: r.f32().unwrap(),
+                    };
+                    assert!((position.distance(center) - 4.).abs() < 0.001);
+                    assert_eq!(r.f32().unwrap(), 0.);
+                    assert_eq!(r.f32().unwrap(), 0.);
+                    assert_eq!(r.i32().unwrap() as u32, 0xffffbf00);
+                    landings.push(position);
+                }
+                assert_eq!(landings.len(), expected);
+                for (i, position) in landings.iter().enumerate() {
+                    let angle = i as f32 * std::f32::consts::TAU / expected as f32;
+                    assert!(
+                        position.distance(Pos {
+                            x: center.x + 4. * angle.cos(),
+                            y: center.y + 4. * angle.sin()
+                        }) < 0.001
+                    );
+                }
+                w.now = 11499;
+                w.named_birth_step();
+                assert_eq!(w.pending_named(root, None), expected);
+                w.now = 11500;
+                w.named_birth_step();
+                assert_eq!(w.pending_named(root, None), 0);
+                let children: Vec<_> = w
+                    .entities
+                    .values()
+                    .filter(|e| (0x929..=0x92c).contains(&e.kind))
+                    .collect();
+                assert_eq!(children.len(), expected);
+                assert_eq!(
+                    children.iter().filter(|e| e.kind == 0x929).count(),
+                    usize::from(company || tier == 0)
+                );
+                for child in children {
+                    assert_eq!(child.quest, Some(root));
+                    assert!(landings.iter().any(|p| p.distance(child.pos) < 0.001));
+                    assert_eq!(child.activated, Some(11500));
+                    assert_eq!(child.stage, Some(0));
+                    assert_ne!(child.condition & condition::bit(condition::INVULNERABLE), 0);
+                }
+            }
+        }
     }
 }

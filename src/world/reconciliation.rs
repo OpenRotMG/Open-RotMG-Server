@@ -55,9 +55,17 @@ pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
 
 impl Player {
     pub(super) fn advertised_weapon(&self, kind: u16) -> bool {
-        self.weapon_ticks.iter().any(|(_, k)| *k == i32::from(kind))
+        self.weapon_ticks
+            .iter()
+            .any(|(_, k, _)| *k == i32::from(kind))
     }
-    pub(super) fn remember_weapon_tick(&mut self) {
+    // NEW_TICK ACK precedes applying DEX, so in-flight cadence needs ACK-bounded views: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/GameServerConnection.as#L1182-L1194
+    pub(super) fn advertised_dex(&self, current: i32) -> i32 {
+        self.weapon_ticks
+            .iter()
+            .fold(current, |dex, (_, _, past)| dex.max(*past))
+    }
+    pub(super) fn remember_weapon_tick(&mut self, dex: i32) {
         if self.controller != Controller::Human {
             return;
         }
@@ -72,7 +80,7 @@ impl Player {
             return;
         }
         self.weapon_ticks
-            .push_back((self.tick, self.character.items[0]));
+            .push_back((self.tick, self.character.items[0], dex));
     }
     pub(super) fn correcting(&self) -> Result<bool> {
         ensure!(self.active(), "inactive player cannot reconcile position");
@@ -109,7 +117,7 @@ impl World {
             crate::server::lifecycle::protocol("unsolicited tick acknowledgement")
         );
         // NEW_TICK queues MOVE before applying inventory; earlier SHOOTs still use the old weapon.
-        p.weapon_ticks.retain(|(sent, _)| *sent >= tick);
+        p.weapon_ticks.retain(|(sent, _, _)| *sent >= tick);
         Ok(())
     }
     pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
@@ -204,7 +212,8 @@ impl World {
         let item = self.content.get(kind)?;
         let count = if time == last { count } else { 0 };
         if time != last {
-            let rate = 0.0015 + 0.0065 * p.effective(&self.content, self.now)?[5] as f64 / 75.;
+            let dex = p.advertised_dex(p.effective(&self.content, self.now)?[5]);
+            let rate = 0.0015 + 0.0065 * dex as f64 / 75.;
             let cooldown = (1. / (rate * f64::from(item.rate))).floor() as f32;
             ensure!(
                 i64::from(time) - i64::from(last) >= cooldown as i64 - 2,
@@ -315,5 +324,80 @@ impl World {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_dexterity_drop_reconciles_only_until_tick_ack_without_extra_damage() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let content = Arc::new(Content::load(&data).unwrap());
+        let map = Arc::new(Map::load(&data.join("nexus.wmap"), &content).unwrap());
+        let mut world = World::new(content, map).unwrap();
+        let character: Character = serde_json::from_value(serde_json::json!({
+            "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+            "class":0x31d,"base":[200,100,15,0,7,10,10,10],
+            "id":1,"account":1,"name":"Cadence","level":1,"exp":0,
+            "fame":0,"hp":200,"mp":100,"revision":0,"alive":true,
+            "items":[0xa00,-1,-1,0xacc,-1,-1,-1,-1,-1,-1,-1,-1]
+        }))
+        .unwrap();
+        let id = world.enter(character, None).unwrap();
+        world.players.get_mut(&id).unwrap().controller = Controller::Human;
+        world.step();
+        world.step();
+        let pos = world.players[&id].pos;
+        let start = Pos {
+            x: pos.x + 0.3,
+            y: pos.y,
+        };
+        let shot = |world: &mut World, time, bullet| {
+            let received = world.clock.now();
+            world.native_shoot_received(id, (time, received), bullet, 0xa00, start, 0.)
+        };
+        assert_eq!(shot(&mut world, 1000, 1).unwrap(), NativeInput::Applied);
+        world.players.get_mut(&id).unwrap().character.items[3] = -1;
+        assert!(world.shoot(id, 1350, 2, 0xa00, start, 0.).is_err());
+        let correcting = world.validate_discarded_shot(id, 1350, 2, 0xa00);
+        let seed = world.players[&id].seed;
+        assert_eq!(
+            shot(&mut world, 1350, 2).expect("old advertised DEX still predicts a 326-ms attack"),
+            NativeInput::Applied
+        );
+        assert_eq!(correcting.unwrap(), 0);
+        assert_eq!(world.players[&id].next_bullet, 3);
+        assert_eq!(
+            world.players[&id].seed,
+            ((u64::from(seed) * 16807) % 2147483647) as u32
+        );
+        assert_eq!(world.players[&id].character.shots, 1);
+        assert_eq!(
+            world
+                .bullets
+                .iter()
+                .filter(|bullet| bullet.owner == id)
+                .count(),
+            1
+        );
+        assert!(world.players[&id].attack_suppressed.is_some());
+        world.step();
+        world.step();
+        let tick = world.players[&id].tick - 1;
+        world.acknowledge_tick(id, tick).unwrap();
+        assert!(world.validate_discarded_shot(id, 1700, 3, 0xa00).is_err());
+        let error = shot(&mut world, 1700, 3).unwrap_err();
+        assert!(error.to_string().contains("attack too fast"));
+        assert_eq!(world.players[&id].next_bullet, 3);
+        assert_eq!(shot(&mut world, 1800, 3).unwrap(), NativeInput::Applied);
+        assert_eq!(world.players[&id].character.shots, 2);
+        assert!(
+            shot(&mut world, 1800, 4)
+                .unwrap_err()
+                .to_string()
+                .contains("too many projectiles")
+        );
     }
 }
