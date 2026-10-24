@@ -343,7 +343,7 @@ pub struct Player {
     lab_conditions: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
-    weapon_ticks: VecDeque<(i32, i32)>,
+    weapon_ticks: VecDeque<(i32, i32, i32)>,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
@@ -3039,7 +3039,7 @@ impl World {
             anyhow::anyhow!(CloseReason::Controller).context("Realm is closed")
         );
         ensure!(ch.alive && ch.hp > 0, "dead character");
-        ch.effective(&self.content)?;
+        let dex = ch.effective(&self.content)?[5];
         ensure!(
             self.owner.is_none_or(|owner| owner == ch.account),
             "private world belongs to another account"
@@ -3078,7 +3078,7 @@ impl World {
         self.players.insert(
             id,
             Player {
-                weapon_ticks: VecDeque::from([(-1, ch.items[0])]),
+                weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
                 committed_lifetime: ch.lifetime.clone(),
                 character: ch,
                 pos,
@@ -3984,8 +3984,7 @@ impl World {
             .cloned()
             .context("weapon has no projectile zero")?;
         // The selected client's integer attack period cannot fund a fractional charge indefinitely.
-        let frequency =
-            0.0015 + (0.008 - 0.0015) * p.effective(&self.content, self.now)?[5] as f64 / 75.;
+        let dex = p.effective(&self.content, self.now)?[5];
         // Expired buffs remain for the existing one-second native transition window.
         let late_berserk = native
             && p.statuses
@@ -3993,8 +3992,11 @@ impl World {
                 .is_some_and(|(_, until)| self.now >= *until && self.now - until < 1000);
         let berserk =
             condition & crate::condition::bit(crate::condition::BERSERK) != 0 || late_berserk;
-        let normal_cooldown =
-            (1. / frequency / f64::from(item.rate) / if berserk { 1.5 } else { 1. }).floor() as f32;
+        let normal_period = |dex| {
+            let frequency = 0.0015 + (0.008 - 0.0015) * f64::from(dex) / 75.;
+            (1. / frequency / f64::from(item.rate) / if berserk { 1.5 } else { 1. }).floor() as f32
+        };
+        let normal_cooldown = normal_period(dex);
         let effective_cooldown =
             reconciliation::attack_cooldown(p, &self.content, self.now, item.rate)?;
         let cooldown =
@@ -4003,7 +4005,12 @@ impl World {
             } else {
                 effective_cooldown
             };
-        let admission = if native { normal_cooldown } else { cooldown };
+        let admission_dex = if native { p.advertised_dex(dex) } else { dex };
+        let admission = if native {
+            normal_period(admission_dex)
+        } else {
+            cooldown
+        };
         let p = self.players.get_mut(&id).unwrap();
         ensure!(time >= 0, protocol("negative shot time"));
         ensure!(
@@ -4016,10 +4023,22 @@ impl World {
         );
         if !ability && time != p.last_attack {
             let attack_elapsed = i64::from(time) - i64::from(p.last_attack);
-            ensure!(
-                attack_elapsed >= admission as i64 - 2,
-                protocol("attack too fast")
-            );
+            if attack_elapsed < admission as i64 - 2 {
+                tracing::warn!(
+                    player = id,
+                    kind,
+                    dex,
+                    advertised_dex = admission_dex,
+                    native,
+                    elapsed_ms = attack_elapsed,
+                    required_ms = admission,
+                    authoritative_ms = cooldown,
+                    client_time = time,
+                    last_client_time = p.last_attack,
+                    "attack cadence rejected"
+                );
+                return Err(protocol("attack too fast"));
+            }
             let elapsed = received
                 .checked_sub(p.last_attack_at)
                 .context("attack receive clock regressed")?;
@@ -6886,7 +6905,10 @@ impl World {
                 }
                 send(&self.players[&id], wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
-                p.remember_weapon_tick();
+                let dex = p
+                    .effective(&self.content, self.now)
+                    .expect("visible player stats must be valid")[5];
+                p.remember_weapon_tick(dex);
                 p.tick += 1;
             }
         }
