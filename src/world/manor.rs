@@ -180,7 +180,9 @@ impl World {
             let e = self.entities.get_mut(&id).unwrap();
             e.condition &=
                 !(condition::bit(condition::INVULNERABLE) | condition::bit(condition::INVINCIBLE));
-            if part == 1 && age >= 750 {
+            // Preserve the queued opening before bat immunity, not uninterrupted ritual protection.
+            // https://github.com/cp-nilly/nillys-realm-phoenix/blob/e5eb61dddd921ef605fbcd09c7b352f4af9504e6/wServer/logic/db/BehaviorDb.Manor.cs#L70-L83
+            if part == 1 && (750..6650).contains(&age) {
                 e.condition |= condition::bit(condition::INVULNERABLE);
             } else if part == 2 {
                 e.condition |= condition::bit(condition::INVINCIBLE);
