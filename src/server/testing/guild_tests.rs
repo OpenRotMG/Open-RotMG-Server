@@ -293,6 +293,35 @@ async fn prepared_guild_commits_real_relation_without_wallet_or_star_changes() {
 // Synthetic backend fixture: ordinary policy and wire deltas, not native rendering proof.
 #[tokio::test]
 async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
+    async fn persisted_guild_state(
+        app: &App,
+        members: &[(i32, i32)],
+        path: &Path,
+    ) -> (Value, Vec<crate::store::AccountPresentation>) {
+        let mut characters = Vec::new();
+        let mut presentations = Vec::new();
+        for &(actor, account) in members {
+            characters.push(app.store.load(account, actor).await.unwrap());
+            presentations.push(app.store.presentation(account).await.unwrap());
+        }
+        let guild = app.store.guild(members[0].1).await.unwrap();
+        let db =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let rows = db.prepare("SELECT account,guild,rank,fame FROM guild_members WHERE guild=?1 ORDER BY account LIMIT 51").unwrap()
+            .query_map([guild.id], |r| Ok((r.get::<_,i32>(0)?,r.get::<_,i32>(1)?,r.get::<_,i32>(2)?,r.get::<_,i32>(3)?))).unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        assert_eq!(rows.len(), members.len());
+        assert_eq!(
+            rows.iter().map(|r| r.0).collect::<BTreeSet<_>>(),
+            members.iter().map(|m| m.1).collect()
+        );
+        (
+            json!({"characters":characters,"guild":guild,"memberships":rows}),
+            presentations,
+        )
+    }
+
     let (dir, mut app) = crate::server::account_actions::tests::fixture();
     write_json(
         &dir.join("testing.json"),
@@ -343,9 +372,13 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
     let command =
         |paused| json!({"op":"cheat","actor":actor,"change":{"kind":"pause","paused":paused}});
     let before = snapshot(&app, actor, false).await.unwrap();
-    let account = before["session"]["account"].as_i64().unwrap() as i32;
-    let stored = serde_json::to_value(app.store.load(account, actor).await.unwrap()).unwrap();
-    let presentation = app.store.presentation(account).await.unwrap();
+    let mut members = Vec::new();
+    for &actor in &actors {
+        let state = snapshot(&app, actor, false).await.unwrap();
+        members.push((actor, state["session"]["account"].as_i64().unwrap() as i32));
+    }
+    let db_path = dir.join("game.db");
+    let persisted = persisted_guild_state(&app, &members, &db_path).await;
     let testing = app.testing.take();
     assert_eq!(
         request(&app, "pause-unprepared", command(true)).await["status"],
@@ -391,6 +424,10 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
         .await
         .unwrap();
     assert_eq!(snapshot(&app, actor, false).await.unwrap(), before);
+    assert_eq!(
+        persisted_guild_state(&app, &members, &db_path).await,
+        persisted
+    );
     assert!(app.quarantined.lock().unwrap().is_empty());
     for (index, paused) in [true, false].into_iter().enumerate() {
         let initial = snapshot(&app, actor, false).await.unwrap();
@@ -408,14 +445,17 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
         after["character"]["conditions"] = initial["character"]["conditions"].clone();
         assert_eq!(after, initial);
         assert_eq!(
-            serde_json::to_value(app.store.load(account, actor).await.unwrap()).unwrap(),
-            stored
+            persisted_guild_state(&app, &members, &db_path).await,
+            persisted
         );
-        assert_eq!(app.store.presentation(account).await.unwrap(), presentation);
         assert!(receiver.try_recv().is_err());
         let rejected = request(&app, &format!("pause-repeat-{index}"), command(paused)).await;
         assert_eq!(rejected["status"], "failed");
         assert!(rejected.to_string().contains("already has"), "{rejected}");
+        assert_eq!(
+            persisted_guild_state(&app, &members, &db_path).await,
+            persisted
+        );
         app.world
             .in_world(-2)
             .call(move |w| {
@@ -458,10 +498,9 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
     assert_eq!(after_rejection["lifecycle"], before_enemy["lifecycle"]);
     assert_eq!(after_rejection["character"], before_enemy["character"]);
     assert_eq!(
-        serde_json::to_value(app.store.load(account, actor).await.unwrap()).unwrap(),
-        stored
+        persisted_guild_state(&app, &members, &db_path).await,
+        persisted
     );
-    assert_eq!(app.store.presentation(account).await.unwrap(), presentation);
     assert!(app.quarantined.lock().unwrap().is_empty());
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
