@@ -306,7 +306,10 @@ impl Directory {
                 inventory_revision: p.character.revision,
                 pirate_caves: p.character.pirate_caves,
                 snake_pits: p.character.dungeons[0],
-                ability_ready_ms: p.ability_ready_ms,
+                ability_ready_ms: w
+                    .now
+                    .checked_add(p.ability_ready_ms.saturating_sub(w.ability_clock_ms()?))
+                    .context("ability view cooldown overflow")?,
             },
             lifecycle: Lifecycle {
                 alive: p.character.alive,
