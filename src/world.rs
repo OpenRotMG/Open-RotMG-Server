@@ -4987,6 +4987,14 @@ impl World {
         p.validate_progress_reservation(snapshot)?;
         Ok(p.level_assists_prepared.clone())
     }
+    pub(crate) fn class_quest_rank(&self, id: i32) -> Result<i32> {
+        let player = self
+            .players
+            .get(&id)
+            .context("class-quest rank player missing")?;
+        Ok(player.presentation.stars() / self.content.classes.len() as i32)
+    }
+
     pub fn finish_progress(&mut self, id: i32, snapshot: Character) -> Result<()> {
         let p = self
             .players
