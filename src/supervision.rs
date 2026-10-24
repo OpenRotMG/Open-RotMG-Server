@@ -137,52 +137,114 @@ impl Supervisor {
         component: &'static str,
         work: impl Future<Output = Result<()>> + Send + 'static,
     ) {
+        self.spawn_inner(component, work, false);
+    }
+    pub fn spawn_finite_on(
+        &self,
+        runtime: &tokio::runtime::Handle,
+        component: &'static str,
+        work: impl Future<Output = Result<()>> + Send + 'static,
+    ) {
+        self.spawn_on(runtime, component, work, true);
+    }
+    fn spawn_inner(
+        &self,
+        component: &'static str,
+        work: impl Future<Output = Result<()>> + Send + 'static,
+        finite: bool,
+    ) {
+        self.spawn_on(&tokio::runtime::Handle::current(), component, work, finite);
+    }
+    fn spawn_on(
+        &self,
+        runtime: &tokio::runtime::Handle,
+        component: &'static str,
+        work: impl Future<Output = Result<()>> + Send + 'static,
+        finite: bool,
+    ) {
         let supervisor = self.clone();
-        tokio::spawn(async move {
-            // Unwinding is observed only to terminate the service; the damaged worker is never resumed.
-            let (failure, detail, panic) = match AssertUnwindSafe(work).catch_unwind().await {
-                Ok(Ok(())) => (
-                    "exited",
-                    "critical worker exited unexpectedly".to_owned(),
-                    None,
-                ),
-                Ok(Err(error)) => ("failed", format!("{error:#}"), None),
-                Err(error) => {
-                    let detail = error
-                        .downcast_ref::<&str>()
-                        .map(|v| (*v).to_owned())
-                        .or_else(|| error.downcast_ref::<String>().cloned());
-                    (
-                        "panicked",
-                        format!("{detail:?}"),
-                        PANIC.with_borrow_mut(Option::take),
-                    )
+        runtime.spawn(async move {
+            let outcome = AssertUnwindSafe(work).catch_unwind().await;
+            if finite && matches!(outcome, Ok(Ok(()))) {
+                return;
+            }
+            supervisor.terminate(component, outcome);
+        });
+    }
+    pub fn spawn_finite_thread(
+        &self,
+        component: &'static str,
+        work: impl FnOnce() -> Result<()> + Send + 'static,
+    ) -> Result<()> {
+        let supervisor = self.clone();
+        std::thread::Builder::new()
+            .name(component.into())
+            .spawn(move || {
+                let outcome = std::panic::catch_unwind(AssertUnwindSafe(work));
+                if !matches!(outcome, Ok(Ok(()))) {
+                    supervisor.terminate(component, outcome);
                 }
-            };
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time before Unix epoch")
-                .as_millis() as u64;
-            let mut incident = Incident {
-                id: format!("{}-{now}", std::process::id()),
-                unix_ms: now,
-                process: std::process::id(),
-                revision: option_env!("GITHUB_SHA").map(str::to_owned),
-                component: component.into(),
-                failure: failure.into(),
-                location: panic.as_ref().map(|v| v.0.clone()),
-                context: panic.map(|v| v.1).unwrap_or_default(),
-                fences_preserved: false,
-                fenced_accounts: Vec::new(),
-            };
-            tracing::error!(component, failure, error=%detail, incident=%incident.id, "critical worker terminated");
-            supervisor.fatal.send_if_modified(|current| {
+            })
+            .context("critical worker thread could not start")?;
+        Ok(())
+    }
+    pub fn blocking_work<R>(&self, component: &'static str, work: impl FnOnce() -> R) -> Result<R> {
+        match std::panic::catch_unwind(AssertUnwindSafe(work)) {
+            Ok(value) => Ok(value),
+            Err(panic) => {
+                self.terminate(component, Err(panic));
+                bail!("critical {component} worker panicked")
+            }
+        }
+    }
+    pub fn failure(&self, component: &'static str, error: anyhow::Error) {
+        self.terminate(component, Ok(Err(error)));
+    }
+    fn terminate(&self, component: &'static str, outcome: std::thread::Result<Result<()>>) {
+        // Unwinding is observed only to terminate the service; the damaged worker is never resumed.
+        let (failure, detail, panic) = match outcome {
+            Ok(Ok(())) => (
+                "exited",
+                "critical worker exited unexpectedly".to_owned(),
+                None,
+            ),
+            Ok(Err(error)) => ("failed", format!("{error:#}"), None),
+            Err(error) => {
+                let detail = error
+                    .downcast_ref::<&str>()
+                    .map(|v| (*v).to_owned())
+                    .or_else(|| error.downcast_ref::<String>().cloned());
+                (
+                    "panicked",
+                    format!("{detail:?}"),
+                    PANIC.with_borrow_mut(Option::take),
+                )
+            }
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before Unix epoch")
+            .as_millis() as u64;
+        let mut incident = Incident {
+            id: format!("{}-{now}", std::process::id()),
+            unix_ms: now,
+            process: std::process::id(),
+            revision: option_env!("GITHUB_SHA").map(str::to_owned),
+            component: component.into(),
+            failure: failure.into(),
+            location: panic.as_ref().map(|v| v.0.clone()),
+            context: panic.map(|v| v.1).unwrap_or_default(),
+            fences_preserved: false,
+            fenced_accounts: Vec::new(),
+        };
+        tracing::error!(component, failure, error=%detail, incident=%incident.id, "critical worker terminated");
+        self.fatal.send_if_modified(|current| {
                 if current.is_some() { return false; }
                 let mut save = || -> Result<()> {
-                    if let Some(previous) = supervisor.latest()? {
+                    if let Some(previous) = self.latest()? {
                         incident.fenced_accounts = previous.fenced_accounts;
                     }
-                    supervisor.save(&incident)
+                    self.save(&incident)
                 };
                 if let Err(error) = save() {
                     tracing::error!(%error, "critical incident persistence failed; automatic restart forbidden");
@@ -191,7 +253,6 @@ impl Supervisor {
                 *current = Some(incident);
                 true
             });
-        });
     }
     pub async fn failed(&self) -> Incident {
         let mut receiver = self.fatal.subscribe();

@@ -177,10 +177,29 @@ pub struct VisibleProjectile {
 
 impl Directory {
     pub fn player_view(&self, id: i32) -> Result<PlayerView> {
-        let started = crate::performance::Measure::start();
         let scope = self.location(id)?;
-        let w = &self.worlds[&scope];
-        let p = &w.players[&id];
+        self.worlds[&scope].player_view(scope, id, self.tick * 50)
+    }
+}
+impl super::Handle {
+    pub async fn player_view(&self, id: i32) -> Result<PlayerView> {
+        let routing = self.routing.clone();
+        self.for_player(id)
+            .call_scoped(move |world, scope| {
+                world.player_view(
+                    scope,
+                    id,
+                    routing.tick.load(std::sync::atomic::Ordering::Acquire) * 50,
+                )
+            })
+            .await
+    }
+}
+impl World {
+    fn player_view(&self, scope: i32, id: i32, elapsed_ms: u64) -> Result<PlayerView> {
+        let started = crate::performance::Measure::start();
+        let w = self;
+        let p = w.players.get(&id).context("view player missing")?;
         let visible = w.visible(id);
         let objects = visible
             .intersection(&p.known)
@@ -284,7 +303,7 @@ impl Directory {
             tick: w.tick,
             time_ms: w.now,
             clock_at: w.clock.now(),
-            elapsed_ms: self.tick * 50,
+            elapsed_ms,
             position: p.pos,
             quest: p.quest.filter(|quest| p.known.contains(quest)),
             map: MapInfo {

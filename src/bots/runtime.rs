@@ -102,7 +102,7 @@ async fn enter_admitted(
             Ok(id)
         })
         .await?;
-    let view = app.world.directory(move |d| d.player_view(id)).await?;
+    let view = app.world.player_view(id).await?;
     tracing::info!(
         player = id,
         name = profile.name,
@@ -503,14 +503,15 @@ async fn launch(
                     }
                     #[cfg(test)]
                     let audit_due = (selected.is_some(), brain.next_decision);
-                    let view = Arc::new(app.world.directory(move |d| {
-                        let view = d.player_view(id)?;
-                        #[cfg(test)]
-                        if audit_due.0 && view.tick >= audit_due.1 && let Some(audit) = d.prepared_postclear_key_audit(Some(&view))? {
-                            tracing::info!(audit=%audit,"prepared postclear evaluator key audit");
-                        }
-                        Ok(view)
-                    }).await?);
+                    let view=Arc::new(app.world.player_view(id).await?);
+                    #[cfg(test)]
+                    if audit_due.0 && view.tick>=audit_due.1 {
+                        let audit_view=view.clone();
+                        app.world.directory(move|d| {
+                            if let Some(audit)=d.prepared_postclear_key_audit(Some(&audit_view))? { tracing::info!(audit=%audit,"prepared postclear evaluator key audit"); }
+                            Ok(())
+                        }).await?;
+                    }
                     ensure!(view.session.account == account, "autonomous account binding changed");
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }
                     if view.map.name=="Nexus" && brain.agreement.as_ref().is_none_or(|a|a.waiting.is_none()) && brain.group_lost_since.is_some_and(|since|view.time_ms.saturating_sub(since)>=30000) {
@@ -574,7 +575,7 @@ async fn launch(
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
                             continue;
                         }
-                        let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.directory(move |d|d.player_view(id)).await?) } else { None };
+                        let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.player_view(id).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
                         let event_before = brain.mind.events.clone();
                         brain.mind.events.receive(&packet, social_view, profile.name)?;
@@ -738,7 +739,7 @@ async fn launch(
                         Ok(plan)
                     }).await? {
                         Ok(true) => {
-                            let after = app.world.directory(move |d| d.player_view(id)).await?;
+                            let after = app.world.player_view(id).await?;
                             let prior_events = brain.mind.events.clone();
                             brain.mind.events.committed(&after)?;
                             if brain.mind.events != prior_events { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
@@ -801,7 +802,7 @@ async fn launch(
                         }
                     }
                 }
-                let view = app.world.directory(move |d| d.player_view(id)).await?;
+                let view = app.world.player_view(id).await?;
                 brain.mind.reconcile(&view)?;
                 brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
                 Ok(())

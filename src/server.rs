@@ -2683,88 +2683,88 @@ fn close_scripts(a: &App) -> Result<Vec<lifecycle::Finalized>> {
 }
 
 pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
-    let app = a.clone();
-    let progress = a
-        .world
-        .directory(move |d| {
-            let mut owned = BTreeMap::new();
-            let mut failure = None;
-            let plans: Vec<_> = d
-                .worlds
-                .values_mut()
-                .flat_map(|w| {
-                    w.pending_progress_where(|id, account| {
-                        match lifecycle::reserve_player(&app, account, id, "progress") {
-                            Ok(Some(guard)) => {
-                                owned.insert(id, guard);
-                                true
-                            }
-                            Ok(None) => false,
-                            Err(error) => {
-                                failure = Some(error);
-                                false
-                            }
+    // Commit progress across worlds before death settlement so causal recipients stay durable.
+    for world in a.world.worlds() {
+        let app = a.clone();
+        let Some(progress) = world
+            .registered_world(move |world| {
+                let mut owned = BTreeMap::new();
+                let mut failure = None;
+                let plans = world.pending_progress_where(|id, account| {
+                    match lifecycle::reserve_player(&app, account, id, "progress") {
+                        Ok(Some(guard)) => {
+                            owned.insert(id, guard);
+                            true
                         }
+                        Ok(None) => false,
+                        Err(error) => {
+                            failure = Some(error);
+                            false
+                        }
+                    }
+                });
+                if let Some(error) = failure {
+                    return Err(error);
+                }
+                Ok(plans
+                    .into_iter()
+                    .map(|(id, snapshot)| {
+                        (
+                            owned.remove(&id).expect("reserved progress owner"),
+                            id,
+                            snapshot,
+                        )
                     })
-                })
-                .collect();
-            if let Some(error) = failure {
-                return Err(error);
+                    .collect::<Vec<_>>())
+            })
+            .await?
+        else {
+            continue;
+        };
+        for (guard, id, snapshot) in progress {
+            if let Err(error) = lifecycle::complete(guard, move |a| async move {
+                persist_progress_inner(&a, id, snapshot).await
+            })
+            .await
+            {
+                tracing::error!(player=id,error=%format_args!("{error:#}"),"progress completion failed");
             }
-            Ok(plans
-                .into_iter()
-                .map(|(id, snapshot)| {
-                    (
-                        owned.remove(&id).expect("reserved progress owner"),
-                        id,
-                        snapshot,
-                    )
-                })
-                .collect::<Vec<_>>())
-        })
-        .await?;
-    for (guard, id, snapshot) in progress {
-        if let Err(error) = lifecycle::complete(guard, move |a| async move {
-            persist_progress_inner(&a, id, snapshot).await
-        })
-        .await
-        {
-            tracing::error!(player=id,error=%format_args!("{error:#}"),"progress completion failed");
         }
     }
-    let app = a.clone();
-    let dying = a
-        .world
-        .directory(move |d| {
-            let mut candidates = vec![];
-            for (id, p) in d
-                .worlds
-                .values()
-                .flat_map(|w| w.players.iter())
-                .filter(|(_, p)| p.death_pending && !p.death_started)
-            {
-                if lifecycle::collector_death_candidate(&app, p.character.account, *id)? {
-                    candidates.push(*id);
+    let mut dying = Vec::new();
+    for world in a.world.worlds() {
+        let app = a.clone();
+        if let Some(candidates) = world
+            .registered_world(move |world| {
+                let mut candidates = Vec::new();
+                for (id, p) in world
+                    .players
+                    .iter()
+                    .filter(|(_, p)| p.death_pending && !p.death_started)
+                {
+                    if lifecycle::collector_death_candidate(&app, p.character.account, *id)? {
+                        candidates.push(*id);
+                    }
                 }
-            }
-            Ok(candidates)
-        })
-        .await?;
+                Ok(candidates)
+            })
+            .await?
+        {
+            dying.extend(candidates);
+        }
+    }
     for id in dying {
         settle_giver_credits(a, id).await?;
         refresh_giver_credits(a, id).await?;
     }
-    let app = a.clone();
-    let pending = a
-        .world
-        .directory(move |d| {
-            let mut owned = BTreeMap::new();
-            let mut failure = None;
-            let plans: Vec<_> = d
-                .worlds
-                .values_mut()
-                .flat_map(|w| {
-                    w.pending_deaths_where(|id, account| {
+    for world in a.world.worlds() {
+        let app = a.clone();
+        let Some(pending) = world
+            .registered_world(move |world| {
+                let mut owned = BTreeMap::new();
+                let mut failure = None;
+                let plans =
+                    world.pending_deaths_where(|id, account| {
                         match lifecycle::reserve_player(&app, account, id, "death") {
                             Ok(Some(guard)) => {
                                 owned.insert(id, guard);
@@ -2776,32 +2776,34 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
                                 false
                             }
                         }
+                    });
+                if let Some(error) = failure {
+                    return Err(error);
+                }
+                Ok(plans
+                    .into_iter()
+                    .map(|(id, ch, killer)| {
+                        (
+                            owned.remove(&id).expect("reserved death owner"),
+                            id,
+                            ch,
+                            killer,
+                        )
                     })
-                })
-                .collect();
-            if let Some(error) = failure {
-                return Err(error);
+                    .collect::<Vec<_>>())
+            })
+            .await?
+        else {
+            continue;
+        };
+        for (guard, id, ch, killer) in pending {
+            if let Err(error) = lifecycle::complete(guard, move |a| async move {
+                persist_death_inner(&a, id, ch, killer).await
+            })
+            .await
+            {
+                tracing::error!(player=id,error=%format_args!("{error:#}"),"death completion failed");
             }
-            Ok(plans
-                .into_iter()
-                .map(|(id, ch, killer)| {
-                    (
-                        owned.remove(&id).expect("reserved death owner"),
-                        id,
-                        ch,
-                        killer,
-                    )
-                })
-                .collect::<Vec<_>>())
-        })
-        .await?;
-    for (guard, id, ch, killer) in pending {
-        if let Err(error) = lifecycle::complete(guard, move |a| async move {
-            persist_death_inner(&a, id, ch, killer).await
-        })
-        .await
-        {
-            tracing::error!(player=id,error=%format_args!("{error:#}"),"death completion failed");
         }
     }
     Ok(())

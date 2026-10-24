@@ -3,7 +3,7 @@ use crate::endgame::{CASTLE, CELLAR, HEROES, INCANTATION, LOCKED_CELLAR, RealmCy
 use rand::seq::IteratorRandom;
 
 // Gameplay documentation specifies two minutes, unlike modified forks' 20s: https://wikiwiki.jp/rmd/イベント#jded12e1
-const REMAINING_TAUNT_MS: u64 = 120_000;
+pub(super) const REMAINING_TAUNT_MS: u64 = 120_000;
 
 #[derive(Default)]
 pub(super) struct RealmDirectory {
@@ -257,16 +257,25 @@ impl Directory {
         );
         Ok(())
     }
-    fn chamber_step(&mut self) {
-        let markers: Vec<_> = self
+    fn chamber_step(&mut self, ready: &[i32]) {
+        let now = self.tick * 50;
+        let castles: Vec<_> = self
             .worlds
-            .iter()
-            .filter(|(_, w)| w.name == "Oryx's Castle" && w.cleared)
-            .flat_map(|(origin, w)| {
-                w.entities
+            .summaries()
+            .filter(|(id, w)| {
+                (ready.contains(id) || !w.needs_coordinator())
+                    && w.chamber_at.is_some_and(|at| at <= now)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        let markers: Vec<_> = castles
+            .into_iter()
+            .flat_map(|origin| {
+                self.worlds[&origin]
+                    .entities
                     .values()
-                    .filter(|e| e.kind == 0xd7a && e.next_aux <= self.tick * 50)
-                    .map(|e| (*origin, e.id, e.pos))
+                    .filter(move |e| e.kind == 0xd7a && e.next_aux <= now)
+                    .map(move |e| (origin, e.id, e.pos))
             })
             .collect();
         let origins: Vec<_> = markers.iter().map(|(origin, _, _)| *origin).collect();
@@ -322,6 +331,9 @@ impl Directory {
                 tracing::error!(origin,%error,"earned Chamber binding failed; retry scheduled without publishing a portal");
             }
         }
+        for origin in origins {
+            self.worlds.release_world(&origin);
+        }
     }
     pub(super) fn bind_realm_heroes(&mut self, origin: i32, heroes: BTreeSet<i32>) -> Result<()> {
         let world = self.worlds.get(&origin).context("closure Realm missing")?;
@@ -353,12 +365,20 @@ impl Directory {
             .insert(origin, RealmRecord::new(cycle, self.tick * 50));
         Ok(())
     }
-    pub(super) fn endgame_step(&mut self) {
-        self.chamber_step();
+    pub(super) fn endgame_step(&mut self, ready: &[i32]) {
+        self.chamber_step(ready);
         let now = self.tick * 50;
-        for (origin, world) in &mut self.worlds {
+        let due:Vec<_>=self.worlds.summaries().filter(|(id,world)| {
+            ready.contains(id) && world.critical || (ready.contains(id) || !world.needs_coordinator()) && self.endgame.realms.get(id).is_some_and(|record| {
+                record.enabled && record.cycle.admits() && now>=record.next_taunt
+                    || matches!(record.cycle.stage, RealmStage::Closing{deadline}|RealmStage::Sealed{deadline} if now>=deadline)
+            })
+        }).map(|(id,_)|*id).collect();
+        for origin in &due {
+            let world = self.worlds.get_mut(origin).expect("endgame source missing");
             let deaths = std::mem::take(&mut world.critical_deaths);
             let Some(record) = self.endgame.realms.get_mut(origin) else {
+                self.worlds.release_world(origin);
                 continue;
             };
             let cycle = &mut record.cycle;
@@ -428,6 +448,10 @@ impl Directory {
                     }
                 }
             }
+            // Ordinary maintenance must not retain this loan while waiting for another Realm.
+            if cycle.stage != RealmStage::Transferring {
+                self.worlds.release_world(origin);
+            }
         }
         let transferring: Vec<_> = self
             .endgame
@@ -465,7 +489,7 @@ impl Directory {
         }
         self.endgame.forced.retain(|player, route| {
             self.worlds
-                .get(&route.origin)
+                .summary(&route.origin)
                 .is_some_and(|w| w.players.contains_key(player))
         });
         let retired: Vec<_> = self
@@ -476,7 +500,12 @@ impl Directory {
                 record.replacement.is_some()
                     && record.publish_at.is_none()
                     && record.pending_transfers.is_empty()
-                    && self.worlds[id].players.is_empty()
+                    && self
+                        .worlds
+                        .summary(id)
+                        .expect("retiring Realm metadata missing")
+                        .players
+                        .is_empty()
                     && !self
                         .grants
                         .values()
@@ -514,6 +543,7 @@ impl Directory {
         }
     }
     fn replace_realm(&mut self, origin: i32) -> Result<()> {
+        self.worlds.get(&origin).context("closing Realm missing")?;
         self.reserve_worlds(2, &[origin])?;
         let castle = self.make(CASTLE, "Oryx's Castle", false, None)?;
         let realm = self.make("realm-shore", "Realm", false, None)?;
