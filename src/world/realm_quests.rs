@@ -902,6 +902,22 @@ fn named_site_populations_match_reference_ranges() {
                 .filter(|e| quest::ROOTS.contains(&e.kind))
                 .collect();
             for (kind, range) in [
+                (crate::endgame::HEROES[0], 3..5),
+                (crate::endgame::HEROES[1], 4..7),
+            ] {
+                let heroes: Vec<_> = world.entities.values().filter(|e| e.kind == kind).collect();
+                assert!(
+                    range.contains(&heroes.len()),
+                    "{layout}: {kind:#x} has {} landmark heroes, expected {range:?}",
+                    heroes.len()
+                );
+                assert!(
+                    heroes
+                        .iter()
+                        .all(|e| e.published && e.hp > 0 && e.quest.is_none() && e.camp.is_none())
+                );
+            }
+            for (kind, range) in [
                 (0x91f, 17..25),
                 (0x91b, 4..7),
                 (0x928, 8..15),
