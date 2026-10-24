@@ -658,8 +658,10 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x908 => &[(0.04, Item(0xa22)), (0.06, Item(0xa23))],
         0x90b => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
         0x909 => &[],
+        // Preserve #244's paired private-potion contract; historical allocation is separate: https://github.com/OpenRotMG/Open-RotMG-Server/issues/244
         crate::dungeon::abyss::MALPHAS => &[
             (1., Item(0xa34)),
+            (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
@@ -675,6 +677,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         ],
         crate::dungeon::abyss::IDOL => &[
             (1., Item(0xa34)),
+            (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
@@ -959,4 +962,24 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
     }
     items.resize(8, -1);
     Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::SeedableRng;
+
+    #[test]
+    fn abyss_bosses_preserve_the_paired_potion_reward() {
+        let content = super::Content::load(std::path::Path::new("data")).unwrap();
+        for kind in [crate::dungeon::abyss::MALPHAS, crate::dungeon::abyss::IDOL] {
+            for seed in 0..64 {
+                let items =
+                    super::rewards(&content, kind, &mut rand::rngs::StdRng::seed_from_u64(seed));
+                assert!(
+                    items.contains(&0xa34) && items.contains(&0xa20),
+                    "{kind:#x} seed {seed}: {items:?}"
+                );
+            }
+        }
+    }
 }
