@@ -1,13 +1,40 @@
 use super::*;
 
-pub(crate) const SCHEMA: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half','first_bug_report')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
+pub(crate) const SCHEMA: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half','first_bug_report','class_star_blue','class_star_red','class_star_orange','class_star_yellow','class_star_white')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
 pub(crate) const DISCORD: &str = "discord_link";
 const COLLECTION: &str = "collection_top_half";
 pub(crate) const AMOUNT: i32 = 100;
 const BUG: &str = "first_bug_report";
 
+#[cfg(test)]
+mod tests;
+
+// These are project rewards, not historical payments: https://github.com/OpenRotMG/Open-RotMG-Server/issues/421
+const CLASS_QUESTS: [(&str, i32, &str); 5] = [
+    ("class_star_blue", 75, "reaching Blue Star rank"),
+    ("class_star_red", 150, "reaching Red Star rank"),
+    ("class_star_orange", 250, "reaching Orange Star rank"),
+    ("class_star_yellow", 750, "reaching Yellow Star rank"),
+    ("class_star_white", 2500, "reaching White Star rank"),
+];
+
+pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
+    if version >= 18 {
+        let sql: String = db.query_row(
+            "SELECT sql FROM sqlite_schema WHERE name='gold_rewards'",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            sql == SCHEMA.trim_end_matches(';'),
+            "schema-18 gold reward metadata mismatch; restore the reviewed ledger"
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn migrate(db: &Connection, version: i32, exists: bool) -> Result<()> {
-    if version == 10 {
+    if exists && version < 18 {
         db.execute_batch("ALTER TABLE gold_rewards RENAME TO old_gold_rewards;")?;
         db.execute_batch(SCHEMA)?;
         db.execute_batch(
@@ -27,7 +54,11 @@ fn details(reward: &str) -> Result<(i32, &'static str)> {
             "reaching the top 50% of the Collection Log hiscores",
         ),
         BUG => (50, "submitting your first bug report"),
-        _ => anyhow::bail!("unknown gold reward {reward}"),
+        _ => CLASS_QUESTS
+            .iter()
+            .find(|r| r.0 == reward)
+            .map(|r| (r.1, r.2))
+            .with_context(|| format!("unknown gold reward {reward}"))?,
     })
 }
 
@@ -63,6 +94,38 @@ pub(super) fn grant(db: &Connection, account: i32, reward: &str) -> Result<bool>
     Ok(true)
 }
 
+pub(super) fn class_quests(
+    db: &Connection,
+    account: i32,
+    stars: i32,
+    classes: usize,
+) -> Result<bool> {
+    ensure!(classes > 0, "class-quest reward requires playable classes");
+    if stars < classes as i32
+        || db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM shore_bots WHERE account=?1)",
+            [account],
+            |r| r.get::<_, bool>(0),
+        )?
+    {
+        return Ok(false);
+    }
+    let mut granted = false;
+    for (index, (reward, amount, _)) in CLASS_QUESTS.iter().enumerate() {
+        if stars >= ((index + 1) * classes) as i32 && grant(db, account, reward)? {
+            granted = true;
+            tracing::info!(
+                account,
+                reward,
+                amount,
+                stars,
+                "class-quest gold reward staged"
+            );
+        }
+    }
+    Ok(granted)
+}
+
 pub(super) fn collection(db: &Connection, account: i32) -> Result<bool> {
     let eligible: bool = db.query_row("WITH scores AS (
 SELECT a.id,count(l.item) AS score FROM accounts a JOIN competitors c ON c.account=a.id LEFT JOIN collections l ON l.account=a.id
@@ -90,9 +153,11 @@ impl Store {
         }).await
     }
     pub(crate) async fn gold(&self, account: i32) -> Result<Gold> {
+        let legacy_base = self.legacy_base;
+        let classes = self.classes.clone();
         self.call(move |db| {
             let tx = db.transaction()?;
-            let balance: i32 = tx.query_row("SELECT credits FROM accounts WHERE id=?1", [account], |r| r.get(0))?;
+            let balance = rewarded_presentation(&tx, account, legacy_base, &classes)?.0.credits;
             ensure!(balance >= 0, "negative gold balance for account {account}");
             let mut q = tx.prepare("SELECT reward FROM gold_rewards WHERE account=?1 AND notified_at IS NULL ORDER BY awarded_at,reward")?;
             let rewards = q.query_map([account], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?;

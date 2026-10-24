@@ -881,6 +881,7 @@ async fn refresh_giver_credits(a: &App, id: i32) -> Result<()> {
 }
 
 async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Character) -> Result<()> {
+    let account = snapshot.account;
     let reservation = snapshot.clone();
     let assists = a
         .world
@@ -894,13 +895,20 @@ async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Charac
         .await
         .context("progress persistence failed");
     lifecycle::stage(Stage::Publication);
-    a.world
+    let crossed_rank = a
+        .world
         .for_player(id)
         .call(move |w| {
+            let rank = w.class_quest_rank(id)?;
             w.committed(id, result)?;
-            w.finish_progress(id, snapshot)
+            w.finish_progress(id, snapshot)?;
+            Ok(w.class_quest_rank(id)? > rank)
         })
-        .await
+        .await?;
+    if crossed_rank {
+        gold::sync(a, account).await?;
+    }
+    Ok(())
 }
 
 async fn persist_death_inner(
