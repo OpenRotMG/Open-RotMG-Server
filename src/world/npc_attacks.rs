@@ -137,10 +137,15 @@ impl World {
             e.kind,
             crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
         ) {
+            // Entry resets rotation, but the caller's age predates mechanics: https://github.com/UniverseRealms/vanilla-7.0/blob/ba1fa22c58c24b4a2403860116656492d0133748/realm-server-master/Game/Logic/Behaviors/Shoot.cs#L55-L59
+            let age = self
+                .now
+                .checked_sub(e.activated.context("Manor entrance phase clock missing")?)
+                .context("Manor entrance phase clock starts in the future")?;
             return Ok(Some(attacks::manor_entry_schedule(
                 e.kind,
                 e.stage.context("Manor entrance phase missing")?,
-                elapsed,
+                age,
             )));
         }
         if crate::dungeon::jungle::ROSTER.contains(&e.kind) {

@@ -593,15 +593,17 @@ async fn launch(
                         if let Some(service) = &app.dialogue
                             && let Some(request) = brain.dialogue_request(&packet, &view, &app.content)?
                         {
+                            // A rate-limited correction must still invalidate the older promise.
+                            dialogue::supersede(&mut pending, &request);
                             if pending.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
-                                dialogue::failed(&app, request.speaker, "busy", "busy").await;
+                                dialogue::failed(&app, &request, "busy", "busy").await;
                             } else {
                                 last_dialogue = Some(std::time::Instant::now());
-                                pending = Some(dialogue::Pending::start(service.clone(), request));
+                                pending = Some(dialogue::Pending::start(Some(service.clone()), request, profile));
                             }
                             continue;
                         }
-                        if brain.receive(packet, &view, app.dialogue.is_none())? {
+                        if brain.receive(packet, &view, app.dialogue.is_none(), &app.content)? {
                             let received = app.world.clock.now();
                             if let Err(error) = app.world.directory(move |d| d.chat(id, "omw".into(), received)).await {
                                 tracing::warn!(player=id,%error,"invitation acknowledgement rejected");
@@ -614,14 +616,7 @@ async fn launch(
                         let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
                         if let Some(plan)=plan {
                             let request=brain.adventure_request(plan,&view,&app.content)?;
-                            if let Some(service)=&app.dialogue {pending=Some(dialogue::Pending::start(service.clone(),request));}
-                            else {
-                                let intent:dialogue::Intent=serde_json::from_value(request.payload["allowed_intents"][0].clone())?;
-                                let reply=adventures::policy_reply(&request,intent)?;
-                                if let Err(error)=dialogue::publish(&app,&mut brain,&request,&reply,&view).await {
-                                    tracing::warn!(account,%error,"autonomous policy invitation rejected");
-                                }
-                            }
+                            pending=Some(dialogue::Pending::start(app.dialogue.clone(),request,profile));
                         }
                     }
                     if pending.as_ref().is_some_and(|p| p.task.is_finished()) {
@@ -637,16 +632,17 @@ async fn launch(
                             Ok(reply) => {
                                 let validation = dialogue::publish(&app,&mut brain,&completed.request,&reply,&view).await;
                                 match validation {
-                                    Ok(()) => {
+                                    Ok(true) => {
                                         tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,intent=?reply.intent,"bot dialogue intention applied");
                                     }
+                                    Ok(false) => {}
                                     Err(error) => {
                                         tracing::error!(request=%completed.id,player=id,%error,"bot dialogue intention rejected");
-                                        dialogue::failed(&app, completed.request.speaker, &completed.id, "rejected").await;
+                                        dialogue::failed(&app, &completed.request, &completed.id, "rejected").await;
                                     }
                                 }
                             }
-                            Err(error) => dialogue::failed(&app, completed.request.speaker, &completed.id, error.0).await,
+                            Err(error) => dialogue::failed(&app, &completed.request, &completed.id, error.0).await,
                         }
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
@@ -717,11 +713,12 @@ async fn launch(
                             Err(error) => tracing::warn!(player=id,text,%error,"autonomous public call rejected"),
                         }
                     }
-                    if decision.goal != brain.goal {
+                    if !brain.decision_logged || decision.goal != brain.goal {
                         tracing::info!(account,character=view.session.character,world=view.session.world,player=id,name=profile.name,tick=view.tick,hp=view.character.hp,
                             experience=view.character.experience,x=view.position.x,y=view.position.y,
-                            cognition=%serde_json::to_string(&brain.mind.cognition)?,aim=?decision.aim,movement=?decision.movement,
+                            aim=?decision.aim,movement=?decision.movement,
                             goal=?decision.goal,"autonomous decision");
+                        brain.decision_logged = true;
                     }
                     brain.goal = decision.goal;
                     brain.destination = decision.movement;

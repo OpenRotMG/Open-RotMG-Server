@@ -2,6 +2,10 @@ use super::*;
 use rand::seq::IteratorRandom;
 use std::time::{Duration, Instant};
 
+mod incoming;
+use incoming::Incoming;
+#[cfg(test)]
+mod incoming_tests;
 #[cfg(test)]
 mod session_tests;
 #[cfg(test)]
@@ -151,6 +155,8 @@ pub(crate) struct Market {
     #[serde(skip)]
     pub(in crate::bots) trade: Option<SessionTrade>,
     #[serde(skip)]
+    pub(in crate::bots) incoming: Option<Incoming>,
+    #[serde(skip)]
     pub(in crate::bots) revoke_trade: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,6 +172,10 @@ pub(in crate::bots) struct Message {
     pub consent: bool,
 }
 impl Message {
+    pub(in crate::bots) fn optional_public(&self) -> Option<&str> {
+        (!self.consent && self.text.starts_with("sell ") && self.channel == Channel::Local)
+            .then_some(self.text.as_str())
+    }
     pub(in crate::bots) fn chat(&self) -> String {
         match &self.channel {
             Channel::Local => self.text.clone(),
@@ -211,6 +221,7 @@ impl Market {
     pub(in crate::bots) fn bind(&mut self) {
         self.session = None;
         self.session_used = false;
+        self.incoming = None;
         self.outgoing = None;
         self.trade = None;
         self.announced = false;
@@ -502,10 +513,7 @@ impl Market {
             if active || self.outgoing.is_some() {
                 return Ok(true);
             }
-            let parsed = (|| -> Option<(Goods, i32)> {
-                let (g, w) = ad.split_once("; want ")?;
-                Some((parse_goods(g)?, w.parse().ok()?))
-            })();
+            let parsed = parse_ad(ad, c);
             let Some((goods, want)) = parsed else {
                 return Ok(true);
             };
@@ -1024,6 +1032,22 @@ impl Market {
             return Ok(None);
         };
         if self.session.is_none() {
+            self.session_used = true;
+            let admitted = rng.gen_ratio(1, 5);
+            tracing::info!(
+                account = v.session.account,
+                admitted,
+                probability = 0.2,
+                reason = if admitted {
+                    "visit_admitted"
+                } else {
+                    "visit_declined"
+                },
+                "market autonomous session admission"
+            );
+            if !admitted {
+                return Ok(None);
+            }
             let duration_ms = rng.gen_range(60..=1800) * 1000u64;
             self.session = Some(MarketSession {
                 anchor: tile(v.position),
@@ -1034,7 +1058,6 @@ impl Market {
                 next_move: v.elapsed_ms + 10_000,
                 destination: None,
             });
-            self.session_used = true;
             tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,duration_ms,session=?self.session,?goods,want,"market intentional session started");
         }
         let s = self
@@ -1063,8 +1086,19 @@ impl Market {
             .map(center)
             .filter(|p| v.position.distance(*p) > 0.2 && grid.segment(v.position, *p));
         if now() >= self.next_ad && self.outgoing.is_none() {
+            // Chat renders text literally, not item types: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/GameServerConnection.as#L1635-L1663
+            let ad = format!(
+                "{} x{}; want {}",
+                c.get(u16::try_from(goods.kind)?)?.name,
+                goods.quantity,
+                c.get(u16::try_from(want)?)?.name
+            );
+            ensure!(
+                parse_ad(&ad, c) == Some((goods.clone(), want)),
+                "market advertisement cannot resolve its item names: {ad}"
+            );
             self.queue(
-                format!("sell {}x{}; want {want}", goods.kind, goods.quantity),
+                format!("sell {ad}"),
                 if self.guild {
                     Channel::Guild
                 } else {
@@ -1082,11 +1116,7 @@ impl Market {
             61 => {
                 let name = r.utf()?;
                 r.done()?;
-                tracing::info!(
-                    account = v.session.account,
-                    name,
-                    "market native trade request received"
-                );
+                self.incoming_request(name, v);
             }
             67 => {
                 let read_items = |r: &mut Reader<'_>| -> Result<(Vec<i32>, [bool; 12])> {
@@ -1135,6 +1165,9 @@ impl Market {
                 let reason = r.utf()?;
                 r.done()?;
                 self.trade = None;
+                if self.incoming.is_some() {
+                    self.end_incoming(v);
+                }
                 tracing::info!(
                     account = v.session.account,
                     result,
@@ -1155,6 +1188,25 @@ fn capacity(v: &PlayerView, kind: i32) -> u8 {
         .filter(|k| **k < 0 || **k == kind)
         .count()
         .clamp(1, 8) as u8
+}
+fn parse_ad(s: &str, c: &Content) -> Option<(Goods, i32)> {
+    let kind = |name: &str| {
+        let mut items = c
+            .objects
+            .values()
+            .filter(|o| !name.is_empty() && o.class == "Equipment" && o.name == name);
+        let kind = items.next()?.kind;
+        items.next().is_none().then_some(i32::from(kind))
+    };
+    let (give, want) = s.split_once("; want ")?;
+    let (name, quantity) = give.rsplit_once(" x")?;
+    let goods = Goods {
+        kind: kind(name)?,
+        quantity: quantity.parse().ok()?,
+    };
+    (1..=16)
+        .contains(&goods.quantity)
+        .then_some((goods, kind(want)?))
 }
 fn parse_goods(s: &str) -> Option<Goods> {
     let (k, n) = s.split_once('x')?;

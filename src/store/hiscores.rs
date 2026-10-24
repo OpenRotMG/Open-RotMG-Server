@@ -76,6 +76,7 @@ impl Store {
     }
     pub async fn hiscores(&self, living: Vec<Character>) -> Result<serde_json::Value> {
         let base = self.legacy_base;
+        let classes = self.classes.clone();
         self.call(move |db| {
             let tx = db.transaction()?;
             let mut records = std::collections::BTreeMap::<i32, serde_json::Value>::new();
@@ -84,7 +85,9 @@ impl Store {
                 for row in q.query_map([], |r| Ok((r.get::<_,i32>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,i64>(3)?)))? {
                     let (id,name,discord,balance)=row?;
                     ensure!(balance >= 0, "negative account fame");
-                    records.insert(id,serde_json::json!({"account":id,"name":name,"discord_id":discord,"base_fame":0,"total_fame":balance,"collection":0}));
+                    // Account stars sum class bests, not spendable fame: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/appengine/SavedCharactersList.as#L127-L139
+                    let (presentation, _) = read_presentation(&tx, id, base, &classes)?;
+                    records.insert(id,serde_json::json!({"account":id,"name":name,"discord_id":discord,"base_fame":0,"total_fame":balance,"collection":0,"stars":presentation.stars()}));
                 }
             }
             let mut characters = std::collections::BTreeMap::new();
@@ -127,5 +130,97 @@ impl Store {
             drop(q);tx.commit()?;
             Ok(serde_json::json!({"account":account,"name":name,"items":items}))
         }).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn star_hiscores_match_retained_class_bests_not_wallet_or_uncommitted_fame() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "star-hiscores-{}-{}.db",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let store = Store::open(&path, &content).unwrap();
+        let mut owners = Vec::new();
+        for name in ["Orion", "Lyra", "Nova"] {
+            let id = store
+                .register(
+                    format!("star-{name}"),
+                    format!("{name}@example.invalid"),
+                    "fixture-password".into(),
+                )
+                .await
+                .unwrap();
+            store.choose_name(id, name.into()).await.unwrap();
+            store.compete(id).await.unwrap();
+            owners.push(id);
+        }
+        for (n, owner) in owners[..2].iter().copied().enumerate() {
+            for fame in [if n == 0 { 800 } else { 2000 }, 20] {
+                let mut ch = store
+                    .create(owner, content.get(WIZARD).unwrap())
+                    .await
+                    .unwrap();
+                ch.level = 20;
+                ch.exp = 20000;
+                ch.fame = fame;
+                store.progress(ch.clone()).await.unwrap();
+                store.delete_character(owner, ch.id).await.unwrap();
+            }
+            let kind = if n == 0 { 0x310 } else { 0x300 };
+            let mut ch = store
+                .create_prepared(owner, content.get(kind).unwrap(), None)
+                .await
+                .unwrap();
+            ch.level = 20;
+            ch.exp = 20000;
+            ch.fame = if n == 0 { 150 } else { 20 };
+            store.progress(ch.clone()).await.unwrap();
+            if n == 0 {
+                ch.alive = false;
+                ch.hp = 0;
+                let id = ch.id;
+                store.death(ch, "fixture".into()).await.unwrap();
+                store
+                    .call(move |db| {
+                        db.execute(
+                            "UPDATE characters SET stats=json_set(stats,'$.fame',9999) WHERE id=?1",
+                            [id],
+                        )?;
+                        db.execute(
+                            "UPDATE account_fame SET balance=0 WHERE account=?1",
+                            [owner],
+                        )?;
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+        let mut pending = store
+            .create(owners[2], content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        pending.fame = 2000;
+        let guest = store.list("star-unregistered".into()).await.unwrap();
+        store.compete(guest.id).await.unwrap();
+        eprintln!("STAR_FIXTURE_DB={}", path.display());
+        let scores = store.hiscores(vec![pending]).await.unwrap();
+        assert_eq!(scores["players"].as_array().unwrap().len(), 3);
+        for (id, expected) in owners.into_iter().zip([7, 6, 0]) {
+            let row = scores["players"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["account"] == id)
+                .unwrap();
+            assert_eq!(row["stars"], expected);
+            assert_eq!(row["stars"], store.presentation(id).await.unwrap().stars());
+        }
     }
 }
