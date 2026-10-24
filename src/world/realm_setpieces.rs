@@ -37,12 +37,19 @@ enum GroundWrite {
     Keep,
     Set(u8),
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BossAnchor {
+    Marker,
+    TempleA,
+    TempleB,
+}
 struct Piece {
     width: usize,
     height: usize,
     cells: Vec<u8>,
     temple_ground: Vec<GroundWrite>,
     boss: (usize, usize),
+    boss_anchor: BossAnchor,
 }
 impl Piece {
     fn new(width: usize, height: usize) -> Self {
@@ -52,14 +59,25 @@ impl Piece {
             cells: vec![0; width * height],
             temple_ground: Vec::new(),
             boss: (width / 2, height / 2),
+            boss_anchor: BossAnchor::Marker,
         }
     }
     fn set(&mut self, x: usize, y: usize, value: u8) {
         self.cells[y * self.width + x] = value;
     }
     fn boss_position(&self, kind: u16, area: Area) -> Pos {
-        // Grove.cs uses integer Size / 2 + 1, not the stencil cell midpoint.
-        let offset = if kind == 0x91f { 1. } else { 0.5 };
+        // Temple actors use fixed post-rotation anchors; Grove uses integer Size / 2 + 1.
+        let offset = match self.boss_anchor {
+            BossAnchor::TempleA => 0.,
+            BossAnchor::TempleB => 0.5,
+            BossAnchor::Marker => {
+                if kind == 0x91f {
+                    1.
+                } else {
+                    0.5
+                }
+            }
+        };
         Pos {
             x: (area.x + self.boss.0 as i32) as f32 + offset,
             y: (area.y + self.boss.1 as i32) as f32 + offset,
@@ -80,7 +98,11 @@ impl Piece {
                 }
             }
         }
-        out.boss = (self.height - 1 - self.boss.1, self.boss.0);
+        out.boss_anchor = self.boss_anchor;
+        out.boss = match self.boss_anchor {
+            BossAnchor::Marker => (self.height - 1 - self.boss.1, self.boss.0),
+            BossAnchor::TempleA | BossAnchor::TempleB => self.boss,
+        };
         out
     }
     fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
@@ -222,6 +244,7 @@ impl Piece {
                     })
                     .collect();
                 let bas = if rng.gen_bool(0.5) {
+                    p.boss_anchor = BossAnchor::TempleA;
                     for n in 0..20 {
                         p.set(17 + n, 17, if n == 19 { 3 } else { 2 });
                         p.set(17 + n, 18, 3);
@@ -252,6 +275,7 @@ impl Piece {
                     }
                     17
                 } else {
+                    p.boss_anchor = BossAnchor::TempleB;
                     for n in 0..23 {
                         if (10..=12).contains(&n) {
                             continue;
@@ -892,8 +916,8 @@ impl World {
                         .iter()
                         .all(|(x, y)| a.distance(Pos { x: *x, y: *y }) >= 64.)
                     && protected.iter().all(|p| a.distance(*p) >= 4.)
-                    // Grove's integer anchor crosses into the next tile, not the sampled center tile.
-                    && (kind != 0x91f
+                    // Fixed anchors must retain habitat at the actual destination, not only the sampled center.
+                    && (!matches!(kind, 0x91f | 0xdc2)
                         || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
                     && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
@@ -1048,6 +1072,188 @@ mod tests {
         assert!(changes.into_iter().all(|count| count > 0));
     }
 
+    fn temple_test_map(terrain: u8) -> Map {
+        Map {
+            width: 192,
+            height: 192,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x46,
+                    object: None,
+                    config: "name:source".into(),
+                    terrain,
+                    region: 0,
+                };
+                192 * 192
+            ],
+            spawns: vec![(1., 1.)],
+        }
+    }
+
+    #[test]
+    fn temple_population_uses_fixed_colocated_anchors_and_preserves_birth_map() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut witnessed = BTreeSet::new();
+        for seed in 0..64 {
+            let original = Arc::new(temple_test_map(7));
+            let mut world = World::new(content.clone(), original.clone()).unwrap();
+            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.populate_coil_snakes().unwrap();
+            assert_eq!(world.setpieces.len(), 2);
+            assert_eq!(
+                world.entities.values().filter(|e| e.kind == 0xdc2).count(),
+                2
+            );
+            assert_eq!(
+                world.entities.values().filter(|e| e.kind == 0x501).count(),
+                2
+            );
+            for area in &world.setpieces {
+                let columns: Vec<_> = (area.y..area.y + 60)
+                    .flat_map(|y| (area.x..area.x + 60).map(move |x| (x, y)))
+                    .filter(|&(x, y)| world.map.cells[(y * 192 + x) as usize].object == Some(0x1f3))
+                    .map(|(x, y)| ((x - area.x) as usize, (y - area.y) as usize))
+                    .collect();
+                let local = match columns.len() {
+                    8 => 30.,
+                    16 => 27.5,
+                    count => panic!("unexpected placed Temple column count {count}"),
+                };
+                let expected = Pos {
+                    x: area.x as f32 + local,
+                    y: area.y as f32 + local,
+                };
+                let root = world
+                    .entities
+                    .values()
+                    .find(|e| e.kind == 0xdc2 && area.distance(e.pos) == 0.)
+                    .unwrap();
+                let chest = world
+                    .entities
+                    .values()
+                    .find(|e| e.kind == 0x501 && area.distance(e.pos) == 0.)
+                    .unwrap();
+                for entity in [root, chest] {
+                    assert_eq!(
+                        (entity.pos.x, entity.pos.y),
+                        (expected.x, expected.y),
+                        "seed {seed}"
+                    );
+                    assert_eq!((entity.home.x, entity.home.y), (expected.x, expected.y));
+                    assert!(entity.published && world.walkable(entity.pos));
+                    let index = expected.y.floor() as usize * 192 + expected.x.floor() as usize;
+                    assert!(world.cells.ids(index).contains(&entity.id));
+                }
+                assert!(root.hp > 0 && root.quest == Some(root.id));
+                assert!(
+                    [(4., 0.), (0., 4.), (-4., 0.), (0., -4.)]
+                        .into_iter()
+                        .all(|(x, y)| world.walkable(Pos {
+                            x: expected.x + x,
+                            y: expected.y + y
+                        }))
+                );
+                let cell = world.map.cell(expected.x, expected.y).unwrap();
+                assert_eq!(
+                    (
+                        cell.ground,
+                        cell.object,
+                        cell.config.as_str(),
+                        cell.terrain,
+                        cell.region
+                    ),
+                    (0xc5, None, "", 7, 0)
+                );
+                assert_eq!(
+                    original.cell(expected.x, expected.y).unwrap().config,
+                    "name:source"
+                );
+                witnessed.insert((
+                    columns.len(),
+                    columns.iter().map(|p| p.0).min().unwrap(),
+                    columns.iter().map(|p| p.1).min().unwrap(),
+                ));
+            }
+            assert!(!Arc::ptr_eq(&original, &world.map));
+        }
+        assert_eq!(
+            witnessed,
+            BTreeSet::from([
+                (8, 22, 22),
+                (8, 21, 22),
+                (8, 21, 21),
+                (8, 22, 21),
+                (16, 21, 21),
+                (16, 26, 21),
+                (16, 26, 26),
+                (16, 21, 26),
+            ])
+        );
+    }
+
+    #[test]
+    fn temple_b_fixed_destination_preserves_admission_guards() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut witnessed = 0;
+        for seed in 0..64 {
+            let plan = Piece::build(0xdc2, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            if plan.boss_anchor != BossAnchor::TempleB {
+                continue;
+            }
+            witnessed += 1;
+            for mode in 0..6 {
+                let mut map = temple_test_map(0);
+                map.cells[96 * 192 + 96].terrain = 7;
+                let cell = &mut map.cells[93 * 192 + 93];
+                cell.terrain = if mode == 2 { 0 } else { 7 };
+                cell.object = Some(if mode == 3 { 0x1f3 } else { 0x107 });
+                if mode == 4 {
+                    cell.ground = 0xf4;
+                }
+                let original = Arc::new(map);
+                let mut world = World::new(content.clone(), original.clone()).unwrap();
+                if mode == 4 {
+                    world.realm_layout = Some("classic-world-01-reconstruction".into());
+                }
+                let old_id = world.cells.ids(93 * 192 + 93)[0];
+                let x = if mode == 1 {
+                    61.75
+                } else if mode == 5 {
+                    62.25
+                } else {
+                    61.5
+                };
+                let previous = world
+                    .spawn_entity(0x91b, Pos { x, y: 93.5 }, vec![])
+                    .unwrap();
+                if mode != 5 {
+                    world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                }
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let result = world.place_named_setpiece(0xdc2, &[7]);
+                assert_eq!(
+                    result.is_ok(),
+                    mode == 0,
+                    "seed {seed}, mode {mode}: {result:?}"
+                );
+                if let Ok(pos) = result {
+                    assert_eq!((pos.x, pos.y), (93.5, 93.5));
+                    let cell = world.map.cell(pos.x, pos.y).unwrap();
+                    assert_eq!(
+                        (cell.ground, cell.object, cell.config.as_str()),
+                        (0xc5, None, "")
+                    );
+                    assert!(!world.entities.contains_key(&old_id) && world.walkable(pos));
+                    assert!(!Arc::ptr_eq(&original, &world.map));
+                } else {
+                    assert!(Arc::ptr_eq(&original, &world.map) && world.setpieces.is_empty());
+                    assert!(world.entities.contains_key(&old_id));
+                }
+            }
+        }
+        assert!(witnessed > 0);
+    }
+
     #[test]
     fn temple_masonry_can_retain_dark_grass_underlay() {
         let data = std::path::Path::new("data");
@@ -1135,18 +1341,18 @@ mod tests {
         let mut witnessed = BTreeSet::new();
         for seed in 0..16 {
             let mut p = Piece::build(0xdc2, &mut rand::rngs::StdRng::seed_from_u64(seed));
-            let (bas, anchor) = match p.cells.iter().filter(|&&mark| mark == 4).count() {
-                8 => (17, 30),
-                16 => (16, 27),
-                count => panic!("unexpected Temple column count {count}"),
+            let (bas, column) = match p.boss_anchor {
+                BossAnchor::TempleA => (17, 22),
+                BossAnchor::TempleB => (16, 21),
+                BossAnchor::Marker => panic!("Temple lacks its variant anchor"),
             };
             for _ in 0..4 {
-                if p.boss == (anchor, anchor) {
+                if p.cells[column * 60 + column] == 4 {
                     break;
                 }
                 p = p.rotate();
             }
-            assert_eq!(p.boss, (anchor, anchor));
+            assert_eq!(p.cells[column * 60 + column], 4);
             for (i, &mark) in p
                 .cells
                 .iter()
@@ -1187,12 +1393,12 @@ mod tests {
         for seed in 0..16 {
             let mut p = Piece::build(0xdc2, &mut rand::rngs::StdRng::seed_from_u64(seed));
             variants.insert(p.cells.iter().filter(|&&mark| mark == 4).count());
+            assert_eq!(
+                p.temple_ground[p.boss.1 * p.width + p.boss.0],
+                GroundWrite::Set(0xc5)
+            );
             for _ in 0..4 {
                 assert_eq!(p.temple_ground.len(), p.cells.len());
-                assert_eq!(
-                    p.temple_ground[p.boss.1 * p.width + p.boss.0],
-                    GroundWrite::Set(0xc5)
-                );
                 for (i, &mark) in p.cells.iter().enumerate() {
                     if mark == 0 {
                         assert_eq!(p.temple_ground[i], GroundWrite::Keep);
