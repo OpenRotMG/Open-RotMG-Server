@@ -2,8 +2,6 @@ use super::*;
 use crate::content::PRIEST;
 use crate::world::view::VisibleObject;
 mod life;
-#[cfg(test)]
-pub(in crate::bots) use life::Interaction;
 pub(crate) use life::Life;
 pub(super) use life::{life, receive_life};
 
@@ -22,10 +20,7 @@ pub(super) fn companions<'a>(
         })
         .collect()
 }
-#[cfg(test)]
-pub(super) fn healing(v: &PlayerView, content: &Content) -> Result<Option<Action>> {
-    healing_selected(v, content, |_| true)
-}
+
 fn healing_selected(
     v: &PlayerView,
     content: &Content,

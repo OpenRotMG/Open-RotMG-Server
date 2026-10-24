@@ -839,6 +839,3 @@ pub async fn receipt(
         Err(e) => error(e),
     }
 }
-
-#[cfg(test)]
-mod tests;

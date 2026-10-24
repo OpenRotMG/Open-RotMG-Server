@@ -46,15 +46,6 @@ pub(super) struct GeometryCache {
     geometry: Option<Arc<crate::navigation::Geometry>>,
 }
 impl GeometryCache {
-    #[cfg(test)]
-    pub(super) fn get_for_test(
-        &mut self,
-        map: &Arc<Map>,
-        content: &Arc<Content>,
-    ) -> Arc<crate::navigation::Geometry> {
-        self.get(map, content)
-    }
-
     fn get(&mut self, map: &Arc<Map>, content: &Arc<Content>) -> Arc<crate::navigation::Geometry> {
         if !self.map.ptr_eq(&Arc::downgrade(map)) || !self.content.ptr_eq(&Arc::downgrade(content))
         {

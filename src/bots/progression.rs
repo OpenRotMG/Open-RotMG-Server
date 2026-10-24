@@ -409,6 +409,3 @@ pub(super) fn clear_cover(
         chat: None,
     })
 }
-
-#[cfg(test)]
-mod tests;

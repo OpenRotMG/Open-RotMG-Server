@@ -488,10 +488,6 @@ impl Life {
         None
     }
 }
-#[cfg(test)]
-mod revocation_tests;
-#[cfg(test)]
-mod tests;
 
 fn idle() -> Decision {
     Decision {

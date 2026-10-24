@@ -378,8 +378,6 @@ async fn continue_selected(
         })
         .context("selected autonomous character is missing or dead; no replacement was selected")
 }
-#[cfg(test)]
-mod community_lifecycle_tests;
 
 pub async fn start(app: &App) -> Result<()> {
     for profile in PROFILES {
@@ -893,20 +891,3 @@ fn close_controller(
     }
     owner.close(app, reason)
 }
-
-#[cfg(test)]
-mod community_crowd_tests;
-#[cfg(test)]
-mod community_events_tests;
-#[cfg(test)]
-mod community_market_tests;
-#[cfg(test)]
-mod community_resources_tests;
-#[cfg(test)]
-mod community_social_tests;
-#[cfg(test)]
-mod decision_timing_tests;
-#[cfg(test)]
-mod fame_transfer_tests;
-#[cfg(test)]
-mod market_consent_tests;

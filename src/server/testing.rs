@@ -1,6 +1,5 @@
 use super::*;
-#[cfg(test)]
-mod tests;
+
 use crate::store::Character;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};

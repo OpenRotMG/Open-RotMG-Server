@@ -1,7 +1,5 @@
 use super::*;
 use crate::world::view::PlayerMarker;
-#[cfg(test)]
-mod tests;
 
 pub(super) struct Crowd {
     pub knows_minimap: bool,

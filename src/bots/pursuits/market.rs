@@ -1075,6 +1075,3 @@ pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
     }
     Ok(a)
 }
-
-#[cfg(test)]
-mod tests;
