@@ -591,6 +591,8 @@ async fn launch(
                         if let Some(service) = &app.dialogue
                             && let Some(request) = brain.dialogue_request(&packet, &view, &app.content)?
                         {
+                            // A rate-limited correction must still invalidate the older promise.
+                            dialogue::supersede(&mut pending, &request);
                             if pending.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
                                 dialogue::failed(&app, &request, "busy", "busy").await;
                             } else {

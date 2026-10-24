@@ -379,6 +379,21 @@ pub(super) async fn end_agreement(
     }
 }
 
+pub(super) fn supersede(pending: &mut Option<Pending>, request: &Request) -> bool {
+    let same_speaker = pending.as_ref().is_some_and(|p| {
+        p.request.session == request.session
+            && p.request.speaker == request.speaker
+            && p.request.name == request.name
+            && p.request.created <= request.created
+    });
+    if same_speaker {
+        let previous = pending.take().expect("superseded dialogue missing");
+        tracing::info!(request=%previous.id,player=request.session.1,speaker=request.speaker,
+            "bot dialogue superseded by newer message from same speaker");
+    }
+    same_speaker
+}
+
 pub(super) async fn cancel(app: &crate::server::App, pending: &mut Option<Pending>) {
     if let Some(request) = pending.take() {
         request.task.abort();
