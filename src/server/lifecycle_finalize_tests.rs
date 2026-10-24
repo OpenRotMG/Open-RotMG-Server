@@ -109,7 +109,7 @@ pub(super) fn socket_hello(
     socket_hello_password(dir, guid, "", game, transfer)
 }
 
-fn socket_hello_password(
+pub(super) fn socket_hello_password(
     dir: &std::path::Path,
     guid: &str,
     password: &str,
@@ -169,7 +169,7 @@ pub(super) async fn socket_load(
     Reader::new(&success.body).i32().unwrap()
 }
 
-async fn socket_server(a: &App) -> (u16, tokio::task::JoinHandle<()>) {
+pub(super) async fn socket_server(a: &App) -> (u16, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     println!(
