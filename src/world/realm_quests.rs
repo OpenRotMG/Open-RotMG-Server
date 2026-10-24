@@ -847,7 +847,7 @@ fn named_site_populations_match_reference_ranges() {
         // Fixed boundary requests avoid depending on a lucky population draw.
         let mut dense = World::new(content.clone(), source.open(&content).unwrap()).unwrap();
         dense.realm_layout = Some(layout.clone());
-        dense.rng = StdRng::seed_from_u64(12351);
+        dense.rng = rand::rngs::StdRng::seed_from_u64(12351);
         assert!(dense.populate_named_sites(0x928, &[4, 3], -1).is_err());
         for (kind, terrains, count) in [
             (0x91f, &[7, 6][..], 24),
