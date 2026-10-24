@@ -569,6 +569,7 @@ async fn launch(
                         } else { None };
                         if let Some(reason) = reason { dialogue::end_agreement(&app, &mut brain, reason).await; }
                     }
+                    brain.crowd.observe(&view, &app.content);
                     while let Some((packet, received_view)) = deferred_market.take().or_else(||output.try_recv().ok().map(|p|(p,view.clone()))) {
                         if packet.id == crate::wire::GOTO {
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
@@ -576,6 +577,7 @@ async fn launch(
                         }
                         let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.directory(move |d|d.player_view(id)).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
+                        brain.crowd.receive(&packet, social_view, &app.content)?;
                         let event_before = brain.mind.events.clone();
                         brain.mind.events.receive(&packet, social_view, profile.name)?;
                         if brain.mind.events != event_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
