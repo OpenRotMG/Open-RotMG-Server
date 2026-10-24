@@ -227,7 +227,7 @@ async function resumeAll() {
 }
 const bindings = {
   w:['KeyW',87],a:['KeyA',65],s:['KeyS',83],d:['KeyD',68],
-  ' ':['Space',32],Insert:['Insert',45],r:['KeyR',82],q:['KeyQ',81],e:['KeyE',69],
+  ' ':['Space',32],Insert:['Insert',45],r:['KeyR',82],q:['KeyQ',81],e:['KeyE',69],i:['KeyI',73],
   '1':['Digit1',49],'2':['Digit2',50],'3':['Digit3',51],'4':['Digit4',52],
   '5':['Digit5',53],'6':['Digit6',54],'7':['Digit7',55],'8':['Digit8',56],
 };

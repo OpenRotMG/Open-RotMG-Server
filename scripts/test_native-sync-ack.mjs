@@ -24,6 +24,14 @@ test('native resume proves clocks, focus and binding without waiting for extra p
   assert.equal(context.mayProgress,true);
   context.leaseError=Error('renewal failed');await assert.rejects(resume(),/renewal failed/);
 });
+test('ordinary autofire key uses the same bounded native key validation',()=>{
+  const c={clients:[{actor:1}],Error},{step,key}=vm.runInNewContext(source.slice(source.indexOf('const bindings ='),source.indexOf('async function nativeAct('))+';({step:nativeStep,key:bindings.i})',c);
+  assert.deepEqual(Array.from(key),['KeyI',73]);
+  assert.deepEqual(Array.from(step(1,{keys:['i'],duration_ms:150}).input.keys),['i']);
+  assert.throws(()=>step(1,{keys:['i','i'],duration_ms:150}),/unique/);
+  assert.throws(()=>step(1,{keys:['i'],duration_ms:0}),/duration_ms/);
+});
+
 test('native input retains its post-release paint and readiness proof, not a pre-DOWN paint',()=>{
   const moved=source.indexOf("await client.call('Input.dispatchMouseEvent',{type:'mouseMoved',...mouse})"),hold=source.indexOf('const press=await client.hold',moved),release=source.indexOf('for(const result of await press.down)',hold),paint=source.indexOf('requestAnimationFrame',release),ready=source.indexOf('await states(true)',paint);
   assert(moved>0&&hold>moved&&release>hold&&paint>release&&ready>paint);
