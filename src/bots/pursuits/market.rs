@@ -502,10 +502,7 @@ impl Market {
             if active || self.outgoing.is_some() {
                 return Ok(true);
             }
-            let parsed = (|| -> Option<(Goods, i32)> {
-                let (g, w) = ad.split_once("; want ")?;
-                Some((parse_goods(g)?, w.parse().ok()?))
-            })();
+            let parsed = parse_ad(ad, c);
             let Some((goods, want)) = parsed else {
                 return Ok(true);
             };
@@ -1063,8 +1060,19 @@ impl Market {
             .map(center)
             .filter(|p| v.position.distance(*p) > 0.2 && grid.segment(v.position, *p));
         if now() >= self.next_ad && self.outgoing.is_none() {
+            // Chat renders text literally, not item types: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/GameServerConnection.as#L1635-L1663
+            let ad = format!(
+                "{} x{}; want {}",
+                c.get(u16::try_from(goods.kind)?)?.name,
+                goods.quantity,
+                c.get(u16::try_from(want)?)?.name
+            );
+            ensure!(
+                parse_ad(&ad, c) == Some((goods.clone(), want)),
+                "market advertisement cannot resolve its item names: {ad}"
+            );
             self.queue(
-                format!("sell {}x{}; want {want}", goods.kind, goods.quantity),
+                format!("sell {ad}"),
                 if self.guild {
                     Channel::Guild
                 } else {
@@ -1155,6 +1163,25 @@ fn capacity(v: &PlayerView, kind: i32) -> u8 {
         .filter(|k| **k < 0 || **k == kind)
         .count()
         .clamp(1, 8) as u8
+}
+fn parse_ad(s: &str, c: &Content) -> Option<(Goods, i32)> {
+    let kind = |name: &str| {
+        let mut items = c
+            .objects
+            .values()
+            .filter(|o| !name.is_empty() && o.class == "Equipment" && o.name == name);
+        let kind = items.next()?.kind;
+        items.next().is_none().then_some(i32::from(kind))
+    };
+    let (give, want) = s.split_once("; want ")?;
+    let (name, quantity) = give.rsplit_once(" x")?;
+    let goods = Goods {
+        kind: kind(name)?,
+        quantity: quantity.parse().ok()?,
+    };
+    (1..=16)
+        .contains(&goods.quantity)
+        .then_some((goods, kind(want)?))
 }
 fn parse_goods(s: &str) -> Option<Goods> {
     let (k, n) = s.split_once('x')?;
