@@ -2,6 +2,10 @@ use super::*;
 use rand::seq::IteratorRandom;
 use std::time::{Duration, Instant};
 
+mod incoming;
+use incoming::Incoming;
+#[cfg(test)]
+mod incoming_tests;
 #[cfg(test)]
 mod session_tests;
 #[cfg(test)]
@@ -151,6 +155,8 @@ pub(crate) struct Market {
     #[serde(skip)]
     pub(in crate::bots) trade: Option<SessionTrade>,
     #[serde(skip)]
+    pub(in crate::bots) incoming: Option<Incoming>,
+    #[serde(skip)]
     pub(in crate::bots) revoke_trade: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,6 +217,7 @@ impl Market {
     pub(in crate::bots) fn bind(&mut self) {
         self.session = None;
         self.session_used = false;
+        self.incoming = None;
         self.outgoing = None;
         self.trade = None;
         self.announced = false;
@@ -1082,11 +1089,7 @@ impl Market {
             61 => {
                 let name = r.utf()?;
                 r.done()?;
-                tracing::info!(
-                    account = v.session.account,
-                    name,
-                    "market native trade request received"
-                );
+                self.incoming_request(name, v);
             }
             67 => {
                 let read_items = |r: &mut Reader<'_>| -> Result<(Vec<i32>, [bool; 12])> {
@@ -1135,6 +1138,9 @@ impl Market {
                 let reason = r.utf()?;
                 r.done()?;
                 self.trade = None;
+                if self.incoming.is_some() {
+                    self.end_incoming(v);
+                }
                 tracing::info!(
                     account = v.session.account,
                     result,

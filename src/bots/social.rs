@@ -1,6 +1,7 @@
 use super::*;
 use crate::content::PRIEST;
 use crate::world::view::VisibleObject;
+mod incoming;
 mod life;
 pub(crate) use life::Life;
 pub(super) use life::{life, receive_life};
@@ -122,6 +123,14 @@ pub(super) async fn receive_market(
             && view.session.account == brain.mind.account,
         "market packet belongs to a replaced session"
     );
+    if packet.id == 61 && brain.mind.social.gift_active() {
+        tracing::info!(
+            account = view.session.account,
+            reason = "active_gift",
+            "market incoming request policy"
+        );
+        return Ok(MarketUptake::Applied);
+    }
     let before = brain.mind.clone();
     if packet.id == wire::TEXT && !view.lifecycle.busy {
         recover_market(app, brain).await?;
@@ -176,6 +185,9 @@ pub(super) async fn market(
     let before = brain.mind.clone();
     if !revoke_market(app, brain).await? {
         return Ok(true);
+    }
+    if brain.mind.market.incoming.is_some() {
+        return incoming::incoming(app, brain, v).await;
     }
     brain.mind.market.observe(v);
     if let Some(b) = &brain.mind.market.bargain {
