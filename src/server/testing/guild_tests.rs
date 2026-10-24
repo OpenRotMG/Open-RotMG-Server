@@ -471,6 +471,7 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
             if paused { 1 << 20 } else { 0 }
         );
         assert!(!stats.keys().any(|(_, key)| matches!(key, 62 | 63)));
+        let before_hold = snapshot(&app, actor, false).await.unwrap();
         let clock = app.world.clock.clone();
         app.world
             .in_world(-2)
@@ -491,6 +492,12 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
             })
             .await
             .unwrap();
+        let after_hold = snapshot(&app, actor, false).await.unwrap();
+        assert_eq!(after_hold["lifecycle"], before_hold["lifecycle"]);
+        assert_eq!(
+            after_hold["game_ms"].as_u64().unwrap() - before_hold["game_ms"].as_u64().unwrap(),
+            if paused { 2000 } else { 0 }
+        );
         while receiver.try_recv().is_ok() {}
         assert_eq!(
             persisted_guild_state(&app, &members, &db_path).await,
