@@ -58,6 +58,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
         tiles: Arc::new(tiles),
         player_markers: vec![],
         projectiles: vec![],
+        dungeon_entries: vec![],
         objects: vec![VisibleObject {
             id: 2,
             account: None,

@@ -55,6 +55,7 @@ fn fixture(account: i32) -> (Content, PlayerView, Brain) {
         },
         tiles: Arc::new(tiles),
         projectiles: vec![],
+        dungeon_entries: vec![],
         objects: vec![VisibleObject {
             id: 40,
             account: Some(40),

@@ -72,6 +72,20 @@ pub struct Session {
     pub character: i32,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct ObservedDungeonEntry {
+    // A globally allocated source actor can complete only one departure; no destination identity leaks.
+    pub sequence: i32,
+    pub source_world: i32,
+    pub portal: i32,
+    pub portal_kind: u16,
+    pub entrant: i32,
+    pub account: i32,
+    pub name: String,
+    pub observed_ms: u64,
+    pub expires_ms: u64,
+}
+
 #[derive(Serialize)]
 pub struct PlayerView {
     pub session: Session,
@@ -89,6 +103,7 @@ pub struct PlayerView {
     pub objects: Vec<VisibleObject>,
     pub player_markers: Vec<PlayerMarker>,
     pub projectiles: Vec<VisibleProjectile>,
+    pub dungeon_entries: Vec<ObservedDungeonEntry>,
 }
 #[derive(Serialize)]
 pub struct MapInfo {
@@ -196,7 +211,7 @@ impl super::Handle {
     }
 }
 impl World {
-    fn player_view(&self, scope: i32, id: i32, elapsed_ms: u64) -> Result<PlayerView> {
+    pub(super) fn player_view(&self, scope: i32, id: i32, elapsed_ms: u64) -> Result<PlayerView> {
         let started = crate::performance::Measure::start();
         let w = self;
         let p = w.players.get(&id).context("view player missing")?;
@@ -354,6 +369,27 @@ impl World {
                 })
                 .collect(),
             projectiles,
+            dungeon_entries: p
+                .dungeon_entries
+                .iter()
+                .filter(|e| {
+                    e.expires_ms > elapsed_ms
+                        && e.source_world == scope
+                        && dungeon_entry::observing(p)
+                        && w.owner.is_none()
+                        && w.guild.is_none()
+                        && visible.contains(&e.portal)
+                        && p.known.contains(&e.portal)
+                        && w.entities.get(&e.portal).is_some_and(|portal| {
+                            portal.published
+                                && portal.kind == e.portal_kind
+                                && portal.conditions(w.now)
+                                    & crate::condition::bit(crate::condition::INVISIBLE)
+                                    == 0
+                        })
+                })
+                .cloned()
+                .collect(),
         };
         w.performance.borrow_mut().work("perception", started);
         Ok(view)

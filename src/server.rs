@@ -1501,6 +1501,10 @@ async fn handle_inner(
             *player = Some(
                 a.world
                     .directory(move |d| {
+                        let entry_key = transfer_arrival
+                            .as_ref()
+                            .map(|_| ticket.clone().context("arrival admission key missing"))
+                            .transpose()?;
                         if let Some(arrival) = transfer_arrival {
                             d.admit_transfer(arrival, account, ch.id, destination)?;
                         }
@@ -1520,6 +1524,9 @@ async fn handle_inner(
                         )?;
                         bind(id)?;
                         w.sync_account_lists(id, Some(lists))?;
+                        if let Some(key) = entry_key {
+                            d.complete_dungeon_entry(&key, id)?;
+                        }
                         Ok(id)
                     })
                     .await?,
