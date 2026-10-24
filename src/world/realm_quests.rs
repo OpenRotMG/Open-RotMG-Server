@@ -25,18 +25,27 @@ impl World {
             (0x675, &[5, 2][..]),
             (0x678, &[8, 5][..]),
         ] {
-            let pos = self.place_named_setpiece(kind, terrains)?;
-            let id = self.spawn_entity(kind, pos, vec![])?;
-            let e = self.entities.get_mut(&id).unwrap();
-            e.quest = Some(id);
-            e.stage = (kind != 0x678).then_some(0);
-            e.size = self.content.objects[&kind].size;
-            tracing::info!(
-                entity = id,
-                kind,
-                terrain = self.map.cell(pos.x, pos.y).unwrap().terrain,
-                "finite named Realm quest placed"
-            );
+            // Restore finite Grove multiplicity: Next(17, 25) excludes the upper bound.
+            // https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/setpieces/SetPieces.cs
+            let count = if kind == 0x91f {
+                self.rng.gen_range(17..25)
+            } else {
+                1
+            };
+            for _ in 0..count {
+                let pos = self.place_named_setpiece(kind, terrains)?;
+                let id = self.spawn_entity(kind, pos, vec![])?;
+                let e = self.entities.get_mut(&id).unwrap();
+                e.quest = Some(id);
+                e.stage = (kind != 0x678).then_some(0);
+                e.size = self.content.objects[&kind].size;
+                tracing::info!(
+                    entity = id,
+                    kind,
+                    terrain = self.map.cell(pos.x, pos.y).unwrap().terrain,
+                    "finite named Realm quest placed"
+                );
+            }
         }
         Ok(())
     }
@@ -823,6 +832,74 @@ impl World {
         };
         self.predict_enemy_shots(id, target, &mut shots, |_| factor)?;
         Ok(shots)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn ent_population_matches_grove_reference() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for source in crate::terrain::realms::sources(data).unwrap() {
+        let layout = source.name().to_owned();
+        let mut directory = Directory::configured(
+            data,
+            content.clone(),
+            85,
+            12351,
+            Some(12351),
+            vec![source],
+            2,
+        )
+        .unwrap();
+        for (world_id, world) in directory.worlds.iter().filter(|(_, w)| w.name == "Realm") {
+            let ents: Vec<_> = world
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x91f)
+                .collect();
+            assert!(
+                (17..25).contains(&ents.len()),
+                "{layout}: {} Ent roots",
+                ents.len()
+            );
+            for (index, ent) in ents.iter().enumerate() {
+                assert!(ent.published && ent.hp > 0 && ent.camp.is_none());
+                assert_eq!(ent.quest, Some(ent.id));
+                assert!(
+                    directory.endgame.realms[world_id]
+                        .cycle
+                        .remaining
+                        .contains(&ent.id)
+                );
+                for other in &ents[index + 1..] {
+                    assert!(ent.pos.distance(other.pos) >= 32.);
+                }
+            }
+            for kind in quest::ROOTS.into_iter().filter(|k| *k != 0x91f) {
+                assert_eq!(
+                    world.entities.values().filter(|e| e.kind == kind).count(),
+                    1
+                );
+            }
+        }
+        let world = directory.worlds.get_mut(&-3).unwrap();
+        let roots: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == 0x91f)
+            .map(|e| e.id)
+            .collect();
+        let grown = world.quest_transform(roots[0], 0x920).unwrap();
+        assert_eq!(world.entities[&grown].quest, Some(roots[0]));
+        assert_eq!(world.entities[&roots[1]].quest, Some(roots[1]));
+        assert_eq!(world.entities[&roots[1]].kind, 0x91f);
+        assert!(
+            directory.endgame.realms[&-3]
+                .cycle
+                .remaining
+                .contains(&roots[0])
+        );
     }
 }
 

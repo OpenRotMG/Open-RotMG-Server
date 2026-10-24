@@ -1613,9 +1613,14 @@ fn read_presentation(
         ))
     })? {
         let (id, raw, paid) = row?;
-        let committed_death = paid.is_some();
-        let ch = match paid {
-            Some(receipt) => death_awards::decode_receipt(&receipt)?.character(&raw, legacy_base),
+        let receipt = paid
+            .as_deref()
+            .map(death_awards::decode_receipt)
+            .transpose()
+            .with_context(|| format!("decode class death receipt {id}"))?;
+        let committed_death = receipt.is_some();
+        let ch = match &receipt {
+            Some(receipt) => receipt.character(&raw, legacy_base),
             None => decode_character(&raw, legacy_base),
         }
         .with_context(|| format!("decode saved class record {id}"))?;
@@ -1636,8 +1641,13 @@ fn read_presentation(
                     .all(|(value, cap)| *value >= 0 && *value <= cap),
             "invalid saved class record {id}"
         );
+        // Before the 2021 base-only change, class quests included death bonuses: https://steamcommunity.com/games/200210/announcements/detail/4032392655081525895
+        let score = match receipt {
+            Some(receipt) => receipt.total,
+            None => ch.fame,
+        };
         let best = best_fame.entry(ch.class).or_default();
-        *best = (*best).max(ch.fame);
+        *best = (*best).max(score);
     }
     Ok((
         AccountPresentation {
@@ -1723,5 +1733,7 @@ impl Account {
         )
     }
 }
+#[cfg(test)]
+mod class_quest_tests;
 #[cfg(test)]
 mod community_schema_tests;

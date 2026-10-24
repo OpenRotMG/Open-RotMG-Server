@@ -996,8 +996,8 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        // The fixture must fit both finite 65-tile graveyards alongside the other setpieces.
-        let map = Arc::new(crate::terrain::generate(&content, seed, 768)?);
+        // Restored Grove populations need room alongside both finite 65-tile graveyards.
+        let map = Arc::new(crate::terrain::generate(&content, seed, 1024)?);
         Self::configured(
             path,
             content,
@@ -2441,13 +2441,22 @@ impl Handle {
     }
 }
 pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
+    let packet_bytes = body.len();
     if let Some(tx) = &p.tx
-        && tx.packets.try_send(Packet { id, body }).is_err()
+        && let Err(error) = tx.packets.try_send(Packet { id, body })
     {
         tx.lost.send_replace(true);
+        let queue_state = match error {
+            mpsc::error::TrySendError::Full(_) => "full",
+            mpsc::error::TrySendError::Closed(_) => "closed",
+        };
         tracing::warn!(
             character = p.character.id,
-            "slow/closed connection; packet queue full"
+            packet = id,
+            packet_bytes,
+            queue_state,
+            queue_capacity = tx.packets.max_capacity(),
+            "outbound game packet rejected; closing connection"
         );
     }
 }
@@ -7014,6 +7023,24 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod dungeon_return_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
+#[cfg(test)]
+mod sphinx_site_tests;
 
 #[cfg(test)]
 impl World {}
+
+#[cfg(test)]
+#[test]
+fn populated_realm_fixture_retains_graveyard_space() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for seed in [730, 1093] {
+        let directory = Directory::fixture(data, content.clone(), 16, 12351, Some(seed))
+            .unwrap_or_else(|error| panic!("fixture population seed {seed}: {error:#}"));
+        for world in directory.worlds.values().filter(|w| w.name == "Realm") {
+            let count = |kind| world.entities.values().filter(|e| e.kind == kind).count();
+            assert_eq!(count(crate::dungeon::manor::KAGE), 2);
+            assert!((17..25).contains(&count(0x91f)));
+        }
+    }
+}
