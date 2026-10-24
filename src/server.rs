@@ -1479,25 +1479,21 @@ async fn handle_inner(
             };
             let id = player.ok_or_else(|| lifecycle::protocol("chat before character"))?;
 
-            if let Some(command @ ("/bug" | "/bug-info")) = text.split_whitespace().next() {
-                let message = text.trim()[command.len()..].trim();
+            if text.split_whitespace().next() == Some("/bug") {
+                let message = text.trim()["/bug".len()..].trim();
                 let owner = account
                     .as_ref()
                     .context("authenticated session required")?
                     .id;
-                match diagnostics::report(
-                    a,
-                    owner,
-                    id,
-                    message,
-                    diagnostics,
-                    command == "/bug-info",
-                )
-                .await
-                {
-                    Ok(reply) => enqueue_reply(tx, crate::world::chat_info(reply))?,
+                match diagnostics::report(a, owner, id, message, diagnostics, None).await {
+                    Ok(_) => enqueue_reply(
+                        tx,
+                        crate::world::chat_info(
+                            "Bug report submitted, but bug reporting has moved ~ please use \"Report Bug\" at the bottom of the website instead!",
+                        ),
+                    )?,
                     Err(error) => {
-                        tracing::error!(account=owner, player=id, command, error=%error, "bug report failed");
+                        tracing::error!(account=owner, player=id, error=%error, "bug report failed");
                         enqueue_reply(
                             tx,
                             crate::world::chat_info(&format!("Could not save bug report: {error}")),
@@ -2126,6 +2122,10 @@ async fn connection_io<S, I>(
         ..Session::default()
     };
     session.diagnostics.user_agent = user_agent;
+    let (report_sender, mut report_requests) = mpsc::channel(1);
+    if let Some(browser) = &browser {
+        browser.lock().expect("browser poisoned").reports = Some(report_sender);
+    }
     session.diagnostics.browser = browser;
     let mut reconnect_sent = false;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -2172,6 +2172,7 @@ async fn connection_io<S, I>(
             break;
         }
         tokio::select! {
+            Some(request) = report_requests.recv() => diagnostics::from_session(&a, &session, request).await,
             _=async { match testing_stop.as_mut() { Some(stop) => { if stop.borrow().is_none() { let _ = stop.changed().await; } }, None => std::future::pending::<()>().await } } => {
                 let player=session.player;
                 let terminal=a.world.directory(move |d|Ok(d.worlds.values().flat_map(|w|w.players.iter()).any(|(id,p)|Some(*id)==player && (!p.character.alive || p.death_pending)))).await;
@@ -2924,6 +2925,14 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route(
             "/api/bug-reports/{id}/diagnostics.json",
             get(diagnostics::attachment),
+        )
+        .route(
+            "/api/diagnostics/{key}/report",
+            post(diagnostics::submit).layer(DefaultBodyLimit::max(1_500_000)),
+        )
+        .route(
+            "/api/bug-reports/{id}/screenshot.png",
+            get(diagnostics::screenshot),
         )
         .route("/internal/discord/bugs", get(diagnostics::pending))
         .route("/internal/discord/bugs/{id}", post(diagnostics::receipt))
