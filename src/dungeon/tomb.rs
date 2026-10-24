@@ -21,6 +21,7 @@ pub const TRAP: u16 = 0xd38;
 pub const DISABLED_TRAP: u16 = 0xd39;
 pub const EXIT: u16 = 0xd40;
 pub const QUICKSAND: u8 = 0xbf;
+pub const MISSING_TILE: u8 = 0xe3;
 pub const WALL: u16 = 0x1dd;
 
 pub fn immortal(kind: u16) -> bool {
@@ -202,8 +203,8 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         let (tx, ty) = center(b);
         let horizontal = rng.gen_bool(0.5);
         while (x, y) != (tx, ty) {
-            for dy in -1..=1 {
-                for dx in -1..=1 {
+            for dy in -1..=0 {
+                for dx in -1..=0 {
                     map.cells[index(x + dx, y + dy)].ground = 0xe0;
                 }
             }
@@ -217,18 +218,21 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     for &room in &rooms {
         let (cx, cy) = center(room);
         if room == 12 {
+            // Sandy tracks match selected Missing Tile, not a sinking moat: https://www.youtube.com/watch?v=Igu8lFDRHg0&t=20s (123.4.4 footage; this footprint remains reconstructed).
             for y in cy - 18..=cy + 18 {
                 for x in cx - 18..=cx + 18 {
                     let (dx, dy) = ((x - cx).abs(), (y - cy).abs());
-                    if (8..=10).contains(&dx.max(dy)) {
-                        map.cells[index(x, y)].ground = QUICKSAND;
+                    if (64..=169).contains(&(dx * dx + dy * dy)) {
+                        map.cells[index(x, y)].ground = MISSING_TILE;
                     }
                 }
             }
-            for (dx, dy) in [(-12, -13), (12, -13), (-12, 13), (12, 13)] {
+            for (dx, dy) in [(-15, -13), (15, -13), (-15, 13), (15, 13)] {
                 for y in cy + dy - 1..=cy + dy + 1 {
                     for x in cx + dx - 1..=cx + dx + 1 {
-                        map.cells[index(x, y)].object = Some(WALL);
+                        if x != cx + dx || y != cy + dy {
+                            map.cells[index(x, y)].object = Some(WALL);
+                        }
                         map.cells[index(x, y)].ground = 0xff;
                     }
                 }
@@ -253,13 +257,20 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             for y in cy - 6..=cy + 6 {
                 for x in cx - 6..=cx + 6 {
                     if (x - cx + 2 * (y - cy) + bend).rem_euclid(13) < 3 {
-                        map.cells[index(x, y)].ground = QUICKSAND;
+                        map.cells[index(x, y)].ground = MISSING_TILE;
                     }
                 }
             }
         }
         if events.contains(&room) {
             let treasure = treasures.contains(&room);
+            if !treasure {
+                for y in cy - 9..=cy + 9 {
+                    for x in cx - 9..=cx + 9 {
+                        map.cells[index(x, y)].ground = MISSING_TILE;
+                    }
+                }
+            }
             put(
                 &mut map,
                 cx,
@@ -375,4 +386,82 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         "generated reconstructed Tomb layout"
     );
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeSet, VecDeque};
+
+    #[test]
+    fn footage_layout_keeps_selected_floors_hollow_pillars_and_connected_two_tile_passages() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert_eq!(content.grounds[&MISSING_TILE], 0.9);
+        assert_eq!(content.grounds[&QUICKSAND], 0.6);
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            let count = |kind| map.cells.iter().filter(|c| c.object == Some(kind)).count();
+            assert!((3..=5).contains(&count(SARCOPHAGUS)));
+            assert_eq!(count(TREASURE), 1);
+            assert_eq!(count(ANCHOR), 1);
+            assert_eq!(count(EXIT), 1);
+            for kind in STATUES {
+                assert_eq!(count(kind), 1);
+            }
+            assert_eq!(map.cells[index(80, 70)].ground, MISSING_TILE);
+            assert!(map.cells.iter().any(|c| c.ground == QUICKSAND));
+            for (dx, dy) in [(-15, -13), (15, -13), (-15, 13), (15, 13)] {
+                for y in -1..=1 {
+                    for x in -1..=1 {
+                        let c = &map.cells[index(80 + dx + x, 80 + dy + y)];
+                        assert_eq!(c.ground, 0xff);
+                        assert_eq!(c.object, (x != 0 || y != 0).then_some(WALL));
+                    }
+                }
+            }
+            for c in map.cells.iter().filter(|c| c.object == Some(WALL)) {
+                let conn: u32 = c.config.strip_prefix("conn:").unwrap().parse().unwrap();
+                assert!(conn.to_be_bytes().into_iter().all(|v| matches!(v, 1 | 2)));
+            }
+            let passable = |x: i32, y: i32| {
+                (0..map.width).contains(&x) && (0..map.height).contains(&y) && {
+                    let c = &map.cells[index(x, y)];
+                    content.grounds[&c.ground] > 0. && c.object != Some(WALL)
+                }
+            };
+            let mut seen = BTreeSet::from([(80, 81)]);
+            let mut queue = VecDeque::from([(80, 81)]);
+            while let Some((x, y)) = queue.pop_front() {
+                for p in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                    if passable(p.0, p.1) && seen.insert(p) {
+                        queue.push_back(p);
+                    }
+                }
+            }
+            for (i, c) in map.cells.iter().enumerate() {
+                if c.object.is_some_and(|kind| kind != WALL) {
+                    assert!(
+                        seen.contains(&(i as i32 % map.width, i as i32 / map.width)),
+                        "seed {seed}, cell {i}"
+                    );
+                }
+                if c.object == Some(SARCOPHAGUS) {
+                    assert_eq!(c.ground, MISSING_TILE, "seed {seed}, Sarcophagus cell {i}");
+                }
+            }
+            let mut passages = 0;
+            for room in (0..25).filter(|r| ![7, 11, 12, 13, 17].contains(r)) {
+                let (cx, cy) = center(room);
+                if room % 5 < 4 && passable(cx + 16, cy) {
+                    assert_eq!((-3..=3).filter(|dy| passable(cx + 16, cy + dy)).count(), 2);
+                    passages += 1;
+                }
+                if room / 5 < 4 && passable(cx, cy + 16) {
+                    assert_eq!((-3..=3).filter(|dx| passable(cx + dx, cy + 16)).count(), 2);
+                    passages += 1;
+                }
+            }
+            assert!(passages > 0);
+        }
+    }
 }
