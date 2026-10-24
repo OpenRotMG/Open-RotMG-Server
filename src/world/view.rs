@@ -211,7 +211,7 @@ impl super::Handle {
     }
 }
 impl World {
-    fn player_view(&self, scope: i32, id: i32, elapsed_ms: u64) -> Result<PlayerView> {
+    pub(super) fn player_view(&self, scope: i32, id: i32, elapsed_ms: u64) -> Result<PlayerView> {
         let started = crate::performance::Measure::start();
         let w = self;
         let p = w.players.get(&id).context("view player missing")?;
@@ -373,15 +373,11 @@ impl World {
                 .dungeon_entries
                 .iter()
                 .filter(|e| {
-                    e.expires_ms > self.tick * 50
+                    e.expires_ms > elapsed_ms
                         && e.source_world == scope
                         && dungeon_entry::observing(p)
                         && w.owner.is_none()
                         && w.guild.is_none()
-                        && self
-                            .portals
-                            .get(&e.portal)
-                            .is_some_and(|b| b.origin == scope && b.expires > self.tick)
                         && visible.contains(&e.portal)
                         && p.known.contains(&e.portal)
                         && w.entities.get(&e.portal).is_some_and(|portal| {

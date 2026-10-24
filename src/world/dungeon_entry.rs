@@ -145,6 +145,7 @@ impl Directory {
             return Ok(0);
         }
         let now = self.tick * 50;
+        let portal_expires_ms = self.portals.get(&witness.portal).map(|b| b.expires * 50);
         let Some(world) = self.worlds.get_mut(&witness.source) else {
             return Ok(0);
         };
@@ -196,7 +197,9 @@ impl Directory {
                 account: witness.account,
                 name: witness.name.clone(),
                 observed_ms: witness.observed_ms,
-                expires_ms: witness.observed_ms + LIFETIME_MS,
+                // World-local perception cannot consult Directory while it owns this world.
+                expires_ms: (witness.observed_ms + LIFETIME_MS)
+                    .min(portal_expires_ms.expect("live portal binding checked")),
             });
             delivered += 1;
         }

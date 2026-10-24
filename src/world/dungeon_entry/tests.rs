@@ -82,6 +82,12 @@ async fn dungeon_entry_success_is_local_public_and_once_for_all_controller_types
             .unwrap()
             .controller = controller;
         let name = d.worlds[&-3].players[&entrant].character.name.clone();
+        let lifetime = if matches!(controller, Controller::Human) {
+            LIFETIME_MS
+        } else {
+            100
+        };
+        d.portals.get_mut(&portal).unwrap().expires = d.tick + lifetime / 50;
         let (ch, time, key, _) = depart(&mut d, entrant, portal);
         assert!(d.player_view(observer).unwrap().dungeon_entries.is_empty());
         let account = ch.account;
@@ -103,7 +109,15 @@ async fn dungeon_entry_success_is_local_public_and_once_for_all_controller_types
             (entrant, -3, portal, 0x718, entrant, account)
         );
         assert_eq!(e.name, name);
-        assert_eq!(e.expires_ms - e.observed_ms, LIFETIME_MS);
+        assert_eq!(e.expires_ms - e.observed_ms, lifetime);
+        assert!(
+            d.worlds[&-3]
+                .player_view(-3, observer, e.expires_ms)
+                .unwrap()
+                .dungeon_entries
+                .is_empty()
+        );
+        assert!(d.worlds[&-3].entities.contains_key(&portal));
         assert_eq!(d.complete_dungeon_entry(&key, id).unwrap(), 0);
         assert_eq!(d.player_view(observer).unwrap().dungeon_entries.len(), 1);
         d.tick += LIFETIME_MS / 50;
