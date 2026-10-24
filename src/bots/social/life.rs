@@ -76,6 +76,9 @@ fn health(v: &PlayerView) -> usize {
         .count()
 }
 impl Life {
+    pub(in crate::bots) fn gift_active(&self) -> bool {
+        self.gift.is_some()
+    }
     pub(in crate::bots) fn bind(&mut self) {
         self.gift = None;
         self.outgoing = None;
@@ -159,7 +162,16 @@ impl Life {
         v: &PlayerView,
         own_name: &str,
         willingness: f32,
+        incoming_trade: bool,
     ) -> Result<bool> {
+        if incoming_trade && packet.id == wire::TEXT {
+            tracing::info!(
+                account = v.session.account,
+                reason = "active_incoming_trade",
+                "canonical social gift uptake declined"
+            );
+            return Ok(false);
+        }
         if self.heal_tick != v.tick {
             self.heal_notice = 0;
             self.heal_origin = None;
@@ -595,10 +607,13 @@ pub(in crate::bots) async fn receive_life(
             return Ok(false);
         }
     }
-    brain
-        .mind
-        .social
-        .receive(packet, v, &brain.mind.market.name, brain.profile.companions)
+    brain.mind.social.receive(
+        packet,
+        v,
+        &brain.mind.market.name,
+        brain.profile.companions,
+        brain.mind.market.incoming.is_some(),
+    )
 }
 
 async fn cancel_gift(app: &crate::server::App, brain: &mut Brain) -> Result<bool> {
@@ -639,24 +654,6 @@ pub(in crate::bots) async fn life(
     if v.elapsed_ms >= brain.mind.market.next_message_ms
         && let Some(text) = brain.mind.social.outgoing.take()
     {
-        if let Some(service) = &app.dialogue {
-            let payload = serde_json::json!({"allowed_intents":[dialogue::Intent::Talk],"policy_social_terms":text,"message":"Express only these observed policy facts and canonical social terms."});
-            let result = service
-                .ask(&payload, "social-policy")
-                .await
-                .and_then(|reply| {
-                    if reply.intent == dialogue::Intent::Talk && reply.reply == text {
-                        Ok(reply)
-                    } else {
-                        Err(dialogue::Failure("unsupported_social_terms"))
-                    }
-                });
-            service.completed(&result);
-            if let Err(error) = result {
-                tracing::error!(account=v.session.account,%error,"social language failed; no canned fallback");
-                return cancel_gift(app, brain).await;
-            }
-        }
         let id = v.session.player;
         let received = app.world.clock.now();
         match app
@@ -664,7 +661,13 @@ pub(in crate::bots) async fn life(
             .directory(move |d| d.chat(id, text, received))
             .await
         {
-            Ok(()) => brain.mind.market.next_message_ms = v.elapsed_ms + 1500,
+            Ok(()) => {
+                tracing::info!(
+                    account = v.session.account,
+                    "canonical gift protocol published without generation"
+                );
+                brain.mind.market.next_message_ms = v.elapsed_ms + 1500;
+            }
             Err(error) => {
                 tracing::warn!(account=v.session.account,%error,"social publication rejected; no assent inferred");
                 return cancel_gift(app, brain).await;
