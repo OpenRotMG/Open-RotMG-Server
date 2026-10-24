@@ -947,7 +947,13 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
             "landmark {kind:#x} chest has an empty selected tier"
         );
     }
-    let maximum = rng.gen_range(5..8);
+    // TempleA/B.cs (realm-src@1855c017; data/REALM-SRC-LICENSE) use GetLoots(3, 8) as a success ceiling.
+    let minimum_limit = if kind == crate::dungeon::jungle::COIL {
+        3
+    } else {
+        5
+    };
+    let maximum = rng.gen_range(minimum_limit..8);
     let mut items = Vec::new();
     for (chance, pick) in picks {
         if rng.gen_bool(chance) {
@@ -968,7 +974,36 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{SeedableRng, rngs::StdRng};
+    use rand::{
+        SeedableRng,
+        rngs::{StdRng, mock::StepRng},
+    };
+
+    #[test]
+    fn coil_chest_limits_successes_without_filling_failed_rolls() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, limit) in [
+            (crate::dungeon::jungle::COIL, 3),
+            (0x678, 5),
+            (0x67d, 5),
+            (0x668, 5),
+        ] {
+            let items = landmark_chest(&content, kind, &mut StepRng::new(0, 0)).unwrap();
+            assert_eq!(items.len(), 8);
+            assert_eq!(
+                items.iter().filter(|item| **item >= 0).count(),
+                limit,
+                "{kind:#x}"
+            );
+        }
+        let empty = landmark_chest(
+            &content,
+            crate::dungeon::jungle::COIL,
+            &mut StepRng::new(0, u64::MAX),
+        )
+        .unwrap();
+        assert_eq!(empty, vec![-1; 8]);
+    }
 
     #[test]
     fn abyss_malphas_rewards_include_both_stat_potions() {
