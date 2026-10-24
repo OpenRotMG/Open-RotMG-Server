@@ -592,10 +592,10 @@ async fn launch(
                             && let Some(request) = brain.dialogue_request(&packet, &view, &app.content)?
                         {
                             if pending.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
-                                dialogue::failed(&app, request.speaker, "busy", "busy").await;
+                                dialogue::failed(&app, &request, "busy", "busy").await;
                             } else {
                                 last_dialogue = Some(std::time::Instant::now());
-                                pending = Some(dialogue::Pending::start(service.clone(), request));
+                                pending = Some(dialogue::Pending::start(Some(service.clone()), request, profile));
                             }
                             continue;
                         }
@@ -612,14 +612,7 @@ async fn launch(
                         let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
                         if let Some(plan)=plan {
                             let request=brain.adventure_request(plan,&view,&app.content)?;
-                            if let Some(service)=&app.dialogue {pending=Some(dialogue::Pending::start(service.clone(),request));}
-                            else {
-                                let intent:dialogue::Intent=serde_json::from_value(request.payload["allowed_intents"][0].clone())?;
-                                let reply=adventures::policy_reply(&request,intent)?;
-                                if let Err(error)=dialogue::publish(&app,&mut brain,&request,&reply,&view).await {
-                                    tracing::warn!(account,%error,"autonomous policy invitation rejected");
-                                }
-                            }
+                            pending=Some(dialogue::Pending::start(app.dialogue.clone(),request,profile));
                         }
                     }
                     if pending.as_ref().is_some_and(|p| p.task.is_finished()) {
@@ -635,16 +628,17 @@ async fn launch(
                             Ok(reply) => {
                                 let validation = dialogue::publish(&app,&mut brain,&completed.request,&reply,&view).await;
                                 match validation {
-                                    Ok(()) => {
+                                    Ok(true) => {
                                         tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,intent=?reply.intent,"bot dialogue intention applied");
                                     }
+                                    Ok(false) => {}
                                     Err(error) => {
                                         tracing::error!(request=%completed.id,player=id,%error,"bot dialogue intention rejected");
-                                        dialogue::failed(&app, completed.request.speaker, &completed.id, "rejected").await;
+                                        dialogue::failed(&app, &completed.request, &completed.id, "rejected").await;
                                     }
                                 }
                             }
-                            Err(error) => dialogue::failed(&app, completed.request.speaker, &completed.id, error.0).await,
+                            Err(error) => dialogue::failed(&app, &completed.request, &completed.id, error.0).await,
                         }
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));

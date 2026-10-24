@@ -99,6 +99,30 @@ fn message(text: String) -> Packet {
 }
 
 #[test]
+fn only_unsolicited_local_ads_are_optional_without_rewriting_terms() {
+    let mut message = Message {
+        text: "sell 2589x2; want 2595".into(),
+        channel: Channel::Local,
+        consent: false,
+    };
+    assert_eq!(message.optional_public(), Some(message.text.as_str()));
+    assert_eq!(message.chat(), message.text);
+    message.channel = Channel::Guild;
+    assert!(message.optional_public().is_none());
+    message.channel = Channel::Tell("Peer".into());
+    assert!(message.optional_public().is_none());
+    message.channel = Channel::Local;
+    for verb in ["offer", "counter", "agree", "no deal:"] {
+        message.text = format!("Peer, {verb} exact terms");
+        assert!(message.optional_public().is_none());
+        assert_eq!(message.chat(), message.text);
+    }
+    message.text = "sell 2589x2; want 2595".into();
+    message.consent = true;
+    assert!(message.optional_public().is_none());
+}
+
+#[test]
 fn market_counter_reduces_useful_offer_without_inventing_goods_or_consent() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
     let (mut market, v) = fixture(&c, [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1]);
