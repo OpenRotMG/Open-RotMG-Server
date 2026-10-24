@@ -2032,6 +2032,62 @@ async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
     }
 }
 
+// Actor-awaiting handlers can starve a one-packet drain: https://docs.rs/tokio/1.53.2/tokio/macro.select.html#fairness
+fn outgoing_burst(
+    first: Packet,
+    rx: &mut mpsc::Receiver<Packet>,
+) -> impl Iterator<Item = (Packet, usize)> + '_ {
+    let ready = rx.len();
+    std::iter::once((first, ready + 1)).chain(
+        std::iter::from_fn(move || rx.try_recv().ok().map(|packet| (packet, rx.len() + 1)))
+            .take(ready),
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn cloud_volleys_drain_before_more_actor_work_without_buffering_or_starving_input() {
+    let (tx, mut rx) = mpsc::channel::<Packet>(64);
+    let packet = |id, body| Packet { id, body };
+    let mut written = Vec::new();
+    let mut expected = Vec::new();
+    for phase in 0..8 {
+        for cloud in 0..10 {
+            let body = vec![phase, cloud];
+            tx.try_send(packet(19, body.clone()))
+                .expect("cloud volleys filled the unchanged 64-packet output queue");
+            expected.push((19, body));
+        }
+        tx.try_send(packet(wire::NEW_TICK, vec![phase])).unwrap();
+        expected.push((wire::NEW_TICK, vec![phase]));
+        let first = rx.try_recv().unwrap();
+        written.extend(outgoing_burst(first, &mut rx).map(|(packet, _)| (packet.id, packet.body)));
+    }
+    assert_eq!(written, expected);
+    assert!(rx.is_empty());
+
+    for n in 1..=2 {
+        tx.try_send(packet(19, vec![n])).unwrap();
+    }
+    let first = rx.try_recv().unwrap();
+    let mut burst = outgoing_burst(first, &mut rx);
+    assert_eq!(tx.capacity(), 63);
+    tx.try_send(packet(19, vec![99])).unwrap();
+    assert_eq!(burst.next().unwrap().0.body, [1]);
+    assert_eq!(tx.capacity(), 62);
+    assert_eq!(burst.next().unwrap().0.body, [2]);
+    assert!(burst.next().is_none());
+    drop(burst);
+    assert_eq!(rx.try_recv().unwrap().body, [99]);
+    for _ in 0..64 {
+        tx.try_send(packet(19, vec![])).unwrap();
+    }
+    assert!(matches!(
+        tx.try_send(packet(19, vec![])),
+        Err(mpsc::error::TrySendError::Full(_))
+    ));
+}
+
 async fn connection_io<S, I>(
     mut wsout: S,
     wsin: I,
@@ -2208,18 +2264,22 @@ async fn connection_io<S, I>(
             _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{close_reason=CloseReason::Deadline;tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
             outgoing=rx.recv()=>{
                 let Some(packet)=outgoing else {break};
-                let reconnect=packet.id==39;
-                session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(rx.len()+1);
-                let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
-                let frame = codec.frame(packet.id,packet.body);
-                if let (Some(testing),Some(player),Some(nonce)) = (&a.testing,session.player,nonce) { testing.note_native_frame(nonce,player,&frame); }
-                let sending = std::time::Instant::now();
-                if send!(Message::Binary(frame.into())).is_err(){break;}
-                session.diagnostics.packets_out += 1;
-                session.diagnostics.last_socket_send=Some(std::time::Instant::now());
-                session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
-                // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
-                if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
+                for (packet, queued) in outgoing_burst(packet, &mut rx) {
+                    let reconnect=packet.id==39;
+                    session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
+                    let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
+                    let frame = codec.frame(packet.id,packet.body);
+                    if let (Some(testing),Some(player),Some(nonce)) = (&a.testing,session.player,nonce) { testing.note_native_frame(nonce,player,&frame); }
+                    let sending = std::time::Instant::now();
+                    if send!(Message::Binary(frame.into())).is_err(){break 'connection;}
+                    session.diagnostics.packets_out += 1;
+                    session.diagnostics.last_socket_send=Some(std::time::Instant::now());
+                    session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
+                    // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
+                    if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));break;}
+                    if (terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)) && deadline.is_elapsed()
+                        || testing_stop.as_ref().is_some_and(|stop| stop.borrow().is_some()) {break;}
+                }
             },
             _=ping.tick()=>{if session.account.is_some() && !a.world.clock.paused(){serial+=1;let mut o=Writer::new();o.i32(serial);
                 session.diagnostics.sent(serial);
