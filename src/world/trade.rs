@@ -16,7 +16,7 @@ pub(super) struct Trade {
 }
 pub struct TradePlan {
     pub transaction: String,
-    pub delivery: Option<Delivery>,
+    pub(crate) delivery: Option<Delivery>,
     key: i32,
     pub plans: [InventoryPlan; 2],
 }
