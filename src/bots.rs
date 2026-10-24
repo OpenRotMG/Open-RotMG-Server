@@ -1066,7 +1066,9 @@ impl Brain {
             .attend(v, content, &self.mind.cognition, inspecting);
         if self.agreement.is_none()
             && self.companion.is_none()
-            && let Some(marker) = self.crowd.destination(v, self.group.as_ref())
+            && let Some(marker) = self.crowd.destination(v, self.group.as_ref(), |position| {
+                !self.blocked.contains_key(&tile(position))
+            })
         {
             let distance = marker.position.distance(v.position);
             if distance > 7. {
