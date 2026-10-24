@@ -259,7 +259,8 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0x64b => (chase(1.), 12., 500, 3.),
         0x64f => (chase(7.), 15., 500, 10.),
         0x650 => (chase(1.), 10., 500, 10.),
-        0x651 | 0x654 => (chase(4.), 6., 1000, 12.),
+        0x651 => (chase(4.), 6., 1000, 10.),
+        0x654 => (chase(4.), 6., 1000, 12.),
         0x652 | 0xd05 => (Wander, 2., 1000, 12.),
         0x653 => (
             Protect {
@@ -643,4 +644,14 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn white_demon_does_not_inherit_medusas_longer_firing_radius() {
+        for (kind, range) in [(0x651, 10.), (0x654, 12.), (0x657, 12.), (0x659, 12.)] {
+            assert_eq!(super::profile(kind).unwrap().range, range, "{kind:#x}");
+        }
+    }
 }
