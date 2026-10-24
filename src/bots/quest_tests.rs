@@ -1,7 +1,7 @@
 use super::*;
 use crate::world::view::{Lifecycle, MapInfo, OwnCharacter, Session, VisibleObject};
 
-fn fixture() -> (Content, PlayerView) {
+pub(super) fn fixture() -> (Content, PlayerView) {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let geometry = crate::navigation::Geometry::new(
         (128, 128),

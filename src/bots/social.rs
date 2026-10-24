@@ -192,63 +192,51 @@ pub(super) async fn market(
         .clone()
         .filter(|_| v.elapsed_ms >= brain.mind.market.next_message_ms)
     {
-        let supported = if let Some(service) = &app.dialogue {
-            let intent = if message.consent {
-                dialogue::Intent::MarketAgree
-            } else if message.text.starts_with("sell ") {
-                dialogue::Intent::MarketAdvertise
-            } else if message.text.contains(", offer ") {
-                dialogue::Intent::MarketOffer
-            } else if message.text.contains(", counter ") {
-                dialogue::Intent::MarketCounter
-            } else {
-                dialogue::Intent::MarketRefuse
-            };
-            let payload = serde_json::json!({"allowed_intents":[intent],"policy_market_terms":message.text,"message":"Express only the supplied canonical policy terms. These are not received consent."});
-            let result = service
-                .ask(&payload, "market-policy")
-                .await
-                .and_then(|reply| dialogue::market_reply(reply, intent, &message.text));
-            service.completed(&result);
-            match result {
-                Ok(_) => true,
-                Err(error) => {
-                    tracing::error!(account=v.session.account,%error,"market language failed; no canned fallback");
-                    false
+        let text = message.chat();
+        let optional = message.optional_public().map(str::to_owned);
+        let id = v.session.player;
+        let received = app.world.clock.now();
+        let society = app.society.clone();
+        // Canonical transaction protocol cannot be paraphrased and must not wait on generation.
+        match app
+            .world
+            .directory(move |d| {
+                let world = d.location(id)?;
+                let now = d.tick * 50;
+                let mut state = society.lock().expect("adventure registry poisoned");
+                if let Some(body) = &optional
+                    && state.speech.repeated(world, now, body)
+                {
+                    return Ok(false);
                 }
+                d.chat(id, text, received)?;
+                if let Some(body) = optional {
+                    state.speech.record(world, now, &body);
+                }
+                Ok(true)
+            })
+            .await
+        {
+            Ok(true) => {
+                tracing::info!(account=v.session.account,channel=?message.channel,text=message.text,consent=message.consent,terms=?brain.mind.market.bargain,"canonical market policy terms published without generation");
+                brain.mind.market.published(&message);
+                brain.mind.market.next_message_ms = v.elapsed_ms + 1500;
             }
-        } else {
-            true
-        };
-        if supported {
-            let text = message.chat();
-            let id = v.session.player;
-            let received = app.world.clock.now();
-            match app
-                .world
-                .directory(move |d| d.chat(id, text, received))
-                .await
-            {
-                Ok(()) => {
-                    tracing::info!(account=v.session.account,channel=?message.channel,text=message.text,consent=message.consent,terms=?brain.mind.market.bargain,"market policy terms published");
-                    brain.mind.market.published(&message);
-                    brain.mind.market.next_message_ms = v.elapsed_ms + 1500;
-                }
-                Err(error) => {
-                    tracing::warn!(account=v.session.account,%error,"market message publication failed without agreement");
-                    brain.mind.market.outgoing = None;
-                    brain
-                        .mind
-                        .market
-                        .finish("communication_failed_remaining_balance_unenforced");
-                }
+            Ok(false) => {
+                tracing::info!(
+                    account = v.session.account,
+                    "optional market advertisement suppressed: recent public repeat"
+                );
+                brain.mind.market.outgoing = None;
             }
-        } else {
-            brain.mind.market.outgoing = None;
-            brain
-                .mind
-                .market
-                .finish("language_failed_remaining_balance_unenforced");
+            Err(error) => {
+                tracing::warn!(account=v.session.account,%error,"market message publication failed without agreement");
+                brain.mind.market.outgoing = None;
+                brain
+                    .mind
+                    .market
+                    .finish("communication_failed_remaining_balance_unenforced");
+            }
         }
     }
     if before != brain.mind {
