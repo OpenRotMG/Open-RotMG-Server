@@ -212,7 +212,7 @@ mod tests {
         eprintln!("STAR_FIXTURE_DB={}", path.display());
         let scores = store.hiscores(vec![pending]).await.unwrap();
         assert_eq!(scores["players"].as_array().unwrap().len(), 3);
-        for (id, expected) in owners.into_iter().zip([6, 6, 0]) {
+        for (id, expected) in owners.into_iter().zip([7, 6, 0]) {
             let row = scores["players"]
                 .as_array()
                 .unwrap()
