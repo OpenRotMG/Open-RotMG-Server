@@ -473,7 +473,8 @@ impl Life {
                 );
             }
         }
-        if v.character.level <= 5
+        if v.map.name != "Nexus"
+            && v.character.level <= 5
             && let Some(p) = v.objects.iter().find(|p| {
                 p.hp > 0
                     && p.account.is_some_and(|a| self.known(a))

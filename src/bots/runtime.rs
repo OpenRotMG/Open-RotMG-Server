@@ -711,11 +711,12 @@ async fn launch(
                             Err(error) => tracing::warn!(player=id,text,%error,"autonomous public call rejected"),
                         }
                     }
-                    if decision.goal != brain.goal {
+                    if !brain.decision_logged || decision.goal != brain.goal {
                         tracing::info!(account,character=view.session.character,world=view.session.world,player=id,name=profile.name,tick=view.tick,hp=view.character.hp,
                             experience=view.character.experience,x=view.position.x,y=view.position.y,
-                            cognition=%serde_json::to_string(&brain.mind.cognition)?,aim=?decision.aim,movement=?decision.movement,
+                            aim=?decision.aim,movement=?decision.movement,
                             goal=?decision.goal,"autonomous decision");
+                        brain.decision_logged = true;
                     }
                     brain.goal = decision.goal;
                     brain.destination = decision.movement;
