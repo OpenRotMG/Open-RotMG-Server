@@ -881,6 +881,7 @@ async fn refresh_giver_credits(a: &App, id: i32) -> Result<()> {
 }
 
 async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Character) -> Result<()> {
+    let account = snapshot.account;
     let reservation = snapshot.clone();
     let assists = a
         .world
@@ -894,13 +895,20 @@ async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Charac
         .await
         .context("progress persistence failed");
     lifecycle::stage(Stage::Publication);
-    a.world
+    let crossed_rank = a
+        .world
         .for_player(id)
         .call(move |w| {
+            let rank = w.class_quest_rank(id)?;
             w.committed(id, result)?;
-            w.finish_progress(id, snapshot)
+            w.finish_progress(id, snapshot)?;
+            Ok(w.class_quest_rank(id)? > rank)
         })
-        .await
+        .await?;
+    if crossed_rank {
+        gold::sync(a, account).await?;
+    }
+    Ok(())
 }
 
 async fn persist_death_inner(
@@ -1471,25 +1479,21 @@ async fn handle_inner(
             };
             let id = player.ok_or_else(|| lifecycle::protocol("chat before character"))?;
 
-            if let Some(command @ ("/bug" | "/bug-info")) = text.split_whitespace().next() {
-                let message = text.trim()[command.len()..].trim();
+            if text.split_whitespace().next() == Some("/bug") {
+                let message = text.trim()["/bug".len()..].trim();
                 let owner = account
                     .as_ref()
                     .context("authenticated session required")?
                     .id;
-                match diagnostics::report(
-                    a,
-                    owner,
-                    id,
-                    message,
-                    diagnostics,
-                    command == "/bug-info",
-                )
-                .await
-                {
-                    Ok(reply) => enqueue_reply(tx, crate::world::chat_info(reply))?,
+                match diagnostics::report(a, owner, id, message, diagnostics, None).await {
+                    Ok(_) => enqueue_reply(
+                        tx,
+                        crate::world::chat_info(
+                            "Bug report submitted, but bug reporting has moved ~ please use \"Report Bug\" at the bottom of the website instead!",
+                        ),
+                    )?,
                     Err(error) => {
-                        tracing::error!(account=owner, player=id, command, error=%error, "bug report failed");
+                        tracing::error!(account=owner, player=id, error=%error, "bug report failed");
                         enqueue_reply(
                             tx,
                             crate::world::chat_info(&format!("Could not save bug report: {error}")),
@@ -1568,6 +1572,57 @@ async fn handle_inner(
                 .await;
                 let reply = match result {
                     Ok(text) => crate::world::chat_info(text),
+                    Err(error) if lifecycle::rule_rejection(&error) => {
+                        lifecycle::stage(Stage::Rejected);
+                        crate::world::chat_error(&error.to_string())
+                    }
+                    Err(error) => return Err(error),
+                };
+                enqueue_reply(tx, reply)?;
+            } else if text
+                .split_whitespace()
+                .next()
+                .is_some_and(|s| s.eq_ignore_ascii_case("/swap"))
+            {
+                let result = async {
+                    crate::world::validate_chat(&text)?;
+                    a.world
+                        .directory(move |d| d.chat_permit(id, received))
+                        .await?;
+                    let owner = account.as_ref().context("authenticated session required")?;
+                    ensure!(
+                        owner.registered,
+                        lifecycle::controller("Register your account before swapping Fame.")
+                    );
+                    let fame = match text.split_whitespace().collect::<Vec<_>>()[..] {
+                        [_, amount] => amount.parse::<i32>().ok().filter(|f| *f > 0 && f % 2 == 0),
+                        _ => None,
+                    }
+                    .ok_or_else(|| {
+                        lifecycle::controller(
+                            "Usage: /swap <fame>. 2 Fame buys 1 Gold, so use an even amount.",
+                        )
+                    })?;
+                    let account = owner.id;
+                    let _gold = a.gold_updates.lock().await;
+                    lifecycle::stage(Stage::Store);
+                    let (fame_left, gold) = a.store.swap_fame(account, fame).await?;
+                    tracing::info!(account, fame, fame_left, gold, "fame swapped for gold");
+                    lifecycle::stage(Stage::Publication);
+                    a.world
+                        .for_player(id)
+                        .call(move |w| {
+                            let p = w.players.get_mut(&id).context("fame swap player missing")?;
+                            (p.presentation.fame, p.presentation.credits) = (fame_left, gold);
+                            Ok(())
+                        })
+                        .await?;
+                    lifecycle::stage(Stage::Settled);
+                    Ok::<_, anyhow::Error>(format!("Swapped {fame} Fame for {} Gold.", fame / 2))
+                }
+                .await;
+                let reply = match result {
+                    Ok(text) => crate::world::chat_info(&text),
                     Err(error) if lifecycle::rule_rejection(&error) => {
                         lifecycle::stage(Stage::Rejected);
                         crate::world::chat_error(&error.to_string())
@@ -2032,6 +2087,62 @@ async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
     }
 }
 
+// Actor-awaiting handlers can starve a one-packet drain: https://docs.rs/tokio/1.53.2/tokio/macro.select.html#fairness
+fn outgoing_burst(
+    first: Packet,
+    rx: &mut mpsc::Receiver<Packet>,
+) -> impl Iterator<Item = (Packet, usize)> + '_ {
+    let ready = rx.len();
+    std::iter::once((first, ready + 1)).chain(
+        std::iter::from_fn(move || rx.try_recv().ok().map(|packet| (packet, rx.len() + 1)))
+            .take(ready),
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn cloud_volleys_drain_before_more_actor_work_without_buffering_or_starving_input() {
+    let (tx, mut rx) = mpsc::channel::<Packet>(64);
+    let packet = |id, body| Packet { id, body };
+    let mut written = Vec::new();
+    let mut expected = Vec::new();
+    for phase in 0..8 {
+        for cloud in 0..10 {
+            let body = vec![phase, cloud];
+            tx.try_send(packet(19, body.clone()))
+                .expect("cloud volleys filled the unchanged 64-packet output queue");
+            expected.push((19, body));
+        }
+        tx.try_send(packet(wire::NEW_TICK, vec![phase])).unwrap();
+        expected.push((wire::NEW_TICK, vec![phase]));
+        let first = rx.try_recv().unwrap();
+        written.extend(outgoing_burst(first, &mut rx).map(|(packet, _)| (packet.id, packet.body)));
+    }
+    assert_eq!(written, expected);
+    assert!(rx.is_empty());
+
+    for n in 1..=2 {
+        tx.try_send(packet(19, vec![n])).unwrap();
+    }
+    let first = rx.try_recv().unwrap();
+    let mut burst = outgoing_burst(first, &mut rx);
+    assert_eq!(tx.capacity(), 63);
+    tx.try_send(packet(19, vec![99])).unwrap();
+    assert_eq!(burst.next().unwrap().0.body, [1]);
+    assert_eq!(tx.capacity(), 62);
+    assert_eq!(burst.next().unwrap().0.body, [2]);
+    assert!(burst.next().is_none());
+    drop(burst);
+    assert_eq!(rx.try_recv().unwrap().body, [99]);
+    for _ in 0..64 {
+        tx.try_send(packet(19, vec![])).unwrap();
+    }
+    assert!(matches!(
+        tx.try_send(packet(19, vec![])),
+        Err(mpsc::error::TrySendError::Full(_))
+    ));
+}
+
 async fn connection_io<S, I>(
     mut wsout: S,
     wsin: I,
@@ -2062,6 +2173,10 @@ async fn connection_io<S, I>(
         ..Session::default()
     };
     session.diagnostics.user_agent = user_agent;
+    let (report_sender, mut report_requests) = mpsc::channel(1);
+    if let Some(browser) = &browser {
+        browser.lock().expect("browser poisoned").reports = Some(report_sender);
+    }
     session.diagnostics.browser = browser;
     let mut reconnect_sent = false;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -2108,6 +2223,7 @@ async fn connection_io<S, I>(
             break;
         }
         tokio::select! {
+            Some(request) = report_requests.recv() => diagnostics::from_session(&a, &session, request).await,
             _=async { match testing_stop.as_mut() { Some(stop) => { if stop.borrow().is_none() { let _ = stop.changed().await; } }, None => std::future::pending::<()>().await } } => {
                 let player=session.player;
                 let terminal=a.world.directory(move |d|Ok(d.worlds.values().flat_map(|w|w.players.iter()).any(|(id,p)|Some(*id)==player && (!p.character.alive || p.death_pending)))).await;
@@ -2208,18 +2324,22 @@ async fn connection_io<S, I>(
             _=&mut deadline,if terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)=>{close_reason=CloseReason::Deadline;tracing::warn!(reconnecting=session.reconnecting,reconnect_sent,terminal_drain,"game selection, reconnect-close or terminal-drain deadline exceeded");break;},
             outgoing=rx.recv()=>{
                 let Some(packet)=outgoing else {break};
-                let reconnect=packet.id==39;
-                session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(rx.len()+1);
-                let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
-                let frame = codec.frame(packet.id,packet.body);
-                if let (Some(testing),Some(player),Some(nonce)) = (&a.testing,session.player,nonce) { testing.note_native_frame(nonce,player,&frame); }
-                let sending = std::time::Instant::now();
-                if send!(Message::Binary(frame.into())).is_err(){break;}
-                session.diagnostics.packets_out += 1;
-                session.diagnostics.last_socket_send=Some(std::time::Instant::now());
-                session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
-                // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
-                if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
+                for (packet, queued) in outgoing_burst(packet, &mut rx) {
+                    let reconnect=packet.id==39;
+                    session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
+                    let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
+                    let frame = codec.frame(packet.id,packet.body);
+                    if let (Some(testing),Some(player),Some(nonce)) = (&a.testing,session.player,nonce) { testing.note_native_frame(nonce,player,&frame); }
+                    let sending = std::time::Instant::now();
+                    if send!(Message::Binary(frame.into())).is_err(){break 'connection;}
+                    session.diagnostics.packets_out += 1;
+                    session.diagnostics.last_socket_send=Some(std::time::Instant::now());
+                    session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
+                    // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
+                    if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));break;}
+                    if (terminal_drain || session.player.is_none() && (!session.reconnecting || reconnect_sent)) && deadline.is_elapsed()
+                        || testing_stop.as_ref().is_some_and(|stop| stop.borrow().is_some()) {break;}
+                }
             },
             _=ping.tick()=>{if session.account.is_some() && !a.world.clock.paused(){serial+=1;let mut o=Writer::new();o.i32(serial);
                 session.diagnostics.sent(serial);
@@ -2858,6 +2978,14 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route(
             "/api/bug-reports/{id}/diagnostics.json",
             get(diagnostics::attachment),
+        )
+        .route(
+            "/api/diagnostics/{key}/report",
+            post(diagnostics::submit).layer(DefaultBodyLimit::max(1_500_000)),
+        )
+        .route(
+            "/api/bug-reports/{id}/screenshot.png",
+            get(diagnostics::screenshot),
         )
         .route("/internal/discord/bugs", get(diagnostics::pending))
         .route("/internal/discord/bugs/{id}", post(diagnostics::receipt))

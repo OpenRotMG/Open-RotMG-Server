@@ -736,13 +736,22 @@ impl Directory {
 }
 impl World {
     pub(super) fn populate_realm_heroes(&mut self) -> Result<()> {
-        for (kind, terrains) in [(HEROES[0], &[1][..]), (HEROES[1], &[3, 4][..])] {
-            for _ in 0..3 {
-                let pos = self.place_named_setpiece(kind, terrains)?;
-                self.spawn_entity(kind, pos, vec![])?;
-            }
-            tracing::info!(kind, "three finite landmark heroes placed");
+        // GPL-3.0 requested counts, not authenticated 123.5.1 density (data/REALM-SRC-LICENSE):
+        // https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+        // Unlike its 50-attempt skips, our protected allocator fulfills requests or errors.
+        for (kind, terrains, range) in [(HEROES[0], &[1][..], 3..5), (HEROES[1], &[3, 4][..], 4..7)]
+        {
+            let count = self.rng.gen_range(range);
+            self.populate_landmark_heroes(kind, terrains, count)?;
         }
+        Ok(())
+    }
+    fn populate_landmark_heroes(&mut self, kind: u16, terrains: &[u8], count: usize) -> Result<()> {
+        for _ in 0..count {
+            let pos = self.place_named_setpiece(kind, terrains)?;
+            self.spawn_entity(kind, pos, vec![])?;
+        }
+        tracing::info!(kind, count, "finite landmark heroes placed");
         Ok(())
     }
     pub(super) fn hero_identities(&self) -> BTreeSet<i32> {
@@ -982,5 +991,52 @@ impl World {
 
     pub(super) fn oryx_notice(&self, text: &str) {
         self.broadcast_text("#Oryx the Mad God", text);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn landmark_hero_boundaries_fit_published_layouts() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for source in crate::terrain::realms::sources(data).unwrap() {
+        for counts in [[3, 4], [4, 6]] {
+            let mut world = World::new(content.clone(), source.open(&content).unwrap()).unwrap();
+            world.realm_layout = Some(source.name().to_owned());
+            world.rng = rand::rngs::StdRng::seed_from_u64(12351);
+            for (kind, terrains, count) in [
+                (HEROES[0], &[1][..], counts[0]),
+                (HEROES[1], &[3, 4][..], counts[1]),
+            ] {
+                world
+                    .populate_landmark_heroes(kind, terrains, count)
+                    .unwrap();
+                assert_eq!(
+                    world.entities.values().filter(|e| e.kind == kind).count(),
+                    count,
+                    "{}: {kind:#x}",
+                    source.name()
+                );
+            }
+            let ids = world.hero_identities();
+            assert_eq!(ids.len(), counts.iter().sum::<usize>());
+            for id in &ids {
+                let e = &world.entities[id];
+                assert!(e.published && e.hp > 0 && e.quest.is_none() && e.camp.is_none());
+                assert!(
+                    ids.iter()
+                        .filter(|other| *other != id)
+                        .all(|other| e.pos.distance(world.entities[other].pos) >= 32.)
+                );
+            }
+            let mut cycle = RealmCycle::new(ids.clone()).unwrap();
+            for id in ids {
+                assert!(cycle.defeated(id, 1000));
+                assert!(!cycle.defeated(id, 1000));
+            }
+            assert!(
+                matches!(cycle.stage, RealmStage::Closing { deadline } if deadline == 1000 + crate::endgame::CLOSE_DELAY_MS)
+            );
+        }
     }
 }

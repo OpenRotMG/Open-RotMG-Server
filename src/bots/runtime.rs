@@ -570,6 +570,7 @@ async fn launch(
                         } else { None };
                         if let Some(reason) = reason { dialogue::end_agreement(&app, &mut brain, reason).await; }
                     }
+                    brain.crowd.observe(&view, &app.content);
                     while let Some((packet, received_view)) = deferred_market.take().or_else(||output.try_recv().ok().map(|p|(p,view.clone()))) {
                         if packet.id == crate::wire::GOTO {
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
@@ -577,6 +578,7 @@ async fn launch(
                         }
                         let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.player_view(id).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
+                        brain.crowd.receive(&packet, social_view, &app.content)?;
                         let event_before = brain.mind.events.clone();
                         brain.mind.events.receive(&packet, social_view, profile.name)?;
                         if brain.mind.events != event_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
@@ -592,11 +594,13 @@ async fn launch(
                         if let Some(service) = &app.dialogue
                             && let Some(request) = brain.dialogue_request(&packet, &view, &app.content)?
                         {
+                            // A rate-limited correction must still invalidate the older promise.
+                            dialogue::supersede(&mut pending, &request);
                             if pending.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
-                                dialogue::failed(&app, request.speaker, "busy", "busy").await;
+                                dialogue::failed(&app, &request, "busy", "busy").await;
                             } else {
                                 last_dialogue = Some(std::time::Instant::now());
-                                pending = Some(dialogue::Pending::start(service.clone(), request));
+                                pending = Some(dialogue::Pending::start(Some(service.clone()), request, profile));
                             }
                             continue;
                         }
@@ -613,14 +617,7 @@ async fn launch(
                         let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
                         if let Some(plan)=plan {
                             let request=brain.adventure_request(plan,&view,&app.content)?;
-                            if let Some(service)=&app.dialogue {pending=Some(dialogue::Pending::start(service.clone(),request));}
-                            else {
-                                let intent:dialogue::Intent=serde_json::from_value(request.payload["allowed_intents"][0].clone())?;
-                                let reply=adventures::policy_reply(&request,intent)?;
-                                if let Err(error)=dialogue::publish(&app,&mut brain,&request,&reply,&view).await {
-                                    tracing::warn!(account,%error,"autonomous policy invitation rejected");
-                                }
-                            }
+                            pending=Some(dialogue::Pending::start(app.dialogue.clone(),request,profile));
                         }
                     }
                     if pending.as_ref().is_some_and(|p| p.task.is_finished()) {
@@ -636,16 +633,17 @@ async fn launch(
                             Ok(reply) => {
                                 let validation = dialogue::publish(&app,&mut brain,&completed.request,&reply,&view).await;
                                 match validation {
-                                    Ok(()) => {
+                                    Ok(true) => {
                                         tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,intent=?reply.intent,"bot dialogue intention applied");
                                     }
+                                    Ok(false) => {}
                                     Err(error) => {
                                         tracing::error!(request=%completed.id,player=id,%error,"bot dialogue intention rejected");
-                                        dialogue::failed(&app, completed.request.speaker, &completed.id, "rejected").await;
+                                        dialogue::failed(&app, &completed.request, &completed.id, "rejected").await;
                                     }
                                 }
                             }
-                            Err(error) => dialogue::failed(&app, completed.request.speaker, &completed.id, error.0).await,
+                            Err(error) => dialogue::failed(&app, &completed.request, &completed.id, error.0).await,
                         }
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
@@ -716,11 +714,12 @@ async fn launch(
                             Err(error) => tracing::warn!(player=id,text,%error,"autonomous public call rejected"),
                         }
                     }
-                    if decision.goal != brain.goal {
+                    if !brain.decision_logged || decision.goal != brain.goal {
                         tracing::info!(account,character=view.session.character,world=view.session.world,player=id,name=profile.name,tick=view.tick,hp=view.character.hp,
                             experience=view.character.experience,x=view.position.x,y=view.position.y,
-                            cognition=%serde_json::to_string(&brain.mind.cognition)?,aim=?decision.aim,movement=?decision.movement,
+                            aim=?decision.aim,movement=?decision.movement,
                             goal=?decision.goal,"autonomous decision");
+                        brain.decision_logged = true;
                     }
                     brain.goal = decision.goal;
                     brain.destination = decision.movement;

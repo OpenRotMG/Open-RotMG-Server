@@ -14,7 +14,7 @@ fn community_schema17_migrates_canonical15_and16_without_recreating_committed_fe
             assert_eq!(
                 db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
                     .unwrap(),
-                17
+                18
             );
             if version == 16 {
                 db.pragma_update(None, "user_version", 16).unwrap();
@@ -38,7 +38,7 @@ fn community_schema17_migrates_canonical15_and16_without_recreating_committed_fe
             assert_eq!(
                 db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
                     .unwrap(),
-                17
+                18
             );
             for table in ["bot_minds", "trade_transactions"] {
                 assert!(
@@ -190,14 +190,14 @@ async fn community_schema17_migrates_canonical16_and_committed_reopen_preserves_
     assert_eq!(canonical_schema_rows(&db), before);
     assert_eq!(feature_rows(&db), features);
     drop(reopened);
-    db.execute_batch("PRAGMA user_version=18").unwrap();
+    db.execute_batch("PRAGMA user_version=19").unwrap();
     let bytes = std::fs::read(&path).unwrap();
     assert!(
         Store::open(&path, &content)
             .err()
             .unwrap()
             .to_string()
-            .contains("unsupported game database schema 18")
+            .contains("unsupported game database schema 19")
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }
@@ -222,7 +222,7 @@ async fn community_schema17_upgrades_fresh_canonical13_and14_with_owned_vault_ro
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
                 .unwrap(),
-            17
+            18
         );
         assert_eq!(canonical_schema_rows(&db), before);
         assert_eq!(migrated.vaults(account).await.unwrap().len(), 2);

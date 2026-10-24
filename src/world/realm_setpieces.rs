@@ -1,5 +1,5 @@
 // GPL-3.0 reference; data/REALM-SRC-LICENSE: moistosaurus/realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff
-// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
+// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,Sphinx,Temple,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -32,10 +32,16 @@ impl Area {
             || other.y + other.height + 2 <= self.y
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum GroundWrite {
+    Keep,
+    Set(u8),
+}
 struct Piece {
     width: usize,
     height: usize,
     cells: Vec<u8>,
+    temple_ground: Vec<GroundWrite>,
     boss: (usize, usize),
 }
 impl Piece {
@@ -44,6 +50,7 @@ impl Piece {
             width,
             height,
             cells: vec![0; width * height],
+            temple_ground: Vec::new(),
             boss: (width / 2, height / 2),
         }
     }
@@ -52,9 +59,17 @@ impl Piece {
     }
     fn rotate(self) -> Self {
         let mut out = Self::new(self.height, self.width);
+        if !self.temple_ground.is_empty() {
+            assert_eq!(self.temple_ground.len(), self.cells.len());
+            out.temple_ground = vec![GroundWrite::Keep; self.cells.len()];
+        }
         for y in 0..self.height {
             for x in 0..self.width {
                 out.set(self.height - 1 - y, x, self.cells[y * self.width + x]);
+                if !self.temple_ground.is_empty() {
+                    out.temple_ground[x * out.width + self.height - 1 - y] =
+                        self.temple_ground[y * self.width + x];
+                }
             }
         }
         out.boss = (self.height - 1 - self.boss.1, self.boss.0);
@@ -62,7 +77,6 @@ impl Piece {
     }
     fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
         let mut p = match kind {
-            // Arena measurements: trapped/rotmg_svr@593e490, realm/setpieces/Sphinx.cs; the center motif is reconstructed.
             crate::dungeon::tomb::SPHINX => {
                 let mut p = Self::new(81, 81);
                 for y in 0..81 {
@@ -70,7 +84,25 @@ impl Piece {
                         let dx = x as f32 - 40.;
                         let dy = y as f32 - 40.;
                         if dx.hypot(dy) + rng.gen_range(-2.0..2.0) <= 35. {
-                            p.set(x, y, if dx.abs() + dy.abs() <= 10. { 2 } else { 1 });
+                            p.set(x, y, 1);
+                        }
+                    }
+                }
+                let center = [
+                    0x1ffff_u32,
+                    0x7ffc,
+                    0x1ff0,
+                    0x3ff8,
+                    0x3ff8,
+                    0x3bb8,
+                    0x380,
+                    0x100,
+                    0x100,
+                ];
+                for y in 0_usize..17 {
+                    for x in 0..17 {
+                        if center[y.abs_diff(8)] & (1 << x) != 0 {
+                            p.set(32 + x, 32 + y, 2);
                         }
                     }
                 }
@@ -170,7 +202,18 @@ impl Piece {
                         }
                     }
                 }
-                if rng.gen_bool(0.5) {
+                // Temple.cs writes objects over independent ground, including deliberately unwritten holes.
+                p.temple_ground = p
+                    .cells
+                    .iter()
+                    .map(|mark| match mark {
+                        0 => GroundWrite::Keep,
+                        1 => GroundWrite::Set(0xc5),
+                        5 => GroundWrite::Set(0x56),
+                        _ => unreachable!("invalid Temple ground marker"),
+                    })
+                    .collect();
+                let bas = if rng.gen_bool(0.5) {
                     for n in 0..20 {
                         p.set(17 + n, 17, if n == 19 { 3 } else { 2 });
                         p.set(17 + n, 18, 3);
@@ -199,6 +242,7 @@ impl Piece {
                     ] {
                         p.set(x, y, 4);
                     }
+                    17
                 } else {
                     for n in 0..23 {
                         if (10..=12).contains(&n) {
@@ -221,11 +265,15 @@ impl Piece {
                         }
                     }
                     p.boss = (27, 27);
-                }
-                for y in 6..54 {
-                    for x in 6..54 {
+                    16
+                };
+                for y in 0..60 {
+                    for x in 0..60 {
                         if p.cells[y * 60 + x] == 5
-                            && (!(17..=43).contains(&x) || !(17..=43).contains(&y))
+                            && ((x > 5 && x < bas)
+                                || (x < 55 && x > 60 - bas)
+                                || (y > 5 && y < bas)
+                                || (y < 55 && y > 60 - bas))
                         {
                             let r: f32 = rng.r#gen();
                             if r > 0.33 {
@@ -382,11 +430,13 @@ impl Piece {
                     }
                 }
                 border.shuffle(rng);
-                // Cardinal approaches must stay clear rather than seal the island with palms.
-                for &(x, y) in border.iter().take(border.len().div_ceil(2)) {
-                    if x != 15 && y != 15 {
-                        p.set(x, y, 3);
-                    }
+                // Keep cardinal approaches open without underplanting the reference's half-border count.
+                for &(x, y) in border
+                    .iter()
+                    .filter(|&&(x, y)| x != 15 && y != 15)
+                    .take(border.len().div_ceil(2))
+                {
+                    p.set(x, y, 3);
                 }
                 p
             }
@@ -567,8 +617,14 @@ impl Piece {
         if kind == 0x668 {
             p.boss = (20, 20);
         }
-        if !matches!(kind, 0x935 | 0xd59 | 0xd50 | 0xe37) {
+        if !matches!(
+            kind,
+            0x935 | 0xd59 | 0xd50 | 0xe37 | crate::dungeon::tomb::SPHINX
+        ) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
+            if kind == 0xdc2 {
+                p.temple_ground[p.boss.1 * p.width + p.boss.0] = GroundWrite::Set(0xc5);
+            }
         }
         p
     }
@@ -745,6 +801,18 @@ impl World {
             )
         );
         let piece = Piece::build(kind, &mut self.rng);
+        ensure!(
+            kind != 0xdc2 || piece.temple_ground.len() == piece.cells.len(),
+            "Temple ground plane is incomplete"
+        );
+        for write in &piece.temple_ground {
+            if let GroundWrite::Set(ground) = write {
+                ensure!(
+                    self.content.grounds.contains_key(ground),
+                    "Temple missing selected ground {ground:#x}"
+                );
+            }
+        }
         for mark in piece.cells.iter().copied().filter(|m| *m != 0) {
             let (ground, object) = Piece::tile(kind, mark);
             ensure!(
@@ -871,7 +939,14 @@ impl World {
                     self.remove_entity(id);
                 }
                 let cell = &mut Arc::make_mut(&mut self.map).cells[index];
-                cell.ground = ground;
+                cell.ground = if kind == 0xdc2 {
+                    match piece.temple_ground[y * piece.width + x] {
+                        GroundWrite::Keep => cell.ground,
+                        GroundWrite::Set(ground) => ground,
+                    }
+                } else {
+                    ground
+                };
                 cell.object = object;
                 cell.config.clear();
                 let connection = (object == Some(crate::dungeon::tomb::WALL)).then(|| {
@@ -937,6 +1012,219 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temple_masonry_can_retain_dark_grass_underlay() {
+        let data = std::path::Path::new("data");
+        let content = Arc::new(Content::load(data).unwrap());
+        let source = crate::terrain::realms::sources(data).unwrap().remove(0);
+        let mut world = World::new(content.clone(), source.open(&content).unwrap()).unwrap();
+        world.realm_layout = Some(source.name().to_owned());
+        world.rng = rand::rngs::StdRng::seed_from_u64(12351);
+        let original = world.map.clone();
+        let plan = Piece::build(0xdc2, &mut world.rng.clone());
+        world.place_named_setpiece(0xdc2, &[6, 7]).unwrap();
+        let area = world.setpieces.last().unwrap();
+        let mut kept_under_objects = 0;
+        let mut plant_kinds = BTreeSet::new();
+        for (i, mark) in plan.cells.iter().copied().enumerate() {
+            let (x, y) = (
+                area.x + (i % plan.width) as i32,
+                area.y + (i / plan.width) as i32,
+            );
+            let before = original.cell(x as f32, y as f32).unwrap();
+            let after = world.map.cell(x as f32, y as f32).unwrap();
+            assert_eq!(
+                (after.terrain, after.region),
+                (before.terrain, before.region)
+            );
+            if mark == 0 {
+                assert_eq!(
+                    (after.ground, after.object, &after.config),
+                    (before.ground, before.object, &before.config)
+                );
+                assert_eq!(plan.temple_ground[i], GroundWrite::Keep);
+                continue;
+            }
+            let expected = match plan.temple_ground[i] {
+                GroundWrite::Keep => {
+                    kept_under_objects += 1;
+                    before.ground
+                }
+                GroundWrite::Set(ground) => ground,
+            };
+            assert_eq!(after.ground, expected);
+            assert_eq!(after.object, Piece::tile(0xdc2, mark).1);
+            assert!(after.config.is_empty());
+            if let Some(kind) = after.object {
+                let pos = Pos {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                };
+                let index = y as usize * world.map.width as usize + x as usize;
+                assert!(
+                    world
+                        .cells
+                        .ids(index)
+                        .iter()
+                        .any(|id| world.entities[id].kind == kind && world.entities[id].published)
+                );
+                if matches!(kind, 0x1f2..=0x1f4) {
+                    assert!(!world.walkable(pos));
+                }
+                if matches!(kind, 0xdd4 | 0xdd5 | 0xdda) {
+                    plant_kinds.insert(kind);
+                    assert_eq!(after.ground, 0x56);
+                    assert_eq!(world.walkable(pos), kind != 0xdda);
+                }
+            }
+        }
+        assert_eq!(plant_kinds, BTreeSet::from([0xdd4, 0xdd5, 0xdda]));
+        assert!(kept_under_objects > 0);
+        assert!(!Arc::ptr_eq(&original, &world.map));
+        let grass_under_masonry = (area.y..area.y + area.height)
+            .flat_map(|y| (area.x..area.x + area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let cell = world.map.cell(x as f32, y as f32).unwrap();
+                cell.ground == 0x56 && matches!(cell.object, Some(0x1f2..=0x1f4))
+            })
+            .count();
+        assert!(
+            grass_under_masonry > 0,
+            "Temple objects must not manufacture floor beneath every wall and column"
+        );
+    }
+
+    #[test]
+    fn temple_plants_use_variant_strips_without_clipping_the_other_axis() {
+        let mut witnessed = BTreeSet::new();
+        for seed in 0..16 {
+            let mut p = Piece::build(0xdc2, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            let (bas, anchor) = match p.cells.iter().filter(|&&mark| mark == 4).count() {
+                8 => (17, 30),
+                16 => (16, 27),
+                count => panic!("unexpected Temple column count {count}"),
+            };
+            for _ in 0..4 {
+                if p.boss == (anchor, anchor) {
+                    break;
+                }
+                p = p.rotate();
+            }
+            assert_eq!(p.boss, (anchor, anchor));
+            for (i, &mark) in p
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, mark)| matches!(**mark, 6..=8))
+            {
+                let (x, y) = (i % 60, i / 60);
+                assert!(
+                    (x > 5 && x < bas)
+                        || (x < 55 && x > 60 - bas)
+                        || (y > 5 && y < bas)
+                        || (y < 55 && y > 60 - bas),
+                    "seed {seed}, bas {bas}: forbidden plant at {x},{y}"
+                );
+                assert_eq!(p.temple_ground[i], GroundWrite::Set(0x56));
+                assert!(matches!(
+                    Piece::tile(0xdc2, mark).1,
+                    Some(0xdd4 | 0xdd5 | 0xdda)
+                ));
+                if x == 54 || y == 54 {
+                    witnessed.insert((bas, 1));
+                }
+                if !(6..=54).contains(&x) || !(6..=54).contains(&y) {
+                    witnessed.insert((bas, 2));
+                }
+            }
+        }
+        assert_eq!(
+            witnessed,
+            BTreeSet::from([(16, 1), (16, 2), (17, 1), (17, 2)])
+        );
+    }
+
+    #[test]
+    fn temple_ground_and_objects_rotate_together_without_filling_holes() {
+        let mut roles = BTreeSet::new();
+        let mut variants = BTreeSet::new();
+        for seed in 0..16 {
+            let mut p = Piece::build(0xdc2, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            variants.insert(p.cells.iter().filter(|&&mark| mark == 4).count());
+            for _ in 0..4 {
+                assert_eq!(p.temple_ground.len(), p.cells.len());
+                assert_eq!(
+                    p.temple_ground[p.boss.1 * p.width + p.boss.0],
+                    GroundWrite::Set(0xc5)
+                );
+                for (i, &mark) in p.cells.iter().enumerate() {
+                    if mark == 0 {
+                        assert_eq!(p.temple_ground[i], GroundWrite::Keep);
+                    }
+                    if matches!(mark, 2..=4) {
+                        let ground = match p.temple_ground[i] {
+                            GroundWrite::Keep => 0,
+                            GroundWrite::Set(0xc5) => 1,
+                            GroundWrite::Set(0x56) => 2,
+                            _ => panic!("unexpected Temple ground"),
+                        };
+                        roles.insert((mark, ground));
+                    }
+                }
+                let before_cells = p.cells.clone();
+                let before_ground = p.temple_ground.clone();
+                p = p.rotate();
+                for y in 0..60 {
+                    for x in 0..60 {
+                        let rotated = x * 60 + 59 - y;
+                        assert_eq!(p.cells[rotated], before_cells[y * 60 + x]);
+                        assert_eq!(p.temple_ground[rotated], before_ground[y * 60 + x]);
+                    }
+                }
+            }
+        }
+        assert_eq!(variants, BTreeSet::from([8, 16]));
+        assert_eq!(
+            roles,
+            (2..=4)
+                .flat_map(|mark| (0..3).map(move |ground| (mark, ground)))
+                .collect()
+        );
+    }
+
+    #[test]
+    fn oasis_keeps_forty_palms_and_clear_cardinal_approaches() {
+        for seed in 0..16 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let p = Piece::build(0x678, &mut rng);
+            assert_eq!((p.width, p.height, p.boss), (30, 30, (15, 15)));
+            assert_eq!(
+                p.cells.iter().filter(|&&mark| mark == 3).count(),
+                40,
+                "seed {seed}"
+            );
+            for (i, &mark) in p.cells.iter().enumerate() {
+                let (x, y) = ((i % p.width) as i32 - 15, (i / p.width) as i32 - 15);
+                let r2 = x * x + y * y;
+                if mark == 3 {
+                    assert!(x != 0 && y != 0 && ((81 < r2 && r2 <= 100) || (4 < r2 && r2 <= 9)));
+                    assert_eq!(Piece::tile(0x678, mark), (0x46, Some(0x18e)));
+                } else {
+                    assert_eq!(
+                        mark,
+                        if r2 > 169 {
+                            0
+                        } else if 9 < r2 && r2 <= 100 {
+                            2
+                        } else {
+                            1
+                        }
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn kage_cover_reaches_the_graves_without_sealing_their_approaches() {

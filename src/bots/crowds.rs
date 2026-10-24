@@ -1,11 +1,14 @@
 use super::*;
 use crate::world::view::PlayerMarker;
+mod cooperation;
+pub(super) use cooperation::available as cooperative_available;
 
 pub(super) struct Crowd {
     pub knows_minimap: bool,
     contacts: BTreeMap<i32, (PlayerMarker, u64)>,
     approaching: Option<(i32, i32)>,
     completed: BTreeSet<(i32, i32)>,
+    cooperation: cooperation::Cooperation,
 }
 impl Crowd {
     pub fn new(knows_minimap: bool) -> Self {
@@ -14,7 +17,63 @@ impl Crowd {
             contacts: BTreeMap::new(),
             approaching: None,
             completed: BTreeSet::new(),
+            cooperation: cooperation::Cooperation::default(),
         }
+    }
+    pub fn observe(&mut self, v: &PlayerView, content: &Content) {
+        self.cooperation.observe(
+            cooperation::binding(v),
+            v.elapsed_ms,
+            v.objects
+                .iter()
+                .filter(|p| content.objects[&p.kind].enemy)
+                .map(|p| (p.id, p.kind)),
+        );
+        self.cooperation
+            .company(v.elapsed_ms, |peer| cooperation::visible(v, peer), |_| true);
+    }
+    pub fn receive(&mut self, packet: &Packet, v: &PlayerView, content: &Content) -> Result<()> {
+        self.cooperation.receive(
+            packet,
+            cooperation::binding(v),
+            v.elapsed_ms,
+            |id| {
+                v.objects
+                    .iter()
+                    .find(|p| p.id == id && content.objects[&p.kind].enemy)
+                    .map(|p| p.kind)
+            },
+            |id| {
+                v.objects
+                    .iter()
+                    .find(|p| p.id == id && p.hp > 0)
+                    .and_then(|p| p.account)
+            },
+        )
+    }
+    pub fn cooperator(
+        &mut self,
+        v: &PlayerView,
+        eligible: impl Fn(Pos) -> bool,
+    ) -> Option<PlayerMarker> {
+        let ((id, account), position) = self.cooperation.company(
+            v.elapsed_ms,
+            |peer| cooperation::visible(v, peer),
+            eligible,
+        )?;
+        let name = v
+            .objects
+            .iter()
+            .find(|p| p.id == id)
+            .expect("validated cooperative peer missing")
+            .name
+            .clone();
+        Some(PlayerMarker {
+            id,
+            account,
+            position,
+            name,
+        })
     }
     pub fn len(&self) -> usize {
         self.contacts.len()

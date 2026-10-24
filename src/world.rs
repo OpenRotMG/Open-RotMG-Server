@@ -331,7 +331,7 @@ pub struct Player {
     pub tx: Option<Output>,
     pub departing: bool,
     account_lists: AccountLists,
-    presentation: AccountPresentation,
+    pub(crate) presentation: AccountPresentation,
     paused: bool,
     pub(crate) controller: Controller,
     pub(crate) native_update_acked: bool,
@@ -1000,8 +1000,8 @@ impl Directory {
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        // The fixture must fit both finite 65-tile graveyards alongside the other setpieces.
-        let map = Arc::new(crate::terrain::generate(&content, seed, 768)?);
+        // Restored Grove populations need room alongside both finite 65-tile graveyards.
+        let map = Arc::new(crate::terrain::generate(&content, seed, 1024)?);
         Self::configured(
             path,
             content,
@@ -1011,6 +1011,7 @@ impl Directory {
             vec![crate::terrain::realms::Source::Fixture(map)],
             2,
         )
+        .with_context(|| format!("test Realm fixture map/layout seed {seed}"))
     }
     pub fn with_seed(
         path: &std::path::Path,
@@ -1215,6 +1216,19 @@ impl Directory {
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
         world.new_tick_at = self.clock.now();
+        #[cfg(test)]
+        if layout.is_some_and(|index| {
+            matches!(
+                &self.realms[index],
+                crate::terrain::realms::Source::Fixture(_)
+            )
+        }) {
+            // Reproduce fixture populations without granting prepared-world authority or consuming layout RNG.
+            let seed = self.realm_rng.clone().r#gen::<u64>();
+            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
+            tracing::debug!(seed, "test Realm population seeded");
+        }
         if let Some(seed) = self.prepared_seed {
             let seed = seed ^ self.next_world as u64;
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -2588,13 +2602,22 @@ impl Handle {
     }
 }
 pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
+    let packet_bytes = body.len();
     if let Some(tx) = &p.tx
-        && tx.packets.try_send(Packet { id, body }).is_err()
+        && let Err(error) = tx.packets.try_send(Packet { id, body })
     {
         tx.lost.send_replace(true);
+        let queue_state = match error {
+            mpsc::error::TrySendError::Full(_) => "full",
+            mpsc::error::TrySendError::Closed(_) => "closed",
+        };
         tracing::warn!(
             character = p.character.id,
-            "slow/closed connection; packet queue full"
+            packet = id,
+            packet_bytes,
+            queue_state,
+            queue_capacity = tx.packets.max_capacity(),
+            "outbound game packet rejected; closing connection"
         );
     }
 }
@@ -5125,6 +5148,14 @@ impl World {
         p.validate_progress_reservation(snapshot)?;
         Ok(p.level_assists_prepared.clone())
     }
+    pub(crate) fn class_quest_rank(&self, id: i32) -> Result<i32> {
+        let player = self
+            .players
+            .get(&id)
+            .context("class-quest rank player missing")?;
+        Ok(player.presentation.stars() / self.content.classes.len() as i32)
+    }
+
     pub fn finish_progress(&mut self, id: i32, snapshot: Character) -> Result<()> {
         let p = self
             .players
@@ -7161,6 +7192,91 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod dungeon_return_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
+#[cfg(test)]
+mod sphinx_site_tests;
 
 #[cfg(test)]
 impl World {}
+
+#[cfg(test)]
+#[test]
+fn fixture_population_seed_is_reproducible_without_prepared_authority() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for seed in [12351, 423] {
+        let mut left = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
+        let right = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
+        let mut expected_layout_rng = rand::rngs::StdRng::seed_from_u64(seed);
+        for _ in 0..2 {
+            let _: usize = expected_layout_rng.gen_range(0..1);
+        }
+        assert_eq!(
+            left.realm_rng.clone().r#gen::<u64>(),
+            expected_layout_rng.r#gen::<u64>()
+        );
+        assert!(left.prepared_seed.is_none() && right.prepared_seed.is_none());
+        let mut streams = BTreeSet::new();
+        for (id, a) in left.worlds.iter().filter(|(_, w)| w.name == "Realm") {
+            let b = &right.worlds[id];
+            assert!(a.prepared_seed.is_none() && b.prepared_seed.is_none());
+            let next = (
+                a.rng.clone().r#gen::<u64>(),
+                a.event_rng.clone().r#gen::<u64>(),
+            );
+            assert_eq!(
+                next,
+                (
+                    b.rng.clone().r#gen::<u64>(),
+                    b.event_rng.clone().r#gen::<u64>()
+                )
+            );
+            assert!(streams.insert(next));
+            assert_eq!(
+                a.entities
+                    .values()
+                    .map(|e| (e.kind, e.pos.x, e.pos.y))
+                    .collect::<Vec<_>>(),
+                b.entities
+                    .values()
+                    .map(|e| (e.kind, e.pos.x, e.pos.y))
+                    .collect::<Vec<_>>()
+            );
+            assert!(a.map.cells.iter().zip(&b.map.cells).all(|(a, b)| (
+                a.ground, a.object, &a.config, a.terrain, a.region
+            ) == (
+                b.ground, b.object, &b.config, b.terrain, b.region
+            )));
+            assert_eq!(
+                a.entities
+                    .values()
+                    .filter(|e| e.kind == crate::dungeon::manor::KAGE)
+                    .count(),
+                2
+            );
+        }
+        assert_eq!(streams.len(), 2);
+        let worlds = left.worlds.len();
+        assert!(left.prepared_instance("realm-shore").is_err());
+        assert!(
+            left.prepared_instance_with_seed("realm-shore", 423)
+                .is_err()
+        );
+        assert_eq!(left.worlds.len(), worlds);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn populated_realm_fixture_retains_graveyard_space() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for seed in [730, 1093] {
+        let directory = Directory::fixture(data, content.clone(), 16, 12351, Some(seed))
+            .unwrap_or_else(|error| panic!("fixture population seed {seed}: {error:#}"));
+        for world in directory.worlds.values().filter(|w| w.name == "Realm") {
+            let count = |kind| world.entities.values().filter(|e| e.kind == kind).count();
+            assert_eq!(count(crate::dungeon::manor::KAGE), 2);
+            assert!((17..25).contains(&count(0x91f)));
+        }
+    }
+}

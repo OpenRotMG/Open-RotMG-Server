@@ -161,6 +161,7 @@ export async function runCase(scenario, options) {
   const controller=new AbortController(), children=[], files=[], participants=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
   const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
   const elapsed=()=>Math.round(performance.now()-started);
+  let failureClient;
   let saveTurn=Promise.resolve();
   const save=async()=>{
     const bytes=JSON.stringify({...report,wallMs:elapsed()},null,2)+'\n',previous=saveTurn;
@@ -288,29 +289,43 @@ export async function runCase(scenario, options) {
       connection=opened;
       const window=await call('Browser.getWindowForTarget',{targetId:browser.target}),bounds=(await call('Browser.getWindowBounds',{windowId:window.windowId})).bounds;
       assert(bounds.left>=0&&bounds.left+bounds.width<=1400&&bounds.width<=1300,'Owned native windows must remain unoccluded on the private display');
+      // Guest setup can fail before the first participant is published.
+      if(participants.length===0)failureClient={connection,browser,chromePort};
+      report.bootstrapStep='configure-page';
       await call('Runtime.enable');
       if(!archive)await call('Fetch.enable',{patterns:[{urlPattern:report.origin+'/legacy-api/char/list',requestStage:'Request'}]});
+      report.bootstrapStep='before-navigate-hook';
       await nativeBeforeNavigate(fixtureModule,{owner:browser.owner,port:chromePort,target:browser.target,pid:browser.pid},{signal:controller.signal,stopped,check});
-      await call('Page.navigate',{url:report.origin});
-      if(!archive){await Promise.race([guest,waitFor(()=>guestDone,'Normal fresh guest char/list missing',60000),stopped]);await call('Fetch.disable');}
+      report.bootstrapStep='navigate';await call('Page.navigate',{url:report.origin});
+      if(!archive){report.bootstrapStep='fresh-guest-char-list';await Promise.race([guest,waitFor(()=>guestDone,'Normal fresh guest char/list missing',60000),stopped]);report.bootstrapStep='disable-guest-interception';await call('Fetch.disable');}
 
+      report.bootstrapStep='wait-ruffle-playing';
       await waitFor(()=>evaluate('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Ruffle did not start');
-      if(archive){await Promise.race([Promise.resolve().then(()=>{check();return fixtureModule.readArchive(Object.freeze({actor,account,origin:report.origin,browser:Object.freeze({owner,port:chromePort,target:browser.target,pid:browser.pid}),signal:controller.signal}));}),stopped]);check();return {actor,account,connection,browser,chromePort};}
+      if(archive){report.bootstrapStep='read-archive';await Promise.race([Promise.resolve().then(()=>{check();return fixtureModule.readArchive(Object.freeze({actor,account,origin:report.origin,browser:Object.freeze({owner,port:chromePort,target:browser.target,pid:browser.pid}),signal:controller.signal}));}),stopped]);check();report.bootstrapStep='ready';return {actor,account,connection,browser,chromePort};}
+      report.bootstrapStep='native-entry';
       await nativeEntry(fixtureModule,{actor,account,browser:{owner:browser.owner,port:chromePort,target:browser.target,pid:browser.pid}},{signal:controller.signal,stopped,check},async()=>{
+      report.bootstrapStep='close-hardware-modal';
       await evaluate('(()=>{const p=document.querySelector("ruffle-player");const modal=p.shadowRoot.querySelector("#hardware-acceleration-modal");if(modal&&!modal.classList.contains("hidden"))modal.querySelector(".close-modal").click();})()');
       const click=async()=>{
+        report.bootstrapStep='measure-native-menu';
         const r=await evaluate('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,vw:innerWidth,vh:innerHeight};})()');assert(r.width===800&&r.height===600&&r.x>=0&&r.y>=0&&r.x+800<=r.vw&&r.y+600<=r.vh,'Native menu requires the unclipped 800x600 client');
         const p={x:r.x+400,y:r.y+550,button:'left',clickCount:1};
+        report.bootstrapStep='click-native-menu';
         try{await call('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await connection.call('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}
+        report.bootstrapStep='wait-native-menu-frames';
         await evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
       };
+      report.bootstrapStep='focus-native-menu';
       await call('Emulation.setFocusEmulationEnabled',{enabled:true});await click();await click();
       });
+      report.bootstrapStep='wait-character-load';
       await waitFor(async()=>{const actors=[...participants.map(c=>c.actor),actor],s=await api({op:'native_state',actors});assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');return s.actors.length===actors.length&&s.actors.every(a=>a.stage==='ready');},'Normal character LOAD did not complete');
+      report.bootstrapStep='publish-participant';
       participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
       await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state,browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
+      report.bootstrapStep='pause-native-client';
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
-      await save();check();
+      report.bootstrapStep='ready';await save();check();
       return participants.at(-1);
       });
     }
@@ -333,8 +348,9 @@ export async function runCase(scenario, options) {
     check();joins.idle();report.status='passed';
   } catch(error) {
     primary=error;report.status='failed';report.failure={phase,error:String(error),stack:error.stack};
+    if(failureClient)report.failure.captureBrowser={...failureClient.browser,port:failureClient.chromePort};
     await save();
-    if(connection)try{const image=await connection.call('Page.captureScreenshot',{format:'png'});await writeFile(join(out,'failure.png'),Buffer.from(image.data,'base64'),{mode:0o600});report.failure.capture=join(out,'failure.png');}catch(error){report.failure.captureError=String(error);}
+    if(failureClient)try{const image=await failureClient.connection.call('Page.captureScreenshot',{format:'png'});await writeFile(join(out,'failure.png'),Buffer.from(image.data,'base64'),{mode:0o600});report.failure.capture=join(out,'failure.png');}catch(error){report.failure.captureError=String(error);}
   } finally {
     clearTimeout(timer);closing=true;report.cleanupErrors=[];controller.abort(Error('Native test closing'));const cleanup=performance.now();
     for(const row of children)row.stopping=true;
