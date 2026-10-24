@@ -9,6 +9,12 @@ pub(super) struct Area {
     pub(super) width: i32,
     pub(super) height: i32,
 }
+#[derive(Clone)]
+pub(super) struct EventSite {
+    pub(super) area: Area,
+    pub(super) cells: Vec<(usize, crate::content::Cell)>,
+    scenery: Vec<Entity>,
+}
 impl Area {
     pub(super) fn distance(&self, p: Pos) -> f32 {
         let dx = (self.x as f32 - p.x)
@@ -624,6 +630,78 @@ impl Piece {
     }
 }
 impl World {
+    pub(super) fn event_site_clear(&self, site: &EventSite) -> bool {
+        site.cells.iter().all(|(index, _)| {
+            self.cells.ids(*index).iter().all(|id| {
+                let e = &self.entities[id];
+                let object = &self.content.objects[&e.kind];
+                object.static_object
+                    && !object.enemy
+                    && !matches!(object.class.as_str(), "Container" | "Portal")
+                    && e.items.is_empty()
+                    && !e.reserved
+                    && e.parent.is_none()
+                    && e.expires.is_none()
+                    && e.quest.is_none()
+                    && e.population_slot.is_none()
+                    && !e.extra_stats.iter().any(|(kind, _)| *kind == 54)
+            })
+        })
+    }
+    pub(super) fn capture_event_site(
+        &self,
+        area: Area,
+        indices: impl IntoIterator<Item = usize>,
+    ) -> Result<EventSite> {
+        let mut site = EventSite {
+            area,
+            cells: indices
+                .into_iter()
+                .map(|i| (i, self.map.cells[i].clone()))
+                .collect(),
+            scenery: vec![],
+        };
+        ensure!(
+            self.event_site_clear(&site),
+            "event site contains a live or owned actor"
+        );
+        site.scenery = site
+            .cells
+            .iter()
+            .flat_map(|(i, _)| self.cells.ids(*i).iter().copied())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|id| self.entities[&id].clone())
+            .collect();
+        Ok(site)
+    }
+    pub(super) fn swap_event_site(&mut self, incoming: &EventSite) -> Result<EventSite> {
+        let previous =
+            self.capture_event_site(incoming.area, incoming.cells.iter().map(|(i, _)| *i))?;
+        let retiring: BTreeSet<_> = previous.scenery.iter().map(|e| e.id).collect();
+        ensure!(
+            incoming
+                .scenery
+                .iter()
+                .all(|e| !self.entities.contains_key(&e.id) || retiring.contains(&e.id)),
+            "reserved event scenery identity reused"
+        );
+        for id in retiring {
+            self.remove_entity(id);
+        }
+        for (index, cell) in &incoming.cells {
+            Arc::make_mut(&mut self.map).cells[*index] = cell.clone();
+        }
+        for entity in &incoming.scenery {
+            let id = entity.id;
+            assert!(
+                self.entities.insert(id, entity.clone()).is_none(),
+                "event scenery identity changed after preflight"
+            );
+            self.index_actor(id);
+        }
+        Ok(previous)
+    }
     pub(super) fn outside_setpieces(&self, pos: Pos) -> bool {
         // Most Realm cells are beyond the bounding box, so avoid millions of hypot calls.
         self.setpieces.iter().all(|a| {
@@ -761,6 +839,20 @@ impl World {
                     piece.width, piece.height, self.realm_layout
                 )
             })?;
+        if crate::quest::EVENT_BOSSES.contains(&kind) {
+            let indices = piece
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, mark)| **mark != 0)
+                .map(|(i, _)| {
+                    ((area.y as usize + i / piece.width) * self.map.width as usize)
+                        + area.x as usize
+                        + i % piece.width
+                });
+            let original = self.capture_event_site(area, indices)?;
+            self.event_sites.push(original);
+        }
         for y in 0..piece.height {
             for x in 0..piece.width {
                 let mark = piece.cells[y * piece.width + x];

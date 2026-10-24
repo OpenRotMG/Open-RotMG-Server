@@ -77,6 +77,14 @@ impl World {
                 "Realm has no unoccupied inland site for the Hermit landmark (layout={:?}, retain_authored_lava={retain_authored_lava})",
                 self.realm_layout
             ))?;
+        let width = self.map.width;
+        let indices = (0..29).flat_map(|y| {
+            (0..32).filter_map(move |x| {
+                (hermit_radius(x, y) <= 15.).then_some(((area.y + y) * width + area.x + x) as usize)
+            })
+        });
+        let original = self.capture_event_site(area, indices)?;
+        self.event_sites.push(original);
         // Reconstruct the source island's rings without erasing generated waterways.
         for y in 0..29 {
             for x in 0..32 {
