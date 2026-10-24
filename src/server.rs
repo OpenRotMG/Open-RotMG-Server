@@ -1579,6 +1579,57 @@ async fn handle_inner(
                     Err(error) => return Err(error),
                 };
                 enqueue_reply(tx, reply)?;
+            } else if text
+                .split_whitespace()
+                .next()
+                .is_some_and(|s| s.eq_ignore_ascii_case("/swap"))
+            {
+                let result = async {
+                    crate::world::validate_chat(&text)?;
+                    a.world
+                        .directory(move |d| d.chat_permit(id, received))
+                        .await?;
+                    let owner = account.as_ref().context("authenticated session required")?;
+                    ensure!(
+                        owner.registered,
+                        lifecycle::controller("Register your account before swapping Fame.")
+                    );
+                    let fame = match text.split_whitespace().collect::<Vec<_>>()[..] {
+                        [_, amount] => amount.parse::<i32>().ok().filter(|f| *f > 0 && f % 2 == 0),
+                        _ => None,
+                    }
+                    .ok_or_else(|| {
+                        lifecycle::controller(
+                            "Usage: /swap <fame>. 2 Fame buys 1 Gold, so use an even amount.",
+                        )
+                    })?;
+                    let account = owner.id;
+                    let _gold = a.gold_updates.lock().await;
+                    lifecycle::stage(Stage::Store);
+                    let (fame_left, gold) = a.store.swap_fame(account, fame).await?;
+                    tracing::info!(account, fame, fame_left, gold, "fame swapped for gold");
+                    lifecycle::stage(Stage::Publication);
+                    a.world
+                        .for_player(id)
+                        .call(move |w| {
+                            let p = w.players.get_mut(&id).context("fame swap player missing")?;
+                            (p.presentation.fame, p.presentation.credits) = (fame_left, gold);
+                            Ok(())
+                        })
+                        .await?;
+                    lifecycle::stage(Stage::Settled);
+                    Ok::<_, anyhow::Error>(format!("Swapped {fame} Fame for {} Gold.", fame / 2))
+                }
+                .await;
+                let reply = match result {
+                    Ok(text) => crate::world::chat_info(&text),
+                    Err(error) if lifecycle::rule_rejection(&error) => {
+                        lifecycle::stage(Stage::Rejected);
+                        crate::world::chat_error(&error.to_string())
+                    }
+                    Err(error) => return Err(error),
+                };
+                enqueue_reply(tx, reply)?;
             } else if let Err(error) = a.world.directory(move |d| d.chat(id, text, received)).await
             {
                 if !lifecycle::rule_rejection(&error) {

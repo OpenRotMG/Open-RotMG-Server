@@ -330,7 +330,7 @@ pub struct Player {
     pub tx: Option<Output>,
     pub departing: bool,
     account_lists: AccountLists,
-    presentation: AccountPresentation,
+    pub(crate) presentation: AccountPresentation,
     paused: bool,
     pub(crate) controller: Controller,
     pub(crate) native_update_acked: bool,
