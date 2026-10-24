@@ -7014,6 +7014,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod dungeon_return_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
+#[cfg(test)]
+mod sphinx_site_tests;
 
 #[cfg(test)]
 impl World {}
