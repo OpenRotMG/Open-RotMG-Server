@@ -372,6 +372,7 @@ impl World {
         );
         self.trade_ready(id)?;
         ensure!(self.trade_key(id).is_none(), controller("already trading"));
+        // Trades resolve names in this world, not melee range: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.Trade.cs#L42-L75
         let targets: Vec<_> = self
             .players
             .iter()
@@ -387,10 +388,6 @@ impl World {
         ensure!(
             self.trade_key(target).is_none(),
             controller("target already trading")
-        );
-        ensure!(
-            self.players[&id].pos.distance(self.players[&target].pos) < 2.,
-            controller("trade target out of range")
         );
         if self
             .trade_requests
@@ -516,13 +513,6 @@ impl World {
                 "trade inventory changed"
             );
         }
-        ensure!(
-            self.players[&trade.players[0]]
-                .pos
-                .distance(self.players[&trade.players[1]].pos)
-                < 2.,
-            controller("trade participants out of range")
-        );
         let trade = self.trades.get_mut(&key).unwrap();
         trade.accepted[side] = true;
         let other = trade.players[1 - side];
@@ -644,18 +634,11 @@ impl World {
         let interrupted: Vec<_> = self
             .trades
             .values()
-            .filter(|t| {
-                !t.pending
-                    && (t.players.iter().any(|id| !self.players[id].active())
-                        || self.players[&t.players[0]]
-                            .pos
-                            .distance(self.players[&t.players[1]].pos)
-                            >= 2.)
-            })
+            .filter(|t| !t.pending && t.players.iter().any(|id| !self.players[id].active()))
             .map(|t| t.players[0])
             .collect();
         for id in interrupted {
-            self.cancel_trade(id, "Trade interrupted by departure, death or distance.");
+            self.cancel_trade(id, "Trade interrupted by departure or death.");
         }
     }
 }
@@ -746,9 +729,24 @@ mod community_tests {
             .collect()
     }
     #[tokio::test]
+    async fn nearby_autonomous_trade_request_reaches_controller_without_assuming_consent() {
+        let (mut w, _, ids, mut receivers) = fixture().await;
+        w.players.get_mut(&ids[1]).unwrap().pos.x += 3.;
+        w.players.get_mut(&ids[1]).unwrap().controller = Controller::Autonomous;
+        w.request_trade(ids[0], w.players[&ids[1]].character.name.clone())
+            .unwrap();
+        assert_eq!(w.trade_requests[&ids[0]].0, ids[1]);
+        assert_eq!(receivers[1].try_recv().unwrap().id, 61);
+        assert!(w.trades.is_empty(), "a request is not reciprocal consent");
+    }
+    #[tokio::test]
     async fn trade_settling_uses_pause_aware_elapsed_time_not_world_ticks() {
         let (mut w, _, ids, _) = fixture().await;
+        w.players.get_mut(&ids[1]).unwrap().pos.x += 3.;
         start(&mut w, ids);
+        w.players.get_mut(&ids[1]).unwrap().pos.x += 8.;
+        w.trade_step();
+        assert_eq!(w.trades.len(), 1);
         let mut masks = [[false; 12]; 2];
         masks[0][4] = true;
         masks[1][5] = true;
@@ -769,11 +767,15 @@ mod community_tests {
                 .expect("client countdown elapsed while world ticks lagged")
                 .is_none()
         );
+        w.players.get_mut(&ids[1]).unwrap().departing = true;
+        w.trade_step();
+        assert!(w.trades.is_empty());
     }
 
     #[tokio::test]
     async fn trade_offer_reset_keeps_elapsed_settling_and_atomic_commit_guards() {
         let (mut w, store, ids, _) = fixture().await;
+        w.players.get_mut(&ids[1]).unwrap().pos.x += 3.;
         start(&mut w, ids);
         let masks = offers(&mut w, ids).await;
         assert!(
