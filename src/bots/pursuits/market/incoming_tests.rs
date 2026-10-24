@@ -119,7 +119,6 @@ fn canonical_health_gift_policy_preserves_actual_need_and_reserves() {
         ),
     ] {
         let (_, v) = fixture(&c, backpack);
-        let mut life = Life::default();
         let mut w = wire::Writer::new();
         w.utf("Peer")
             .i32(20)
@@ -128,19 +127,22 @@ fn canonical_health_gift_policy_preserves_actual_need_and_reserves() {
             .utf("")
             .utf(&format!("Trader, {text}"))
             .utf("");
-        assert!(
-            life.receive(
-                &Packet {
-                    id: wire::TEXT,
-                    body: w.0
-                },
-                &v,
-                "Trader",
-                6.
-            )
-            .unwrap()
-        );
-        assert_eq!(life.gift_active(), active, "{text} with {backpack:?}");
+        let packet = Packet {
+            id: wire::TEXT,
+            body: w.0,
+        };
+        for incoming in [false, true] {
+            let mut life = Life::default();
+            assert_eq!(
+                life.receive(&packet, &v, "Trader", 6., incoming).unwrap(),
+                !incoming
+            );
+            assert_eq!(
+                life.gift_active(),
+                active && !incoming,
+                "{text} with {backpack:?}, incoming={incoming}"
+            );
+        }
     }
 }
 #[test]

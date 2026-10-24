@@ -162,7 +162,16 @@ impl Life {
         v: &PlayerView,
         own_name: &str,
         willingness: f32,
+        incoming_trade: bool,
     ) -> Result<bool> {
+        if incoming_trade && packet.id == wire::TEXT {
+            tracing::info!(
+                account = v.session.account,
+                reason = "active_incoming_trade",
+                "canonical social gift uptake declined"
+            );
+            return Ok(false);
+        }
         if self.heal_tick != v.tick {
             self.heal_notice = 0;
             self.heal_origin = None;
@@ -597,10 +606,13 @@ pub(in crate::bots) async fn receive_life(
             return Ok(false);
         }
     }
-    brain
-        .mind
-        .social
-        .receive(packet, v, &brain.mind.market.name, brain.profile.companions)
+    brain.mind.social.receive(
+        packet,
+        v,
+        &brain.mind.market.name,
+        brain.profile.companions,
+        brain.mind.market.incoming.is_some(),
+    )
 }
 
 async fn cancel_gift(app: &crate::server::App, brain: &mut Brain) -> Result<bool> {
