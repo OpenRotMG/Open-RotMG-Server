@@ -214,10 +214,16 @@ pub(super) fn visible(
     Ok(p.position)
 }
 
-pub(in crate::bots) fn available(choices: &[(f32, Goal, Pos)], position: Pos, range: f32) -> bool {
+pub(in crate::bots) fn available(
+    choices: &[(f32, Goal, Pos)],
+    position: Pos,
+    range: f32,
+    eligible_position: impl Fn(Pos) -> bool,
+) -> bool {
     !choices.iter().any(|(score, goal, target)| {
-        *score >= 95.
-            || matches!(goal, Goal::Loot(_))
-            || matches!(goal, Goal::Fight(_)) && position.distance(*target) < range
+        eligible_position(*target)
+            && (*score >= 95.
+                || matches!(goal, Goal::Loot(_))
+                || matches!(goal, Goal::Fight(_)) && position.distance(*target) < range)
     })
 }

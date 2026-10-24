@@ -1069,7 +1069,9 @@ impl Brain {
             .cooperator(v, |position| !self.blocked.contains_key(&tile(position)));
         let cooperative_goal = if self.agreement.is_none()
             && self.companion.is_none()
-            && crowds::cooperative_available(&choices, v.position, range)
+            && crowds::cooperative_available(&choices, v.position, range, |position| {
+                !self.blocked.contains_key(&tile(position))
+            })
             && let Some(peer) = &recent_company
         {
             choices.push((

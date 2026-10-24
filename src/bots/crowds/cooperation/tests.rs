@@ -203,11 +203,32 @@ fn tracking_is_bounded_and_existing_useful_activity_wins() {
         (40., Goal::Loot(1), 20.),
         (40., Goal::Fight(1), 4.),
     ] {
-        assert!(!available(&[(score, goal, Pos { x, y: 0. })], origin, 8.));
+        assert!(!available(
+            &[(score, goal, Pos { x, y: 0. })],
+            origin,
+            8.,
+            |_| true
+        ));
     }
     assert!(available(
         &[(78., Goal::Hunt(1), Pos { x: 20., y: 0. })],
         origin,
-        8.
+        8.,
+        |_| true
     ));
+}
+
+#[test]
+fn only_reachable_useful_loot_suppresses_valid_cooperative_follow() {
+    let mut c = together();
+    assert!(
+        c.company(300, |_| Ok(Pos { x: 9., y: 0. }), |_| true)
+            .is_some()
+    );
+    let bag = Pos { x: 20., y: 0. };
+    let choices = [(40., Goal::Loot(1), bag)];
+    let blocked = BTreeSet::from([tile(bag)]);
+    let origin = Pos { x: 0., y: 0. };
+    assert!(available(&choices, origin, 8., |p| !blocked.contains(&tile(p))));
+    assert!(!available(&choices, origin, 8., |_| true));
 }
