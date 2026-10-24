@@ -105,6 +105,99 @@ fn pending(b: &mut Brain, v: &PlayerView) {
     });
 }
 
+fn realm_fixture() -> (Content, PlayerView, Brain) {
+    let (c, mut v, mut b) = fixture(4);
+    v.map.name = "Realm".into();
+    v.session.world = -3;
+    b.session.0 = -3;
+    (c, v, b)
+}
+fn red_demon(c: &Content, v: &mut PlayerView, distance: f32) {
+    let definition = c.get(0x668).unwrap();
+    v.objects.push(VisibleObject {
+        id: 50,
+        account: None,
+        kind: 0x668,
+        name: definition.name.clone(),
+        position: Pos {
+            x: v.position.x,
+            y: v.position.y + distance,
+        },
+        hp: definition.hp,
+        max_hp: definition.hp,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    });
+}
+
+#[test]
+fn public_call_distant_advertised_enemy_allows_receive_and_dispatch() {
+    for visible_at_receipt in [true, false] {
+        let (c, mut v, mut b) = realm_fixture();
+        let projectile = &c.get(v.character.items[0] as u16).unwrap().projectiles[&0];
+        let range = projectile.speed * projectile.lifetime / 10000.;
+        assert!((range - 8.55).abs() < 0.01);
+        assert!(v.projectiles.is_empty());
+        assert_eq!(b.goal, Goal::Wait);
+        if visible_at_receipt {
+            red_demon(&c, &mut v, 18.);
+        }
+        let mut expected = b.rng.clone();
+        assert!(expected.gen_bool(0.5));
+        b.receive(packet(40, "Caller", "", "tp demon"), &v, false, &c)
+            .unwrap();
+        assert!(b.calls.opportunity.is_some());
+        assert_eq!(b.rng.clone().next_u64(), expected.next_u64());
+        if !visible_at_receipt {
+            red_demon(&c, &mut v, 18.);
+        }
+        let enemy = v.objects.last().unwrap();
+        assert!(enemy.position.distance(v.position) > range);
+        assert!(progression::can_fight(&v, &c, enemy));
+        let next = b.rng.clone().next_u64();
+        assert_eq!(b.call_target(&v, &c).unwrap(), Some(40));
+        assert_eq!(b.call_target(&v, &c).unwrap(), None);
+        assert_eq!(b.rng.clone().next_u64(), next);
+    }
+}
+
+#[test]
+fn public_call_active_combat_vetoes_without_roll_or_redraw() {
+    for distance in [6., 10.] {
+        let (c, mut v, mut b) = realm_fixture();
+        red_demon(&c, &mut v, distance);
+        b.goal = Goal::Fight(50);
+        let next = b.rng.clone().next_u64();
+        b.receive(packet(40, "Caller", "", "tp demon"), &v, false, &c)
+            .unwrap();
+        assert!(b.calls.opportunity.is_none());
+        assert_eq!(b.rng.clone().next_u64(), next);
+        v.objects.pop();
+        b.goal = Goal::Wait;
+        b.receive(packet(40, "Caller", "", "tp demon"), &v, false, &c)
+            .unwrap();
+        assert!(b.calls.opportunity.is_none());
+        assert_eq!(b.rng.clone().next_u64(), next);
+
+        let (c, mut v, mut b) = realm_fixture();
+        b.receive(packet(40, "Caller", "", "tp demon"), &v, false, &c)
+            .unwrap();
+        assert!(b.calls.opportunity.is_some());
+        let next = b.rng.clone().next_u64();
+        red_demon(&c, &mut v, distance);
+        b.goal = Goal::Fight(50);
+        assert_eq!(b.call_target(&v, &c).unwrap(), None);
+        v.objects.pop();
+        b.goal = Goal::Wait;
+        assert_eq!(b.call_target(&v, &c).unwrap(), None);
+        assert_eq!(b.rng.clone().next_u64(), next);
+    }
+}
+
 #[test]
 fn public_call_aliases_are_exact_and_activity_claims_not_coordinates() {
     for (text, activity) in [

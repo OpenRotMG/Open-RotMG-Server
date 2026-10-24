@@ -105,11 +105,28 @@ impl Brain {
             }
             Activity::Sphinx => v.map.name == "Realm" && events::ready(v, c),
         };
-        if !interested
-            || v.objects.iter().any(|o| {
-                o.hp > 0 && c.objects[&o.kind].enemy && o.position.distance(v.position) <= 32.
-            })
-        {
+        if !interested {
+            return Ok(false);
+        }
+        let weapon = c.get(v.character.items[0] as u16)?;
+        let projectile = weapon
+            .projectiles
+            .get(&0)
+            .context("weapon projectile missing")?;
+        let range = projectile.speed * projectile.lifetime / 10000.;
+        if v.objects.iter().any(|o| {
+            if o.hp <= 0 || !c.objects[&o.kind].enemy {
+                return false;
+            }
+            let distance = o.position.distance(v.position);
+            let can_fight = progression::can_fight(v, c, o);
+            let engaged = matches!(&self.goal, Goal::Fight(target) | Goal::Hunt(target) if *target == o.id)
+                && distance < range * 1.3;
+            // Seeing the advertised activity is not itself an ongoing fight.
+            distance <= 5.
+                || (!can_fight && distance < 8.)
+                || (can_fight && progression::vulnerable(o) && (distance < range || engaged))
+        }) {
             return Ok(false);
         }
         for bag in v
