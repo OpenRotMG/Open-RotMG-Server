@@ -86,6 +86,7 @@ impl World {
                 _ => (Motion::Tangential, 8.),
             },
             kind if GODS.contains(&kind) => {
+                // Pursuit is shorter than firing (White 9/10, Medusa 7/12): https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Mountain.cs
                 let sight = if kind == 0x651 { 9. } else { 7. };
                 if target.is_none_or(|p| e.pos.distance(p) > sight) {
                     (Motion::Wander, 4.)
