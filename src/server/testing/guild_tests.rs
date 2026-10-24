@@ -471,6 +471,31 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
             if paused { 1 << 20 } else { 0 }
         );
         assert!(!stats.keys().any(|(_, key)| matches!(key, 62 | 63)));
+        let clock = app.world.clock.clone();
+        app.world
+            .in_world(-2)
+            .call(move |w| {
+                if paused {
+                    let start = w.now;
+                    clock.set_paused(false);
+                    let result = w.test_paused_script_heartbeats(player);
+                    clock.set_paused(true);
+                    result?;
+                    assert_eq!(w.now - start, 2000);
+                } else {
+                    let p = &w.players[&player];
+                    w.move_to(player, p.pos, w.now as i32)?;
+                    assert_eq!(w.players[&player].native_time(), w.now as i32);
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        while receiver.try_recv().is_ok() {}
+        assert_eq!(
+            persisted_guild_state(&app, &members, &db_path).await,
+            persisted
+        );
     }
     let before_enemy = snapshot(&app, actor, false).await.unwrap();
     app.world

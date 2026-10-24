@@ -6652,7 +6652,18 @@ impl World {
         let ids: Vec<_> = self.players.keys().copied().collect();
         for id in &ids {
             let p = &self.players[id];
-            if !p.active() || p.paused {
+            if !p.active() {
+                continue;
+            }
+            if p.paused {
+                // Script controllers still own their MOVE clock while gameplay is paused.
+                if p.controller != Controller::Human {
+                    let pos = p.pos;
+                    let time = self.now as i32;
+                    if let Err(e) = self.move_to(*id, pos, time) {
+                        tracing::error!(player=id,error=%e,"script idle MOVE rejected");
+                    }
+                }
                 continue;
             }
             let p = self.players.get_mut(id).unwrap();
@@ -7049,7 +7060,49 @@ mod sphinx_loot_tests;
 mod sphinx_site_tests;
 
 #[cfg(test)]
-impl World {}
+impl World {
+    pub(crate) fn test_paused_script_heartbeats(&mut self, id: i32) -> Result<()> {
+        let p = self.players.get_mut(&id).unwrap();
+        assert!(p.active() && p.paused && p.controller != Controller::Human);
+        let position = p.pos;
+        let credit = p.movement_credit;
+        let character = serde_json::to_value(&p.character)?;
+        let fractions = (p.hp_fraction, p.mp_fraction);
+        // Nonzero residues detect accidentally entering even the full-HP/MP regeneration branch.
+        p.hp_fraction = 0.25;
+        p.mp_fraction = 0.5;
+        p.bot_goal = Some(Pos {
+            x: position.x + 1.,
+            y: position.y,
+        });
+        p.bot_aim = Some(0.);
+        let goal = p.bot_goal;
+        let next_bullet = p.next_bullet;
+        let mut moves = Vec::new();
+        for _ in 0..40 {
+            self.step();
+            let p = &self.players[&id];
+            moves.push((p.last_move, self.now as i32));
+            assert_eq!((p.pos.x, p.pos.y), (position.x, position.y));
+            assert_eq!(p.movement_credit, credit);
+            assert_eq!(serde_json::to_value(&p.character)?, character);
+            assert_eq!((p.hp_fraction, p.mp_fraction), (0.25, 0.5));
+            assert_eq!(p.bot_goal.map(|p| (p.x, p.y)), goal.map(|p| (p.x, p.y)));
+            assert_eq!(p.bot_aim, Some(0.));
+            assert_eq!(p.next_bullet, next_bullet);
+            assert!(!self.bullets.iter().any(|b| b.owner == id));
+        }
+        // Exercise the real guard before checking the recorded heartbeat times.
+        self.move_to(id, position, self.now as i32)?;
+        assert!(moves.iter().all(|(actual, expected)| actual == expected));
+        let p = self.players.get_mut(&id).unwrap();
+        p.hp_fraction = fractions.0;
+        p.mp_fraction = fractions.1;
+        p.bot_goal = None;
+        p.bot_aim = None;
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 #[test]
