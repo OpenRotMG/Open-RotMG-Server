@@ -1007,6 +1007,7 @@ impl Directory {
             vec![crate::terrain::realms::Source::Fixture(map)],
             2,
         )
+        .with_context(|| format!("test Realm fixture map/layout seed {seed}"))
     }
     pub fn with_seed(
         path: &std::path::Path,
@@ -1211,6 +1212,19 @@ impl Directory {
         world.clock = self.clock.clone();
         world.attack_epoch = self.clock.now();
         world.new_tick_at = self.clock.now();
+        #[cfg(test)]
+        if layout.is_some_and(|index| {
+            matches!(
+                &self.realms[index],
+                crate::terrain::realms::Source::Fixture(_)
+            )
+        }) {
+            // Reproduce fixture populations without granting prepared-world authority or consuming layout RNG.
+            let seed = self.realm_rng.clone().r#gen::<u64>();
+            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
+            tracing::debug!(seed, "test Realm population seeded");
+        }
         if let Some(seed) = self.prepared_seed {
             let seed = seed ^ self.next_world as u64;
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -7036,6 +7050,73 @@ mod sphinx_site_tests;
 
 #[cfg(test)]
 impl World {}
+
+#[cfg(test)]
+#[test]
+fn fixture_population_seed_is_reproducible_without_prepared_authority() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for seed in [12351, 423] {
+        let mut left = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
+        let right = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
+        let mut expected_layout_rng = rand::rngs::StdRng::seed_from_u64(seed);
+        for _ in 0..2 {
+            let _: usize = expected_layout_rng.gen_range(0..1);
+        }
+        assert_eq!(
+            left.realm_rng.clone().r#gen::<u64>(),
+            expected_layout_rng.r#gen::<u64>()
+        );
+        assert!(left.prepared_seed.is_none() && right.prepared_seed.is_none());
+        let mut streams = BTreeSet::new();
+        for (id, a) in left.worlds.iter().filter(|(_, w)| w.name == "Realm") {
+            let b = &right.worlds[id];
+            assert!(a.prepared_seed.is_none() && b.prepared_seed.is_none());
+            let next = (
+                a.rng.clone().r#gen::<u64>(),
+                a.event_rng.clone().r#gen::<u64>(),
+            );
+            assert_eq!(
+                next,
+                (
+                    b.rng.clone().r#gen::<u64>(),
+                    b.event_rng.clone().r#gen::<u64>()
+                )
+            );
+            assert!(streams.insert(next));
+            assert_eq!(
+                a.entities
+                    .values()
+                    .map(|e| (e.kind, e.pos.x, e.pos.y))
+                    .collect::<Vec<_>>(),
+                b.entities
+                    .values()
+                    .map(|e| (e.kind, e.pos.x, e.pos.y))
+                    .collect::<Vec<_>>()
+            );
+            assert!(a.map.cells.iter().zip(&b.map.cells).all(|(a, b)| (
+                a.ground, a.object, &a.config, a.terrain, a.region
+            ) == (
+                b.ground, b.object, &b.config, b.terrain, b.region
+            )));
+            assert_eq!(
+                a.entities
+                    .values()
+                    .filter(|e| e.kind == crate::dungeon::manor::KAGE)
+                    .count(),
+                2
+            );
+        }
+        assert_eq!(streams.len(), 2);
+        let worlds = left.worlds.len();
+        assert!(left.prepared_instance("realm-shore").is_err());
+        assert!(
+            left.prepared_instance_with_seed("realm-shore", 423)
+                .is_err()
+        );
+        assert_eq!(left.worlds.len(), worlds);
+    }
+}
 
 #[cfg(test)]
 #[test]
