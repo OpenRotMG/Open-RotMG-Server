@@ -29,6 +29,202 @@ pub(super) enum EventAdmission {
 pub(super) struct ReservedEvent {
     pub(super) root: Entity,
     pub(super) children: Vec<Entity>,
+    pub(super) site: realm_setpieces::EventSite,
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn reserved_event_sites_remain_original_and_ordinary_quests_exist_at_creation() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    let mut directory = Directory::test_with_seed(data, content.clone(), 85, 12351).unwrap();
+    let original = directory.realms[0].open(&content).unwrap();
+    let world = directory.worlds.get_mut(&-3).unwrap();
+    assert!(world.players.is_empty());
+    for kind in quest::ROOTS {
+        assert!(
+            world
+                .entities
+                .values()
+                .any(|e| e.kind == kind && e.hp > 0 && e.published)
+        );
+    }
+    assert!(!world.event_reserves.is_empty());
+    for event in &world.event_reserves {
+        assert!(!world.entities.contains_key(&event.root.id));
+        let area = world
+            .setpieces
+            .iter()
+            .find(|a| a.distance(event.root.pos) == 0.)
+            .unwrap();
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                let index = (y * world.map.width + x) as usize;
+                assert_eq!(
+                    world.map.cells[index].ground, original.cells[index].ground,
+                    "unspawned event {:#x} changed ground at {x},{y}",
+                    event.root.kind
+                );
+            }
+        }
+    }
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let account = store.list("event-site".into()).await.unwrap();
+    let ch = store
+        .create(account.id, content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let ent = world
+        .entities
+        .values()
+        .find(|e| e.kind == 0x91f)
+        .unwrap()
+        .clone();
+    let (packets, mut receiver) = mpsc::channel(128);
+    let (lost, _) = watch::channel(false);
+    let player = world
+        .enter_at(
+            ch,
+            Some(Output { packets, lost }),
+            Some(Pos {
+                x: ent.pos.x + 3.,
+                ..ent.pos
+            }),
+            AccountPresentation {
+                guild: None,
+                fame: 0,
+                best_fame: BTreeMap::new(),
+                credits: 0,
+            },
+        )
+        .unwrap();
+    world.updates(player, true).unwrap();
+    assert_ne!(world.players[&player].quest, Some(ent.id));
+    assert!(world.players[&player].known.contains(&ent.id));
+    let reserve = world
+        .event_reserves
+        .iter()
+        .find(|e| e.root.kind == crate::dungeon::trench::HERMIT)
+        .unwrap();
+    let root = reserve.root.id;
+    let (cell, ground) = reserve
+        .site
+        .cells
+        .iter()
+        .find(|(index, cell)| {
+            cell.ground != original.cells[*index].ground
+                && world.walkable(Pos {
+                    x: (*index % world.map.width as usize) as f32 + 0.5,
+                    y: (*index / world.map.width as usize) as f32 + 0.5,
+                })
+        })
+        .map(|(i, c)| (*i, c.ground))
+        .unwrap();
+    let point = (
+        (cell % world.map.width as usize) as i16,
+        (cell / world.map.width as usize) as i16,
+    );
+    let pos = Pos {
+        x: f32::from(point.0) + 0.5,
+        y: f32::from(point.1) + 0.5,
+    };
+    world.players.get_mut(&player).unwrap().pos = pos;
+    world.updates(player, false).unwrap();
+    world.event_waiting = Some(42);
+    world.event_choice = Some(crate::dungeon::trench::HERMIT);
+    assert!(matches!(
+        world.earn_realm_event(42).unwrap(),
+        EventAdmission::Waiting
+    ));
+    let (x, y) = world.map.spawns[0];
+    world.players.get_mut(&player).unwrap().pos = Pos { x, y };
+    world.updates(player, false).unwrap();
+    let bag = world.spawn_entity(0x0507, pos, vec![]).unwrap();
+    world
+        .entities
+        .get_mut(&bag)
+        .unwrap()
+        .extra_stats
+        .push((54, account.id));
+    assert!(matches!(
+        world.earn_realm_event(42).unwrap(),
+        EventAdmission::Waiting
+    ));
+    assert!(world.entities.contains_key(&bag));
+    world.remove_entity(bag);
+    let reserve = world
+        .event_reserves
+        .iter_mut()
+        .find(|e| e.root.id == root)
+        .unwrap();
+    let marker = reserve.children.remove(
+        reserve
+            .children
+            .iter()
+            .position(|e| e.kind == 0xd65)
+            .unwrap(),
+    );
+    assert!(world.earn_realm_event(42).is_err());
+    assert_eq!(world.map.cells[cell].ground, original.cells[cell].ground);
+    assert!(!world.entities.contains_key(&root));
+    world
+        .event_reserves
+        .iter_mut()
+        .find(|e| e.root.id == root)
+        .unwrap()
+        .children
+        .push(marker);
+    let before = directory.player_view(player).unwrap().tiles;
+    let world = directory.worlds.get_mut(&-3).unwrap();
+    let explored = (
+        world.players[&player].character.tiles,
+        world.players[&player].character.lifetime.tiles,
+    );
+    while receiver.try_recv().is_ok() {}
+    assert!(
+        matches!(world.earn_realm_event(42).unwrap(), EventAdmission::Spawned(id) if id == root)
+    );
+    assert_eq!(world.map.cells[cell].ground, ground);
+    assert_eq!(world.quest_members(root, &[0xd65]).len(), 8);
+    assert!(
+        world.players[&player]
+            .tile_updates
+            .contains(&(point.0, point.1, ground))
+    );
+    world.updates(player, false).unwrap();
+    assert_eq!(
+        (
+            world.players[&player].character.tiles,
+            world.players[&player].character.lifetime.tiles
+        ),
+        explored
+    );
+    assert!(world.players[&player].tile_updates.is_empty());
+    let update = std::iter::from_fn(|| receiver.try_recv().ok())
+        .find(|p| p.id == wire::UPDATE)
+        .unwrap();
+    let mut reader = crate::wire::Reader::new(&update.body);
+    let count = reader.i16().unwrap();
+    let tiles = (0..count)
+        .map(|_| {
+            (
+                reader.i16().unwrap(),
+                reader.i16().unwrap(),
+                reader.u8().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(tiles.contains(&(point.0, point.1, ground)));
+    let after = directory.player_view(player).unwrap().tiles;
+    assert!(!Arc::ptr_eq(&before, &after));
+    assert_eq!(
+        after.iter().find(|t| (t.x, t.y) == point).unwrap().ground,
+        ground
+    );
+    assert_eq!(
+        before.iter().find(|t| (t.x, t.y) == point).unwrap().ground,
+        original.cells[cell].ground
+    );
 }
 
 fn mandatory_initial_summons(kind: u16) -> usize {
@@ -194,6 +390,13 @@ impl World {
                 .map(|id| self.remove_entity(id))
                 .collect();
             let root = self.remove_entity(id);
+            let index = self
+                .event_sites
+                .iter()
+                .position(|site| site.area.distance(root.pos) == 0.)
+                .context("reserved event has no original site snapshot")?;
+            let original = self.event_sites.remove(index);
+            let site = self.swap_event_site(&original)?;
             ensure!(
                 root.quest == Some(id) && root.hp > 0,
                 "event reserve lacks a living owned root"
@@ -203,12 +406,20 @@ impl World {
                 kind = root.kind,
                 "Realm event reserved outside active indexes"
             );
-            self.event_reserves.push(ReservedEvent { root, children });
+            self.event_reserves.push(ReservedEvent {
+                root,
+                children,
+                site,
+            });
         }
+        ensure!(
+            self.event_sites.is_empty(),
+            "unbound original event site snapshot"
+        );
         Ok(())
     }
     pub(super) fn earn_realm_event(&mut self, source: i32) -> Result<EventAdmission> {
-        // Prebuilt sites avoid replacing live camps/terrain; critical kills summon events: https://wikiwiki.jp/rmd/%E3%82%A4%E3%83%99%E3%83%B3%E3%83%88
+        // Reserve space, not visible arenas: SpawnEvent paints the site with its boss: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/Oryx.cs#L797-L813
         if let Some(waiting) = self.event_waiting {
             if waiting != source {
                 return Ok(EventAdmission::Waiting);
@@ -239,10 +450,11 @@ impl World {
                 Some(event.root.kind) == self.event_choice
                     && owned + 1 + event.children.len() + mandatory_initial_summons(event.root.kind)
                         <= 256
-                    && self
-                        .players
-                        .values()
-                        .all(|p| p.pos.distance(event.root.pos) >= 32.)
+                    && self.players.values().all(|p| {
+                        p.pos.distance(event.root.pos) >= 32.
+                            && event.site.area.distance(p.pos) >= 4.
+                    })
+                    && self.event_site_clear(&event.site)
             })
             .map(|(index, _)| index)
             .collect();
@@ -250,6 +462,13 @@ impl World {
             return Ok(EventAdmission::Waiting);
         };
         let event = self.event_reserves.remove(index);
+        let previous_site = match self.swap_event_site(&event.site) {
+            Ok(previous) => previous,
+            Err(error) => {
+                self.event_reserves.insert(index, event);
+                return Err(error.context("event site refused; original reserve retained"));
+            }
+        };
         let retained = event.clone();
         let (id, kind, pos) = (event.root.id, event.root.kind, event.root.pos);
         for mut entity in std::iter::once(event.root).chain(event.children) {
@@ -276,10 +495,34 @@ impl World {
             for child in born.into_iter().rev() {
                 self.remove_entity(child);
             }
+            let rollback = self.swap_event_site(&previous_site);
             self.event_reserves.insert(index, retained);
+            rollback.context("earned event site rollback refused")?;
             return Err(error.context(
                 "earned event initial group refused; original reserve retained for retry",
             ));
+        }
+        let tiles: Vec<_> = retained
+            .site
+            .cells
+            .iter()
+            .zip(&previous_site.cells)
+            .filter(|((_, next), (_, previous))| next.ground != previous.ground)
+            .map(|((index, cell), _)| {
+                (
+                    (*index % self.map.width as usize) as i16,
+                    (*index / self.map.width as usize) as i16,
+                    cell.ground,
+                )
+            })
+            .collect();
+        for player in self.players.values_mut() {
+            let known = tiles
+                .iter()
+                .filter(|(x, y, _)| player.tiles.contains(&(*x, *y)))
+                .copied()
+                .collect::<Vec<_>>();
+            player.tile_updates.extend(known);
         }
         self.event_waiting = None;
         self.event_choice = None;

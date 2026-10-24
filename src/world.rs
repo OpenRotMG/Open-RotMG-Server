@@ -348,6 +348,7 @@ pub struct Player {
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
+    tile_updates: Vec<(i16, i16, u8)>,
     tile_scan: Option<(i32, i32)>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
@@ -779,6 +780,7 @@ pub struct World {
     population_counts: [usize; 13],
     population_next: u64,
     setpieces: Vec<realm_setpieces::Area>,
+    event_sites: Vec<realm_setpieces::EventSite>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
     critical_killers: BTreeMap<i32, (u16, String)>,
@@ -2610,6 +2612,7 @@ impl World {
             population_counts: [0; 13],
             population_next: 10000,
             setpieces: vec![],
+            event_sites: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
             critical_killers: BTreeMap::new(),
@@ -3102,6 +3105,7 @@ impl World {
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
+                tile_updates: vec![],
                 tile_scan: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
@@ -3476,9 +3480,15 @@ impl World {
             }
         }
         self.players.get_mut(&id).unwrap().tile_scan = Some(center);
-        if initial || !tiles.is_empty() || !added.is_empty() || !dropped.is_empty() {
+        let changed_tiles = self.players[&id].tile_updates.len();
+        if initial
+            || !tiles.is_empty()
+            || changed_tiles > 0
+            || !added.is_empty()
+            || !dropped.is_empty()
+        {
             let mut o = Writer::new();
-            o.i16(i16::try_from(tiles.len())?);
+            o.i16(i16::try_from(tiles.len() + changed_tiles)?);
             let p = self.players.get_mut(&id).unwrap();
             for &(x, y, ground) in &tiles {
                 p.tiles.insert((x, y));
@@ -3503,6 +3513,9 @@ impl World {
                     .borrow_mut()
                     .discover(&self.map, &self.content, &tiles, p.tiles.len());
                 self.performance.borrow_mut().work("terrain_update", adding);
+            }
+            for (x, y, ground) in std::mem::take(&mut p.tile_updates) {
+                o.i16(x).i16(y).u8(ground);
             }
             o.i16(added.len() as i16);
             for entity in added {
