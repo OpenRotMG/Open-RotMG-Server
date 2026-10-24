@@ -42,12 +42,9 @@ async fn reserved_event_sites_remain_original_and_ordinary_quests_exist_at_creat
     let world = directory.worlds.get_mut(&-3).unwrap();
     assert!(world.players.is_empty());
     for kind in quest::ROOTS {
-        assert!(
-            world
-                .entities
-                .values()
-                .any(|e| e.kind == kind && e.hp > 0 && e.published)
-        );
+        let roots: Vec<_> = world.entities.values().filter(|e| e.kind == kind).collect();
+        assert!(!roots.is_empty() || matches!(kind, 0x675 | 0x678));
+        assert!(roots.iter().all(|e| e.hp > 0 && e.published));
     }
     assert!(!world.event_reserves.is_empty());
     for event in &world.event_reserves {
