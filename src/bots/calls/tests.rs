@@ -1,6 +1,6 @@
 use super::*;
 use crate::world::view::{Lifecycle, MapInfo, OwnCharacter, PlayerMarker, Session, VisibleObject};
-use rand::RngCore;
+use rand::{RngCore, rngs::mock::StepRng};
 
 fn fixture(account: i32) -> (Content, PlayerView, Brain) {
     let c = Content::load(std::path::Path::new("data")).unwrap();
@@ -361,10 +361,64 @@ fn public_call_opportunity_expires_binds_identity_and_preserves_local_priorities
     v.tick += 1;
     pending(&mut b, &v);
     v.character.items[6] = 0xa1d;
+    let grid = b.navigation_grid(&v, &c, &[]);
+    // Spare stock only makes a visit eligible; this case needs an admitted commitment.
+    let admitted = b
+        .mind
+        .market
+        .decide(&v, &c, b.mind.future_class, &grid, &mut StepRng::new(0, 1))
+        .unwrap()
+        .expect("fixture must admit an autonomous market session");
+    assert_eq!(admitted.goal, Goal::Wait);
     let d = b.decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Wait);
     assert!(d.journey.is_none());
     assert!(b.calls.opportunity.is_some());
+}
+
+#[test]
+fn public_call_declined_market_visit_allows_calls_but_not_over_player_agreements() {
+    let (c, mut v, mut b) = fixture(3);
+    b.nexus_until = 0;
+    v.character.items[6] = 0xa1d;
+    let grid = b.navigation_grid(&v, &c, &[]);
+    assert!(
+        b.mind
+            .market
+            .decide(
+                &v,
+                &c,
+                b.mind.future_class,
+                &grid,
+                &mut StepRng::new(u64::MAX, 1)
+            )
+            .unwrap()
+            .is_none()
+    );
+    // Even an accepting draw cannot turn this declined visit into a commitment.
+    assert!(
+        b.mind
+            .market
+            .decide(&v, &c, b.mind.future_class, &grid, &mut StepRng::new(0, 1))
+            .unwrap()
+            .is_none()
+    );
+    pending(&mut b, &v);
+    let d = b.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Follow(40));
+    assert!(matches!(d.journey, Some(Journey::Regroup(40))));
+    assert!(b.calls.opportunity.is_none());
+    b.next_teleport = 0;
+    for waiting in [None, Some(v.position)] {
+        b.agreement = Some(dialogue::Agreement {
+            partner: "Caller".into(),
+            player: 40,
+            waiting,
+        });
+        assert!(!b.call_ready(&v, &c, Activity::Help, 40).unwrap());
+        pending(&mut b, &v);
+        assert_eq!(b.call_target(&v, &c).unwrap(), None);
+    }
 }
 
 #[test]
