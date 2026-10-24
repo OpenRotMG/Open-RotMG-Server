@@ -168,13 +168,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             }
         }
     }
+    // Narrow bands follow the later map; the original 123.5.1 generator is unrecovered.
+    // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/snakepit.wmap
     for &(a, b) in &edges {
         let ((x0, y0), (x1, y1)) = (centers[a], centers[b]);
         for y in
-            y0.min(y1) - if y0 == y1 { 4 } else { 0 }..=y0.max(y1) + if y0 == y1 { 4 } else { 0 }
+            y0.min(y1) - if y0 == y1 { 2 } else { 0 }..=y0.max(y1) + if y0 == y1 { 1 } else { 0 }
         {
-            for x in x0.min(x1) - if x0 == x1 { 4 } else { 0 }
-                ..=x0.max(x1) + if x0 == x1 { 4 } else { 0 }
+            for x in x0.min(x1) - if x0 == x1 { 2 } else { 0 }
+                ..=x0.max(x1) + if x0 == x1 { 1 } else { 0 }
             {
                 let cell = &mut map.cells[(y * width + x) as usize];
                 if cell.ground == 0xff {
@@ -263,6 +265,92 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
     for dy in [-4, -2, 0, 2, 4] {
         for dx in [-7, 7] {
             map.cells[((cy + dy) * map.width + cx + dx) as usize].object = Some(DART);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeSet, VecDeque};
+
+    #[test]
+    fn reconstructed_connectors_are_four_tiles_and_reach_every_room_after_digging() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            let count = |kind| map.cells.iter().filter(|c| c.object == Some(kind)).count();
+            assert_eq!(count(BOSS), 1);
+            assert_eq!(count(0x703), 1);
+            assert_eq!(count(GUARD), 0);
+            assert!(count(SPAWNER) <= 3);
+            assert_eq!(count(BUTTON), count(SPAWNER));
+            let pythons = map
+                .cells
+                .iter()
+                .filter(|c| matches!(c.object, Some(0x225..=0x229)))
+                .count();
+            assert!((32..=52).contains(&pythons) && pythons % 4 == 0);
+            assert_eq!(count(0x173), pythons / 2);
+            assert_eq!(map.spawns.len(), 1);
+            let neighbors = |i: usize| {
+                let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+                [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                    .into_iter()
+                    .filter(|&(x, y)| (0..map.width).contains(&x) && (0..map.height).contains(&y))
+                    .map(|(x, y)| (y * map.width + x) as usize)
+                    .collect::<Vec<_>>()
+            };
+            let mut soft: BTreeSet<_> = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.object == Some(0x172))
+                .map(|(i, _)| i)
+                .collect();
+            assert!(!soft.is_empty());
+            while let Some(start) = soft.pop_first() {
+                let mut queue = VecDeque::from([start]);
+                let (mut x0, mut x1, mut y0, mut y1) = (map.width, 0, map.height, 0);
+                while let Some(i) = queue.pop_front() {
+                    let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                    for n in neighbors(i) {
+                        if soft.remove(&n) {
+                            queue.push_back(n);
+                        }
+                    }
+                }
+                assert_eq!(
+                    (x1 - x0 + 1).min(y1 - y0 + 1),
+                    4,
+                    "seed {seed}, soft component {x0},{y0}..{x1},{y1}"
+                );
+            }
+            let passable = |i: usize| {
+                content.grounds[&map.cells[i].ground] > 0.
+                    && !matches!(map.cells[i].object, Some(0x170 | 0x1ec | 0x1ed))
+            };
+            let (x, y) = map.spawns[0];
+            let start = y.floor() as usize * map.width as usize + x.floor() as usize;
+            let mut seen = BTreeSet::from([start]);
+            let mut queue = VecDeque::from([start]);
+            while let Some(i) = queue.pop_front() {
+                for n in neighbors(i) {
+                    if passable(n) && seen.insert(n) {
+                        queue.push_back(n);
+                    }
+                }
+            }
+            for i in 0..map.cells.len() {
+                assert!(
+                    !passable(i) || seen.contains(&i),
+                    "seed {seed}, disconnected post-dig floor {i}"
+                );
+            }
         }
     }
 }
