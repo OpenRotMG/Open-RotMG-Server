@@ -335,7 +335,7 @@ mod tests {
     fn native_dexterity_drop_reconciles_only_until_tick_ack_without_extra_damage() {
         let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
         let content = Arc::new(Content::load(&data).unwrap());
-        let map = Arc::new(Map::load(&data.join("tutorial.wmap"), &content).unwrap());
+        let map = Arc::new(Map::load(&data.join("nexus.wmap"), &content).unwrap());
         let mut world = World::new(content, map).unwrap();
         let character: Character = serde_json::from_value(serde_json::json!({
             "schema":1,"lifetime":crate::store::FameLifetime::complete(),
@@ -374,7 +374,14 @@ mod tests {
             ((u64::from(seed) * 16807) % 2147483647) as u32
         );
         assert_eq!(world.players[&id].character.shots, 1);
-        assert_eq!(world.bullets.len(), 1);
+        assert_eq!(
+            world
+                .bullets
+                .iter()
+                .filter(|bullet| bullet.owner == id)
+                .count(),
+            1
+        );
         assert!(world.players[&id].attack_suppressed.is_some());
         world.step();
         world.step();
