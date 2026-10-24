@@ -484,11 +484,10 @@ async fn login(mut app: App, packet: Packet) -> Result<Session> {
     let lost = tokio::sync::watch::channel(false).0;
     handle(
         &mut app,
-        packet,
+        vec![(packet, std::time::Instant::now())],
         &mut session,
         &tx,
         &lost,
-        std::time::Instant::now(),
     )
     .await?;
     Ok(session)

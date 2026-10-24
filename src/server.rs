@@ -1063,13 +1063,183 @@ fn enqueue_reply(tx: &mpsc::Sender<Packet>, packet: Packet) -> Result<()> {
     })
 }
 
+// Packets whose only effect is on the sender's World; a queued run of them shares one world job.
+const INPUTS: [u8; 11] = [7, 11, 14, 22, 24, 38, 48, 51, 59, 64, 66];
+type Input = Box<dyn FnOnce(&mut World) -> Result<()> + Send>;
+
+fn input(
+    packet: &Packet,
+    player: Option<i32>,
+    received: std::time::Instant,
+    testing: bool,
+) -> Result<Option<Input>> {
+    let mut r = NativeReader(Reader::new(&packet.body));
+    let character = |what| player.ok_or_else(|| lifecycle::protocol(what));
+    let input: Input = match packet.id {
+        wire::UPDATE_ACK => {
+            r.done()?;
+            let Some(id) = player.filter(|_| testing) else {
+                return Ok(None);
+            };
+            Box::new(move |w| {
+                w.players
+                    .get_mut(&id)
+                    .context("native UPDATE_ACK player missing")?
+                    .native_update_acked = true;
+                Ok(())
+            })
+        }
+        wire::MOVE => {
+            let tick = r.i32()?;
+            let time = r.i32()?;
+            let pos = Pos {
+                x: r.f32()?,
+                y: r.f32()?,
+            };
+            let count = r.i16()?;
+            ensure!(
+                (0..=128).contains(&count),
+                lifecycle::protocol("movement history too long")
+            );
+            for _ in 0..count {
+                r.i32()?;
+                r.f32()?;
+                r.f32()?;
+            }
+            r.done()?;
+            let id = character("MOVE before character")?;
+            Box::new(move |w| {
+                w.acknowledge_tick(id, tick)?;
+                match w.native_move_received(id, pos, (time, received)) {
+                    Ok(_) => Ok(()),
+                    Err(e) if lifecycle::rule_rejection(&e) => {
+                        w.correct_position(id, time, &e.to_string())
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+        }
+        wire::PLAYER_SHOOT => {
+            let time = r.i32()?;
+            let bullet = r.u8()?;
+            let kind = r.i16()? as u16;
+            let pos = Pos {
+                x: r.f32()?,
+                y: r.f32()?,
+            };
+            let angle = r.f32()?;
+            r.done()?;
+            let id = character("shoot before character")?;
+            Box::new(move |w| {
+                match w.native_shoot_received(id, (time, received), bullet, kind, pos, angle) {
+                    Ok(_) => Ok(()),
+                    Err(error)
+                        if error
+                            .downcast_ref::<crate::world::RejectedNativeShot>()
+                            .is_some() =>
+                    {
+                        w.correct_native_shot(id, time, bullet, kind, &format!("{error:#}"))
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+        }
+        64 => {
+            let time = r.i32()?;
+            let pos = Pos {
+                x: r.f32()?,
+                y: r.f32()?,
+            };
+            r.done()?;
+            let id = character("ground damage before character")?;
+            Box::new(move |w| w.ground_damage(id, time, pos))
+        }
+        22 => {
+            let time = r.i32()?;
+            r.done()?;
+            let id = character("SHOOT ACK before character")?;
+            Box::new(move |w| w.acknowledge_shoot(id, time))
+        }
+        24 => {
+            let bullet = r.u8()?;
+            let owner = r.i32()?;
+            r.done()?;
+            let id = character("hit report before character")?;
+            Box::new(move |w| w.native_player_hit(id, owner, bullet))
+        }
+        14 => {
+            let time = r.i32()?;
+            r.done()?;
+            let id = character("GOTO ACK before character")?;
+            Box::new(move |w| w.acknowledge_goto(id, time))
+        }
+        59 => {
+            character("area acknowledgement before character")?;
+            r.i32()?;
+            r.f32()?;
+            r.f32()?;
+            r.done()?;
+            return Ok(None);
+        }
+        66 | 51 => {
+            collision_report(packet.id == 66, &mut r).context(CloseReason::Protocol)?;
+            return Ok(None);
+        }
+        48 => {
+            r.done()?;
+            return Ok(None);
+        }
+        id => unreachable!("packet {id} is not native input"),
+    };
+    Ok(Some(input))
+}
+
+async fn handle_inputs(
+    a: &App,
+    packets: Vec<(Packet, std::time::Instant)>,
+    session: &Session,
+) -> Result<()> {
+    let testing = a.testing.is_some();
+    let inputs = packets
+        .iter()
+        .map(|(packet, received)| {
+            Ok((
+                packet.id,
+                input(packet, session.player, *received, testing)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let Some(id) = session.player else {
+        return Ok(());
+    };
+    a.world
+        .call(move |w| {
+            for (packet, input) in inputs {
+                let p = w.players.get(&id).context("player missing")?;
+                // Resurrection is alive again, but its old scene must stay inert until the owned RECONNECT.
+                if p.native_transferring()
+                    || matches!(packet, 7 | 38) && (p.death_pending || !p.character.alive)
+                {
+                    tracing::debug!(
+                        player = id,
+                        packet,
+                        "ignored queued command from dying or transferring character"
+                    );
+                } else if let Some(input) = input {
+                    input(w)?;
+                }
+            }
+            Ok(())
+        })
+        .await
+}
+
 async fn handle(
     a: &mut App,
-    packet: Packet,
+    packets: Vec<(Packet, std::time::Instant)>,
     session: &mut Session,
     tx: &mpsc::Sender<Packet>,
     lost: &tokio::sync::watch::Sender<bool>,
-    received: std::time::Instant,
 ) -> Result<()> {
     let entry = lifecycle::drain::entry(a)?;
     if let (Some(owner), Some(player)) = (&session.account, session.player) {
@@ -1086,16 +1256,25 @@ async fn handle(
         .unwrap_or_default();
     let (app, completed_session, result) =
         lifecycle::account(a, accounts, "native_packet", move |mut app| async move {
-            let result = entry
-                .scope(handle_inner(
-                    &mut app,
-                    packet,
-                    &mut owned_session,
-                    &tx,
-                    &lost,
-                    received,
-                ))
-                .await;
+            let result = if INPUTS.contains(&packets[0].0.id) {
+                entry
+                    .scope(handle_inputs(&app, packets, &owned_session))
+                    .await
+            } else {
+                let Ok([(packet, received)]) = <[_; 1]>::try_from(packets) else {
+                    unreachable!("only native input is batched")
+                };
+                entry
+                    .scope(handle_inner(
+                        &mut app,
+                        packet,
+                        &mut owned_session,
+                        &tx,
+                        &lost,
+                        received,
+                    ))
+                    .await
+            };
             if let (Err(error), Some(owner)) = (&result, &owned_session.account) {
                 lifecycle::observe(&app, owner.id, "native_packet", error);
             }
@@ -1353,80 +1532,6 @@ async fn handle_inner(
             if let Some(testing) = &a.testing {
                 testing.native_entered(account)?;
             }
-        }
-        wire::UPDATE_ACK => {
-            r.done()?;
-            if a.testing.is_some()
-                && let Some(id) = player
-            {
-                let id = *id;
-                a.world
-                    .for_player(id)
-                    .call(move |w| {
-                        w.players
-                            .get_mut(&id)
-                            .context("native UPDATE_ACK player missing")?
-                            .native_update_acked = true;
-                        Ok(())
-                    })
-                    .await?;
-            }
-        }
-        wire::MOVE => {
-            let tick = r.i32()?;
-            let time = r.i32()?;
-            let pos = Pos {
-                x: r.f32()?,
-                y: r.f32()?,
-            };
-            let count = r.i16()?;
-            ensure_protocol!((0..=128).contains(&count), "movement history too long");
-            for _ in 0..count {
-                r.i32()?;
-                r.f32()?;
-                r.f32()?;
-            }
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("MOVE before character"))?;
-            a.world
-                .call(move |w| {
-                    w.acknowledge_tick(id, tick)?;
-                    match w.native_move_received(id, pos, (time, received)) {
-                        Ok(_) => Ok(()),
-                        Err(e) if lifecycle::rule_rejection(&e) => {
-                            w.correct_position(id, time, &e.to_string())
-                        }
-                        Err(error) => Err(error),
-                    }
-                })
-                .await?;
-        }
-        wire::PLAYER_SHOOT => {
-            let time = r.i32()?;
-            let bullet = r.u8()?;
-            let kind = r.i16()? as u16;
-            let pos = Pos {
-                x: r.f32()?,
-                y: r.f32()?,
-            };
-            let angle = r.f32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("shoot before character"))?;
-            a.world
-                .call(move |w| {
-                    match w.native_shoot_received(id, (time, received), bullet, kind, pos, angle) {
-                        Ok(_) => Ok(()),
-                        Err(error)
-                            if error
-                                .downcast_ref::<crate::world::RejectedNativeShot>()
-                                .is_some() =>
-                        {
-                            w.correct_native_shot(id, time, bullet, kind, &format!("{error:#}"))
-                        }
-                        Err(error) => Err(error),
-                    }
-                })
-                .await?;
         }
         wire::CREATE_GUILD
         | wire::GUILD_INVITE
@@ -1740,24 +1845,6 @@ async fn handle_inner(
                 testing.acknowledge_native(nonce, *player);
             }
         }
-        64 => {
-            let time = r.i32()?;
-            let pos = Pos {
-                x: r.f32()?,
-                y: r.f32()?,
-            };
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("ground damage before character"))?;
-            a.world
-                .call(move |w| w.ground_damage(id, time, pos))
-                .await?;
-        }
-        22 => {
-            let time = r.i32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("SHOOT ACK before character"))?;
-            a.world.call(move |w| w.acknowledge_shoot(id, time)).await?;
-        }
         76 => {
             r.i32()?;
             r.u8()?;
@@ -1765,23 +1852,6 @@ async fn handle_inner(
             r.u8()?;
             r.done()?;
         }
-        24 => {
-            let bullet = r.u8()?;
-            let owner = r.i32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("hit report before character"))?;
-            a.world
-                .call(move |w| w.native_player_hit(id, owner, bullet))
-                .await?;
-        }
-        59 => {
-            player.ok_or_else(|| lifecycle::protocol("area acknowledgement before character"))?;
-            r.i32()?;
-            r.f32()?;
-            r.f32()?;
-            r.done()?;
-        }
-        66 | 51 => collision_report(packet.id == 66, &mut r).context(CloseReason::Protocol)?,
         30 => {
             let time = r.i32()?;
             let s = slot(&mut r).context(CloseReason::Protocol)?;
@@ -1867,15 +1937,6 @@ async fn handle_inner(
             lifecycle::stage(Stage::Reservation);
             let plan = a.world.call(move |w| w.swap(id, from, to)).await?;
             persist(a, plan).await?;
-        }
-        14 => {
-            let time = r.i32()?;
-            r.done()?;
-            let id = player.ok_or_else(|| lifecycle::protocol("GOTO ACK before character"))?;
-            a.world.call(move |w| w.acknowledge_goto(id, time)).await?;
-        }
-        48 => {
-            r.done()?;
         }
         33 => {
             let name = r.utf()?;
@@ -2179,6 +2240,7 @@ async fn connection_io<S, I>(
     }
     session.diagnostics.browser = browser;
     let mut reconnect_sent = false;
+    let mut deferred = None;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(5));
     let mut serial = 0;
     let mut transfers = tokio::time::interval(std::time::Duration::from_millis(250));
@@ -2237,19 +2299,27 @@ async fn connection_io<S, I>(
                     Err(error) => {tracing::error!(%error,"terminal native drain inspection failed");break;}
                 }
             },
-            event=incoming.recv()=>match event {
-                Some(Incoming::Command(packet, received, _bytes))=>{
+            event=async { match deferred.take() { Some(event) => Some(event), None => incoming.recv().await } }=>match event {
+                Some(Incoming::Command(packet, received, bytes))=>{
                     if incoming.is_closed() { break; }
                     if a.testing.as_ref().is_some_and(|t| t.stopped.borrow().is_some()) { if terminal_drain {continue;} break; }
                     if !session.reconnecting {
                         let id=packet.id;
-                        session.diagnostics.packets_in += 1;
-                        session.diagnostics.processed(id);
+                        let queue_before=incoming.len();
+                        let (mut packets, mut _bytes) = (vec![(packet, received)], vec![bytes]);
+                        // Serial world round trips per packet cannot keep up with boss volleys while ticks overrun.
+                        while INPUTS.contains(&id) && let Ok(next) = incoming.try_recv() {
+                            match next {
+                                Incoming::Command(packet, received, bytes) if INPUTS.contains(&packet.id) => { packets.push((packet, received)); _bytes.push(bytes); }
+                                other => { deferred = Some(other); break; }
+                            }
+                        }
+                        session.diagnostics.packets_in += packets.len() as u64;
+                        for (packet, _) in &packets { session.diagnostics.processed(packet.id); }
                         let handling = std::time::Instant::now();
                         let queued=a.world.clock.now().saturating_duration_since(received);
-                        let queue_before=incoming.len();
                         let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
-                        let result=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packet,&mut session,&tx,&lost,received)).await;
+                        let result=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packets,&mut session,&tx,&lost)).await;
                         session.diagnostics.handled(diagnostics::CommandSample {packet:id,queued,handling:handling.elapsed(),queue_before,queue_after:incoming.len(),failed:result.is_err(),requests:requests.lock().expect("request timings poisoned").clone()});
                         if let Err(e)=result {
                             let rejected = lifecycle::rule_rejection(&e);
