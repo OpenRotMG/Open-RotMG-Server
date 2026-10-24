@@ -677,6 +677,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         ],
         crate::dungeon::abyss::IDOL => &[
             (1., Item(0xa34)),
+            // Restore Trapped's DEF candidate using our VIT guarantee, not its ordered weights: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Abyss.cs#L224-L235
             (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
@@ -966,18 +967,40 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use rand::SeedableRng;
+    use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
-    fn abyss_bosses_preserve_the_paired_potion_reward() {
-        let content = super::Content::load(std::path::Path::new("data")).unwrap();
-        for kind in [crate::dungeon::abyss::MALPHAS, crate::dungeon::abyss::IDOL] {
-            for seed in 0..64 {
-                let items =
-                    super::rewards(&content, kind, &mut rand::rngs::StdRng::seed_from_u64(seed));
-                assert!(
-                    items.contains(&0xa34) && items.contains(&0xa20),
-                    "{kind:#x} seed {seed}: {items:?}"
+    fn abyss_malphas_rewards_include_both_stat_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for seed in 0..64 {
+            let items = rewards(
+                &content,
+                crate::dungeon::abyss::MALPHAS,
+                &mut StdRng::seed_from_u64(seed),
+            );
+            assert!(
+                items.contains(&0xa34) && items.contains(&0xa20),
+                "seed={seed} items={items:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn abyss_idol_rewards_include_both_stat_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert!(private(crate::dungeon::abyss::IDOL));
+        for seed in 0..64 {
+            let items = rewards(
+                &content,
+                crate::dungeon::abyss::IDOL,
+                &mut StdRng::seed_from_u64(seed),
+            );
+            for potion in [0xa20, 0xa34] {
+                assert_eq!(
+                    items.iter().filter(|item| **item == potion).count(),
+                    1,
+                    "seed={seed} potion={potion:#x} items={items:?}"
                 );
             }
         }
