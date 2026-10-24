@@ -529,6 +529,7 @@ fn nexus_exclusion_preserves_active_business_and_admitted_market() {
             &v,
             "Triceps",
             3.,
+            brain.mind.market.incoming.is_some(),
         )
         .unwrap();
     let d = brain.decide(&v, &c).unwrap();
