@@ -940,12 +940,16 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
     .collect()
 }
 pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
-    let picks = chest_table(kind);
-    for (_, pick) in &picks {
+    let mut consideration = Vec::new();
+    for (chance, pick) in chest_table(kind) {
+        let pool = candidates(content, pick);
         ensure!(
-            !candidates(content, *pick).is_empty(),
+            !pool.is_empty(),
             "landmark {kind:#x} chest has an empty selected tier"
         );
+        // MobDrops.cs expands p/n per item; selected BTree order is not authenticated source order.
+        let probability = chance / pool.len() as f64;
+        consideration.extend(pool.into_iter().map(|id| (probability, id)));
     }
     // TempleA/B.cs (realm-src@1855c017; data/REALM-SRC-LICENSE) use GetLoots(3, 8) as a success ceiling.
     let minimum_limit = if kind == crate::dungeon::jungle::COIL {
@@ -955,13 +959,9 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
     };
     let maximum = rng.gen_range(minimum_limit..8);
     let mut items = Vec::new();
-    for (chance, pick) in picks {
+    for (chance, id) in consideration {
         if rng.gen_bool(chance) {
-            items.push(i32::from(
-                *candidates(content, pick)
-                    .choose(rng)
-                    .expect("selected landmark chest tier"),
-            ));
+            items.push(i32::from(id));
             if items.len() == maximum {
                 break;
             }
@@ -1003,6 +1003,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(empty, vec![-1; 8]);
+    }
+
+    #[test]
+    fn landmark_chests_roll_each_selected_item_with_divided_probability() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert_eq!(candidates(&content, Pick::Tier(4, WEAPONS)).len(), 5);
+        assert_eq!(candidates(&content, Pick::Tier(4, ARMOR)).len(), 3);
+        for (kind, tiers) in [
+            (crate::dungeon::jungle::COIL, vec![4, 4, 4]),
+            (0x678, vec![4, 4, 4, 5, 5]),
+            (0x67d, vec![5, 5, 5, 6, 6]),
+            (0x668, vec![6, 6, 6, 7, 7]),
+        ] {
+            let items =
+                landmark_chest(&content, kind, &mut StepRng::new(0x1000000000000000, 0)).unwrap();
+            let actual: Vec<_> = items
+                .into_iter()
+                .filter(|item| *item >= 0)
+                .map(|id| {
+                    let item = &content.objects[&(id as u16)];
+                    assert!(ARMOR.contains(&item.slot_type), "{kind:#x}: {id:#x}");
+                    item.tier.unwrap()
+                })
+                .collect();
+            assert_eq!(actual, tiers, "{kind:#x}");
+        }
     }
 
     #[test]
