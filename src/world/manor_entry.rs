@@ -88,3 +88,55 @@ impl World {
         Ok(())
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kage_human_volley_restarts_on_the_current_phase_clock() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+        for cell in &mut map.cells {
+            cell.ground = 0x61;
+            cell.object = None;
+        }
+        let mut w = World::new(content, Arc::new(map)).unwrap();
+        let target = Pos { x: 4.5, y: 3.5 };
+        let id = w
+            .spawn_entity(KAGE, Pos { x: 3.5, y: 3.5 }, vec![])
+            .unwrap();
+        w.now = 10_000;
+        for (previous_stage, duration) in [(1, 2000), (3, 4000)] {
+            w.manor_entry_phase(id, previous_stage);
+            let previous = w.npc_attack_schedule(id, 0).unwrap().unwrap();
+            w.scheduled_attacks(id, Some(target), &previous).unwrap();
+            w.now += duration;
+            w.manor_entry_mechanics(id, None, duration).unwrap();
+            assert_eq!(w.entities[&id].stage, Some(2));
+            for (delta, expected) in [(0, Some(0.)), (50, None), (250, Some(30f32.to_radians()))] {
+                w.now += delta;
+                let age = w.now - w.entities[&id].activated.unwrap();
+                let elapsed = if delta == 0 { duration } else { age };
+                let schedule = w.npc_attack_schedule(id, elapsed).unwrap().unwrap();
+                let shots = w.scheduled_attacks(id, Some(target), &schedule).unwrap();
+                if let Some(first) = expected {
+                    assert_eq!(shots.len(), 2);
+                    for ((projectile, angle), expected) in
+                        shots.into_iter().zip([first, first + std::f32::consts::PI])
+                    {
+                        assert_eq!(projectile, 1);
+                        assert!(
+                            (angle - expected).abs() < 1e-5,
+                            "phase {previous_stage}: {angle} != {expected}"
+                        );
+                    }
+                } else {
+                    assert!(
+                        shots.is_empty(),
+                        "phase {previous_stage} fired an extra entry volley"
+                    );
+                }
+            }
+        }
+    }
+}
