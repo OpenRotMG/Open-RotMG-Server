@@ -17,30 +17,6 @@ pub struct Diagnostics {
 #[derive(Default)]
 struct Reports {
     pending: BTreeSet<String>,
-    latest: HashMap<i32, (u64, String)>,
-}
-impl Reports {
-    fn remember(&mut self, report: &Value) -> Result<()> {
-        let account = serde_json::from_value(report["account_id"].clone())?;
-        let key = (
-            report["created_at_unix_ms"]
-                .as_u64()
-                .context("missing report timestamp")?,
-            report["id"]
-                .as_str()
-                .context("missing report ID")?
-                .to_string(),
-        );
-        self.latest
-            .entry(account)
-            .and_modify(|previous| {
-                if key > *previous {
-                    *previous = key.clone();
-                }
-            })
-            .or_insert(key);
-        Ok(())
-    }
 }
 fn note_progress(report: &Value) -> Result<(usize, usize)> {
     let Some(notes) = report.get("notes") else {
@@ -58,6 +34,8 @@ fn note_progress(report: &Value) -> Result<(usize, usize)> {
 #[derive(Default)]
 pub struct Browser {
     samples: VecDeque<(Instant, BrowserSample)>,
+    pub reports: Option<mpsc::Sender<WebReport>>,
+    last_report: Option<Instant>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -129,7 +107,6 @@ impl Diagnostics {
                     _ => bail!("invalid stored bug delivery state"),
                 }
                 note_progress(&report)?;
-                pending.remember(&report)?;
             }
         }
         let executable = std::env::current_exe()?;
@@ -178,40 +155,6 @@ impl Diagnostics {
         pending
             .pending
             .insert(report["id"].as_str().context("missing report ID")?.into());
-        pending.remember(report)?;
-        Ok(())
-    }
-    fn add_info(&self, account: i32, message: &str) -> Result<()> {
-        ensure!(
-            !message.trim().is_empty() && message.chars().count() <= 500,
-            "Use /bug-info <details>, with 1–500 characters."
-        );
-        let mut files = self.files.lock().expect("diagnostics poisoned");
-        let id = files
-            .latest
-            .get(&account)
-            .context("No bug report yet. Use /bug <description> first.")?
-            .1
-            .clone();
-        let mut report: Value =
-            serde_json::from_slice(&std::fs::read(self.root.join(format!("{id}.json")))?)?;
-        ensure!(report["account_id"] == account, "bug report owner changed");
-        if report.get("notes").is_none() {
-            report["notes"] = json!([]);
-            report["delivery"]["notes_through"] = json!(0);
-        }
-        let (_, count) = note_progress(&report)?;
-        ensure!(
-            count < 32,
-            "This report already has 32 additions. Use /bug <description> for a new report."
-        );
-        report["notes"].as_array_mut().context("invalid stored bug notes")?.push(json!({
-            "created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis(),
-            "text_untrusted":message}));
-        report["delivery"]["status"] = json!("pending");
-        self.write(&report)?;
-        files.pending.insert(id.clone());
-        tracing::info!(report_id=%id, account, note=count+1, "bug report details saved; awaiting delivery");
         Ok(())
     }
     fn next(&self) -> Result<Option<Value>> {
@@ -226,6 +169,10 @@ impl Diagnostics {
                     report["delivery"]["note_batch"] = json!({"from":through+1,"through":total});
                     self.write(&report)?;
                 }
+                report
+                    .as_object_mut()
+                    .expect("report object")
+                    .remove("screenshot");
                 return Ok(Some(report));
             }
             ensure!(
@@ -643,38 +590,30 @@ pub async fn attachment(State(a): State<App>, Path(id): Path<String>) -> Respons
     }
 }
 
+#[cfg(test)]
+#[path = "diagnostics_tests.rs"]
+mod tests;
+
 pub async fn report(
     a: &App,
     account: i32,
     player: i32,
     message: &str,
     connection: &ConnectionDiagnostics,
-    info: bool,
-) -> Result<&'static str> {
+    screenshot: Option<String>,
+) -> Result<String> {
     ensure!(
         a.discord_link_token.is_some(),
         "Discord bug reporting is not configured."
     );
     ensure!(
         !message.trim().is_empty(),
-        if info {
-            "Usage: /bug-info <details>. Reports are public; do not include personal information."
-        } else {
-            "Usage: /bug <description>. Reports are public; do not include personal information."
-        }
+        "Describe the bug before submitting. Reports are public; do not include personal information."
     );
     ensure!(
-        message.chars().count() <= 500,
-        "Bug message is too long (maximum 500 characters)."
+        message.chars().count() <= 4000,
+        "Bug message is too long (maximum 4000 characters)."
     );
-    if info {
-        let diagnostics = a.diagnostics.clone();
-        let message = message.to_owned();
-        tokio::task::spawn_blocking(move || diagnostics.add_info(account, &message)).await??;
-        return Ok(
-            "Info added to your latest bug report! Type /bug-info <details> to add more! <3",
-        );
-    }
     let requested = Instant::now();
     let context = a.world.directory(move |d| d.bug_context(player)).await?;
     let id = {
@@ -697,14 +636,135 @@ pub async fn report(
         "{}/api/bug-reports/{id}/diagnostics.json",
         a.origin
     ));
+    if let Some(screenshot) = screenshot {
+        report["screenshot"] = json!(screenshot);
+        report["screenshot_url"] =
+            json!(format!("{}/api/bug-reports/{id}/screenshot.png", a.origin));
+    }
     let object = report.as_object_mut().expect("report object");
     object.remove("connection");
     object.insert("context".into(), json!({"player_id": player}));
     let diagnostics = a.diagnostics.clone();
     tokio::task::spawn_blocking(move || diagnostics.save(&report)).await??;
     tracing::info!(report_id=%id, account, player, "bug report saved; awaiting Discord delivery");
-    Ok("Report submitted! Type /bug-info <details> to add more and help us fix it faster! <3")
+    Ok(id)
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebReportInput {
+    message: String,
+    screenshot: String,
+}
+pub struct WebReport {
+    input: WebReportInput,
+    reply: tokio::sync::oneshot::Sender<Result<String>>,
+}
+fn screenshot_png(encoded: &str) -> Result<Vec<u8>> {
+    use base64::Engine;
+    ensure!(encoded.len() <= 1_400_000, "Game screenshot exceeds 1 MiB.");
+    let png = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+    ensure!(
+        png.len() >= 33
+            && png.len() <= 1024 * 1024
+            && png.starts_with(b"\x89PNG\r\n\x1a\n")
+            && &png[12..16] == b"IHDR",
+        "Game screenshot must be a PNG of at most 1 MiB."
+    );
+    for offset in [16, 20] {
+        let dimension = u32::from_be_bytes(png[offset..offset + 4].try_into()?);
+        ensure!(
+            (1..=4096).contains(&dimension),
+            "Invalid game screenshot dimensions."
+        );
+    }
+    Ok(png)
+}
+pub async fn submit(
+    State(a): State<App>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<WebReportInput>,
+) -> Response {
+    super::hiscores::json_result(async {
+        ensure!(headers.get("origin").and_then(|v|v.to_str().ok()) == Some(a.origin.as_str()), "Bug report origin denied.");
+        ensure!(!input.message.trim().is_empty() && input.message.chars().count() <= 4000, "Describe the bug in 1–4000 characters.");
+        screenshot_png(&input.screenshot)?;
+        let browser = a.diagnostics.browsers.lock().expect("diagnostics poisoned").get(&key).and_then(|b|b.upgrade()).context("Connect to a character before submitting a bug report.")?;
+        let (reply, response) = tokio::sync::oneshot::channel();
+        {
+            let mut browser = browser.lock().expect("browser poisoned");
+            ensure!(browser.last_report.is_none_or(|t|t.elapsed().as_secs() >= 30), "Wait 30 seconds between bug reports.");
+            browser.reports.as_ref().context("No game connection for this tab.")?.try_send(WebReport {input,reply}).context("Game connection is busy or closed; report was not queued.")?;
+            browser.last_report = Some(Instant::now());
+        }
+        let id = tokio::time::timeout(std::time::Duration::from_secs(30), response).await.context("Submission outcome unknown; check the bug backlog before retrying.")?.context("Game disconnected before confirming submission; check the backlog before retrying.")??;
+        Ok(json!({"id":id}))
+    }.await)
+}
+pub(super) async fn from_session(a: &App, session: &Session, request: WebReport) {
+    // Resolve identity on the owning game task, not browser-supplied IDs: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+    let result = async {
+        ensure!(
+            !session.reconnecting,
+            "World transfer in progress; try again when connected."
+        );
+        let account = session
+            .account
+            .as_ref()
+            .context("Sign into the game before reporting.")?
+            .id;
+        let player = session
+            .player
+            .context("Connect to a character before reporting.")?;
+        report(
+            a,
+            account,
+            player,
+            &request.input.message,
+            &session.diagnostics,
+            Some(request.input.screenshot),
+        )
+        .await
+    }
+    .await;
+    if let Err(error) = &result {
+        tracing::warn!(%error, "website bug report failed");
+    }
+    let _ = request.reply.send(result);
+}
+pub async fn screenshot(State(a): State<App>, Path(id): Path<String>) -> Response {
+    if !valid_id(&id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let result = tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>> {
+        let bytes = match std::fs::read(a.diagnostics.root.join(format!("{id}.json"))) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let report: Value = serde_json::from_slice(&bytes)?;
+        report
+            .get("screenshot")
+            .map(|v| screenshot_png(v.as_str().context("Invalid stored screenshot")?))
+            .transpose()
+    })
+    .await;
+    match result {
+        Ok(Ok(Some(png))) => (
+            [
+                ("content-type", "image/png"),
+                ("x-content-type-options", "nosniff"),
+                ("cache-control", "no-store"),
+            ],
+            png,
+        )
+            .into_response(),
+        Ok(Ok(None)) => StatusCode::NOT_FOUND.into_response(),
+        Ok(Err(e)) => error(e),
+        Err(e) => error(e.into()),
+    }
+}
+
 pub async fn browser_sample(
     State(a): State<App>,
     Path(key): Path<String>,
