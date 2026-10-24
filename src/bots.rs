@@ -749,6 +749,7 @@ impl Brain {
                     && pressured
                     && !decision.movement.is_some_and(|p| {
                         combat::speed(v) > 0.
+                            && recovery_step_valid(v, content, &grid, p)
                             && (enemies.is_empty() || separation(p) > separation(v.position))
                             && combat::clearance(v, p, &perception)
                                 >= self.mind.cognition.pickup_clearance
@@ -1388,6 +1389,41 @@ fn peaceful(enemies: &[&crate::world::view::VisibleObject], position: Pos) -> bo
     enemies
         .iter()
         .all(|enemy| enemy.position.distance(position) > 5.)
+}
+fn recovery_step_valid(v: &PlayerView, content: &Content, grid: &Grid, pos: Pos) -> bool {
+    if !pos.x.is_finite() || !pos.y.is_finite() || !grid.walkable.contains(&tile(pos)) {
+        return false;
+    }
+    let own = tile(pos);
+    let side = |n: f32| {
+        if n.fract() < 0.5 {
+            -1
+        } else if n.fract() > 0.5 {
+            1
+        } else {
+            0
+        }
+    };
+    let (dx, dy) = (side(pos.x), side(pos.y));
+    let neighbors = [
+        (own.0 + dx, own.1),
+        (own.0, own.1 + dy),
+        (own.0 + dx, own.1 + dy),
+    ];
+    // World::player_position_valid checks the half-cell footprint, not just the route centerline.
+    neighbors.iter().all(|point| {
+        v.tiles
+            .iter()
+            .find(|t| (t.x, t.y) == *point)
+            .is_some_and(|t| t.ground != 255)
+    }) && v.objects.iter().all(|o| {
+        let point = tile(o.position);
+        if point == own {
+            !content.objects[&o.kind].blocks
+        } else {
+            !neighbors.contains(&point) || !content.objects[&o.kind].full_occupy
+        }
+    })
 }
 fn hostile(v: &PlayerView, owner: i32) -> bool {
     owner != v.session.player

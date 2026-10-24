@@ -274,3 +274,96 @@ fn recovery_preserves_healing_and_close_outmatched_precedence() {
     assert!(pending.journey.is_none());
     assert!(matches!(pending.item, Some(Action::Use { slot: 1, .. })));
 }
+
+#[test]
+fn recovery_rejects_centerline_clear_but_blocked_endpoint_footprint() {
+    let (content, mut view) = recovery_scene(250);
+    let mut ground = vec![1; 128 * 128];
+    ground[10 * 128 + 8] = 255;
+    let geometry =
+        crate::navigation::Geometry::new((128, 128), ground, &BTreeMap::from([(1, 1.), (255, 0.)]));
+    view.tiles = Arc::new(crate::navigation::Tiles::new(
+        geometry.clone(),
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    let grid = Grid::terrain(&view);
+    let step = Pos { x: 9.25, y: 10.5 };
+    assert!(grid.segment(view.position, step));
+    assert!(!recovery_step_valid(&view, &content, &grid, step));
+    assert!(recovery_step_valid(
+        &view,
+        &content,
+        &grid,
+        Pos { x: 9.5, y: 10.5 }
+    ));
+    let decision = Brain::new(ARCHETYPES[0], &view)
+        .decide(&view, &content)
+        .unwrap();
+    assert!(matches!(decision.journey, Some(Journey::Nexus)));
+    assert!(decision.movement.is_some_and(|p| p.distance(step) < 0.001));
+    view.tiles = Arc::new(crate::navigation::Tiles::new(
+        geometry,
+        (0..128)
+            .flat_map(|x| (0..128).map(move |y| (x, y)))
+            .filter(|p| *p != (8, 10)),
+    ));
+    assert!(!recovery_step_valid(
+        &view,
+        &content,
+        &Grid::terrain(&view),
+        step
+    ));
+    assert!(matches!(
+        Brain::new(ARCHETYPES[0], &view)
+            .decide(&view, &content)
+            .unwrap()
+            .journey,
+        Some(Journey::Nexus)
+    ));
+}
+
+#[test]
+fn recovery_footprint_preserves_half_cell_and_object_boundaries() {
+    let (content, mut view) = recovery_scene(250);
+    let grid = Grid::terrain(&view);
+    let step = Pos { x: 9.25, y: 10.5 };
+    assert!(recovery_step_valid(&view, &content, &grid, step));
+    assert!(!recovery_step_valid(
+        &view,
+        &content,
+        &grid,
+        Pos { x: 0.25, y: 10.5 }
+    ));
+    assert!(recovery_step_valid(
+        &view,
+        &content,
+        &grid,
+        Pos { x: 0.5, y: 10.5 }
+    ));
+    assert!(!recovery_step_valid(
+        &view,
+        &content,
+        &grid,
+        Pos {
+            x: f32::NAN,
+            y: 10.5
+        }
+    ));
+    view.objects[0].kind = content
+        .objects
+        .values()
+        .find(|o| o.full_occupy)
+        .unwrap()
+        .kind;
+    view.objects[0].position = Pos { x: 8.5, y: 10.5 };
+    assert!(!recovery_step_valid(&view, &content, &grid, step));
+    view.objects[0].kind = content
+        .objects
+        .values()
+        .find(|o| o.blocks && !o.full_occupy)
+        .unwrap()
+        .kind;
+    assert!(recovery_step_valid(&view, &content, &grid, step));
+    view.objects[0].position = step;
+    assert!(!recovery_step_valid(&view, &content, &grid, step));
+}
