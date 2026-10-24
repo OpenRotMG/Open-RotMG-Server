@@ -658,8 +658,10 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x908 => &[(0.04, Item(0xa22)), (0.06, Item(0xa23))],
         0x90b => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
         0x909 => &[],
+        // Preserve #244's paired private-potion contract; historical allocation is separate: https://github.com/OpenRotMG/Open-RotMG-Server/issues/244
         crate::dungeon::abyss::MALPHAS => &[
             (1., Item(0xa34)),
+            (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
@@ -967,6 +969,22 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn abyss_malphas_rewards_include_both_stat_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for seed in 0..64 {
+            let items = rewards(
+                &content,
+                crate::dungeon::abyss::MALPHAS,
+                &mut StdRng::seed_from_u64(seed),
+            );
+            assert!(
+                items.contains(&0xa34) && items.contains(&0xa20),
+                "seed={seed} items={items:?}"
+            );
+        }
+    }
 
     #[test]
     fn abyss_idol_rewards_include_both_stat_potions() {
