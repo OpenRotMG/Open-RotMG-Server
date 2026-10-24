@@ -130,7 +130,10 @@ impl Directory {
             "unpublished portal missing"
         );
         let destination = match template
-            .map(|template| self.instance(template, None))
+            .map(|template| {
+                let route = self.dungeon_return_from(origin)?;
+                self.instance(template, None, Some(route))
+            })
             .transpose()
         {
             Ok(destination) => destination,
@@ -274,7 +277,7 @@ impl Directory {
                     "authored Chamber entrance position blocked"
                 );
                 self.reserve_worlds(1, &origins)?;
-                let destination = self.instance(crate::endgame::CHAMBER, None)?;
+                let destination = self.instance(crate::endgame::CHAMBER, None, None)?;
                 let portal =
                     match self
                         .worlds

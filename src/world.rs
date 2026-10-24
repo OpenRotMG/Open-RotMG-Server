@@ -771,6 +771,7 @@ pub struct World {
     background: i32,
     pub safe: bool,
     pub owner: Option<i32>,
+    return_route: Option<DungeonReturn>,
     pub max_players: usize,
     admissions: BTreeMap<Vec<u8>, Admission>,
     encounter: bool,
@@ -888,6 +889,11 @@ struct Portal {
     origin: i32,
     destination: Option<i32>,
     expires: u64,
+}
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum DungeonReturn {
+    Realm(i32),
+    Random,
 }
 pub struct Directory {
     pub clock: crate::clock::Clock,
@@ -1377,7 +1383,7 @@ impl Directory {
             "prepared encounter requires isolated test state"
         );
         if template != crate::endgame::CASTLE {
-            return self.instance(template, None);
+            return self.instance(template, None, Some(DungeonReturn::Random));
         }
         self.reserve_worlds(1, &[])?;
         let world = self.make(template, "Oryx's Castle", false, None)?;
@@ -1435,7 +1441,23 @@ impl Directory {
         }
         Ok(())
     }
-    pub fn instance(&mut self, template: &str, account: Option<i32>) -> Result<i32> {
+    pub(crate) fn instance(
+        &mut self,
+        template: &str,
+        account: Option<i32>,
+        return_route: Option<DungeonReturn>,
+    ) -> Result<i32> {
+        ensure!(
+            account.is_none() || return_route.is_none(),
+            "private world cannot have a dungeon return route"
+        );
+        ensure!(
+            return_route.is_some()
+                || !crate::dungeon::DUNGEONS
+                    .iter()
+                    .any(|(_, name, _, _)| *name == template),
+            "dungeon requires an explicit return route"
+        );
         ensure!(
             matches!((template, account), ("vault", Some(_)))
                 || (account.is_none()
@@ -1451,7 +1473,7 @@ impl Directory {
             return Ok(*id);
         }
         self.reserve_worlds(1, &[])?;
-        let world = self.make(
+        let mut world = self.make(
             template,
             if template == "vault" {
                 "Vault"
@@ -1466,14 +1488,50 @@ impl Directory {
             template == "vault",
             account,
         )?;
+        // Entrances expire before their dungeons; preserve RECONNECT's exact world identity: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/incoming/Reconnect.as
+        world.return_route = return_route;
         let id = self.next_world;
         self.next_world = id
             .checked_add(1)
             .context("world identity space exhausted")?;
         self.worlds.insert(id, world);
         self.idle.insert(id, self.tick);
-        tracing::info!(world = id, template, account, "world instance created");
+        tracing::info!(
+            world = id,
+            template,
+            account,
+            return_route = ?return_route,
+            "world instance created"
+        );
         Ok(id)
+    }
+    fn dungeon_return_from(&self, origin: i32) -> Result<DungeonReturn> {
+        let world = &self.worlds[&origin];
+        if world.name == "Realm" {
+            Ok(DungeonReturn::Realm(origin))
+        } else if crate::dungeon::DUNGEONS
+            .iter()
+            .any(|(_, _, name, _)| *name == world.name)
+        {
+            world
+                .return_route
+                .context("parent dungeon has no return route")
+        } else {
+            Ok(DungeonReturn::Random)
+        }
+    }
+    fn dungeon_realm(&self, world: &World) -> Result<i32> {
+        match world.return_route.context("dungeon has no return route")? {
+            DungeonReturn::Random => self.initial(-3),
+            DungeonReturn::Realm(id) => {
+                ensure!(
+                    self.endgame.realms.get(&id).is_some_and(|r| r.enabled)
+                        && self.worlds.get(&id).is_some_and(|w| w.admission_open),
+                    controller("This dungeon's Realm has closed. Use Nexus.")
+                );
+                Ok(id)
+            }
+        }
     }
     pub fn destination(&mut self, player: i32, portal: Option<i32>) -> Result<(i32, i32, i32)> {
         let origin = self.location(player)?;
@@ -1510,11 +1568,12 @@ impl Directory {
                 *id
             }
             0x703 if matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons") => {
-                self.initial(-3)?
+                self.dungeon_realm(world)?
             }
             0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
-            0x704 | 0x70e | 0x71c => self.initial(-3)?,
-            0x720 => self.instance("vault", Some(account))?,
+            0x704 | 0x70e => self.dungeon_realm(world)?,
+            0x71c => self.initial(-3)?,
+            0x720 => self.instance("vault", Some(account), None)?,
             0x72f => {
                 let guild = p
                     .presentation
@@ -2021,7 +2080,7 @@ impl Directory {
             self.worlds[&origin].name == "Realm" && self.worlds[&origin].walkable(pos),
             "dungeon portal must be earned on the walkable Realm"
         );
-        let destination = self.instance(definition.1, None)?;
+        let destination = self.instance(definition.1, None, Some(DungeonReturn::Realm(origin)))?;
         let id = self
             .worlds
             .get_mut(&origin)
@@ -2603,6 +2662,7 @@ impl World {
             background: 0,
             safe: false,
             owner: None,
+            return_route: None,
             max_players: 85,
             admissions: BTreeMap::new(),
             encounter: false,
@@ -6928,6 +6988,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }
 
+#[cfg(test)]
+mod dungeon_return_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 
