@@ -18,6 +18,7 @@ mod calls;
 mod combat;
 mod crowds;
 pub(crate) mod dialogue;
+mod entries;
 mod events;
 
 #[cfg(test)]
@@ -238,6 +239,7 @@ struct Brain {
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
     calls: calls::Calls,
+    entries: entries::Entries,
     agreement: Option<dialogue::Agreement>,
     invitation_until: u64,
     next_decision: u64,
@@ -299,6 +301,7 @@ impl Brain {
             visits: BTreeMap::new(),
             companion: None,
             calls: calls::Calls::default(),
+            entries: entries::Entries::default(),
             agreement: None,
             invitation_until: 0,
             next_decision: view.tick + seed % profile.reaction,
@@ -1087,6 +1090,15 @@ impl Brain {
                     portal.position,
                 ));
             }
+        }
+        if let Some(portal) = self.witnessed_portal(v, content, &choices, range) {
+            let position = v
+                .objects
+                .iter()
+                .find(|p| p.id == portal)
+                .expect("observed portal exists")
+                .position;
+            choices.push((104., Goal::Portal(portal), position));
         }
         if let Some(agreement) = &self.agreement {
             let destination = match agreement.waiting {
