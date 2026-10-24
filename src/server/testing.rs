@@ -193,6 +193,9 @@ enum Cheat {
         name: String,
         members: Vec<i32>,
     },
+    Pause {
+        paused: bool,
+    },
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -1001,6 +1004,26 @@ async fn prepare_guild(
     Ok(state)
 }
 
+async fn prepare_pause(a: &App, t: &Testing, actor: i32, paused: bool) -> Result<Value> {
+    t.registration(actor)?;
+    ensure!(
+        a.world.clock.paused(),
+        "actor pause preparation requires an explicitly paused test session"
+    );
+    let player = resolve(a, actor).await?;
+    super::lifecycle::player(a, player, "qa_pause", move |a| async move {
+        super::lifecycle::stage(Stage::Reservation);
+        a.world
+            .directory(move |d| d.prepare_actor_pause(player, paused))
+            .await
+    })
+    .await?;
+    let mut state = snapshot(a, actor, false).await?;
+    state["prepared_pause"] =
+        json!({"paused":paused,"client_publication":"next_ordinary_unpaused_tick"});
+    Ok(state)
+}
+
 async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Value> {
     ensure!(
         t.stopped.borrow().is_none()
@@ -1085,6 +1108,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
             finish_action(a,actor,result,pause_after,true).await
         },
         Command::Cheat{actor,change:Cheat::Guild{name,members}} => prepare_guild(a,t,actor,name,members).await,
+        Command::Cheat{actor,change:Cheat::Pause{paused}} => prepare_pause(a,t,actor,paused).await,
         Command::Cheat{actor,change} => {
             t.registration(actor)?;
             ensure!(a.world.clock.paused(),"cheats require an explicitly paused test session");
@@ -1101,7 +1125,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
                     match change {
                         Cheat::Stats{values}=>{ch.base=values;let stats=ch.effective(&a.content)?;ch.hp=ch.hp.min(stats[0]);ch.mp=ch.mp.min(stats[1]);},
                         Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],Vec::new()).await?[0];},
-                        Cheat::Teleport{..}|Cheat::StatModifier{..}|Cheat::Guild{..}=>unreachable!(),
+                        Cheat::Teleport{..}|Cheat::StatModifier{..}|Cheat::Guild{..}|Cheat::Pause{..}=>unreachable!(),
                     }
                     let stats = ch.effective(&a.content)?;
                     ch.hp = ch.hp.min(stats[0]); ch.mp = ch.mp.min(stats[1]);

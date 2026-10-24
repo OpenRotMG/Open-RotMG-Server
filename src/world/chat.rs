@@ -138,6 +138,29 @@ impl World {
 }
 
 impl Directory {
+    pub(crate) fn prepare_actor_pause(&mut self, player: i32, paused: bool) -> Result<()> {
+        ensure!(
+            self.clock.paused(),
+            controller("actor pause requires a paused test session")
+        );
+        let w = self.resolve(Target::Player(player))?;
+        let p = w.players.get(&player).context("pause actor missing")?;
+        ensure!(
+            p.controller == Controller::Qa
+                && p.character.alive
+                && !p.pending
+                && !p.progress_started
+                && !p.death_pending
+                && !p.departing,
+            controller("pause preparation requires an available direct actor")
+        );
+        ensure!(
+            p.paused != paused,
+            controller("actor already has the requested pause state")
+        );
+        self.chat(player, "/pause".into(), Instant::now())
+    }
+
     pub fn chat_permit(&mut self, id: i32, now: Instant) -> Result<()> {
         let sender = &self.resolve(Target::Player(id))?.players[&id];
         ensure!(

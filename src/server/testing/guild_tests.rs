@@ -289,3 +289,180 @@ async fn prepared_guild_commits_real_relation_without_wallet_or_star_changes() {
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
 }
+
+// Synthetic backend fixture: ordinary policy and wire deltas, not native rendering proof.
+#[tokio::test]
+async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
+    let (dir, mut app) = crate::server::account_actions::tests::fixture();
+    write_json(
+        &dir.join("testing.json"),
+        &json!({"schema":1,"provenance":"prepared"}),
+    )
+    .unwrap();
+    app.testing = Testing::open(&dir).unwrap();
+    app.control = Some("guild-test".into());
+    app.world.clock.set_paused(true);
+    let pos = app
+        .world
+        .in_world(-2)
+        .call(|w| {
+            let (x, y) = w.map.spawns[0];
+            Ok(Pos { x, y })
+        })
+        .await
+        .unwrap();
+    let mut actors = Vec::new();
+    for i in 0..2 {
+        let result=request(&app,&format!("pause-spawn-{i}"),json!({"op":"spawn","spec":{"guid":format!("qa-pause-{i}"),"class":WIZARD,"level":8,"seed":12351,"equipment":[-1,-1,-1,-1],"backpack":[-1,-1,-1,-1,-1,-1,-1,-1],"world":-2,"position":pos,"controller":"direct"}})).await;
+        assert_eq!(result["status"], "succeeded", "{result}");
+        actors.push(result["result"]["actor"].as_i64().unwrap() as i32);
+    }
+    let actor = actors[0];
+    let player = resolve(&app, actor).await.unwrap();
+    let viewer = resolve(&app, actors[1]).await.unwrap();
+    let guild = request(&app,"pause-guild",json!({"op":"cheat","actor":actor,"change":{"kind":"guild","name":"PauseGuild","members":[actors[1]]}})).await;
+    assert_eq!(guild["status"], "succeeded", "{guild}");
+    let mut receiver = app
+        .world
+        .in_world(-2)
+        .call(move |w| {
+            let (packets, receiver) = tokio::sync::mpsc::channel(128);
+            w.players.get_mut(&viewer).unwrap().tx = Some(crate::world::Output {
+                packets,
+                lost: tokio::sync::watch::channel(false).0,
+            });
+            Ok(receiver)
+        })
+        .await
+        .unwrap();
+    step_guild_world(&app).await;
+    let stats = emitted_tick_stats(&mut receiver);
+    assert_eq!(stats[&(player, 62)], "PauseGuild");
+    assert_eq!(stats[&(player, 63)], 40);
+    assert_eq!(stats[&(player, 29)].as_i64().unwrap() & (1 << 20), 0);
+    let command =
+        |paused| json!({"op":"cheat","actor":actor,"change":{"kind":"pause","paused":paused}});
+    let before = snapshot(&app, actor, false).await.unwrap();
+    let account = before["session"]["account"].as_i64().unwrap() as i32;
+    let stored = serde_json::to_value(app.store.load(account, actor).await.unwrap()).unwrap();
+    let presentation = app.store.presentation(account).await.unwrap();
+    let testing = app.testing.take();
+    assert_eq!(
+        request(&app, "pause-unprepared", command(true)).await["status"],
+        "failed"
+    );
+    app.testing = testing;
+    app.world.clock.set_paused(false);
+    // Rejection precedes actor lookup and never takes a lifecycle reservation.
+    assert!(
+        prepare_pause(&app, app.testing.as_ref().unwrap(), actor, true)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("explicitly paused")
+    );
+    app.world.clock.set_paused(true);
+    for (id, cmd) in [
+        (
+            "pause-foreign",
+            json!({"op":"cheat","actor":99999,"change":{"kind":"pause","paused":true}}),
+        ),
+        ("pause-noop", command(false)),
+    ] {
+        assert_eq!(request(&app, id, cmd).await["status"], "failed");
+    }
+    app.world
+        .in_world(-2)
+        .call(move |w| {
+            w.players.get_mut(&player).unwrap().controller = crate::world::Controller::Human;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let rejected = request(&app, "pause-human", command(true)).await;
+    assert_eq!(rejected["status"], "failed");
+    assert!(rejected.to_string().contains("direct actor"), "{rejected}");
+    app.world
+        .in_world(-2)
+        .call(move |w| {
+            w.players.get_mut(&player).unwrap().controller = crate::world::Controller::Qa;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(snapshot(&app, actor, false).await.unwrap(), before);
+    assert!(app.quarantined.lock().unwrap().is_empty());
+    for (index, paused) in [true, false].into_iter().enumerate() {
+        let initial = snapshot(&app, actor, false).await.unwrap();
+        let result = request(&app, &format!("pause-toggle-{index}"), command(paused)).await;
+        assert_eq!(result["status"], "succeeded", "{result}");
+        assert_eq!(
+            result["result"]["prepared_pause"],
+            json!({"paused":paused,"client_publication":"next_ordinary_unpaused_tick"})
+        );
+        let mut after = snapshot(&app, actor, false).await.unwrap();
+        assert_eq!(
+            after["character"]["conditions"].as_i64().unwrap() & (1 << 20),
+            if paused { 1 << 20 } else { 0 }
+        );
+        after["character"]["conditions"] = initial["character"]["conditions"].clone();
+        assert_eq!(after, initial);
+        assert_eq!(
+            serde_json::to_value(app.store.load(account, actor).await.unwrap()).unwrap(),
+            stored
+        );
+        assert_eq!(app.store.presentation(account).await.unwrap(), presentation);
+        assert!(receiver.try_recv().is_err());
+        let rejected = request(&app, &format!("pause-repeat-{index}"), command(paused)).await;
+        assert_eq!(rejected["status"], "failed");
+        assert!(rejected.to_string().contains("already has"), "{rejected}");
+        app.world
+            .in_world(-2)
+            .call(move |w| {
+                assert!(w.players[&viewer].known.contains(&player));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        step_guild_world(&app).await;
+        let stats = emitted_tick_stats(&mut receiver);
+        assert_eq!(
+            stats[&(player, 29)].as_i64().unwrap() & (1 << 20),
+            if paused { 1 << 20 } else { 0 }
+        );
+        assert!(!stats.keys().any(|(_, key)| matches!(key, 62 | 63)));
+    }
+    let before_enemy = snapshot(&app, actor, false).await.unwrap();
+    app.world
+        .in_world(-2)
+        .call(move |w| {
+            w.players.get_mut(&player).unwrap().controller = crate::world::Controller::Qa;
+            let kind = w
+                .content
+                .objects
+                .iter()
+                .find(|(_, o)| o.enemy && o.hp > 0)
+                .map(|(k, _)| *k)
+                .unwrap();
+            w.spawn_entity(kind, pos, Vec::new())
+        })
+        .await
+        .unwrap();
+    let rejected = request(&app, "pause-unsafe", command(true)).await;
+    assert_eq!(rejected["status"], "failed");
+    assert!(
+        rejected.to_string().contains("Not safe enough"),
+        "{rejected}"
+    );
+    let after_rejection = snapshot(&app, actor, false).await.unwrap();
+    assert_eq!(after_rejection["lifecycle"], before_enemy["lifecycle"]);
+    assert_eq!(after_rejection["character"], before_enemy["character"]);
+    assert_eq!(
+        serde_json::to_value(app.store.load(account, actor).await.unwrap()).unwrap(),
+        stored
+    );
+    assert_eq!(app.store.presentation(account).await.unwrap(), presentation);
+    assert!(app.quarantined.lock().unwrap().is_empty());
+    app.shutdown.send_replace(true);
+    fs::remove_dir_all(dir).unwrap();
+}
