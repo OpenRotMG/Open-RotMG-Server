@@ -703,27 +703,14 @@ impl Brain {
             } else {
                 Goal::Dodge
             };
-            let held_heal = v
-                .character
-                .items
-                .iter()
-                .filter(|kind| **kind >= 0)
-                .any(|kind| content.objects[&(*kind as u16)].activate == "Heal");
-            if ((health < self.profile.recovery && !held_heal)
-                || (outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.)))
-                && decision.item.is_none()
-                && v.map.name != "Nexus"
-            {
-                decision.journey = Some(Journey::Nexus);
-                return Ok(decision);
-            }
             let opponent = if retreat {
                 None
             } else {
                 combat::target(v, content, &grid, &enemies, range, projectile.passes_cover)
             };
-            if threatened || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3)
-            {
+            let pressured = threatened
+                || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3);
+            if pressured {
                 let focus = if retreat {
                     nearest.map(|e| e.position)
                 } else if let Some(blue) = remedy {
@@ -738,6 +725,54 @@ impl Brain {
                 };
                 decision.movement =
                     combat::movement(v, &grid, &enemies, focus, spacing, retreat, &perception);
+            }
+            let held_heal = v
+                .character
+                .items
+                .iter()
+                .filter(|kind| **kind >= 0)
+                .any(|kind| content.objects[&(*kind as u16)].activate == "Heal");
+            let emergency = self.profile.recovery * 0.5;
+            let separation = |p: Pos| {
+                enemies
+                    .iter()
+                    .map(|e| e.position.distance(p))
+                    .fold(f32::INFINITY, f32::min)
+            };
+            let escape =
+                if outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.) {
+                    Some("near_outmatched")
+                } else if !held_heal && health < emergency {
+                    Some("critical_health")
+                } else if !held_heal
+                    && retreat
+                    && pressured
+                    && !decision.movement.is_some_and(|p| {
+                        combat::speed(v) > 0.
+                            && (enemies.is_empty() || separation(p) > separation(v.position))
+                            && combat::clearance(v, p, &perception)
+                                >= self.mind.cognition.pickup_clearance
+                    })
+                {
+                    Some("no_viable_backstep")
+                } else {
+                    None
+                };
+            if let Some(reason) = escape
+                && decision.item.is_none()
+                && v.map.name != "Nexus"
+            {
+                tracing::info!(
+                    account = v.session.account,
+                    character = v.session.character,
+                    hp = v.character.hp,
+                    max_hp = v.character.stats[0],
+                    emergency_threshold = emergency,
+                    reason,
+                    "autonomous recovery escape selected"
+                );
+                decision.journey = Some(Journey::Nexus);
+                return Ok(decision);
             }
             if retreat {
                 for (slot, kind) in v
