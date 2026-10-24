@@ -559,7 +559,7 @@ impl Brain {
             if let Some(market) =
                 self.mind
                     .market
-                    .decide(v, content, self.mind.future_class, &grid)?
+                    .decide(v, content, self.mind.future_class, &grid, &mut self.rng)?
             {
                 return Ok(market);
             }
@@ -778,9 +778,16 @@ impl Brain {
         if (equipping && remedy.is_none()) || (v.map.name == "Vault" && inspecting) {
             return Ok(decision);
         }
-        self.mind
-            .market
-            .decide(v, content, self.mind.future_class, &grid)?;
+        if let Some(mut market) =
+            self.mind
+                .market
+                .decide(v, content, self.mind.future_class, &grid, &mut self.rng)?
+        {
+            if market.item.is_none() {
+                market.item = decision.item;
+            }
+            return Ok(market);
+        }
         if let Some(project) = self.mind.supply(v, content, &grid)? {
             return Ok(project);
         }
