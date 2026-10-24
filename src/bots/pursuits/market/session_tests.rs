@@ -141,6 +141,7 @@ fn market_session_requires_real_stock_and_need_and_native_trade_preempts_expiry(
     assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
     assert_eq!(rng.clone().next_u64(), next_random);
     m.bargain = None;
+    m.outgoing = None;
     v.elapsed_ms -= 1;
     v.character.items[4] = -1;
     v.character.items[5] = -1;
@@ -162,6 +163,61 @@ fn market_session_requires_real_stock_and_need_and_native_trade_preempts_expiry(
     assert!(m.want(&v, &c, None).unwrap().is_none());
     assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
     assert!(!m.session_used);
+}
+
+#[test]
+fn market_session_observation_drops_only_expired_ads_before_publication() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, mut v) = fixture(&c, STOCK);
+    let grid = terrain(&mut v);
+    let mut rng = StdRng::seed_from_u64(9);
+    m.decide(&v, &c, None, &grid, &mut rng).unwrap();
+    let session = m.session.clone();
+    let ad = m.outgoing.clone();
+    assert!(ad.as_ref().unwrap().text.starts_with("sell "));
+    m.trade = Some(SessionTrade {
+        binding: [-2, 10, 1],
+        peer: "Peer".into(),
+        items: [vec![], vec![]],
+        tradeable: [false; 12],
+        offers: [[false; 12]; 2],
+        ready: 0,
+        ready_at: Instant::now(),
+        changed: false,
+    });
+    let trade = m.trade.clone();
+    let next_random = rng.clone().next_u64();
+    v.elapsed_ms = session.as_ref().unwrap().until - 1;
+    m.next_message_ms = v.elapsed_ms + 1;
+    m.observe(&v);
+    assert_eq!(m.outgoing, ad);
+    v.elapsed_ms += 1;
+    m.observe(&v);
+    assert!(m.outgoing.is_none());
+    assert_eq!(m.session, session);
+    assert!(m.session_used);
+    assert_eq!(m.trade, trade);
+    for verb in ["offer", "counter", "agree", "no deal:"] {
+        m.queue(
+            format!("Peer, {verb} terms"),
+            Channel::Tell("Peer".into()),
+            verb == "agree",
+        );
+        let message = m.outgoing.clone();
+        m.observe(&v);
+        assert_eq!(m.outgoing, message);
+        assert_eq!(m.session, session);
+        assert!(m.session_used);
+        assert_eq!(m.trade, trade);
+    }
+    let d = m.decide(&v, &c, None, &grid, &mut rng).unwrap().unwrap();
+    assert!(d.movement.is_none() && d.journey.is_none());
+    assert_eq!(m.session, session);
+    assert_eq!(m.trade, trade);
+    assert_eq!(rng.clone().next_u64(), next_random);
+    m.trade = None;
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
+    assert!(m.session.is_none() && m.session_used);
 }
 
 #[test]

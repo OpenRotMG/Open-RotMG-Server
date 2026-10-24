@@ -229,6 +229,18 @@ impl Market {
         true
     }
     pub(in crate::bots) fn observe(&mut self, v: &PlayerView) {
+        // Publication runs before decide can retire an expired session.
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|s| v.elapsed_ms >= s.until)
+            && self
+                .outgoing
+                .as_ref()
+                .is_some_and(|m| m.text.starts_with("sell "))
+        {
+            self.outgoing = None;
+        }
         if v.map.name != "Nexus" {
             self.end_session(v, "left_nexus");
             self.session_used = false;
