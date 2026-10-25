@@ -15,6 +15,7 @@ use std::{
 
 pub(crate) mod adventures;
 mod calls;
+pub(crate) mod cctv;
 mod combat;
 mod crowds;
 pub(crate) mod dialogue;

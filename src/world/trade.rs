@@ -505,7 +505,8 @@ impl World {
         let trade = self.trades.remove(&key).unwrap();
         for player in trade.players {
             let mut out = Writer::new();
-            out.i32(1).utf(reason);
+            // Internal reasons stay in logs; players see the original server's text.
+            out.i32(1).utf("Trade canceled!");
             send(&self.players[&player], 12, out.0);
         }
         tracing::info!(players=?trade.players,%reason,"trade cancelled without inventory mutation");

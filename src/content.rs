@@ -215,6 +215,7 @@ pub struct Content {
     pub(crate) xml_sha256: [String; 2],
     pub objects: BTreeMap<u16, Object>,
     pub grounds: BTreeMap<u8, f32>,
+    pub ground_names: BTreeMap<u8, String>,
     pub pushes: BTreeMap<u8, (f32, f32)>,
     pub hazards: BTreeMap<u8, Hazard>,
     pub classes: BTreeMap<u16, Class>,
@@ -601,6 +602,7 @@ impl Content {
         let grounds_sha256 = format!("{:x}", Sha256::digest(data.as_bytes()));
         let doc = roxmltree::Document::parse(&data)?;
         let mut grounds = BTreeMap::new();
+        let mut ground_names = BTreeMap::new();
         let mut pushes = BTreeMap::new();
         let mut hazards = BTreeMap::new();
         for n in doc.root_element().children().filter(|n| n.is_element()) {
@@ -639,6 +641,7 @@ impl Content {
                 );
             }
             pushes.insert(id, push);
+            ground_names.insert(id, n.attribute("id").context("ground name missing")?.into());
             ensure!(
                 grounds.insert(id, speed).is_none(),
                 "duplicate ground type {id:#x}"
@@ -652,6 +655,7 @@ impl Content {
             xml_sha256: [objects_sha256, grounds_sha256],
             objects,
             grounds,
+            ground_names,
             pushes,
             hazards,
             classes,
