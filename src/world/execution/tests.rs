@@ -12,7 +12,9 @@ fn directory() -> Directory {
 }
 #[tokio::test]
 async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
-    let handle = super::super::Handle::spawn(directory());
+    let directory = directory();
+    directory.clock.set_paused(true);
+    let handle = super::super::Handle::spawn(directory);
     let (entered, ready) = oneshot::channel();
     let (release, wait) = std::sync::mpsc::channel();
     let owner = handle.clone();
@@ -32,16 +34,23 @@ async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
     let ran = Arc::new(AtomicBool::new(false));
     let marked = ran.clone();
     let pending = handle.in_world(-1);
-    let blocked = tokio::spawn(async move {
-        pending
-            .call(move |_| {
-                marked.store(true, Ordering::Release);
-                Ok(())
-            })
-            .await
-    });
+    let mut blocked = Box::pin(pending.call(move |_| {
+        marked.store(true, Ordering::Release);
+        Ok(())
+    }));
+    assert!(futures_util::poll!(blocked.as_mut()).is_pending());
+    let slot = handle.routing.resolve(Target::World(-1)).unwrap();
+    // A timer must not win the actor's select and take this request's ownership wait.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while slot.mailbox.capacity() != slot.mailbox.max_capacity() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     let other = handle.in_world(-2);
     let baseline = other.call(|w| Ok(w.tick)).await.unwrap();
+    handle.clock.set_paused(false);
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if other.call(|w| Ok(w.tick)).await.unwrap() >= baseline + 2 {
@@ -66,7 +75,7 @@ async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
     let guaranteed_hold = held_since.elapsed();
     release.send(()).unwrap();
     assert_eq!(transaction.await.unwrap().unwrap(), before);
-    blocked.await.unwrap().unwrap();
+    blocked.await.unwrap();
     other.in_world(-1).call(|_| Ok(())).await.unwrap();
     let slot = handle.routing.resolve(Target::World(-1)).unwrap();
     let attribution = slot.attribution.lock().unwrap();
