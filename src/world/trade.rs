@@ -721,7 +721,7 @@ mod community_tests {
                 .await
                 .unwrap();
             let (packets, receiver) = mpsc::channel(64);
-            let (lost, _) = watch::channel(false);
+            let (lost, _) = watch::channel(None);
             players.push(w.enter(character, Some(Output { packets, lost })).unwrap());
             receivers.push(receiver);
         }

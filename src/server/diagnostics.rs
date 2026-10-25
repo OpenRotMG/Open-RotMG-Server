@@ -13,11 +13,24 @@ pub struct Diagnostics {
     source_revision: Option<String>,
     browsers: Mutex<HashMap<String, std::sync::Weak<Mutex<Browser>>>>,
     files: Mutex<Reports>,
-    drops: Mutex<HashMap<i32, (Instant, Value)>>,
+    drops: Mutex<HashMap<i32, Value>>,
     anonymous_reports: Mutex<HashMap<IpAddr, Instant>>,
 }
-// Players report after reconnecting, so a dropped connection must outlive it: https://github.com/OpenRotMG/Open-RotMG-Server/issues/469
-const DROP_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+// Players report after reconnecting, so a dropped connection must outlive it and any deploy restart: https://github.com/OpenRotMG/Open-RotMG-Server/issues/469
+const DROP_WINDOW_MS: u64 = 600_000;
+const DROPS: &str = "recent-drops.state";
+fn unix_ms() -> u64 {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    u64::try_from(now.expect("system clock predates Unix epoch").as_millis())
+        .expect("unix time fits u64")
+}
+fn drop_age(drop: &Value) -> u64 {
+    unix_ms().saturating_sub(
+        drop["at_unix_ms"]
+            .as_u64()
+            .expect("validated drop timestamp"),
+    )
+}
 #[derive(Default)]
 struct Reports {
     pending: BTreeSet<String>,
@@ -113,6 +126,17 @@ impl Diagnostics {
                 note_progress(&report)?;
             }
         }
+        let drops: HashMap<i32, Value> = match std::fs::read(root.join(DROPS)) {
+            Ok(bytes) => {
+                serde_json::from_slice(&bytes).context("invalid stored disconnect diagnostics")?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(e) => return Err(e.into()),
+        };
+        ensure!(
+            drops.values().all(|d| d["at_unix_ms"].is_u64()),
+            "stored disconnect diagnostics lack a timestamp"
+        );
         let executable = std::env::current_exe()?;
         let source_revision = match std::fs::read_to_string(executable.with_file_name("REVISION")) {
             Ok(value) => {
@@ -132,15 +156,24 @@ impl Diagnostics {
             binary_sha256: format!("{:x}", Sha256::digest(std::fs::read(executable)?)),
             browsers: Mutex::default(),
             files: Mutex::new(pending),
-            drops: Mutex::default(),
+            drops: Mutex::new(drops),
             anonymous_reports: Mutex::default(),
         })
     }
-    fn previous_drop(&self, account: i32) -> Value {
+    pub(super) fn previous_drop(&self, account: i32) -> Value {
         let drops = self.drops.lock().expect("drop diagnostics poisoned");
-        drops.get(&account).filter(|(at, _)| at.elapsed() < DROP_WINDOW).map_or(Value::Null, |(at, drop)| {
-            json!({"age_ms": at.elapsed().as_millis(), "transport": drop["transport"], "diagnostics": drop["diagnostics"]})
+        let drop = drops.get(&account).filter(|d| drop_age(d) < DROP_WINDOW_MS);
+        drop.map_or(Value::Null, |d| {
+            let mut d = d.clone();
+            d["age_ms"] = json!(drop_age(&d));
+            d
         })
+    }
+    fn note_drop(&self, account: i32, drop: Value) -> Result<()> {
+        let mut drops = self.drops.lock().expect("drop diagnostics poisoned");
+        drops.retain(|_, d| drop_age(d) < DROP_WINDOW_MS);
+        drops.insert(account, drop);
+        self.write_file(DROPS, &json!(*drops))
     }
     pub fn browser(&self, key: &str) -> Result<Arc<Mutex<Browser>>> {
         ensure!(
@@ -253,13 +286,16 @@ impl Diagnostics {
         })
     }
     fn write(&self, report: &Value) -> Result<()> {
-        use std::io::Write;
         let id = report["id"].as_str().context("missing report ID")?;
         ensure!(valid_id(id), "invalid report ID");
-        let path = self.root.join(format!("{id}.json"));
+        self.write_file(&format!("{id}.json"), report)
+    }
+    fn write_file(&self, name: &str, value: &Value) -> Result<()> {
+        use std::io::Write;
+        let path = self.root.join(name);
         let temp = self
             .root
-            .join(format!("{id}-{:016x}.tmp", rand::random::<u64>()));
+            .join(format!("{name}-{:016x}.tmp", rand::random::<u64>()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -268,7 +304,7 @@ impl Diagnostics {
             options.mode(0o600);
         }
         let mut file = options.open(&temp)?;
-        file.write_all(&serde_json::to_vec_pretty(report)?)?;
+        file.write_all(&serde_json::to_vec_pretty(value)?)?;
         file.sync_all()?;
         std::fs::rename(temp, path)?;
         std::fs::File::open(&self.root)?.sync_all()?;
@@ -565,19 +601,13 @@ pub(super) async fn disconnect(
         }
     }
     if let Some(account) = dropped_account {
-        let mut drops = a
-            .diagnostics
-            .drops
-            .lock()
-            .expect("drop diagnostics poisoned");
-        drops.retain(|_, (at, _)| at.elapsed() < DROP_WINDOW);
-        drops.insert(
-            account,
-            (
-                Instant::now(),
-                json!({"transport": transport, "diagnostics": public_diagnostics(&report)}),
-            ),
-        );
+        let drop = json!({"at_unix_ms": unix_ms(), "transport": transport, "diagnostics": public_diagnostics(&report)});
+        let diagnostics = a.diagnostics.clone();
+        match tokio::task::spawn_blocking(move || diagnostics.note_drop(account, drop)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::error!(account, %error, "disconnect diagnostics not saved"),
+            Err(error) => tracing::error!(account, %error, "disconnect diagnostics writer failed"),
+        }
     }
 }
 

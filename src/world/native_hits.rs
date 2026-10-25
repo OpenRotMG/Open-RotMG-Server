@@ -39,7 +39,7 @@ pub(super) fn expect_shoot_ack(
             "SHOOT acknowledgement snapshot budget exceeded"
         );
         if let Some(output) = &p.tx {
-            output.lost.send_replace(true);
+            lose(&output.lost, "shoot_ack_budget");
         }
         return false;
     }
@@ -178,7 +178,7 @@ impl World {
                     .is_some_and(|(sent, _)| now.duration_since(*sent) > Duration::from_secs(5))
             {
                 if let Some(output) = &p.tx {
-                    output.lost.send_replace(true);
+                    lose(&output.lost, "shoot_ack_timeout");
                 }
                 p.departing = true;
                 let (sent, bullets) = p.shoot_acks.front().expect("expired acknowledgement");

@@ -1062,7 +1062,7 @@ fn enqueue_reply(tx: &mpsc::Sender<Packet>, packet: Packet) -> Result<()> {
 }
 
 // Packets whose only effect is on the sender's World; a queued run of them shares one world job.
-const INPUTS: [u8; 11] = [7, 11, 14, 22, 24, 38, 48, 51, 59, 64, 66];
+const INPUTS: [u8; 12] = [7, 11, 14, 22, 24, 38, 48, 51, 59, 64, 66, 76];
 type Input = Box<dyn FnOnce(&mut World) -> Result<()> + Send>;
 
 fn input(
@@ -1183,6 +1183,22 @@ fn input(
             collision_report(packet.id == 66, &mut r).context(CloseReason::Protocol)?;
             return Ok(None);
         }
+        76 => {
+            r.i32()?;
+            let bullet = r.u8()?;
+            let target = r.i32()?;
+            let killed = r.u8()?;
+            r.done()?;
+            ensure!(
+                killed <= 1,
+                lifecycle::protocol("invalid predicted enemy death flag")
+            );
+            let id = character("enemy hit report before character")?;
+            if killed == 0 {
+                return Ok(None);
+            }
+            Box::new(move |w| w.native_predicted_enemy_death(id, bullet, target))
+        }
         48 => {
             r.done()?;
             return Ok(None);
@@ -1237,7 +1253,7 @@ async fn handle(
     packets: Vec<(Packet, std::time::Instant)>,
     session: &mut Session,
     tx: &mpsc::Sender<Packet>,
-    lost: &tokio::sync::watch::Sender<bool>,
+    lost: &tokio::sync::watch::Sender<Option<&'static str>>,
 ) -> Result<()> {
     let entry = lifecycle::drain::entry(a)?;
     if let (Some(owner), Some(player)) = (&session.account, session.player) {
@@ -1307,7 +1323,7 @@ async fn handle_inner(
     packet: Packet,
     session: &mut Session,
     tx: &mpsc::Sender<Packet>,
-    lost: &tokio::sync::watch::Sender<bool>,
+    lost: &tokio::sync::watch::Sender<Option<&'static str>>,
     received: std::time::Instant,
 ) -> Result<()> {
     let Session {
@@ -1850,13 +1866,6 @@ async fn handle_inner(
                 testing.acknowledge_native(nonce, *player);
             }
         }
-        76 => {
-            r.i32()?;
-            r.u8()?;
-            r.i32()?;
-            r.u8()?;
-            r.done()?;
-        }
         30 => {
             let time = r.i32()?;
             let s = slot(&mut r).context(CloseReason::Protocol)?;
@@ -2134,7 +2143,7 @@ async fn connection(
 async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
     output: &mut S,
     message: Message,
-    lost: &mut tokio::sync::watch::Receiver<bool>,
+    lost: &mut tokio::sync::watch::Receiver<Option<&'static str>>,
     shutdown: &mut tokio::sync::watch::Receiver<bool>,
     cancel: Option<tokio::sync::watch::Receiver<bool>>,
     drain: &mut tokio::sync::watch::Receiver<u64>,
@@ -2142,7 +2151,7 @@ async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
     tokio::select! {
         biased;
         _ = drain.changed() => Err(CloseReason::Shutdown),
-        _ = async { if !*lost.borrow() { let _ = lost.changed().await; } } => Err(CloseReason::Output),
+        _ = async { if lost.borrow().is_none() { let _ = lost.changed().await; } } => Err(CloseReason::Output),
         _ = async { if !*shutdown.borrow() { let _ = shutdown.changed().await; } } => Err(CloseReason::Shutdown),
         _ = async { match cancel { Some(mut cancel) => { if !*cancel.borrow() { let _ = cancel.changed().await; } }, None => std::future::pending::<()>().await } } => Err(CloseReason::Controller),
         sent = tokio::time::timeout(std::time::Duration::from_secs(5), output.send(message)) => match sent {
@@ -2163,6 +2172,25 @@ fn outgoing_burst(
         std::iter::from_fn(move || rx.try_recv().ok().map(|packet| (packet, rx.len() + 1)))
             .take(ready),
     )
+}
+
+#[cfg(test)]
+#[test]
+fn predicted_enemy_deaths_reach_the_owning_world_without_granting_hits() {
+    assert!(INPUTS.contains(&76), "predicted enemy deaths are discarded");
+    let packet = |killed| {
+        let mut w = Writer::new();
+        w.i32(1000).u8(1).i32(42).u8(killed);
+        Packet { id: 76, body: w.0 }
+    };
+    let now = std::time::Instant::now();
+    assert!(input(&packet(1), Some(1), now, true).unwrap().is_some());
+    assert!(input(&packet(0), Some(1), now, true).unwrap().is_none());
+    assert!(input(&packet(2), Some(1), now, true).is_err());
+    assert!(input(&packet(1), None, now, true).is_err());
+    let mut trailing = packet(1);
+    trailing.body.push(0);
+    assert!(input(&trailing, Some(1), now, true).is_err());
 }
 
 #[cfg(test)]
@@ -2227,7 +2255,7 @@ async fn connection_io<S, I>(
         return;
     };
     let (tx, mut rx) = mpsc::channel::<Packet>(64);
-    let (lost, mut lost_rx) = tokio::sync::watch::channel(false);
+    let (lost, mut lost_rx) = tokio::sync::watch::channel(None);
     // Actor work and output backpressure must not manufacture late, clustered input receipts.
     let (mut incoming, input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
     let mut shutdown = a.shutdown.subscribe();
@@ -2269,7 +2297,7 @@ async fn connection_io<S, I>(
         };
     }
     'connection: loop {
-        if *lost_rx.borrow() {
+        if lost_rx.borrow().is_some() {
             close_reason = CloseReason::Output;
             break;
         }
@@ -2430,7 +2458,7 @@ async fn connection_io<S, I>(
     let dropped_account = session
         .account
         .as_ref()
-        .filter(|_| !reconnect_sent)
+        .filter(|_| !reconnect_sent && close_reason != CloseReason::Shutdown)
         .map(|owner| owner.id);
     let finalization = session
         .account
@@ -2442,7 +2470,7 @@ async fn connection_io<S, I>(
             id,
             dropped_account,
             &session.diagnostics,
-            serde_json::json!({"reason":close_reason.to_string(),
+            serde_json::json!({"reason":close_reason.to_string(),"cause":*lost_rx.borrow(),
             "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()}),
         );
         if std::panic::AssertUnwindSafe(diagnostic)
