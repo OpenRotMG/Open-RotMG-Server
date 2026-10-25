@@ -34,7 +34,7 @@ pub(super) struct ReservedEvent {
 
 #[cfg(test)]
 #[test]
-fn pentaract_factory_retains_native_controller_cells() {
+fn event_factory_retains_unpainted_root_cells() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let fields = |cell: &crate::content::Cell| {
         (
@@ -61,7 +61,7 @@ fn pentaract_factory_retains_native_controller_cells() {
             ],
             spawns: vec![(1., 1.)],
         };
-        // Six separated eligible samples fulfill the existing two-per-kind factory.
+        // The two-per-kind factory and separate Lord constructor need seven eligible sites.
         // Every possible controller sample has native scenery; no chosen-site RNG oracle.
         let candidates = [
             (96, 96),
@@ -70,6 +70,7 @@ fn pentaract_factory_retains_native_controller_cells() {
             (96, 192),
             (192, 192),
             (288, 192),
+            (192, 288),
         ];
         for (x, y) in candidates {
             map.cells[y * 384 + x] = crate::content::Cell {
@@ -153,121 +154,200 @@ fn pentaract_factory_retains_native_controller_cells() {
                 .unwrap();
             assert!(!site.cells.iter().any(|(i, _)| *i == index));
         }
-        if owned {
-            continue;
-        }
-        // Real Realm construction enables reward dispatch; this fixture calls the factory directly.
+        // Direct factory construction needs reward dispatch for the Pentaract lifecycle.
+        world.populate_lost_lands().unwrap();
         world.encounter = true;
-        let centers: Vec<_> = world
-            .entities
-            .values()
-            .filter(|e| e.kind == 0xd5f)
-            .map(|e| e.pos)
-            .collect();
         world.reserve_realm_events().unwrap();
-        world.event_waiting = Some(42);
-        world.event_choice = Some(0xd5f);
-        for mode in 0..3 {
-            let blockers: Vec<_> = centers
+        assert_eq!(world.event_reserves.len(), 7);
+        for kind in [0xd59, 0xd50, 0xd5f] {
+            let pending: Vec<_> = world
+                .event_reserves
                 .iter()
-                .map(|pos| {
-                    let index = pos.y as usize * 384 + pos.x as usize;
-                    if mode == 1 {
-                        let native = natives[&index].0;
-                        world
-                            .entities
-                            .get_mut(&native)
-                            .unwrap()
-                            .extra_stats
-                            .push((54, 7));
-                        native
+                .filter(|e| e.root.kind == kind)
+                .cloned()
+                .collect();
+            assert_eq!(pending.len(), if kind == 0xd50 { 1 } else { 2 });
+            if kind != 0xd5f {
+                assert!(pending.iter().all(|e| e.site.cells.is_empty()));
+            }
+            world.event_waiting = Some(42);
+            world.event_choice = Some(kind);
+            for mode in 0..7 {
+                let blockers: Vec<_> = pending
+                    .iter()
+                    .map(|event| {
+                        let pos = event.root.pos;
+                        let index = pos.y as usize * 384 + pos.x as usize;
+                        match mode {
+                            5 => {
+                                Arc::make_mut(&mut world.map).cells[index].ground = 0xbc;
+                                None
+                            }
+                            6 => {
+                                world
+                                    .entities
+                                    .get_mut(&natives[&index].0)
+                                    .unwrap()
+                                    .extra_stats
+                                    .push((54, 7));
+                                None
+                            }
+                            _ => {
+                                let id = world
+                                    .spawn_entity(
+                                        [0x100, 0x1f3, 0x507, 0x501, 0x600][mode],
+                                        pos,
+                                        vec![],
+                                    )
+                                    .unwrap();
+                                if mode == 2 {
+                                    world
+                                        .entities
+                                        .get_mut(&id)
+                                        .unwrap()
+                                        .extra_stats
+                                        .push((54, 7));
+                                }
+                                Some(id)
+                            }
+                        }
+                    })
+                    .collect();
+                let map = world.map.clone();
+                let ids: BTreeSet<_> = world.entities.keys().copied().collect();
+                let reserves: Vec<_> = world.event_reserves.iter().map(|e| e.root.id).collect();
+                assert!(
+                    matches!(world.earn_realm_event(42).unwrap(), EventAdmission::Waiting),
+                    "unpainted root {kind:#x}, mode {mode}, native Owned {owned}"
+                );
+                assert!(Arc::ptr_eq(&map, &world.map));
+                assert_eq!(world.entities.keys().copied().collect::<BTreeSet<_>>(), ids);
+                assert_eq!(
+                    world
+                        .event_reserves
+                        .iter()
+                        .map(|e| e.root.id)
+                        .collect::<Vec<_>>(),
+                    reserves
+                );
+                assert_eq!(
+                    (world.event_waiting, world.event_choice),
+                    (Some(42), Some(kind))
+                );
+                for (event, blocker) in pending.iter().zip(blockers) {
+                    let index = event.root.pos.y as usize * 384 + event.root.pos.x as usize;
+                    if let Some(id) = blocker {
+                        world.remove_entity(id);
+                    } else if mode == 5 {
+                        Arc::make_mut(&mut world.map).cells[index].ground =
+                            original.cells[index].ground;
                     } else {
                         world
-                            .spawn_entity(if mode == 0 { 0x100 } else { 0x501 }, *pos, vec![])
+                            .entities
+                            .get_mut(&natives[&index].0)
                             .unwrap()
+                            .extra_stats
+                            .retain(|s| s.0 != 54);
                     }
-                })
-                .collect();
-            let map = world.map.clone();
-            let ids: BTreeSet<_> = world.entities.keys().copied().collect();
-            assert!(
-                matches!(world.earn_realm_event(42).unwrap(), EventAdmission::Waiting),
-                "reserved native-center mode {mode}"
-            );
-            assert!(Arc::ptr_eq(&map, &world.map));
-            assert_eq!(world.entities.keys().copied().collect::<BTreeSet<_>>(), ids);
-            assert_eq!(world.event_reserves.len(), 6);
-            for id in blockers {
-                if mode == 1 {
-                    world
-                        .entities
-                        .get_mut(&id)
-                        .unwrap()
-                        .extra_stats
-                        .retain(|s| s.0 != 54);
-                } else {
-                    world.remove_entity(id);
                 }
             }
+            let event = &pending[0];
+            let index = event.root.pos.y as usize * 384 + event.root.pos.x as usize;
+            let native = natives[&index].0;
+            world.entities.get_mut(&native).unwrap().name = "post-reserve native".into();
+            let before = fields(&world.map.cells[index]);
+            let ids = world.cells.ids(index).to_vec();
+            assert!(
+                matches!(world.earn_realm_event(42).unwrap(), EventAdmission::Spawned(id) if id == event.root.id)
+            );
+            let admitted = &world.entities[&event.root.id];
+            assert_eq!(
+                (
+                    admitted.id,
+                    admitted.kind,
+                    admitted.quest,
+                    admitted.stage,
+                    admitted.condition,
+                    admitted.hp
+                ),
+                (
+                    event.root.id,
+                    event.root.kind,
+                    event.root.quest,
+                    event.root.stage,
+                    event.root.condition,
+                    event.root.hp
+                )
+            );
+            assert_eq!(
+                (
+                    admitted.pos.x,
+                    admitted.pos.y,
+                    admitted.home.x,
+                    admitted.home.y
+                ),
+                (
+                    event.root.pos.x,
+                    event.root.pos.y,
+                    event.root.home.x,
+                    event.root.home.y
+                )
+            );
+            assert_eq!(fields(&world.map.cells[index]), before);
+            assert_eq!(
+                fields(&world.map.cells[index]),
+                fields(&original.cells[index])
+            );
+            assert_eq!(world.entities[&native].name, "post-reserve native");
+            assert!(ids.iter().all(|id| world.cells.ids(index).contains(id)));
+            assert!(world.cells.ids(index).contains(&event.root.id));
+            assert_eq!((world.event_waiting, world.event_choice), (None, None));
+            assert!(matches!(
+                &world.entities[&native].state,
+                entity_store::EntityState::Owned(_)
+            ));
+            assert!(world.walkable(admitted.pos));
+            if kind == 0xd5f {
+                let root = event.root.id;
+                let towers = world.quest_members(root, &[0xd5e]);
+                assert_eq!(
+                    towers.iter().copied().collect::<BTreeSet<_>>(),
+                    event.children.iter().map(|e| e.id).collect()
+                );
+                let home = world.entities[&towers[0]].home;
+                world.defeat_entity(towers[0]).unwrap();
+                world.now = 14999;
+                world.event_step();
+                assert_eq!(world.quest_members(root, &[0xd5e]).len(), 4);
+                world.now = 15000;
+                world.event_step();
+                let revived = world.quest_members(root, &[0xd5e]);
+                assert_eq!(revived.len(), 5);
+                let replacement = revived.iter().find(|id| !towers.contains(id)).unwrap();
+                let e = &world.entities[replacement];
+                assert_eq!((e.home.x, e.home.y, e.quest), (home.x, home.y, Some(root)));
+                for id in revived {
+                    world.defeat_entity(id).unwrap();
+                }
+                world.event_step();
+                world.event_step();
+                assert!(!world.entities.contains_key(&root));
+                assert!(
+                    !world
+                        .entities
+                        .values()
+                        .any(|e| e.quest == Some(root) && matches!(e.kind, 0xd5e | 0xd60))
+                );
+                assert_eq!(
+                    world
+                        .critical_deaths
+                        .iter()
+                        .filter(|id| **id == root)
+                        .count(),
+                    1
+                );
+            }
         }
-        let pending = world
-            .event_reserves
-            .iter()
-            .find(|e| e.root.kind == 0xd5f)
-            .unwrap()
-            .clone();
-        let root = pending.root.id;
-        let index = pending.root.pos.y as usize * 384 + pending.root.pos.x as usize;
-        let native = natives[&index].0;
-        world.entities.get_mut(&native).unwrap().name = "post-reserve native".into();
-        let before = fields(&world.map.cells[index]);
-        assert!(
-            matches!(world.earn_realm_event(42).unwrap(), EventAdmission::Spawned(id) if id == root)
-        );
-        assert_eq!(fields(&world.map.cells[index]), before);
-        assert!(world.cells.ids(index).contains(&native));
-        assert_eq!(world.entities[&native].name, "post-reserve native");
-        assert!(matches!(
-            &world.entities[&native].state,
-            entity_store::EntityState::Owned(_)
-        ));
-        let towers = world.quest_members(root, &[0xd5e]);
-        assert_eq!(
-            towers.iter().copied().collect::<BTreeSet<_>>(),
-            pending.children.iter().map(|e| e.id).collect()
-        );
-        let home = world.entities[&towers[0]].home;
-        world.defeat_entity(towers[0]).unwrap();
-        world.now = 14999;
-        world.event_step();
-        assert_eq!(world.quest_members(root, &[0xd5e]).len(), 4);
-        world.now = 15000;
-        world.event_step();
-        let revived = world.quest_members(root, &[0xd5e]);
-        assert_eq!(revived.len(), 5);
-        let replacement = revived.iter().find(|id| !towers.contains(id)).unwrap();
-        let e = &world.entities[replacement];
-        assert_eq!((e.home.x, e.home.y, e.quest), (home.x, home.y, Some(root)));
-        for id in revived {
-            world.defeat_entity(id).unwrap();
-        }
-        world.event_step();
-        world.event_step();
-        assert!(!world.entities.contains_key(&root));
-        assert!(
-            !world
-                .entities
-                .values()
-                .any(|e| e.quest == Some(root) && matches!(e.kind, 0xd5e | 0xd60))
-        );
-        assert_eq!(
-            world
-                .critical_deaths
-                .iter()
-                .filter(|id| **id == root)
-                .count(),
-            1
-        );
     }
 }
 
@@ -691,8 +771,8 @@ impl World {
                             && event.site.area.distance(p.pos) >= 4.
                     })
                     && self.event_site_clear(&event.site)
-                    // The controller's native cell is not part of the painted-site swap.
-                    && (event.root.kind != 0xd5f
+                    // These native root cells are not part of the painted-site swap.
+                    && (!matches!(event.root.kind, 0xd59 | 0xd50 | 0xd5f)
                         || self.walkable(event.root.pos)
                             && self.setpiece_scenery_clear(
                                 event.root.pos.y as usize * self.map.width as usize
