@@ -10,4 +10,6 @@ Copy the small item-use case (`fixture` and `run(game)`), not setup code. The ru
 
 Prepared fixtures do not prove earned progression; keep normal journeys separate. Never use host input, `Page.bringToFront` or target activation; use page-local focus only.
 
+The protected `persona` starting-context operation takes an actual catalog `profile`, `world` and walkable `position`, requires a paused fresh test registration, and uses ordinary persona provisioning/replacement. Existing `game_bot` spawns remain pinned and stop on death. Privileged `world_info.damaging_ground` exposes up to 16 real walkable hazard positions; it does not create damage or death.
+
 `result.json` records timings and assertions. Failures exit nonzero and retain state/logs. Discover controller operations and limits with `node scripts/game.mjs --help`.

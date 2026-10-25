@@ -16,6 +16,8 @@ use std::{
 #[cfg(test)]
 mod guild_tests;
 #[cfg(test)]
+mod persona_tests;
+#[cfg(test)]
 mod protection_tests;
 
 const MAX_REQUEST_BYTES: usize = 8192;
@@ -73,6 +75,13 @@ pub struct Spawn {
     pub profile: Option<String>,
     pub stats: Option<[i32; 8]>,
 }
+// Normal personas have no fabricated equipment/class spawn specification.
+#[derive(Serialize, Deserialize)]
+struct Registration {
+    guid: String,
+    controller: Controller,
+    profile: Option<String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Controller {
@@ -102,6 +111,11 @@ enum Command {
     },
     Spawn {
         spec: Spawn,
+    },
+    Persona {
+        profile: String,
+        world: i32,
+        position: Pos,
     },
     World {
         template: String,
@@ -294,7 +308,7 @@ impl Testing {
     fn path(&self, id: &str, suffix: &str) -> PathBuf {
         self.root.join(format!("{id}.{suffix}.json"))
     }
-    fn registration(&self, actor: i32) -> Result<Spawn> {
+    fn registration(&self, actor: i32) -> Result<Registration> {
         ensure!(actor > 0, "actor must be a positive durable character ID");
         Ok(serde_json::from_slice(
             &fs::read(self.path(&format!("actor-{actor}"), "spawn"))
@@ -867,6 +881,38 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
     )
     }).await
 }
+async fn prepare_persona(
+    a: &App,
+    t: &Testing,
+    profile: String,
+    world: i32,
+    position: Pos,
+) -> Result<Value> {
+    ensure!(
+        a.world.clock.paused(),
+        "persona fixture requires a paused prepared test session"
+    );
+    a.world
+        .in_world(world)
+        .call(move |w| {
+            ensure!(
+                position.x.is_finite() && position.y.is_finite() && w.walkable(position),
+                "persona position is blocked or outside the world"
+            );
+            Ok(())
+        })
+        .await?;
+    let ch = crate::bots::start_test_persona(a, &profile, world, position).await?;
+    let registration = Registration {
+        guid: a.store.account_guid(ch.account).await?,
+        controller: Controller::GameBot,
+        profile: Some(profile.clone()),
+    };
+    write_json(&t.path(&format!("actor-{}", ch.id), "spawn"), &registration)?;
+    Ok(
+        json!({"actor":ch.id,"account":ch.account,"profile":profile,"provenance":"prepared normal persona; ordinary replacement enabled"}),
+    )
+}
 async fn resume(a: &App, t: &Testing) -> Result<()> {
     ensure!(
         t.stopped.borrow().is_none(),
@@ -1057,11 +1103,12 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         "native control lease expired; this prepared session is terminal"
     );
     match command {
-        Command::Capabilities => Ok(json!({"schema":1,"provenance":"prepared","pause_scope":"isolated server and all registered native clients","controllers":["direct","native","game_bot"],"game_bot_profiles":crate::bots::profiles(),"goals":["time","level","kills","pirate_caves"],"max_game_ms":600000,"trace_page_limit":40,"request_bytes_limit":MAX_REQUEST_BYTES,"mutation_limit":MAX_MUTATIONS,"starting_context_operations":["prepare_realm_capacity"],"prepared_realm_capacity":if t.root.join("prepared-realm-capacity.json").exists(){serde_json::from_slice::<Value>(&fs::read(t.root.join("prepared-realm-capacity.json"))?)?}else{Value::Null}})),
+        Command::Capabilities => Ok(json!({"schema":1,"provenance":"prepared","pause_scope":"isolated server and all registered native clients","controllers":["direct","native","game_bot"],"game_bot_profiles":crate::bots::profiles(),"goals":["time","level","kills","pirate_caves"],"max_game_ms":600000,"trace_page_limit":40,"request_bytes_limit":MAX_REQUEST_BYTES,"mutation_limit":MAX_MUTATIONS,"starting_context_operations":["prepare_realm_capacity","persona"],"prepared_realm_capacity":if t.root.join("prepared-realm-capacity.json").exists(){serde_json::from_slice::<Value>(&fs::read(t.root.join("prepared-realm-capacity.json"))?)?}else{Value::Null}})),
         Command::PrepareRealmCapacity{limit} => prepare_realm_capacity(a,t,limit).await,
         Command::Catalog{search,limit} => {ensure!(!search.is_empty() && search.len()<=80 && (1..=20).contains(&limit),"catalog needs search and limit 1–20");let matches=a.content.objects.values().filter(|o|o.name.to_lowercase().contains(&search.to_lowercase())).collect::<Vec<_>>();Ok(json!({"items":matches.iter().take(limit).map(|o|json!({"id":o.kind,"name":o.name,"class":o.class,"slot_type":o.slot_type,"unsupported_equipment":o.unsupported_equipment})).collect::<Vec<_>>(),"omitted":matches.len().saturating_sub(limit)}))},
-        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed,"privileged":true,"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|crate::dungeon::pirate::BOSS|0xd05|0xd06|0xd7a|0xd7b|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
+        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed,"privileged":true,"damaging_ground":w.map.cells.iter().enumerate().filter(|(_,c)|w.content.hazards.contains_key(&c.ground)).map(|(i,_)|Pos{x:(i as i32%w.map.width) as f32+0.5,y:(i as i32/w.map.width) as f32+0.5}).filter(|p|w.walkable(*p)).take(16).collect::<Vec<_>>(),"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|crate::dungeon::pirate::BOSS|0xd05|0xd06|0xd7a|0xd7b|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
         Command::Spawn{spec} => spawn(a,t,spec).await,
+        Command::Persona{profile,world,position} => prepare_persona(a,t,profile,world,position).await,
         Command::World{template,seed} => { let world=a.world.directory(move |d|match seed { Some(seed)=>d.prepared_instance_with_seed(&template,seed), None=>d.prepared_instance(&template) }).await?; Ok(json!({"world":world,"provenance":"prepared"})) },
         Command::Observe{actor} => {t.registration(actor)?;snapshot(a,actor,false).await},
         Command::Inspect{actor} => {t.registration(actor)?;snapshot(a,actor,true).await},

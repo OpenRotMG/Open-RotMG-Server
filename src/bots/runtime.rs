@@ -487,6 +487,37 @@ async fn continue_selected(
 pub async fn start(app: &App) -> Result<()> {
     director::start(app).await
 }
+pub(super) async fn start_test_persona(
+    app: &App,
+    profile: Profile,
+    world: i32,
+    position: Pos,
+) -> Result<Character> {
+    ensure!(
+        app.testing.is_some() && app.world.clock.paused(),
+        "persona fixture requires a paused prepared test session"
+    );
+    ensure!(
+        app.store
+            .shore_account(profile.identity.into())
+            .await?
+            .is_none(),
+        "persona fixture already exists; no reset or implicit replacement"
+    );
+    let character = persona_character(app, profile).await?;
+    let owner = app.claim(character.account)?;
+    launch(
+        app,
+        profile,
+        character.clone(),
+        world,
+        Some(position),
+        None,
+        owner,
+    )
+    .await?;
+    Ok(character)
+}
 pub(super) async fn start_selected(
     app: &App,
     profile: Profile,
