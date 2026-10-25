@@ -89,6 +89,26 @@ impl World {
         }
         Ok(e.pos)
     }
+    pub(super) fn ocean_bag_position(&mut self, e: &Entity) -> Result<Pos> {
+        if e.kind != trench::HERMIT {
+            return self.ocean_reward_position(e);
+        }
+        // Release 7.0 server data rolls Hermit loot at eight drop locations: https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740
+        let (x, y) = *super::ocean_setpiece::HERMIT_SPAWNERS
+            .choose(&mut self.rng)
+            .expect("eight Hermit drop sites");
+        let site = Pos {
+            x: e.home.x + x as f32 - 15.5,
+            y: e.home.y + y as f32 - 13.,
+        };
+        ensure!(
+            self.walkable(site),
+            "Hermit drop site {},{} is not collectible",
+            site.x,
+            site.y
+        );
+        Ok(site)
+    }
     fn ocean_wave(&mut self, id: i32, kind: u16) -> Result<()> {
         let positions: Vec<_> = self
             .ocean_children(id, 0xd65)

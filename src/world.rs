@@ -5852,11 +5852,8 @@ impl World {
             }
         }
         for (owner, items) in drops {
-            self.loot_bags(
-                self.ocean_reward_position(defeated)?,
-                (owner >= 0).then_some(owner),
-                &items,
-            )?;
+            let pos = self.ocean_bag_position(defeated)?;
+            self.loot_bags(pos, (owner >= 0).then_some(owner), &items)?;
         }
         Ok(())
     }
@@ -7236,6 +7233,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod chase_tests;
 #[cfg(test)]
 mod dungeon_return_tests;
+#[cfg(test)]
+mod hermit_loot_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 #[cfg(test)]
