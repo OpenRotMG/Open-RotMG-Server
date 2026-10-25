@@ -1,5 +1,5 @@
 use super::*;
-use crate::server::App;
+use crate::server::{App, lifecycle};
 use rand::seq::SliceRandom;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -91,41 +91,108 @@ async fn fill(
     Ok(())
 }
 
+async fn maintain(
+    app: &App,
+    done: &mpsc::Sender<Departure>,
+    departed: &mut mpsc::Receiver<Departure>,
+    online: &mut BTreeSet<&'static str>,
+    resting: &mut BTreeMap<&'static str, Instant>,
+) -> Result<()> {
+    let stopping = lifecycle::drain::stopping(app);
+    if !lifecycle::drain::open(app) || app.world.clock.paused() {
+        return Ok(());
+    }
+    // Provisioning and retirement write durable state; preparation must wait for this turn too.
+    let result = async {
+        lifecycle::drain::entry(app)?
+            .scope(async {
+                loop {
+                    let exit = match departed.try_recv() {
+                        Ok(exit) => exit,
+                        Err(mpsc::error::TryRecvError::Empty) => break,
+                        Err(mpsc::error::TryRecvError::Disconnected) => {
+                            anyhow::bail!("population departure channel closed")
+                        }
+                    };
+                    if exit.retire {
+                        app.store
+                            .retire_persona(exit.profile.identity.into(), exit.account)
+                            .await?;
+                    }
+                    online.remove(exit.profile.identity);
+                    resting.insert(
+                        exit.profile.identity,
+                        app.world.clock.now() + Duration::from_secs(20 * 60),
+                    );
+                    tracing::info!(
+                        name = exit.profile.name,
+                        account = exit.account,
+                        retired = exit.retire,
+                        online = online.len(),
+                        "inhabitant session ended"
+                    );
+                }
+                fill(app, done, online, resting).await
+            })
+            .await
+    }
+    .await;
+    if let Err(error) = result {
+        if error.downcast_ref::<lifecycle::CloseReason>()
+            == Some(&lifecycle::CloseReason::Controller)
+            && stopping.has_changed()?
+        {
+            tracing::info!("population work interrupted by lifecycle preparation");
+            return Ok(());
+        }
+        return Err(error);
+    }
+    if online.len() < app.bot_population {
+        tracing::warn!(
+            online = online.len(),
+            target = app.bot_population,
+            "population below target; admission or eligible personas unavailable"
+        );
+    }
+    Ok(())
+}
+
 pub(super) async fn start(app: &App) -> Result<()> {
     let (done, mut departed) = mpsc::channel(app.bot_population.max(1));
     let mut online = BTreeSet::new();
     let mut resting = BTreeMap::new();
-    fill(app, &done, &mut online, &resting).await?;
+    maintain(app, &done, &mut departed, &mut online, &mut resting).await?;
     let app = app.clone();
     let mut shutdown = app.shutdown.subscribe();
     let supervisor = app.world.supervisor.clone();
-    supervisor.spawn("bot-population", async move {
-        let mut poll = tokio::time::interval(Duration::from_secs(30));
-        loop {
-            tokio::select! {
-                _ = shutdown.changed() => return Ok(()),
-                _ = poll.tick() => {},
-                Some(exit) = departed.recv() => {
-                    online.remove(exit.profile.identity);
-                    if exit.retire {
-                        app.store.retire_persona(exit.profile.identity.into(), exit.account).await?;
-                    }
-                    resting.insert(exit.profile.identity, app.world.clock.now() + Duration::from_secs(20 * 60));
-                    tracing::info!(name=exit.profile.name,account=exit.account,retired=exit.retire,online=online.len(),"inhabitant session ended");
+    supervisor.spawn_finite_on(
+        &tokio::runtime::Handle::current(),
+        "bot-population",
+        async move {
+            let mut poll = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                tokio::select! {
+                    _ = shutdown.changed() => return Ok(()),
+                    _ = poll.tick() => {},
                 }
+                if *shutdown.borrow() {
+                    return Ok(());
+                }
+                maintain(&app, &done, &mut departed, &mut online, &mut resting).await?;
             }
-            if *shutdown.borrow() { return Ok(()); }
-            if app.world.clock.paused() { continue; }
-            fill(&app, &done, &mut online, &resting).await?;
-            if online.len() < app.bot_population {
-                tracing::warn!(online=online.len(),target=app.bot_population,"population below target; admission or eligible personas unavailable");
-            }
-        }
-    });
+        },
+    );
     Ok(())
 }
 
-pub(super) fn may_finish(brain: &Brain, v: &PlayerView) -> bool {
+pub(super) fn may_finish(app: &App, brain: &mut Brain, v: &PlayerView) -> bool {
+    let mut society = app.society.lock().expect("adventure registry poisoned");
+    brain.group = society.group(v.session.account, v.elapsed_ms);
+    brain.offered = society.outgoing(v.session.account, v.elapsed_ms);
+    can_finish(brain, v)
+}
+
+fn can_finish(brain: &Brain, v: &PlayerView) -> bool {
     !v.lifecycle.busy
         && !brain.mind.social.gift_active()
         && brain.mind.market.incoming.is_none()
@@ -137,5 +204,10 @@ pub(super) fn may_finish(brain: &Brain, v: &PlayerView) -> bool {
             .as_ref()
             .is_none_or(|b| b.resolution.is_some())
         && brain.agreement.is_none()
+        && (brain.companion.is_none() || brain.invitation_until <= v.time_ms)
+        && brain
+            .offered
+            .as_ref()
+            .is_none_or(|offer| offer.until <= v.elapsed_ms)
         && brain.group.as_ref().is_none_or(|g| g.finished)
 }

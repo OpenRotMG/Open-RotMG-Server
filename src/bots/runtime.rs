@@ -644,7 +644,7 @@ pub(super) async fn launch(
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
                     let ending = until.is_some_and(|deadline| app.world.clock.now() >= deadline)
-                        && pending.is_none() && director::may_finish(&brain, &view);
+                        && pending.is_none() && director::may_finish(&app, &mut brain, &view);
                     if ending && view.map.name == "Nexus" {
                         retired = true;
                         break;
@@ -670,7 +670,7 @@ pub(super) async fn launch(
                         timings.completed("decision_sync_work", sync_work);
                         record_decision_phase_elapsed(&mut timings, "decide_sync_elapsed", sync_elapsed, decision)?
                     };
-                    if ending && director::may_finish(&brain, &view) && decision.journey.is_none() {
+                    if ending && director::may_finish(&app, &mut brain, &view) && decision.journey.is_none() {
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
                         tracing::info!(account,name=profile.name,"session finished; returning to Nexus before logout");
