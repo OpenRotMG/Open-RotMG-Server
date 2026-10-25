@@ -544,7 +544,7 @@ impl Market {
         let text = r.utf()?;
         r.utf()?;
         r.done()?;
-        if speaker == v.session.player || name == self.name.as_str() {
+        if speaker == v.session.player {
             return Ok(false);
         }
         let channel = if recipient.is_empty() {
@@ -588,16 +588,15 @@ impl Market {
         if self.wanted(v, c, future, q[0].kind)? > 0
             && self.spare(v, c, future, q[1].kind)? >= q[1].quantity
             && fair(&q, c)
+            && let Some(account) = peer.account
         {
-            if let Some(account) = peer.account {
-                self.incoming = Some(Incoming::outbound(
-                    v,
-                    peer.id,
-                    account,
-                    name,
-                    [q[1].clone(), q[0].clone()],
-                ));
-            }
+            self.incoming = Some(Incoming::outbound(
+                v,
+                peer.id,
+                account,
+                name,
+                [q[1].clone(), q[0].clone()],
+            ));
         }
         let _ = channel;
         Ok(true)

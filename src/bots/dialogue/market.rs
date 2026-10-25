@@ -3,6 +3,7 @@ use crate::bots::pursuits::market::{Message, goods_text, parse_quote};
 
 pub(super) struct Wording {
     facts: String,
+    created: Instant,
     result: Arc<Mutex<Option<std::result::Result<String, Failure>>>>,
 }
 
@@ -87,11 +88,14 @@ impl Service {
         if let Some(entry) = cache.get(&key) {
             let result = entry.result.lock().expect("market speech result poisoned");
             if entry.facts == message.text {
-                return match result.as_ref() {
-                    Some(Ok(text)) => Ok(Some(text.clone())),
-                    Some(Err(error)) => Err((*error).into()),
-                    None => Ok(None),
-                };
+                match result.as_ref() {
+                    Some(Ok(text)) => return Ok(Some(text.clone())),
+                    Some(Err(error)) if entry.created.elapsed() < Duration::from_secs(60) => {
+                        return Err((*error).into());
+                    }
+                    Some(Err(_)) => {}
+                    None => return Ok(None),
+                }
             }
             // Complete and count a stale request, but never publish it for changed stock/terms.
             if result.is_none() {
@@ -110,6 +114,7 @@ impl Service {
             key,
             Wording {
                 facts: message.text.clone(),
+                created: Instant::now(),
                 result: result.clone(),
             },
         );
@@ -244,6 +249,16 @@ mod provider_tests {
                 .market_wording("Trader", &message, &c, json!({"voice":"terse"}))
                 .is_err()
         );
+        service
+            .wordings
+            .lock()
+            .unwrap()
+            .get_mut("Trader:MarketAdvertise")
+            .unwrap()
+            .created = Instant::now() - Duration::from_secs(61);
+        assert!(generated(&service, "Trader", &message, &c).await.is_err());
+        assert_eq!(service.health()["daily_requests"], 2);
+        assert_eq!(service.health()["successes"], 0);
         server.abort();
     }
     #[tokio::test]
@@ -288,6 +303,58 @@ mod provider_tests {
         assert!(generated(&service, "Trader", &old, &c).await.is_err());
         assert_eq!(service.health()["last_error"], "invalid_market_wording");
         assert_eq!(service.health()["successes"], 0);
+        server.abort();
+    }
+    #[tokio::test]
+    async fn market_pending_generation_loses_publication_authority_when_real_stock_is_lost() {
+        use crate::bots::pursuits::market::Market;
+        let (c, mut v) = crate::bots::quest_tests::fixture();
+        v.map.name = "Nexus".into();
+        v.session.world = -2;
+        v.character.items[4..8].fill(0xa21);
+        let mut market = Market::default();
+        market.name = "Trader".into();
+        let grid = Grid::terrain(&v);
+        for _ in 0..32 {
+            let d = market
+                .decide(
+                    &v,
+                    &c,
+                    None,
+                    &grid,
+                    &mut rand::rngs::mock::StepRng::new(0, 1),
+                )
+                .unwrap()
+                .unwrap();
+            if market.outgoing.is_some() {
+                break;
+            }
+            v.position = d.movement.expect("market position should be reachable");
+        }
+        let ad = market.outgoing.clone().unwrap();
+        assert!(market.message_current(&ad, &v, &c, None).unwrap());
+        let (service, server) = super::super::tests::provider(
+            axum::http::StatusCode::OK,
+            envelope("wts {give} for {want}"),
+        )
+        .await;
+        assert!(
+            service
+                .market_wording("Trader", &ad, &c, json!({}))
+                .unwrap()
+                .is_none()
+        );
+        v.character.items[4] = -1;
+        v.character.inventory_revision += 1;
+        assert!(!market.message_current(&ad, &v, &c, None).unwrap());
+        assert_eq!(
+            generated(&service, "Trader", &ad, &c).await.unwrap(),
+            "wts 4 spd for 1 def"
+        );
+        assert!(
+            !market.message_current(&ad, &v, &c, None).unwrap(),
+            "a valid model reply cannot restore lost stock or publication authority"
+        );
         server.abort();
     }
 }

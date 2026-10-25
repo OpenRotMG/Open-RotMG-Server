@@ -182,10 +182,16 @@ impl Service {
     }
     pub fn health(&self) -> Value {
         let b = self.budget.lock().expect("dialogue budget poisoned");
-        json!({"enabled":true,"model":MODEL,"status":if b.last_error.is_some(){"error"}else{"ready"},
-            "last_error":b.last_error,"successes":b.successes,"failures":b.failures,"daily_requests":b.daily,"automatic_remaining":800u32.saturating_sub(b.daily),
-            "daily_limit":1000,"last_latency_ms":b.last_latency_ms,
-            "in_flight":2-self.slots.available_permits()})
+        let remaining = Duration::from_secs(86400).saturating_sub(b.day.elapsed());
+        let requests = if remaining.is_zero() { 0 } else { b.daily };
+        json!({"enabled":true,"model":MODEL,"status":if b.contract_failed || b.last_error.is_some(){"error"}else{"ready"},
+            "last_error":b.last_error,"successes":b.successes,"failures":b.failures,"daily_requests":requests,
+            "budget_scope":"process-local","budget_resets_on_restart":true,"budget_window_seconds":86400,
+            "budget_window_resets_in_seconds":remaining.as_secs(),"provider_quota":"unknown",
+            "automatic_limit":800,"automatic_remaining":800u32.saturating_sub(requests),
+            "daily_limit":1000,"requests_remaining":1000u32.saturating_sub(requests),
+            "contract_failed":b.contract_failed,"cooldown_seconds":b.blocked_until.saturating_duration_since(Instant::now()).as_millis().div_ceil(1000),
+            "last_latency_ms":b.last_latency_ms,"in_flight":2-self.slots.available_permits()})
     }
     pub(super) async fn ask(
         &self,
@@ -430,15 +436,6 @@ pub(super) async fn failed(
         reason,
         "bot dialogue interaction unavailable"
     );
-    if matches!(interaction.plan, Some(adventures::Plan::Invite { .. })) {
-        tracing::info!(
-            request,
-            speaker,
-            reason,
-            "optional invitation suppressed; no substitute speech"
-        );
-        return;
-    }
 }
 fn network_error(error: reqwest::Error) -> Failure {
     if error.is_timeout() {
