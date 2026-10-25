@@ -144,13 +144,13 @@ impl World {
 
 pub(crate) struct Projection {
     own: i32,
-    players: BTreeSet<i32>,
+    player_types: BTreeMap<i32, bool>,
 }
 impl Projection {
     pub(crate) fn new(own: i32) -> Self {
         Self {
             own,
-            players: BTreeSet::new(),
+            player_types: BTreeMap::new(),
         }
     }
     fn status(&self, r: &mut Reader<'_>, out: &mut Writer) -> Result<()> {
@@ -170,10 +170,12 @@ impl Projection {
                 field.i32(r.i32()?);
             }
             let public = matches!(key,0..=7 | 20..=22 | 26..=33 | 46..=53 | 56..=58 | 62..=65);
-            let inventory = (8..=19).contains(&key)
-                && (actor == self.own || key <= 11 && self.players.contains(&actor));
+            let player = self.player_types.get(&actor).copied();
+            let appearance = player == Some(false) && matches!(key, 34 | 36..=37 | 40..=45 | 55);
+            let inventory =
+                (8..=19).contains(&key) && (actor == self.own || key <= 11 && player == Some(true));
             // Container contents and human backpacks never become public merely because the bot received them.
-            if public || inventory {
+            if public || appearance || inventory {
                 fields.0.extend(field.0);
                 kept += 1;
             }
@@ -198,14 +200,11 @@ impl Projection {
                 out.i16(objects);
                 for _ in 0..objects {
                     let kind = r.i16()? as u16;
-                    // NEW_TICK carries no type; remember only identities that can expose public equipped gear.
+                    // NEW_TICK omits types; merchant appearance and player inventory have different public fields.
                     let mut peek = Reader::new(r.remaining());
                     let id = peek.i32()?;
-                    if content.get(kind)?.class == "Player" {
-                        self.players.insert(id);
-                    } else {
-                        self.players.remove(&id);
-                    }
+                    self.player_types
+                        .insert(id, content.get(kind)?.class == "Player");
                     out.i16(kind as i16);
                     self.status(&mut r, &mut out)?;
                 }
@@ -214,7 +213,7 @@ impl Projection {
                 out.i16(drops);
                 for _ in 0..drops {
                     let id = r.i32()?;
-                    self.players.remove(&id);
+                    self.player_types.remove(&id);
                     out.i32(id);
                 }
             }
@@ -237,7 +236,8 @@ impl Projection {
                 r.utf()?;
                 r.done()?;
                 return Ok(
-                    (recipient.is_empty() && self.players.contains(&actor)).then_some(packet)
+                    (recipient.is_empty() && self.player_types.get(&actor) == Some(&true))
+                        .then_some(packet),
                 );
             }
             19 | 74 | 13 | 4 | wire::GOTO | wire::SHOW_EFFECT | wire::PLAY_SOUND | 34 => {

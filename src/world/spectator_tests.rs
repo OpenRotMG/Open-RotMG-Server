@@ -122,6 +122,114 @@ fn spectator_projection_redacts_human_backpacks_containers_wallets_and_nonvisual
 }
 
 #[test]
+fn spectator_preserves_public_merchant_and_connection_stats_without_promoting_player_or_unknown_fields()
+ {
+    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let merchant = content
+        .objects
+        .values()
+        .find(|o| o.class == "Merchant")
+        .unwrap()
+        .kind;
+    let public = [
+        (34, 0xa97),
+        (36, 100),
+        (37, 0),
+        (40, 1),
+        (41, 3),
+        (42, 2),
+        (43, 20),
+        (44, 1),
+        (45, 2),
+        (55, 3),
+    ];
+    let secret = 0x12345678;
+    let mut fields = public.to_vec();
+    fields.extend([
+        (8, secret),
+        (35, secret),
+        (38, secret),
+        (39, secret),
+        (54, secret),
+    ]);
+    let mut update = Writer::new();
+    update.i16(0).i16(3).i16(crate::content::WIZARD as i16);
+    status(&mut update, 7, &public);
+    update.i16(crate::content::WIZARD as i16);
+    status(&mut update, 8, &public);
+    update.i16(merchant as i16);
+    status(&mut update, 9, &fields);
+    update.i16(0);
+    let mut projection = Projection::new(7);
+    let filtered = projection
+        .packet(
+            Packet {
+                id: wire::UPDATE,
+                body: update.0,
+            },
+            &content,
+        )
+        .unwrap()
+        .unwrap();
+    let mut expected = Writer::new();
+    expected.i16(0).i16(3).i16(crate::content::WIZARD as i16);
+    status(&mut expected, 7, &[]);
+    expected.i16(crate::content::WIZARD as i16);
+    status(&mut expected, 8, &[]);
+    expected.i16(merchant as i16);
+    status(&mut expected, 9, &public);
+    expected.i16(0);
+    assert_eq!(filtered.body, expected.0);
+    let mut tick = Writer::new();
+    tick.i32(1).i32(100).i16(2);
+    status(&mut tick, 9, &public);
+    status(&mut tick, 99, &public);
+    let filtered = projection
+        .packet(
+            Packet {
+                id: wire::NEW_TICK,
+                body: tick.0,
+            },
+            &content,
+        )
+        .unwrap()
+        .unwrap();
+    let mut expected = Writer::new();
+    expected.i32(1).i32(100).i16(2);
+    status(&mut expected, 9, &public);
+    status(&mut expected, 99, &[]);
+    assert_eq!(filtered.body, expected.0);
+    let mut drop = Writer::new();
+    drop.i16(0).i16(0).i16(1).i32(9);
+    projection
+        .packet(
+            Packet {
+                id: wire::UPDATE,
+                body: drop.0,
+            },
+            &content,
+        )
+        .unwrap();
+    let mut tick = Writer::new();
+    tick.i32(2).i32(100).i16(1);
+    status(&mut tick, 9, &public);
+    let filtered = projection
+        .packet(
+            Packet {
+                id: wire::NEW_TICK,
+                body: tick.0,
+            },
+            &content,
+        )
+        .unwrap()
+        .unwrap();
+    let mut expected = Writer::new();
+    expected.i32(2).i32(100).i16(1);
+    status(&mut expected, 9, &[]);
+    assert_eq!(filtered.body, expected.0);
+}
+
+#[test]
 fn spectator_snapshot_subscription_has_no_avatar_and_is_bounded_and_closed_on_retirement() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
