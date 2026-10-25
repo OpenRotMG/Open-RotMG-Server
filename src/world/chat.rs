@@ -20,7 +20,9 @@ pub(crate) fn chat_info(text: &str) -> Packet {
 }
 
 pub(super) fn text_packet(name: &str, object: i32, bubble: u8, text: &str) -> Packet {
-    text_to(name, object, bubble, "", text, 0)
+    // The client draws a class star for every numStars >= 0 (client §_-0At§), so non-player
+    // lines use -1; realm-src's Mob/Oryx/Taunt/SendInfo all send -1 for the same reason.
+    text_to(name, object, bubble, "", text, -1)
 }
 
 fn text_to(name: &str, object: i32, bubble: u8, recipient: &str, text: &str, stars: i32) -> Packet {
@@ -397,5 +399,29 @@ impl Directory {
         }
         tracing::info!(player=id, account, world=%world.name, yell, recipients, bytes=text.len(), "local chat delivered");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stars(packet: Packet) -> i32 {
+        let mut r = crate::wire::Reader::new(&packet.body);
+        r.utf().unwrap();
+        r.i32().unwrap();
+        r.i32().unwrap()
+    }
+
+    #[test]
+    fn non_player_text_does_not_carry_a_class_star() {
+        for packet in [
+            chat_info("Players online: Test"),
+            chat_error("Unknown chat command."),
+            chat_private("Discord"),
+            text_packet("#Oryx the Mad God", 4, 5, "Uhh. So... sleepy..."),
+        ] {
+            assert_eq!(stars(packet), -1);
+        }
     }
 }
