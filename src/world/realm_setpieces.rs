@@ -951,7 +951,7 @@ impl World {
                                 0xdc2 | crate::dungeon::beach::BUM | crate::dungeon::tomb::SPHINX
                             ) && mark == 0;
                             self.setpiece_cell_available(c, untouched, retain_authored_lava)
-                                && (!(kind == 0x67d && matches!(mark, 5 | 6))
+                                && (!matches!((kind, mark), (0x67d, 5 | 6) | (0x91b, 3))
                                     || self.walkable(Pos { x: x as f32 + 0.5, y: y as f32 + 0.5 })
                                         && self.setpiece_scenery_clear(index))
                         })
@@ -994,8 +994,8 @@ impl World {
                 }
                 let (ground, object) = Piece::tile(kind, mark);
                 let index = pos.y as usize * self.map.width as usize + pos.x as usize;
-                if kind == 0x67d && matches!(mark, 5 | 6) {
-                    // Castle.cs changes ground at these markers without replacing native scenery.
+                if matches!((kind, mark), (0x67d, 5 | 6) | (0x91b, 3)) {
+                    // The community renderers retain native scenery beneath these ground-only writes.
                     Arc::make_mut(&mut self.map).cells[index].ground = ground;
                     if let Some(object) = object {
                         self.spawn_entity(object, pos, vec![])?;
@@ -1241,6 +1241,89 @@ mod tests {
                     }
                 }
                 assert_eq!(original.cells[destination].config, "name:native;size:137");
+            }
+        }
+    }
+
+    #[test]
+    fn lich_rubble_requires_safe_walkable_native_scenery() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        assert!(content.objects[&0x100].blocks && !content.objects[&0x100].full_occupy);
+        for seed in [8, 13, 1, 12] {
+            let plan = Piece::build(0x91b, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            let mark = plan
+                .cells
+                .iter()
+                .position(|m| *m == 3)
+                .expect("rotated rubble target");
+            let (ox, oy) = (96 - plan.width / 2, 96 - plan.height / 2);
+            let index = (oy + mark / plan.width) * 192 + ox + mark % plan.width;
+            let destination = (oy + 13) * 192 + ox + 13;
+            for mode in 0..3 {
+                let mut map = temple_test_map(0);
+                map.cells[96 * 192 + 96].terrain = 7;
+                map.cells[destination].terrain = 7;
+                map.cells[index].object = Some(if mode == 0 { 0x100 } else { 0x105 });
+                map.cells[index].config = "name:native;size:137".into();
+                let original = Arc::new(map);
+                let mut world = World::new(content.clone(), original.clone()).unwrap();
+                let native = world.cells.ids(index)[0];
+                if mode == 1 {
+                    world
+                        .entities
+                        .get_mut(&native)
+                        .unwrap()
+                        .extra_stats
+                        .push((54, 1));
+                }
+                let ids: BTreeSet<_> = world.entities.values().map(|e| e.id).collect();
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let result = world.place_named_setpiece(0x91b, &[6, 7]);
+                assert_eq!(
+                    result.is_ok(),
+                    mode == 2,
+                    "seed {seed}, mode {mode}: {result:?}"
+                );
+                if mode == 2 {
+                    let area = world.setpieces.last().unwrap();
+                    assert_eq!((area.x, area.y), (ox as i32, oy as i32));
+                    let wall = world
+                        .cells
+                        .ids(index)
+                        .iter()
+                        .copied()
+                        .find(|id| world.entities[id].kind == 0x162)
+                        .unwrap();
+                    assert_ne!(native, wall);
+                    assert_eq!(world.cells.ids(index).len(), 2);
+                    assert!(world.cells.ids(index).contains(&native));
+                    assert_eq!(world.map.cells[index].ground, 0xad);
+                    assert_eq!(world.map.cells[index].object, Some(0x105));
+                } else {
+                    assert!(Arc::ptr_eq(&original, &world.map));
+                    assert!(world.setpieces.is_empty());
+                    assert_eq!(
+                        world
+                            .entities
+                            .values()
+                            .map(|e| e.id)
+                            .collect::<BTreeSet<_>>(),
+                        ids
+                    );
+                    assert_eq!(world.cells.ids(index), &[native]);
+                    if mode == 1 {
+                        assert!(world.entities[&native].extra_stats.contains(&(54, 1)));
+                    }
+                }
+                assert_eq!(
+                    (
+                        world.entities[&native].name.as_str(),
+                        world.entities[&native].size
+                    ),
+                    ("native", 137)
+                );
+                assert_eq!(world.map.cells[index].config, "name:native;size:137");
+                assert_eq!(original.cells[index].config, "name:native;size:137");
             }
         }
     }
