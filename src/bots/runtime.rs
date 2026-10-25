@@ -69,7 +69,7 @@ async fn enter_admitted(
     // Concurrent novas and hit receipts must fit between bounded perception updates.
     let (packets, output) = mpsc::channel(OUTPUT_CAPACITY);
     let sender = packets.clone();
-    let (lost, _) = watch::channel(false);
+    let (lost, _) = watch::channel(None);
     let presentation = app.store.presentation(character.account).await?;
     let own_name = character.name.clone();
     let own_guild = presentation.guild.is_some();

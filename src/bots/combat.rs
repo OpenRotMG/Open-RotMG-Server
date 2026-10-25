@@ -211,30 +211,127 @@ pub(super) fn attack(
     {
         decision.aim = Some(angle(v.position, point));
     }
-    if decision.item.is_none()
-        && v.character.items[1] >= 0
-        && v.time_ms >= v.character.ability_ready_ms
-    {
-        let ability = content.get(v.character.items[1] as u16)?;
-        if ability.activate == "BulletNova"
-            && v.character.conditions & crate::condition::bit(crate::condition::QUIET) == 0
-            && v.character.mp >= ability.mana_cost
-            && (v.map.name != "Snake Pit"
-                || v.quest == Some(enemy.id)
-                || v.character.mp - ability.mana_cost >= ability.mana_cost)
-            && enemy.hp > projectile.max * 2
-            && v.position.distance(enemy.position) <= 15.
-            && shot_clear(v, grid, enemy.position, false)
-        {
-            // Nova bullets originate at the cursor, not after the weapon's flight time.
-            decision.item = Some(Action::Use {
-                slot: 1,
-                x: enemy.position.x,
-                y: enemy.position.y,
-            });
-        }
+    if decision.item.is_none() {
+        decision.item = ability(v, content, grid, enemy)?;
     }
     Ok(())
+}
+
+/// Uses the equipped class ability against or away from `enemy`; healing tomes belong to `social`.
+pub(super) fn ability(
+    v: &PlayerView,
+    content: &Content,
+    grid: &Grid,
+    enemy: &VisibleObject,
+) -> Result<Option<Action>> {
+    use crate::condition::*;
+    use crate::content::Ability;
+    let Ok(kind) = u16::try_from(v.character.items[1]) else {
+        return Ok(None);
+    };
+    let item = content.get(kind)?;
+    let distance = v.position.distance(enemy.position);
+    if v.time_ms < v.character.ability_ready_ms
+        || v.character.mp < item.mana_cost
+        || v.character.conditions & bit(QUIET) != 0
+        || distance > 14.
+    {
+        return Ok(None);
+    }
+    let weapon = content.get(v.character.items[0] as u16)?.projectiles[&0].clone();
+    let health = v.character.hp as f32 / v.character.stats[0] as f32;
+    let endangered = health < 0.6 && distance < 8.;
+    let teleport = item.abilities.iter().find_map(|a| match a {
+        Ability::Teleport { distance } => Some(*distance),
+        _ => None,
+    });
+    // A teleporting item's single cursor is the escape landing, so it cannot also aim at the enemy.
+    let aimed = teleport.is_none();
+    // Snake Pit keeps a second cast in reserve for its boss.
+    let worthwhile = |reach: f32, passes_cover: bool| {
+        aimed
+            && enemy.hp > weapon.max * 2
+            && distance <= reach
+            && shot_clear(v, grid, enemy.position, passes_cover)
+            && (v.map.name != "Snake Pit"
+                || v.quest == Some(enemy.id)
+                || v.character.mp - item.mana_cost >= item.mana_cost)
+    };
+    let reach = |p: &crate::content::Projectile| p.speed * p.lifetime / 10000.;
+    let mut wanted = false;
+    for activation in &item.abilities {
+        wanted |= match activation {
+            Ability::Shoot => {
+                let shot = item
+                    .projectiles
+                    .get(&0)
+                    .context("ability projectile missing")?;
+                worthwhile(reach(shot), shot.passes_cover)
+            }
+            // Area abilities land at the cursor, not after the weapon's flight time.
+            Ability::Nova
+            | Ability::Poison { .. }
+            | Ability::Drain { .. }
+            | Ability::Lightning { .. }
+            | Ability::Daze { .. } => worthwhile(14., false),
+            Ability::Trap { .. } => {
+                worthwhile(14., false) && grid.walkable.contains(&tile(enemy.position))
+            }
+            Ability::SpiritBomb => worthwhile(3., false),
+            // The server charges casts that only reach stasised or immune enemies.
+            Ability::Stasis { .. } => {
+                endangered
+                    && aimed
+                    && v.objects.iter().any(|o| {
+                        content.objects[&o.kind].enemy
+                            && o.hp > 0
+                            && o.position.distance(enemy.position) <= 3.
+                            && o.condition_mask
+                                .is_some_and(|m| m & (bit(STASIS) | bit(STASIS_IMMUNE)) == 0)
+                    })
+            }
+            Ability::Decoy { .. } | Ability::Teleport { .. } => endangered,
+            Ability::Condition { effect, .. } if v.character.conditions & bit(*effect) != 0 => {
+                false
+            }
+            Ability::Condition { effect, .. } => match *effect {
+                INVISIBLE | INVULNERABLE | ARMORED => endangered,
+                HEALING => health < 0.75,
+                // Buffs start just before a melee weapon reaches its target.
+                BERSERK | DAMAGING | SPEEDY => {
+                    enemy.hp > weapon.max && distance <= reach(&weapon) + 2.
+                }
+                effect => anyhow::bail!("unsupported autonomous condition ability {effect}"),
+            },
+            Ability::Heal { .. } | Ability::Clear { .. } | Ability::Cleanse { .. } => false,
+        };
+    }
+    if !wanted {
+        return Ok(None);
+    }
+    let point = match teleport {
+        Some(distance) => {
+            let away = angle(enemy.position, v.position);
+            // Leave margin for movement made while this decision was computed.
+            let Some(landing) = (1..=3)
+                .rev()
+                .map(|step| Pos {
+                    x: v.position.x + away.cos() * distance * step as f32 / 4.,
+                    y: v.position.y + away.sin() * distance * step as f32 / 4.,
+                })
+                .find(|p| grid.walkable.contains(&tile(*p)))
+            else {
+                return Ok(None);
+            };
+            landing
+        }
+        None => enemy.position,
+    };
+    Ok(Some(Action::Use {
+        slot: 1,
+        x: point.x,
+        y: point.y,
+    }))
 }
 
 pub(super) fn movement(
@@ -275,4 +372,61 @@ pub(super) fn movement(
         }
     }
     best.map(|(_, point)| point)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::condition::{DAMAGING, HEALING, INVISIBLE, STASIS, bit};
+
+    fn scene(weapon: i32, ability: i32, health: f32) -> (Content, PlayerView) {
+        let (content, mut v) = super::super::quest_tests::fixture();
+        v.position = Pos { x: 40.5, y: 40.5 };
+        v.character.items[0] = weapon;
+        v.character.items[1] = ability;
+        v.character.hp = (v.character.stats[0] as f32 * health) as i32;
+        v.objects[0].position = Pos { x: 44.5, y: 40.5 };
+        (content, v)
+    }
+    fn cast(content: &Content, v: &PlayerView) -> Option<Pos> {
+        let grid = Grid::terrain(v);
+        match ability(v, content, &grid, &v.objects[0]).unwrap()? {
+            Action::Use { slot: 1, x, y } => Some(Pos { x, y }),
+            other => panic!("unexpected ability action {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rogue_cloaks_only_when_injured_and_visible() {
+        let (content, mut v) = scene(2675, 0xa56, 0.4);
+        assert!(cast(&content, &v).is_some());
+        v.character.conditions = bit(INVISIBLE);
+        assert!(cast(&content, &v).is_none());
+        let (content, v) = scene(2675, 0xa56, 1.);
+        assert!(cast(&content, &v).is_none());
+    }
+
+    #[test]
+    fn casts_skip_active_buffs_stasised_targets_and_aimless_teleports() {
+        let (content, mut v) = scene(2561, 0xa52, 0.5);
+        v.character.conditions = bit(HEALING) | bit(DAMAGING);
+        assert!(cast(&content, &v).is_none());
+        v.character.conditions = bit(HEALING);
+        assert!(cast(&content, &v).is_some());
+
+        let (content, mut v) = scene(2714, 0xae4, 0.4);
+        v.objects[0].condition_mask = Some(bit(STASIS));
+        assert!(cast(&content, &v).is_none());
+        v.objects[0].condition_mask = Some(0);
+        assert!(cast(&content, &v).unwrap().distance(v.objects[0].position) < 1e-3);
+
+        let (content, v) = scene(2565, 0xae2, 1.);
+        assert!(cast(&content, &v).is_none());
+        let (content, v) = scene(2565, 0xae2, 0.4);
+        let landing = cast(&content, &v).unwrap();
+        assert!(
+            landing.distance(Pos { x: 25.5, y: 40.5 }) < 1e-3,
+            "{landing:?}"
+        );
+    }
 }

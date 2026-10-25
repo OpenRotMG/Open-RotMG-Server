@@ -37,7 +37,7 @@ impl Drop for InputTask {
 }
 pub(super) fn receive<S, E>(
     mut stream: S,
-    lost: watch::Sender<bool>,
+    lost: watch::Sender<Option<&'static str>>,
     clock: crate::clock::Clock,
 ) -> (mpsc::Receiver<Incoming>, InputTask)
 where
@@ -63,7 +63,7 @@ where
                         Ok(packets) => packets,
                         Err(error) => {
                             tracing::error!(%error, "invalid packet stream");
-                            lost.send_replace(true);
+                            crate::world::lose(&lost, "invalid_packet_stream");
                             return;
                         }
                     };
@@ -74,7 +74,7 @@ where
                     count = count.saturating_add(packets.len());
                     if count > 512 {
                         tracing::warn!("input packet rate exceeded");
-                        lost.send_replace(true);
+                        crate::world::lose(&lost, "input_rate_exceeded");
                         return;
                     }
                     let mut inputs = Vec::with_capacity(packets.len());
@@ -86,7 +86,7 @@ where
                             Ok(permit) => permit,
                             Err(error) => {
                                 tracing::warn!(%error, "native input byte backlog exceeded");
-                                lost.send_replace(true);
+                                crate::world::lose(&lost, "input_byte_backlog");
                                 return;
                             }
                         };
@@ -98,12 +98,12 @@ where
                 Ok(Message::Close(_)) => return,
                 Ok(_) => {
                     tracing::warn!("non-binary game message rejected");
-                    lost.send_replace(true);
+                    crate::world::lose(&lost, "non_binary_message");
                     return;
                 }
                 Err(error) => {
                     tracing::warn!(%error, "WebSocket failed");
-                    lost.send_replace(true);
+                    crate::world::lose(&lost, "websocket_failed");
                     return;
                 }
             };
@@ -111,7 +111,7 @@ where
             for (index, input) in inputs.into_iter().enumerate() {
                 if let Err(error) = tx.try_send(input) {
                     tracing::warn!(%error, batch, index, "native input queue rejected before receipt timing diverges");
-                    lost.send_replace(true);
+                    crate::world::lose(&lost, "input_queue_full");
                     return;
                 }
                 // Buffered separate frames must also let the consumer run before the bounded queue fills.

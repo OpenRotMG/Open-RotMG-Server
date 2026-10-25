@@ -155,7 +155,7 @@ async fn prepared_guild_commits_real_relation_without_wallet_or_star_changes() {
                 let (packets, receiver) = tokio::sync::mpsc::channel(128);
                 w.players.get_mut(player).unwrap().tx = Some(crate::world::Output {
                     packets,
-                    lost: tokio::sync::watch::channel(false).0,
+                    lost: tokio::sync::watch::channel(None).0,
                 });
                 receivers.push(receiver);
             }
@@ -358,7 +358,7 @@ async fn prepared_pause_uses_ordinary_policy_and_preserves_known_guild() {
             let (packets, receiver) = tokio::sync::mpsc::channel(128);
             w.players.get_mut(&viewer).unwrap().tx = Some(crate::world::Output {
                 packets,
-                lost: tokio::sync::watch::channel(false).0,
+                lost: tokio::sync::watch::channel(None).0,
             });
             Ok(receiver)
         })
