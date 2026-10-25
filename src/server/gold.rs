@@ -50,7 +50,7 @@ mod tests {
         let _owner = a.claim_session(account).unwrap();
         let bind = lifecycle::binding(&a, account).unwrap();
         let (packets, mut received) = tokio::sync::mpsc::channel(512);
-        let (lost, _lost_rx) = tokio::sync::watch::channel(false);
+        let (lost, _lost_rx) = tokio::sync::watch::channel(None);
         let id = a
             .world
             .call(move |w| {

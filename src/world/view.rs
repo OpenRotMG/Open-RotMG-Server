@@ -353,7 +353,9 @@ impl World {
                 quarantined: p.persistence_failure.is_some(),
                 output: match &p.tx {
                     None => OutputState::Detached,
-                    Some(tx) if *tx.lost.borrow() || tx.packets.is_closed() => OutputState::Lost,
+                    Some(tx) if tx.lost.borrow().is_some() || tx.packets.is_closed() => {
+                        OutputState::Lost
+                    }
                     Some(_) => OutputState::Live,
                 },
             },

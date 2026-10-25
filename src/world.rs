@@ -113,7 +113,11 @@ pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
     pub packets: mpsc::Sender<Packet>,
-    pub lost: watch::Sender<bool>,
+    pub lost: watch::Sender<Option<&'static str>>,
+}
+// The first cause names the disconnect; later failures of a closing connection are its consequences.
+pub(crate) fn lose(lost: &watch::Sender<Option<&'static str>>, cause: &'static str) {
+    lost.send_if_modified(|current| current.is_none() && current.replace(cause).is_none());
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -348,6 +352,7 @@ pub struct Player {
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32, i32)>,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
+    predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
@@ -517,7 +522,7 @@ impl Player {
         self.bot_goal = None;
         self.bot_aim = None;
         if let Some(output) = &self.tx {
-            let _ = output.lost.send(true);
+            lose(&output.lost, "persistence_quarantine");
         }
         // Quarantine remains authoritative even when its diagnostic sink fails.
         let error = self
@@ -1258,6 +1263,8 @@ impl Directory {
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
             let started = Instant::now();
+            let groves = self.realms[layout.context("Realm layout selection missing")?].groves()?;
+            world.populate_authored_groves(&groves)?;
             // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
             let beach_bum = world.rng.gen_ratio(1, 200);
             world.populate_tomb_entry()?;
@@ -1266,7 +1273,7 @@ impl Directory {
                 world.populate_beach_bum()?;
             }
             world.populate_realm_heroes()?;
-            world.populate_named_quests()?;
+            world.populate_named_quests(!groves.is_empty())?;
             world.populate_realm_events()?;
             world.populate_hermit()?;
             world.populate_manor_entry()?;
@@ -2629,7 +2636,14 @@ pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
     if let Some(tx) = &p.tx
         && let Err(error) = tx.packets.try_send(Packet { id, body })
     {
-        tx.lost.send_replace(true);
+        lose(
+            &tx.lost,
+            if tx.packets.is_closed() {
+                "output_queue_closed"
+            } else {
+                "output_queue_full"
+            },
+        );
         let queue_state = match error {
             mpsc::error::TrySendError::Full(_) => "full",
             mpsc::error::TrySendError::Closed(_) => "closed",
@@ -3356,6 +3370,7 @@ impl World {
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
+                predicted_deaths: BTreeMap::new(),
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
@@ -7183,6 +7198,7 @@ impl World {
         bullets.append(&mut self.bullets);
         self.bullets = bullets;
         self.detached_bullets = 0;
+        self.reconcile_enemy_deaths();
         if self.tick.is_multiple_of(2) {
             // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
             // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
