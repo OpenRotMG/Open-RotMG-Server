@@ -1,5 +1,6 @@
 import concurrent.futures
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -39,6 +40,18 @@ class RetainedELFTests(unittest.TestCase):
         self.assertEqual(a.stat().st_mode & 0o777, 0o555)
         self.assertEqual(len(list(self.pool.glob('*.bin'))), 1)
         self.assertEqual(a.stat().st_nlink, 3)
+
+    def test_provenance_records_every_output_and_source(self):
+        a, b = self.retain('run-a'), self.retain('run-b')
+        record = json.loads(next(self.pool.glob('*.json')).read_text())
+        self.assertEqual(record, {'version': 1, 'sources': [str(m.ROOT)],
+                                  'outputs': sorted([str(a), str(b)])})
+
+    def test_legacy_object_is_not_falsely_given_complete_provenance(self):
+        self.retain('run-a')
+        next(self.pool.glob('*.json')).unlink()
+        self.retain('run-b')
+        self.assertEqual(list(self.pool.glob('*.json')), [])
 
     def test_compiler_overwrite_cannot_modify_retained_evidence(self):
         a = self.retain('run-a')

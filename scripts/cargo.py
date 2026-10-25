@@ -122,7 +122,8 @@ def retain_binary(executable, output):
         obj = root / f'{digest}-{mode:o}.bin'
         if obj.is_symlink():
             raise RuntimeError('Retained binary object must not be a symlink')
-        if not obj.exists():
+        created = not obj.exists()
+        if created:
             with tempfile.NamedTemporaryFile(dir=root, prefix='.retain-', delete=False) as temporary:
                 stage = Path(temporary.name)
             try:
@@ -143,6 +144,27 @@ def retain_binary(executable, output):
         after = executable.stat()
         if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode):
             raise RuntimeError('Executable changed before retention completed')
+        provenance = obj.with_suffix('.json')
+        if provenance.is_symlink():
+            raise RuntimeError('Retained binary provenance must not be a symlink')
+        if created or provenance.exists():
+            record = json.loads(provenance.read_text()) if provenance.exists() else {'version': 1, 'sources': [], 'outputs': []}
+            if not isinstance(record, dict) or record.get('version') != 1 or any(not isinstance(record.get(key), list) or
+                    any(not isinstance(path, str) or not Path(path).is_absolute() for path in record[key])
+                    for key in ('sources', 'outputs')):
+                raise RuntimeError('Invalid retained binary provenance')
+            record['sources'] = sorted(set(record['sources']) | {str(ROOT)})
+            record['outputs'] = sorted(set(record['outputs']) | {str(output.absolute()), str(output.resolve())})
+            with tempfile.NamedTemporaryFile(dir=root, prefix='.provenance-', delete=False) as temporary:
+                metadata_stage = Path(temporary.name)
+            try:
+                with metadata_stage.open('w') as stream:
+                    json.dump(record, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                metadata_stage.replace(provenance)
+            finally:
+                metadata_stage.unlink(missing_ok=True)
         sync_directory(root)
         with tempfile.NamedTemporaryFile(dir=output.parent, prefix='.openrotmg-', delete=False) as temporary:
             stage = Path(temporary.name)
