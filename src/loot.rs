@@ -1622,6 +1622,35 @@ mod tests {
     }
 
     #[test]
+    fn white_demon_attack_uses_one_percent_without_changing_gear_or_other_gods() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let boundary = (0.01 * u64::MAX as f64) as u64;
+        for roll in [boundary - 1, boundary, (0.0125 * u64::MAX as f64) as u64] {
+            let white = rewards(&content, 0x651, &mut StepRng::new(roll, 0));
+            assert_eq!(
+                white.contains(&0xa1f),
+                roll < boundary,
+                "White Demon Attack at random sample {roll}"
+            );
+            let gear: Vec<_> = white.into_iter().filter(|item| *item != 0xa1f).collect();
+            assert!(!gear.is_empty());
+            for kind in [0x652, 0x657, 0xd05] {
+                let sibling = rewards(&content, kind, &mut StepRng::new(roll, 0));
+                assert!(sibling.contains(&0xa1f), "{kind:#x} keeps its 1.5% roll");
+                assert_eq!(
+                    gear,
+                    sibling
+                        .into_iter()
+                        .filter(|item| *item != 0xa1f)
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        assert_eq!(potion_damage(0x651), Some(180));
+        assert!(private(0x651));
+    }
+
+    #[test]
     fn limon_defense_is_an_independent_five_percent_private_bonus() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         assert!(private(0xd06));
