@@ -2,20 +2,16 @@ use super::*;
 use crate::bots::pursuits::market::{Message, goods_text, parse_quote};
 
 pub(super) struct Wording {
-    facts: String,
     created: Instant,
     result: Arc<Mutex<Option<std::result::Result<String, Failure>>>>,
 }
 
 pub(super) const PROMPT: &str = "Generate your own terse 2012 Realm player trade speech. Use reply_to_player once with the sole allowed intent. Write a TEMPLATE: never substitute facts into tokens. For market_advertise use SELL {give} LINK {want} or BUY {want} LINK {give}, optionally followed by ' @{name}'. SELL is wts, selling, sell, s>, or trading. BUY is wtb, buying, or buy. LINK is for or =. Caps and extra whitespace are allowed. For market_refuse the grammar is 'nty need {want}' or 'nah need {want}' or 'no thx need {want}'. Vary wording and capitalization for the supplied speaker/style, keeping their preferred voice. Tokens must occur exactly once. No other words, numbers, punctuation, goods, promises, acceptance or invented terms. The program inserts inventory-validated facts AFTER generation. WINDOW offers are the only trade acceptance authority.";
 
-fn render(
+fn validated_template_words(
     template: &str,
     intent: Intent,
-    give: &str,
-    want: &str,
-    name: &str,
-) -> std::result::Result<String, Failure> {
+) -> std::result::Result<Vec<&str>, Failure> {
     let words = template.split_whitespace().collect::<Vec<_>>();
     let lower = words
         .iter()
@@ -43,13 +39,23 @@ fn render(
     if !valid {
         return Err(Failure("invalid_market_wording"));
     }
+    Ok(words)
+}
+
+fn render(
+    template: &str,
+    intent: Intent,
+    give: &str,
+    want: &str,
+    name: &str,
+) -> std::result::Result<String, Failure> {
     let mut result = Vec::new();
-    for (word, token) in words.iter().zip(lower) {
-        result.push(match token.as_str() {
+    for word in validated_template_words(template, intent)? {
+        result.push(match word.to_ascii_lowercase().as_str() {
             "{give}" => give.to_owned(),
             "{want}" => want.to_owned(),
             "@{name}" => format!("@{name}"),
-            _ => (*word).to_owned(),
+            _ => word.to_owned(),
         });
     }
     let text = result.join(" ");
@@ -89,19 +95,15 @@ impl Service {
         let mut cache = self.wordings.lock().expect("market speech cache poisoned");
         if let Some(entry) = cache.get(&key) {
             let result = entry.result.lock().expect("market speech result poisoned");
-            if entry.facts == message.text {
-                match result.as_ref() {
-                    Some(Ok(text)) => return Ok(Some(text.clone())),
-                    Some(Err(error)) if entry.created.elapsed() < Duration::from_secs(60) => {
-                        return Err((*error).into());
-                    }
-                    Some(Err(_)) => {}
-                    None => return Ok(None),
+            match result.as_ref() {
+                Some(Ok(template)) => {
+                    return Ok(Some(render(template, intent, &give, &want, name)?));
                 }
-            }
-            // Complete and count a stale request, but never publish it for changed stock/terms.
-            if result.is_none() {
-                return Ok(None);
+                Some(Err(error)) if entry.created.elapsed() < Duration::from_secs(60) => {
+                    return Err((*error).into());
+                }
+                Some(Err(_)) => {}
+                None => return Ok(None),
             }
         }
         if !self.automatic_available() {
@@ -115,7 +117,6 @@ impl Service {
         cache.insert(
             key,
             Wording {
-                facts: message.text.clone(),
                 created: Instant::now(),
                 result: result.clone(),
             },
@@ -124,7 +125,7 @@ impl Service {
         let name = name.to_owned();
         let payload = json!({"allowed_intents":[intent],"automatic":true,"market_generation":true,
             "bot":{"name":name,"personality":personality,"style_seed":name.bytes().fold(0u32, |h,b| h.wrapping_mul(31).wrapping_add(u32::from(b)))},
-            "immutable_facts":{"give":give,"want":want},"message":"Generate a trade speech template in my own voice, using only the given grammar."});
+            "message":"Generate a trade speech template in my own voice, using only the given grammar."});
         tokio::spawn(async move {
             let start = Instant::now();
             let id = format!("market-{:016x}", rand::random::<u64>());
@@ -132,10 +133,8 @@ impl Service {
                 if reply.intent != intent {
                     return Err(Failure("invalid_market_wording"));
                 }
-                render(&reply.reply, intent, &give, &want, &name).map(|text| Reply {
-                    intent,
-                    reply: text,
-                })
+                validated_template_words(&reply.reply, intent)?;
+                Ok(reply)
             });
             service.completed(&reply, start.elapsed());
             if let Err(error) = &reply {
@@ -210,13 +209,13 @@ mod provider_tests {
         .await
         .expect("generation timed out")
     }
-    fn envelope(text: &str) -> Value {
+    fn envelope(intent: Intent, text: &str) -> Value {
         json!({"model":MODEL,"choices":[{"finish_reason":"tool_calls","message":{
             "provider_metadata":{"gateway":{"routing":{"canonicalSlug":MODEL,"finalProvider":"nvidia"},"cost":"0"}},
-            "tool_calls":[{"type":"function","function":{"name":"reply_to_player","arguments":json!({"intent":"market_advertise","reply":text}).to_string()}}]}}]})
+            "tool_calls":[{"type":"function","function":{"name":"reply_to_player","arguments":json!({"intent":intent,"reply":text}).to_string()}}]}}]})
     }
     #[tokio::test]
-    async fn market_generation_reuses_success_for_same_truthful_goods_and_observes_provider_failure()
+    async fn market_template_reuses_generated_voice_for_current_goods_and_observes_provider_failure()
      {
         let c = Content::load(std::path::Path::new("data")).unwrap();
         let message = Message {
@@ -225,7 +224,7 @@ mod provider_tests {
         };
         let (service, server) = super::super::tests::provider(
             axum::http::StatusCode::OK,
-            envelope("SELLING {give} FOR {want} @{name}"),
+            envelope(Intent::MarketAdvertise, "SELLING {give} FOR {want} @{name}"),
         )
         .await;
         assert_eq!(
@@ -235,6 +234,15 @@ mod provider_tests {
         assert_eq!(
             generated(&service, "Trader", &message, &c).await.unwrap(),
             "SELLING 4 spd FOR 1 def @Trader"
+        );
+        assert_eq!(service.health()["daily_requests"], 1);
+        let changed = Message {
+            text: "wts 6 def for 1 life".into(),
+            ..message.clone()
+        };
+        assert_eq!(
+            generated(&service, "Trader", &changed, &c).await.unwrap(),
+            "SELLING 6 def FOR 1 life @Trader"
         );
         assert_eq!(service.health()["daily_requests"], 1);
         assert_eq!(
@@ -250,6 +258,9 @@ mod provider_tests {
         assert_eq!(service.health()["failures"], 1);
         assert_eq!(service.health()["successes"], 0);
         assert_eq!(service.health()["last_error"], "provider_rejected");
+        assert!(generated(&service, "Trader", &changed, &c).await.is_err());
+        assert_eq!(service.health()["daily_requests"], 1);
+
         assert!(
             service
                 .market_wording("Trader", &message, &c, json!({"voice":"terse"}))
@@ -268,11 +279,12 @@ mod provider_tests {
         server.abort();
     }
     #[tokio::test]
-    async fn market_generation_blocks_changed_stock_terms_and_model_invented_prices() {
+    async fn market_template_pending_generation_uses_current_terms_and_rejects_invented_prices_or_intent()
+     {
         let c = Content::load(std::path::Path::new("data")).unwrap();
         let (service, server) = super::super::tests::provider(
             axum::http::StatusCode::OK,
-            envelope("wts {give} for {want}"),
+            envelope(Intent::MarketAdvertise, "wts {give} for {want}"),
         )
         .await;
         let old = Message {
@@ -299,16 +311,71 @@ mod provider_tests {
             generated(&service, "Trader", &changed, &c).await.unwrap(),
             "wts 5 spd for 1 def"
         );
-        assert_eq!(service.health()["daily_requests"], 2);
+        assert_eq!(service.health()["daily_requests"], 1);
+        let current = Message {
+            text: "wts 6 def for 1 life".into(),
+            ..old.clone()
+        };
+        assert_eq!(
+            generated(&service, "Trader", &current, &c).await.unwrap(),
+            "wts 6 def for 1 life"
+        );
+        assert_eq!(service.health()["daily_requests"], 1);
+        {
+            let cache = service.wordings.lock().unwrap();
+            let template = cache["Trader:MarketAdvertise"].result.lock().unwrap();
+            assert_eq!(
+                template.as_ref().unwrap().as_ref().unwrap(),
+                "wts {give} for {want}"
+            );
+        }
         server.abort();
+        for invalid in [
+            envelope(Intent::MarketAdvertise, "wts {give} for 9 life"),
+            envelope(Intent::MarketRefuse, "nah need {want}"),
+        ] {
+            let (service, server) =
+                super::super::tests::provider(axum::http::StatusCode::OK, invalid).await;
+            assert!(generated(&service, "Trader", &old, &c).await.is_err());
+            assert_eq!(service.health()["last_error"], "invalid_market_wording");
+            assert_eq!(service.health()["successes"], 0);
+            assert_eq!(service.health()["failures"], 1);
+            assert!(generated(&service, "Trader", &current, &c).await.is_err());
+            assert_eq!(service.health()["daily_requests"], 1);
+            server.abort();
+        }
+    }
+    #[tokio::test]
+    async fn market_refusal_template_renders_current_wants_without_another_provider_request() {
+        let c = Content::load(std::path::Path::new("data")).unwrap();
         let (service, server) = super::super::tests::provider(
             axum::http::StatusCode::OK,
-            envelope("wts {give} for 9 life"),
+            envelope(Intent::MarketRefuse, "nah need {want}"),
         )
         .await;
-        assert!(generated(&service, "Trader", &old, &c).await.is_err());
-        assert_eq!(service.health()["last_error"], "invalid_market_wording");
-        assert_eq!(service.health()["successes"], 0);
+        let old = Message {
+            text: "nty need 1 def".into(),
+            channel: Channel::Tell("Peer".into()),
+        };
+        assert!(
+            service
+                .market_wording("Trader", &old, &c, json!({}))
+                .unwrap()
+                .is_none()
+        );
+        let changed = Message {
+            text: "nty need 4 spd".into(),
+            ..old.clone()
+        };
+        assert_eq!(
+            generated(&service, "Trader", &changed, &c).await.unwrap(),
+            "nah need 4 spd"
+        );
+        assert_eq!(
+            generated(&service, "Trader", &old, &c).await.unwrap(),
+            "nah need 1 def"
+        );
+        assert_eq!(service.health()["daily_requests"], 1);
         server.abort();
     }
     #[tokio::test]
@@ -341,7 +408,7 @@ mod provider_tests {
         assert!(market.message_current(&ad, &v, &c, None).unwrap());
         let (service, server) = super::super::tests::provider(
             axum::http::StatusCode::OK,
-            envelope("wts {give} for {want}"),
+            envelope(Intent::MarketAdvertise, "wts {give} for {want}"),
         )
         .await;
         assert!(
