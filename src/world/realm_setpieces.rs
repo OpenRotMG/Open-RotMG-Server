@@ -40,6 +40,7 @@ enum GroundWrite {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BossAnchor {
     Marker,
+    Lich,
     TempleA,
     TempleB,
 }
@@ -66,9 +67,9 @@ impl Piece {
         self.cells[y * self.width + x] = value;
     }
     fn boss_position(&self, kind: u16, area: Area) -> Pos {
-        // Castle bosses use raw rotated markers; Temple actors stay fixed and Grove uses integer Size / 2 + 1.
+        // Community coordinates are not universally cell-centered or rotated with the stencil.
         let offset = match self.boss_anchor {
-            BossAnchor::TempleA => 0.,
+            BossAnchor::Lich | BossAnchor::TempleA => 0.,
             BossAnchor::TempleB => 0.5,
             BossAnchor::Marker => match kind {
                 0x91f => 1.,
@@ -99,7 +100,7 @@ impl Piece {
         out.boss_anchor = self.boss_anchor;
         out.boss = match self.boss_anchor {
             BossAnchor::Marker => (self.height - 1 - self.boss.1, self.boss.0),
-            BossAnchor::TempleA | BossAnchor::TempleB => self.boss,
+            BossAnchor::Lich | BossAnchor::TempleA | BossAnchor::TempleB => self.boss,
         };
         out
     }
@@ -347,6 +348,8 @@ impl Piece {
             }
             0x91b => {
                 let mut p = Self::new(25, 26);
+                p.boss = (13, 13);
+                p.boss_anchor = BossAnchor::Lich;
                 for x in 2..23 {
                     for y in 1..24 {
                         p.set(x, y, u8::from(!rng.gen_ratio(1, 10)));
@@ -933,8 +936,10 @@ impl World {
                         .all(|(x, y)| a.distance(Pos { x: *x, y: *y }) >= 64.)
                     && protected.iter().all(|p| a.distance(*p) >= 4.)
                     // Offset anchors must retain habitat at the actual destination, not only the sampled center.
-                    && (!matches!(kind, 0x91f | 0xdc2 | 0x67d)
+                    && (!matches!(kind, 0x91b | 0x91f | 0xdc2 | 0x67d)
                         || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
+                    && (kind != 0x91b
+                        || self.setpiece_scenery_clear(boss.y as usize * self.map.width as usize + boss.x as usize))
                     && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
@@ -1071,6 +1076,174 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lich_fixed_anchor_only_relocates_the_protected_clear_cell() {
+        use rand::RngCore;
+        // Pre-change goldens cover each sampled rotation, including native holes at both clear locations.
+        for (seed, width, old, unforced, checksum, tail) in [
+            (
+                8,
+                25,
+                337,
+                0,
+                14571063273733361089_u64,
+                10361982608388095525_u64,
+            ),
+            (13, 26, 324, 1, 17420403749850390922, 10538468675606859923),
+            (1, 25, 312, 0, 15787864280399260911, 2095672165982410954),
+            (12, 26, 325, 1, 18191834656117855729, 11330589970583084517),
+        ] {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let p = Piece::build(0x91b, &mut rng);
+            assert_eq!((p.width, p.height), (width, 650 / width));
+            assert_eq!(p.boss, (13, 13), "seed {seed}");
+            let pos = p.boss_position(
+                0x91b,
+                Area {
+                    x: 0,
+                    y: 0,
+                    width: p.width as i32,
+                    height: p.height as i32,
+                },
+            );
+            assert_eq!((pos.x, pos.y), (13., 13.));
+            let new = 13 * p.width + 13;
+            assert_eq!(p.cells[old], unforced, "old marker must not clear twice");
+            assert_eq!(p.cells[new], 1);
+            let mut cells = p.cells;
+            cells[old] = 0;
+            cells[new] = 0;
+            assert_eq!(
+                cells
+                    .iter()
+                    .fold(0xcbf29ce484222325_u64, |h, c| (h ^ *c as u64)
+                        .wrapping_mul(0x100000001b3)),
+                checksum
+            );
+            assert_eq!(rng.next_u64(), tail, "local stencil RNG changed");
+        }
+    }
+
+    #[test]
+    fn lich_fixed_destination_preserves_admission_and_owned_state() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        assert!(content.objects[&0x100].blocks && !content.objects[&0x100].full_occupy);
+        assert!(content.objects[&0x1f3].full_occupy);
+        for seed in [8, 13, 1, 12] {
+            let plan = Piece::build(0x91b, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            let (x, y) = (96 - plan.width / 2 + 13, 96 - plan.height / 2 + 13);
+            let destination = y * 192 + x;
+            let hole = plan.cells.iter().position(|v| *v == 0).unwrap();
+            let hole_index = (96 - plan.height / 2 + hole / plan.width) * 192 + 96 - plan.width / 2
+                + hole % plan.width;
+            for mode in 0..9 {
+                let mut map = temple_test_map(0);
+                map.cells[96 * 192 + 96].terrain = 7;
+                map.cells[destination].terrain = if mode == 2 { 0 } else { 7 };
+                map.cells[destination].object = Some(if mode == 3 { 0x1f3 } else { 0x100 });
+                map.cells[destination].config = "name:native;size:137".to_owned();
+                if mode == 6 {
+                    map.cells[destination].ground = 0xf4;
+                }
+                if mode == 7 {
+                    map.cells[hole_index].ground = 0xf4;
+                }
+                let original = Arc::new(map);
+                let mut world = World::new(content.clone(), original.clone()).unwrap();
+                world.realm_layout = Some("classic-world-01-reconstruction".to_owned());
+                let old_id = world.cells.ids(destination)[0];
+                if mode == 4 {
+                    world
+                        .entities
+                        .get_mut(&old_id)
+                        .unwrap()
+                        .extra_stats
+                        .push((54, 1));
+                }
+                // Pre-existing protected occupants must survive even when blocking scenery shares their cell.
+                if mode == 5 {
+                    world
+                        .insert_entity(
+                            0x501,
+                            Pos {
+                                x: x as f32 + 0.5,
+                                y: y as f32 + 0.5,
+                            },
+                            vec![],
+                        )
+                        .unwrap();
+                }
+                if mode == 8 {
+                    world
+                        .insert_entity(
+                            0x91f,
+                            Pos {
+                                x: x as f32,
+                                y: y as f32,
+                            },
+                            vec![],
+                        )
+                        .unwrap();
+                }
+                let previous = world
+                    .spawn_entity(
+                        0x91f,
+                        Pos {
+                            x: x as f32 - if mode == 1 { 31.75 } else { 32. },
+                            y: y as f32,
+                        },
+                        vec![],
+                    )
+                    .unwrap();
+                world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                let ids: BTreeSet<_> = world.entities.values().map(|e| e.id).collect();
+                let index_ids = world.cells.ids(destination).to_vec();
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let result = world.place_named_setpiece(0x91b, &[6, 7]);
+                assert_eq!(
+                    result.is_ok(),
+                    mode == 0,
+                    "seed {seed}, mode {mode}: {result:?}"
+                );
+                if mode == 0 {
+                    let pos = result.unwrap();
+                    assert_eq!((pos.x, pos.y), (x as f32, y as f32));
+                    assert_eq!(pos.distance(world.entities[&previous].pos), 32.);
+                    assert!(world.walkable(pos) && !world.entities.contains_key(&old_id));
+                    assert!(world.cells.ids(destination).is_empty());
+                    let c = &world.map.cells[destination];
+                    assert_eq!(
+                        (c.ground, c.object, c.config.as_str(), c.terrain),
+                        (0xad, None, "", 7)
+                    );
+                } else {
+                    assert!(Arc::ptr_eq(&original, &world.map));
+                    assert!(world.setpieces.is_empty());
+                    assert_eq!(
+                        world
+                            .entities
+                            .values()
+                            .map(|e| e.id)
+                            .collect::<BTreeSet<_>>(),
+                        ids
+                    );
+                    assert_eq!(world.cells.ids(destination), index_ids);
+                    assert_eq!(
+                        (
+                            world.entities[&old_id].name.as_str(),
+                            world.entities[&old_id].size
+                        ),
+                        ("native", 137)
+                    );
+                    if mode == 4 {
+                        assert!(world.entities[&old_id].extra_stats.contains(&(54, 1)));
+                    }
+                }
+                assert_eq!(original.cells[destination].config, "name:native;size:137");
+            }
+        }
+    }
 
     #[test]
     fn sphinx_outer_floor_uses_reference_index_space_center() {
@@ -1519,7 +1692,7 @@ mod tests {
             let (bas, column) = match p.boss_anchor {
                 BossAnchor::TempleA => (17, 22),
                 BossAnchor::TempleB => (16, 21),
-                BossAnchor::Marker => panic!("Temple lacks its variant anchor"),
+                BossAnchor::Marker | BossAnchor::Lich => panic!("Temple lacks its variant anchor"),
             };
             for _ in 0..4 {
                 if p.cells[column * 60 + column] == 4 {
