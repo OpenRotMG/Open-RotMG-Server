@@ -5,11 +5,12 @@ fn held_weapon(class: u16, weapon: u16) -> (World, i32) {
     let content = Arc::new(Content::load(data).unwrap());
     let map = Arc::new(Map::load(&data.join("nexus.wmap"), &content).unwrap());
     let mut world = World::new(content, map).unwrap();
+    let base = world.content.classes[&class].caps;
     let character: Character = serde_json::from_value(serde_json::json!({
         "schema":1,"lifetime":crate::store::FameLifetime::complete(),
-        "class":class,"base":[770,252,50,40,50,50,75,50],
+        "class":class,"base":base,
         "id":1,"account":1,"name":"Weapon","level":20,"exp":0,
-        "fame":0,"hp":770,"mp":252,"revision":0,"alive":true,
+        "fame":0,"hp":base[0],"mp":base[1],"revision":0,"alive":true,
         "items":[weapon,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
     }))
     .unwrap();
@@ -23,6 +24,7 @@ fn held_weapon(class: u16, weapon: u16) -> (World, i32) {
 fn held_double_bow_spreads_from_one_muzzle_at_normal_cadence() {
     let (mut world, id) = held_weapon(0x307, 0xa1d);
     let position = world.players[&id].pos;
+    let mana = world.players[&id].character.mp;
     let weapon = world.content.get(0xa1d).unwrap();
     assert_eq!(weapon.shots, 2);
     let half_arc = weapon.arc.to_radians() / 2.;
@@ -64,7 +66,7 @@ fn held_double_bow_spreads_from_one_muzzle_at_normal_cadence() {
         }
         assert_eq!(world.players[&id].character.shots, volleys as u64 * 2);
         assert!(world.players[&id].pos.distance(position) < 1e-5);
-        assert_eq!(world.players[&id].character.mp, 252);
+        assert_eq!(world.players[&id].character.mp, mana);
     }
     assert!(volleys > 1);
 }
@@ -73,6 +75,7 @@ fn held_double_bow_spreads_from_one_muzzle_at_normal_cadence() {
 fn held_zero_arc_staff_keeps_common_aim_muzzle_and_opposite_wave_parity() {
     let (mut world, id) = held_weapon(crate::content::WIZARD, 0xa97);
     let position = world.players[&id].pos;
+    let mana = world.players[&id].character.mp;
     assert_eq!(world.content.get(0xa97).unwrap().arc, 0.);
     world.step();
     let shots: Vec<_> = world.bullets.iter().filter(|b| b.owner == id).collect();
@@ -92,13 +95,14 @@ fn held_zero_arc_staff_keeps_common_aim_muzzle_and_opposite_wave_parity() {
     }
     assert!(waves[0].abs() > 0.1);
     assert!((waves[0] + waves[1]).abs() < 1e-5);
-    assert_eq!(world.players[&id].character.mp, 252);
+    assert_eq!(world.players[&id].character.mp, mana);
 }
 
 #[test]
 fn held_weapon_is_blocked_by_stunned_but_not_quiet() {
     for condition in [crate::condition::STUNNED, crate::condition::QUIET] {
         let (mut world, id) = held_weapon(0x307, 0xa1d);
+        let mana = world.players[&id].character.mp;
         world.apply_condition(id, condition, 5000).unwrap();
         world.step();
         let stunned = condition == crate::condition::STUNNED;
@@ -112,7 +116,7 @@ fn held_weapon_is_blocked_by_stunned_but_not_quiet() {
         );
         assert_eq!(
             world.players[&id].character.mp,
-            if stunned { 252 } else { 0 }
+            if stunned { mana } else { 0 }
         );
         assert_eq!(world.players[&id].next_bullet, 3);
     }
