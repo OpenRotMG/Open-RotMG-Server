@@ -37,7 +37,7 @@ def validate_cleanup(root):
 
 
 @contextmanager
-def locked(root, cleaning=False):
+def locked(root, cleaning=False, marker_text=MARKER):
     if root.resolve() != root:
         raise RuntimeError(f'Build cache path must not contain symlinks: {root}')
     root.mkdir(parents=True, exist_ok=True)
@@ -47,18 +47,18 @@ def locked(root, cleaning=False):
         except BlockingIOError:
             if cleaning:
                 raise RuntimeError(f'Cannot clean an active build cache: {root}') from None
-            print(f'Waiting for build cache lock: {root}', flush=True)
+            print(f'Waiting for artifact store lock: {root}', flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
         marker = root / '.owner'
         if marker.is_symlink():
             raise RuntimeError(f'Build cache marker must not be a symlink: {marker}')
         if marker.exists():
-            if marker.read_text() != MARKER:
-                raise RuntimeError(f'Unrecognized build cache: {root}')
+            if marker.read_text() != marker_text:
+                raise RuntimeError(f'Unrecognized artifact store ownership: {root}')
         elif any(path.name != '.lock' for path in root.iterdir()):
             raise RuntimeError(f'Refusing to adopt a nonempty build cache: {root}')
         else:
-            marker.write_text(MARKER)
+            marker.write_text(marker_text)
         # Children retain the lock if the wrapper exits before Cargo does.
         yield lock
 
@@ -84,6 +84,123 @@ def clean(root):
             shutil.rmtree(path)
 
 
+def binary_digest(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_json(path, record):
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.metadata-', delete=False) as temporary:
+        stage = Path(temporary.name)
+    try:
+        with stage.open('w') as stream:
+            json.dump(record, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        stage.replace(path)
+        sync_directory(path.parent)
+    finally:
+        stage.unlink(missing_ok=True)
+
+
+def record_source(target, output):
+    if target.resolve() != target:
+        raise RuntimeError('Cargo target must not contain symlinks')
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / '.source.json'
+    if path.is_symlink():
+        raise RuntimeError('Cargo source provenance must not be a symlink')
+    present = path.exists()
+    record = json.loads(path.read_text()) if present else {'version': 1, 'source': str(ROOT), 'outputs': []}
+    original = record.copy() if isinstance(record, dict) else record
+    if not isinstance(record, dict) or record.get('version') != 1 or record.get('source') != str(ROOT) or not isinstance(record.get('outputs'), list) or any(not isinstance(p, str) or not Path(p).is_absolute() for p in record['outputs']):
+        raise RuntimeError('Cargo source provenance does not match this checkout')
+    if output is not None:
+        record['outputs'] = sorted(set(record['outputs']) | {str(output.absolute()), str(output.resolve())})
+    if not present or record != original:
+        write_json(path, record)
+
+
+def retain_binary(executable, output):
+    root = Path(os.environ.get('OPENROTMG_RETAINED_STORE', Path.home() / '.local/share/openrotmg/retained-binaries'))
+    if not root.is_absolute() or root.resolve() != root:
+        raise RuntimeError('Retained binary store must be absolute and contain no symlinks')
+    if output.resolve().is_relative_to(root):
+        raise RuntimeError('Retained output must be outside the immutable object store')
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = root.stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o022:
+        raise RuntimeError('Retained binary store must be owned by the current user and not writable by others')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if root.stat().st_dev != output.parent.stat().st_dev:
+        raise RuntimeError('Retained binary store must share the output filesystem; set OPENROTMG_RETAINED_STORE explicitly')
+    with locked(root, marker_text='OpenRotMG immutable retained binaries v1\n'):
+        before = executable.stat()
+        mode = before.st_mode & 0o777 & ~0o222
+        if not mode & 0o111:
+            raise RuntimeError('Expected an executable compiler artifact')
+        digest = binary_digest(executable)
+        obj = root / f'{digest}-{mode:o}.bin'
+        if obj.is_symlink():
+            raise RuntimeError('Retained binary object must not be a symlink')
+        created = not obj.exists()
+        if created:
+            with tempfile.NamedTemporaryFile(dir=root, prefix='.retain-', delete=False) as temporary:
+                stage = Path(temporary.name)
+            try:
+                shutil.copy2(executable, stage)
+                if binary_digest(stage) != digest:
+                    raise RuntimeError('Executable changed during retention')
+                stage.chmod(mode)
+                with stage.open('rb') as stream:
+                    os.fsync(stream.fileno())
+                stage.replace(obj)
+            finally:
+                stage.unlink(missing_ok=True)
+        info = obj.lstat()
+        if obj.is_symlink() or not obj.is_file() or info.st_uid != os.getuid() or info.st_mode & 0o777 != mode:
+            raise RuntimeError('Retained binary object ownership or permissions changed')
+        if binary_digest(obj) != digest:
+            raise RuntimeError('Retained binary object content changed')
+        after = executable.stat()
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode):
+            raise RuntimeError('Executable changed before retention completed')
+        provenance = obj.with_suffix('.json')
+        if provenance.is_symlink():
+            raise RuntimeError('Retained binary provenance must not be a symlink')
+        if created or provenance.exists():
+            record = json.loads(provenance.read_text()) if provenance.exists() else {'version': 1, 'sources': [], 'outputs': []}
+            if not isinstance(record, dict) or record.get('version') != 1 or any(not isinstance(record.get(key), list) or
+                    any(not isinstance(path, str) or not Path(path).is_absolute() for path in record[key])
+                    for key in ('sources', 'outputs')):
+                raise RuntimeError('Invalid retained binary provenance')
+            record['sources'] = sorted(set(record['sources']) | {str(ROOT)})
+            record['outputs'] = sorted(set(record['outputs']) | {str(output.absolute()), str(output.resolve())})
+            write_json(provenance, record)
+        sync_directory(root)
+        with tempfile.NamedTemporaryFile(dir=output.parent, prefix='.openrotmg-', delete=False) as temporary:
+            stage = Path(temporary.name)
+        stage.unlink()
+        try:
+            os.link(obj, stage, follow_symlinks=False)
+            stage.replace(output)
+            sync_directory(output.parent)
+        finally:
+            stage.unlink(missing_ok=True)
+    print(f'Retained binary object: sha256={digest}; output={output}', flush=True)
+
+
 def execute(command, target, output, lock):
     env = {**os.environ, 'CARGO_TARGET_DIR': str(target)}
     if output is None:
@@ -105,14 +222,7 @@ def execute(command, target, output, lock):
         return code
     if executable is None or not executable.resolve().is_relative_to(target.resolve()):
         raise RuntimeError('Cargo did not identify the built openrotmg executable inside its cache')
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=output.parent, prefix='.openrotmg-', delete=False) as temporary:
-        stage = Path(temporary.name)
-    try:
-        shutil.copy2(executable, stage)
-        stage.replace(output)
-    finally:
-        stage.unlink(missing_ok=True)
+    retain_binary(executable, output)
     print(f'Retained binary: {output}', flush=True)
     return 0
 
@@ -121,7 +231,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Cargo builds with isolated, reusable targets and explicit cache cleanup.',
                                      epilog='User-wide cache: $XDG_CACHE_HOME/openrotmg/cargo (default ~/.cache/openrotmg/cargo). clean removes only managed deps/incremental, never SDK/build data or binaries.')
     parser.add_argument('--toolchain', help='Explicit rustup toolchain, e.g. 1.94.1')
-    parser.add_argument('--output', type=Path, help='Atomically retain the server executable outside the cache (build only)')
+    parser.add_argument('--output', type=Path, help='Atomically retain a read-only executable outside the cache, sharing identical retained binaries (build only)')
     parser.add_argument('command', choices=['build', 'check', 'test', 'clippy', 'fmt', 'clean'])
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -148,10 +258,12 @@ def main(argv=None):
             # Cargo tracks env! inputs; runtime diagnostics and job counts need no separate target tree.
             settings = {key: value for key, value in os.environ.items()
                         if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))
-                        and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'CARGO_BUILD_JOBS')}
+                        and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'RUST_MIN_STACK', 'CARGO_BUILD_JOBS')}
             # Cargo can treat an older sibling checkout's different inputs as fresh.
             key = hashlib.sha256(json.dumps([str(ROOT), version, settings], sort_keys=True).encode()).hexdigest()[:20]
             target = root / key
+            # Failed builds can stop before Cargo emits source-bound depfiles.
+            record_source(target, args.output)
             print(f'Cargo target: {target}; checkout={ROOT}', flush=True)
             return execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output, lock)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
