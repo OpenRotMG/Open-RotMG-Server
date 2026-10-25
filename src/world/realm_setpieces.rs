@@ -720,6 +720,17 @@ impl Piece {
     }
 }
 impl World {
+    pub(super) fn spawn_landmark_chests(&mut self, kind: u16, pos: Pos) -> Result<()> {
+        let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
+        // Independent period rolls can exceed one container; never discard earned items.
+        for chunk in items.chunks(8) {
+            let mut slots = chunk.to_vec();
+            slots.resize(8, -1);
+            self.spawn_entity(0x501, pos, slots)?;
+        }
+        tracing::info!(kind, count = items.len(), "landmark chest rewards created");
+        Ok(())
+    }
     fn setpiece_scenery_clear(&self, index: usize) -> bool {
         self.cells.ids(index).iter().all(|id| {
             let e = &self.entities[id];
@@ -988,8 +999,7 @@ impl World {
                     y: area.y as f32 + y as f32 + 0.5,
                 };
                 if kind == 0x67d && mark == 7 {
-                    let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
-                    self.spawn_entity(0x501, pos, items)?;
+                    self.spawn_landmark_chests(kind, pos)?;
                     continue;
                 }
                 let (ground, object) = Piece::tile(kind, mark);
@@ -1037,8 +1047,7 @@ impl World {
                     cell.config = format!("conn:{connection}");
                 }
                 if (x, y) == piece.boss && matches!(kind, 0x668 | 0x675 | 0x678) {
-                    let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
-                    self.spawn_entity(0x501, pos, items)?;
+                    self.spawn_landmark_chests(kind, pos)?;
                 }
                 if let Some(object) = object {
                     let id = self.spawn_entity(object, pos, vec![])?;

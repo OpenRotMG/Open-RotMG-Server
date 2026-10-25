@@ -8,6 +8,8 @@ pub(crate) enum Pick {
 }
 pub(crate) const WEAPONS: &[i32] = &[1, 2, 3, 8, 17];
 pub(crate) const ABILITIES: &[i32] = &[4, 5, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23];
+// The period wiki calls Wolfskin/Neophyte/Iron Mail T0; the selected client calls them T1.
+// Armor rates below use selected-client tiers (wiki tier + 1), verified through all 39 named armors.
 pub(crate) const ARMOR: &[i32] = &[6, 7, 14];
 pub(crate) const RINGS: &[i32] = &[9];
 pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
@@ -334,27 +336,45 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x181f => &[],
         0x122 | 0x162 | 0x163 | 0xd57 | 0xd58 | 0xd5b..=0xd5f => &[],
         0xd5a => &[(0.05, Item(0xa3b))],
-        0xd56 | 0xd59 | 0xd60 => &[
-            (0.15, Tier(8, WEAPONS)),
-            (0.1, Tier(9, WEAPONS)),
-            (0.07, Tier(10, WEAPONS)),
+        // Wild Shadow wiki rates before the March 2012 edits removed them (Pentaract is per tower):
+        // https://web.archive.org/web/20120117000123/http://forums.wildshadow.com:80/wiki/realm-mad-god/cube-god
+        0xd56 | 0xd59 => &[
+            (0.4, Tier(8, WEAPONS)),
+            (0.2, Tier(9, WEAPONS)),
+            (0.1, Tier(10, WEAPONS)),
             (0.05, Tier(11, WEAPONS)),
-            (0.15, Tier(4, ABILITIES)),
-            (0.07, Tier(5, ABILITIES)),
-            (0.2, Tier(8, ARMOR)),
-            (0.15, Tier(9, ARMOR)),
+            (0.4, Tier(8, ARMOR)),
+            (0.2, Tier(9, ARMOR)),
             (0.1, Tier(10, ARMOR)),
-            (0.07, Tier(11, ARMOR)),
-            (0.04, Tier(12, ARMOR)),
-            (0.15, Tier(3, RINGS)),
-            (0.07, Tier(4, RINGS)),
-            (0.03, Tier(5, RINGS)),
-            (0.1, Item(0xa1f)),
-            (0.1, Item(0xa20)),
-            (0.1, Item(0xa21)),
-            (0.1, Item(0xa34)),
-            (0.1, Item(0xa35)),
-            (0.1, Item(0xa4c)),
+            (0.05, Tier(11, ARMOR)),
+            (0.025, Tier(12, ARMOR)),
+            (0.4, Tier(3, RINGS)),
+            (0.1, Tier(4, RINGS)),
+            (0.025, Tier(5, RINGS)),
+            (0.2, Tier(4, ABILITIES)),
+            (0.05, Tier(5, ABILITIES)),
+            (0.5, Tier(2, &[10])),
+            (0.5, Tier(2, &[10])),
+            (0.5, Tier(2, &[10])),
+        ],
+        0xd60 => &[
+            (0.08, Tier(8, WEAPONS)),
+            (0.04, Tier(9, WEAPONS)),
+            (0.02, Tier(10, WEAPONS)),
+            (0.01, Tier(11, WEAPONS)),
+            (0.08, Tier(8, ARMOR)),
+            (0.04, Tier(9, ARMOR)),
+            (0.02, Tier(10, ARMOR)),
+            (0.01, Tier(11, ARMOR)),
+            (0.005, Tier(12, ARMOR)),
+            (0.08, Tier(3, RINGS)),
+            (0.02, Tier(4, RINGS)),
+            (0.005, Tier(5, RINGS)),
+            (0.04, Tier(4, ABILITIES)),
+            (0.01, Tier(5, ABILITIES)),
+            (0.1, Tier(2, &[10])),
+            (0.1, Tier(2, &[10])),
+            (0.1, Tier(2, &[10])),
         ],
         0x91b | 0x91f | 0x928 | 0x675 | 0x6c2 | 0x923 => &[],
         0x676 => &[(0.05, Item(0xa23))],
@@ -564,14 +584,30 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xa23)),
             (0.01, Tier(6, WEAPONS)),
         ],
-        0x651..=0x659 | 0xd05 | 0x91a | 0x6d8 => &[
+        // Leviathan's monster page overrides the general Realm Gods tier-page rates:
+        // https://web.archive.org/web/20120215050418/http://forums.wildshadow.com:80/wiki/realm-mad-god/weapons
+        0x6d8 => &[
             (0.02, Tier(6, WEAPONS)),
             (0.01, Tier(7, WEAPONS)),
             (0.005, Tier(8, WEAPONS)),
             (0.02, Tier(6, ARMOR)),
-            (0.01, Tier(7, ARMOR)),
-            (0.005, Tier(8, ARMOR)),
+            (0.02, Tier(7, ARMOR)),
+            (0.01, Tier(8, ARMOR)),
+            (0.005, Tier(9, ARMOR)),
+            (0.0075, Tier(3, RINGS)),
+            (0.005, Tier(4, RINGS)),
+            (0.01, Tier(4, ABILITIES)),
+        ],
+        0x651 | 0x652 | 0x654..=0x659 | 0xd05 | 0x91a => &[
+            (0.04, Tier(6, WEAPONS)),
+            (0.02, Tier(7, WEAPONS)),
+            (0.01, Tier(8, WEAPONS)),
+            (0.08, Tier(6, ARMOR)),
+            (0.04, Tier(7, ARMOR)),
+            (0.02, Tier(8, ARMOR)),
+            (0.01, Tier(9, ARMOR)),
             (0.015, Tier(3, RINGS)),
+            (0.005, Tier(4, RINGS)),
             (0.02, Tier(4, ABILITIES)),
         ],
         0x223..=0x229 => &[
@@ -747,8 +783,12 @@ fn bonus(kind: u16) -> &'static [(f64, u16)] {
         0xd60 => &[(0.004, 0xc06)],
         0x1705 => &[(0.04, 0xaea)],
         0x651 | 0x652 | 0x657 | 0x905..=0x907 => &[(0.015, 0xa1f)],
-        0x654 | 0x659 | 0x91a => &[(0.015, 0xa21)],
-        0x655 | 0x656 | 0x658 | 0x6d8 => &[(0.015, 0xa20)],
+        0x659 => &[(0.015, 0xa21)],
+        0x654 => &[(0.01, 0xa21)],
+        0x91a => &[(0.02, 0xa21)],
+        0x655 | 0x658 => &[(0.015, 0xa20)],
+        0x656 => &[(0.01, 0xa20)],
+        0x6d8 => &[(0.025, 0xa20)],
         _ => &[],
     }
 }
@@ -799,8 +839,11 @@ fn roll_table(content: &Content, picks: &[(f64, Pick)], rng: &mut impl Rng) -> O
     }
     None
 }
-pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if kind == crate::dungeon::tomb::TREASURE
+pub(crate) fn period_boss(kind: u16) -> bool {
+    matches!(kind, 0xd56 | 0xd59 | 0xd60)
+}
+fn independent(kind: u16) -> bool {
+    kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
         || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50 | 0xd52 | 0xd53)
         || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b)
@@ -825,7 +868,21 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
                 | crate::dungeon::abyss::IDOL
                 | crate::endgame::ORYX
                 | crate::endgame::ORYX2
-        ) {
+        )
+        || matches!(kind, 0x651..=0x659 | 0xd05 | 0x91a | 0x6d8 | 0xd56 | 0xd59)
+}
+/// Stat potions from these Realm gods need the wiki's soulbound damage; other god loot needs any hit.
+pub(crate) fn potion_damage(kind: u16) -> Option<i32> {
+    match kind {
+        0x651 | 0x655 | 0x657..=0x659 => Some(180),
+        0x656 => Some(270),
+        0x652 | 0x654 | 0x6d8 | 0xd05 => Some(360),
+        0x91a => Some(0),
+        _ => None,
+    }
+}
+pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
+    let mut items = if independent(kind) {
         let mut items = Vec::new();
         for (chance, pick) in table(kind) {
             if rng.gen_bool(*chance) {
@@ -918,32 +975,48 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
             (0.5, Tier(1, &[10])),
         ];
     }
-    let (weapon, armor) = match kind {
-        0x675 | 0x678 => (5, 4),
-        0x67d => (6, 5),
-        0x668 => (7, 6),
+    // Monster-page chest rates override the generic community-server pools.
+    // https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant
+    let (weapon, armor, tier_rates, ring, ring_rates, ability_rates) = match kind {
+        0x675 | 0x678 => (5, 5, [0.75, 0.375, 0.167], 1, [0.6, 0.15], [0.3, 0.075, 0.]),
+        0x67d => (6, 6, [0.5, 0.25, 0.125], 2, [0.2, 0.05], [0.4, 0.1, 0.025]),
+        0x668 => (7, 7, [0.5, 0.25, 0.125], 2, [0.4, 0.1], [0.8, 0.2, 0.05]),
         _ => unreachable!("selected landmark chest"),
     };
-    let ring = if matches!(kind, 0x675 | 0x678) { 1 } else { 2 };
     [
-        (0.3, Tier(weapon, WEAPONS)),
-        (0.2, Tier(weapon + 1, WEAPONS)),
-        (0.1, Tier(weapon + 2, WEAPONS)),
-        (0.3, Tier(armor, ARMOR)),
-        (0.2, Tier(armor + 1, ARMOR)),
-        (0.1, Tier(armor + 2, ARMOR)),
-        (0.3, Tier(2, ABILITIES)),
-        (0.2, Tier(3, ABILITIES)),
-        (0.1, Tier(4, ABILITIES)),
-        (0.25, Tier(ring, RINGS)),
-        (0.15, Tier(ring + 1, RINGS)),
-        (0.5, Tier(1, &[10])),
+        (tier_rates[0], Tier(weapon, WEAPONS)),
+        (tier_rates[1], Tier(weapon + 1, WEAPONS)),
+        (tier_rates[2], Tier(weapon + 2, WEAPONS)),
+        (tier_rates[0], Tier(armor, ARMOR)),
+        (tier_rates[1], Tier(armor + 1, ARMOR)),
+        (tier_rates[2], Tier(armor + 2, ARMOR)),
+        (ability_rates[0], Tier(2, ABILITIES)),
+        (ability_rates[1], Tier(3, ABILITIES)),
+        (ability_rates[2], Tier(4, ABILITIES)),
+        (ring_rates[0], Tier(ring, RINGS)),
+        (ring_rates[1], Tier(ring + 1, RINGS)),
+        (1., Tier(1, &[10])),
+        (1., Tier(1, &[10])),
     ]
     .into_iter()
-    .filter(|(_, pick)| !matches!(kind, 0x675 | 0x678) || !matches!(pick, Tier(4, ABILITIES)))
+    .filter(|(chance, _)| *chance > 0.)
     .collect()
 }
 pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
+    if kind != crate::dungeon::jungle::COIL {
+        let mut items = Vec::new();
+        for (chance, pick) in chest_table(kind) {
+            let pool = candidates(content, pick);
+            ensure!(
+                !pool.is_empty(),
+                "landmark {kind:#x} chest has an empty selected tier"
+            );
+            if rng.gen_bool(chance) {
+                items.push(i32::from(*pool.choose(rng).expect("validated chest tier")));
+            }
+        }
+        return Ok(items);
+    }
     let mut consideration = Vec::new();
     for (chance, pick) in chest_table(kind) {
         let pool = candidates(content, pick);
@@ -956,12 +1029,7 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
         consideration.extend(pool.into_iter().map(|id| (probability, id)));
     }
     // TempleA/B.cs (realm-src@1855c017; data/REALM-SRC-LICENSE) use GetLoots(3, 8) as a success ceiling.
-    let minimum_limit = if kind == crate::dungeon::jungle::COIL {
-        3
-    } else {
-        5
-    };
-    let maximum = rng.gen_range(minimum_limit..8);
+    let maximum = rng.gen_range(3..8);
     let mut items = Vec::new();
     for (chance, id) in consideration {
         if rng.gen_bool(chance) {
@@ -986,13 +1054,7 @@ mod tests {
     #[test]
     fn coil_chest_limits_successes_without_filling_failed_rolls() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for (kind, limit) in [
-            (crate::dungeon::jungle::COIL, 3),
-            (0x675, 5),
-            (0x678, 5),
-            (0x67d, 5),
-            (0x668, 5),
-        ] {
+        for (kind, limit) in [(crate::dungeon::jungle::COIL, 3)] {
             let items = landmark_chest(&content, kind, &mut StepRng::new(0, 0)).unwrap();
             assert_eq!(items.len(), 8);
             assert_eq!(
@@ -1006,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn landmark_chests_roll_each_selected_item_with_divided_probability() {
+    fn period_landmark_chests_roll_tiers_and_preserve_both_guaranteed_potions() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let signature = |kind| {
             chest_table(kind)
@@ -1020,28 +1082,28 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(signature(0x675), signature(0x678));
-        assert_eq!(candidates(&content, Pick::Tier(4, WEAPONS)).len(), 5);
-        assert_eq!(candidates(&content, Pick::Tier(4, ARMOR)).len(), 3);
-        for (kind, tiers) in [
-            (crate::dungeon::jungle::COIL, vec![4, 4, 4]),
-            (0x675, vec![4, 4, 4, 5, 5]),
-            (0x678, vec![4, 4, 4, 5, 5]),
-            (0x67d, vec![5, 5, 5, 6, 6]),
-            (0x668, vec![6, 6, 6, 7, 7]),
-        ] {
-            let items =
-                landmark_chest(&content, kind, &mut StepRng::new(0x1000000000000000, 0)).unwrap();
-            let actual: Vec<_> = items
-                .into_iter()
-                .filter(|item| *item >= 0)
-                .map(|id| {
-                    let item = &content.objects[&(id as u16)];
-                    assert!(ARMOR.contains(&item.slot_type), "{kind:#x}: {id:#x}");
-                    item.tier.unwrap()
-                })
-                .collect();
-            assert_eq!(actual, tiers, "{kind:#x}");
+        for kind in [0x675, 0x678, 0x67d, 0x668] {
+            let all = landmark_chest(&content, kind, &mut StepRng::new(0, 0)).unwrap();
+            assert_eq!(all.len(), chest_table(kind).len());
+            assert!(
+                all.len() > 8,
+                "packaging must split, not truncate successful rolls"
+            );
+            for seed in 0..64 {
+                let items =
+                    landmark_chest(&content, kind, &mut StdRng::seed_from_u64(seed)).unwrap();
+                assert_eq!(
+                    items
+                        .iter()
+                        .filter(|id| content.objects[&(**id as u16)].slot_type == 10)
+                        .count(),
+                    2
+                );
+            }
         }
+        assert_eq!(signature(0x675)[0].0, 0.75);
+        assert_eq!(signature(0x67d)[0].0, 0.5);
+        assert_eq!(signature(0x668)[0].0, 0.5);
     }
 
     #[test]
@@ -1076,6 +1138,54 @@ mod tests {
             );
             assert!(rewards[0].0 == 7 && content.objects[&rewards[0].1].bag_type == 4);
         }
+    }
+
+    #[test]
+    fn period_tables_roll_independently_and_keep_repeated_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, potion_count, weapon_tier) in [(0xd56, 3, 8), (0xd59, 3, 8), (0xd60, 3, 8)] {
+            let items = rewards(&content, kind, &mut StepRng::new(0, 0));
+            assert_eq!(
+                items
+                    .iter()
+                    .filter(|id| content.objects[id].tier == Some(2)
+                        && content.objects[id].slot_type == 10)
+                    .count(),
+                potion_count
+            );
+            assert!(
+                items
+                    .iter()
+                    .any(|id| content.objects[id].tier == Some(weapon_tier)
+                        && WEAPONS.contains(&content.objects[id].slot_type))
+            );
+            assert!(
+                items.iter().any(|id| content.objects[id].tier == Some(12)),
+                "unresolved existing top armor is retained"
+            );
+        }
+        let items = rewards(&content, 0x655, &mut StepRng::new(0, 0));
+        assert!(items.contains(&0xa20));
+        for (tier, slots) in [(6, WEAPONS), (7, WEAPONS), (8, WEAPONS), (4, RINGS)] {
+            assert!(items.iter().any(|id| content.objects[id].tier == Some(tier)
+                && slots.contains(&content.objects[id].slot_type)));
+        }
+        assert!(
+            rewards(&content, 0x653, &mut StepRng::new(0, 0)).is_empty(),
+            "Sprite Child is not its parent"
+        );
+        let chance = |kind, tier, slots: &[i32]| {
+            table(kind).iter().find_map(|(chance, pick)| {
+                matches!(pick, Pick::Tier(t, s) if *t == tier && *s == slots).then_some(*chance)
+            })
+        };
+        assert_eq!(chance(0xd56, 8, WEAPONS), Some(0.4));
+        assert_eq!(chance(0xd60, 8, WEAPONS), Some(0.08));
+        assert_eq!(chance(0xd56, 12, ARMOR), Some(0.025));
+        assert_eq!(chance(0xd60, 12, ARMOR), Some(0.005));
+        assert_eq!(content.objects[&0xa12].tier, Some(8));
+        assert_eq!(chance(crate::endgame::ORYX, 10, WEAPONS), Some(0.07));
+        assert_eq!(chance(crate::endgame::ORYX2, 13, ARMOR), Some(0.05));
     }
 
     #[test]
