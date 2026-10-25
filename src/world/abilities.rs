@@ -209,10 +209,6 @@ impl World {
             match effect {
                 Ability::Shoot => {
                     ensure!(
-                        self.players[&id].controller == Controller::Human,
-                        controller("projectile abilities require native reports")
-                    );
-                    ensure!(
                         (1..=5).contains(&item.shots)
                             && item.activations == 1
                             && item.projectiles.contains_key(&0),
@@ -266,6 +262,10 @@ impl World {
                 "ability activation applied"
             );
             match *effect {
+                // Native clients report their own ability projectiles; other controllers have no client.
+                Ability::Shoot if self.players[&id].controller != Controller::Human => {
+                    self.ability_shots(id, item, origin, pos)?
+                }
                 Ability::Shoot => {}
                 Ability::Nova => self.ability_nova(id, item, pos)?,
                 Ability::Heal { amount, range } => self.heal_ability(id, item, amount, range)?,
@@ -443,6 +443,30 @@ impl World {
                     );
                 }
             }
+        }
+        Ok(())
+    }
+    fn ability_shots(&mut self, id: i32, item: &Object, origin: Pos, target: Pos) -> Result<()> {
+        let time = self.now as i32;
+        let aim = (target.y - origin.y).atan2(target.x - origin.x);
+        // Like the client, every pellet leaves the central muzzle at its own spread angle.
+        let start = Pos {
+            x: origin.x + 0.3 * aim.cos(),
+            y: origin.y + 0.3 * aim.sin(),
+        };
+        let p = self.players.get_mut(&id).unwrap();
+        p.ability_shot = Some((item.kind, time, true, 0));
+        let first = p.next_bullet;
+        for i in 0..item.shots {
+            let spread = item.arc.to_radians() * (i as f32 - (item.shots - 1) as f32 / 2.);
+            self.shoot(
+                id,
+                time,
+                (first + i as u8) % 128,
+                item.kind,
+                start,
+                aim + spread,
+            )?;
         }
         Ok(())
     }
@@ -868,5 +892,64 @@ mod tests {
             .expect("real cooldown elapsed despite no simulation ticks");
         assert_eq!(world.players[&id].character.mp, mp - item.mana_cost);
         assert!(world.spend_ability(id, slot, &item, pos).is_err());
+    }
+
+    #[test]
+    fn autonomous_shoot_ability_fans_from_one_muzzle_under_native_condition_rules() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let content = Arc::new(Content::load(&data).unwrap());
+        let map = Arc::new(Map::load(&data.join("tutorial.wmap"), &content).unwrap());
+        let mut world = World::new(content, map).unwrap();
+        let character: Character = serde_json::from_value(serde_json::json!({
+            "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+            "class":0x31e,"base":[770,252,50,40,50,50,75,50],
+            "id":1,"account":1,"name":"Shield","level":20,"exp":0,
+            "fame":0,"hp":770,"mp":252,"revision":0,"alive":true,
+            "items":[-1,0xa09,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+        }))
+        .unwrap();
+        let id = world.enter(character, None).unwrap();
+        world.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+        // Native ability shots stay legal while Paralyzed or Stunned; only the weapon is suppressed.
+        for condition in [crate::condition::PARALYZED, crate::condition::STUNNED] {
+            world.apply_condition(id, condition, 5000).unwrap();
+        }
+        let pos = world.players[&id].pos;
+        let shield = world.content.get(0xa09).unwrap().clone();
+        assert_eq!(shield.shots, 2);
+        let slot = Slot {
+            object: id,
+            slot: 1,
+            kind: 0xa09,
+        };
+        let target = Pos {
+            x: pos.x,
+            y: pos.y + 2.,
+        };
+        world.use_item(id, slot, target).unwrap();
+        let central = std::f32::consts::FRAC_PI_2;
+        let half = shield.arc.to_radians() / 2.;
+        let shots: Vec<_> = world.bullets.iter().filter(|b| b.owner == id).collect();
+        assert_eq!(shots.len(), 2);
+        let muzzle = Pos {
+            x: pos.x + 0.3 * central.cos(),
+            y: pos.y + 0.3 * central.sin(),
+        };
+        for (shot, angle) in shots.iter().zip([central - half, central + half]) {
+            assert!(
+                (shot.angle - angle).abs() < 1e-5,
+                "{} != {angle}",
+                shot.angle
+            );
+            assert!(shot.start.distance(muzzle) < 1e-5);
+        }
+        assert_eq!(world.players[&id].character.mp, 252 - shield.mana_cost);
+        assert!(world.players[&id].ability_shot.is_none());
+        std::thread::sleep(Duration::from_millis(shield.cooldown_ms + 50));
+        world
+            .apply_condition(id, crate::condition::QUIET, 1000)
+            .unwrap();
+        assert!(world.use_item(id, slot, target).is_err());
+        assert_eq!(world.bullets.len(), 2);
     }
 }
