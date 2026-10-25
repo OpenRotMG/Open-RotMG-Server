@@ -606,6 +606,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.15, Tier(7, ARMOR)),
             (0.124, Tier(4, ABILITIES)),
             (0.11, Tier(3, RINGS)),
+            // Later comparator's optional bonus, not recovered 123.5.1 odds: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/logic/db/BehaviorDb.SpriteWorld.cs#L143-L145
+            (0.05, Item(0xa20)),
         ],
         0xd90 => &[
             (1., Item(0xa35)),
