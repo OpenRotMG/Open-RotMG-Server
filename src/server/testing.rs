@@ -777,7 +777,7 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
             .profile
             .as_deref()
             .context("game_bot requires an explicit actual gameplay profile")?;
-        crate::bots::validate_test_class(spec.class, profile)?;
+        crate::bots::validate_test_profile(profile)?;
         Some(profile.to_owned())
     } else {
         ensure!(
