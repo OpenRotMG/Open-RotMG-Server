@@ -13,7 +13,10 @@ pub struct Diagnostics {
     source_revision: Option<String>,
     browsers: Mutex<HashMap<String, std::sync::Weak<Mutex<Browser>>>>,
     files: Mutex<Reports>,
+    drops: Mutex<HashMap<i32, (Instant, Value)>>,
 }
+// Players report after reconnecting, so a dropped connection must outlive it: https://github.com/OpenRotMG/Open-RotMG-Server/issues/469
+const DROP_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
 #[derive(Default)]
 struct Reports {
     pending: BTreeSet<String>,
@@ -128,6 +131,13 @@ impl Diagnostics {
             binary_sha256: format!("{:x}", Sha256::digest(std::fs::read(executable)?)),
             browsers: Mutex::default(),
             files: Mutex::new(pending),
+            drops: Mutex::default(),
+        })
+    }
+    fn previous_drop(&self, account: i32) -> Value {
+        let drops = self.drops.lock().expect("drop diagnostics poisoned");
+        drops.get(&account).filter(|(at, _)| at.elapsed() < DROP_WINDOW).map_or(Value::Null, |(at, drop)| {
+            json!({"age_ms": at.elapsed().as_millis(), "transport": drop["transport"], "diagnostics": drop["diagnostics"]})
         })
     }
     pub fn browser(&self, key: &str) -> Result<Arc<Mutex<Browser>>> {
@@ -529,6 +539,7 @@ fn public_diagnostics(report: &Value) -> Value {
 pub(super) async fn disconnect(
     a: &App,
     player: i32,
+    dropped_account: Option<i32>,
     connection: &ConnectionDiagnostics,
     transport: Value,
 ) {
@@ -554,6 +565,21 @@ pub(super) async fn disconnect(
         Err(error) => {
             tracing::warn!(player,transport=%transport,context_request_ms,%error,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics deadline exceeded")
         }
+    }
+    if let Some(account) = dropped_account {
+        let mut drops = a
+            .diagnostics
+            .drops
+            .lock()
+            .expect("drop diagnostics poisoned");
+        drops.retain(|_, (at, _)| at.elapsed() < DROP_WINDOW);
+        drops.insert(
+            account,
+            (
+                Instant::now(),
+                json!({"transport": transport, "diagnostics": public_diagnostics(&report)}),
+            ),
+        );
     }
 }
 
@@ -632,6 +658,7 @@ pub async fn report(
         "context_request_ms": requested.elapsed().as_secs_f64() * 1000.0, "connection": connection.snapshot(),
         "capture_window_seconds": 120});
     report["diagnostics"] = public_diagnostics(&report);
+    report["diagnostics"]["previous_drop"] = a.diagnostics.previous_drop(account);
     report["diagnostics_url"] = json!(format!(
         "{}/api/bug-reports/{id}/diagnostics.json",
         a.origin
