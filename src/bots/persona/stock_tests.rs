@@ -39,6 +39,7 @@ async fn carried_stock_is_withdrawn_not_reminted_after_banking_and_roster_loss()
             expected
         );
         let carried = ch.items.iter().filter(|item| **item == kind).count();
+        let original_vaults = vaults.clone();
         for item in ch.items.iter_mut().filter(|item| **item == kind) {
             if cycle != 2 {
                 *vaults
@@ -57,7 +58,11 @@ async fn carried_stock_is_withdrawn_not_reminted_after_banking_and_roster_loss()
                     revision: ch.revision,
                     items: ch.items.clone(),
                 }],
-                vaults,
+                vaults
+                    .into_iter()
+                    .zip(original_vaults)
+                    .filter_map(|(now, old)| (now.items != old.items).then_some(now))
+                    .collect(),
             )
             .await
             .unwrap();
