@@ -55,9 +55,11 @@ fn market_ad_cadence_repeats_truthfully_and_changed_stock_invalidates_pending_ge
         .unwrap();
     assert!(m.outgoing.is_none());
     v.elapsed_ms = due;
+    m.guild = true;
     m.decide(&v, &c, None, &grid, &mut StepRng::new(0, 1))
         .unwrap();
     assert_eq!(m.outgoing.as_ref().unwrap().text, ad.text);
+    assert_eq!(m.outgoing.as_ref().unwrap().channel, Channel::Guild);
     v.character.items[4] = -1;
     assert!(!m.message_current(&ad, &v, &c, None).unwrap());
     v.character.items[4] = DEFENSE;

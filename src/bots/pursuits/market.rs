@@ -1042,7 +1042,14 @@ impl Market {
                 parse_quote(&ad, c).as_ref() == Some(&quote),
                 "unresolvable market quote: {ad}"
             );
-            self.queue(ad, Channel::Local);
+            self.queue(
+                ad,
+                if self.guild {
+                    Channel::Guild
+                } else {
+                    Channel::Local
+                },
+            );
             self.next_ad = v.elapsed_ms + 6_000 + u64::from(style(&self.name) % 7) * 1_000;
         }
         Ok(Some(d))
