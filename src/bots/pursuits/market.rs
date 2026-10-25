@@ -602,11 +602,17 @@ impl Market {
             return Ok(true);
         }
         // Ads are invitations to inspect a WINDOW, never evidence of consent or payment.
-        if self.wanted(v, c, future, q[0].kind)? > 0
+        if let Some(objective) = self.quote(v, c, future)?
+            && objective[0].kind == q[1].kind
+            && objective[1].kind == q[0].kind
+            && q[1].quantity <= objective[0].quantity
+            && q[0].quantity >= objective[1].quantity
+            && self.wanted(v, c, future, q[0].kind)? >= q[0].quantity
             && self.spare(v, c, future, q[1].kind)? >= q[1].quantity
             && fair(&q, c)
             && let Some(account) = peer.account
         {
+            self.quote = Some(objective);
             self.incoming = Some(Incoming::outbound(
                 v,
                 peer.id,

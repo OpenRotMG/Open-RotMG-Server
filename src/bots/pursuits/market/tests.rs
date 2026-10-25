@@ -265,3 +265,44 @@ fn market_trade_up_intent_farms_short_stock_instead_of_buying_its_own_speed_back
         "actual excess Speed may trade up after maxing"
     );
 }
+
+#[test]
+fn market_peer_ads_must_fund_the_actual_objective_not_reverse_its_currency_chain() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut seller, v) = fixture(&c, [LIFE, -1, -1, -1, -1, -1, -1, -1]);
+    assert_ne!(
+        seller.quote(&v, &c, None).unwrap().unwrap()[1].kind,
+        DEFENSE
+    );
+    seller
+        .receive(&message("wtb life for 6 def"), &v, &c, None)
+        .unwrap();
+    assert!(
+        seller.incoming.is_none(),
+        "Life saved for an upgrade is not stock to turn back into Defense"
+    );
+    let (mut trader, v) = fixture(&c, [SPEED, SPEED, SPEED, SPEED, -1, -1, -1, -1]);
+    trader
+        .receive(&message("wts 1 def for 3 spd"), &v, &c, None)
+        .unwrap();
+    let q = trader.incoming.as_ref().unwrap().quote.as_ref().unwrap();
+    assert_eq!(
+        q[0],
+        Goods {
+            kind: SPEED,
+            quantity: 3
+        }
+    );
+    assert_eq!(
+        q[1],
+        Goods {
+            kind: DEFENSE,
+            quantity: 1
+        }
+    );
+    assert_eq!(
+        trader.quote.as_ref().unwrap()[0].kind,
+        SPEED,
+        "a better human price still retains the real trade-up motive"
+    );
+}
