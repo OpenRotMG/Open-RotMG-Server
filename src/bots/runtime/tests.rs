@@ -39,7 +39,7 @@ async fn actor(
     ch.base[0] = 500;
     ch.base[4] = app.content.classes[&ch.class].caps[4];
     ch.hp = 500;
-    let owner = app.claim_session(account).unwrap();
+    let owner = app.claim(account).unwrap();
     let (id, output, _, brain) = enter(app, profile(), ch, -2, None).await.unwrap();
     (owner, id, output, brain)
 }
@@ -280,6 +280,16 @@ async fn runtime_coordinator_survival_preempts_active_incoming_gift_and_legacy_w
             .unwrap()
             .is_empty()
     );
+    lifecycle::finalize(&app, id, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    lifecycle::finalize(&app, peer, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -510,5 +520,15 @@ async fn runtime_coordinator_rebind_resumes_paid_installments_only_through_fresh
             .len(),
         2
     );
+    lifecycle::finalize(&app, id, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    lifecycle::finalize(&app, peer, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
     std::fs::remove_dir_all(dir).unwrap();
 }

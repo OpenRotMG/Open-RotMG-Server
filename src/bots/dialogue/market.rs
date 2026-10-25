@@ -430,4 +430,48 @@ mod provider_tests {
         );
         server.abort();
     }
+    #[tokio::test]
+    #[ignore = "requires approved server-only free-provider environment"]
+    async fn real_provider_market_template_and_talk_smoke() {
+        async fn wording(service: &Arc<Service>, message: &Message, c: &Content) -> Result<String> {
+            loop {
+                if let Some(text) =
+                    service.market_wording("SmokeTrader", message, c, json!({"voice":"terse"}))?
+                {
+                    return Ok(text);
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }
+        tokio::time::timeout(Duration::from_secs(25), async {
+            let service = Service::configured(true)?.context("canonical provider service disabled")?;
+            let content = Content::load(std::path::Path::new("data"))?;
+            use crate::bots::pursuits::market::Goods;
+            let goods = [Goods {kind:0xa21,quantity:4}, Goods {kind:0xa20,quantity:1}];
+            let ad = Message {text:format!("wts {} for {}", goods_text(&goods[0],&content)?,goods_text(&goods[1],&content)?),channel:Channel::Local};
+            let first = wording(&service,&ad,&content).await?;
+            ensure!(parse_quote(&first,&content) == Some(goods), "generated advertisement facts changed");
+            let current = [Goods {kind:0xa20,quantity:6}, Goods {kind:0xae9,quantity:1}];
+            let changed = Message {text:format!("wts {} for {}",goods_text(&current[0],&content)?,goods_text(&current[1],&content)?),..ad};
+            let updated = wording(&service,&changed,&content).await?;
+            ensure!(parse_quote(&updated,&content) == Some(current), "reused template rendered stale facts");
+            ensure!(service.health()["daily_requests"] == 1, "advertisement exceeded its one-request smoke budget");
+            let refusal = Message {text:"nty need 1 def".into(),channel:Channel::Local};
+            wording(&service,&refusal,&content).await?;
+            let changed_refusal = Message {text:"nty need 4 spd".into(),..refusal};
+            let refusal_text = wording(&service,&changed_refusal,&content).await?;
+            ensure!(refusal_text.to_ascii_lowercase().ends_with("need 4 spd"), "refusal template rendered stale wants");
+            ensure!(service.health()["daily_requests"] == 2, "refusal exceeded its one-request smoke budget");
+            let payload = json!({"allowed_intents":["talk"],"bot":{"name":"SmokeTrader","world":"Nexus","hp":500,"max_hp":500,"mp":200,"level":20,"equipment":[],"priorities":{"recovery":0.7,"resources":4,"companions":3}},
+                "speaker":{"name":"SmokeHuman","hp":500,"max_hp":500,"level":20},"crew":[],"agreement":null,"message":"SmokeTrader, hello!"});
+            let started=Instant::now();
+            let reply=service.ask(&payload,"real-market-smoke-talk").await;
+            service.completed(&reply,started.elapsed());
+            ensure!(reply?.intent == Intent::Talk, "generic speech did not choose the sole allowed Talk intent");
+            let health=service.health();
+            ensure!(health["daily_requests"] == 3 && health["successes"] == 3 && health["failures"] == 0 && health["contract_failed"] == false, "three-call free-provider smoke contract failed");
+            println!("{}",json!({"smoke":"market-template-and-talk","advertisement_current_facts":true,"refusal_current_facts":true,"health":health}));
+            Ok::<(),anyhow::Error>(())
+        }).await.expect("free-provider smoke exceeded its 25-second deadline").expect("free-provider smoke failed without retry or substitute speech");
+    }
 }
