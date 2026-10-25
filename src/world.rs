@@ -6024,7 +6024,10 @@ impl World {
                 x: resolved.x,
                 y: next.y,
             };
-            let clear = |pos| self.jungle_walkable(kind, pos) || self.ocean_walkable(kind, pos);
+            let clear = |pos| {
+                (kind != crate::dungeon::trench::HERMIT && self.jungle_walkable(kind, pos))
+                    || self.ocean_walkable(kind, pos)
+            };
             let x_clear = clear(horizontal);
             let y_clear = clear(vertical);
             if clear(next) && (!slide || x_clear || y_clear) {
@@ -7373,6 +7376,8 @@ mod chase_tests;
 mod death_chat_tests;
 #[cfg(test)]
 mod dungeon_return_tests;
+#[cfg(test)]
+mod hermit_leash_tests;
 #[cfg(test)]
 mod hermit_loot_tests;
 #[cfg(test)]
