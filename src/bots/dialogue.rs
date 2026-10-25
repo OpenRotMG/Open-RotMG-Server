@@ -111,6 +111,7 @@ struct Budget {
     successes: u64,
     failures: u64,
     last_error: Option<&'static str>,
+    last_latency_ms: Option<u128>,
     contract_failed: bool,
     blocked_until: Instant,
 }
@@ -165,6 +166,7 @@ impl Service {
                 successes: 0,
                 failures: 0,
                 last_error: None,
+                last_latency_ms: None,
                 contract_failed: false,
                 blocked_until: now,
             }),
@@ -182,6 +184,7 @@ impl Service {
         let b = self.budget.lock().expect("dialogue budget poisoned");
         json!({"enabled":true,"model":MODEL,"status":if b.last_error.is_some(){"error"}else{"ready"},
             "last_error":b.last_error,"successes":b.successes,"failures":b.failures,"daily_requests":b.daily,"automatic_remaining":800u32.saturating_sub(b.daily),
+            "daily_limit":1000,"last_latency_ms":b.last_latency_ms,
             "in_flight":2-self.slots.available_permits()})
     }
     pub(super) async fn ask(
@@ -339,8 +342,13 @@ impl Service {
         );
         Ok(reply)
     }
-    pub(super) fn completed(&self, result: &std::result::Result<Reply, Failure>) {
+    pub(super) fn completed(
+        &self,
+        result: &std::result::Result<Reply, Failure>,
+        elapsed: Duration,
+    ) {
         let mut b = self.budget.lock().expect("dialogue budget poisoned");
+        b.last_latency_ms = Some(elapsed.as_millis());
         match result {
             Ok(_) => {
                 b.successes += 1;
@@ -352,6 +360,12 @@ impl Service {
             }
         }
     }
+}
+pub(crate) fn health(service: Option<&Service>) -> Value {
+    service.map_or_else(
+        || json!({"enabled":false,"status":"disabled"}),
+        Service::health,
+    )
 }
 pub(super) async fn end_agreement(
     app: &crate::server::App,
@@ -482,7 +496,7 @@ impl Pending {
             let start = Instant::now();
             let result = if let Some(service) = service {
                 let result = service.ask(&payload, &log_id).await;
-                service.completed(&result);
+                service.completed(&result, start.elapsed());
                 match &result {
                     Ok(_) => {
                         tracing::info!(request=%log_id,player=bot,speaker,model=MODEL,elapsed_ms=start.elapsed().as_millis(),"bot dialogue provider succeeded")

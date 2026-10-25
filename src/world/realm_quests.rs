@@ -841,6 +841,7 @@ impl World {
 #[test]
 fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut walls = 0;
     for (seed, width, height, old_x, old_y, old_hole) in [
         (8, 25, 26, 12, 13, true),
         (13, 26, 25, 12, 12, false),
@@ -868,13 +869,22 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
             let old = (96 - height / 2 + old_y) * 192 + 96 - width / 2 + old_x;
             map.cells[96 * 192 + 96].terrain = terrain;
             map.cells[destination].terrain = terrain;
-            for index in [destination].into_iter().chain(old_hole.then_some(old)) {
-                map.cells[index].object = Some(0x105);
-                map.cells[index].config = "name:native;size:137".to_owned();
+            for y in 96 - height / 2..96 - height / 2 + height {
+                for x in 96 - width / 2..96 - width / 2 + width {
+                    map.cells[y * 192 + x].object = Some(0x105);
+                    map.cells[y * 192 + x].config = "name:native;size:137".to_owned();
+                }
             }
             let original = Arc::new(map);
             let mut world = World::new(content.clone(), original.clone()).unwrap();
+            let native_ids: Vec<_> = (0..192 * 192)
+                .map(|i| world.cells.ids(i).first().copied())
+                .collect();
             let removed = world.cells.ids(destination)[0];
+            let template = match &world.entities[&removed].state {
+                entity_store::EntityState::Shared(t) => t.clone(),
+                _ => panic!("native Bush does not use shared scenery state"),
+            };
             let retained = old_hole.then(|| world.cells.ids(old)[0]);
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
             world.populate_named_sites(0x91b, &[6, 7], 1).unwrap();
@@ -936,8 +946,83 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
                 ),
                 (0x46, Some(0x105), "name:native;size:137")
             );
+            let wall_sites: Vec<_> = world
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x162)
+                .map(|e| (e.id, e.pos))
+                .collect();
+            for &(id, pos) in &wall_sites {
+                let index = pos.y as usize * 192 + pos.x as usize;
+                let cell = &world.map.cells[index];
+                let input = &original.cells[index];
+                assert_eq!(
+                    (
+                        cell.ground,
+                        cell.object,
+                        &cell.config,
+                        cell.terrain,
+                        cell.region
+                    ),
+                    (
+                        0xad,
+                        input.object,
+                        &input.config,
+                        input.terrain,
+                        input.region
+                    ),
+                    "seed {seed}, terrain {terrain}, rubble {index}"
+                );
+                let native = &world.entities[&native_ids[index].unwrap()];
+                assert_eq!(
+                    (native.kind, native.name.as_str(), native.size),
+                    (0x105, "native", 137)
+                );
+                assert_eq!((native.pos.x, native.pos.y), (pos.x, pos.y));
+                assert!(
+                    matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+                );
+                assert_eq!(world.cells.ids(index).len(), 2);
+                assert!(
+                    world.cells.ids(index).contains(&native.id)
+                        && world.cells.ids(index).contains(&id)
+                );
+                assert_eq!(world.entities[&id].hp, 100);
+                assert!(world.entities[&id].published && !world.walkable(pos));
+                assert!(!world.actor_ids.contains(&id));
+                walls += 1;
+            }
+            if let Some((id, pos)) = wall_sites.first().copied() {
+                let index = pos.y as usize * 192 + pos.x as usize;
+                world.damage_enemy(-1, id, 1000, true, &[], None).unwrap();
+                assert!(!world.entities.contains_key(&id) && world.walkable(pos));
+                assert_eq!(world.cells.ids(index), &[native_ids[index].unwrap()]);
+                let cell = &world.map.cells[index];
+                assert_eq!(
+                    (cell.ground, cell.object, cell.config.as_str()),
+                    (0xad, Some(0x105), "name:native;size:137")
+                );
+                let native = &world.entities[&native_ids[index].unwrap()];
+                assert_eq!(
+                    (native.kind, native.name.as_str(), native.size),
+                    (0x105, "native", 137)
+                );
+                assert!(
+                    matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+                );
+            }
+            for y in 96 - height / 2..96 - height / 2 + height {
+                for x in 96 - width / 2..96 - width / 2 + width {
+                    let cell = &original.cells[y * 192 + x];
+                    assert_eq!(
+                        (cell.ground, cell.object, cell.config.as_str()),
+                        (0x46, Some(0x105), "name:native;size:137")
+                    );
+                }
+            }
         }
     }
+    assert!(walls > 0);
 }
 
 #[cfg(test)]

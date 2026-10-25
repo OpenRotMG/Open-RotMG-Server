@@ -187,7 +187,7 @@ impl Directory {
         let mut out = Writer::new();
         out.utf("")
             .i32(-1)
-            .i32(0)
+            .i32(-1)
             .u8(0)
             .utf("*Guild*")
             .utf(message)
