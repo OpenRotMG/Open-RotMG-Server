@@ -839,6 +839,109 @@ impl World {
 
 #[cfg(test)]
 #[test]
+fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    for (seed, width, height, old_x, old_y, old_hole) in [
+        (8, 25, 26, 12, 13, true),
+        (13, 26, 25, 12, 12, false),
+        (1, 25, 26, 12, 12, true),
+        (12, 26, 25, 13, 12, false),
+    ] {
+        for terrain in [6, 7] {
+            let mut map = Map {
+                width: 192,
+                height: 192,
+                cells: vec![
+                    crate::content::Cell {
+                        ground: 0x46,
+                        object: None,
+                        config: String::new(),
+                        terrain: 0,
+                        region: 0
+                    };
+                    192 * 192
+                ],
+                spawns: vec![(1., 1.)],
+            };
+            let (x, y) = (96 - width / 2 + 13, 96 - height / 2 + 13);
+            let destination = y * 192 + x;
+            let old = (96 - height / 2 + old_y) * 192 + 96 - width / 2 + old_x;
+            map.cells[96 * 192 + 96].terrain = terrain;
+            map.cells[destination].terrain = terrain;
+            for index in [destination].into_iter().chain(old_hole.then_some(old)) {
+                map.cells[index].object = Some(0x105);
+                map.cells[index].config = "name:native;size:137".to_owned();
+            }
+            let original = Arc::new(map);
+            let mut world = World::new(content.clone(), original.clone()).unwrap();
+            let removed = world.cells.ids(destination)[0];
+            let retained = old_hole.then(|| world.cells.ids(old)[0]);
+            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.populate_named_sites(0x91b, &[6, 7], 1).unwrap();
+            let roots: Vec<_> = world
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x91b)
+                .collect();
+            assert_eq!(roots.len(), 1);
+            let root = roots[0];
+            let area = world.setpieces.last().unwrap();
+            assert_eq!((area.width, area.height), (width as i32, height as i32));
+            assert_eq!(
+                (root.pos.x - area.x as f32, root.pos.y - area.y as f32),
+                (13., 13.),
+                "seed {seed}"
+            );
+            assert_eq!((root.pos.x, root.pos.y), (x as f32, y as f32));
+            assert_eq!((root.home.x, root.home.y), (root.pos.x, root.pos.y));
+            assert_eq!((root.hp, root.size, root.stage), (300000, 120, Some(0)));
+            assert!(root.published && root.quest == Some(root.id) && root.camp.is_none());
+            assert!(world.cells.ids(destination).contains(&root.id));
+            assert!(!world.entities.contains_key(&removed));
+            assert!(!world.cells.ids(destination).contains(&removed));
+            let cell = &world.map.cells[destination];
+            assert_eq!(
+                (
+                    cell.ground,
+                    cell.object,
+                    cell.config.as_str(),
+                    cell.terrain,
+                    cell.region
+                ),
+                (0xad, None, "", terrain, 0)
+            );
+            for (dx, dy) in [(0., 0.), (1., 0.), (-1., 0.), (0., 1.), (0., -1.)] {
+                assert!(
+                    world.walkable(Pos {
+                        x: root.pos.x + dx,
+                        y: root.pos.y + dy
+                    }),
+                    "seed {seed}: {dx},{dy}"
+                );
+            }
+            if let Some(id) = retained {
+                assert!(world.cells.ids(old).contains(&id));
+                assert_eq!(
+                    (world.entities[&id].name.as_str(), world.entities[&id].size),
+                    ("native", 137)
+                );
+                assert_eq!(world.map.cells[old].config, "name:native;size:137");
+            }
+            assert!(!Arc::ptr_eq(&original, &world.map));
+            assert_eq!(
+                (
+                    original.cells[destination].ground,
+                    original.cells[destination].object,
+                    original.cells[destination].config.as_str()
+                ),
+                (0x46, Some(0x105), "name:native;size:137")
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
 fn grove_root_uses_source_anchor_for_birth_habitat_and_spacing() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     for (label, existing_x, destination_habitat, accepted) in [
@@ -1010,7 +1113,7 @@ fn named_site_populations_match_reference_ranges() {
             for (index, root) in roots.iter().enumerate() {
                 assert!(root.published && root.hp > 0 && root.camp.is_none());
                 assert_eq!(root.quest, Some(root.id));
-                if root.kind == 0x91f {
+                if matches!(root.kind, 0x91f | 0x91b) {
                     let area = world
                         .setpieces
                         .iter()
