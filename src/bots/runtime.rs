@@ -740,7 +740,9 @@ pub(super) async fn launch(
                                                 "bot dialogue canceled; pending intention not published");
                                         } else {
                                             tracing::error!(request=%completed.id,player=id,%error,busy=view.lifecycle.busy,
-                                                output=?view.lifecycle.output,"bot dialogue intention rejected");
+                                                alive=view.lifecycle.alive,death_pending=view.lifecycle.death_pending,
+                                                departing=view.lifecycle.departing,quarantined=view.lifecycle.quarantined,
+                                                output_live=matches!(view.lifecycle.output,OutputState::Live),"bot dialogue intention rejected");
                                             dialogue::failed(&app, &completed.request, &completed.id, "rejected").await;
                                         }
                                     }
