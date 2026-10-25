@@ -12,7 +12,7 @@ async fn fixture() -> (
     let mut world = World::new(content, map).unwrap();
     let mut ids = Vec::new();
     let mut inboxes = Vec::new();
-    let (lost, _) = watch::channel(false);
+    let (lost, _) = watch::channel(None);
     for role in ["victim", "witness"] {
         let account = store.list(format!("death-chat-{role}")).await.unwrap();
         let mut ch = store
