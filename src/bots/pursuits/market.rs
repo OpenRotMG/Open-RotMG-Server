@@ -272,18 +272,13 @@ impl Market {
         if item.soulbound || item.unsupported_equipment {
             return Ok(0);
         }
-        let desired = if kind == SPEED && self.wants_speed(v) {
-            5
-        } else if kind == LIFE {
+        let desired = if kind == LIFE {
             if self.gear_want(v, c, future)?.is_some() {
                 2
             } else {
                 0
             }
-        } else if kind == DEFENSE
-            && self.count(v, SPEED) > 0
-            && self.gear_want(v, c, future)?.is_some()
-        {
+        } else if kind == DEFENSE && self.gear_want(v, c, future)?.is_some() {
             7
         } else if let Some(index) = progression::potion_index(c, kind)? {
             (c.classes[&v.character.class].caps[index] - v.character.base_stats[index]).clamp(0, 16)
@@ -406,7 +401,12 @@ impl Market {
         if self.count(v, SPEED) >= price as usize && self.wanted(v, c, future, DEFENSE)? > 0 {
             return Ok(Some(pair(SPEED, price as u8, DEFENSE, 1)));
         }
-        if self.count(v, DEFENSE) > 0 && self.wanted(v, c, future, SPEED)? >= price as u8 {
+        let trading_up =
+            self.quote.as_ref().is_some_and(|q| q[0].kind == SPEED) && self.wants_speed(v);
+        if self.count(v, DEFENSE) > 0
+            && !trading_up
+            && self.wanted(v, c, future, SPEED)? >= price as u8
+        {
             return Ok(Some(pair(DEFENSE, 1, SPEED, price as u8)));
         }
         if let Some(g) = stock.into_iter().find(|g| {
@@ -418,10 +418,14 @@ impl Market {
                 .get(g.kind as u16)?
                 .tier
                 .context("trade gear without tier")?;
+            let payment = if tier >= 10 { LIFE } else { DEFENSE };
+            if self.wanted(v, c, future, payment)? == 0 {
+                return Ok(None);
+            }
             return Ok(Some(pair(
                 g.kind,
                 1,
-                if tier >= 10 { LIFE } else { DEFENSE },
+                payment,
                 if tier >= 10 {
                     1
                 } else {
@@ -657,6 +661,12 @@ impl Market {
         rng: &mut impl Rng,
     ) -> Result<Option<Decision>> {
         self.observe(v);
+        if let Some(q) = &self.quote
+            && self.wanted(v, c, future, q[1].kind)? == 0
+        {
+            self.quote = None;
+            self.preparing = false;
+        }
         if !super::settled(v) {
             return Ok(None);
         }
@@ -932,7 +942,6 @@ impl Market {
             return Ok(None);
         }
         let Some(quote) = self.quote(v, c, future)? else {
-            self.quote = None;
             self.end_session(v, "no_real_exchange");
             return Ok(None);
         };

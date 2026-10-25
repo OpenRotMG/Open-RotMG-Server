@@ -206,3 +206,46 @@ fn market_ui_success_is_not_a_settlement_receipt_and_receipts_cannot_regress() {
     );
     assert!(m.recover(vec![]).is_err());
 }
+
+#[test]
+fn market_trade_up_intent_farms_short_stock_instead_of_buying_its_own_speed_back() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, mut v) = fixture(&c, [SPEED, SPEED, SPEED, SPEED, SPEED, SPEED, -1, -1]);
+    m.quote = m.quote(&v, &c, None).unwrap();
+    assert_eq!(m.quote.as_ref().unwrap()[0].kind, SPEED);
+    v.character.items[4..].fill(-1);
+    v.character.items[4] = SPEED;
+    v.character.items[5] = SPEED;
+    v.character.items[6] = DEFENSE;
+    assert!(m.wants_speed(&v));
+    assert!(
+        m.quote(&v, &c, None).unwrap().is_none(),
+        "do not undo a funded trade-up by buying the same speed back"
+    );
+    v.character.items[4..].fill(DEFENSE);
+    assert_eq!(m.quote(&v, &c, None).unwrap().unwrap()[1].kind, LIFE);
+    v.character.items[4..].fill(-1);
+    v.character.base_stats = c.classes[&v.character.class].caps;
+    for slot in 0..4 {
+        let slot_type = c.get(v.character.class).unwrap().slots[slot];
+        if let Some(item) = c
+            .objects
+            .values()
+            .filter(|o| o.slot_type == slot_type && !o.unsupported_equipment && !o.consumable)
+            .max_by_key(|o| o.tier)
+        {
+            v.character.items[slot] = i32::from(item.kind);
+        }
+    }
+    // If another real upgrade is still possible, the target remains valid; otherwise it is retired.
+    let needed = m.wanted(&v, &c, None, DEFENSE).unwrap() > 0;
+    m.decide(
+        &v,
+        &c,
+        None,
+        &Grid::terrain(&v),
+        &mut rand::rngs::mock::StepRng::new(0, 1),
+    )
+    .unwrap();
+    assert_eq!(m.wants_speed(&v), needed);
+}
