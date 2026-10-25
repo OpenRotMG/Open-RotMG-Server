@@ -2167,6 +2167,25 @@ fn outgoing_burst(
 
 #[cfg(test)]
 #[test]
+fn predicted_enemy_deaths_reach_the_owning_world_without_granting_hits() {
+    assert!(INPUTS.contains(&76), "predicted enemy deaths are discarded");
+    let packet = |killed| {
+        let mut w = Writer::new();
+        w.i32(1000).u8(1).i32(42).u8(killed);
+        Packet { id: 76, body: w.0 }
+    };
+    let now = std::time::Instant::now();
+    assert!(input(&packet(1), Some(1), now, true).unwrap().is_some());
+    assert!(input(&packet(0), Some(1), now, true).unwrap().is_none());
+    assert!(input(&packet(2), Some(1), now, true).is_err());
+    assert!(input(&packet(1), None, now, true).is_err());
+    let mut trailing = packet(1);
+    trailing.body.push(0);
+    assert!(input(&trailing, Some(1), now, true).is_err());
+}
+
+#[cfg(test)]
+#[test]
 fn cloud_volleys_drain_before_more_actor_work_without_buffering_or_starving_input() {
     let (tx, mut rx) = mpsc::channel::<Packet>(64);
     let packet = |id, body| Packet { id, body };
