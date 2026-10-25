@@ -925,6 +925,7 @@ pub struct Directory {
     pub max_tick_us: u64,
     diagnostic_ticks: std::collections::VecDeque<(Instant, u64, u64)>,
     performance: crate::performance::Window,
+    attribution: crate::performance::attribution::Attribution,
     max_players: usize,
     prepared_seed: Option<u64>,
 }
@@ -1109,6 +1110,7 @@ impl Directory {
             max_tick_us: 0,
             diagnostic_ticks: std::collections::VecDeque::new(),
             performance: crate::performance::Window::default(),
+            attribution: crate::performance::attribution::Attribution::default(),
             max_players,
             prepared_seed,
         };
@@ -2304,16 +2306,53 @@ impl Directory {
     }
 }
 type Reply = Box<dyn FnOnce() + Send>;
-type Job<S> = Box<dyn FnOnce(&mut S) -> Reply + Send>;
-fn execute_directory_job(directory: &mut Directory, job: Job<Directory>) {
-    let reply = job(directory);
+struct Job<S> {
+    body: Box<dyn FnOnce(&mut S) -> Reply + Send>,
+    sample: Box<crate::performance::attribution::Sample>,
+    enqueued: Instant,
+}
+impl<S> Job<S> {
+    fn new(
+        operation: &'static str,
+        send_wait: Duration,
+        body: Box<dyn FnOnce(&mut S) -> Reply + Send>,
+    ) -> Self {
+        let mut sample = crate::performance::attribution::Sample::new(operation);
+        sample.stages[0] = send_wait;
+        Self {
+            body,
+            sample,
+            enqueued: Instant::now(),
+        }
+    }
+}
+fn execute_directory_job(directory: &mut Directory, mut job: Job<Directory>) {
+    let _context =
+        crate::performance::attribution::Context::enter(job.sample.operation, job.sample.id);
+    job.sample.stages[1] = job.enqueued.elapsed();
+    let work = crate::performance::Measure::start();
+    let reply = (job.body)(directory);
+    let work = work.finish();
+    job.sample.stages[4] = work.wall;
+    job.sample.cpu = work.cpu;
+    job.sample.tick = directory.tick;
+    let publish = crate::performance::Measure::start();
     directory
         .worlds
         .routing
         .tick
         .store(directory.tick, Ordering::Release);
     directory.worlds.release();
+    let publish = publish.finish();
+    job.sample.stages[5] = publish.wall;
+    job.sample.publish_cpu = publish.cpu;
+    let dispatch = Instant::now();
     reply();
+    job.sample.stages[6] = dispatch.elapsed();
+    directory.attribution.record(job.sample);
+    if let Some(attribution) = directory.attribution.report() {
+        crate::performance::attribution::Attribution::emit(attribution, None);
+    }
 }
 async fn service_queued_jobs(directory: &mut Directory, rx: &mut mpsc::Receiver<Job<Directory>>) {
     for _ in 0..16 {
@@ -2374,12 +2413,17 @@ impl Handle {
                 tokio::select! {
                     scheduled = timer.tick() => {
                         if directory.clock.paused() { continue; }
+                        let mut sample=crate::performance::attribution::Sample::new("coordinator_tick");
+                        let _context=crate::performance::attribution::Context::enter(sample.operation,sample.id);
                         let late=scheduled.elapsed().as_micros() as u64;
+                        let execution=crate::performance::Measure::start();
                         let measuring=crate::performance::Measure::start();
                         let start=Instant::now(); directory.coordinator_step();
                         let us=start.elapsed().as_micros() as u64;
                         directory.max_tick_us=directory.max_tick_us.max(us);
-                        directory.performance.work("coordination_step", measuring);
+                        let measured=measuring.finish();
+                        sample.tick=directory.tick;
+                        directory.performance.completed("coordination_step", measured);
                         directory.performance.record("scheduling_lateness", std::time::Duration::from_micros(late));
                         directory.diagnostic_ticks.push_back((start, us, late));
                         while directory.diagnostic_ticks.front().is_some_and(|(t, _, _)| t.elapsed().as_secs() > 120) { directory.diagnostic_ticks.pop_front(); }
@@ -2395,7 +2439,18 @@ impl Handle {
                                 memory=%crate::performance::memory(),timings=%timings,"directory health");
                         }
                         // Over-budget ticks must not repeatedly win select and starve queued input or lease renewals.
+                        let execution=execution.finish();
+                        sample.stages[4]=execution.wall;
+                        sample.cpu=execution.cpu;
+                        let publish=crate::performance::Measure::start();
                         directory.worlds.release();
+                        let publish=publish.finish();
+                        sample.stages[5]=publish.wall;
+                        sample.publish_cpu=publish.cpu;
+                        directory.attribution.record(sample);
+                        if let Some(attribution)=directory.attribution.report() {
+                            crate::performance::attribution::Attribution::emit(attribution,None);
+                        }
                         service_queued_jobs(&mut directory, &mut rx).await;
                     },
                     job=rx.recv()=>match job{Some(f)=>execute_directory_job(&mut directory,f),None=>break}
@@ -2475,13 +2530,20 @@ impl Handle {
         &self,
         f: impl FnOnce(&mut Directory) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        self.request(&self.tx, "directory", |d| &mut d.performance, f)
-            .await
+        self.request(
+            &self.tx,
+            "directory",
+            std::any::type_name_of_val(&f),
+            |d| &mut d.performance,
+            f,
+        )
+        .await
     }
     async fn request<S: Send + 'static, T: Send + 'static>(
         &self,
         sender: &mpsc::Sender<Job<S>>,
         actor: &'static str,
+        operation: &'static str,
         timings: fn(&mut S) -> &mut crate::performance::Window,
         f: impl FnOnce(&mut S) -> Result<T> + Send + 'static,
     ) -> Result<T> {
@@ -2502,11 +2564,12 @@ impl Handle {
         };
         let start = Instant::now();
         record("capacity_wait", tx.is_closed());
+        let capacity_started = Instant::now();
         let permit = sender
             .reserve()
             .await
             .map_err(|_| anyhow::anyhow!("{actor} request queue stopped"))?;
-        let send_wait = start.elapsed();
+        let send_wait = capacity_started.elapsed();
         record("capacity_acquired", tx.is_closed());
         let queued = Instant::now();
         let work_request = request.clone();
@@ -2527,55 +2590,59 @@ impl Handle {
                 None
             }
         };
-        permit.send(Box::new(move |d: &mut S| -> Reply {
-            let queue_wait = queued.elapsed();
-            work_record("started", tx.is_closed());
-            timings(d).record("job_send_wait", send_wait);
-            timings(d).record("job_wait", queue_wait);
-            let started = crate::performance::Measure::start();
-            #[cfg(test)]
-            if gate.as_ref().is_some_and(|(_, before, _, _, _)| *before) {
-                let (_, _, _, entered, wait) = gate.take().unwrap();
-                let _ = entered.send(());
-                if wait.recv().is_err() {
-                    return Box::new(move || {
-                        let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
-                    });
+        permit.send(Job::new(
+            operation,
+            send_wait,
+            Box::new(move |d: &mut S| -> Reply {
+                let queue_wait = queued.elapsed();
+                work_record("started", tx.is_closed());
+                timings(d).record("job_send_wait", send_wait);
+                timings(d).record("job_wait", queue_wait);
+                let started = crate::performance::Measure::start();
+                #[cfg(test)]
+                if gate.as_ref().is_some_and(|(_, before, _, _, _)| *before) {
+                    let (_, _, _, entered, wait) = gate.take().unwrap();
+                    let _ = entered.send(());
+                    if wait.recv().is_err() {
+                        return Box::new(move || {
+                            let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                        });
+                    }
                 }
-            }
-            let result = f(d);
-            #[cfg(test)]
-            if let Some((_, _, _, entered, wait)) = gate {
-                let _ = entered.send(());
-                if wait.recv().is_err() {
-                    return Box::new(move || {
-                        let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
-                    });
+                let result = f(d);
+                #[cfg(test)]
+                if let Some((_, _, _, entered, wait)) = gate {
+                    let _ = entered.send(());
+                    if wait.recv().is_err() {
+                        return Box::new(move || {
+                            let _ = tx.send(Err(anyhow::anyhow!("lifecycle World gate abandoned")));
+                        });
+                    }
                 }
-            }
 
-            let measurement = started.finish();
-            timings(d).completed("job", measurement);
-            if let Some(r) = work_request {
-                let mut r = r.lock().expect("request timings poisoned");
-                r.completed += 1;
-                r.send_wait += send_wait;
-                r.queued += queue_wait;
-                r.work += measurement.wall;
-                if let Some(cpu) = measurement.cpu {
-                    *r.cpu.get_or_insert(Duration::ZERO) += cpu;
+                let measurement = started.finish();
+                timings(d).completed("job", measurement);
+                if let Some(r) = work_request {
+                    let mut r = r.lock().expect("request timings poisoned");
+                    r.completed += 1;
+                    r.send_wait += send_wait;
+                    r.queued += queue_wait;
+                    r.work += measurement.wall;
+                    if let Some(cpu) = measurement.cpu {
+                        *r.cpu.get_or_insert(Duration::ZERO) += cpu;
+                    }
                 }
-            }
-            work_record("completed", tx.is_closed());
-            #[cfg(test)]
-            if lost.swap(false, Ordering::SeqCst) {
-                return Box::new(|| {});
-            }
-            Box::new(move || {
-                let receiver_closed = tx.send(result).is_err();
-                work_record("result_send", receiver_closed);
-            })
-        }));
+                work_record("completed", tx.is_closed());
+                #[cfg(test)]
+                if lost.swap(false, Ordering::SeqCst) {
+                    return Box::new(|| {});
+                }
+                Box::new(move || {
+                    let receiver_closed = tx.send(result).is_err();
+                    work_record("result_send", receiver_closed);
+                })
+            }),
+        ));
         // The receiver cannot be dropped until this poll yields.
         record("enqueued", false);
         let result = rx.await.with_context(|| format!("{actor} worker failed"));
@@ -2588,10 +2655,18 @@ impl Handle {
         &self,
         f: impl FnOnce(&mut World) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        self.call_scoped(move |world, _| f(world)).await
+        self.call_named(std::any::type_name_of_val(&f), move |world, _| f(world))
+            .await
     }
     async fn call_scoped<T: Send + 'static>(
         &self,
+        f: impl FnOnce(&mut World, i32) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.call_named(std::any::type_name_of_val(&f), f).await
+    }
+    async fn call_named<T: Send + 'static>(
+        &self,
+        operation: &'static str,
         f: impl FnOnce(&mut World, i32) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let target = self.target;
@@ -2600,6 +2675,7 @@ impl Handle {
         self.request(
             &slot.mailbox,
             "world",
+            operation,
             |world| world.performance.get_mut(),
             move |world| {
                 if let Target::Player(player) = target {
@@ -6849,6 +6925,7 @@ impl World {
     }
     pub fn step(&mut self) {
         let started = crate::performance::Measure::start();
+        let players_started = crate::performance::Measure::start();
         self.now += 50;
         self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
@@ -6985,6 +7062,9 @@ impl World {
                 }
             }
         }
+        self.performance
+            .borrow_mut()
+            .work("players", players_started);
         let population_started = crate::performance::Measure::start();
         if let Err(error) = self.repopulate() {
             tracing::error!(%error,"Realm population replenishment failed");
@@ -6992,6 +7072,7 @@ impl World {
         self.performance
             .borrow_mut()
             .work("population", population_started);
+        let transient_started = crate::performance::Measure::start();
         let expired: Vec<_> = self
             .bag_expiry
             .iter()
@@ -7008,6 +7089,9 @@ impl World {
             self.remove_entity(id);
             tracing::debug!(entity = id, "expired transient or empty container removed");
         }
+        self.performance
+            .borrow_mut()
+            .work("transients", transient_started);
         let mechanics_started = crate::performance::Measure::start();
         self.mechanic_expiry();
         self.abyss_step();
@@ -7024,6 +7108,7 @@ impl World {
         let npc_started = crate::performance::Measure::start();
         let shots = self.npc_step();
         self.performance.borrow_mut().work("npc", npc_started);
+        let combat_started = crate::performance::Measure::start();
         self.grenade_step();
         for id in &ids {
             if let Err(e) = self.updates(*id, false) {
@@ -7199,6 +7284,10 @@ impl World {
         self.bullets = bullets;
         self.detached_bullets = 0;
         self.reconcile_enemy_deaths();
+        self.performance
+            .borrow_mut()
+            .work("combat_and_updates", combat_started);
+        let packets_started = crate::performance::Measure::start();
         if self.tick.is_multiple_of(2) {
             // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
             // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
@@ -7248,6 +7337,9 @@ impl World {
                 p.tick += 1;
             }
         }
+        self.performance
+            .borrow_mut()
+            .work("tick_packets", packets_started);
         self.performance.borrow_mut().work("step", started);
     }
     fn report_performance(&self, world_id: i32) {

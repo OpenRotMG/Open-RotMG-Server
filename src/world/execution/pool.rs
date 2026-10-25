@@ -65,6 +65,7 @@ impl Pool {
             body: Some(body),
             finished: Some(finished),
             complete: false,
+            submitted: std::time::Instant::now(),
         };
         self.sender.try_send(task).map_err(|error| {
             anyhow::anyhow!("bounded simulation dispatch refused work: {error}")
@@ -84,9 +85,11 @@ struct Task {
     body: Option<Body>,
     finished: Option<oneshot::Sender<()>>,
     complete: bool,
+    submitted: std::time::Instant,
 }
 impl Task {
     fn run(mut self, supervisor: &crate::supervision::Supervisor) -> Result<()> {
+        let pool_wait = self.submitted.elapsed();
         let _context = crate::supervision::world(self.slot.id, self.tick);
         // Publish the original CPU-thread incident before waking any blocked Directory borrower.
         let outcome = supervisor.blocking_work("world", || -> Result<()> {
@@ -100,14 +103,39 @@ impl Task {
                     .send(());
                 return Ok(());
             }
-            let reply = self.body.take().expect("simulation job consumed twice")(
-                self.world
-                    .as_mut()
-                    .expect("simulation job has no owned world"),
+            let mut job = self.body.take().expect("simulation job consumed twice");
+            job.sample.stages[3] = pool_wait;
+            let _context = crate::performance::attribution::Context::enter(
+                job.sample.operation,
+                job.sample.id,
             );
+            let world = self
+                .world
+                .as_mut()
+                .expect("simulation job has no owned world");
+            let tick = job.sample.kind == "tick";
+            if tick {
+                world.performance.get_mut().begin_capture();
+            }
+            let work = crate::performance::Measure::start();
+            let reply = (job.body)(world);
+            let work = work.finish();
+            job.sample.tick = world.tick;
+            job.sample.stages[4] = work.wall;
+            job.sample.cpu = work.cpu;
+            if tick {
+                job.sample.phases = world.performance.get_mut().end_capture();
+            }
+            let publish = crate::performance::Measure::start();
             self.slot
                 .restore(self.world.take().expect("simulation world returned twice"))?;
+            let publish = publish.finish();
+            job.sample.stages[5] = publish.wall;
+            job.sample.publish_cpu = publish.cpu;
+            let dispatch = std::time::Instant::now();
             reply();
+            job.sample.stages[6] = dispatch.elapsed();
+            self.slot.record_attribution(job.sample);
             let _ = self
                 .finished
                 .take()
