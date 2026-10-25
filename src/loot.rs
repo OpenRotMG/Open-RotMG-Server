@@ -1627,7 +1627,13 @@ mod tests {
     fn white_demon_attack_uses_one_percent_without_changing_gear_or_other_gods() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let boundary = (0.01 * u64::MAX as f64) as u64;
-        for roll in [boundary - 1, boundary, (0.0125 * u64::MAX as f64) as u64] {
+        // Keep gear's u32 draws zero: constant rejected samples would never terminate.
+        let mask = !u64::from(u32::MAX);
+        for roll in [
+            boundary & mask,
+            (boundary + (1 << 32)) & mask,
+            ((0.0125 * u64::MAX as f64) as u64) & mask,
+        ] {
             let white = rewards(&content, 0x651, &mut StepRng::new(roll, 0));
             assert_eq!(
                 white.contains(&0xa1f),
@@ -1648,6 +1654,7 @@ mod tests {
                 );
             }
         }
+        assert_eq!(bonus(0x651), &[(0.01, 0xa1f)]);
         assert_eq!(potion_damage(0x651), Some(180));
         assert!(private(0x651));
     }
