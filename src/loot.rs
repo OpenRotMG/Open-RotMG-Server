@@ -386,6 +386,18 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.02, Item(0xa99)),
             (0.02, Item(0xa2f)),
         ],
+        // Trapped 593e490 engineering tables, not authenticated 123.5.1 probabilities. Kithio lists only potions; the May 2012
+        // wiki pool (wiki T2/T3 armor, T1 rings, HP/MP) omits Trapped's T2 weapon and adds a Master HP potion:
+        // https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Lowland.cs#L153-L196
+        // https://web.archive.org/web/20120509105306/http://forums.wildshadow.com:80/wiki/realm-mad-god/sumo-master
+        0x7f00 => &[
+            (0.10, Tier(2, WEAPONS)),
+            (0.05, Tier(3, ARMOR)),
+            (0.03, Tier(4, ARMOR)),
+            (0.10, Tier(1, RINGS)),
+            (0.03, Item(0xa23)),
+        ],
+        0x7f01 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
         // Behavior coverage alone does not establish new drop probabilities.
         kind if crate::encounter::fauna::ROSTER.contains(&kind)
             || crate::encounter::landmarks::ROSTER.contains(&kind) =>

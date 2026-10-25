@@ -134,6 +134,7 @@ pub(super) const FAMILIES: &[Family] = &[
     family!(@script 0x950,6; 0x951,5),
     family!(@script 0x957,3; 0x958,3; 0x959,4; 0x960,4; 0x961,4),
     family!(@once 0x903,2; 0x904,5),
+    family!(@script 0x7f00,9; 0x7f01,5),
 ];
 pub(super) struct Camp {
     pub start: usize,
@@ -271,7 +272,10 @@ impl World {
             ensure!(
                 self.content.get(kind)?.terrain == family.terrain
                     || (self.content.get(kind)?.terrain == 0
-                        && matches!(kind, 0x6d2..=0x6d7 | 0x951 | 0x958 | 0x959 | 0x960 | 0x961)
+                        && matches!(
+                            kind,
+                            0x6d2..=0x6d7 | 0x951 | 0x958 | 0x959 | 0x960 | 0x961 | 0x7f01
+                        )
                         && kind != family.leader),
                 "family contradicts XML habitat"
             );

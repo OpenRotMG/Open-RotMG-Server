@@ -235,6 +235,15 @@ impl World {
             s.attacks[0].enabled = stage == 1;
             s.attacks[1].enabled = stage == 3;
         }
+        if e.kind == 0x7f00 && !matches!(e.stage, Some(2 | 3)) {
+            for attack in &mut schedule
+                .as_mut()
+                .context("Sumo Master schedule missing")?
+                .attacks
+            {
+                attack.enabled = false;
+            }
+        }
         if e.kind == 0x20d {
             schedule
                 .as_mut()

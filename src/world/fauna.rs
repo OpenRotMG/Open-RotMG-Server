@@ -202,6 +202,57 @@ impl World {
                 self.flash_inland(id, 0xffff0000, 0.5, 1000000.);
                 tracing::debug!(entity = id, "wounded Desert Werewolf enraged");
             }
+            // Kithio states: asleep (alt textures 0/3 each second); below 99% HP hurt (2) for 1 s with Lil Sumos;
+            // awake (1); below 50% rage (4) with taunt:
+            // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Lowland.cs#L157-L203
+            0x7f00 => {
+                let stage = match e.stage {
+                    None if e.hp < 337 => Some(1),
+                    Some(1) if self.now >= e.reaction_until => Some(2),
+                    Some(2) if e.hp < 170 => Some(3),
+                    stage => stage,
+                };
+                let entered = stage != e.stage;
+                let texture = match stage {
+                    None => elapsed / 1000 % 2 * 3,
+                    Some(1) => 2,
+                    Some(2) => 1,
+                    _ => 4,
+                };
+                self.landmark_texture(id, texture as i32);
+                let e = self.entities.get_mut(&id).unwrap();
+                e.stage = stage;
+                if entered {
+                    tracing::debug!(entity = id, ?stage, "Sumo Master state entered");
+                }
+                if entered && stage == Some(1) {
+                    e.reaction_until = self.now + 1000;
+                    let camp = e.camp.context("Sumo Master lacks Lil Sumo slots")?;
+                    // Kithio Spawn defaults to five children (2 at once, then one per 200 ms); all five arrive together here.
+                    // The May 2012 wiki also lists "Max: 5"; its "Cooldown: 2.5s" refill is not in Kithio and is not modeled.
+                    // Kithio's random orbit variance separates them; distinct reserved ring slots do that here.
+                    let start = self.camps[camp].start + 1;
+                    let mut spawned = 0;
+                    for slot in start..start + 5 {
+                        ensure!(
+                            self.population[slot].entity.is_none(),
+                            "Lil Sumo slot already occupied"
+                        );
+                        if !self.population_space(9, 1)? {
+                            break;
+                        }
+                        self.place_member(camp, slot, self.population[slot].pos)?;
+                        spawned += 1;
+                    }
+                    tracing::debug!(entity = id, camp, spawned, "Sumo Master released Lil Sumos");
+                }
+                if entered && stage == Some(3) {
+                    let packet = chat::text_packet("#Sumo Master", id, 5, "Engaging Super-Mode!!!");
+                    for p in self.players.values().filter(|p| p.known.contains(&id)) {
+                        send(p, packet.id, packet.body.clone());
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -248,7 +299,27 @@ impl World {
                 ));
             }
         }
+        if e.kind == 0x7f00 {
+            let speed = match e.stage {
+                Some(2) => crate::encounter::nr_speed(0.05),
+                Some(3) => crate::encounter::nr_speed(0.6),
+                _ => return Ok((Motion::Stationary, 0.)),
+            };
+            let follow = target.is_some_and(|p| (1. ..10.).contains(&e.pos.distance(p)));
+            return Ok((
+                if follow {
+                    Motion::Chase {
+                        sight: 10.,
+                        stop: 1.,
+                    }
+                } else {
+                    Motion::Wander
+                },
+                speed,
+            ));
+        }
         let owner = match e.kind {
+            0x7f01 => Some((0x7f00, 2., crate::encounter::nr_speed(0.4))),
             0x635 | 0x636 => Some((0x637, 3., 10.)),
             0x620 | 0x622 => Some((0x623, 2., 4.)),
             0x948 | 0x949 => Some((0x947, 2., 8.)),
@@ -263,7 +334,7 @@ impl World {
             };
             if let Some(leader) = leader {
                 let gap = e.pos.distance(self.entities[&leader].pos);
-                if gap < 10. && matches!(e.kind, 0x948 | 0x949) {
+                if gap < 10. && matches!(e.kind, 0x948 | 0x949 | 0x7f01) {
                     return Ok((
                         Motion::Orbit {
                             anchor: Anchor::CampEntity(leader),

@@ -5919,7 +5919,7 @@ impl World {
         } else {
             // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
             let multiplier = match defeated.kind {
-                0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 => 4,
+                0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 | 0x7f00 => 4,
                 0x62c => 3,
                 _ => 2,
             };

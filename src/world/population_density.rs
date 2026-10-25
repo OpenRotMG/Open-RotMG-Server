@@ -41,14 +41,6 @@ impl World {
                 && o.spawn_weight.is_some_and(|w| w > 0.)
                 && o.per_realm_max.is_none()
         }) {
-            // Changing allocation must not introduce an enemy whose behavior is still unimplemented.
-            if object.kind == 0x7f00 {
-                tracing::warn!(
-                    kind = object.kind,
-                    "Sumo Master remains excluded: encounter behavior is not implemented"
-                );
-                continue;
-            }
             crate::encounter::validate(&self.content, object.kind)?;
             crate::loot::validate(&self.content, object.kind)?;
             if let Some(family) = population::FAMILIES
