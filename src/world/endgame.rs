@@ -996,9 +996,10 @@ impl World {
 
 #[cfg(test)]
 #[test]
-fn castle_chest_preserves_native_fields_and_scenery() {
+fn castle_ground_only_writes_preserve_native_scenery() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut witnessed = BTreeSet::new();
+    let (mut bridges, mut walls) = (0, 0);
     for seed in 0..16 {
         let original = Arc::new(Map {
             width: 192,
@@ -1034,40 +1035,74 @@ fn castle_chest_preserves_native_fields_and_scenery() {
         assert_eq!((chest.pos.x.fract(), chest.pos.y.fract()), (0.5, 0.5));
         assert_eq!((root.pos.x.fract(), root.pos.y.fract()), (0., 0.));
         assert!(root.pos.distance(chest.pos) > 6.);
-        let index = chest.pos.y as usize * 192 + chest.pos.x as usize;
-        let actual = &world.map.cells[index];
-        let before = &original.cells[index];
-        assert_eq!(
-            (
-                actual.ground,
-                actual.object,
-                &actual.config,
-                actual.terrain,
-                actual.region
-            ),
-            (
-                before.ground,
-                before.object,
-                &before.config,
-                before.terrain,
-                before.region
-            ),
-            "seed {seed}"
-        );
-        let native = &world.entities[&native_ids[index]];
-        assert_eq!(
-            (native.kind, native.name.as_str(), native.size),
-            (0x105, "native", 137)
-        );
-        assert_eq!((native.pos.x, native.pos.y), (chest.pos.x, chest.pos.y));
-        assert!(
-            matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
-        );
-        assert_eq!(world.cells.ids(index).len(), 2);
-        assert!(
-            world.cells.ids(index).contains(&native.id)
-                && world.cells.ids(index).contains(&chest.id)
-        );
+        let assert_native = |pos: Pos, ground: u8, added: Option<i32>| {
+            let index = pos.y as usize * 192 + pos.x as usize;
+            let actual = &world.map.cells[index];
+            let before = &original.cells[index];
+            assert_eq!(
+                (
+                    actual.ground,
+                    actual.object,
+                    &actual.config,
+                    actual.terrain,
+                    actual.region
+                ),
+                (
+                    ground,
+                    before.object,
+                    &before.config,
+                    before.terrain,
+                    before.region
+                ),
+                "seed {seed}"
+            );
+            let native = &world.entities[&native_ids[index]];
+            assert_eq!(
+                (native.kind, native.name.as_str(), native.size),
+                (0x105, "native", 137)
+            );
+            assert_eq!((native.pos.x, native.pos.y), (pos.x, pos.y));
+            assert!(
+                matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+            );
+            assert_eq!(
+                world.cells.ids(index).len(),
+                1 + usize::from(added.is_some())
+            );
+            assert!(world.cells.ids(index).contains(&native.id));
+            if let Some(id) = added {
+                assert!(world.cells.ids(index).contains(&id));
+            }
+        };
+        assert_native(chest.pos, 0x47, Some(chest.id));
+        let wall_sites: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == 0x122)
+            .map(|e| (e.id, e.pos))
+            .collect();
+        for &(id, pos) in &wall_sites {
+            assert_native(pos, 0x60, Some(id));
+            assert!(
+                world.entities[&id].hp > 0 && world.entities[&id].published && !world.walkable(pos)
+            );
+            walls += 1;
+        }
+        for (i, _) in world
+            .map
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.ground == 0xcb)
+        {
+            let pos = Pos {
+                x: (i % 192) as f32 + 0.5,
+                y: (i / 192) as f32 + 0.5,
+            };
+            assert_native(pos, 0xcb, None);
+            assert!(world.walkable(pos));
+            bridges += 1;
+        }
         let boss_cell = world.map.cell(root.pos.x, root.pos.y).unwrap();
         assert_eq!(
             (
@@ -1084,7 +1119,22 @@ fn castle_chest_preserves_native_fields_and_scenery() {
             ((chest.pos.x - area.x as f32) * 2.) as i32,
             ((chest.pos.y - area.y as f32) * 2.) as i32,
         ));
+        if let Some((wall, pos)) = wall_sites.first().copied() {
+            let index = pos.y as usize * 192 + pos.x as usize;
+            world.damage_enemy(-1, wall, 1000, true, &[], None).unwrap();
+            assert!(!world.entities.contains_key(&wall) && world.walkable(pos));
+            assert_eq!(world.cells.ids(index), &[native_ids[index]]);
+            let cell = &world.map.cells[index];
+            assert_eq!(
+                (cell.ground, cell.object, cell.config.as_str()),
+                (0x60, Some(0x105), "name:native;size:137")
+            );
+            assert!(
+                matches!(&world.entities[&native_ids[index]].state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+            );
+        }
     }
+    assert!(bridges > 0 && walls > 0);
     assert_eq!(
         witnessed,
         BTreeSet::from([

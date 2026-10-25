@@ -717,23 +717,26 @@ impl Piece {
     }
 }
 impl World {
-    pub(super) fn event_site_clear(&self, site: &EventSite) -> bool {
-        site.cells.iter().all(|(index, _)| {
-            self.cells.ids(*index).iter().all(|id| {
-                let e = &self.entities[id];
-                let object = &self.content.objects[&e.kind];
-                object.static_object
-                    && !object.enemy
-                    && !matches!(object.class.as_str(), "Container" | "Portal")
-                    && e.items.is_empty()
-                    && !e.reserved
-                    && e.parent.is_none()
-                    && e.expires.is_none()
-                    && e.quest.is_none()
-                    && e.population_slot.is_none()
-                    && !e.extra_stats.iter().any(|(kind, _)| *kind == 54)
-            })
+    fn setpiece_scenery_clear(&self, index: usize) -> bool {
+        self.cells.ids(index).iter().all(|id| {
+            let e = &self.entities[id];
+            let object = &self.content.objects[&e.kind];
+            object.static_object
+                && !object.enemy
+                && !matches!(object.class.as_str(), "Container" | "Portal")
+                && e.items.is_empty()
+                && !e.reserved
+                && e.parent.is_none()
+                && e.expires.is_none()
+                && e.quest.is_none()
+                && e.population_slot.is_none()
+                && !e.extra_stats.iter().any(|(kind, _)| *kind == 54)
         })
+    }
+    pub(super) fn event_site_clear(&self, site: &EventSite) -> bool {
+        site.cells
+            .iter()
+            .all(|(index, _)| self.setpiece_scenery_clear(*index))
     }
     pub(super) fn capture_event_site(
         &self,
@@ -935,14 +938,17 @@ impl World {
                     && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
                         (a.x..a.x + a.width).all(|x| {
-                            let c = &self.map.cells[(y * self.map.width + x) as usize];
+                            let index = (y * self.map.width + x) as usize;
+                            let c = &self.map.cells[index];
+                            let mark = piece.cells[(y - a.y) as usize * piece.width + (x - a.x) as usize];
                             let untouched = matches!(
                                 kind,
                                 0xdc2 | crate::dungeon::beach::BUM | crate::dungeon::tomb::SPHINX
-                            ) && piece.cells
-                                [(y - a.y) as usize * piece.width + (x - a.x) as usize]
-                                == 0;
+                            ) && mark == 0;
                             self.setpiece_cell_available(c, untouched, retain_authored_lava)
+                                && (!(kind == 0x67d && matches!(mark, 5 | 6))
+                                    || self.walkable(Pos { x: x as f32 + 0.5, y: y as f32 + 0.5 })
+                                        && self.setpiece_scenery_clear(index))
                         })
                     })
             })
@@ -983,6 +989,14 @@ impl World {
                 }
                 let (ground, object) = Piece::tile(kind, mark);
                 let index = pos.y as usize * self.map.width as usize + pos.x as usize;
+                if kind == 0x67d && matches!(mark, 5 | 6) {
+                    // Castle.cs changes ground at these markers without replacing native scenery.
+                    Arc::make_mut(&mut self.map).cells[index].ground = ground;
+                    if let Some(object) = object {
+                        self.spawn_entity(object, pos, vec![])?;
+                    }
+                    continue;
+                }
                 let old: Vec<_> = self.cells.ids(index).to_vec();
                 for id in old {
                     self.remove_entity(id);
@@ -1114,6 +1128,7 @@ mod tests {
         assert!(!content.objects[&0x105].blocks && content.objects[&0x105].static_object);
         assert!(content.grounds[&0x72] > 0. && content.grounds[&0x73] > 0.);
         let mut witnessed = BTreeSet::new();
+        let mut targets = BTreeSet::new();
         for seed in 0..16 {
             let plan = Piece::build(0x67d, &mut rand::rngs::StdRng::seed_from_u64(seed));
             let (dx, dy) = (
@@ -1125,85 +1140,128 @@ mod tests {
                 y: (96 + dy) as f32,
             };
             witnessed.insert((plan.width, plan.height, plan.boss));
-            for mode in 0..11 {
-                if mode == 2 && (dx, dy) == (0, 0) {
+            for target in [7, 5, 6] {
+                let Some(marker) = plan.cells.iter().position(|m| *m == target) else {
                     continue;
-                }
-                let mut map = temple_test_map(0);
-                map.cells[96 * 192 + 96].terrain = 3;
-                if mode != 2 {
-                    map.cells[expected.y as usize * 192 + expected.x as usize].terrain = 3;
-                }
-                let marker = plan.cells.iter().position(|m| *m == 7).unwrap();
-                let chest_pos = Pos {
-                    x: (96 - plan.width as i32 / 2 + (marker % plan.width) as i32) as f32 + 0.5,
-                    y: (96 - plan.height as i32 / 2 + (marker / plan.width) as i32) as f32 + 0.5,
                 };
-                let cell = &mut map.cells[chest_pos.y as usize * 192 + chest_pos.x as usize];
-                match mode {
-                    3 => cell.ground = 0xbc,
-                    4 => cell.object = Some(0x100),
-                    5 => cell.object = Some(0x1f3),
-                    6 => cell.ground = 0xf4,
-                    7 => cell.region = 1,
-                    8 => cell.ground = 0x72,
-                    9 => cell.ground = 0x73,
-                    _ => {}
-                }
-                let original = Arc::new(map);
-                let mut world = World::new(content.clone(), original.clone()).unwrap();
-                let previous = world
-                    .spawn_entity(
-                        0x91b,
-                        Pos {
-                            x: expected.x - if mode == 1 { 31.75 } else { 32. },
-                            y: expected.y,
-                        },
-                        vec![],
-                    )
-                    .unwrap();
-                world.entities.get_mut(&previous).unwrap().quest = Some(previous);
-                if mode == 6 {
-                    world.realm_layout = Some("classic-world-01-reconstruction".into());
-                }
-                let prior_chest = (mode == 10)
-                    .then(|| world.spawn_entity(0x501, chest_pos, vec![-1; 8]).unwrap());
-                let ids_before: BTreeSet<_> = world.entities.keys().copied().collect();
-                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
-                let result = world.place_named_setpiece(0x67d, &[3]);
-                assert_eq!(
-                    result.is_ok(),
-                    mode == 0,
-                    "seed {seed}, mode {mode}: {result:?}"
-                );
-                if let Ok(pos) = result {
-                    assert_eq!((pos.x, pos.y), (expected.x, expected.y));
-                    assert!(
-                        world.walkable(pos) && pos.distance(world.entities[&previous].pos) == 32.
-                    );
-                    assert_eq!(world.map.cell(pos.x, pos.y).unwrap().terrain, 3);
-                } else {
-                    assert!(
-                        Arc::ptr_eq(&original, &world.map)
-                            && world.setpieces.is_empty()
-                            && world.event_sites.is_empty()
-                    );
-                    assert_eq!(
-                        world.entities.keys().copied().collect::<BTreeSet<_>>(),
-                        ids_before
-                    );
-                    if let Some(id) = prior_chest {
-                        assert!(
+                targets.insert(target);
+                for mode in 0..12 {
+                    if mode == 2 && (dx, dy) == (0, 0) || mode == 11 && target == 7 {
+                        continue;
+                    }
+                    let mut map = temple_test_map(0);
+                    map.cells[96 * 192 + 96].terrain = 3;
+                    if mode != 2 {
+                        map.cells[expected.y as usize * 192 + expected.x as usize].terrain = 3;
+                    }
+                    let native_pos = Pos {
+                        x: (96 - plan.width as i32 / 2 + (marker % plan.width) as i32) as f32 + 0.5,
+                        y: (96 - plan.height as i32 / 2 + (marker / plan.width) as i32) as f32
+                            + 0.5,
+                    };
+                    let index = native_pos.y as usize * 192 + native_pos.x as usize;
+                    let cell = &mut map.cells[index];
+                    if target != 7 {
+                        cell.object = Some(0x105);
+                    }
+                    match mode {
+                        3 => cell.ground = 0xbc,
+                        4 => cell.object = Some(0x100),
+                        5 => cell.object = Some(0x1f3),
+                        6 => cell.ground = 0xf4,
+                        7 => cell.region = 1,
+                        8 => cell.ground = 0x72,
+                        9 => cell.ground = 0x73,
+                        _ => {}
+                    }
+                    let original = Arc::new(map);
+                    let mut world = World::new(content.clone(), original.clone()).unwrap();
+                    let native = if target != 7 && matches!(mode, 0 | 11) {
+                        let id = world.cells.ids(index)[0];
+                        if mode == 0 {
+                            world.entities.get_mut(&id).unwrap().name = "retained state".into();
+                        } else {
                             world
-                                .cells
-                                .ids(chest_pos.y as usize * 192 + chest_pos.x as usize)
-                                .contains(&id)
+                                .entities
+                                .get_mut(&id)
+                                .unwrap()
+                                .extra_stats
+                                .push((54, 7));
+                        }
+                        Some(id)
+                    } else {
+                        None
+                    };
+                    let previous = world
+                        .spawn_entity(
+                            0x91b,
+                            Pos {
+                                x: expected.x - if mode == 1 { 31.75 } else { 32. },
+                                y: expected.y,
+                            },
+                            vec![],
+                        )
+                        .unwrap();
+                    world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                    if mode == 6 {
+                        world.realm_layout = Some("classic-world-01-reconstruction".into());
+                    }
+                    let prior_chest = (mode == 10)
+                        .then(|| world.spawn_entity(0x501, native_pos, vec![-1; 8]).unwrap());
+                    let ids_before: BTreeSet<_> = world.entities.keys().copied().collect();
+                    world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                    let result = world.place_named_setpiece(0x67d, &[3]);
+                    assert_eq!(
+                        result.is_ok(),
+                        mode == 0,
+                        "seed {seed}, marker {target}, mode {mode}: {result:?}"
+                    );
+                    if let Ok(pos) = result {
+                        assert_eq!((pos.x, pos.y), (expected.x, expected.y));
+                        assert!(
+                            world.walkable(pos)
+                                && pos.distance(world.entities[&previous].pos) == 32.
                         );
+                        assert_eq!(world.map.cell(pos.x, pos.y).unwrap().terrain, 3);
+                        if let Some(id) = native {
+                            let cell = &world.map.cells[index];
+                            assert_eq!(
+                                (cell.ground, cell.object, cell.config.as_str()),
+                                (
+                                    if target == 5 { 0x60 } else { 0xcb },
+                                    Some(0x105),
+                                    "name:source"
+                                )
+                            );
+                            assert!(world.cells.ids(index).contains(&id));
+                            assert_eq!(world.entities[&id].name, "retained state");
+                            assert!(matches!(
+                                &world.entities[&id].state,
+                                entity_store::EntityState::Owned(_)
+                            ));
+                        }
+                    } else {
+                        assert!(
+                            Arc::ptr_eq(&original, &world.map)
+                                && world.setpieces.is_empty()
+                                && world.event_sites.is_empty()
+                        );
+                        assert_eq!(
+                            world.entities.keys().copied().collect::<BTreeSet<_>>(),
+                            ids_before
+                        );
+                        if let Some(id) = prior_chest {
+                            assert!(world.cells.ids(index).contains(&id));
+                        }
+                        if let Some(id) = native {
+                            assert!(world.entities[&id].extra_stats.contains(&(54, 7)));
+                        }
                     }
                 }
             }
         }
         assert_eq!(witnessed.len(), 4);
+        assert_eq!(targets, BTreeSet::from([5, 6, 7]));
     }
 
     #[test]
