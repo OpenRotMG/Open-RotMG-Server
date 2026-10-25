@@ -721,6 +721,8 @@ pub(crate) fn endgame_schedule(kind: u16, hp: i32, max_hp: i32, elapsed: u64) ->
             vec![fan(0, 1, 0., 700, 3.)]
         }
         0x174a | 0x174b => vec![fan(0, 3, 10., 1000, 25.)],
+        // Each Goo fires its selected speed-0, 6000 ms MultiHit projectile once: the puddle is the hazard.
+        0xdf0 => vec![fan(0, 1, 0., 1, 0.).fixed(0.).once()],
         0x944 => vec![
             fan(0, 1, 0., 1500, 8.).chance(1.),
             fan(1, 3, 20., 1500, 8.).delay(500),

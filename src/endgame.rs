@@ -24,7 +24,8 @@ pub const DUNGEONS: &[(u16, &str, &str, u16)] = &[
 pub const ROSTER: &[u16] = &[
     0x668, 0x669, 0x66a, 0x66b, 0x67d, 0x67e, 0x67f, 0x680, 0x681, 0x682, 0xd70, 0xd71, 0xd78,
     0xd79, 0xd7a, 0xd7c, 0xd7d, 0xd7e, 0xd7f, 0xd80, 0xd81, 0xd82, 0xd83, 0xd84, 0xd87, 0x1740,
-    0x1748, 0x1749, 0x174a, 0x174b, 0x932, 0x944, 0xde0, 0xde1, 0xde2, 0xde3, 0xde4, 0xdf1, 0xdf2,
+    0x1748, 0x1749, 0x174a, 0x174b, 0x932, 0x944, 0xde0, 0xde1, 0xde2, 0xde3, 0xde4, 0xde5, 0xdf0,
+    0xdf1, 0xdf2,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,7 +96,10 @@ pub fn profile(kind: u16) -> Option<Profile> {
             1000,
             10.,
         ),
-        0xd70 | 0xd71 | 0xd7a | 0xd7d | 0xdf1 => (Motion::Stationary, 0., 0, 0.),
+        0xd70 | 0xd71 | 0xd7a | 0xd7d | 0xde5 => (Motion::Stationary, 0., 0, 0.),
+        0xdf0 => (Motion::Stationary, 0., 6000, 0.),
+        // Bile "moves around randomly" (https://web.archive.org/web/20160522054322/http://www.realmeye.com/wiki/bile-of-oryx); Wander(.5) from a later comparator: https://github.com/Omniraptyr/Valor-Server/blob/40fab9e80d8a44e922036d178b9d1f03aca66a44/VotR-Server/wServer/logic/db/BehaviorDb.Oryx.cs#L493-L501
+        0xdf1 => (Motion::Wander, crate::encounter::nr_speed(0.5), 0, 0.),
         0xd78 | 0xd79 => (
             Motion::Orbit {
                 anchor: Anchor::Home,
@@ -443,7 +447,7 @@ pub fn attacks(kind: u16, hp: i32, max_hp: i32, heading: f32, elapsed: u64) -> V
         0x669 | 0x67e..=0x682 | 0xd84 | 0xd87 | 0xde2 | 0xdf2 => vec![(0, heading)],
         0x67d if elapsed % 10_000 < 5000 => fan(10, 3, 10., heading),
         0x67d => (0..4).map(|index| (index, heading)).collect(),
-        0xd70 | 0xd71 | 0xd7a | 0xd7d | 0xde1 | 0xde3 | 0xdf1 => vec![],
+        0xd70 | 0xd71 | 0xd7a | 0xd7d | 0xde1 | 0xde3 | 0xde5 | 0xdf1 => vec![],
         0xd78 | 0xd79 => match elapsed % 20_000 {
             0..5200 => ring(0, 2, elapsed as f32 / 200. * 30f32.to_radians()),
             5200..10_000 => fan(0, 2, 180., (elapsed as f32 / 100. * 10.).to_radians()),
@@ -605,6 +609,13 @@ pub fn summons(kind: u16) -> &'static [Wave] {
                 radius: 2.,
                 lifetime: 60_000,
             },
+            // Henchman spawns Bile (period JP wiki): https://web.archive.org/web/20261025114348/https://wikiwiki.jp/rmd/Wine%20Cellar
+            Wave {
+                kind: 0xdf1,
+                count: 1,
+                radius: 2.,
+                lifetime: 60_000,
+            },
         ],
         0xde1 => &[Wave {
             kind: 0xde2,
@@ -682,6 +693,9 @@ pub(crate) fn loot(kind: u16) -> &'static [(f64, crate::loot::Pick)] {
         | 0x174a
         | 0x174b
         | 0xde1..=0xde4
+        // A 2012 player reports the barrels empty: https://web.archive.org/web/20130627235632/http://gaming.stackexchange.com/questions/92083/where-is-the-wine
+        | 0xde5
+        | 0xdf0
         | 0xdf1 => &[],
         _ => panic!("unselected endgame loot {kind:#x}"),
     }
