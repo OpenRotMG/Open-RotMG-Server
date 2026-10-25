@@ -222,6 +222,10 @@ impl World {
                 self.landmark_texture(id, texture as i32);
                 let e = self.entities.get_mut(&id).unwrap();
                 e.stage = stage;
+                if entered && stage == Some(3) {
+                    // Kithio's rage burst starts on entry, so its 1100 ms cycle runs from now, not from spawn.
+                    e.activated = Some(self.now);
+                }
                 if entered {
                     tracing::debug!(entity = id, ?stage, "Sumo Master state entered");
                 }
