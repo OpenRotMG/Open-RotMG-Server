@@ -218,8 +218,60 @@ struct Decision {
     journey: Option<Journey>,
     chat: Option<&'static str>,
 }
+/// What a bot is doing for the next while; reflexes may interrupt any of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Activity {
+    Busy,
+    Survive,
+    Trade,
+    Equip,
+    Supply,
+    Event,
+    Consume,
+    Social,
+    Bank,
+    Linger,
+    Call,
+    Adventure,
+}
+impl std::fmt::Display for Activity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Busy => "busy",
+            Self::Survive => "surviving",
+            Self::Trade => "trading",
+            Self::Equip => "sorting gear",
+            Self::Supply => "restocking",
+            Self::Event => "at an event",
+            Self::Consume => "using items",
+            Self::Social => "socializing",
+            Self::Bank => "banking",
+            Self::Linger => "hanging out in Nexus",
+            Self::Call => "answering a call",
+            Self::Adventure => "adventuring",
+        })
+    }
+}
+/// One decision's shared perception, computed once and read by reflexes and activities.
+struct Scene<'a> {
+    enemies: Vec<&'a crate::world::view::VisibleObject>,
+    nearest: Option<&'a crate::world::view::VisibleObject>,
+    quarry: Option<&'a crate::world::view::VisibleObject>,
+    perception: combat::Perception,
+    inspecting: bool,
+    range: f32,
+    passes_cover: bool,
+    health: f32,
+    danger: f32,
+    threatened: bool,
+    retreat: bool,
+    outmatched: bool,
+    grid: Arc<Grid>,
+    remedy: Option<&'a crate::world::view::VisibleObject>,
+}
 struct Brain {
     profile: Profile,
+    activity: Activity,
     mind: pursuits::Mind,
     group: Option<adventures::Adventure>,
     group_lost_since: Option<u64>,
@@ -278,6 +330,7 @@ impl Brain {
         mind.events.knows_blue = [true, false, false, true, false, false][index];
         Self {
             profile,
+            activity: Activity::Busy,
             mind,
             group: None,
             group_lost_since: None,
@@ -533,7 +586,7 @@ impl Brain {
         }
         self.previous = v.position;
         self.visits.insert(tile(v.position), v.tick);
-        let mut decision = Decision {
+        let decision = Decision {
             goal: Goal::Wait,
             movement: None,
             aim: None,
@@ -542,8 +595,26 @@ impl Brain {
             chat: None,
         };
         if v.lifecycle.busy {
+            self.set_activity(v, Activity::Busy);
             return Ok(decision);
         }
+        let (activity, decision) = self.arbitrate(v, content, decision)?;
+        self.set_activity(v, activity);
+        Ok(decision)
+    }
+    fn set_activity(&mut self, v: &PlayerView, activity: Activity) {
+        if activity != self.activity {
+            tracing::info!(account=v.session.account,player=v.session.player,from=%self.activity,to=%activity,"autonomous activity changed");
+            self.activity = activity;
+        }
+    }
+    /// Reflexes first, then the first activity with something to do; adventuring is the default.
+    fn arbitrate(
+        &mut self,
+        v: &PlayerView,
+        content: &Content,
+        mut decision: Decision,
+    ) -> Result<(Activity, Decision)> {
         self.mind.reconcile(v)?;
         self.mind.events.observe(v);
         let party = social::companions(v, self.group.as_ref());
@@ -575,7 +646,7 @@ impl Brain {
                     .market
                     .decide(v, content, self.mind.future_class, &grid, &mut self.rng)?
             {
-                return Ok(market);
+                return Ok((Activity::Trade, market));
             }
         }
         let inspecting = self.mind.inspecting(v, content);
@@ -693,6 +764,158 @@ impl Brain {
                 "autonomous event safety observation"
             );
         }
+        let s = Scene {
+            nearest: nearest.copied(),
+            quarry: quarry.copied(),
+            enemies,
+            perception,
+            inspecting,
+            range,
+            passes_cover: projectile.passes_cover,
+            health,
+            danger,
+            threatened,
+            retreat,
+            outmatched,
+            grid,
+            remedy,
+        };
+        if self.reflex(v, content, &s, &mut decision)? {
+            return Ok((Activity::Survive, decision));
+        }
+        if (equipping && s.remedy.is_none()) || (v.map.name == "Vault" && s.inspecting) {
+            return Ok((Activity::Equip, decision));
+        }
+        if let Some(mut market) =
+            self.mind
+                .market
+                .decide(v, content, self.mind.future_class, &s.grid, &mut self.rng)?
+        {
+            if market.item.is_none() {
+                market.item = decision.item;
+            }
+            return Ok((Activity::Trade, market));
+        }
+        if let Some(project) = self.mind.supply(v, content, &s.grid)? {
+            return Ok((Activity::Supply, project));
+        }
+        if let Some(mut event) =
+            self.mind
+                .events
+                .decide(v, content, &s.grid, self.mind.cognition.attention)?
+        {
+            if decision.item.is_some() {
+                event.item = decision.item;
+            }
+            return Ok((Activity::Event, event));
+        }
+        if decision.item.is_none()
+            && s.nearest
+                .is_none_or(|e| e.position.distance(v.position) > 5.)
+        {
+            decision.item = progression::consume(v, content)?;
+            if decision.item.is_some() {
+                return Ok((Activity::Consume, decision));
+            }
+        }
+        if (self.proposing
+            || self
+                .offered
+                .as_ref()
+                .is_some_and(|o| o.until > v.elapsed_ms))
+            && peaceful(&s.enemies, v.position)
+        {
+            self.destination = None;
+            self.stationary = v.tick;
+            return Ok((Activity::Social, decision));
+        }
+        if v.map.name == "Vault"
+            && self.agreement.is_none()
+            && let Some(banking) = progression::bank(v, content, &s.grid, self.mind.future_class)?
+        {
+            self.next_bank = v.time_ms + 300000;
+            if matches!(banking.journey, Some(Journey::Nexus)) && self.mind.social.trying_loadout(v)
+            {
+                decision.aim = Some(self.heading);
+                return Ok((Activity::Bank, decision));
+            }
+            return Ok((Activity::Bank, banking));
+        }
+        let banking = v.time_ms >= self.next_bank && progression::stash(v, content)?;
+        if self.agreement.is_none()
+            && peaceful(&s.enemies, v.position)
+            && let Some(social) =
+                self.mind
+                    .social
+                    .decide(v, &s.grid, self.profile.companions, banking)
+        {
+            return Ok((Activity::Social, social));
+        }
+        if v.map.name == "Nexus" && self.agreement.is_none() && v.time_ms < self.nexus_until {
+            return Ok((Activity::Linger, decision));
+        }
+        if v.map.name == "Realm"
+            && self.agreement.is_none()
+            && banking
+            && v.character
+                .items
+                .iter()
+                .skip(4)
+                .filter(|k| **k >= 0)
+                .count()
+                >= 6
+            && peaceful(&s.enemies, v.position)
+            && s.health >= 0.75
+        {
+            decision.journey = Some(Journey::Nexus);
+            if self.group.is_some() {
+                decision.chat = Some("nexus");
+            }
+            return Ok((Activity::Bank, decision));
+        }
+        if let Some(target) = self.call_target(v, content)? {
+            self.next_teleport = v.time_ms + 10_000;
+            decision.goal = Goal::Follow(target);
+            decision.journey = Some(Journey::Regroup(target));
+            return Ok((Activity::Call, decision));
+        }
+        Ok((
+            Activity::Adventure,
+            self.adventure(v, content, &s, decision, banking)?,
+        ))
+    }
+
+    /// Safety always outranks any activity: retreat, dodge, or leave for the Nexus.
+    fn reflex(
+        &mut self,
+        v: &PlayerView,
+        content: &Content,
+        s: &Scene,
+        decision: &mut Decision,
+    ) -> Result<bool> {
+        let Scene {
+            enemies,
+            nearest,
+            range,
+            health,
+            danger,
+            threatened,
+            retreat,
+            outmatched,
+            remedy,
+            ..
+        } = s;
+        let (range, health, danger, threatened, retreat, outmatched, nearest, remedy) = (
+            *range,
+            *health,
+            *danger,
+            *threatened,
+            *retreat,
+            *outmatched,
+            *nearest,
+            *remedy,
+        );
+        let (grid, perception) = (&s.grid, &s.perception);
         if threatened
             && v.objects.iter().any(|o| o.contents.contains(&0xa22))
             && v.map.name == "Realm"
@@ -705,7 +928,7 @@ impl Brain {
             );
             decision.goal = Goal::Recover;
             decision.journey = Some(Journey::Nexus);
-            return Ok(decision);
+            return Ok(true);
         }
         if retreat || threatened {
             decision.goal = if retreat {
@@ -718,7 +941,7 @@ impl Brain {
             let opponent = if retreat {
                 None
             } else {
-                combat::target(v, content, &grid, &enemies, range, projectile.passes_cover)
+                combat::target(v, content, grid, enemies, range, s.passes_cover)
             };
             let pressured = threatened
                 || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3);
@@ -736,7 +959,7 @@ impl Brain {
                     range
                 };
                 decision.movement =
-                    combat::movement(v, &grid, &enemies, focus, spacing, retreat, &perception);
+                    combat::movement(v, grid, enemies, focus, spacing, retreat, perception);
             }
             let held_heal = v
                 .character
@@ -761,9 +984,9 @@ impl Brain {
                     && pressured
                     && !decision.movement.is_some_and(|p| {
                         combat::speed(v) > 0.
-                            && recovery_step_valid(v, content, &grid, p)
+                            && recovery_step_valid(v, content, grid, p)
                             && (enemies.is_empty() || separation(p) > separation(v.position))
-                            && combat::clearance(v, p, &perception)
+                            && combat::clearance(v, p, perception)
                                 >= self.mind.cognition.pickup_clearance
                     })
                 {
@@ -785,7 +1008,7 @@ impl Brain {
                     "autonomous recovery escape selected"
                 );
                 decision.journey = Some(Journey::Nexus);
-                return Ok(decision);
+                return Ok(true);
             }
             if retreat {
                 for (slot, kind) in v
@@ -814,110 +1037,31 @@ impl Brain {
                 combat::attack(
                     v,
                     content,
-                    &grid,
+                    grid,
                     enemy,
                     self.tracks
                         .get(&enemy.id)
                         .map_or(Pos { x: 0., y: 0. }, |track| track.2),
-                    &perception,
-                    &mut decision,
+                    perception,
+                    decision,
                 )?;
             }
-            return Ok(decision);
+            return Ok(true);
         }
-        if (equipping && remedy.is_none()) || (v.map.name == "Vault" && inspecting) {
-            return Ok(decision);
-        }
-        if let Some(mut market) =
-            self.mind
-                .market
-                .decide(v, content, self.mind.future_class, &grid, &mut self.rng)?
-        {
-            if market.item.is_none() {
-                market.item = decision.item;
-            }
-            return Ok(market);
-        }
-        if let Some(project) = self.mind.supply(v, content, &grid)? {
-            return Ok(project);
-        }
-        if let Some(mut event) =
-            self.mind
-                .events
-                .decide(v, content, &grid, self.mind.cognition.attention)?
-        {
-            if decision.item.is_some() {
-                event.item = decision.item;
-            }
-            return Ok(event);
-        }
-        if decision.item.is_none() && nearest.is_none_or(|e| e.position.distance(v.position) > 5.) {
-            decision.item = progression::consume(v, content)?;
-            if decision.item.is_some() {
-                return Ok(decision);
-            }
-        }
-        if (self.proposing
-            || self
-                .offered
-                .as_ref()
-                .is_some_and(|o| o.until > v.elapsed_ms))
-            && peaceful(&enemies, v.position)
-        {
-            self.destination = None;
-            self.stationary = v.tick;
-            return Ok(decision);
-        }
-        if v.map.name == "Vault"
-            && self.agreement.is_none()
-            && let Some(banking) = progression::bank(v, content, &grid, self.mind.future_class)?
-        {
-            self.next_bank = v.time_ms + 300000;
-            if matches!(banking.journey, Some(Journey::Nexus)) && self.mind.social.trying_loadout(v)
-            {
-                decision.aim = Some(self.heading);
-                return Ok(decision);
-            }
-            return Ok(banking);
-        }
-        let banking = v.time_ms >= self.next_bank && progression::stash(v, content)?;
-        if self.agreement.is_none()
-            && peaceful(&enemies, v.position)
-            && let Some(social) =
-                self.mind
-                    .social
-                    .decide(v, &grid, self.profile.companions, banking)
-        {
-            return Ok(social);
-        }
-        if v.map.name == "Nexus" && self.agreement.is_none() && v.time_ms < self.nexus_until {
-            return Ok(decision);
-        }
-        if v.map.name == "Realm"
-            && self.agreement.is_none()
-            && banking
-            && v.character
-                .items
-                .iter()
-                .skip(4)
-                .filter(|k| **k >= 0)
-                .count()
-                >= 6
-            && peaceful(&enemies, v.position)
-            && health >= 0.75
-        {
-            decision.journey = Some(Journey::Nexus);
-            if self.group.is_some() {
-                decision.chat = Some("nexus");
-            }
-            return Ok(decision);
-        }
-        if let Some(target) = self.call_target(v, content)? {
-            self.next_teleport = v.time_ms + 10_000;
-            decision.goal = Goal::Follow(target);
-            decision.journey = Some(Journey::Regroup(target));
-            return Ok(decision);
-        }
+        Ok(false)
+    }
+    /// Default activity: fight, loot, quest, take portals, keep company and explore, by score.
+    fn adventure(
+        &mut self,
+        v: &PlayerView,
+        content: &Content,
+        s: &Scene,
+        mut decision: Decision,
+        banking: bool,
+    ) -> Result<Decision> {
+        let (enemies, grid, perception) = (&s.enemies, &s.grid, &s.perception);
+        let (nearest, quarry, range, inspecting, health) =
+            (s.nearest, s.quarry, s.range, s.inspecting, s.health);
         let mut choices = Vec::new();
         let event_area = self.mind.events.area(v);
         if let Some(area) = event_area {
@@ -934,7 +1078,7 @@ impl Brain {
         if v.map.name == "Realm" && progression::ready(v, content, 0x718) && !self.inland_reached {
             choices.push((60. + self.profile.resources, Goal::Venture, inland));
         }
-        for enemy in &enemies {
+        for enemy in enemies {
             if !progression::can_fight(v, content, enemy)
                 || events::shared(&v.map.name) && !progression::vulnerable(enemy)
             {
@@ -1003,7 +1147,7 @@ impl Brain {
                 if progression::pickup(v, content, bag, self.mind.future_class)?.is_some() {
                     // A distant objective must not outrank replenishing an exhausted ability.
                     let replenishing = needs_mana
-                        && peaceful(&enemies, v.position)
+                        && peaceful(enemies, v.position)
                         && bag
                             .contents
                             .iter()
@@ -1022,7 +1166,7 @@ impl Brain {
         }
         let peaceful = nearest.is_none_or(|e| e.position.distance(v.position) > 5.);
         let realm = if v.map.name == "Nexus" && !banking && peaceful && health >= 0.75 {
-            self.realm_portal(v, &grid)?
+            self.realm_portal(v, grid)?
         } else {
             None
         };
@@ -1272,16 +1416,16 @@ impl Brain {
                 }
                 Goal::Fight(_) | Goal::Hunt(_)
                     if v.position.distance(destination) < range
-                        && shot_clear(v, &grid, destination, projectile.passes_cover) =>
+                        && shot_clear(v, grid, destination, s.passes_cover) =>
                 {
                     combat::movement(
                         v,
-                        &grid,
-                        &enemies,
+                        grid,
+                        enemies,
                         Some(destination),
                         range,
                         false,
-                        &perception,
+                        perception,
                     )
                 }
                 Goal::Follow(_) if v.position.distance(destination) < 4.5 => None,
@@ -1326,10 +1470,10 @@ impl Brain {
                             && let Some(mut clearing) = progression::clear_cover(
                                 v,
                                 content,
-                                &grid,
+                                grid,
                                 destination,
                                 range,
-                                projectile.passes_cover,
+                                s.passes_cover,
                             )
                         {
                             clearing.item = decision.item;
@@ -1385,17 +1529,17 @@ impl Brain {
                 && matches!(decision.goal, Goal::Follow(_) | Goal::Gather(_))
                 || matches!(decision.goal, Goal::Survey(..) | Goal::Venture))
                 && let Some(enemy) =
-                    combat::target(v, content, &grid, &enemies, range, projectile.passes_cover)
+                    combat::target(v, content, grid, enemies, range, s.passes_cover)
             {
                 combat::attack(
                     v,
                     content,
-                    &grid,
+                    grid,
                     enemy,
                     self.tracks
                         .get(&enemy.id)
                         .map_or(Pos { x: 0., y: 0. }, |track| track.2),
-                    &perception,
+                    perception,
                     &mut decision,
                 )?;
             }
@@ -1409,7 +1553,7 @@ impl Brain {
                     && v.map.name == "Snake Pit"
                     && v.position.distance(enemy.position) >= range
                 {
-                    combat::target(v, content, &grid, &enemies, range, projectile.passes_cover)
+                    combat::target(v, content, grid, enemies, range, s.passes_cover)
                 } else {
                     Some(enemy)
                 };
@@ -1417,12 +1561,12 @@ impl Brain {
                     combat::attack(
                         v,
                         content,
-                        &grid,
+                        grid,
                         enemy,
                         self.tracks
                             .get(&enemy.id)
                             .map_or(Pos { x: 0., y: 0. }, |track| track.2),
-                        &perception,
+                        perception,
                         &mut decision,
                     )?;
                 }

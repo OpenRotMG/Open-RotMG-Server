@@ -165,14 +165,19 @@ fn label<'a>(o: &'a crate::world::view::VisibleObject, content: &'a Content) -> 
         &o.name
     }
 }
-pub(super) fn reason(d: &Decision, v: &PlayerView, content: &Content) -> String {
+pub(super) fn reason(
+    activity: Activity,
+    d: &Decision,
+    v: &PlayerView,
+    content: &Content,
+) -> String {
     let named = |id: &i32| {
         v.objects.iter().find(|o| o.id == *id).map_or_else(
             || format!("out-of-sight object {id}"),
             |o| label(o, content).into(),
         )
     };
-    match (&d.journey, &d.goal) {
+    let doing = match (&d.journey, &d.goal) {
         (Some(Journey::Portal(id)), _) => format!("entering {}", named(id)),
         (Some(Journey::Nexus), _) => "returning to the Nexus".into(),
         (Some(Journey::Regroup(id)), _) => format!("teleporting to {}", named(id)),
@@ -192,7 +197,8 @@ pub(super) fn reason(d: &Decision, v: &PlayerView, content: &Content) -> String 
         (None, Goal::Survey(..)) => "heading to a realm event".into(),
         (None, Goal::Explore(..)) => "exploring".into(),
         (None, Goal::Wait) => "waiting".into(),
-    }
+    };
+    format!("{activity}: {doing}")
 }
 
 struct Viewer {
