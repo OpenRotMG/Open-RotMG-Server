@@ -538,6 +538,7 @@ impl Piece {
                     }
                 }
                 p.set(15, 27, 7);
+                p.set(15, 20, 8);
                 p.boss = (15, 20);
                 p
             }
@@ -652,7 +653,7 @@ impl Piece {
         }
         if !matches!(
             kind,
-            0x935 | 0xd59 | 0xd50 | 0xe37 | crate::dungeon::tomb::SPHINX
+            0x935 | 0xd59 | 0xd50 | 0xe37 | 0x67d | crate::dungeon::tomb::SPHINX
         ) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
             if kind == 0xdc2 {
@@ -849,7 +850,12 @@ impl World {
                 );
             }
         }
-        for mark in piece.cells.iter().copied().filter(|m| *m != 0) {
+        for mark in piece
+            .cells
+            .iter()
+            .copied()
+            .filter(|m| *m != 0 && !(kind == 0x67d && *m == 8))
+        {
             let (ground, object) = Piece::tile(kind, mark);
             ensure!(
                 self.content.grounds.contains_key(&ground),
@@ -919,6 +925,7 @@ impl World {
                     && a.y > 0
                     && a.x + a.width < self.map.width
                     && a.y + a.height < self.map.height
+                    && (kind != 0x67d || self.walkable(boss))
                     && castle_chest.is_none_or(|i| self.walkable(Pos {
                         x: (a.x + (i % piece.width) as i32) as f32 + 0.5,
                         y: (a.y + (i / piece.width) as i32) as f32 + 0.5,
@@ -938,7 +945,7 @@ impl World {
                     // Offset anchors must retain habitat at the actual destination, not only the sampled center.
                     && (!matches!(kind, 0x91b | 0x91f | 0xdc2 | 0x67d)
                         || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
-                    && (kind != 0x91b
+                    && (!matches!(kind, 0x91b | 0x67d)
                         || self.setpiece_scenery_clear(boss.y as usize * self.map.width as usize + boss.x as usize))
                     && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
@@ -980,7 +987,8 @@ impl World {
         for y in 0..piece.height {
             for x in 0..piece.width {
                 let mark = piece.cells[y * piece.width + x];
-                if mark == 0 {
+                // Castle boss8 enters independently, without replacing its native cell.
+                if mark == 0 || kind == 0x67d && mark == 8 {
                     continue;
                 }
                 let pos = Pos {
@@ -1397,8 +1405,12 @@ mod tests {
                 y: (96 + dy) as f32,
             };
             witnessed.insert((plan.width, plan.height, plan.boss));
-            for target in [7, 5, 6] {
-                let Some(marker) = plan.cells.iter().position(|m| *m == target) else {
+            for target in [7, 5, 6, 8] {
+                let marker = if target == 8 {
+                    plan.boss.1 * plan.width + plan.boss.0
+                } else if let Some(marker) = plan.cells.iter().position(|m| *m == target) {
+                    marker
+                } else {
                     continue;
                 };
                 targets.insert(target);
@@ -1466,6 +1478,7 @@ mod tests {
                     let prior_chest = (mode == 10)
                         .then(|| world.spawn_entity(0x501, native_pos, vec![-1; 8]).unwrap());
                     let ids_before: BTreeSet<_> = world.entities.keys().copied().collect();
+                    let cell_ids_before = world.cells.ids(index).to_vec();
                     world.rng = rand::rngs::StdRng::seed_from_u64(seed);
                     let result = world.place_named_setpiece(0x67d, &[3]);
                     assert_eq!(
@@ -1485,7 +1498,12 @@ mod tests {
                             assert_eq!(
                                 (cell.ground, cell.object, cell.config.as_str()),
                                 (
-                                    if target == 5 { 0x60 } else { 0xcb },
+                                    match target {
+                                        5 => 0x60,
+                                        6 => 0xcb,
+                                        8 => original.cells[index].ground,
+                                        _ => unreachable!(),
+                                    },
                                     Some(0x105),
                                     "name:source"
                                 )
@@ -1507,6 +1525,7 @@ mod tests {
                             world.entities.keys().copied().collect::<BTreeSet<_>>(),
                             ids_before
                         );
+                        assert_eq!(world.cells.ids(index), cell_ids_before.as_slice());
                         if let Some(id) = prior_chest {
                             assert!(world.cells.ids(index).contains(&id));
                         }
@@ -1518,7 +1537,7 @@ mod tests {
             }
         }
         assert_eq!(witnessed.len(), 4);
-        assert_eq!(targets, BTreeSet::from([5, 6, 7]));
+        assert_eq!(targets, BTreeSet::from([5, 6, 7, 8]));
     }
 
     #[test]

@@ -1103,14 +1103,13 @@ fn castle_ground_only_writes_preserve_native_scenery() {
             assert!(world.walkable(pos));
             bridges += 1;
         }
-        let boss_cell = world.map.cell(root.pos.x, root.pos.y).unwrap();
-        assert_eq!(
-            (
-                boss_cell.ground,
-                boss_cell.object,
-                boss_cell.config.as_str()
-            ),
-            (0x60, None, "")
+        assert_native(
+            Pos {
+                x: root.pos.x + 0.5,
+                y: root.pos.y + 0.5,
+            },
+            0x47,
+            Some(root.id),
         );
         let area = world.setpieces[0];
         witnessed.insert((
@@ -1190,26 +1189,27 @@ fn landmark_hero_boundaries_fit_published_layouts() {
                         .unwrap();
                     assert_eq!((chest.pos.x.fract(), chest.pos.y.fract()), (0.5, 0.5));
                     assert!(world.walkable(chest.pos));
-                    let chest_index =
-                        chest.pos.y as usize * world.map.width as usize + chest.pos.x as usize;
-                    let original = &birth_map.cells[chest_index];
-                    let current = &world.map.cells[chest_index];
-                    assert_eq!(
-                        (
-                            current.ground,
-                            current.object,
-                            &current.config,
-                            current.terrain,
-                            current.region
-                        ),
-                        (
-                            original.ground,
-                            original.object,
-                            &original.config,
-                            original.terrain,
-                            original.region
-                        )
-                    );
+                    for pos in [chest.pos, e.pos] {
+                        let index = pos.y as usize * world.map.width as usize + pos.x as usize;
+                        let original = &birth_map.cells[index];
+                        let current = &world.map.cells[index];
+                        assert_eq!(
+                            (
+                                current.ground,
+                                current.object,
+                                &current.config,
+                                current.terrain,
+                                current.region
+                            ),
+                            (
+                                original.ground,
+                                original.object,
+                                &original.config,
+                                original.terrain,
+                                original.region
+                            )
+                        );
+                    }
                     let local = match (
                         area.width,
                         area.height,
