@@ -1,5 +1,5 @@
 // GPL-3.0 reference; data/REALM-SRC-LICENSE: moistosaurus/realm-src@1855c017eab870d13f0b61b1cf0b9e66a01922ff
-// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,Sphinx,Temple,TempleA,TempleB,Oasis}.cs; NR-Core and Skilly.
+// wServer/realm/setpieces/{Grove,LichyTemple,Tower,Pyre,Castle,LavaFissure,SkullShrine,CubeGod,Pentaract,Sphinx,Temple,TempleA,TempleB,Oasis,Graveyard}.cs; NR-Core and Skilly.
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -73,7 +73,7 @@ impl Piece {
             BossAnchor::TempleB => 0.5,
             BossAnchor::Marker => match kind {
                 0x91f => 1.,
-                0x67d | 0x928 => 0.,
+                0x67d | 0x928 | 0x925 => 0.,
                 _ => 0.5,
             },
         };
@@ -542,6 +542,39 @@ impl Piece {
                 p.boss = (15, 20);
                 p
             }
+            0x925 => {
+                let mut p = Self::new(23, 35);
+                for y in 0..35 {
+                    for x in 0..23 {
+                        let floor = u8::from(!rng.gen_ratio(1, 3));
+                        p.set(x, y, if x % 22 == 0 || y % 34 == 0 { 2 } else { floor });
+                    }
+                }
+                let mut graves = Vec::new();
+                for y in 0..11 {
+                    for x in 0..7 {
+                        let (x, y) = (2 + 3 * x, 2 + 3 * y);
+                        if rng.gen_ratio(2, 3) {
+                            p.set(x, y, 4);
+                        } else {
+                            graves.push((x, y));
+                        }
+                    }
+                }
+                for c in p.cells.iter_mut().filter(|c| **c == 2) {
+                    let n: f32 = rng.r#gen();
+                    if n < 0.1 {
+                        *c = 1;
+                    } else if n < 0.4 {
+                        *c = 3;
+                    }
+                }
+                let (x, y) = *graves.choose(rng).expect("Graveyard left no open grave");
+                p.set(x, y, 7);
+                p.set(x + 1, y, 8);
+                p.boss = (x + 1, y);
+                p
+            }
             0x668 => {
                 let mut p = Self::new(40, 40);
                 for x in 0..40 {
@@ -643,7 +676,7 @@ impl Piece {
             }
             _ => unreachable!("named setpiece kind validated by caller"),
         };
-        if matches!(kind, 0x91b | 0x928 | 0x67d | 0x668 | 0xdc2) {
+        if matches!(kind, 0x91b | 0x928 | 0x67d | 0x668 | 0xdc2 | 0x925) {
             for _ in 0..rng.gen_range(0..4) {
                 p = p.rotate();
             }
@@ -657,7 +690,15 @@ impl Piece {
             p.set(19, 13, 0);
         } else if !matches!(
             kind,
-            0x91b | 0x935 | 0xd59 | 0xd50 | 0xd5f | 0xe37 | 0x67d | crate::dungeon::tomb::SPHINX
+            0x91b
+                | 0x935
+                | 0xd59
+                | 0xd50
+                | 0xd5f
+                | 0xe37
+                | 0x67d
+                | 0x925
+                | crate::dungeon::tomb::SPHINX
         ) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
             if kind == 0xdc2 {
@@ -709,6 +750,10 @@ impl Piece {
             (0x67d, 4) => (0x60, Some(0x120)),
             (0x67d, 5) => (0x60, Some(0x122)),
             (0x67d, 6) => (0xcb, None),
+            (0x925, 1 | 7) => (0x48, None),
+            (0x925, 2) => (0x48, Some(0x120)),
+            (0x925, 3) => (0x48, Some(0x122)),
+            (0x925, 4) => (0x48, Some(0x184)),
             (0x668, 1) => (0xf4, None),
             (0x668, 2) => (0xf4, Some(0x153)),
             (0xd56, 1) => (0x57, None),
@@ -869,7 +914,7 @@ impl World {
             .cells
             .iter()
             .copied()
-            .filter(|m| *m != 0 && !(kind == 0x67d && *m == 8))
+            .filter(|m| *m != 0 && !(matches!(kind, 0x67d | 0x925) && *m == 8))
         {
             let (ground, object) = Piece::tile(kind, mark);
             ensure!(
@@ -915,13 +960,13 @@ impl World {
             })
             .collect();
         candidates.shuffle(&mut self.rng);
-        let castle_chest = if kind == 0x67d {
+        let chest_cell = if matches!(kind, 0x67d | 0x925) {
             Some(
                 piece
                     .cells
                     .iter()
                     .position(|mark| *mark == 7)
-                    .context("Castle missing chest marker")?,
+                    .context("setpiece missing chest marker")?,
             )
         } else {
             None
@@ -940,11 +985,11 @@ impl World {
                     && a.y > 0
                     && a.x + a.width < self.map.width
                     && a.y + a.height < self.map.height
-                    && (!matches!(kind, 0x67d | 0x928) || self.walkable(boss))
+                    && (!matches!(kind, 0x67d | 0x928 | 0x925) || self.walkable(boss))
                     && (!matches!(kind, 0x91b | 0xd5f)
                         || piece.cells[piece.boss.1 * piece.width + piece.boss.0] != 0
                         || self.walkable(boss))
-                    && castle_chest.is_none_or(|i| self.walkable(Pos {
+                    && chest_cell.is_none_or(|i| self.walkable(Pos {
                         x: (a.x + (i % piece.width) as i32) as f32 + 0.5,
                         y: (a.y + (i / piece.width) as i32) as f32 + 0.5,
                     }))
@@ -961,9 +1006,9 @@ impl World {
                         .all(|(x, y)| a.distance(Pos { x: *x, y: *y }) >= 64.)
                     && protected.iter().all(|p| a.distance(*p) >= 4.)
                     // Offset anchors must retain habitat at the actual destination, not only the sampled center.
-                    && (!matches!(kind, 0x91b | 0x91f | 0xdc2 | 0x67d | 0x928)
+                    && (!matches!(kind, 0x91b | 0x91f | 0xdc2 | 0x67d | 0x928 | 0x925)
                         || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
-                    && (!matches!(kind, 0x91b | 0x67d | 0xd5f)
+                    && (!matches!(kind, 0x91b | 0x67d | 0xd5f | 0x925)
                         || self.setpiece_scenery_clear(boss.y as usize * self.map.width as usize + boss.x as usize))
                     && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
@@ -977,7 +1022,7 @@ impl World {
                             ) && mark == 0;
                             self.setpiece_cell_available(c, untouched, retain_authored_lava)
                                 && (kind != 0x928 || self.setpiece_scenery_clear(index))
-                                && (!matches!((kind, mark), (0x67d, 5 | 6) | (0x91b, 3))
+                                && (!matches!((kind, mark), (0x67d, 5 | 6) | (0x91b | 0x925, 3))
                                     || self.walkable(Pos { x: x as f32 + 0.5, y: y as f32 + 0.5 })
                                         && self.setpiece_scenery_clear(index))
                         })
@@ -1006,21 +1051,21 @@ impl World {
         for y in 0..piece.height {
             for x in 0..piece.width {
                 let mark = piece.cells[y * piece.width + x];
-                // Castle boss8 enters independently, without replacing its native cell.
-                if mark == 0 || kind == 0x67d && mark == 8 {
+                // Castle and Graveyard boss8 enter independently, without replacing their native cells.
+                if mark == 0 || matches!(kind, 0x67d | 0x925) && mark == 8 {
                     continue;
                 }
                 let pos = Pos {
                     x: area.x as f32 + x as f32 + 0.5,
                     y: area.y as f32 + y as f32 + 0.5,
                 };
-                if kind == 0x67d && mark == 7 {
+                if matches!(kind, 0x67d | 0x925) && mark == 7 {
                     self.spawn_landmark_chests(kind, pos)?;
                     continue;
                 }
                 let (ground, object) = Piece::tile(kind, mark);
                 let index = pos.y as usize * self.map.width as usize + pos.x as usize;
-                if matches!((kind, mark), (0x67d, 5 | 6) | (0x91b, 3)) {
+                if matches!((kind, mark), (0x67d, 5 | 6) | (0x91b | 0x925, 3)) {
                     // The community renderers retain native scenery beneath these ground-only writes.
                     Arc::make_mut(&mut self.map).cells[index].ground = ground;
                     if let Some(object) = object {

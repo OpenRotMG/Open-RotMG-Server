@@ -5907,6 +5907,8 @@ impl World {
             eligible.len()
         } else if crate::loot::period_dungeon(defeated.kind)
             || crate::loot::period_surface(defeated.kind)
+            // realm-src Loots.cs Handle rolls public skeleton loot once per death, not per contributor.
+            || matches!(defeated.kind, 0x65a..=0x65d)
         {
             1
         } else {
