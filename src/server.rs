@@ -2449,6 +2449,10 @@ async fn connection_io<S, I>(
                 if send!(Message::Binary(codec.frame(wire::PING,o.0).into())).is_err(){break;}}}
         }
     }
+    // The input task closes its queue right after naming a cause, so the loop can see the closed queue first.
+    if close_reason == CloseReason::Transport && lost_rx.borrow().is_some() {
+        close_reason = CloseReason::Output;
+    }
     input_task.abort();
     // Publish custody before diagnostics; neither a cancelled socket task nor its sink owns cleanup.
     let cancelled_admission = session
@@ -3092,6 +3096,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             "/api/diagnostics/{key}/report",
             post(diagnostics::submit).layer(DefaultBodyLimit::max(1_500_000)),
         )
+        .route("/api/bug-reports/{id}/status", get(diagnostics::status))
         .route(
             "/api/bug-reports/{id}/screenshot.png",
             get(diagnostics::screenshot),

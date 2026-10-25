@@ -4277,8 +4277,7 @@ impl World {
             protocol("dead, departing or quarantined player cannot shoot")
         );
 
-        let ability =
-            native && matches!(p.ability_shot, Some((k, t, _, _)) if k == kind && t == time);
+        let ability = matches!(p.ability_shot, Some((k, t, _, _)) if k == kind && t == time);
         let denied_ability = ability && matches!(p.ability_shot, Some((_, _, false, _)));
         ensure!(
             p.character.items[0] == kind as i32
