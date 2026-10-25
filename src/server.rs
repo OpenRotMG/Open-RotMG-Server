@@ -3192,26 +3192,38 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         .await;
         if let Err(e) = result {
             tracing::error!(error=%e,"shutdown persistence failed");
-            *report.lock().expect("shutdown report poisoned") = Some(e.to_string());
+            *report.lock().expect("shutdown report poisoned") = Some(e);
         }
         stopped.send_replace(true);
     });
-    tokio::select! {
+    let result = tokio::select! {
         mut incident = a.world.supervisor.failed() => {
             a.shutdown.send_replace(true);
             lifecycle::preserve_uncertain(&a, &mut incident)?;
-            bail!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id);
+            Err(anyhow::anyhow!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id))
         },
-        result = serving => result?,
+        result = serving => result.map_err(anyhow::Error::from),
         _ = async { let _ = stop.changed().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } => {
-            let failure = failure.lock().expect("shutdown report poisoned").clone();
-            bail!("HTTP shutdown deadline exceeded; drain failure={failure:?}");
+            Err(anyhow::anyhow!("HTTP shutdown deadline exceeded"))
         }
+    };
+    let failure = failure.lock().expect("shutdown report poisoned").take();
+    if let Some(error) = failure {
+        return failed_shutdown(&a, error).await;
     }
-    if let Some(e) = failure.lock().expect("shutdown report poisoned").take() {
-        bail!("{e}");
+    result
+}
+async fn failed_shutdown(a: &App, error: anyhow::Error) -> Result<()> {
+    a.world
+        .supervisor
+        .failure("shutdown", anyhow::anyhow!("{error:#}"));
+    let mut incident = a.world.supervisor.failed().await;
+    if let Err(checkpoint) = lifecycle::preserve_uncertain(a, &mut incident) {
+        return Err(error.context(format!(
+            "shutdown account-fence checkpoint failed: {checkpoint:#}"
+        )));
     }
-    Ok(())
+    Err(error)
 }
 async fn shutdown_signal() -> Result<()> {
     #[cfg(unix)]
