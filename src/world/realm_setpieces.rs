@@ -73,7 +73,7 @@ impl Piece {
             BossAnchor::TempleB => 0.5,
             BossAnchor::Marker => match kind {
                 0x91f => 1.,
-                0x67d => 0.,
+                0x67d | 0x928 => 0.,
                 _ => 0.5,
             },
         };
@@ -651,7 +651,11 @@ impl Piece {
         if kind == 0x668 {
             p.boss = (20, 20);
         }
-        if !matches!(
+        if kind == 0x928 {
+            // The selected primary assigns its spawn-only marker after rotating the tiles.
+            p.boss = (19, 13);
+            p.set(19, 13, 0);
+        } else if !matches!(
             kind,
             0x91b | 0x935 | 0xd59 | 0xd50 | 0xd5f | 0xe37 | 0x67d | crate::dungeon::tomb::SPHINX
         ) {
@@ -936,7 +940,7 @@ impl World {
                     && a.y > 0
                     && a.x + a.width < self.map.width
                     && a.y + a.height < self.map.height
-                    && (kind != 0x67d || self.walkable(boss))
+                    && (!matches!(kind, 0x67d | 0x928) || self.walkable(boss))
                     && (!matches!(kind, 0x91b | 0xd5f)
                         || piece.cells[piece.boss.1 * piece.width + piece.boss.0] != 0
                         || self.walkable(boss))
@@ -957,7 +961,7 @@ impl World {
                         .all(|(x, y)| a.distance(Pos { x: *x, y: *y }) >= 64.)
                     && protected.iter().all(|p| a.distance(*p) >= 4.)
                     // Offset anchors must retain habitat at the actual destination, not only the sampled center.
-                    && (!matches!(kind, 0x91b | 0x91f | 0xdc2 | 0x67d)
+                    && (!matches!(kind, 0x91b | 0x91f | 0xdc2 | 0x67d | 0x928)
                         || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
                     && (!matches!(kind, 0x91b | 0x67d | 0xd5f)
                         || self.setpiece_scenery_clear(boss.y as usize * self.map.width as usize + boss.x as usize))
@@ -972,6 +976,7 @@ impl World {
                                 0xdc2 | crate::dungeon::beach::BUM | crate::dungeon::tomb::SPHINX
                             ) && mark == 0;
                             self.setpiece_cell_available(c, untouched, retain_authored_lava)
+                                && (kind != 0x928 || self.setpiece_scenery_clear(index))
                                 && (!matches!((kind, mark), (0x67d, 5 | 6) | (0x91b, 3))
                                     || self.walkable(Pos { x: x as f32 + 0.5, y: y as f32 + 0.5 })
                                         && self.setpiece_scenery_clear(index))
@@ -1096,6 +1101,197 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tower_fixed_birth_preserves_spacing_and_native_admission() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        assert!(content.objects[&0x100].blocks && !content.objects[&0x100].full_occupy);
+        assert!(content.objects[&0x1f3].full_occupy);
+        for seed in 0..16 {
+            for mode in 0..21 {
+                let center = 96 * 192 + 96;
+                let destination = 96 * 192 + 102;
+                let hole = 83 * 192 + 83;
+                let mut map = temple_test_map(0);
+                map.cells[center].terrain = 3;
+                map.cells[destination].terrain = if mode == 2 { 0 } else { 3 };
+                let changed = match mode {
+                    13 | 14 | 19 => center,
+                    15..=18 => hole,
+                    _ => destination,
+                };
+                map.cells[destination].object = Some(0x105);
+                map.cells[destination].config = "name:native;size:137".into();
+                map.cells[changed].object = Some(match mode {
+                    3 => 0x100,
+                    4 | 15 => 0x1f3,
+                    _ => 0x105,
+                });
+                map.cells[changed].ground = match mode {
+                    8 | 13 => 0xbc,
+                    9 | 19 => 0x72,
+                    10 => 0x73,
+                    12 | 18 => 0xf4,
+                    _ => 0x46,
+                };
+                if mode == 11 || mode == 17 {
+                    map.cells[changed].region = 1;
+                }
+                let original = Arc::new(map);
+                let mut world = World::new(content.clone(), original.clone()).unwrap();
+                world.realm_layout = Some("classic-world-01-reconstruction".into());
+                let native = world.cells.ids(destination)[0];
+                if matches!(mode, 5 | 14 | 16) {
+                    let id = world.cells.ids(changed)[0];
+                    world
+                        .entities
+                        .get_mut(&id)
+                        .unwrap()
+                        .extra_stats
+                        .push((54, 1));
+                }
+                if mode == 20 {
+                    world.entities.get_mut(&native).unwrap().name = "native".into();
+                }
+                if mode == 6 || mode == 7 {
+                    world
+                        .insert_entity(
+                            if mode == 6 { 0x501 } else { 0x91f },
+                            Pos { x: 102., y: 96. },
+                            vec![],
+                        )
+                        .unwrap();
+                }
+                let previous = world
+                    .spawn_entity(
+                        0x91f,
+                        Pos {
+                            x: 102.,
+                            y: 96. - if mode == 1 { 31.75 } else { 32. },
+                        },
+                        vec![],
+                    )
+                    .unwrap();
+                world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                let ids: BTreeSet<_> = world.entities.values().map(|e| e.id).collect();
+                let indices: Vec<_> = [center, destination, hole]
+                    .map(|i| world.cells.ids(i).to_vec())
+                    .into();
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let result = world.place_named_setpiece(0x928, &[4, 3]);
+                assert_eq!(
+                    result.is_ok(),
+                    mode == 0 || mode == 20,
+                    "seed {seed}, mode {mode}: {result:?}"
+                );
+                if let Ok(pos) = result {
+                    assert_eq!((pos.x, pos.y), (102., 96.));
+                    assert_eq!(pos.distance(world.entities[&previous].pos), 32.);
+                    assert!(world.walkable(pos));
+                    assert!(world.cells.ids(destination).contains(&native));
+                    assert_eq!(world.cells.ids(destination).len(), 1);
+                    let c = &world.map.cells[destination];
+                    assert_eq!(
+                        (c.ground, c.object, c.config.as_str(), c.terrain, c.region),
+                        (0x46, Some(0x105), "name:native;size:137", 3, 0)
+                    );
+                    assert_eq!(
+                        matches!(
+                            &world.entities[&native].state,
+                            entity_store::EntityState::Owned(_)
+                        ),
+                        mode == 20
+                    );
+                } else {
+                    assert!(Arc::ptr_eq(&original, &world.map));
+                    assert!(world.setpieces.is_empty());
+                    assert_eq!(
+                        world
+                            .entities
+                            .values()
+                            .map(|e| e.id)
+                            .collect::<BTreeSet<_>>(),
+                        ids
+                    );
+                    for (i, before) in [center, destination, hole].into_iter().zip(indices) {
+                        assert_eq!(world.cells.ids(i), before);
+                    }
+                    assert_eq!(
+                        (
+                            world.entities[&native].name.as_str(),
+                            world.entities[&native].size
+                        ),
+                        ("native", 137)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tower_rotates_the_stencil_before_assigning_the_raw_spawn_only_marker() {
+        let quarter = [
+            "............XX",
+            "........XXXXXX",
+            "......XXXXXXXX",
+            ".....XXXX=====",
+            "....XXX=======",
+            "...XXX========",
+            "..XXX=========",
+            "..XX==========",
+            ".XXX==========",
+            ".XX===========",
+            ".XX===========",
+            ".XX===========",
+            "XXX===========",
+            "XXX===========",
+        ];
+        let mut rotations = BTreeSet::new();
+        for seed in 0..16 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let piece = Piece::build(0x928, &mut rng);
+            let mut reference = rand::rngs::StdRng::seed_from_u64(seed);
+            let turns: i32 = reference.gen_range(0..4);
+            rotations.insert(turns);
+            assert_eq!(rng.r#gen::<u64>(), reference.r#gen::<u64>());
+            assert_eq!((piece.width, piece.height, piece.boss), (27, 27, (19, 13)));
+            let pos = piece.boss_position(
+                0x928,
+                Area {
+                    x: 83,
+                    y: 83,
+                    width: 27,
+                    height: 27,
+                },
+            );
+            assert_eq!((pos.x, pos.y), (102., 96.));
+            for y in 0..27usize {
+                for x in 0..27usize {
+                    let (mut u, mut v) = (x, y);
+                    for _ in 0..turns {
+                        (u, v) = (v, 26 - u);
+                    }
+                    let expected = if (x, y) == (19, 13) {
+                        0
+                    } else if (1..4).contains(&v) && (8..19).contains(&u)
+                        || v == 0 && (12..15).contains(&u)
+                    {
+                        1
+                    } else {
+                        match quarter[v.min(26 - v)].as_bytes()[u.min(26 - u)] {
+                            b'X' => 2,
+                            b'=' => 1,
+                            _ => 0,
+                        }
+                    };
+                    assert_eq!(piece.cells[y * 27 + x], expected, "seed {seed}: {x},{y}");
+                }
+            }
+        }
+        assert_eq!(rotations.len(), 4);
+        assert_eq!(Piece::tile(0x928, 1), (0x60, None));
+        assert_eq!(Piece::tile(0x928, 2), (0x60, Some(0x120)));
+    }
 
     #[test]
     fn lich_fixed_anchor_retains_reference_birth_cell() {
