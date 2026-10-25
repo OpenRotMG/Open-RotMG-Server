@@ -304,9 +304,7 @@ pub(crate) async fn stream(
                 _ = ticks.tick() => {},
                 _ = shutdown.wait_for(|stop| *stop) => return None,
             }
-            if viewer.cctv.binding(viewer.name).is_none() {
-                return None;
-            }
+            viewer.cctv.binding(viewer.name)?;
             let (event, seen) = viewer.cctv.update(viewer.name, seen);
             let event = sse::Event::default().data(event);
             Some((
