@@ -1,14 +1,9 @@
 use super::tests::fixture;
 use super::*;
 use crate::world::TradeAction;
-
-fn invite(m: &mut Market, v: &PlayerView) {
-    let mut w = wire::Writer::new();
-    w.utf("Peer");
-    m.trade_packet(&Packet { id: 61, body: w.0 }, v).unwrap();
-}
 fn opened(m: &mut Market, v: &PlayerView, c: &Content) {
-    invite(m, v);
+    m.quote = m.quote(v, c, None).unwrap();
+    m.incoming_request("Peer".into(), v);
     assert!(matches!(
         m.incoming_action(v, c, None).unwrap(),
         Some(TradeAction::Request { .. })
@@ -18,7 +13,7 @@ fn opened(m: &mut Market, v: &PlayerView, c: &Content) {
         peer: "Peer".into(),
         items: [
             v.character.items.clone(),
-            [vec![-1; 4], vec![0xa22; 8]].concat(),
+            [vec![-1; 4], vec![DEFENSE, -1, -1, -1, -1, -1, -1, -1]].concat(),
         ],
         tradeable: [true; 12],
         offers: [[false; 12]; 2],
@@ -28,162 +23,49 @@ fn opened(m: &mut Market, v: &PlayerView, c: &Content) {
     });
 }
 #[test]
-fn incoming_request_opens_independently_of_market_session_without_offering_stock() {
+fn incoming_human_exchange_selects_advertised_real_goods_and_requires_payment() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
-    let (mut m, v) = fixture(&c, [0xa1d, -1, -1, -1, -1, -1, -1, -1]);
-    m.session_used = true;
+    let (mut m, mut v) = fixture(&c, [SPEED, SPEED, SPEED, SPEED, -1, -1, -1, -1]);
     opened(&mut m, &v, &c);
-    assert!(m.session.is_none());
-    assert!(m.bargain.is_none());
+    match m.incoming_action(&v, &c, None).unwrap().unwrap() {
+        TradeAction::Change { offer } => assert_eq!(offer.iter().filter(|b| **b).count(), 4),
+        _ => panic!("must offer advertised goods, not interpret an exchange as a gift"),
+    }
     assert!(m.incoming_action(&v, &c, None).unwrap().is_none());
     m.trade.as_mut().unwrap().offers[1][4] = true;
+    v.time_ms += 3000;
+    v.clock_at += Duration::from_millis(3000);
     match m.incoming_action(&v, &c, None).unwrap().unwrap() {
         TradeAction::Accept { mine, theirs } => {
-            assert_eq!(mine, [false; 12]);
+            assert_eq!(mine.iter().filter(|b| **b).count(), 4);
             assert_eq!(theirs.iter().filter(|b| **b).count(), 1);
         }
-        _ => panic!("useful free gift should be accepted"),
+        _ => panic!("matching WINDOW exchange should accept after countdown"),
     }
-    m.trade.as_mut().unwrap().ready_at += Duration::from_secs(3);
-    assert!(m.incoming_action(&v, &c, None).unwrap().is_none());
-}
-#[test]
-fn incoming_requests_preserve_capacity_contact_lifecycle_and_bargains() {
-    let c = Content::load(std::path::Path::new("data")).unwrap();
-    for case in 0..10 {
-        let (mut m, mut v) = fixture(&c, [-1; 8]);
-        match case {
-            0 => v.character.items[4..].fill(0xa22),
-            1 => v.map.name = "Realm".into(),
-            2 => v.lifecycle.busy = true,
-            3 => v.lifecycle.alive = false,
-            4 => v.lifecycle.death_pending = true,
-            5 => v.lifecycle.departing = true,
-            6 => v.lifecycle.quarantined = true,
-            7 => v.objects[0].position.x += 3.,
-            8 => v.objects[0].hp = 0,
-            9 => v.objects[0].account = None,
-            _ => unreachable!(),
-        }
-        invite(&mut m, &v);
-        assert!(m.incoming.is_none(), "case {case}");
-    }
-    let (mut m, mut v) = fixture(&c, [-1; 8]);
-    m.replace(Terms {
-        version: 1,
-        accounts: [1, 2],
-        names: ["Trader".into(), "Peer".into()],
-        goods: [
-            Goods {
-                kind: 0xa1d,
-                quantity: 1,
-            },
-            Goods {
-                kind: 0xa22,
-                quantity: 1,
-            },
-        ],
-        meeting: [-2, 5, 5],
-        expires: now() + 120,
-        batch: 1,
-    });
-    invite(&mut m, &v);
     assert!(
-        m.incoming.is_none(),
-        "an invite cannot replace negotiated consent"
+        m.bargain.is_none(),
+        "UI acceptance does not fabricate a settlement"
     );
-    m.bargain = None;
-    opened(&mut m, &v, &c);
-    v.objects[0].account = Some(3);
-    assert!(matches!(
-        m.incoming_action(&v, &c, None).unwrap(),
-        Some(TradeAction::Cancel)
-    ));
 }
 #[test]
-fn canonical_health_gift_policy_preserves_actual_need_and_reserves() {
-    use crate::bots::social::Life;
+fn incoming_incompatible_window_refuses_contextually_and_never_gives_wanted_potions_free() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
-    for (backpack, text, active) in [
-        ([-1; 8], "take health", true),
-        ([0xa22, 0xa22, -1, -1, -1, -1, -1, -1], "take health", false),
-        (
-            [0xa22, 0xa22, -1, -1, -1, -1, -1, -1],
-            "spare health?",
-            false,
-        ),
-        (
-            [0xa22, 0xa22, 0xa22, -1, -1, -1, -1, -1],
-            "spare health?",
-            true,
-        ),
-    ] {
-        let (_, v) = fixture(&c, backpack);
-        let mut w = wire::Writer::new();
-        w.utf("Peer")
-            .i32(20)
-            .i32(0)
-            .u8(0)
-            .utf("")
-            .utf(&format!("Trader, {text}"))
-            .utf("");
-        let packet = Packet {
-            id: wire::TEXT,
-            body: w.0,
-        };
-        for incoming in [false, true] {
-            let mut life = Life::default();
-            assert_eq!(
-                life.receive(&packet, &v, "Trader", 6., incoming).unwrap(),
-                !incoming
-            );
-            assert_eq!(
-                life.gift_active(),
-                active && !incoming,
-                "{text} with {backpack:?}, incoming={incoming}"
-            );
-        }
-    }
-}
-#[test]
-fn incoming_requests_do_not_refresh_lock_or_bypass_native_request_cooldown() {
-    let c = Content::load(std::path::Path::new("data")).unwrap();
-    let (mut m, mut v) = fixture(&c, [-1; 8]);
-    opened(&mut m, &v, &c);
-    v.elapsed_ms += 59_000;
-    invite(&mut m, &v);
-    v.elapsed_ms += 1_001;
-    assert!(matches!(
-        m.incoming_action(&v, &c, None).unwrap(),
-        Some(TradeAction::Cancel)
-    ));
-    m.trade = None;
-    m.end_incoming(&v);
-    invite(&mut m, &v);
-    assert!(m.incoming.is_none());
-    v.elapsed_ms += 20_000;
-    invite(&mut m, &v);
-    assert!(m.incoming.is_some());
-}
-#[test]
-fn incoming_gifts_reject_junk_excess_deficits_capacity_and_bot_goods() {
-    let c = Content::load(std::path::Path::new("data")).unwrap();
-    for case in 0..5 {
-        let (mut m, mut v) = fixture(&c, [-1; 8]);
+    for case in 0..6 {
+        let (mut m, mut v) = fixture(&c, [SPEED, SPEED, SPEED, SPEED, -1, -1, -1, -1]);
         opened(&mut m, &v, &c);
-        let t = m.trade.as_mut().unwrap();
-        t.offers[1][4] = true;
+        m.incoming_action(&v, &c, None).unwrap();
+        m.trade.as_mut().unwrap().offers[1][4] = true;
         match case {
-            0 => t.items[1][4] = 0xa97, // Same weapon is not an upgrade.
-            1 => {
-                t.offers[1][5] = true;
-                t.offers[1][6] = true;
-            }
-            2 => v.character.items[4..].fill(0xa22),
-            3 => t.offers[0][4] = true,
-            4 => t.offers[1][0] = true,
+            0 => m.trade.as_mut().unwrap().items[1][4] = 0xa22,
+            1 => v.character.items[4] = -1,
+            2 => v.objects[0].account = Some(99),
+            3 => v.lifecycle.departing = true,
+            4 => v.elapsed_ms += 60_001,
+            5 => v.character.hp = 1,
             _ => unreachable!(),
         }
+        v.time_ms += 3000;
+        v.clock_at += Duration::from_millis(3000);
         assert!(
             matches!(
                 m.incoming_action(&v, &c, None).unwrap(),
@@ -191,5 +73,19 @@ fn incoming_gifts_reject_junk_excess_deficits_capacity_and_bot_goods() {
             ),
             "case {case}"
         );
+        if case == 0 {
+            assert_eq!(m.outgoing.as_ref().unwrap().text, "nty need 1 def");
+        }
     }
+    // A bot buying speed offers its held Defense, rather than accepting the Speed for free.
+    let (mut m, mut v) = fixture(&c, [DEFENSE, -1, -1, -1, -1, -1, -1, -1]);
+    opened(&mut m, &v, &c);
+    m.trade.as_mut().unwrap().items[1][4..8].fill(SPEED);
+    m.incoming_action(&v, &c, None).unwrap();
+    m.trade.as_mut().unwrap().offers[1][4..8].fill(true);
+    v.time_ms += 3000;
+    v.clock_at += Duration::from_millis(3000);
+    assert!(
+        matches!(m.incoming_action(&v,&c,None).unwrap(),Some(TradeAction::Accept{mine,..}) if mine[4])
+    );
 }

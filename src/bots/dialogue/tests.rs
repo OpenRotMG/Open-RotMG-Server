@@ -160,7 +160,7 @@ async fn policy_speech_wait_is_enforced_but_does_not_stack_after_a_past_deadline
     );
 }
 
-async fn provider(
+pub(super) async fn provider(
     status: axum::http::StatusCode,
     body: Value,
 ) -> (Arc<Service>, tokio::task::JoinHandle<()>) {

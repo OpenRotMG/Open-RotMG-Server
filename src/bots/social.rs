@@ -186,9 +186,11 @@ pub(super) async fn market(
     if !revoke_market(app, brain).await? {
         return Ok(true);
     }
-    if brain.mind.market.incoming.is_some() {
-        return incoming::incoming(app, brain, v).await;
-    }
+    let incoming_active = if brain.mind.market.incoming.is_some() {
+        incoming::incoming(app, brain, v).await?
+    } else {
+        false
+    };
     brain.mind.market.observe(v);
     if let Some(b) = &brain.mind.market.bargain {
         let receipts = app
@@ -204,55 +206,84 @@ pub(super) async fn market(
         .clone()
         .filter(|_| v.elapsed_ms >= brain.mind.market.next_message_ms)
     {
-        let text = message.chat();
-        let optional = message.optional_public().map(str::to_owned);
-        let id = v.session.player;
-        let received = app.world.clock.now();
-        let society = app.society.clone();
-        // Canonical transaction protocol cannot be paraphrased and must not wait on generation.
-        match app
-            .world
-            .directory(move |d| {
-                let world = d.location(id)?;
-                let now = d.tick * 50;
-                let mut state = society.lock().expect("adventure registry poisoned");
-                if let Some(body) = &optional
-                    && state.speech.repeated(world, now, body)
-                {
-                    return Ok(false);
-                }
-                d.chat(id, text, received)?;
-                if let Some(body) = optional {
-                    state.speech.record(world, now, &body);
-                }
-                Ok(true)
-            })
-            .await
+        if !brain
+            .mind
+            .market
+            .message_current(&message, v, &app.content, brain.mind.future_class)?
         {
-            Ok(true) => {
-                tracing::info!(account=v.session.account,channel=?message.channel,text=message.text,consent=message.consent,terms=?brain.mind.market.bargain,"canonical market policy terms published without generation");
-                brain.mind.market.published(&message);
-                brain.mind.market.next_message_ms = v.elapsed_ms + 1500;
+            brain.mind.market.outgoing = None;
+            tracing::info!(
+                account = v.session.account,
+                "market speech discarded: intent or held goods changed"
+            );
+        } else if let Some(service) = &app.dialogue {
+            match service.market_wording(
+                &brain.mind.market.name,
+                &message,
+                &app.content,
+                serde_json::json!({"sociability":brain.profile.companions,
+                    "patience":brain.profile.reaction,"resources":brain.profile.resources}),
+            ) {
+                Ok(Some(words)) => {
+                    let mut generated = message.clone();
+                    generated.text = words;
+                    let text = generated.chat();
+                    let id = v.session.player;
+                    let session = [v.session.world, id, v.session.character];
+                    let revision = v.character.inventory_revision;
+                    let market = brain.mind.market.clone();
+                    let content = app.content.clone();
+                    let future = brain.mind.future_class;
+                    let received = app.world.clock.now();
+                    let published = app
+                        .world
+                        .directory(move |d| {
+                            let current = d.player_view(id)?;
+                            ensure!(
+                                [current.session.world, id, current.session.character] == session
+                                    && current.character.inventory_revision == revision
+                                    && market
+                                        .message_current(&message, &current, &content, future)?,
+                                "market speech state changed before publication"
+                            );
+                            d.chat(id, text, received)
+                        })
+                        .await;
+                    match published {
+                        Ok(()) => {
+                            brain.mind.market.outgoing = None;
+                            brain.mind.market.next_message_ms = v.elapsed_ms + 1500;
+                            tracing::info!(
+                                account = v.session.account,
+                                text = generated.text,
+                                "generated inventory-bound market speech published"
+                            );
+                        }
+                        Err(error) => {
+                            brain.mind.market.outgoing = None;
+                            tracing::warn!(account=v.session.account, %error, "market speech not published");
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    brain.mind.market.outgoing = None;
+                    tracing::error!(account=v.session.account, %error, "market generation failed; no substitute speech");
+                }
             }
-            Ok(false) => {
-                tracing::info!(
-                    account = v.session.account,
-                    "optional market advertisement suppressed: recent public repeat"
-                );
-                brain.mind.market.outgoing = None;
-            }
-            Err(error) => {
-                tracing::warn!(account=v.session.account,%error,"market message publication failed without agreement");
-                brain.mind.market.outgoing = None;
-                brain
-                    .mind
-                    .market
-                    .finish("communication_failed_remaining_balance_unenforced");
-            }
+        } else {
+            brain.mind.market.outgoing = None;
+            tracing::warn!(
+                account = v.session.account,
+                "market speech unavailable: dialogue service disabled; no substitute speech"
+            );
         }
     }
     if before != brain.mind {
         brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
+    }
+    if incoming_active {
+        return Ok(true);
     }
     let Some(b) = brain
         .mind

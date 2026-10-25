@@ -298,6 +298,7 @@ impl World {
         peer: i32,
         binding: (i32, String),
         action: TradeAction,
+        quote: Option<[crate::bots::pursuits::market::Goods; 2]>,
     ) -> Result<Option<TradePlan>> {
         let p = self.players.get(&id).context("incoming trader missing")?;
         ensure!(
@@ -305,7 +306,7 @@ impl World {
             "incoming trade controller/session changed"
         );
         if matches!(action, TradeAction::Cancel) {
-            self.cancel_trade(id, "Incoming gift declined or contact changed.");
+            self.cancel_trade(id, "Incoming exchange declined or contact changed.");
             return Ok(None);
         }
         self.trade_ready(id)?;
@@ -319,32 +320,64 @@ impl World {
                 && q.character.name == binding.1,
             "incoming trade observed contact/world changed"
         );
+        let quote = quote.context("incoming exchange has no inventory-bound quote")?;
+        ensure!(
+            quote
+                .iter()
+                .all(|g| (0..=65535).contains(&g.kind) && (1..=8).contains(&g.quantity))
+                && quote[0].kind != quote[1].kind,
+            "invalid incoming exchange quantities"
+        );
+        let matches =
+            |items: &[i32], mask: &[bool; 12], goods: &crate::bots::pursuits::market::Goods| {
+                mask.iter().filter(|b| **b).count() == usize::from(goods.quantity)
+                    && mask
+                        .iter()
+                        .enumerate()
+                        .all(|(i, b)| !*b || (i >= 4 && items[i] == goods.kind))
+            };
         match action {
             TradeAction::Request { name } => {
                 ensure!(
                     name == binding.1
-                        && p.character.items.iter().skip(4).any(|k| *k < 0)
-                        && self
-                            .trade_requests
-                            .get(&peer)
-                            .is_some_and(|(to, until)| *to == id && *until > self.now),
-                    "incoming request expired or capacity changed"
+                        && p.character
+                            .items
+                            .iter()
+                            .skip(4)
+                            .filter(|k| **k == quote[0].kind)
+                            .count()
+                            >= usize::from(quote[0].quantity),
+                    "incoming exchange request stock changed"
                 );
                 self.request_trade(id, name)?;
+            }
+            TradeAction::Change { offer } => {
+                let key = self.trade_key(id).context("incoming trade missing")?;
+                ensure!(
+                    self.trades[&key].players.contains(&peer)
+                        && self.trades[&key].deliveries == [None, None],
+                    "incoming exchange belongs to another counterparty or installment"
+                );
+                ensure!(
+                    matches(&p.character.items, &offer, &quote[0]),
+                    "own offer differs from market quote"
+                );
+                self.change_trade(id, offer)?;
             }
             TradeAction::Accept { mine, theirs } => {
                 let key = self.trade_key(id).context("incoming trade missing")?;
                 let t = &self.trades[&key];
+                let side = usize::from(t.players[1] == id);
                 ensure!(
                     t.players.contains(&peer)
                         && t.deliveries == [None, None]
-                        && mine.iter().all(|b| !b)
-                        && theirs.iter().any(|b| *b),
-                    "incoming gift must be free and nonempty, without negotiated deliveries"
+                        && matches(&t.items[side], &mine, &quote[0])
+                        && matches(&t.items[1 - side], &theirs, &quote[1]),
+                    "window goods differ from inventory-bound market quote"
                 );
                 return self.accept_trade(id, mine, theirs);
             }
-            _ => bail!("incoming request cannot authorize bot goods"),
+            TradeAction::Cancel => unreachable!(),
         }
         Ok(None)
     }
@@ -798,88 +831,149 @@ mod community_tests {
         assert!(w.trades.is_empty(), "a request is not reciprocal consent");
     }
     #[tokio::test]
-    async fn incoming_free_gift_opens_only_real_requests_and_commits_without_bot_goods() {
+    async fn incoming_market_window_exchange_requires_real_payment_and_commits_durable_receipt() {
+        use crate::bots::pursuits::market::Goods;
         let (mut w, store, ids, _) = fixture().await;
+        for (side, id) in ids.into_iter().enumerate() {
+            let mut items = w.players[&id].character.items.clone();
+            items[4..].fill(-1);
+            if side == 0 {
+                items[4] = 0xa20;
+            } else {
+                items[4..8].fill(0xa21);
+            }
+            let plan = w.plan(id, items, None);
+            let revision = store
+                .exchange(
+                    vec![InventoryWrite {
+                        id: plan.character,
+                        account: plan.account,
+                        revision: plan.revision,
+                        items: plan.items.clone(),
+                    }],
+                    vec![],
+                )
+                .await
+                .unwrap()[0];
+            w.finish_inventory(plan, Ok(revision)).unwrap();
+        }
         w.name = "Nexus".into();
         w.players.get_mut(&ids[1]).unwrap().controller = Controller::Autonomous;
         w.updates(ids[1], true).unwrap();
-        let p = &w.players[&ids[1]];
-        let session = [-2, ids[1], p.character.id];
-        let bot_before = p.character.items.clone();
+        let session = [-2, ids[1], w.players[&ids[1]].character.id];
         let binding = (
             w.players[&ids[0]].character.account,
             w.players[&ids[0]].character.name.clone(),
         );
+        let quote = Some([
+            Goods {
+                kind: 0xa21,
+                quantity: 4,
+            },
+            Goods {
+                kind: 0xa20,
+                quantity: 1,
+            },
+        ]);
         let request = || TradeAction::Request {
             name: binding.1.clone(),
         };
         assert!(
-            w.autonomous_incoming_trade(ids[1], session, ids[0], binding.clone(), request())
+            w.autonomous_incoming_trade(ids[1], session, ids[0], binding.clone(), request(), None)
                 .is_err()
         );
         w.request_trade(ids[0], w.players[&ids[1]].character.name.clone())
             .unwrap();
-        w.autonomous_incoming_trade(ids[1], session, ids[0], binding.clone(), request())
-            .unwrap();
-        let mut gift = [false; 12];
-        gift[4] = true;
-        w.change_trade(ids[0], gift).unwrap();
-        assert!(
-            w.autonomous_incoming_trade(
-                ids[1],
-                session,
-                ids[0],
-                binding.clone(),
-                TradeAction::Change { offer: gift }
-            )
-            .is_err()
-        );
-        assert!(
-            w.autonomous_incoming_trade(
-                ids[1],
-                session,
-                ids[0],
-                binding.clone(),
-                TradeAction::Accept {
-                    mine: gift,
-                    theirs: gift
-                }
-            )
-            .is_err()
-        );
-        assert!(
-            w.autonomous_incoming_trade(
-                ids[1],
-                session,
-                ids[0],
-                binding.clone(),
-                TradeAction::Accept {
-                    mine: [false; 12],
-                    theirs: gift
-                }
-            )
-            .is_err()
-        );
-        tokio::time::sleep(Duration::from_millis(3050)).await;
         w.autonomous_incoming_trade(
             ids[1],
             session,
             ids[0],
-            binding,
-            TradeAction::Accept {
-                mine: [false; 12],
-                theirs: gift,
-            },
+            binding.clone(),
+            request(),
+            quote.clone(),
         )
         .unwrap();
-        let plan = w.accept_trade(ids[0], gift, [false; 12]).unwrap().unwrap();
+        let mut mine = [false; 12];
+        mine[4..8].fill(true);
+        let mut theirs = [false; 12];
+        theirs[4] = true;
+        assert!(
+            w.autonomous_incoming_trade(
+                ids[1],
+                session,
+                ids[0],
+                binding.clone(),
+                TradeAction::Change { offer: theirs },
+                quote.clone()
+            )
+            .is_err()
+        );
+        w.autonomous_incoming_trade(
+            ids[1],
+            session,
+            ids[0],
+            binding.clone(),
+            TradeAction::Change { offer: mine },
+            quote.clone(),
+        )
+        .unwrap();
+        w.change_trade(ids[0], theirs).unwrap();
+        let key = w.trade_key(ids[1]).unwrap();
+        w.trades.get_mut(&key).unwrap().ready = w.clock.now();
+        for (own, other) in [([false; 12], theirs), (mine, [false; 12]), (mine, mine)] {
+            assert!(
+                w.autonomous_incoming_trade(
+                    ids[1],
+                    session,
+                    ids[0],
+                    binding.clone(),
+                    TradeAction::Accept {
+                        mine: own,
+                        theirs: other
+                    },
+                    quote.clone()
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            w.autonomous_incoming_trade(
+                ids[1],
+                session,
+                ids[0],
+                binding,
+                TradeAction::Accept { mine, theirs },
+                quote
+            )
+            .unwrap()
+            .is_none()
+        );
+        let plan = w.accept_trade(ids[0], theirs, mine).unwrap().unwrap();
         let transaction = plan.transaction.clone();
+        let writes = writes(&plan);
         let revisions = store
-            .exchange_trade(transaction, writes(&plan), None)
+            .exchange_trade(transaction.clone(), writes.clone(), None)
             .await
             .unwrap();
+        assert_eq!(
+            store
+                .exchange_trade(transaction, writes, None)
+                .await
+                .unwrap(),
+            revisions,
+            "durable transaction receipt makes duplicate settlement idempotent"
+        );
         w.finish_trade(plan, Ok(revisions)).unwrap();
-        assert_eq!(w.players[&ids[1]].character.items[5], bot_before[5]);
+        assert_eq!(w.players[&ids[1]].character.items[4], 0xa20);
+        assert_eq!(
+            w.players[&ids[0]]
+                .character
+                .items
+                .iter()
+                .filter(|k| **k == 0xa21)
+                .count(),
+            4
+        );
         for id in ids {
             let p = &w.players[&id];
             let saved = store

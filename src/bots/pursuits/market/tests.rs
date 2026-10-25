@@ -73,238 +73,136 @@ pub(super) fn fixture(c: &Content, backpack: [i32; 8]) -> (Market, PlayerView) {
         v,
     )
 }
-fn terms(goods: [Goods; 2]) -> Terms {
-    Terms {
-        version: 1,
-        accounts: [2, 1],
-        names: ["Peer".into(), "Trader".into()],
-        goods,
-        meeting: [-2, 5, 5],
-        expires: now() + 120,
-        batch: 2,
-    }
-}
-fn message(text: String) -> Packet {
+fn message(text: &str) -> Packet {
     let mut w = wire::Writer::new();
-    w.utf("Peer")
-        .i32(20)
-        .i32(0)
-        .u8(0)
-        .utf("")
-        .utf(&text)
-        .utf("");
+    w.utf("Peer").i32(20).i32(0).u8(0).utf("").utf(text).utf("");
     Packet {
         id: wire::TEXT,
         body: w.0,
     }
 }
-
 #[test]
-fn only_unsolicited_local_ads_are_optional_without_rewriting_terms() {
-    let mut message = Message {
-        text: "sell 2589x2; want 2595".into(),
-        channel: Channel::Local,
-        consent: false,
-    };
-    assert_eq!(message.optional_public(), Some(message.text.as_str()));
-    assert_eq!(message.chat(), message.text);
-    message.channel = Channel::Guild;
-    assert!(message.optional_public().is_none());
-    message.channel = Channel::Tell("Peer".into());
-    assert!(message.optional_public().is_none());
-    message.channel = Channel::Local;
-    for verb in ["offer", "counter", "agree", "no deal:"] {
-        message.text = format!("Peer, {verb} exact terms");
-        assert!(message.optional_public().is_none());
-        assert_eq!(message.chat(), message.text);
-    }
-    message.text = "sell 2589x2; want 2595".into();
-    message.consent = true;
-    assert!(message.optional_public().is_none());
-}
-
-#[test]
-fn market_named_ads_resolve_exact_items_without_inventing_consent() {
-    let mut c = Content::load(std::path::Path::new("data")).unwrap();
-    let (mut market, v) = fixture(&c, [0xa23, 0xa23, 0xa23, -1, -1, -1, -1, -1]);
-    market
-        .receive(
-            &message("sell Health Potion x2; want Magic Potion".into()),
-            &v,
-            &c,
-            None,
-        )
-        .unwrap();
-    let bargain = market.bargain.as_ref().unwrap();
-    assert_eq!(
-        bargain.terms.goods,
-        [
-            Goods {
-                kind: 0xa23,
-                quantity: 1
-            },
-            Goods {
-                kind: 0xa22,
-                quantity: 1
-            }
-        ]
-    );
-    assert!(!bargain.own_consent && !bargain.agreed && bargain.peer_consent.is_none());
-    for ad in [
-        "2594x2; want 2595",
-        "Unknown Potion x1; want Magic Potion",
-        "Health Potion x0; want Magic Potion",
-        "Health Potion x17; want Magic Potion",
-        "Health Potion x1; want Unknown Potion",
-        "Ent Ancient x1; want Magic Potion",
-    ] {
-        assert!(parse_ad(ad, &c).is_none(), "{ad}");
-    }
-    let mut duplicate = c.get(0xa22).unwrap().clone();
-    duplicate.kind = u16::MAX;
-    c.objects.insert(duplicate.kind, duplicate);
-    assert!(parse_ad("Health Potion x2; want Magic Potion", &c).is_none());
-}
-
-#[test]
-fn market_counter_reduces_useful_offer_without_inventing_goods_or_consent() {
+fn market_quotes_share_human_slang_grammar_without_chat_consent() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
-    let (mut market, v) = fixture(&c, [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1]);
-    let offered = terms([
-        Goods {
-            kind: 0xa9d,
-            quantity: 2,
-        },
-        Goods {
-            kind: 0xa1d,
-            quantity: 2,
-        },
-    ]);
-    assert!(!market.suitable(&v, &c, None, &offered).unwrap());
-    market.replace(offered.clone());
-    market.bargain.as_mut().unwrap().own_consent = true;
-    market.bargain.as_mut().unwrap().peer_consent = Some([-2, 20, 0]);
-    market
-        .receive(&message(offered.text("Trader", "counter")), &v, &c, None)
-        .unwrap();
-    let counter = market.bargain.as_ref().unwrap();
-    assert_eq!(
-        counter.terms.goods,
-        [
-            Goods {
-                kind: 0xa1d,
-                quantity: 1
-            },
-            Goods {
-                kind: 0xa9d,
-                quantity: 1
-            }
-        ]
-    );
-    counter.terms.validate().unwrap();
-    assert!(market.suitable(&v, &c, None, &counter.terms).unwrap());
-    assert!(!counter.own_consent && counter.peer_consent.is_none() && !counter.agreed);
-    assert!(market.revoke_trade);
+    for text in [
+        "wts 4 spd for 1 def",
+        "SELLING 4 SPEED = DEF",
+        "wtb def for 4 spd",
+        "selling 4 spd for def @Peer",
+    ] {
+        let quote = parse_quote(text, &c).unwrap();
+        assert_eq!(
+            quote,
+            [
+                Goods {
+                    kind: SPEED,
+                    quantity: 4
+                },
+                Goods {
+                    kind: DEFENSE,
+                    quantity: 1
+                }
+            ]
+        );
+    }
+    for text in [
+        "sell 2593x4; want 2592",
+        "Peer, agree abc p0 r0",
+        "wts 0 spd for def",
+        "wts 9 spd for def",
+        "wts spd for spd",
+        "wts fake for def",
+    ] {
+        assert!(parse_quote(text, &c).is_none(), "{text}");
+    }
+    let (mut market, v) = fixture(&c, [DEFENSE, -1, -1, -1, -1, -1, -1, -1]);
     assert!(
         market
-            .history
-            .iter()
-            .all(|b| !b.own_consent && b.peer_consent.is_none())
+            .receive(&message("wts 4 spd for def"), &v, &c, None)
+            .unwrap()
     );
-    assert!(!market.outgoing.as_ref().unwrap().consent);
-    market
-        .receive(&message(offered.text("Trader", "agree")), &v, &c, None)
-        .unwrap();
-    assert!(market.bargain.as_ref().unwrap().peer_consent.is_none());
+    assert!(market.incoming.is_some());
+    assert!(market.bargain.is_none());
+    assert!(market.trade.is_none());
+    assert!(market.outgoing.is_none());
 }
-
 #[test]
-fn market_counter_preserves_rate_reserves_and_rejects_unusable_or_unheld_goods() {
+fn market_real_stock_and_desires_drive_speed_defense_life_gear_chain() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
-    for (backpack, received, payment, expected) in [
+    for (backpack, give, want) in [
+        ([SPEED, SPEED, SPEED, SPEED, -1, -1, -1, -1], SPEED, DEFENSE),
         (
-            [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1],
-            (0xa23, 6),
-            (0xa1d, 3),
-            Some((1, 2)),
+            [
+                DEFENSE, DEFENSE, DEFENSE, DEFENSE, DEFENSE, DEFENSE, DEFENSE, -1,
+            ],
+            DEFENSE,
+            LIFE,
         ),
-        (
-            [0xa22, 0xa22, 0xa22, -1, -1, -1, -1, -1],
-            (0xa23, 4),
-            (0xa22, 2),
-            Some((1, 2)),
-        ),
-        (
-            [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1],
-            (0xa9d, 2),
-            (0xa22, 2),
-            None,
-        ),
-        (
-            [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1],
-            (0xa1d, 2),
-            (0xa22, 2),
-            None,
-        ),
-        (
-            [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1],
-            (0xa9d, 2),
-            (0xa1d, 3),
-            None,
-        ),
-        (
-            [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1],
-            (0xa9d, 2),
-            (0xa97, 2),
-            None,
-        ),
-        (
-            [0xa1d, 0xa1d, 0xa22, 0xa22, -1, -1, -1, -1],
-            (0xa9d, 2),
-            (0xa3d, 2),
-            None,
-        ),
+        ([LIFE, -1, -1, -1, -1, -1, -1, -1], LIFE, 0),
     ] {
-        let (mut market, v) = fixture(&c, backpack);
-        let offered = terms([
-            Goods {
-                kind: received.0,
-                quantity: received.1,
-            },
-            Goods {
-                kind: payment.0,
-                quantity: payment.1,
-            },
-        ]);
-        market
-            .receive(&message(offered.text("Trader", "offer")), &v, &c, None)
-            .unwrap();
-        if let Some((pay, receive)) = expected {
-            let counter = &market.bargain.as_ref().unwrap().terms;
-            assert_eq!(
-                counter.goods,
-                [
-                    Goods {
-                        kind: payment.0,
-                        quantity: pay
-                    },
-                    Goods {
-                        kind: received.0,
-                        quantity: receive
-                    }
-                ]
-            );
-            assert!(market.suitable(&v, &c, None, counter).unwrap());
-            assert_eq!(
-                u16::from(pay) * u16::from(received.1),
-                u16::from(receive) * u16::from(payment.1)
-            );
+        let (m, v) = fixture(&c, backpack);
+        let q = m.quote(&v, &c, None).unwrap().unwrap();
+        assert_eq!(q[0].kind, give);
+        if want != 0 {
+            assert_eq!(q[1].kind, want);
         } else {
-            assert!(
-                market.bargain.is_none(),
-                "unexpected bargain for {received:?}/{payment:?}"
-            );
-            assert!(market.outgoing.as_ref().unwrap().text.contains("no deal"));
+            assert!(m.wanted(&v, &c, None, q[1].kind).unwrap() > 0);
         }
+        assert!(m.count(&v, q[0].kind) >= usize::from(q[0].quantity));
     }
+    let (m, v) = fixture(&c, [-1; 8]);
+    assert!(m.quote(&v, &c, None).unwrap().is_none());
+    let (mut m, v) = fixture(&c, [DEFENSE, -1, -1, -1, -1, -1, -1, -1]);
+    m.quote = m.quote(&v, &c, None).unwrap();
+    assert!(m.wants_speed(&v));
+    m.quote = None;
+    assert!(!m.wants_speed(&v));
+    let mut prices = BTreeSet::new();
+    for name in ["A", "B", "C"] {
+        m.name = name.into();
+        prices.insert(m.quote(&v, &c, None).unwrap().unwrap()[1].quantity);
+    }
+    assert_eq!(prices, BTreeSet::from([3, 4, 5]));
+}
+#[test]
+fn market_ui_success_is_not_a_settlement_receipt_and_receipts_cannot_regress() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, v) = fixture(&c, [SPEED; 8]);
+    m.replace(Terms {
+        version: 1,
+        accounts: [1, 2],
+        names: ["Trader".into(), "Peer".into()],
+        goods: [
+            Goods {
+                kind: SPEED,
+                quantity: 4,
+            },
+            Goods {
+                kind: DEFENSE,
+                quantity: 1,
+            },
+        ],
+        meeting: [-2, 5, 5],
+        expires: now() + 120,
+        batch: 4,
+    });
+    let mut out = wire::Writer::new();
+    out.i32(0).utf("Trade successful.");
+    m.trade_packet(
+        &Packet {
+            id: 12,
+            body: out.0,
+        },
+        &v,
+    )
+    .unwrap();
+    assert_eq!(m.bargain.as_ref().unwrap().confirmed, 0);
+    let receipt = m.bargain.as_ref().unwrap().terms.delivery(0).unwrap();
+    m.recover(vec![receipt]).unwrap();
+    assert_eq!(m.bargain.as_ref().unwrap().confirmed, 1);
+    assert_eq!(
+        m.bargain.as_ref().unwrap().resolution.as_deref(),
+        Some("settled_all_installments_transaction_identified")
+    );
+    assert!(m.recover(vec![]).is_err());
 }

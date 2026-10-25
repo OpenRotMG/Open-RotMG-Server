@@ -52,24 +52,6 @@ impl Terms {
         );
         Ok(())
     }
-    fn body(&self) -> String {
-        format!(
-            "{:x} {}x{}/{}x{} @{},{},{} !{} b{}",
-            self.version,
-            self.goods[0].kind,
-            self.goods[0].quantity,
-            self.goods[1].kind,
-            self.goods[1].quantity,
-            self.meeting[0],
-            self.meeting[1],
-            self.meeting[2],
-            self.expires,
-            self.batch
-        )
-    }
-    pub(in crate::bots) fn text(&self, recipient: &str, verb: &str) -> String {
-        format!("{recipient}, {verb} {} p0 r0", self.body())
-    }
     pub(crate) fn delivery(&self, ordinal: u8) -> Result<Delivery> {
         self.validate()?;
         let quantities = self.goods.each_ref().map(|g| {
@@ -108,20 +90,6 @@ pub(crate) struct Bargain {
     pub rounds: u8,
     pub resolution: Option<String>,
 }
-impl Bargain {
-    fn body(&self) -> String {
-        // Paid ordinal and revocation revision stop a prior assent authorizing remaining deliveries.
-        format!(
-            "{} p{} r{}",
-            self.terms.body(),
-            self.confirmed,
-            self.consent_revision
-        )
-    }
-    pub(in crate::bots) fn text(&self, recipient: &str, verb: &str) -> String {
-        format!("{recipient}, {verb} {}", self.body())
-    }
-}
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MarketSession {
     anchor: TilePoint,
@@ -143,12 +111,15 @@ pub(crate) struct Market {
     pub(in crate::bots) next_message_ms: u64,
     #[serde(skip)]
     next_request_ms: u64,
-    #[serde(skip)]
-    announced: bool,
+    #[serde(default)]
+    quote: Option<[Goods; 2]>,
+    #[serde(default)]
+    preparing: bool,
     contacts: Vec<Contact>,
     pub bargain: Option<Bargain>,
     history: VecDeque<Bargain>,
     vault: Option<Vec<i32>>,
+    #[serde(skip)]
     next_ad: u64,
     #[serde(skip)]
     pub(in crate::bots) outgoing: Option<Message>,
@@ -169,13 +140,8 @@ pub(in crate::bots) enum Channel {
 pub(in crate::bots) struct Message {
     pub text: String,
     pub channel: Channel,
-    pub consent: bool,
 }
 impl Message {
-    pub(in crate::bots) fn optional_public(&self) -> Option<&str> {
-        (!self.consent && self.text.starts_with("sell ") && self.channel == Channel::Local)
-            .then_some(self.text.as_str())
-    }
     pub(in crate::bots) fn chat(&self) -> String {
         match &self.channel {
             Channel::Local => self.text.clone(),
@@ -206,6 +172,13 @@ impl Market {
                     .is_none_or(|v| v.len() == 8 && v.iter().all(|k| (-1..=65535).contains(k))),
             "invalid market memory bounds"
         );
+        ensure!(
+            self.quote.as_ref().is_none_or(|q| q
+                .iter()
+                .all(|g| (0..=65535).contains(&g.kind) && (1..=8).contains(&g.quantity))
+                && q[0].kind != q[1].kind),
+            "invalid remembered market quote"
+        );
         for b in self.bargain.iter().chain(self.history.iter()) {
             b.terms.validate()?;
             ensure!(
@@ -224,7 +197,7 @@ impl Market {
         self.incoming = None;
         self.outgoing = None;
         self.trade = None;
-        self.announced = false;
+        self.next_ad = 0;
         self.revoke_trade = false;
         self.next_request_ms = 0;
         if let Some(b) = &mut self.bargain {
@@ -248,7 +221,7 @@ impl Market {
             && self
                 .outgoing
                 .as_ref()
-                .is_some_and(|m| m.text.starts_with("sell "))
+                .is_some_and(|m| m.text.starts_with("wts "))
         {
             self.outgoing = None;
         }
@@ -296,7 +269,20 @@ impl Market {
         if item.soulbound || item.unsupported_equipment {
             return Ok(0);
         }
-        let desired = if let Some(index) = progression::potion_index(c, kind)? {
+        let desired = if kind == SPEED && self.wants_speed(v) {
+            5
+        } else if kind == LIFE {
+            if self.gear_want(v, c, future)?.is_some() {
+                2
+            } else {
+                0
+            }
+        } else if kind == DEFENSE
+            && self.count(v, SPEED) > 0
+            && self.gear_want(v, c, future)?.is_some()
+        {
+            7
+        } else if let Some(index) = progression::potion_index(c, kind)? {
             (c.classes[&v.character.class].caps[index] - v.character.base_stats[index]).clamp(0, 16)
                 as usize
         } else if item.activate == "Heal" || (item.activate == "Magic" && v.character.items[1] >= 0)
@@ -315,7 +301,9 @@ impl Market {
             return Ok(0);
         }
         let count = self.count(v, kind);
-        let keep = if let Some(index) = progression::potion_index(c, kind)? {
+        let keep = if matches!(kind, SPEED | DEFENSE | LIFE) {
+            0
+        } else if let Some(index) = progression::potion_index(c, kind)? {
             (c.classes[&v.character.class].caps[index] - v.character.base_stats[index]).clamp(0, 16)
                 as usize
         } else if item.activate == "Heal" || (item.activate == "Magic" && v.character.items[1] >= 0)
@@ -347,46 +335,141 @@ impl Market {
         }
         Ok(goods)
     }
-    fn want(&self, v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Option<i32>> {
-        // Supply deficits precede speculative loadouts, without assigning prices to either.
-        for kind in [0xa22, 0xa23, 0xa1f, 0xa20, 0xa21, 0xa34, 0xa35, 0xa4c]
-            .into_iter()
-            .chain(c.objects.keys().copied().map(i32::from))
+    fn reserved_bargain(&self) -> bool {
+        self.bargain
+            .as_ref()
+            .is_some_and(|b| b.resolution.is_none())
+    }
+    pub(in crate::bots) fn reserves_stock(&self) -> bool {
+        self.reserved_bargain()
+            || self.incoming.is_some()
+            || self.preparing
+            || (self.session.is_some() && self.quote.is_some())
+    }
+    pub(crate) fn wants_speed(&self, v: &PlayerView) -> bool {
+        self.quote.as_ref().is_some_and(|q| {
+            let batch = if q[1].kind == SPEED {
+                Some(q[1].quantity)
+            } else if q[0].kind == SPEED && q[1].kind == DEFENSE {
+                Some(q[0].quantity)
+            } else {
+                None
+            };
+            batch.is_some_and(|n| self.count(v, SPEED) < usize::from(n))
+        })
+    }
+    fn gear_want(&self, v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Option<i32>> {
+        for item in c
+            .objects
+            .values()
+            .filter(|o| o.class == "Equipment" && !o.consumable && o.tier.is_some_and(|t| t >= 8))
         {
-            if c.objects[&(kind as u16)].class == "Equipment"
-                && self.wanted(v, c, future, kind)? > 0
-            {
-                return Ok(Some(kind));
+            if self.wanted(v, c, future, i32::from(item.kind))? > 0 {
+                return Ok(Some(i32::from(item.kind)));
             }
         }
         Ok(None)
     }
-    fn suitable(
+    fn quote(
         &self,
         v: &PlayerView,
         c: &Content,
         future: Option<u16>,
-        t: &Terms,
-    ) -> Result<bool> {
-        let side = t
-            .accounts
-            .iter()
-            .position(|a| *a == v.session.account)
-            .context("foreign market terms")?;
-        Ok(
-            self.spare(v, c, future, t.goods[side].kind)? >= t.goods[side].quantity
-                && self.wanted(v, c, future, t.goods[1 - side].kind)? >= t.goods[1 - side].quantity,
-        )
+    ) -> Result<Option<[Goods; 2]>> {
+        let price = 3 + style(&self.name) % 3;
+        let life_price = 5 + (style(&self.name) / 3) % 3;
+        let pair = |give, n, want, m| {
+            [
+                Goods {
+                    kind: give,
+                    quantity: n,
+                },
+                Goods {
+                    kind: want,
+                    quantity: m,
+                },
+            ]
+        };
+        let stock = self.stock(v, c, future)?;
+        // Equipment wants must be genuine upgrades; Life is held until one is available.
+        if self.count(v, LIFE) > 0
+            && let Some(kind) = self.gear_want(v, c, future)?
+        {
+            return Ok(Some(pair(LIFE, 1, kind, 1)));
+        }
+        if self.count(v, DEFENSE) >= life_price as usize && self.wanted(v, c, future, LIFE)? > 0 {
+            return Ok(Some(pair(DEFENSE, life_price as u8, LIFE, 1)));
+        }
+        if self.count(v, SPEED) >= price as usize && self.wanted(v, c, future, DEFENSE)? > 0 {
+            return Ok(Some(pair(SPEED, price as u8, DEFENSE, 1)));
+        }
+        if self.count(v, DEFENSE) > 0 && self.wanted(v, c, future, SPEED)? >= price as u8 {
+            return Ok(Some(pair(DEFENSE, 1, SPEED, price as u8)));
+        }
+        if let Some(g) = stock.into_iter().find(|g| {
+            !matches!(g.kind, SPEED | DEFENSE | LIFE)
+                && c.objects[&(g.kind as u16)].tier.is_some_and(|t| t >= 3)
+                && !c.objects[&(g.kind as u16)].consumable
+        }) {
+            let tier = c
+                .get(g.kind as u16)?
+                .tier
+                .context("trade gear without tier")?;
+            return Ok(Some(pair(
+                g.kind,
+                1,
+                if tier >= 10 { LIFE } else { DEFENSE },
+                if tier >= 10 {
+                    1
+                } else {
+                    (1 + style(&self.name) % 2) as u8
+                },
+            )));
+        }
+        Ok(None)
     }
-    fn queue(&mut self, text: String, channel: Channel, consent: bool) {
-        self.outgoing = Some(Message {
-            text,
-            channel,
-            consent,
-        });
+    pub(in crate::bots) fn message_current(
+        &self,
+        message: &Message,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+    ) -> Result<bool> {
+        if let Some(q) = parse_quote(&message.text, c) {
+            Ok(v.map.name == "Nexus"
+                && self.incoming.is_none()
+                && self.trade.is_none()
+                && super::settled(v)
+                && v.character
+                    .items
+                    .iter()
+                    .skip(4)
+                    .filter(|k| **k == q[0].kind)
+                    .count()
+                    >= usize::from(q[0].quantity)
+                && self
+                    .session
+                    .as_ref()
+                    .is_some_and(|s| v.elapsed_ms < s.until)
+                && self.quote(v, c, future)?.as_ref() == Some(&q))
+        } else {
+            Ok(v.map.name == "Nexus"
+                && super::settled(v)
+                && self
+                    .quote(v, c, future)?
+                    .as_ref()
+                    .map(|q| goods_text(&q[1], c))
+                    .transpose()?
+                    .is_some_and(|want| message.text == format!("nty need {want}")))
+        }
+    }
+    fn queue(&mut self, text: String, channel: Channel) {
+        self.outgoing = Some(Message { text, channel });
     }
     pub(in crate::bots) fn finish(&mut self, reason: &str) {
         self.outgoing = None;
+        self.quote = None;
+        self.preparing = false;
         if let Some(b) = &mut self.bargain
             && b.resolution.is_none()
         {
@@ -398,6 +481,7 @@ impl Market {
         }
         self.trade = None;
     }
+    #[cfg(test)]
     fn replace(&mut self, t: Terms) {
         self.next_request_ms = 0;
         let rounds = self.bargain.as_ref().map_or(1, |b| {
@@ -481,303 +565,42 @@ impl Market {
                 && p.name == name
                 && (speaker == -1 || p.id == speaker)
         });
-        let observed = peer.and_then(|p| p.account.map(|a| (a, [v.session.world, p.id, 0])));
-        let remembered = self
-            .contacts
-            .iter()
-            .find(|p| p.name == name)
-            .map(|p| p.account);
-        let addressed = format!("{}, ", self.name.as_str());
-        let body = if let Some(b) = text.strip_prefix(&addressed) {
-            b
-        } else if text.starts_with("sell ") {
-            text.as_str()
-        } else {
+        let Some(peer) = peer else {
             return Ok(false);
         };
-        let active = self
-            .bargain
-            .as_ref()
-            .is_some_and(|b| b.resolution.is_none());
-        tracing::info!(
-            account = v.session.account,
-            speaker,
-            name,
-            recipient,
-            ?observed,
-            remembered,
-            text,
-            "market message received by real audience"
-        );
-        if let Some(ad) = body.strip_prefix("sell ") {
-            if active || self.outgoing.is_some() {
-                return Ok(true);
-            }
-            let parsed = parse_ad(ad, c);
-            let Some((goods, want)) = parsed else {
-                return Ok(true);
-            };
-            // An unknown private name can inform assessment but cannot bind an account or meeting.
-            if !(0..=65535).contains(&want)
-                || !c.objects.contains_key(&(goods.kind as u16))
-                || !c.objects.contains_key(&(want as u16))
-            {
-                tracing::warn!(
-                    account = v.session.account,
-                    name,
-                    ?goods,
-                    want,
-                    "market advertisement contains an unknown item; no terms accepted"
-                );
-                return Ok(true);
-            }
-            let desired = self.wanted(v, c, future, goods.kind)?;
-            let available = self.spare(v, c, future, want)?;
-            if let Some((account, _)) = observed {
-                let payment = if available > 0 {
-                    Some(Goods {
-                        kind: want,
-                        quantity: available,
-                    })
-                } else {
-                    self.stock(v, c, future)?
-                        .into_iter()
-                        .find(|g| g.kind != goods.kind)
-                };
-                if desired > 0
-                    && let Some(payment) = payment
-                {
-                    let n = desired.min(payment.quantity).min(goods.quantity);
-                    let t = Terms {
-                        version: rand::random::<u64>().max(1),
-                        accounts: [v.session.account, account],
-                        names: [self.name.as_str().into(), name.clone()],
-                        goods: [
-                            Goods {
-                                kind: payment.kind,
-                                quantity: n,
-                            },
-                            Goods {
-                                kind: goods.kind,
-                                quantity: n,
-                            },
-                        ],
-                        meeting: [-2, tile(v.position).0 as i32, tile(v.position).1 as i32],
-                        expires: now() + 180,
-                        batch: capacity(v, payment.kind),
-                    };
-                    let text = t.text(&name, "offer");
-                    self.replace(t);
-                    let channel = if channel == Channel::Local {
-                        Channel::Tell(name.clone())
-                    } else {
-                        channel
-                    };
-                    self.queue(text, channel, false);
-                } else {
-                    self.queue(
-                        format!("{name}, no deal: those goods do not meet my needs or stock."),
-                        channel,
-                        false,
-                    );
-                }
-            }
-            return Ok(true);
-        }
-        if body.starts_with("no deal") || body.starts_with("abandon ") {
-            if let Some(b) = &self.bargain
-                && observed.is_some_and(|(a, _)| b.terms.accounts.contains(&a))
-            {
-                self.finish("peer_refused_or_departed_remaining_balance_unenforced");
-            }
-            return Ok(true);
-        }
-        let (verb, raw) = match body.split_once(' ') {
-            Some((verb, raw)) if matches!(verb, "offer" | "counter" | "agree") => (verb, raw),
-            _ => return Ok(false),
+        let body = text
+            .strip_prefix(&format!("{}, ", self.name))
+            .unwrap_or(&text);
+        let Some(q) = parse_quote(body, c) else {
+            return Ok(false);
         };
-        let Some((account, binding)) = observed else {
-            return Ok(true);
-        };
-        let parsed = parse_terms(raw);
-        let Some((version, goods, meeting, expires, batch, paid, consent_revision)) = parsed else {
-            return Ok(true);
-        };
-        if expires <= now() || expires > now() + 600 {
-            return Ok(true);
-        }
-        if verb == "offer" || verb == "counter" {
-            let t = Terms {
-                version,
-                accounts: [account, v.session.account],
-                names: [name.clone(), self.name.as_str().into()],
-                goods,
-                meeting,
-                expires,
-                batch,
-            };
-            if t.validate().is_err()
-                || t.goods
-                    .iter()
-                    .any(|g| !c.objects.contains_key(&(g.kind as u16)))
-            {
-                tracing::warn!(
-                    account = v.session.account,
-                    name,
-                    "market offer has invalid terms or unknown goods; no consent"
-                );
-                return Ok(true);
-            }
-            if active
-                && self
-                    .bargain
-                    .as_ref()
-                    .is_some_and(|b| !b.terms.accounts.contains(&account))
-            {
-                return Ok(true);
-            }
-            if let Some(b) = &mut self.bargain
-                && active
-                && b.confirmed > 0
-            {
-                let same_terms = version == b.terms.version && t.body() == b.terms.body();
-                if same_terms && (paid != b.confirmed || consent_revision < b.consent_revision) {
-                    return Ok(true);
-                }
-                let reaffirm = same_terms
-                    && (consent_revision > b.consent_revision
-                        || (!b.own_consent && b.peer_consent.is_none()));
-                if !reaffirm || consent_revision > b.consent_revision {
-                    if b.consent_revision >= 4 || consent_revision > 4 {
-                        self.finish("renegotiation_limit_remaining_balance_unenforced");
-                        self.queue(
-                            format!(
-                                "{name}, no deal: original remaining balance abandoned, not paid."
-                            ),
-                            channel,
-                            false,
-                        );
-                        return Ok(true);
-                    }
-                    b.consent_revision = if reaffirm {
-                        consent_revision
-                    } else {
-                        b.consent_revision + 1
-                    };
-                    b.own_consent = false;
-                    b.peer_consent = None;
-                    self.revoke_trade = true;
-                    self.next_request_ms = 0;
-                    self.trade = None;
-                    tracing::info!(terms=?b,"market changed terms revoked consent; original paid terms and remaining balance retained");
-                }
-                let text = b.text(&name, if reaffirm { "agree" } else { "counter" });
-                self.queue(text, channel, reaffirm);
-                return Ok(true);
-            }
-            if paid != 0 || consent_revision != 0 {
-                return Ok(true);
-            }
-            if verb == "offer"
-                && active
-                && self.bargain.as_ref().is_some_and(|b| {
-                    !b.agreed
-                        && !b.own_consent
-                        && b.peer_consent.is_none()
-                        && b.terms.accounts[0] == v.session.account
-                        && v.session.account < account
-                })
-            {
-                return Ok(true);
-            }
-            if self
+        if v.map.name != "Nexus"
+            || self.incoming.is_some()
+            || self.trade.is_some()
+            || self
                 .bargain
                 .as_ref()
-                .is_some_and(|b| b.terms.accounts.contains(&account) && b.rounds >= 4)
-            {
-                self.finish("negotiation_limit_no_agreement_remaining_balance_unenforced");
-                self.queue(
-                    format!("{name}, no deal: incompatible wants."),
-                    channel,
-                    false,
-                );
-                return Ok(true);
-            }
-            if self.suitable(v, c, future, &t)? {
-                let text = t.text(&name, "agree");
-                self.replace(t);
-                self.queue(text, channel, true);
-            } else {
-                self.finish("unsuitable_terms_refused_no_payment_due");
-                let [offered, asked] = &t.goods;
-                let available = self.spare(v, c, future, asked.kind)?.min(asked.quantity);
-                let desired = self.wanted(v, c, future, offered.kind)?;
-                // Smaller trades must preserve the offered exchange rate, not invent another want.
-                let quantities = (1..=available).rev().find_map(|pay| {
-                    let receive = u16::from(pay) * u16::from(offered.quantity);
-                    let denominator = u16::from(asked.quantity);
-                    (receive % denominator == 0 && receive / denominator <= u16::from(desired))
-                        .then_some((pay, (receive / denominator) as u8))
-                });
-                if let Some((pay, receive)) = quantities {
-                    let counter = Terms {
-                        version: rand::random::<u64>().max(1),
-                        accounts: [v.session.account, account],
-                        names: [self.name.as_str().into(), name.clone()],
-                        goods: [
-                            Goods {
-                                kind: asked.kind,
-                                quantity: pay,
-                            },
-                            Goods {
-                                kind: offered.kind,
-                                quantity: receive,
-                            },
-                        ],
-                        meeting,
-                        expires,
-                        batch: capacity(v, asked.kind),
-                    };
-                    tracing::info!(account=v.session.account,requested=?t.goods,counter=?counter.goods,"market counteroffer reduced to actual needs and spare stock");
-                    let text = counter.text(&name, "counter");
-                    self.replace(counter);
-                    self.queue(text, channel, false);
-                } else {
-                    self.queue(
-                        format!("{name}, no deal: unsuitable goods or insufficient stock."),
-                        channel,
-                        false,
-                    );
-                }
-            }
-        } else if let Some(b) = &mut self.bargain
-            && b.resolution.is_none()
-            && b.terms.accounts.contains(&account)
-            && b.body() == raw
+                .is_some_and(|b| b.resolution.is_none())
         {
-            b.peer_consent = Some(binding);
-            if b.own_consent {
-                b.agreed = true;
-            }
-            if !b.own_consent {
-                let text = b.text(&name, "agree");
-                self.queue(text, channel, true);
+            return Ok(true);
+        }
+        // Ads are invitations to inspect a WINDOW, never evidence of consent or payment.
+        if self.wanted(v, c, future, q[0].kind)? > 0
+            && self.spare(v, c, future, q[1].kind)? >= q[1].quantity
+            && fair(&q, c)
+        {
+            if let Some(account) = peer.account {
+                self.incoming = Some(Incoming::outbound(
+                    v,
+                    peer.id,
+                    account,
+                    name,
+                    [q[1].clone(), q[0].clone()],
+                ));
             }
         }
+        let _ = channel;
         Ok(true)
-    }
-    pub(in crate::bots) fn published(&mut self, m: &Message) {
-        self.announced = true;
-        if m.consent
-            && let Some(b) = &mut self.bargain
-            && m.text.ends_with(&b.body())
-        {
-            b.own_consent = true;
-            if b.peer_consent.is_some() {
-                b.agreed = true;
-            }
-        }
-        self.outgoing = None;
     }
     pub(in crate::bots) fn recover(&mut self, receipts: Vec<Delivery>) -> Result<()> {
         let Some(b) = &mut self.bargain else {
@@ -815,7 +638,7 @@ impl Market {
         if self
             .outgoing
             .as_ref()
-            .is_some_and(|m| m.text.starts_with("sell "))
+            .is_some_and(|m| m.text.starts_with("wts "))
         {
             self.outgoing = None;
         }
@@ -853,14 +676,6 @@ impl Market {
             };
             if let Some(reason) = failure {
                 self.finish(reason);
-                self.queue(
-                    format!(
-                        "{}, abandon {:x}: {reason}",
-                        b.terms.names[peer], b.terms.version
-                    ),
-                    Channel::Tell(b.terms.names[peer].clone()),
-                    false,
-                );
                 return Ok(None);
             }
             let mut d = Decision {
@@ -876,14 +691,6 @@ impl Market {
                 return Ok(Some(d));
             }
             if !b.agreed {
-                if !self.announced && self.outgoing.is_none() {
-                    let verb = if side == 0 { "offer" } else { "agree" };
-                    self.queue(
-                        b.text(&b.terms.names[peer], verb),
-                        Channel::Tell(b.terms.names[peer].clone()),
-                        side != 0,
-                    );
-                }
                 return Ok(Some(d));
             }
             let own = delivery.quantities[side] as usize;
@@ -978,23 +785,114 @@ impl Market {
                 d.movement = grid.towards(v.position, meeting);
                 return Ok(Some(d));
             }
-            if let Some(p) = v.objects.iter().find(|p| {
-                p.account == Some(b.terms.accounts[peer]) && p.name == b.terms.names[peer]
-            }) {
-                if b.peer_consent
-                    .is_some_and(|s| s[0] != v.session.world || s[1] != p.id)
-                {
-                    let b = self.bargain.as_mut().unwrap();
-                    b.peer_consent = None;
-                    b.own_consent = false;
+            return Ok(Some(d));
+        }
+        if let Some(g) = &self.incoming {
+            let mut d = Decision {
+                goal: Goal::Wait,
+                movement: None,
+                aim: None,
+                item: None,
+                journey: None,
+                chat: None,
+            };
+            if let Some(p) = v
+                .objects
+                .iter()
+                .find(|p| p.id == g.player && p.account == Some(g.account))
+                && p.position.distance(v.position) >= 1.5
+            {
+                d.movement = grid.towards(v.position, p.position);
+            }
+            return Ok(Some(d));
+        }
+        if v.map.name == "Vault"
+            && let Some(q) = self.quote.clone()
+        {
+            let mut d = Decision {
+                goal: Goal::Wait,
+                movement: None,
+                aim: None,
+                item: None,
+                journey: None,
+                chat: None,
+            };
+            let carried = v
+                .character
+                .items
+                .iter()
+                .skip(4)
+                .filter(|k| **k == q[0].kind)
+                .count();
+            let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
+            let Some(chest) = v.objects.iter().find(|o| o.kind == 0x504) else {
+                return Ok(Some(d));
+            };
+            let transfer = if carried < usize::from(q[0].quantity) {
+                chest
+                    .contents
+                    .iter()
+                    .position(|k| *k == q[0].kind)
+                    .zip(
+                        v.character
+                            .items
+                            .iter()
+                            .enumerate()
+                            .skip(4)
+                            .find(|(_, k)| **k < 0)
+                            .map(|(i, _)| i),
+                    )
+                    .map(|(from, to)| Action::Swap {
+                        from: Slot {
+                            object: chest.id,
+                            slot: from,
+                            kind: q[0].kind,
+                        },
+                        to: super::own(v, to),
+                    })
+            } else if free + carried < usize::from(q[1].quantity) {
+                chest
+                    .contents
+                    .iter()
+                    .position(|k| *k < 0)
+                    .zip(
+                        v.character
+                            .items
+                            .iter()
+                            .enumerate()
+                            .skip(4)
+                            .find(|(_, k)| **k >= 0 && **k != q[0].kind)
+                            .map(|(i, _)| i),
+                    )
+                    .map(|(to, from)| Action::Swap {
+                        from: super::own(v, from),
+                        to: Slot {
+                            object: chest.id,
+                            slot: to,
+                            kind: -1,
+                        },
+                    })
+            } else {
+                None
+            };
+            if let Some(action) = transfer {
+                d.goal = Goal::Bank(chest.id);
+                if v.position.distance(chest.position) < 1.4 {
+                    d.item = Some(action);
+                } else {
+                    d.movement = grid.towards(v.position, chest.position);
                 }
-                if !b.own_consent && self.outgoing.is_none() {
-                    self.queue(
-                        b.text(&b.terms.names[peer], "agree"),
-                        Channel::Tell(b.terms.names[peer].clone()),
-                        true,
-                    );
-                }
+            } else if carried >= usize::from(q[0].quantity)
+                && free + carried >= usize::from(q[1].quantity)
+            {
+                d.journey = Some(Journey::Nexus);
+            } else {
+                self.quote = None;
+                tracing::info!(
+                    account = v.session.account,
+                    "market preparation unavailable: own vault stock or capacity changed"
+                );
+                return Ok(None);
             }
             return Ok(Some(d));
         }
@@ -1023,17 +921,15 @@ impl Market {
             self.end_session(v, "elapsed");
             return Ok(None);
         }
-        let Some(goods) = self.stock(v, c, future)?.into_iter().next() else {
-            self.end_session(v, "no_spare_stock");
+        let Some(quote) = self.quote(v, c, future)? else {
+            self.quote = None;
+            self.end_session(v, "no_real_exchange");
             return Ok(None);
         };
-        let Some(want) = self.want(v, c, future)? else {
-            self.end_session(v, "needs_satisfied");
-            return Ok(None);
-        };
+        self.quote = Some(quote.clone());
         if self.session.is_none() {
             self.session_used = true;
-            let admitted = rng.gen_ratio(1, 5);
+            let admitted = self.preparing || rng.gen_ratio(1, 5);
             tracing::info!(
                 account = v.session.account,
                 admitted,
@@ -1048,9 +944,21 @@ impl Market {
             if !admitted {
                 return Ok(None);
             }
-            let duration_ms = rng.gen_range(60..=1800) * 1000u64;
+            let duration_ms = rng.gen_range(60..=240) * 1000u64;
             self.session = Some(MarketSession {
-                anchor: tile(v.position),
+                anchor: grid
+                    .walkable
+                    .terrain
+                    .points()
+                    .filter(|p| {
+                        grid.walkable.contains(p)
+                            && center(*p).distance(v.position) <= 7.
+                            && grid.segment(v.position, center(*p))
+                    })
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .choose(rng)
+                    .context("market has no reachable Nexus trading position")?,
                 until: v
                     .elapsed_ms
                     .checked_add(duration_ms)
@@ -1058,15 +966,43 @@ impl Market {
                 next_move: v.elapsed_ms + 10_000,
                 destination: None,
             });
-            tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,duration_ms,session=?self.session,?goods,want,"market intentional session started");
+            tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,duration_ms,session=?self.session,?quote,"market intentional session started");
         }
+        let carried = v
+            .character
+            .items
+            .iter()
+            .skip(4)
+            .filter(|k| **k == quote[0].kind)
+            .count();
+        let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
+        if carried < usize::from(quote[0].quantity)
+            || free + usize::from(quote[0].quantity) < usize::from(quote[1].quantity)
+        {
+            self.preparing = true;
+            if let Some(portal) = v.objects.iter().find(|p| p.kind == 0x720 && p.usable) {
+                d.goal = Goal::Portal(portal.id);
+                if v.position.distance(portal.position) < 1.4 {
+                    d.journey = Some(Journey::Portal(portal.id));
+                } else {
+                    d.movement = grid.towards(v.position, portal.position);
+                }
+                return Ok(Some(d));
+            }
+            tracing::info!(
+                account = v.session.account,
+                "market preparation unavailable: no observed Vault portal"
+            );
+            return Ok(None);
+        }
+        self.preparing = false;
         let s = self
             .session
             .as_mut()
             .expect("market session just initialized");
-        if v.position.distance(center(s.anchor)) > 2. {
-            self.end_session(v, "displaced_from_local_area");
-            return Ok(None);
+        if v.position.distance(center(s.anchor)) > 1.5 {
+            d.movement = grid.towards(v.position, center(s.anchor));
+            return Ok(Some(d));
         }
         if v.elapsed_ms >= s.next_move {
             s.next_move = v.elapsed_ms + 10_000;
@@ -1085,28 +1021,18 @@ impl Market {
             .destination
             .map(center)
             .filter(|p| v.position.distance(*p) > 0.2 && grid.segment(v.position, *p));
-        if now() >= self.next_ad && self.outgoing.is_none() {
-            // Chat renders text literally, not item types: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/GameServerConnection.as#L1635-L1663
+        if v.elapsed_ms >= self.next_ad && self.outgoing.is_none() {
             let ad = format!(
-                "{} x{}; want {}",
-                c.get(u16::try_from(goods.kind)?)?.name,
-                goods.quantity,
-                c.get(u16::try_from(want)?)?.name
+                "wts {} for {}",
+                goods_text(&quote[0], c)?,
+                goods_text(&quote[1], c)?
             );
             ensure!(
-                parse_ad(&ad, c) == Some((goods.clone(), want)),
-                "market advertisement cannot resolve its item names: {ad}"
+                parse_quote(&ad, c).as_ref() == Some(&quote),
+                "unresolvable market quote: {ad}"
             );
-            self.queue(
-                format!("sell {ad}"),
-                if self.guild {
-                    Channel::Guild
-                } else {
-                    Channel::Local
-                },
-                false,
-            );
-            self.next_ad = now() + 60;
+            self.queue(ad, Channel::Local);
+            self.next_ad = v.elapsed_ms + 6_000 + u64::from(style(&self.name) % 7) * 1_000;
         }
         Ok(Some(d))
     }
@@ -1180,66 +1106,112 @@ impl Market {
         Ok(true)
     }
 }
-fn capacity(v: &PlayerView, kind: i32) -> u8 {
-    v.character
-        .items
-        .iter()
-        .skip(4)
-        .filter(|k| **k < 0 || **k == kind)
-        .count()
-        .clamp(1, 8) as u8
+pub(in crate::bots) const SPEED: i32 = 0xa21;
+const DEFENSE: i32 = 0xa20;
+const LIFE: i32 = 0xae9;
+fn style(name: &str) -> u32 {
+    name.bytes()
+        .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)))
 }
-fn parse_ad(s: &str, c: &Content) -> Option<(Goods, i32)> {
-    let kind = |name: &str| {
-        let mut items = c
-            .objects
-            .values()
-            .filter(|o| !name.is_empty() && o.class == "Equipment" && o.name == name);
-        let kind = items.next()?.kind;
-        items.next().is_none().then_some(i32::from(kind))
-    };
-    let (give, want) = s.split_once("; want ")?;
-    let (name, quantity) = give.rsplit_once(" x")?;
-    let goods = Goods {
-        kind: kind(name)?,
-        quantity: quantity.parse().ok()?,
-    };
-    (1..=16)
-        .contains(&goods.quantity)
-        .then_some((goods, kind(want)?))
+fn fair(q: &[Goods; 2], c: &Content) -> bool {
+    match (q[0].kind, q[1].kind) {
+        (SPEED, DEFENSE) => (3..=5).contains(&q[0].quantity) && q[1].quantity == 1,
+        (DEFENSE, SPEED) => q[0].quantity == 1 && (3..=5).contains(&q[1].quantity),
+        (DEFENSE, LIFE) => (5..=7).contains(&q[0].quantity) && q[1].quantity == 1,
+        (LIFE, DEFENSE) => q[0].quantity == 1 && (5..=7).contains(&q[1].quantity),
+        _ => [0, 1].into_iter().any(|side| {
+            let gear = &q[side];
+            let pay = &q[1 - side];
+            gear.quantity == 1
+                && (1..=2).contains(&pay.quantity)
+                && matches!(pay.kind, DEFENSE | LIFE)
+                && c.objects
+                    .get(&(gear.kind as u16))
+                    .is_some_and(|o| !o.consumable && o.tier.is_some_and(|t| t >= 3))
+        }),
+    }
 }
-fn parse_goods(s: &str) -> Option<Goods> {
-    let (k, n) = s.split_once('x')?;
-    let goods = Goods {
-        kind: k.parse().ok()?,
-        quantity: n.parse().ok()?,
+pub(in crate::bots) fn goods_text(g: &Goods, c: &Content) -> Result<String> {
+    let name = match g.kind {
+        SPEED => "spd",
+        DEFENSE => "def",
+        LIFE => "life",
+        0xad3 => "dhide",
+        0xaf9 => "hydra",
+        _ => &c.get(u16::try_from(g.kind)?)?.name,
     };
-    ((0..=65535).contains(&goods.kind) && (1..=16).contains(&goods.quantity)).then_some(goods)
+    Ok(format!("{} {name}", g.quantity))
 }
-type ParsedTerms = (u64, [Goods; 2], [i32; 3], u64, u8, u8, u8);
-fn parse_terms(s: &str) -> Option<ParsedTerms> {
-    let p = s.split(' ').collect::<Vec<_>>();
-    if p.len() != 7 {
+pub(in crate::bots) fn parse_quote(text: &str, c: &Content) -> Option<[Goods; 2]> {
+    let lower = text.trim().to_ascii_lowercase();
+    let lower = lower.split(" @").next()?;
+    let mut body = None;
+    let mut buying = false;
+    for prefix in [
+        "wts ", "sell ", "selling ", "s> ", "trading ", "wtb ", "buy ", "buying ",
+    ] {
+        if let Some(s) = lower.strip_prefix(prefix) {
+            body = Some(s);
+            buying = matches!(prefix, "wtb " | "buy " | "buying ");
+            break;
+        }
+    }
+    let body = body?;
+    let parse = |s: &str| -> Option<Goods> {
+        let s = s.trim();
+        let (quantity, name) = if let Some((n, rest)) = s.split_once(' ') {
+            if let Ok(n) = n.parse::<u8>() {
+                (n, rest)
+            } else {
+                (1, s)
+            }
+        } else {
+            (1, s)
+        };
+        if !(1..=8).contains(&quantity) {
+            return None;
+        }
+        let kind = match name {
+            "spd" | "speed" => SPEED,
+            "def" | "defense" => DEFENSE,
+            "life" => LIFE,
+            "dhide" => 0xad3,
+            "hydra" => 0xaf9,
+            _ => {
+                let mut items = c
+                    .objects
+                    .values()
+                    .filter(|o| o.class == "Equipment" && o.name.eq_ignore_ascii_case(name));
+                let kind = i32::from(items.next()?.kind);
+                if items.next().is_some() {
+                    return None;
+                }
+                kind
+            }
+        };
+        Some(Goods { kind, quantity })
+    };
+    let mut candidates = Vec::new();
+    if let Some((give, want)) = body.split_once(" for ").or_else(|| body.split_once(" = ")) {
+        candidates.push([parse(give)?, parse(want)?]);
+    } else {
+        for (i, _) in body.char_indices().filter(|(_, ch)| *ch == ' ') {
+            if let (Some(give), Some(want)) = (parse(&body[..i]), parse(&body[i + 1..])) {
+                candidates.push([give, want]);
+            }
+        }
+    }
+    if candidates.len() != 1 {
         return None;
     }
-    let (a, b) = p[1].split_once('/')?;
-    let meeting = p[2]
-        .strip_prefix('@')?
-        .split(',')
-        .map(str::parse)
-        .collect::<std::result::Result<Vec<i32>, _>>()
-        .ok()?
-        .try_into()
-        .ok()?;
-    Some((
-        u64::from_str_radix(p[0], 16).ok()?,
-        [parse_goods(a)?, parse_goods(b)?],
-        meeting,
-        p[3].strip_prefix('!')?.parse().ok()?,
-        p[4].strip_prefix('b')?.parse().ok()?,
-        p[5].strip_prefix('p')?.parse().ok()?,
-        p[6].strip_prefix('r')?.parse().ok()?,
-    ))
+    let mut q = candidates.pop()?;
+    if q[0].kind == q[1].kind {
+        return None;
+    }
+    if buying {
+        q.swap(0, 1);
+    }
+    Some(q)
 }
 pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
     ensure!(r.i16()? == 12, "market offer shape");
