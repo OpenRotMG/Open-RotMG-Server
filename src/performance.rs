@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) mod attribution;
 const RETAINED: usize = 256;
 
 pub struct Measure {
@@ -124,12 +125,30 @@ pub struct Window {
     samples: BTreeMap<&'static str, Samples>,
     cpu: BTreeMap<&'static str, Samples>,
     counters: BTreeMap<&'static str, u64>,
+    capture: Option<Vec<(&'static str, Measurement)>>,
 }
 impl Window {
+    pub(crate) fn begin_capture(&mut self) {
+        assert!(self.capture.is_none(), "overlapping tick captures");
+        self.capture = Some(Vec::new());
+    }
+    pub(crate) fn end_capture(&mut self) -> Vec<(&'static str, Measurement)> {
+        self.capture.take().expect("tick capture missing")
+    }
     pub fn work(&mut self, name: &'static str, measure: Measure) {
         self.completed(name, measure.finish());
     }
     pub fn completed(&mut self, name: &'static str, measurement: Measurement) {
+        if let Some(phases) = &mut self.capture {
+            if let Some((_, previous)) = phases.iter_mut().find(|(phase, _)| *phase == name) {
+                previous.wall += measurement.wall;
+                if let (Some(previous), Some(cpu)) = (&mut previous.cpu, measurement.cpu) {
+                    *previous += cpu;
+                }
+            } else {
+                phases.push((name, measurement));
+            }
+        }
         if let Some(cpu) = measurement.cpu {
             self.cpu
                 .entry(name)
@@ -142,6 +161,17 @@ impl Window {
         *self.counters.entry(name).or_default() += amount;
     }
     pub fn record(&mut self, name: &'static str, elapsed: Duration) {
+        if name == "scheduling_lateness"
+            && let Some(phases) = &mut self.capture
+        {
+            phases.push((
+                name,
+                Measurement {
+                    wall: elapsed,
+                    cpu: None,
+                },
+            ));
+        }
         self.started.get_or_insert_with(|| Instant::now() - elapsed);
         self.samples
             .entry(name)
