@@ -4,6 +4,7 @@ use crate::store::InventoryWrite;
 
 fn profile() -> Profile {
     let mut profile = ARCHETYPES[0];
+    profile.name = "Trader";
     profile.recovery = 0.9;
     profile.companions = 6.;
     profile

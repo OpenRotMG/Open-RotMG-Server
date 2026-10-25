@@ -467,7 +467,8 @@ mod provider_tests {
             let started=Instant::now();
             let reply=service.ask(&payload,"real-market-smoke-talk").await;
             service.completed(&reply,started.elapsed());
-            ensure!(reply?.intent == Intent::Talk, "generic speech did not choose the sole allowed Talk intent");
+            let reply=reply?;
+            ensure!(reply.intent == Intent::Talk && !reply.reply.trim().is_empty(), "generic speech did not produce the sole allowed Talk intent");
             let health=service.health();
             ensure!(health["daily_requests"] == 3 && health["successes"] == 3 && health["failures"] == 0 && health["contract_failed"] == false, "three-call free-provider smoke contract failed");
             println!("{}",json!({"smoke":"market-template-and-talk","advertisement_current_facts":true,"refusal_current_facts":true,"health":health}));
