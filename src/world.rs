@@ -5984,9 +5984,6 @@ impl World {
         }
         Ok(())
     }
-    fn move_entity(&mut self, id: i32, goal: Pos, distance: f32) -> Result<()> {
-        self.move_entity_colliding(id, goal, distance, false)
-    }
     fn move_entity_colliding(
         &mut self,
         id: i32,
