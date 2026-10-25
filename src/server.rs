@@ -3176,7 +3176,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
     let shutdown = a.clone();
     let failure = Arc::new(Mutex::new(None));
     let report = failure.clone();
-    let (stopped, mut stop) = tokio::sync::watch::channel(false);
+    let (stopped, stop) = tokio::sync::watch::channel(false);
     let serving = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -3196,20 +3196,35 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         }
         stopped.send_replace(true);
     });
-    let result = tokio::select! {
+    supervise_serving(&a, async { serving.await }, &failure, stop).await
+}
+async fn supervise_serving(
+    a: &App,
+    serving: impl std::future::Future<Output = std::io::Result<()>>,
+    failure: &Mutex<Option<anyhow::Error>>,
+    mut stop: tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
+    let (result, checkpoint_attempted) = tokio::select! {
         mut incident = a.world.supervisor.failed() => {
             a.shutdown.send_replace(true);
-            lifecycle::preserve_uncertain(&a, &mut incident)?;
-            Err(anyhow::anyhow!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id))
+            let critical = format!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id);
+            let checkpoint = lifecycle::preserve_uncertain(a, &mut incident)
+                .with_context(|| format!("{critical}; account-fence checkpoint failed"));
+            (checkpoint.and(Err(anyhow::anyhow!(critical))), true)
         },
-        result = serving => result.map_err(anyhow::Error::from),
+        result = serving => (result.map_err(anyhow::Error::from), false),
         _ = async { let _ = stop.changed().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } => {
-            Err(anyhow::anyhow!("HTTP shutdown deadline exceeded"))
+            (Err(anyhow::anyhow!("HTTP shutdown deadline exceeded")), false)
         }
     };
     let failure = failure.lock().expect("shutdown report poisoned").take();
     if let Some(error) = failure {
-        return failed_shutdown(&a, error).await;
+        // Retrying a critical checkpoint could hide its failure and discard the incident diagnostic.
+        if checkpoint_attempted {
+            let critical = result.expect_err("critical termination cannot succeed");
+            return Err(error.context(format!("concurrent shutdown failure: {critical:#}")));
+        }
+        return failed_shutdown(a, error).await;
     }
     result
 }

@@ -184,6 +184,48 @@ async fn failed_shutdown_checkpoint_failure_retains_original_error_and_blocks_re
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn recorded_drain_and_critical_checkpoint_failures_both_survive_select() {
+    let (dir, app) = fixture();
+    let failure = Mutex::new(Some(anyhow::anyhow!("original drain failure")));
+    app.world.supervisor.failure(
+        "fixture-critical",
+        anyhow::anyhow!("concurrent worker failure"),
+    );
+    let incident = app.world.supervisor.latest().unwrap().unwrap();
+    let blocked = dir.join("incident.json.new");
+    std::fs::create_dir(&blocked).unwrap();
+    let checkpoint_error = std::fs::File::create(&blocked).unwrap_err().to_string();
+    let (_stopped, stop) = tokio::sync::watch::channel(false);
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        super::super::supervise_serving(&app, std::future::pending(), &failure, stop),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(error.root_cause().to_string(), "original drain failure");
+    let diagnostic = format!("{error:#}");
+    assert!(
+        diagnostic.contains("critical fixture-critical worker failed"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains(&incident.id), "{diagnostic}");
+    assert!(
+        diagnostic.contains("account-fence checkpoint failed"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains(&checkpoint_error), "{diagnostic}");
+    assert!(failure.lock().unwrap().is_none());
+    assert!(*app.shutdown.borrow());
+    let saved = app.world.supervisor.latest().unwrap().unwrap();
+    assert_eq!(saved.id, incident.id);
+    assert_eq!(saved.component, "fixture-critical");
+    assert!(!saved.fences_preserved);
+    assert!(crate::supervision::Supervisor::persisted(dir.join("incident.json")).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn fatal_fame_fences_survive_restart_without_rejecting_already_accepted_sql() {
     let (dir, app) = fixture();
     let (_pending_owner, pending_player, mut pending) = avatar(&app, "pending").await;
