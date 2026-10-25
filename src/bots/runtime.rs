@@ -416,7 +416,7 @@ async fn reenter(
     result
 }
 
-async fn persona_character(app: &App, profile: Profile) -> Result<Character> {
+pub(super) async fn persona_character(app: &App, profile: Profile) -> Result<Character> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
     let (roster, vault) = persona::life(&profile, &app.content, &mut rng)?;
     app.store
@@ -484,51 +484,7 @@ async fn continue_selected(
 }
 
 pub async fn start(app: &App) -> Result<()> {
-    let mut population = persona::PERSONAS.clone();
-    rand::seq::SliceRandom::shuffle(population.as_mut_slice(), &mut rand::thread_rng());
-    let mut online = Vec::new();
-    for profile in population {
-        if online.len() == app.bot_population {
-            break;
-        }
-        if let Some(account) = app.store.shore_account(profile.identity.into()).await?
-            && app.world.supervisor.account_fenced(account)?
-        {
-            tracing::error!(
-                account,
-                "autonomous account durably fenced; startup skipped pending operator inspection"
-            );
-            continue;
-        }
-        let character = match persona_character(app, profile).await {
-            Ok(character) => character,
-            Err(error)
-                if error
-                    .downcast_ref::<crate::store::Rejected>()
-                    .is_some_and(|r| r.0 == "persona name is already in use") =>
-            {
-                tracing::info!(
-                    name = profile.name,
-                    "persona display name belongs to another account; selecting another inhabitant"
-                );
-                continue;
-            }
-            Err(error) => {
-                return Err(error).with_context(|| format!("provision persona {}", profile.name));
-            }
-        };
-        let owner = app.claim(character.account)?;
-        launch(app, profile, character, -3, None, None, owner).await?;
-        online.push(profile.name);
-    }
-    ensure!(
-        online.len() == app.bot_population,
-        "only {} of {} personas could be started; inspect account fences and name ownership",
-        online.len(),
-        app.bot_population
-    );
-    tracing::info!(names=?online, "bot population started");
-    Ok(())
+    director::start(app).await
 }
 pub(super) async fn start_selected(
     app: &App,
@@ -543,22 +499,23 @@ pub(super) async fn start_selected(
         app,
         profile,
         character,
-        world,
-        Some(position),
+        (world, Some(position)),
         Some(selected),
         owner,
+        None,
     )
     .await
 }
-async fn launch(
+pub(super) async fn launch(
     app: &App,
     profile: Profile,
     character: Character,
-    world: i32,
-    position: Option<Pos>,
+    location: (i32, Option<Pos>),
     selected: Option<i32>,
     mut owner: server::Owner,
+    done: Option<mpsc::Sender<director::Departure>>,
 ) -> Result<()> {
+    let (world, position) = location;
     owner.admit_controller(app)?;
     let mut drain = lifecycle::drain::stopping(app);
     let entry = lifecycle::drain::entry(app)?;
@@ -603,6 +560,14 @@ async fn launch(
         let mut admission: Option<Vec<u8>> = None;
         let mut last_dialogue: Option<std::time::Instant> = None;
         let mut phase = adventures::Phase::Seeking;
+        let until = done.as_ref().map(|_| {
+            app.world.clock.now()
+                + Duration::from_secs(
+                    rand::thread_rng()
+                        .gen_range(app.bot_session_seconds[0]..=app.bot_session_seconds[1]),
+                )
+        });
+        let mut retired = false;
         let result: Result<()> = async {
                 loop {
                     if *shutdown.borrow() || drain.has_changed()? || !lifecycle::drain::open(&app) { break; }
@@ -614,7 +579,7 @@ async fn launch(
                     if app.world.clock.paused() { continue; }
                     let _entry = lifecycle::drain::entry(&app)?;
                     if let Some(transfer) = server::automatic_transfer(&app, id).await? {
-                        dialogue::cancel(&app, &mut pending).await;
+                        dialogue::cancel(&mut pending);
                         dialogue::end_agreement(&app, &mut brain, "world changed").await;
                         ensure!(transfer.player == id && transfer.output.packets.same_channel(&sender), "collective transfer does not belong to autonomous output");
                         while output.try_recv().is_ok() {}
@@ -670,13 +635,17 @@ async fn launch(
                     }
                     if !view.lifecycle.alive {
                         app.society.lock().expect("adventure registry poisoned").leave(account);
-                        dialogue::cancel(&app, &mut pending).await;
+                        dialogue::cancel(&mut pending);
                         dialogue::end_agreement(&app, &mut brain, "character died").await;
                         brain.mind.end(&view, "character_died_steps_invalidated");
                         brain.mind.market.finish("character_died_remaining_balance_unenforced");
                         brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
                         lifecycle::finalize(&app, id, CloseReason::Controller)?.wait().await?;
                         if selected.is_some() { return Ok(()); }
+                        if until.is_some_and(|deadline| app.world.clock.now() >= deadline) {
+                            retired = true;
+                            return Ok(());
+                        }
                         tokio::select! {
                             _=tokio::time::sleep(Duration::from_secs(3))=>{},
                             _=shutdown.changed()=>return Ok(()),
@@ -774,12 +743,24 @@ async fn launch(
                         }
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
+                    let ending = until.is_some_and(|deadline| app.world.clock.now() >= deadline)
+                        && pending.is_none() && director::may_finish(&app, &mut brain, &view);
+                    if ending && view.map.name == "Nexus" {
+                        retired = true;
+                        break;
+                    }
                     if view.lifecycle.busy { continue; }
                     if view.tick < brain.next_decision { continue; }
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();
                     brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
-                    let Some(decision) = decide_before_social(&app, &mut brain, &view).await? else { continue; };
+                    let Some(mut decision) = decide_before_social(&app, &mut brain, &view).await? else { continue; };
+                    if ending && director::may_finish(&app, &mut brain, &view) && decision.journey.is_none() {
+                        decision.journey = Some(Journey::Nexus);
+                        decision.chat = None;
+                        tracing::info!(account,name=profile.name,"session finished; returning to Nexus before logout");
+                        app.cctv.decided(profile.name, &view, &decision, "session finished; returning to Nexus before logout".into(), &app.content);
+                    }
                     if events::shared(&view.map.name) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
                             hp=view.character.hp,max_hp=view.character.stats[0],mp=view.character.mp,recovery=profile.recovery,
@@ -870,7 +851,7 @@ async fn launch(
                                     }
                                 };
                                 admission = Some(key.clone());
-                                dialogue::cancel(&app, &mut pending).await;
+                                dialogue::cancel(&mut pending);
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
@@ -920,6 +901,7 @@ async fn launch(
                 },
             )
         });
+        let mut finalized = true;
         if let Some(closing) = closing {
             let saved = match closing {
                 Ok(Some(completion)) => completion.wait().await,
@@ -927,13 +909,28 @@ async fn launch(
                 Err(error) => Err(error),
             };
             if let Err(error) = saved {
+                finalized = false;
                 tracing::error!(player=id,account,%error,"autonomous finalization failed; account remains fenced");
             }
         }
-        dialogue::cancel(&app, &mut pending).await;
+        dialogue::cancel(&mut pending);
         dialogue::end_agreement(&app, &mut brain, "controller stopped").await;
+        let retire = retired && finalized && result.is_ok() && !*shutdown.borrow();
         if let Err(error) = result {
             tracing::error!(player=id,name=profile.name,%error,"autonomous controller stopped");
+        }
+        if let Some(done) = done
+            && !*shutdown.borrow()
+            && done
+                .send(director::Departure {
+                    profile,
+                    account,
+                    retire,
+                })
+                .await
+                .is_err()
+        {
+            tracing::error!(account, "population director stopped receiving departures");
         }
     });
     Ok(())

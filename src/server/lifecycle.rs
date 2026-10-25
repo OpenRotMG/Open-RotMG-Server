@@ -472,10 +472,15 @@ fn generations(a: &App, accounts: &[i32]) -> Result<Vec<(i32, Arc<()>)>> {
 
 impl App {
     pub(crate) fn claim(&self, id: i32) -> Result<Owner> {
+        self.try_claim(id)?.context("development world full")
+    }
+    pub(crate) fn try_claim(&self, id: i32) -> Result<Option<Owner>> {
         let _admission = drain::admission(self)?;
         let mut owners = self.owners.lock().expect("ownership registry poisoned");
         self.world.supervisor.check_account(id)?;
-        ensure!(owners.len() < self.max_players, "development world full");
+        if owners.len() >= self.max_players {
+            return Ok(None);
+        }
         ensure!(
             !owners.contains_key(&id),
             "account already has an active session"
@@ -497,7 +502,7 @@ impl App {
                 finalization: None,
             },
         );
-        Ok(Owner {
+        Ok(Some(Owner {
             registry: self.owners.clone(),
             id,
             generation,
@@ -505,7 +510,7 @@ impl App {
             admitted: _admission.generation,
             cancel: None,
             cleanup: None,
-        })
+        }))
     }
     pub(super) fn claim_session(&self, id: i32) -> Result<Owner> {
         let mut owner = self.claim(id)?;
@@ -1252,6 +1257,8 @@ pub(super) fn retirement(
     })
 }
 
+#[cfg(test)]
+mod admission_tests;
 #[cfg(test)]
 mod supervision_tests;
 

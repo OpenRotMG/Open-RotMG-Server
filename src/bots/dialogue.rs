@@ -407,10 +407,11 @@ pub(super) fn supersede(pending: &mut Option<Pending>, request: &Request) -> boo
     same_speaker
 }
 
-pub(super) async fn cancel(app: &crate::server::App, pending: &mut Option<Pending>) {
+pub(super) fn cancel(pending: &mut Option<Pending>) {
     if let Some(request) = pending.take() {
         request.task.abort();
-        failed(app, &request.request, &request.id, "session_changed").await;
+        tracing::info!(request=%request.id, speaker=request.request.speaker,
+            reason="session_changed", "bot dialogue canceled; pending intention not published");
     }
 }
 

@@ -26,6 +26,27 @@ fn fixture() -> (Content, PlayerView, Brain, Request) {
     (content, view, brain, request)
 }
 
+#[tokio::test]
+async fn session_cancellation_aborts_pending_publication() {
+    let (_, _, _, request) = fixture();
+    let task = tokio::spawn(std::future::pending::<std::result::Result<Reply, Failure>>());
+    let aborted = task.abort_handle();
+    let mut pending = Some(Pending {
+        request,
+        id: "cancel-test".into(),
+        task,
+    });
+    cancel(&mut pending);
+    assert!(pending.is_none());
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !aborted.is_finished() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
 #[test]
 fn publication_deadline_is_stable_length_sensitive_and_staggers_speakers() {
     let now = Instant::now();

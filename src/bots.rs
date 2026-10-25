@@ -19,6 +19,7 @@ pub(crate) mod cctv;
 mod combat;
 mod crowds;
 pub(crate) mod dialogue;
+mod director;
 mod entries;
 mod events;
 
