@@ -28,7 +28,7 @@ fn pirate_instances_generate_replayable_maps_without_a_static_template() {
 }
 
 #[tokio::test]
-async fn generated_pirate_portal_shares_one_instance_and_retains_realm_return() {
+async fn generated_pirate_portal_shares_one_instance_and_keeps_current_exit() {
     let path = std::path::Path::new("data");
     let content = Arc::new(Content::load(path).unwrap());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
@@ -72,5 +72,6 @@ async fn generated_pirate_portal_shares_one_instance_and_retains_realm_return() 
         .find(|e| e.kind == 0x703)
         .unwrap()
         .id;
-    assert_eq!(d.destination(player, Some(exit)).unwrap().2, -3);
+    // Source-Realm metadata does not override Pirate Cave's explicit Nexus exit.
+    assert_eq!(d.destination(player, Some(exit)).unwrap().2, -2);
 }
