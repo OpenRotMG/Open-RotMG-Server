@@ -7,7 +7,7 @@ use crate::{
     },
 };
 use anyhow::{Context, Result, ensure};
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, seq::IteratorRandom};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{Arc, Mutex},
@@ -23,6 +23,8 @@ mod director;
 mod entries;
 mod events;
 
+#[cfg(test)]
+mod nexus_spacing_tests;
 mod persona;
 mod progression;
 pub(crate) mod pursuits;
@@ -166,6 +168,8 @@ enum Goal {
     Revisit(i16, i16),
     Survey(i16, i16),
     Explore(i16, i16),
+    Linger,
+    NexusNoRoom,
     Wait,
 }
 #[derive(Debug)]
@@ -266,6 +270,7 @@ struct Brain {
     next_bank: u64,
     inland_reached: bool,
     nexus_until: u64,
+    nexus_spot: Option<Pos>,
     portal: Option<(i32, u64)>,
     hunting: Option<Pos>,
     last_encounter: u64,
@@ -332,6 +337,7 @@ impl Brain {
             } else {
                 0
             },
+            nexus_spot: None,
             portal: None,
             hunting: None,
             last_encounter: view.time_ms,
@@ -529,6 +535,9 @@ impl Brain {
             "projectile trajectory cannot be inferred from observation"
         );
         self.last_tick = Some(v.tick);
+        if v.time_ms >= self.nexus_until {
+            self.nexus_spot = None;
+        }
         self.calls.observe(v);
         self.next_decision = v.tick + self.profile.reaction;
         self.blocked.retain(|_, until| *until > v.tick);
@@ -814,6 +823,37 @@ impl Brain {
             return Ok((Activity::Social, social));
         }
         if v.map.name == "Nexus" && self.agreement.is_none() && v.time_ms < self.nexus_until {
+            if decision.item.is_none()
+                && self.group.is_none()
+                && self.companion.is_none()
+                && s.enemies.is_empty()
+            {
+                let available = |p: Pos| {
+                    p.distance(v.position) <= 7.
+                        && s.grid.segment(v.position, p)
+                        && v.player_markers.iter().all(|peer| {
+                            peer.id == v.session.player || peer.position.distance(p) >= 2.
+                        })
+                };
+                if self.nexus_spot.is_none_or(|p| !available(p)) {
+                    let (x, y) = tile(v.position);
+                    self.nexus_spot = (x.saturating_sub(7)..=x.saturating_add(7))
+                        .flat_map(|x| {
+                            (y.saturating_sub(7)..=y.saturating_add(7)).map(move |y| (x, y))
+                        })
+                        .map(center)
+                        .filter(|p| available(*p))
+                        .choose(&mut self.rng);
+                }
+                if let Some(spot) = self.nexus_spot {
+                    decision.goal = Goal::Linger;
+                    if v.position.distance(spot) > 0.3 {
+                        decision.movement = s.grid.next(v.position, spot);
+                    }
+                } else {
+                    decision.goal = Goal::NexusNoRoom;
+                }
+            }
             return Ok((Activity::Linger, decision));
         }
         if v.map.name == "Realm"
