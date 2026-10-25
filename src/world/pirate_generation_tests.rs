@@ -41,6 +41,7 @@ async fn generated_pirate_portal_shares_one_instance_and_keeps_current_exit() {
         d.worlds[&cave].return_route,
         Some(DungeonReturn::Realm(-3))
     ));
+    let entrance = d.worlds[&-3].entities[&portal].pos;
     for i in 0..2 {
         let account = store.list(format!("generated-pirate-{i}")).await.unwrap();
         let character = store
@@ -53,6 +54,13 @@ async fn generated_pirate_portal_shares_one_instance_and_keeps_current_exit() {
             .unwrap()
             .enter(character, None)
             .unwrap();
+        d.worlds
+            .get_mut(&-3)
+            .unwrap()
+            .players
+            .get_mut(&id)
+            .unwrap()
+            .pos = entrance;
         assert_eq!(d.destination(id, Some(portal)).unwrap().2, cave);
     }
     let account = store.list("generated-pirate-return".into()).await.unwrap();

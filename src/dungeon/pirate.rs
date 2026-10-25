@@ -155,7 +155,7 @@ fn build(content: &Content, seed: u64) -> Result<Map> {
         }
     }
     // Snapshot each dilation so scan order cannot turn a margin into unbounded water.
-    for layer in 0..2 {
+    for _ in 0..2 {
         let previous = map.cells.clone();
         for y in 1..height - 1 {
             for x in 1..width - 1 {
@@ -164,7 +164,6 @@ fn build(content: &Content, seed: u64) -> Result<Map> {
                     && DIRECTIONS.iter().any(|&(dx, dy)| {
                         matches!(previous[index(x + dx, y + dy)].ground, FLOOR | SAND | WATER)
                     })
-                    && (layer == 0 || rng.gen_bool(0.6))
                 {
                     map.cells[i].ground = WATER;
                 }
