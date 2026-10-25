@@ -281,6 +281,78 @@ async fn runtime_coordinator_survival_preempts_active_incoming_gift_and_legacy_w
             .unwrap()
             .is_empty()
     );
+    drain(&app, &mut brain, &mut output).await;
+    open(&app, id, peer).await;
+    drain(&app, &mut brain, &mut output).await;
+    let view = app.world.player_view(id).await.unwrap();
+    social::market(&app, &mut brain, &view).await.unwrap();
+    let mut theirs = [false; 12];
+    theirs[4] = true;
+    app.world
+        .for_player(peer)
+        .call(move |w| w.change_trade(peer, theirs))
+        .await
+        .unwrap();
+    drain(&app, &mut brain, &mut output).await;
+    advance(&app, 3100).await;
+    let delivery = brain
+        .mind
+        .market
+        .bargain
+        .as_ref()
+        .unwrap()
+        .terms
+        .delivery(0)
+        .unwrap();
+    let session = [-2, id, view.session.character];
+    let mine = brain.mind.market.trade.as_ref().unwrap().offers[0];
+    app.world
+        .for_player(id)
+        .call(move |w| {
+            ensure!(
+                w.autonomous_trade(
+                    id,
+                    session,
+                    crate::world::TradeAction::Accept { mine, theirs },
+                    delivery
+                )?
+                .is_none(),
+                "human has not accepted yet"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    injure(&app, id, 400).await;
+    let stale = app.world.player_view(id).await.unwrap();
+    let plan = app
+        .world
+        .for_player(peer)
+        .call(move |w| {
+            w.accept_trade(peer, theirs, mine)?
+                .context("mutual native acceptance missing")
+        })
+        .await
+        .unwrap();
+    server::persist_trade(&app, plan).await.unwrap();
+    assert!(
+        decide_before_social(&app, &mut brain, &stale)
+            .await
+            .unwrap()
+            .is_none(),
+        "published receipt must not release an item action planned from the old inventory revision"
+    );
+    assert_eq!(brain.activity, Activity::Survive);
+    assert_eq!(brain.mind.market.bargain.as_ref().unwrap().confirmed, 1);
+    let current = app.world.player_view(id).await.unwrap();
+    assert_eq!(
+        current.character.inventory_revision,
+        stale.character.inventory_revision + 1
+    );
+    assert_eq!(
+        current.character.hp, stale.character.hp,
+        "stale safety consumption must not run"
+    );
     lifecycle::finalize(&app, id, CloseReason::Controller)
         .unwrap()
         .wait()
@@ -436,6 +508,8 @@ async fn runtime_coordinator_rebind_resumes_paid_installments_only_through_fresh
                     .is_none(),
                 "pending atomic commit must fence the safety journey"
             );
+            assert_eq!(brain.activity, Activity::Survive);
+            assert!(app.world.player_view(id).await.unwrap().lifecycle.busy);
             assert_eq!(brain.mind.market.bargain.as_ref().unwrap().confirmed, 1);
         }
         server::persist_trade(&app, plan).await.unwrap();
@@ -506,7 +580,8 @@ async fn runtime_coordinator_rebind_resumes_paid_installments_only_through_fresh
         .await
         .unwrap()
         .expect("completed receipt must release safety movement");
-    assert!(matches!(decision.journey, Some(Journey::Nexus)));
+    assert_eq!(brain.activity, Activity::Survive);
+    assert_eq!(decision.goal, Goal::Recover);
     let b = brain.mind.market.bargain.as_ref().unwrap();
     assert_eq!(b.confirmed, 2);
     assert_eq!(
