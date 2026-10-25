@@ -5777,9 +5777,11 @@ impl World {
                 );
             }
             if self.clear_exit.is_none() {
+                // Dreadstump leaves a Realm Portal: https://www.youtube.com/watch?v=JMZXtUNZ96s (Nov 2012, portal panel at his death taunt)
                 let kind = if matches!(
                     defeated.kind,
-                    crate::dungeon::abyss::MALPHAS
+                    0x927
+                        | crate::dungeon::abyss::MALPHAS
                         | crate::dungeon::snake::BOSS
                         | crate::dungeon::jungle::BOSS
                         | crate::dungeon::beach::BOSS
