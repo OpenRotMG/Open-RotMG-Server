@@ -270,8 +270,22 @@ impl World {
                     &mut self.timed_ids,
                 );
             }
-            0xdf1 if target.is_some_and(|p| pos.distance(p) < 2.) => {
-                self.area_damage(kind, pos, 2., 40)?
+            0xdf1 => {
+                // One Goo per second, at most 20, per a disabled later comparator line: https://github.com/Omniraptyr/Valor-Server/blob/40fab9e80d8a44e922036d178b9d1f03aca66a44/VotR-Server/wServer/logic/db/BehaviorDb.Oryx.cs#L499
+                // Goo lasting as long as its 6000 ms projectile is a reconstruction.
+                let live = self
+                    .actors()
+                    .filter(|e| e.parent == Some(id) && e.kind == 0xdf0)
+                    .count();
+                self.finale_wave(
+                    id,
+                    finale::Wave {
+                        kind: 0xdf0,
+                        count: (live + 1).min(20),
+                        radius: 0.1,
+                        lifetime: 6000,
+                    },
+                )?
             }
             _ => {}
         }

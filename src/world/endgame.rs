@@ -806,6 +806,42 @@ impl World {
                 e.published = false;
             }
         }
+        if self.name == "Wine Cellar" {
+            // Build 122 added destructible barrels (https://web.archive.org/web/20130605124909/forums.wildshadow.com/node/41768); their room-corner placement is a reconstruction.
+            let open = |x: i32, y: i32| {
+                self.walkable(Pos {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                })
+            };
+            let corners: Vec<_> = (0..self.map.height)
+                .flat_map(|y| (0..self.map.width).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let cell = &self.map.cells[(y * self.map.width + x) as usize];
+                    cell.object.is_none()
+                        && cell.region != 1
+                        && open(x, y)
+                        && [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+                            .iter()
+                            .any(|&(dx, dy)| {
+                                !open(x - dx, y)
+                                    && !open(x, y - dy)
+                                    && open(x + dx, y)
+                                    && open(x, y + dy)
+                                    && open(x + dx, y + dy)
+                            })
+                })
+                .collect();
+            ensure!(!corners.is_empty(), "Wine Cellar map has no barrel corners");
+            for &(x, y) in &corners {
+                let pos = Pos {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                };
+                self.spawn_entity(0xde5, pos, vec![])?;
+            }
+            tracing::info!(barrels = corners.len(), "reconstructed Wine Barrels placed");
+        }
         Ok(())
     }
     pub(super) fn begin_unlock(
