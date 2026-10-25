@@ -1152,7 +1152,8 @@ impl Brain {
                     }
                 }
                 // The committed exit is public even when a straggler missed personal clear credit.
-                "Pirate Cave" | "Snake Pit" => p.kind == 0x71d,
+                "Pirate Cave" => p.kind == 0x704,
+                "Snake Pit" => p.kind == 0x71d,
                 "Oryx's Castle" => p.kind == 0xd7b && events::ready(v, content),
                 "Oryx's Chamber" => p.kind == 0x71d || p.kind == 0x700 && events::ready(v, content),
                 "Wine Cellar" | "Mad Lab" => matches!(p.kind, 0x71d | 0x712),
@@ -1165,8 +1166,9 @@ impl Brain {
                 _ => false,
             })
         {
-            let exiting =
-                portal.kind == 0x71d || portal.kind == 0x712 && events::shared(&v.map.name);
+            let exiting = portal.kind == 0x71d
+                || v.map.name == "Pirate Cave"
+                || portal.kind == 0x712 && events::shared(&v.map.name);
             if exiting || ((peaceful || matches!(portal.kind, 0xd7b | 0x700)) && health >= 0.75) {
                 let reward_waiting = choices.iter().any(|(_, goal, _)| {
                     if let Goal::Loot(id) = goal {

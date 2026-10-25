@@ -142,3 +142,37 @@ async fn dungeon_return_rejects_missing_origin_but_preserves_explicit_random_and
     assert!(d.dungeon_return_from(dungeon).is_err());
     assert!(d.destination(player, Some(exit)).is_err());
 }
+
+#[tokio::test]
+async fn dreadstump_completion_queues_credit_and_routes_realm_portal_exit() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 20, 423).unwrap();
+    let pos = d.worlds[&1].map.spawns[0];
+    let entrance = d
+        .drop_dungeon_portal(1, 0x717, Pos { x: pos.0, y: pos.1 })
+        .unwrap();
+    let cave = d.portals[&entrance].destination.unwrap();
+    let account = store.list("dreadstump".into()).await.unwrap();
+    let ch = store
+        .create(account.id, d.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let w = d.worlds.get_mut(&cave).unwrap();
+    let player = w.enter(ch, None).unwrap();
+    let mut boss = w
+        .entities
+        .values()
+        .find(|e| e.kind == 0x927)
+        .unwrap()
+        .clone();
+    w.players.get_mut(&player).unwrap().pos = boss.pos;
+    boss.damage.insert(w.players[&player].character.id, 1);
+    w.drop_loot(&boss).unwrap();
+    assert_eq!(w.players[&player].clears_queued[0], 1);
+    let exit = w.clear_exit.unwrap();
+    assert_eq!(w.entities[&exit].kind, 0x704);
+    w.entities.get_mut(&exit).unwrap().published = true;
+    w.players.get_mut(&player).unwrap().pos = w.entities[&exit].pos;
+    assert_eq!(d.destination(player, Some(exit)).unwrap().2, 1);
+}
