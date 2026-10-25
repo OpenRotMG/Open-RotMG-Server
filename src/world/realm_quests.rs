@@ -194,12 +194,14 @@ impl World {
             e.stage = Some(0);
             e.activated = Some(self.now);
             let lifetime = match kind {
-                0x91d => 130000,
-                0x92a..=0x92c => 160000,
-                _ => 90000,
+                // The Master's Decay is ordered by the King, not a lifetime: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.GhostKing.cs#L165-L240
+                0x929 => None,
+                0x91d => Some(130000),
+                0x92a..=0x92c => Some(160000),
+                _ => Some(90000),
             };
             e.expires
-                .set(Some(self.now + lifetime), child, &mut self.timed_ids);
+                .set(lifetime.map(|ms| self.now + ms), child, &mut self.timed_ids);
             e.size = self.content.objects[&kind].size;
             if matches!(kind, 0x91e | 0x923 | 0x929..=0x92c) {
                 e.condition |= condition::bit(condition::INVULNERABLE);
@@ -1539,5 +1541,58 @@ mod ghost_throw_tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn ghost_master_waits_with_the_invulnerable_king_until_overly_long_combat() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+        for cell in &mut map.cells {
+            cell.ground = 0x61;
+            cell.object = None;
+        }
+        let mut w = World::new(content, Arc::new(map)).unwrap();
+        for id in w.entities.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(id);
+        }
+        let root = w
+            .spawn_entity(0x928, Pos { x: 12.5, y: 12.5 }, vec![])
+            .unwrap();
+        w.entities.get_mut(&root).unwrap().quest = Some(root);
+        w.damage_enemy(-1, root, 1, true, &[], None).unwrap();
+        let mut waited = None;
+        for _ in 0..3600 {
+            let Some(king) = w.entities.get(&root) else {
+                break;
+            };
+            if king.stage == Some(7) {
+                let since = *waited.get_or_insert(w.now);
+                assert_ne!(king.condition & condition::bit(condition::INVULNERABLE), 0);
+                assert_eq!(
+                    w.quest_members(root, &[0x929]).len() + w.pending_named(root, Some(0x929)),
+                    1,
+                    "Ghost Master vanished {}ms into the king's invulnerable wait",
+                    w.now - since
+                );
+            }
+            w.now += 50;
+            w.named_birth_step();
+            w.mechanic_expiry();
+            w.quest_mechanics(root).unwrap();
+        }
+        assert!(!w.entities.contains_key(&root));
+        assert_eq!(w.now - waited.unwrap(), 140000);
+        assert!(
+            !w.entities
+                .values()
+                .any(|e| e.quest == Some(root) && e.kind == 0x929)
+        );
+        assert_eq!(
+            w.entities
+                .values()
+                .filter(|e| e.quest == Some(root) && e.kind == 0x92d)
+                .count(),
+            1
+        );
     }
 }
