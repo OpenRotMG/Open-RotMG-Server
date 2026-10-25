@@ -144,7 +144,7 @@ async fn dungeon_return_rejects_missing_origin_but_preserves_explicit_random_and
 }
 
 #[tokio::test]
-async fn dreadstump_clear_commits_credit_and_returns_through_realm_portal() {
+async fn dreadstump_completion_queues_credit_and_routes_realm_portal_exit() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 20, 423).unwrap();
