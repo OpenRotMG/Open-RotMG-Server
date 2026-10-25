@@ -142,11 +142,7 @@ async fn enter_admitted(
             .await?;
         brain.mind.market.recover(receipts)?;
     }
-    brain.mind.future_class = Some(if profile.healer {
-        crate::content::PRIEST
-    } else {
-        crate::content::WIZARD
-    });
+    brain.mind.future_class = Some(view.character.class);
     let mut generation = std::collections::hash_map::DefaultHasher::new();
     std::hash::Hash::hash(&app.started, &mut generation);
     brain
@@ -254,14 +250,8 @@ async fn reenter(
                                 Some(arrival),
                             )
                         } else if app.store.source_character_alive(account, consumed).await? {
-                            let (character, destination) = continue_character(
-                                &app.store,
-                                &app.content,
-                                profile,
-                                &session,
-                                destination,
-                            )
-                            .await?;
+                            let (character, destination) =
+                                continue_character(&app, profile, &session, destination).await?;
                             ensure!(
                                 character.id == consumed,
                                 "live source character changed during autonomous continuation"
@@ -275,14 +265,8 @@ async fn reenter(
                                     d.cancel_admission(account, ticket)
                                 })
                                 .await?;
-                            let (character, destination) = continue_character(
-                                &app.store,
-                                &app.content,
-                                profile,
-                                &session,
-                                destination,
-                            )
-                            .await?;
+                            let (character, destination) =
+                                continue_character(&app, profile, &session, destination).await?;
                             ensure!(
                                 character.id != consumed && destination == -2,
                                 "committed death did not select explicit replacement"
@@ -292,15 +276,7 @@ async fn reenter(
                     }
                     Reentry::Replacement { previous } => {
                         server::lifecycle::stage(server::lifecycle::Stage::Store);
-                        let character = app
-                            .store
-                            .shore_character(
-                                profile.identity.into(),
-                                profile.name.into(),
-                                &app.content,
-                                profile.healer,
-                            )
-                            .await?;
+                        let character = persona_character(&app, profile).await?;
                         ensure!(
                             character.account == account && character.id != previous,
                             "replacement did not preserve account and replace the dead character"
@@ -340,22 +316,29 @@ async fn reenter(
     result
 }
 
+async fn persona_character(app: &App, profile: Profile) -> Result<Character> {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
+    let (roster, vault) = persona::life(&profile, &app.content, &mut rng)?;
+    app.store
+        .persona_character(profile.identity.into(), roster, vault, rand::random())
+        .await
+}
 async fn continue_character(
-    store: &crate::store::Store,
-    content: &Content,
+    app: &App,
     profile: Profile,
     session: &crate::world::view::Session,
     destination: i32,
 ) -> Result<(Character, i32)> {
     // Departure can commit a death after the transfer was requested.
-    let character = store
-        .shore_character(
-            profile.identity.into(),
-            profile.name.into(),
-            content,
-            profile.healer,
-        )
-        .await?;
+    let character = if app
+        .store
+        .source_character_alive(session.account, session.character)
+        .await?
+    {
+        app.store.load(session.account, session.character).await?
+    } else {
+        persona_character(app, profile).await?
+    };
     ensure!(
         character.account == session.account,
         "departed autonomous account binding changed"
@@ -391,7 +374,13 @@ async fn continue_selected(
 }
 
 pub async fn start(app: &App) -> Result<()> {
-    for profile in PROFILES {
+    let mut population = persona::PERSONAS.clone();
+    rand::seq::SliceRandom::shuffle(population.as_mut_slice(), &mut rand::thread_rng());
+    let mut online = Vec::new();
+    for profile in population {
+        if online.len() == app.bot_population {
+            break;
+        }
         if let Some(account) = app.store.shore_account(profile.identity.into()).await?
             && app.world.supervisor.account_fenced(account)?
         {
@@ -401,18 +390,34 @@ pub async fn start(app: &App) -> Result<()> {
             );
             continue;
         }
-        let character = app
-            .store
-            .shore_character(
-                profile.identity.into(),
-                profile.name.into(),
-                &app.content,
-                profile.healer,
-            )
-            .await?;
+        let character = match persona_character(app, profile).await {
+            Ok(character) => character,
+            Err(error)
+                if error
+                    .downcast_ref::<crate::store::Rejected>()
+                    .is_some_and(|r| r.0 == "persona name is already in use") =>
+            {
+                tracing::info!(
+                    name = profile.name,
+                    "persona display name belongs to another account; selecting another inhabitant"
+                );
+                continue;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("provision persona {}", profile.name));
+            }
+        };
         let owner = app.claim(character.account)?;
         launch(app, profile, character, -3, None, None, owner).await?;
+        online.push(profile.name);
     }
+    ensure!(
+        online.len() == app.bot_population,
+        "only {} of {} personas could be started; inspect account fences and name ownership",
+        online.len(),
+        app.bot_population
+    );
+    tracing::info!(names=?online, "bot population started");
     Ok(())
 }
 pub(super) async fn start_selected(

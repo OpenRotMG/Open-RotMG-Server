@@ -33,10 +33,7 @@ impl PublicSpeech {
 }
 
 fn publication_at(created: Instant, profile: Profile, incoming: &str, reply: &str) -> Instant {
-    let slot = PROFILES
-        .iter()
-        .position(|p| p.name == profile.name)
-        .expect("unknown speaking profile") as u64;
+    let slot = persona::seed(profile.name) % 20;
     // A stable speaker phase separates clones; length charges are policy, not measured human typing.
     created
         + Duration::from_millis(
@@ -663,10 +660,11 @@ impl Brain {
             .objects
             .iter()
             .any(|p| p.account != Some(v.session.account) && p.name.eq_ignore_ascii_case(first));
-        if !recipient.is_empty()
+        if speaker <= 0
+            || speaker == v.session.player
+            || !recipient.is_empty()
             || elsewhere
             || (!first.eq_ignore_ascii_case(self.profile.name) && offered.is_none())
-            || PROFILES.iter().any(|p| p.name.eq_ignore_ascii_case(&name))
         {
             return Ok(None);
         }
