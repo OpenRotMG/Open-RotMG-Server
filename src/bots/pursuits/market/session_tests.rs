@@ -92,3 +92,48 @@ fn market_known_vault_goods_are_prepared_through_normal_banking() {
         .unwrap();
     assert!(matches!(d.item, Some(Action::Swap { .. })));
 }
+
+#[test]
+fn market_bank_preparation_frees_real_capacity_and_aborts_unavailable_travel() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, mut v) = fixture(&c, [0xa1d; 8]);
+    m.vault = Some(vec![SPEED, SPEED, SPEED, SPEED, -1, -1, -1, -1]);
+    let grid = terrain(&mut v);
+    assert!(
+        m.decide(&v, &c, None, &grid, &mut StepRng::new(0, 1))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !m.reserves_stock(),
+        "missing Vault portal releases ordinary activity, not indefinite reservation"
+    );
+    m.session_used = false;
+    v.objects[0].kind = 0x720;
+    v.objects[0].usable = true;
+    assert!(
+        m.decide(&v, &c, None, &grid, &mut StepRng::new(0, 1))
+            .unwrap()
+            .is_some()
+    );
+    assert!(m.preparing);
+    m.bind();
+    assert!(
+        m.preparing && m.quote.is_some(),
+        "a legitimate bank intent survives ordinary world rebind"
+    );
+    v.map.name = "Vault".into();
+    v.objects[0].kind = 0x504;
+    v.objects[0].contents = m.vault.clone().unwrap();
+    let d = m
+        .decide(&v, &c, None, &grid, &mut StepRng::new(0, 1))
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(d.item,Some(Action::Swap{from,..}) if from.object==v.session.player),
+        "bank room before withdrawing actual potions"
+    );
+    v.map.name = "Realm".into();
+    m.observe(&v);
+    assert!(!m.preparing);
+}

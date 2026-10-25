@@ -226,6 +226,9 @@ impl Market {
             self.outgoing = None;
         }
         if v.map.name != "Nexus" {
+            if v.map.name != "Vault" {
+                self.preparing = false;
+            }
             self.end_session(v, "left_nexus");
             self.session_used = false;
         }
@@ -631,6 +634,9 @@ impl Market {
         Ok(())
     }
     fn end_session(&mut self, v: &PlayerView, reason: &str) {
+        if reason != "left_nexus" {
+            self.preparing = false;
+        }
         if let Some(s) = self.session.take() {
             tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,anchor=?s.anchor,until=s.until,reason,"market intentional session ended");
         }
@@ -827,7 +833,35 @@ impl Market {
             let Some(chest) = v.objects.iter().find(|o| o.kind == 0x504) else {
                 return Ok(Some(d));
             };
-            let transfer = if carried < usize::from(q[0].quantity) {
+            let need_stock = carried < usize::from(q[0].quantity);
+            let need_space = (need_stock && free == 0)
+                || free + usize::from(q[0].quantity) < usize::from(q[1].quantity);
+            let transfer = if need_space {
+                chest
+                    .contents
+                    .iter()
+                    .position(|k| *k < 0)
+                    .zip(
+                        v.character
+                            .items
+                            .iter()
+                            .enumerate()
+                            .skip(4)
+                            .find(|(_, k)| {
+                                **k >= 0
+                                    && (**k != q[0].kind || carried > usize::from(q[0].quantity))
+                            })
+                            .map(|(i, _)| i),
+                    )
+                    .map(|(to, from)| Action::Swap {
+                        from: super::own(v, from),
+                        to: Slot {
+                            object: chest.id,
+                            slot: to,
+                            kind: -1,
+                        },
+                    })
+            } else if need_stock {
                 chest
                     .contents
                     .iter()
@@ -849,28 +883,6 @@ impl Market {
                         },
                         to: super::own(v, to),
                     })
-            } else if free + carried < usize::from(q[1].quantity) {
-                chest
-                    .contents
-                    .iter()
-                    .position(|k| *k < 0)
-                    .zip(
-                        v.character
-                            .items
-                            .iter()
-                            .enumerate()
-                            .skip(4)
-                            .find(|(_, k)| **k >= 0 && **k != q[0].kind)
-                            .map(|(i, _)| i),
-                    )
-                    .map(|(to, from)| Action::Swap {
-                        from: super::own(v, from),
-                        to: Slot {
-                            object: chest.id,
-                            slot: to,
-                            kind: -1,
-                        },
-                    })
             } else {
                 None
             };
@@ -881,12 +893,11 @@ impl Market {
                 } else {
                     d.movement = grid.towards(v.position, chest.position);
                 }
-            } else if carried >= usize::from(q[0].quantity)
-                && free + carried >= usize::from(q[1].quantity)
-            {
+            } else if carried >= usize::from(q[0].quantity) && !need_space {
                 d.journey = Some(Journey::Nexus);
             } else {
                 self.quote = None;
+                self.preparing = false;
                 tracing::info!(
                     account = v.session.account,
                     "market preparation unavailable: own vault stock or capacity changed"
@@ -988,6 +999,7 @@ impl Market {
                 }
                 return Ok(Some(d));
             }
+            self.end_session(v, "vault_unobserved");
             tracing::info!(
                 account = v.session.account,
                 "market preparation unavailable: no observed Vault portal"
