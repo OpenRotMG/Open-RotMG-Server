@@ -6959,6 +6959,7 @@ impl World {
                 let kind = p.character.items[0] as u16;
                 let weapon = &self.content.objects[&kind];
                 let shots = weapon.shots;
+                let arc = weapon.arc.to_radians();
                 let cooldown =
                     reconciliation::attack_cooldown(p, &self.content, self.now, weapon.rate)
                         .expect("valid player equipment");
@@ -6975,6 +6976,7 @@ impl World {
                     y: pos.y + 0.3 * angle.sin(),
                 };
                 for i in 0..shots {
+                    let angle = angle + arc * (i as f32 - (shots - 1) as f32 / 2.);
                     if self
                         .shoot(*id, time, (first + i as u8) % 128, kind, start, angle)
                         .is_err()
@@ -7287,6 +7289,8 @@ mod period_loot_tests;
 mod sphinx_loot_tests;
 #[cfg(test)]
 mod sphinx_site_tests;
+#[cfg(test)]
+mod weapon_tests;
 
 #[cfg(test)]
 impl World {
