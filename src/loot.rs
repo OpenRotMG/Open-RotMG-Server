@@ -1079,6 +1079,30 @@ mod tests {
     }
 
     #[test]
+    fn limon_defense_is_an_independent_five_percent_private_bonus() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert!(private(0xd06));
+        let threshold = (0.05 * u64::MAX as f64) as u64;
+        for (roll, defense) in [(threshold - 1, true), (threshold, false)] {
+            let items = rewards(&content, 0xd06, &mut StepRng::new(roll, 0));
+            assert_eq!(items.iter().filter(|item| **item == 0xa4c).count(), 1);
+            assert_eq!(
+                items.iter().filter(|item| **item == 0xa20).count(),
+                usize::from(defense),
+                "Defense roll {roll}: {items:?}"
+            );
+        }
+        let mut bonuses = 0;
+        for seed in 0..1024 {
+            let items = rewards(&content, 0xd06, &mut StdRng::seed_from_u64(seed));
+            assert_eq!(items.iter().filter(|item| **item == 0xa4c).count(), 1);
+            assert!(items.iter().filter(|item| **item == 0xa20).count() <= 1);
+            bonuses += usize::from(items.contains(&0xa20));
+        }
+        assert!((1..1024).contains(&bonuses), "Defense must remain optional");
+    }
+
+    #[test]
     fn abyss_malphas_rewards_include_both_stat_potions() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for seed in 0..64 {
