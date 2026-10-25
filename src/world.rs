@@ -5948,7 +5948,10 @@ impl World {
                 x: resolved.x,
                 y: next.y,
             };
-            let clear = |pos| self.jungle_walkable(kind, pos) || self.ocean_walkable(kind, pos);
+            let clear = |pos| {
+                (kind != crate::dungeon::trench::HERMIT && self.jungle_walkable(kind, pos))
+                    || self.ocean_walkable(kind, pos)
+            };
             let x_clear = clear(horizontal);
             let y_clear = clear(vertical);
             if clear(next) && (!slide || x_clear || y_clear) {
