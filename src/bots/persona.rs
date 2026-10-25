@@ -90,10 +90,14 @@ pub(super) fn life(
     let mut classes: Vec<u16> = content.classes.keys().copied().collect();
     classes.shuffle(rng);
     let mut roster = Vec::new();
-    if p.stars == 0 {
-        let level = rng.gen_range(1..=19);
+    if p.stars == 0 || p.role == Role::Trader {
+        let level = if p.role == Role::Trader {
+            1
+        } else {
+            rng.gen_range(1..=19)
+        };
         let exp = level_start(level)? + rng.gen_range(0..experience_goal(level)?);
-        roster.push(character(content, classes[0], level, exp, 0, rng)?);
+        roster.push(character(content, classes[0], level, exp, p.stars, rng)?);
     }
     let mut left = p.stars;
     let count = classes.len() as i32;
@@ -342,6 +346,10 @@ fn every_persona_gets_a_valid_life_matching_its_stars() {
             );
         }
         if p.role == Role::Trader && p.stars >= 13 {
+            assert_eq!(
+                roster[0].level, 1,
+                "account rank is not the trader's current level"
+            );
             for (name, per) in [
                 ("Potion of Life", 12),
                 ("Potion of Defense", 5),
