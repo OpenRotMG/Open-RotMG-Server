@@ -133,7 +133,10 @@ impl Service {
                 if reply.intent != intent {
                     return Err(Failure("invalid_market_wording"));
                 }
-                validated_template_words(&reply.reply, intent)?;
+                if let Err(error) = validated_template_words(&reply.reply, intent) {
+                    tracing::error!(request=id, bot=name, ?intent, template=?reply.reply, "provider returned invalid market template");
+                    return Err(error);
+                }
                 Ok(reply)
             });
             service.completed(&reply, start.elapsed());
@@ -433,6 +436,11 @@ mod provider_tests {
     #[tokio::test]
     #[ignore = "requires approved server-only free-provider environment"]
     async fn real_provider_market_template_and_talk_smoke() {
+        tracing_subscriber::fmt()
+            .json()
+            .with_max_level(tracing::Level::INFO)
+            .try_init()
+            .expect("provider smoke tracing unavailable");
         async fn wording(service: &Arc<Service>, message: &Message, c: &Content) -> Result<String> {
             loop {
                 if let Some(text) =
@@ -449,7 +457,7 @@ mod provider_tests {
             use crate::bots::pursuits::market::Goods;
             let goods = [Goods {kind:0xa21,quantity:4}, Goods {kind:0xa20,quantity:1}];
             let ad = Message {text:format!("wts {} for {}", goods_text(&goods[0],&content)?,goods_text(&goods[1],&content)?),channel:Channel::Local};
-            let first = wording(&service,&ad,&content).await?;
+            let first = wording(&service,&ad,&content).await.context("advertisement template")?;
             ensure!(parse_quote(&first,&content) == Some(goods), "generated advertisement facts changed");
             let current = [Goods {kind:0xa20,quantity:6}, Goods {kind:0xae9,quantity:1}];
             let changed = Message {text:format!("wts {} for {}",goods_text(&current[0],&content)?,goods_text(&current[1],&content)?),..ad};
@@ -457,7 +465,7 @@ mod provider_tests {
             ensure!(parse_quote(&updated,&content) == Some(current), "reused template rendered stale facts");
             ensure!(service.health()["daily_requests"] == 1, "advertisement exceeded its one-request smoke budget");
             let refusal = Message {text:"nty need 1 def".into(),channel:Channel::Local};
-            wording(&service,&refusal,&content).await?;
+            wording(&service,&refusal,&content).await.context("refusal template")?;
             let changed_refusal = Message {text:"nty need 4 spd".into(),..refusal};
             let refusal_text = wording(&service,&changed_refusal,&content).await?;
             ensure!(refusal_text.to_ascii_lowercase().ends_with("need 4 spd"), "refusal template rendered stale wants");
