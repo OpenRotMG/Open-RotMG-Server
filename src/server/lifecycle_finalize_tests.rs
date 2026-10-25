@@ -922,14 +922,18 @@ async fn all_death_fame_phase4_reciprocal_credits_and_rollback() {
         }
         let (entered, release) = a.store.lifecycle_test_pause_reply();
         let release = HeldReply(Some(release));
-        let fa = lifecycle::finalize(&a, aa, CloseReason::Shutdown).unwrap();
-        let fb = lifecycle::finalize(&a, ba, CloseReason::Shutdown).unwrap();
+        // FIFO starts at send, not gate capture; park SQL before either producer (https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html).
+        let store = a.store.clone();
+        let queued = tokio::spawn(async move { store.lifecycle_test_job(|_| Ok(())).await });
         tokio::time::timeout(Duration::from_secs(5), entered)
             .await
             .unwrap()
             .unwrap();
+        let fa = lifecycle::finalize(&a, aa, CloseReason::Shutdown).unwrap();
+        let fb = lifecycle::finalize(&a, ba, CloseReason::Shutdown).unwrap();
         assert!(lifecycle::state(&a, ac.account).unwrap().1.is_some());
         assert!(lifecycle::state(&a, bc.account).unwrap().1.is_some());
+        let mut last = vec![];
         let prepared = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let prepared = a
@@ -948,6 +952,7 @@ async fn all_death_fame_phase4_reciprocal_credits_and_rollback() {
                     })
                     .await
                     .unwrap();
+                last = prepared.iter().map(|(ch, assists)| (ch.id, ch.level, ch.exp, ch.revision, assists.len())).collect::<Vec<_>>();
                 if prepared.len() == 2 {
                     break prepared;
                 }
@@ -955,9 +960,17 @@ async fn all_death_fame_phase4_reciprocal_credits_and_rollback() {
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|error| panic!("reciprocal credit barrier: {error}; fail={fail}; snapshots(id,level,xp,revision,assists)={last:?}; state_a={:?}; state_b={:?}", lifecycle::state(&a, ac.account), lifecycle::state(&a, bc.account)));
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM level_credits", [], |r| r
+                .get::<_, i32>(0))
+                .unwrap(),
+            0,
+            "credit transactions must remain queued behind the marker"
+        );
         drop(release);
         let (ar, br) = tokio::time::timeout(Duration::from_secs(5), async {
+            queued.await.unwrap().unwrap();
             tokio::join!(fa.wait(), fb.wait())
         })
         .await
