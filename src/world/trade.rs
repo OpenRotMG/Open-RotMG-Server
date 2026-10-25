@@ -843,6 +843,7 @@ mod community_tests {
                 items[4..8].fill(0xa21);
             }
             let plan = w.plan(id, items, None);
+            w.players.get_mut(&id).unwrap().pending = true;
             let revision = store
                 .exchange(
                     vec![InventoryWrite {
