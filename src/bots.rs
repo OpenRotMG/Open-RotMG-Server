@@ -1059,27 +1059,8 @@ impl Brain {
             let protected = !progression::vulnerable(enemy);
             let score = 45. - d * 2.
                 + if d < range {
-                    // Gear-ready players seek stronger central enemies: https://gaming.stackexchange.com/a/63268
-                    let interest = if v.map.name == "Realm" {
-                        let reward = (enemy.max_hp as f32
-                            * content.objects[&enemy.kind].xp_multiplier
-                            / 10.)
-                            .ceil();
-                        let cap = crate::store::experience_goal(v.character.level)? as f32 * 0.1;
-                        let value = (reward / cap).min(1.);
-                        tracing::debug!(
-                            player = v.session.player,
-                            enemy = enemy.id,
-                            reward,
-                            cap,
-                            value,
-                            "autonomous Realm combat interest"
-                        );
-                        value
-                    } else {
-                        1.
-                    };
-                    (35. + (enemy.max_hp as f32).sqrt().min(20.)) * interest
+                    // Nearby reachable mobs are shared XP; equipment does not make them invisible.
+                    60. + (enemy.max_hp as f32).sqrt().min(20.)
                 } else {
                     0.
                 };
@@ -1269,8 +1250,12 @@ impl Brain {
             })
         {
             let distance = marker.position.distance(v.position);
-            if distance > 7. {
-                let score = 54. + self.profile.companions;
+            if distance > 7. || self.crowd.keeping_company(marker.id) {
+                let score = if self.crowd.keeping_company(marker.id) {
+                    80.
+                } else {
+                    64.
+                } + self.profile.companions;
                 if !choices.iter().any(|(s, _, _)| *s > score)
                     && peaceful
                     && distance > 24.
@@ -1284,6 +1269,7 @@ impl Brain {
                         account = v.session.account,
                         target = marker.id,
                         world = v.session.world,
+                        reason = "seek_shared_xp",
                         "autonomous attended crowd travel"
                     );
                     let peer = marker.id;
@@ -1491,6 +1477,18 @@ impl Brain {
                 && let Goal::Follow(id) = goal
                 && cooperative_goal != Some(id)
             {
+                if self.goal != goal {
+                    tracing::info!(
+                        account = v.session.account,
+                        target = id,
+                        reason = if self.crowd.keeping_company(id) {
+                            "keep_shared_xp_company"
+                        } else {
+                            "seek_shared_xp"
+                        },
+                        "autonomous crowd approach selected"
+                    );
+                }
                 self.crowd.approach_selected(id);
             }
             decision.goal = goal;

@@ -7,7 +7,7 @@ pub(super) struct Crowd {
     pub knows_minimap: bool,
     contacts: BTreeMap<i32, (PlayerMarker, u64)>,
     approaching: Option<(i32, i32)>,
-    completed: BTreeSet<(i32, i32)>,
+    company: BTreeMap<(i32, i32), (u64, bool)>,
     cooperation: cooperation::Cooperation,
 }
 impl Crowd {
@@ -16,7 +16,7 @@ impl Crowd {
             knows_minimap,
             contacts: BTreeMap::new(),
             approaching: None,
-            completed: BTreeSet::new(),
+            company: BTreeMap::new(),
             cooperation: cooperation::Cooperation::default(),
         }
     }
@@ -78,13 +78,22 @@ impl Crowd {
     pub fn len(&self) -> usize {
         self.contacts.len()
     }
+    pub fn keeping_company(&self, id: i32) -> bool {
+        self.company
+            .iter()
+            .any(|((peer, _), (_, active))| *peer == id && *active)
+    }
     pub fn approach_selected(&mut self, id: i32) {
-        let peer = &self
+        let (peer, seen) = self
             .contacts
             .get(&id)
-            .expect("selected passive crowd cue missing")
-            .0;
-        self.approaching = Some((peer.id, peer.account));
+            .expect("selected passive crowd cue missing");
+        let key = (peer.id, peer.account);
+        // Bound the whole outing, including a moving stranger we never catch up with.
+        if self.company.len() < 4 && !self.company.contains_key(&key) {
+            self.company.insert(key, (*seen + 90_000, true));
+            self.approaching = Some(key);
+        }
     }
     pub fn attend(
         &mut self,
@@ -98,8 +107,37 @@ impl Crowd {
                 .iter()
                 .any(|p| p.id == *id && p.account == *account)
         };
-        self.completed.retain(published);
-        if self.approaching.is_some_and(|peer| !published(&peer)) {
+        self.company
+            .retain(|_, (until, active)| *active || v.time_ms < *until);
+        for (peer, (until, active)) in &mut self.company {
+            if !*active {
+                continue;
+            }
+            let marker = v.player_markers.iter().find(|p| (p.id, p.account) == *peer);
+            let reason = if v.time_ms >= *until {
+                Some("company_window_ended")
+            } else if marker.is_none() {
+                Some("lost_public_marker")
+            } else if marker.is_some_and(|p| p.position.distance(v.position) > 36.) {
+                Some("separated")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                *active = false;
+                *until = v.time_ms + 30_000;
+                tracing::info!(
+                    account = v.session.account,
+                    target = peer.0,
+                    peer = peer.1,
+                    reason,
+                    "autonomous crowd company released"
+                );
+            }
+        }
+        if self.approaching.is_some_and(|peer| {
+            !published(&peer) || self.company.get(&peer).is_none_or(|(_, active)| !*active)
+        }) {
             self.approaching = None;
         }
         self.contacts.retain(|id, (_, seen)| {
@@ -123,7 +161,11 @@ impl Crowd {
                 .total_cmp(&b.position.distance(v.position))
                 .then(a.id.cmp(&b.id))
         });
-        for cue in cues.into_iter().take(budget) {
+        for (index, cue) in cues.into_iter().enumerate() {
+            let peer = (cue.id, cue.account);
+            if index >= budget && self.approaching != Some(peer) && !self.keeping_company(cue.id) {
+                continue;
+            }
             if !self.contacts.contains_key(&cue.id) {
                 tracing::info!(
                     account = v.session.account,
@@ -142,20 +184,15 @@ impl Crowd {
                         && p.position.distance(v.position) <= 7.
                 })
             {
-                self.completed.insert((cue.id, cue.account));
-                self.approaching = None;
                 tracing::info!(
                     account = v.session.account,
-                    character = v.session.character,
-                    player = v.session.player,
-                    world = v.session.world,
-                    tick = v.tick,
-                    time_ms = v.time_ms,
+                    target = cue.id,
                     peer = cue.account,
-                    object = cue.id,
                     distance = reached.position.distance(v.position),
-                    "autonomous crowd approach completed"
+                    reason = "approach_arrived_shared_xp",
+                    "autonomous crowd company joined"
                 );
+                self.approaching = None;
             }
         }
     }
@@ -168,20 +205,8 @@ impl Crowd {
         if !matches!(v.map.name.as_str(), "Realm" | "Pirate Cave" | "Snake Pit") {
             return None;
         }
-        let level = v.character.level;
-        let realm = v.map.name == "Realm";
-        let center = Pos {
-            x: v.map.width as f32 / 2.,
-            y: v.map.height as f32 / 2.,
-        };
-        let radius = v.map.width.min(v.map.height) as f32 / 2.;
-        // Realm danger rises toward the center (Godlands); players know not to teleport a fresh character there.
-        let survivable = |p: Pos| {
-            let depth = p.distance(center) / radius;
-            !realm || depth >= 0.55 || level >= 20 || (depth >= 0.35 && level >= 10)
-        };
         self.attended_destination(v.time_ms, v.position, v.session.account, group, |p| {
-            survivable(p) && eligible_position(p)
+            survivable(v, p) && eligible_position(p)
         })
     }
     fn attended_destination(
@@ -197,22 +222,27 @@ impl Crowd {
             .filter(|(p, seen)| {
                 *seen == time_ms
                     && eligible_position(p.position)
-                    && !self.completed.contains(&(p.id, p.account))
-                    && (group.is_some_and(|g| {
-                        !g.finished && g.members.iter().any(|m| m.account == p.account)
-                    }) || self
-                        .contacts
-                        .values()
-                        .any(|(q, _)| q.id != p.id && q.position.distance(p.position) < 14.))
+                    && (self.company.len() < 4 || self.company.contains_key(&(p.id, p.account)))
+                    && self
+                        .company
+                        .get(&(p.id, p.account))
+                        .is_none_or(|(_, active)| *active)
             })
             .min_by(|(a, _), (b, _)| {
                 // Different accounts approach different edges; nobody owns the outing's destination.
                 let score = |p: &PlayerMarker| {
-                    p.position.distance(position)
+                    let shared = group.is_some_and(|g| {
+                        !g.finished && g.members.iter().any(|m| m.account == p.account)
+                    }) || self.contacts.values().any(|(q, seen)| {
+                        *seen == time_ms && q.id != p.id && q.position.distance(p.position) < 14.
+                    });
+                    p.position.distance(position) - if shared { 8. } else { 0. }
                         + ((p.account as u32 ^ account as u32).wrapping_mul(2654435761) % 9) as f32
                 };
                 // Small score changes do not justify abandoning company already being approached.
-                let approaching = |p: &PlayerMarker| self.approaching == Some((p.id, p.account));
+                let approaching = |p: &PlayerMarker| {
+                    self.approaching == Some((p.id, p.account)) || self.keeping_company(p.id)
+                };
                 approaching(b)
                     .cmp(&approaching(a))
                     .then_with(|| score(a).total_cmp(&score(b)))
@@ -220,6 +250,19 @@ impl Crowd {
             })
             .map(|(p, _)| p)
     }
+}
+
+pub(super) fn survivable(v: &PlayerView, position: Pos) -> bool {
+    let center = Pos {
+        x: v.map.width as f32 / 2.,
+        y: v.map.height as f32 / 2.,
+    };
+    let depth = position.distance(center) / (v.map.width.min(v.map.height) as f32 / 2.);
+    // Keep PR514's public Realm-depth gates for every voluntary teleport destination.
+    v.map.name != "Realm"
+        || depth >= 0.55
+        || v.character.level >= 20
+        || (depth >= 0.35 && v.character.level >= 10)
 }
 
 #[cfg(test)]
@@ -259,6 +302,7 @@ mod tests {
         crowd.contacts.get_mut(&10).unwrap().0.position.x = 10.;
         assert_eq!(destination(&crowd, 2.5), Some(10));
         crowd.approaching = None;
+        crowd.company.clear();
         assert_eq!(destination(&crowd, 2.5), Some(20));
     }
 
@@ -282,12 +326,12 @@ mod tests {
         crowd.contacts.get_mut(&10).unwrap().1 = 999;
         assert_eq!(destination(&crowd, 0.), Some(20));
         crowd.contacts.get_mut(&10).unwrap().1 = 1000;
-        crowd.completed.insert((10, 1));
+        crowd.company.insert((10, 1), (2000, false));
         assert_eq!(destination(&crowd, 0.), Some(20));
-        crowd.completed.clear();
+        crowd.company.clear();
         crowd.contacts.get_mut(&10).unwrap().0.position.x = 100.;
-        assert_eq!(destination(&crowd, 0.), None);
+        assert_eq!(destination(&crowd, 0.), Some(10));
         crowd.contacts.remove(&10);
-        assert_eq!(destination(&crowd, 0.), None);
+        assert_eq!(destination(&crowd, 0.), Some(20));
     }
 }
