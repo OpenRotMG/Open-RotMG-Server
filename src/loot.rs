@@ -915,12 +915,12 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
         ];
     }
     let (weapon, armor) = match kind {
-        0x678 => (5, 4),
+        0x675 | 0x678 => (5, 4),
         0x67d => (6, 5),
         0x668 => (7, 6),
         _ => unreachable!("selected landmark chest"),
     };
-    let ring = if kind == 0x678 { 1 } else { 2 };
+    let ring = if matches!(kind, 0x675 | 0x678) { 1 } else { 2 };
     [
         (0.3, Tier(weapon, WEAPONS)),
         (0.2, Tier(weapon + 1, WEAPONS)),
@@ -936,7 +936,7 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
         (0.5, Tier(1, &[10])),
     ]
     .into_iter()
-    .filter(|(_, pick)| kind != 0x678 || !matches!(pick, Tier(4, ABILITIES)))
+    .filter(|(_, pick)| !matches!(kind, 0x675 | 0x678) || !matches!(pick, Tier(4, ABILITIES)))
     .collect()
 }
 pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
@@ -984,6 +984,7 @@ mod tests {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for (kind, limit) in [
             (crate::dungeon::jungle::COIL, 3),
+            (0x675, 5),
             (0x678, 5),
             (0x67d, 5),
             (0x668, 5),
@@ -995,23 +996,31 @@ mod tests {
                 limit,
                 "{kind:#x}"
             );
+            let empty = landmark_chest(&content, kind, &mut StepRng::new(0, u64::MAX)).unwrap();
+            assert_eq!(empty, vec![-1; 8], "{kind:#x}");
         }
-        let empty = landmark_chest(
-            &content,
-            crate::dungeon::jungle::COIL,
-            &mut StepRng::new(0, u64::MAX),
-        )
-        .unwrap();
-        assert_eq!(empty, vec![-1; 8]);
     }
 
     #[test]
     fn landmark_chests_roll_each_selected_item_with_divided_probability() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
+        let signature = |kind| {
+            chest_table(kind)
+                .into_iter()
+                .map(|(probability, pick)| {
+                    let Pick::Tier(tier, slots) = pick else {
+                        panic!("unexpected fixed item in landmark {kind:#x} table")
+                    };
+                    (probability, tier, slots)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(signature(0x675), signature(0x678));
         assert_eq!(candidates(&content, Pick::Tier(4, WEAPONS)).len(), 5);
         assert_eq!(candidates(&content, Pick::Tier(4, ARMOR)).len(), 3);
         for (kind, tiers) in [
             (crate::dungeon::jungle::COIL, vec![4, 4, 4]),
+            (0x675, vec![4, 4, 4, 5, 5]),
             (0x678, vec![4, 4, 4, 5, 5]),
             (0x67d, vec![5, 5, 5, 6, 6]),
             (0x668, vec![6, 6, 6, 7, 7]),
