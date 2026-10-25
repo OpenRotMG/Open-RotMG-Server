@@ -85,8 +85,44 @@ async fn period_loot_keeps_ownership_threshold_boundaries_and_repeated_rewards()
         }
         w.remove_entity(root);
     }
+    let root = w
+        .spawn_entity(0x600, Pos { x: 3.5, y: 3.5 }, vec![])
+        .unwrap();
+    let mut defeated = w.entities[&root].clone();
+    defeated.damage = owners[..2].iter().map(|(_, ch)| (*ch, 1)).collect();
+    for seed in 0..64 {
+        for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(bag);
+        }
+        let expected: Vec<_> = crate::loot::rewards(
+            &w.content,
+            0x600,
+            &mut rand::rngs::StdRng::seed_from_u64(seed),
+        )
+        .into_iter()
+        .map(i32::from)
+        .collect();
+        w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+        w.drop_loot(&defeated).unwrap();
+        let actual: Vec<_> = w
+            .bag_expiry
+            .keys()
+            .flat_map(|id| {
+                let bag = &w.entities[id];
+                assert!(
+                    !bag.extra_stats.iter().any(|(stat, _)| *stat == 54),
+                    "public drops stay public"
+                );
+                bag.items.iter().copied().filter(|id| *id >= 0)
+            })
+            .collect();
+        assert_eq!(
+            actual, expected,
+            "one public attempt per kill, not per contributor"
+        );
+    }
     let mut chest_overflow = false;
-    for seed in 0..128 {
+    for seed in 0..4096 {
         for id in w.entities.keys().copied().collect::<Vec<_>>() {
             w.remove_entity(id);
         }
@@ -109,7 +145,10 @@ async fn period_loot_keeps_ownership_threshold_boundaries_and_repeated_rewards()
             })
             .collect();
         assert_eq!(actual, expected);
-        chest_overflow |= actual.len() > 8;
+        if actual.len() > 8 {
+            chest_overflow = true;
+            break;
+        }
     }
     assert!(
         chest_overflow,

@@ -1006,6 +1006,7 @@ pub(crate) fn period_boss(kind: u16) -> bool {
 }
 fn independent(kind: u16) -> bool {
     period_dungeon(kind)
+        || period_surface(kind)
         || kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
         || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50 | 0xd52 | 0xd53)
