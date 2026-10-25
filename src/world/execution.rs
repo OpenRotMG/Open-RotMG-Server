@@ -142,6 +142,7 @@ enum Owner {
 struct State {
     owner: Owner,
     directory_waiting: bool,
+    holder: Option<(&'static str, u64, Instant)>,
 }
 pub(super) struct Slot {
     pub(super) id: i32,
@@ -150,6 +151,7 @@ pub(super) struct Slot {
     available: tokio::sync::Notify,
     retired: watch::Sender<bool>,
     snapshot: RwLock<Arc<Snapshot>>,
+    attribution: Mutex<crate::performance::attribution::Attribution>,
     routes: Arc<RwLock<BTreeMap<i32, i32>>>,
     pub(super) mailbox: mpsc::Sender<Job<World>>,
     receiver: Mutex<Option<mpsc::Receiver<Job<World>>>>,
@@ -165,6 +167,8 @@ impl Slot {
             match state.owner {
                 Owner::Available(_) => {
                     state.directory_waiting = false;
+                    let (operation, id) = crate::performance::attribution::Context::current();
+                    state.holder = Some((operation, id, Instant::now()));
                     let Owner::Available(world) =
                         std::mem::replace(&mut state.owner, Owner::Directory)
                     else {
@@ -189,6 +193,7 @@ impl Slot {
     }
     fn restore(&self, world: Box<World>) -> Result<()> {
         let _context = crate::supervision::world(self.id, world.tick);
+        let tick = world.tick;
         let snapshot = Arc::new(Snapshot::capture(&world));
         let mut state = self.state.lock().expect("world ownership lock poisoned");
         ensure!(
@@ -222,12 +227,39 @@ impl Slot {
             *self.snapshot.write().expect("world snapshot poisoned") = snapshot;
             state.owner = Owner::Available(world);
         }
+        let returned = Instant::now();
+        let holder = state.holder.take();
+        drop(state);
         self.changed.notify_all();
         self.available.notify_waiters();
+        if let Some((operation, id, since)) = holder {
+            let mut sample = crate::performance::attribution::Sample::new(operation);
+            sample.id = id;
+            sample.kind = "directory_loan";
+            sample.tick = tick;
+            sample.stages[4] = returned.duration_since(since);
+            self.record_attribution(sample);
+        }
         Ok(())
     }
-    fn try_work(&self) -> Result<Option<Box<World>>> {
+    fn record_attribution(&self, sample: Box<crate::performance::attribution::Sample>) {
+        let report = {
+            let mut attribution = self.attribution.lock().expect("world attribution poisoned");
+            attribution.record(sample);
+            attribution.report()
+        };
+        if let Some(attribution) = report {
+            crate::performance::attribution::Attribution::emit(attribution, Some(self.id));
+        }
+    }
+    fn try_work(
+        &self,
+        observed_owner: &mut Option<(&'static str, u64)>,
+    ) -> Result<Option<Box<World>>> {
         let mut state = self.state.lock().expect("world ownership lock poisoned");
+        if observed_owner.is_none() {
+            *observed_owner = state.holder.map(|(operation, id, _)| (operation, id));
+        }
         if state.directory_waiting {
             return Ok(None);
         }
@@ -332,11 +364,13 @@ impl Worlds {
             state: Mutex::new(State {
                 owner: Owner::Directory,
                 directory_waiting: false,
+                holder: None,
             }),
             changed: Condvar::new(),
             available: tokio::sync::Notify::new(),
             retired: watch::channel(false).0,
             snapshot: RwLock::new(Arc::new(Snapshot::capture(&world))),
+            attribution: Mutex::default(),
             routes: self.routing.players.clone(),
             mailbox,
             receiver: Mutex::new(Some(receiver)),
