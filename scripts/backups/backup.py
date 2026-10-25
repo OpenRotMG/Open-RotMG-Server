@@ -243,8 +243,11 @@ def validate_slots(game):
                 or type(row['alive']) is not int or row['alive'] not in (0, 1)):
             raise ValueError('Invalid character slot owner or living state')
         living[row['account']] += row['alive']
+    personas = {row['account'] for row in game['shore_bots'] if row['name'].startswith('persona:v1:')}
     for account, capacity in capacities.items():
-        if sorted(purchases[account]) != list(range(2, capacity + 1)) or living[account] > capacity:
+        base = 14 if account in personas else 1
+        if (capacity < base or sorted(purchases[account]) != list(range(base + 1, capacity + 1))
+                or living[account] > capacity):
             raise ValueError('Inconsistent character slot purchase history or living capacity')
 
 
