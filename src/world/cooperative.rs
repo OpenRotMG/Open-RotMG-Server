@@ -102,9 +102,16 @@ impl Directory {
 
 impl World {
     pub(super) fn allow_teleport(&self) -> bool {
+        // Abyss dungeon anchoring relies on player teleports: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
         matches!(
             self.name.as_str(),
-            "Nexus" | "Realm" | "Pirate Cave" | "Snake Pit" | "Sprite World" | "Undead Lair"
+            "Nexus"
+                | "Realm"
+                | "Pirate Cave"
+                | "Snake Pit"
+                | "Sprite World"
+                | "Undead Lair"
+                | "Abyss of Demons"
         )
     }
 
@@ -326,5 +333,110 @@ impl World {
             "area ability healing applied"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn abyss_teleport_advertises_and_uses_the_guarded_player_path() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let mut d =
+            Directory::test_with_seed(std::path::Path::new("data"), content, 20, 578).unwrap();
+        let world = d
+            .instance("abyss-of-demons", None, Some(DungeonReturn::Random))
+            .unwrap();
+        let mut ids = Vec::new();
+        let (packets, mut inbox) = mpsc::channel(64);
+        let (lost, _) = watch::channel(None);
+        let mut output = Some(Output { packets, lost });
+        for role in ["sender", "target"] {
+            let account = store.list(format!("abyss-tp-{role}")).await.unwrap();
+            let ch = store
+                .create(account.id, d.content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap();
+            ids.push(
+                d.worlds
+                    .get_mut(&world)
+                    .unwrap()
+                    .enter(ch, output.take())
+                    .unwrap(),
+            );
+        }
+        let (sender, target) = (ids[0], ids[1]);
+        let received;
+        let destination;
+        {
+            let w = d.worlds.get_mut(&world).unwrap();
+            let (x, y) = w.map.spawns[0];
+            w.players.get_mut(&sender).unwrap().pos = Pos {
+                x: x - 1.,
+                y: y - 1.,
+            };
+            destination = Pos {
+                x: x + 1.,
+                y: y + 1.,
+            };
+            w.players.get_mut(&target).unwrap().pos = destination;
+            w.updates(sender, false).unwrap();
+            assert!(w.players[&sender].known.contains(&target));
+            received = w.attack_epoch + Duration::from_secs(1);
+        }
+        let account = d.worlds[&world].players[&sender].character.account;
+        let receipt = d.teleport(sender, target, received).unwrap();
+        assert_eq!(receipt.world, world);
+        assert!(receipt.position.distance(destination) < 0.001);
+        assert!(d.player_view(sender).unwrap().map.allow_teleport);
+        {
+            let w = d.worlds.get_mut(&world).unwrap();
+            let bytes = w.map_info();
+            let mut packet = wire::Reader::new(&bytes);
+            packet.i32().unwrap();
+            packet.i32().unwrap();
+            packet.utf().unwrap();
+            packet.i32().unwrap();
+            packet.i32().unwrap();
+            assert_eq!(packet.u8().unwrap(), 1);
+            assert!(w.players[&sender].character.lifetime.teleported);
+            assert_eq!(w.players[&sender].goto_acks.len(), 1);
+            assert!(std::iter::from_fn(|| inbox.try_recv().ok()).any(|p| p.id == wire::GOTO));
+            w.acknowledge_goto(sender, 0).unwrap();
+        }
+        assert!(
+            d.teleport(sender, target, received + Duration::from_secs(1))
+                .unwrap_err()
+                .to_string()
+                .contains("Too soon")
+        );
+        assert_eq!(d.teleports[&account], received);
+        d.worlds
+            .get_mut(&world)
+            .unwrap()
+            .players
+            .get_mut(&target)
+            .unwrap()
+            .paused = true;
+        assert!(
+            d.teleport(sender, target, received + Duration::from_secs(11))
+                .unwrap_err()
+                .to_string()
+                .contains("paused")
+        );
+        assert_eq!(d.teleports[&account], received);
+        for name in ["Ocean Trench", "Tomb of the Ancients", "Oryx's Castle"] {
+            d.worlds.get_mut(&world).unwrap().name = name.into();
+            assert!(!d.player_view(sender).unwrap().map.allow_teleport);
+            assert!(
+                d.teleport(sender, target, received + Duration::from_secs(11))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Cannot teleport in this world")
+            );
+            assert_eq!(d.teleports[&account], received);
+        }
     }
 }
