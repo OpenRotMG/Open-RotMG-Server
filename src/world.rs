@@ -6912,7 +6912,17 @@ impl World {
                 let p = &self.players[id];
                 let time = self.now as i32;
                 let kind = p.character.items[0] as u16;
-                let shots = self.content.objects[&kind].shots;
+                let weapon = &self.content.objects[&kind];
+                let shots = weapon.shots;
+                let cooldown =
+                    reconciliation::attack_cooldown(p, &self.content, self.now, weapon.rate)
+                        .expect("valid player equipment");
+                // A held trigger fires when the weapon is ready instead of retrying every tick.
+                if time != p.last_attack
+                    && i64::from(time) - i64::from(p.last_attack) < cooldown as i64 - 2
+                {
+                    continue;
+                }
                 let first = p.next_bullet;
                 let pos = p.pos;
                 let start = Pos {
