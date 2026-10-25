@@ -155,7 +155,7 @@ fn session_enemy_identity_visibility_death_and_blocked_routes_release() {
 }
 
 #[test]
-fn foreign_context_cannot_pair_and_first_valid_peer_is_retained() {
+fn foreign_context_cannot_pair_and_new_shared_activity_can_change_company() {
     let mut c = state();
     hit(&mut c, 10, 4, 1, 100);
     c.receive(
@@ -177,9 +177,9 @@ fn foreign_context_cannot_pair_and_first_valid_peer_is_retained() {
         |id| (id == 7).then_some(8),
     )
     .unwrap();
-    assert_eq!(c.recent, Some(((5, 6), 60_200)));
+    assert_eq!(c.recent, Some(((7, 8), 60_400)));
     let mut crowd = Crowd::new(true);
-    crowd.completed.insert((5, 6));
+    crowd.company.insert((5, 6), (2000, false));
     crowd.cooperation = c;
     assert!(
         crowd

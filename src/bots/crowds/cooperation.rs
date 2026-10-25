@@ -124,31 +124,31 @@ impl Cooperation {
                 && now.saturating_sub(*at) < WINDOW
                 && peer(*id) == Some(*account)
         });
-        if let Some((own_hit_ms, (who, peer_hit_ms))) = together
-            && self.recent.is_none_or(|(current, _)| current == who)
-        {
+        if let Some((own_hit_ms, (who, peer_hit_ms))) = together {
             let until = now
                 .checked_add(COMPANY)
                 .context("cooperative company deadline overflow")?;
-            let accepted = self.recent.is_none();
+            let accepted = self.recent.is_none_or(|(current, _)| current != who);
             self.recent = Some((who, until));
-            tracing::info!(
-                account = binding[1],
-                character = binding[2],
-                world = binding[0],
-                enemy = target,
-                peer = who.1,
-                object = who.0,
-                own_hit_ms,
-                peer_hit_ms,
-                shooter,
-                bullet,
-                damage,
-                killed,
-                until,
-                accepted,
-                "autonomous observed shared damage company"
-            );
+            if accepted {
+                tracing::info!(
+                    account = binding[1],
+                    character = binding[2],
+                    world = binding[0],
+                    enemy = target,
+                    peer = who.1,
+                    object = who.0,
+                    own_hit_ms,
+                    peer_hit_ms,
+                    shooter,
+                    bullet,
+                    damage,
+                    killed,
+                    until,
+                    accepted,
+                    "autonomous observed shared damage company"
+                );
+            }
         }
         if killed {
             self.enemies.remove(&target);
@@ -183,7 +183,14 @@ impl Cooperation {
     }
     fn release(&mut self, reason: &'static str) {
         if let Some((peer, until)) = self.recent.take() {
-            tracing::info!(binding=?self.binding,peer=peer.1,object=peer.0,until,reason,"autonomous cooperative company released");
+            tracing::info!(
+                account = self.binding.map(|b| b[1]),
+                peer = peer.1,
+                target = peer.0,
+                until,
+                reason,
+                "autonomous cooperative company released"
+            );
         }
     }
 }
