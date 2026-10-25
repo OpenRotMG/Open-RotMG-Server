@@ -5749,6 +5749,8 @@ impl World {
             0
         } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
+        } else if crate::loot::potion_damage(defeated.kind).is_some() {
+            0
         } else if matches!(defeated.kind, 0xd56 | 0xd59) {
             self.content.objects[&defeated.kind].hp / 20
         } else if matches!(
@@ -5800,6 +5802,10 @@ impl World {
             2
         } else if private {
             eligible.len()
+        } else if crate::loot::period_dungeon(defeated.kind)
+            || crate::loot::period_surface(defeated.kind)
+        {
+            1
         } else {
             // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
             let multiplier = match defeated.kind {
@@ -5818,13 +5824,23 @@ impl World {
                 rewards.push(0xaea);
             }
             for item in rewards {
+                let potion = self.content.objects[&item].slot_type == 10;
+                if potion
+                    && crate::loot::potion_damage(defeated.kind)
+                        .is_some_and(|required| eligible[i % eligible.len()].1 < required)
+                {
+                    continue;
+                }
                 let owner = if private {
                     eligible[i % eligible.len()].0
                 } else {
                     -1
                 };
                 let items = drops.entry(owner).or_default();
-                if !items.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
+                if !items.contains(&(item as i32))
+                    || matches!(item, 0xa22 | 0xa23)
+                    || crate::loot::period_boss(defeated.kind)
+                {
                     items.push(item as i32);
                 }
             }
@@ -7241,6 +7257,8 @@ mod chase_tests;
 mod dungeon_return_tests;
 #[cfg(test)]
 mod hermit_loot_tests;
+#[cfg(test)]
+mod period_loot_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 #[cfg(test)]
