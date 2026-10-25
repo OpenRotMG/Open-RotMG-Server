@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn connected_bounded_caves_keep_two_tile_doors_safe_arrival_and_native_walls() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for seed in (0..64).chain([u64::MAX, 0x562_1235_1]) {
+        for seed in (0..64).chain([u64::MAX, 0x5621_2351]) {
             let map = generate(&content, seed).unwrap();
             assert!(map.width <= MAX_SIDE && map.height <= MAX_SIDE);
             assert_eq!(map.cells.len(), (map.width * map.height) as usize);
