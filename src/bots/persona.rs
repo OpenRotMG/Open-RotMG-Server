@@ -87,8 +87,10 @@ pub(super) fn life(
     content: &Content,
     rng: &mut impl Rng,
 ) -> Result<(Vec<Character>, Vec<[i32; 8]>)> {
+    // Gear and current-life sampling must not change synthetic account history on a later rebuild.
+    let mut history = rand::rngs::StdRng::seed_from_u64(seed(p.identity));
     let mut classes: Vec<u16> = content.classes.keys().copied().collect();
-    classes.shuffle(rng);
+    classes.shuffle(&mut history);
     let mut roster = Vec::new();
     if p.stars == 0 || p.role == Role::Trader {
         let level = if p.role == Role::Trader {
@@ -107,12 +109,12 @@ pub(super) fn life(
         }
         // Leave no more stars than the remaining classes can hold.
         let fewest = (left - 5 * (count - 1 - index as i32)).max(1);
-        let stars = rng.gen_range(fewest..=left.min(5));
+        let stars = history.gen_range(fewest..=left.min(5));
         left -= stars;
         let floor = THRESHOLDS[stars as usize - 1];
         let ceiling = THRESHOLDS.get(stars as usize).copied().unwrap_or(4000);
-        let fame = rng.gen_range(floor..ceiling);
-        let exp = fame * 1000 + rng.gen_range(0..1000);
+        let fame = history.gen_range(floor..ceiling);
+        let exp = fame * 1000 + history.gen_range(0..1000);
         roster.push(character(content, class, 20, exp, p.stars, rng)?);
     }
     ensure!(left == 0, "{} cannot hold {} stars", p.name, p.stars);
@@ -315,6 +317,26 @@ fn every_persona_gets_a_valid_life_matching_its_stars() {
             p.name
         );
         let (roster, vault) = life(p, &content, &mut rng).unwrap();
+        let other = life(
+            p,
+            &content,
+            &mut rand::rngs::StdRng::seed_from_u64(seed(p.identity) ^ 0x1235),
+        )
+        .unwrap()
+        .0;
+        let history = |characters: &[Character]| {
+            characters
+                .iter()
+                .filter(|ch| ch.fame >= 20)
+                .map(|ch| (ch.class, ch.fame))
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(
+            history(&roster),
+            history(&other),
+            "{} history depends on current-life randomness",
+            p.name
+        );
         let presentation = crate::store::AccountPresentation {
             guild: None,
             credits: 0,
