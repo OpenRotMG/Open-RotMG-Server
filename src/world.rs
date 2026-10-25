@@ -1066,6 +1066,7 @@ impl Directory {
         let mut templates = BTreeMap::new();
         for name in [
             "tutorial",
+            "kitchen",
             "nexus",
             "nexus-limbo",
             "vault",
@@ -1493,7 +1494,7 @@ impl Directory {
             "dungeon requires an explicit return route"
         );
         ensure!(
-            matches!((template, account), ("vault", Some(_)))
+            matches!((template, account), ("vault", Some(_)) | ("kitchen", None))
                 || (account.is_none()
                     && crate::dungeon::DUNGEONS
                         .iter()
@@ -1511,6 +1512,8 @@ impl Directory {
             template,
             if template == "vault" {
                 "Vault"
+            } else if template == "kitchen" {
+                "Kitchen"
             } else {
                 crate::dungeon::DUNGEONS
                     .iter()
@@ -1607,6 +1610,9 @@ impl Directory {
             0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
             0x704 | 0x70e => self.dungeon_realm(world)?,
             0x71c => self.initial(-3)?,
+            // Kitchen destination: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.cs#L387-L416
+            // Reconstruction: a fresh Kitchen per use; Trapped instead caches the first Kitchen on the portal and reuses it.
+            0x71e => self.instance("kitchen", None, None)?,
             0x720 => self.instance("vault", Some(account), None)?,
             0x72f => {
                 let guild = p
@@ -5743,6 +5749,8 @@ impl World {
             0
         } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
+        } else if crate::loot::potion_damage(defeated.kind).is_some() {
+            0
         } else if matches!(defeated.kind, 0xd56 | 0xd59) {
             self.content.objects[&defeated.kind].hp / 20
         } else if matches!(
@@ -5794,6 +5802,10 @@ impl World {
             2
         } else if private {
             eligible.len()
+        } else if crate::loot::period_dungeon(defeated.kind)
+            || crate::loot::period_surface(defeated.kind)
+        {
+            1
         } else {
             // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
             let multiplier = match defeated.kind {
@@ -5812,13 +5824,23 @@ impl World {
                 rewards.push(0xaea);
             }
             for item in rewards {
+                let potion = self.content.objects[&item].slot_type == 10;
+                if potion
+                    && crate::loot::potion_damage(defeated.kind)
+                        .is_some_and(|required| eligible[i % eligible.len()].1 < required)
+                {
+                    continue;
+                }
                 let owner = if private {
                     eligible[i % eligible.len()].0
                 } else {
                     -1
                 };
                 let items = drops.entry(owner).or_default();
-                if !items.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
+                if !items.contains(&(item as i32))
+                    || matches!(item, 0xa22 | 0xa23)
+                    || crate::loot::period_boss(defeated.kind)
+                {
                     items.push(item as i32);
                 }
             }
@@ -5852,11 +5874,8 @@ impl World {
             }
         }
         for (owner, items) in drops {
-            self.loot_bags(
-                self.ocean_reward_position(defeated)?,
-                (owner >= 0).then_some(owner),
-                &items,
-            )?;
+            let pos = self.ocean_bag_position(defeated)?;
+            self.loot_bags(pos, (owner >= 0).then_some(owner), &items)?;
         }
         Ok(())
     }
@@ -6470,10 +6489,15 @@ impl World {
                     Motion::Chase { sight, stop }
                         if target.is_some_and(|p| pos.distance(p) < sight) =>
                     {
-                        if pos.distance(target.expect("acquired chase target")) <= stop {
+                        let target = target.expect("acquired chase target");
+                        if pos.distance(target) <= stop {
                             speed = 0.;
                         }
-                        target
+                        // Per-tick aim jitter keeps chasers from pinning on one wall point: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/movement/Chasing.cs
+                        Some(Pos {
+                            x: target.x + self.rng.gen_range(-2..2) as f32 / 2.,
+                            y: target.y + self.rng.gen_range(-2..2) as f32 / 2.,
+                        })
                     }
                     Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
                         let target = match self.orbit_anchor(id, anchor, target) {
@@ -7228,7 +7252,13 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 }
 
 #[cfg(test)]
+mod chase_tests;
+#[cfg(test)]
 mod dungeon_return_tests;
+#[cfg(test)]
+mod hermit_loot_tests;
+#[cfg(test)]
+mod period_loot_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 #[cfg(test)]
