@@ -22,8 +22,7 @@ pub(crate) mod dialogue;
 mod entries;
 mod events;
 
-#[cfg(test)]
-mod population_tests;
+mod persona;
 mod progression;
 pub(crate) mod pursuits;
 #[cfg(test)]
@@ -31,6 +30,7 @@ mod quest_tests;
 mod realms;
 mod social;
 
+/// Who a bot is: identity, temperament and skill. Built from `persona::PERSONAS`.
 #[derive(Clone, Copy)]
 struct Profile {
     // Keep persisted registry keys independent of the names visible to players.
@@ -40,149 +40,112 @@ struct Profile {
     resources: f32,
     companions: f32,
     reaction: u64,
-    healer: bool,
-    archetype: usize,
+    attention: usize,
+    velocity_step: f32,
+    directions: usize,
+    pickup_clearance: f32,
+    knows_blue: bool,
+    knows_minimap: bool,
+    stars: i32,
+    role: persona::Role,
 }
-// Names transcribed from Whcxy3RJKIA 4:46, fubGzGmVqpI 9:33 and Ex_Ix3dlB4U 5:33 (YouTube).
+#[cfg(test)]
 const ARCHETYPES: [Profile; 6] = [
     Profile {
         identity: "Bayleaf",
         name: "Triceps",
         recovery: 0.62,
-        resources: 4.,
-        companions: 3.,
+        resources: 4.0,
+        companions: 3.0,
         reaction: 6,
-        healer: true,
-        archetype: 0,
+        attention: 4,
+        velocity_step: 1.0,
+        directions: 8,
+        pickup_clearance: 1.3,
+        knows_blue: true,
+        knows_minimap: true,
+        stars: 20,
+        role: persona::Role::Grinder,
     },
     Profile {
         identity: "Mossy",
         name: "Biceps",
         recovery: 0.35,
-        resources: 8.,
-        companions: 3.,
+        resources: 8.0,
+        companions: 3.0,
         reaction: 4,
-        healer: false,
-        archetype: 1,
+        attention: 8,
+        velocity_step: 0.25,
+        directions: 16,
+        pickup_clearance: 0.8,
+        knows_blue: false,
+        knows_minimap: true,
+        stars: 20,
+        role: persona::Role::Grinder,
     },
     Profile {
         identity: "Trellis",
         name: "BattleCrus",
         recovery: 0.48,
-        resources: 3.,
-        companions: 8.,
+        resources: 3.0,
+        companions: 8.0,
         reaction: 5,
-        healer: false,
-        archetype: 2,
+        attention: 2,
+        velocity_step: 2.0,
+        directions: 8,
+        pickup_clearance: 1.05,
+        knows_blue: false,
+        knows_minimap: false,
+        stars: 20,
+        role: persona::Role::Grinder,
     },
     Profile {
         identity: "Juniper",
         name: "Kadabu",
         recovery: 0.55,
-        resources: 3.,
-        companions: 7.,
+        resources: 3.0,
+        companions: 7.0,
         reaction: 5,
-        healer: true,
-        archetype: 3,
+        attention: 6,
+        velocity_step: 0.5,
+        directions: 16,
+        pickup_clearance: 1.5,
+        knows_blue: true,
+        knows_minimap: true,
+        stars: 20,
+        role: persona::Role::Grinder,
     },
     Profile {
         identity: "Reed",
         name: "ExElite",
         recovery: 0.42,
-        resources: 4.,
-        companions: 5.,
+        resources: 4.0,
+        companions: 5.0,
         reaction: 6,
-        healer: false,
-        archetype: 4,
+        attention: 3,
+        velocity_step: 2.0,
+        directions: 4,
+        pickup_clearance: 0.65,
+        knows_blue: false,
+        knows_minimap: false,
+        stars: 20,
+        role: persona::Role::Grinder,
     },
     Profile {
         identity: "Bramble",
         name: "Pixl",
         recovery: 0.38,
-        resources: 6.,
-        companions: 6.,
+        resources: 6.0,
+        companions: 6.0,
         reaction: 4,
-        healer: false,
-        archetype: 5,
-    },
-];
-pub(crate) const POPULATION: usize = 20;
-const PROFILES: [Profile; POPULATION] = [
-    ARCHETYPES[0],
-    ARCHETYPES[1],
-    ARCHETYPES[2],
-    ARCHETYPES[3],
-    ARCHETYPES[4],
-    ARCHETYPES[5],
-    Profile {
-        identity: "Population07",
-        name: "Rune",
-        ..ARCHETYPES[0]
-    },
-    Profile {
-        identity: "Population08",
-        name: "Frosty",
-        ..ARCHETYPES[1]
-    },
-    Profile {
-        identity: "Population09",
-        name: "Cobalt",
-        ..ARCHETYPES[2]
-    },
-    Profile {
-        identity: "Population10",
-        name: "Wisp",
-        ..ARCHETYPES[3]
-    },
-    Profile {
-        identity: "Population11",
-        name: "Rook",
-        ..ARCHETYPES[4]
-    },
-    Profile {
-        identity: "Population12",
-        name: "Ashen",
-        ..ARCHETYPES[5]
-    },
-    Profile {
-        identity: "Population13",
-        name: "Sparrow",
-        ..ARCHETYPES[0]
-    },
-    Profile {
-        identity: "Population14",
-        name: "Lyra",
-        ..ARCHETYPES[1]
-    },
-    Profile {
-        identity: "Population15",
-        name: "Raven",
-        ..ARCHETYPES[2]
-    },
-    Profile {
-        identity: "Population16",
-        name: "Mistral",
-        ..ARCHETYPES[3]
-    },
-    Profile {
-        identity: "Population17",
-        name: "Drift",
-        ..ARCHETYPES[4]
-    },
-    Profile {
-        identity: "Population18",
-        name: "Ember",
-        ..ARCHETYPES[5]
-    },
-    Profile {
-        identity: "Population19",
-        name: "Silver",
-        ..ARCHETYPES[0]
-    },
-    Profile {
-        identity: "Population20",
-        name: "Thorn",
-        ..ARCHETYPES[1]
+        attention: 5,
+        velocity_step: 1.0,
+        directions: 8,
+        pickup_clearance: 0.95,
+        knows_blue: false,
+        knows_minimap: true,
+        stars: 20,
+        role: persona::Role::Grinder,
     },
 ];
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -319,22 +282,21 @@ impl Brain {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let heading = rng.gen_range(0.0..std::f32::consts::TAU);
         let mut mind = pursuits::Mind::new(view.session.account);
-        let index = profile.archetype;
         mind.cognition = pursuits::Cognition {
-            attention: [4, 8, 2, 6, 3, 5][index],
-            velocity_step: [1., 0.25, 2., 0.5, 2., 1.][index],
-            directions: [8, 16, 8, 16, 4, 8][index],
-            pickup_clearance: [1.3, 0.8, 1.05, 1.5, 0.65, 0.95][index],
+            attention: profile.attention,
+            velocity_step: profile.velocity_step,
+            directions: profile.directions,
+            pickup_clearance: profile.pickup_clearance,
         };
         mind.market.name = profile.name.into();
-        mind.events.knows_blue = [true, false, false, true, false, false][index];
+        mind.events.knows_blue = profile.knows_blue;
         Self {
             profile,
             activity: Activity::Busy,
             mind,
             group: None,
             group_lost_since: None,
-            crowd: crowds::Crowd::new([true, true, false, true, false, true][index]),
+            crowd: crowds::Crowd::new(profile.knows_minimap),
             offered: None,
             proposing: false,
             session: (
@@ -1033,6 +995,12 @@ impl Brain {
                     }
                 }
             }
+            if retreat
+                && decision.item.is_none()
+                && let Some(enemy) = nearest
+            {
+                decision.item = combat::ability(v, content, grid, enemy)?;
+            }
             if let Some(enemy) = opponent {
                 combat::attack(
                     v,
@@ -1675,23 +1643,21 @@ use movement::Grid;
 mod runtime;
 pub(crate) const OUTPUT_CAPACITY: usize = 512;
 pub use runtime::start;
+pub fn persona_count() -> usize {
+    persona::PERSONAS.len()
+}
 pub fn profiles() -> Vec<&'static str> {
-    PROFILES.iter().map(|p| p.name).collect()
+    persona::PERSONAS.iter().map(|p| p.name).collect()
 }
 fn selected_profile(name: &str) -> Result<Profile> {
-    PROFILES
+    persona::PERSONAS
         .iter()
         .copied()
         .find(|p| p.name == name)
         .context("unknown actual gameplay profile")
 }
-pub fn validate_test_class(class: u16, profile: &str) -> Result<()> {
-    ensure!(
-        matches!(class, crate::content::WIZARD | crate::content::PRIEST),
-        "this source implements only Wizard and Priest gameplay controllers"
-    );
-    selected_profile(profile)?;
-    Ok(())
+pub fn validate_test_profile(profile: &str) -> Result<()> {
+    selected_profile(profile).map(|_| ())
 }
 pub async fn start_test(
     app: &crate::server::App,
@@ -1701,7 +1667,6 @@ pub async fn start_test(
     profile: &str,
     owner: crate::server::Owner,
 ) -> Result<()> {
-    validate_test_class(character.class, profile)?;
     runtime::start_selected(
         app,
         selected_profile(profile)?,

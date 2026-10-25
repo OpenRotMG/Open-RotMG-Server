@@ -87,7 +87,7 @@ impl Store {
                     ensure!(balance >= 0, "negative account fame");
                     // Account stars sum class bests, not spendable fame: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/appengine/SavedCharactersList.as#L127-L139
                     let (presentation, _) = read_presentation(&tx, id, base, &classes)?;
-                    records.insert(id,serde_json::json!({"account":id,"name":name,"discord_id":discord,"base_fame":0,"total_fame":balance,"collection":0,"stars":presentation.stars()}));
+                    records.insert(id,serde_json::json!({"account":id,"name":name,"discord_id":discord,"base_fame":0,"total_fame":balance,"collection":0,"quests":0,"stars":presentation.stars()}));
                 }
             }
             let mut characters = std::collections::BTreeMap::new();
@@ -103,6 +103,13 @@ impl Store {
             for c in living {
                 if characters.get(&c.id).is_some_and(|saved| !saved.alive) { continue; }
                 characters.insert(c.id,c);
+            }
+            for c in characters.values() {
+                // Quests Completed is each character's assigned-quest kill count: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/FameCounter.cs#L81-L82
+                if let Some(row)=records.get_mut(&c.account) {
+                    let total=row["quests"].as_u64().context("invalid quest total")?;
+                    row["quests"]=total.checked_add(c.lifetime.qualified_quests).context("quest total overflow")?.into();
+                }
             }
             for c in characters.values().filter(|c| c.alive) {
                 if let Some(row)=records.get_mut(&c.account) {
@@ -169,6 +176,7 @@ mod tests {
                 ch.level = 20;
                 ch.exp = 20000;
                 ch.fame = fame;
+                ch.lifetime.qualified_quests = n as u64 + 3;
                 store.progress(ch.clone()).await.unwrap();
                 store.delete_character(owner, ch.id).await.unwrap();
             }
@@ -207,12 +215,13 @@ mod tests {
             .await
             .unwrap();
         pending.fame = 2000;
+        pending.lifetime.qualified_quests = 5;
         let guest = store.list("star-unregistered".into()).await.unwrap();
         store.compete(guest.id).await.unwrap();
         eprintln!("STAR_FIXTURE_DB={}", path.display());
         let scores = store.hiscores(vec![pending]).await.unwrap();
         assert_eq!(scores["players"].as_array().unwrap().len(), 3);
-        for (id, expected) in owners.into_iter().zip([7, 6, 0]) {
+        for (id, (expected, quests)) in owners.into_iter().zip([(7, 6), (6, 8), (0, 5)]) {
             let row = scores["players"]
                 .as_array()
                 .unwrap()
@@ -220,6 +229,7 @@ mod tests {
                 .find(|row| row["account"] == id)
                 .unwrap();
             assert_eq!(row["stars"], expected);
+            assert_eq!(row["quests"], quests);
             assert_eq!(row["stars"], store.presentation(id).await.unwrap().stars());
         }
     }

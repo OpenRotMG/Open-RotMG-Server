@@ -18,12 +18,17 @@ pub struct Config {
     pub shore_bots: bool,
     #[serde(default)]
     pub bot_llm: bool,
+    #[serde(default = "default_bot_population")]
+    pub bot_population: usize,
     pub realm_seed: u64,
     #[serde(default = "default_realm_count")]
     pub realm_count: usize,
 }
 fn default_realm_count() -> usize {
     2
+}
+fn default_bot_population() -> usize {
+    20
 }
 fn default_shore_bots() -> bool {
     true
@@ -104,6 +109,7 @@ impl Config {
                 behind_proxy: false,
                 shore_bots: true,
                 bot_llm: false,
+                bot_population: default_bot_population(),
                 realm_seed: rand::random(),
                 realm_count: default_realm_count(),
             }
@@ -170,9 +176,14 @@ impl Config {
             "development control cannot be enabled behind a public proxy"
         );
         ensure!(
-            !self.shore_bots || self.max_players > crate::bots::POPULATION,
+            !self.shore_bots || self.max_players > self.bot_population,
             "adventuring bots require capacity for {} bots plus a human",
-            crate::bots::POPULATION
+            self.bot_population
+        );
+        ensure!(
+            self.bot_population <= crate::bots::persona_count(),
+            "bot_population exceeds the {} catalogued personas",
+            crate::bots::persona_count()
         );
         ensure!(
             (1..=85).contains(&self.max_players),

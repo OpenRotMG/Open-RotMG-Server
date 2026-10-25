@@ -1,4 +1,4 @@
-use crate::content::{Class, Content, Object, PRIEST, WIZARD};
+use crate::content::{Class, Content, Object, WIZARD};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -326,6 +326,58 @@ pub fn experience_goal(level: i32) -> Result<i32> {
     Ok(50 + (level - 1) * 100)
 }
 impl Character {
+    /// A level-one character of `class` with its starting equipment, not yet bound to an account.
+    pub fn fresh(class: &Object) -> Result<Self> {
+        Ok(Character {
+            schema: 1,
+            lifetime: FameLifetime::complete(),
+            class: class.kind,
+            base: [
+                class.hp,
+                class.mp,
+                class.attack,
+                class.defense,
+                class.speed,
+                class.dexterity,
+                class.vitality,
+                class.wisdom,
+            ],
+            tex1: 0,
+            tex2: 0,
+            pet_kind: None,
+            id: 0,
+            account: 0,
+            name: String::new(),
+            level: 1,
+            exp: 0,
+            xp_boost: XpBoost::default(),
+            fame: 0,
+            hp: class.hp,
+            mp: class.mp,
+            items: class.equipment.clone(),
+            revision: 0,
+            alive: true,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs(),
+            shots: 0,
+            hits: 0,
+            kills: 0,
+            quests: 0,
+            tiles: 0,
+            pirate_caves: 0,
+            dungeons: [0; 3],
+            jungles: 0,
+            abysses: 0,
+            trenches: 0,
+            spider_dens: 0,
+            mad_labs: 0,
+            manors: 0,
+            beaches: 0,
+            davy_lockers: 0,
+            tombs: 0,
+        })
+    }
     pub fn gain_experience(
         &mut self,
         content: &Content,
@@ -964,53 +1016,94 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         })
         .await
     }
-    pub async fn shore_character(
+    /// Provisions a persona account on first use, rebuilds its roster once every character has died,
+    /// and returns the `pick`th living character.
+    pub async fn persona_character(
         &self,
         identity: String,
-        name: String,
-        content: &Content,
-        prefer_priest: bool,
+        roster: Vec<Character>,
+        vault: Vec<[i32; 8]>,
+        pick: usize,
+        starting_stock: Option<i32>,
     ) -> Result<Character> {
+        ensure!(
+            starting_stock.is_none_or(|kind| (0..=65535).contains(&kind)),
+            "invalid persona stock kind"
+        );
+        ensure!(
+            (1..=14).contains(&roster.iter().filter(|ch| ch.alive).count())
+                && (1..=20).contains(&vault.len()),
+            "invalid persona provisioning"
+        );
+        let name = identity
+            .strip_prefix("persona:v1:")
+            .context("unknown persona snapshot version")?
+            .to_owned();
         let guid = self.call(move |db| {
             let tx = db.transaction()?;
             let existing: Option<(String, i32)> = tx.query_row(
                 "SELECT guid,accounts.id FROM accounts JOIN shore_bots ON accounts.id=shore_bots.account WHERE shore_bots.name=?1",
-                [&identity], |r| Ok((r.get(0)?, r.get(1)?))).optional()
-                .context("read shore bot identity; credential-free restores require operator recovery")?;
-            let guid = match existing {
-                Some((guid, account)) => {
-                    if tx.execute("UPDATE accounts SET name=?1 WHERE id=?2 AND name<>?1", params![name,account])? > 0 {
-                        tracing::info!(account, identity, name, "autonomous account renamed");
-                    }
-                    guid
-                },
+                [&identity], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            let (guid, account) = match existing {
+                Some(found) => found,
                 None => {
-                    let guid = format!("shore-{:032x}", rand::random::<u128>());
-                    tx.execute("INSERT INTO accounts(guid,name) VALUES(?1,?2)", params![guid,name])?;
-                    let account = tx.last_insert_rowid();
-                    vaults::provision(&tx, i32::try_from(account)?)?;
+                    let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE name=?1 COLLATE NOCASE AND NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=accounts.id))", [&name], |r| r.get(0))?;
+                    ensure!(!taken, anyhow::anyhow!(Rejected("persona name is already in use")).context(format!("persona {identity} already belongs to another account")));
+                    let guid = format!("persona-{:032x}", rand::random::<u128>());
+                    tx.execute("INSERT INTO accounts(guid,name,character_slots,vault_mask) VALUES(?1,?2,14,?3)", params![guid, name, (1 << vault.len()) - 1])?;
+                    let account = i32::try_from(tx.last_insert_rowid())?;
+                    for (chest, items) in vault.iter().enumerate() {
+                        tx.execute("INSERT INTO vaults(account,chest,items,revision) VALUES(?1,?2,?3,0)", params![account, chest, serde_json::to_string(items)?])?;
+                    }
                     tx.execute("INSERT INTO account_fame(account,balance,earned) VALUES(?1,0,0)", [account])?;
-                    tx.execute("INSERT INTO shore_bots(name,account) VALUES(?1,?2)", params![identity,account])?;
-                    guid
+                    tx.execute("INSERT INTO shore_bots(name,account) VALUES(?1,?2)", params![identity, account])?;
+                    tracing::info!(account, identity, chests = vault.len(), ?vault, "persona account provisioned");
+                    (guid, account)
                 }
             };
+            let living: i64 = tx.query_row("SELECT count(*) FROM characters WHERE account=?1 AND alive=1", [account], |r| r.get(0))?;
+            if living == 0 {
+                let mut roster = roster;
+                if let Some(kind) = starting_stock {
+                    let merchant = roster.iter_mut().find(|ch| ch.alive).context("persona stock has no living owner")?;
+                    // Rebuilds must withdraw durable holdings too, never replay the initial grant.
+                    for mut chest in vaults::read(&tx, account)? {
+                        let mut moved = 0;
+                        for item in chest.items.iter_mut().filter(|item| **item == kind) {
+                            if let Some(slot) = merchant.items.iter_mut().skip(7).find(|slot| **slot == -1) {
+                                *slot = *item;
+                                *item = -1;
+                                moved += 1;
+                            }
+                        }
+                        if moved > 0 { vaults::save(&tx, &chest)?; }
+                        tracing::info!(account, identity, kind, moved, chest=chest.chest, "persona held stock withdrawn from durable vault");
+                    }
+                }
+                for mut ch in roster {
+                    if !ch.alive {
+                        let enough: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM characters WHERE account=?1 AND json_extract(stats,'$.class')=?2 AND json_extract(stats,'$.level')>=?3)", params![account, ch.class, ch.level], |r| r.get(0))?;
+                        if enough { continue; }
+                    }
+                    ch.account = account;
+                    ch.name.clone_from(&name);
+                    tx.execute("INSERT INTO characters(account,stats,items,alive) VALUES(?1,?2,?3,?4)",
+                        params![account, serde_json::to_string(&ch)?, serde_json::to_string(&ch.items)?, ch.alive])?;
+                    tracing::info!(account, identity, class = ch.class, level = ch.level, fame = ch.fame, alive=ch.alive, items = ?ch.items, base = ?ch.base, "persona snapshot character provisioned (synthetic prehistory, not earned gameplay)");
+                }
+            }
+            character_slots::read(&tx, account)?;
+            vaults::read(&tx, account)?;
             tx.commit()?;
             Ok(guid)
         }).await?;
         let mut account = self.list(guid).await?;
         ensure!(
-            account.characters.len() <= 1,
-            "shore account has multiple live characters"
+            !account.characters.is_empty(),
+            "persona has no living character after provisioning"
         );
-        if let Some(character) = account.characters.pop() {
-            return Ok(character);
-        }
-        let class = if prefer_priest && content.unlocked(PRIEST, &account.best_levels)? {
-            PRIEST
-        } else {
-            WIZARD
-        };
-        self.create(account.id, content.get(class)?).await
+        let index = pick % account.characters.len();
+        Ok(account.characters.swap_remove(index))
     }
     pub async fn create(&self, account: i32, class: &Object) -> Result<Character> {
         ensure!(
@@ -1051,19 +1144,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             "unknown playable class"
         );
         let kind = class.kind;
-        let base = [
-            class.hp,
-            class.mp,
-            class.attack,
-            class.defense,
-            class.speed,
-            class.dexterity,
-            class.vitality,
-            class.wisdom,
-        ];
-        let hp = class.hp;
-        let mp = class.mp;
-        let items = class.equipment.clone();
+        let fresh = Character::fresh(class)?;
         self.call(move |c| {
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let slots = character_slots::read(&tx, account)?;
@@ -1095,44 +1176,9 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                     r.get(0)
                 })?;
             let mut ch = Character {
-                schema: 1,
-                lifetime: FameLifetime::complete(),
-                class: kind,
-                base,
-                tex1: 0,
-                tex2: 0,
-                pet_kind: None,
-                id: 0,
                 account,
                 name,
-                level: 1,
-                exp: 0,
-                xp_boost: XpBoost::default(),
-                fame: 0,
-                hp,
-                mp,
-                items,
-                revision: 0,
-                alive: true,
-                created_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_secs(),
-                shots: 0,
-                hits: 0,
-                kills: 0,
-                quests: 0,
-                tiles: 0,
-                pirate_caves: 0,
-                dungeons: [0; 3],
-                jungles: 0,
-                abysses: 0,
-                trenches: 0,
-                spider_dens: 0,
-                mad_labs: 0,
-                manors: 0,
-                beaches: 0,
-                davy_lockers: 0,
-                tombs: 0,
+                ..fresh
             };
             tx.execute(
                 "INSERT INTO characters(account,stats,items) VALUES(?1,?2,?3)",
