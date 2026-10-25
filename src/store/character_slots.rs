@@ -33,8 +33,19 @@ pub(super) fn read(db: &Connection, account: i32) -> Result<i32> {
             Ok((r.get::<_, i32>(0)?, r.get::<_, i32>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let persona: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM shore_bots WHERE account=?1 AND name GLOB 'persona:v1:*')",
+        [account],
+        |r| r.get(0),
+    )?;
+    // Approved pre-made accounts start with capacity; never invent human purchase receipts.
+    let base = if persona { 14 } else { 1 };
     ensure!(
-        receipts.iter().map(|(_, n)| *n).eq(2..=slots)
+        slots >= base,
+        "persona starting capacity missing for account {account}"
+    );
+    ensure!(
+        receipts.iter().map(|(_, n)| *n).eq(base + 1..=slots)
             && receipts
                 .iter()
                 .map(|(timer, _)| *timer)
@@ -144,4 +155,28 @@ impl Store {
         );
         Ok(())
     }
+}
+
+#[cfg(test)]
+#[test]
+fn preset_slots_require_an_explicit_exported_grant_not_a_purchase_story() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE accounts(id INTEGER,character_slots INTEGER);
+CREATE TABLE characters(account INTEGER,alive INTEGER);
+CREATE TABLE character_slot_purchases(account INTEGER,timer INTEGER,slots INTEGER);
+CREATE TABLE shore_bots(account INTEGER,name TEXT);
+INSERT INTO accounts VALUES(1,14);",
+    )
+    .unwrap();
+    assert!(read(&db, 1).is_err());
+    db.execute("INSERT INTO shore_bots VALUES(1,'Bayleaf')", [])
+        .unwrap();
+    assert!(read(&db, 1).is_err());
+    db.execute("UPDATE shore_bots SET name='persona:v1:Acrobat'", [])
+        .unwrap();
+    assert_eq!(read(&db, 1).unwrap(), 14);
+    db.execute("INSERT INTO character_slot_purchases VALUES(1,-2,2)", [])
+        .unwrap();
+    assert!(read(&db, 1).is_err());
 }
