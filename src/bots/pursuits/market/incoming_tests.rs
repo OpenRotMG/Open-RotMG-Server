@@ -48,6 +48,52 @@ fn incoming_human_exchange_selects_advertised_real_goods_and_requires_payment() 
     );
 }
 #[test]
+fn market_five_speed_for_defense_with_life_stock_still_requires_a_fresh_native_window() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, mut v) = fixture(&c, [SPEED, SPEED, SPEED, SPEED, SPEED, LIFE, -1, -1]);
+    m.name = "A".into();
+    assert!(m.incoming_action(&v, &c, None).unwrap().is_none());
+    let items = v.character.items.clone();
+    opened(&mut m, &v, &c);
+    assert_eq!(
+        m.quote.as_ref().unwrap()[0],
+        Goods {
+            kind: SPEED,
+            quantity: 5
+        }
+    );
+    assert_eq!(
+        m.quote.as_ref().unwrap()[1],
+        Goods {
+            kind: DEFENSE,
+            quantity: 1
+        }
+    );
+    assert!(
+        matches!(m.incoming_action(&v, &c, None).unwrap(), Some(TradeAction::Change { offer }) if offer.iter().filter(|b| **b).count() == 5 && !offer[9])
+    );
+    assert!(m.incoming_action(&v, &c, None).unwrap().is_none());
+    m.trade.as_mut().unwrap().offers[1][4] = true;
+    assert!(m.incoming_action(&v, &c, None).unwrap().is_none());
+    v.time_ms += 3000;
+    v.clock_at += Duration::from_millis(3000);
+    assert!(
+        matches!(m.incoming_action(&v, &c, None).unwrap(), Some(TradeAction::Accept { mine, theirs }) if mine.iter().filter(|b| **b).count() == 5 && !mine[9] && theirs[4])
+    );
+    assert_eq!(v.character.items, items);
+    assert!(
+        m.bargain.is_none(),
+        "window acceptance cannot invent a durable receipt"
+    );
+    v.character.inventory_revision += 1;
+    v.character.items[4] = -1;
+    assert!(matches!(
+        m.incoming_action(&v, &c, None).unwrap(),
+        Some(TradeAction::Cancel)
+    ));
+}
+
+#[test]
 fn incoming_incompatible_window_refuses_contextually_and_never_gives_wanted_potions_free() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
     for case in 0..6 {
