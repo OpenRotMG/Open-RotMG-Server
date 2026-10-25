@@ -329,6 +329,7 @@ async fn persona_character(app: &App, profile: Profile) -> Result<Character> {
             } else {
                 rand::random()
             },
+            persona::starting_stock(&profile, &app.content)?,
         )
         .await
 }

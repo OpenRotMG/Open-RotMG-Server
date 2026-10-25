@@ -2,6 +2,9 @@ use super::*;
 use crate::store::{Character, experience_goal, level_start};
 use rand::seq::SliceRandom;
 use serde::Deserialize;
+
+#[cfg(test)]
+mod stock_tests;
 use std::sync::LazyLock;
 
 // Class quest thresholds; each reached threshold is one account star.
@@ -133,24 +136,19 @@ pub(super) fn life(
         archived.items.fill(-1);
         roster.push(archived);
     }
-    let mut storage = vault(p, content, rng)?;
-    if p.role == Role::Trader {
-        let currency = ["Potion of Speed", "Potion of Defense", "Potion of Life"]
-            [(seed(p.identity) % 3) as usize];
-        let kind = named(content, currency)?;
-        let merchant = roster
-            .iter_mut()
-            .find(|ch| ch.alive)
-            .context("trader preset has no living character")?;
-        // Trading starts with held goods withdrawn from its own snapshot, not a fictitious wallet.
-        for slot in merchant.items.iter_mut().skip(7) {
-            if let Some(item) = storage.iter_mut().flatten().find(|item| **item == kind) {
-                *slot = *item;
-                *item = -1;
-            }
-        }
-    }
-    Ok((roster, storage))
+    Ok((roster, vault(p, content, rng)?))
+}
+
+pub(super) fn starting_stock(p: &Profile, content: &Content) -> Result<Option<i32>> {
+    (p.role == Role::Trader)
+        .then(|| {
+            named(
+                content,
+                ["Potion of Speed", "Potion of Defense", "Potion of Life"]
+                    [(seed(p.identity) % 3) as usize],
+            )
+        })
+        .transpose()
 }
 
 fn prerequisites(content: &Content, class: u16, needed: &mut BTreeMap<u16, i32>) {
@@ -344,11 +342,6 @@ fn every_persona_gets_a_valid_life_matching_its_stars() {
             );
         }
         if p.role == Role::Trader && p.stars >= 13 {
-            assert!(
-                roster.iter().find(|ch| ch.alive).unwrap().items[7..]
-                    .iter()
-                    .any(|kind| *kind >= 0)
-            );
             for (name, per) in [
                 ("Potion of Life", 12),
                 ("Potion of Defense", 5),
@@ -394,7 +387,7 @@ async fn persona_snapshot_survives_reopen_and_regeneration_without_duplicate_gra
     };
     let (roster, vault) = build();
     let original = store
-        .persona_character(profile.identity.into(), roster, vault, 0)
+        .persona_character(profile.identity.into(), roster, vault, 0, None)
         .await
         .unwrap();
     let account = original.account;
@@ -413,7 +406,7 @@ async fn persona_snapshot_survives_reopen_and_regeneration_without_duplicate_gra
     let (roster, vault) = build();
     assert_eq!(
         store
-            .persona_character(profile.identity.into(), roster, vault, 0)
+            .persona_character(profile.identity.into(), roster, vault, 0, None)
             .await
             .unwrap()
             .id,
@@ -424,7 +417,7 @@ async fn persona_snapshot_survives_reopen_and_regeneration_without_duplicate_gra
     }
     let (roster, vault) = build();
     let next = store
-        .persona_character(profile.identity.into(), roster, vault, 0)
+        .persona_character(profile.identity.into(), roster, vault, 0, None)
         .await
         .unwrap();
     assert_ne!(next.id, original.id);
@@ -475,7 +468,7 @@ async fn persona_snapshot_survives_reopen_and_regeneration_without_duplicate_gra
     .unwrap();
     assert!(
         store
-            .persona_character(collision.identity.into(), roster, vault, 0)
+            .persona_character(collision.identity.into(), roster, vault, 0, None)
             .await
             .unwrap_err()
             .to_string()

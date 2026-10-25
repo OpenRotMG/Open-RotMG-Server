@@ -1024,7 +1024,12 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         roster: Vec<Character>,
         vault: Vec<[i32; 8]>,
         pick: usize,
+        starting_stock: Option<i32>,
     ) -> Result<Character> {
+        ensure!(
+            starting_stock.is_none_or(|kind| (0..=65535).contains(&kind)),
+            "invalid persona stock kind"
+        );
         ensure!(
             (1..=14).contains(&roster.iter().filter(|ch| ch.alive).count())
                 && (1..=20).contains(&vault.len()),
@@ -1058,6 +1063,23 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             };
             let living: i64 = tx.query_row("SELECT count(*) FROM characters WHERE account=?1 AND alive=1", [account], |r| r.get(0))?;
             if living == 0 {
+                let mut roster = roster;
+                if let Some(kind) = starting_stock {
+                    let merchant = roster.iter_mut().find(|ch| ch.alive).context("persona stock has no living owner")?;
+                    // Rebuilds must withdraw durable holdings too, never replay the initial grant.
+                    for mut chest in vaults::read(&tx, account)? {
+                        let mut moved = 0;
+                        for item in chest.items.iter_mut().filter(|item| **item == kind) {
+                            if let Some(slot) = merchant.items.iter_mut().skip(7).find(|slot| **slot == -1) {
+                                *slot = *item;
+                                *item = -1;
+                                moved += 1;
+                            }
+                        }
+                        if moved > 0 { vaults::save(&tx, &chest)?; }
+                        tracing::info!(account, identity, kind, moved, chest=chest.chest, "persona held stock withdrawn from durable vault");
+                    }
+                }
                 for mut ch in roster {
                     if !ch.alive {
                         let enough: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM characters WHERE account=?1 AND json_extract(stats,'$.class')=?2 AND json_extract(stats,'$.level')>=?3)", params![account, ch.class, ch.level], |r| r.get(0))?;

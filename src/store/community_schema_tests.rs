@@ -126,6 +126,7 @@ async fn fresh_schema_account(content: &Content) -> (std::path::PathBuf, i32) {
             vec![Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap()],
             vec![[-1; 8]],
             0,
+            None,
         )
         .await
         .unwrap();
