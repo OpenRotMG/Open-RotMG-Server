@@ -123,6 +123,13 @@ impl Routing {
         ensure!(!slot.retired(), "world {id} is retired");
         Ok(slot)
     }
+    pub(super) fn player(&self, id: i32) -> Result<Option<Arc<Slot>>> {
+        let _publication = self.publication.read().expect("world publication poisoned");
+        let Some(scope) = self.players.read().expect("player routing poisoned").get(&id).copied() else { return Ok(None); };
+        let slot = self.worlds.read().expect("world routing poisoned").get(&scope).cloned().context("routed spectator world is missing")?;
+        ensure!(!slot.retired(), "spectator world is retired");
+        Ok(Some(slot))
+    }
     pub(super) fn ids(&self) -> Vec<i32> {
         self.worlds
             .read()

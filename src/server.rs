@@ -1,3 +1,4 @@
+mod bot_view;
 mod input;
 
 #[cfg(test)]
@@ -3142,6 +3143,10 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
         .route("/api/bots", get(crate::bots::cctv::list))
+        .route("/api/bots/{name}/socket", get(bot_view::socket))
+        .route_service("/api/bots/{name}/view", tower_http::services::ServeFile::new(client.join("spectator.html")))
+        .route_service("/api/bots/spectator.js", tower_http::services::ServeFile::new(client.join("spectator.js")))
+        .route_service("/api/bots/client.swf", tower_http::services::ServeFile::new(client.join("spectator.swf")))
         .route("/api/bots/{name}/stream", get(crate::bots::cctv::stream))
         .route(
             "/internal/discord/critical-incident",

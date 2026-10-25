@@ -214,6 +214,7 @@ async fn enter_admitted(
         })
         .await?;
     let view = app.world.player_view(id).await?;
+    app.cctv.entered(profile.name, &view);
     tracing::info!(
         player = id,
         name = profile.name,

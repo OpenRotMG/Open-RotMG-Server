@@ -14,22 +14,21 @@ use std::{
 };
 
 const THOUGHTS: usize = 50;
-const SIGHT: i16 = 16;
 const VIEWERS: usize = 32;
 const VIEWERS_PER_IP: usize = 2;
 
-// Public read-only telemetry; the restricted view is only built while someone watches.
+// Telemetry and native viewers share bot identity, but have independent admission budgets.
 #[derive(Default)]
 pub(crate) struct Cctv(Mutex<Registry>);
 #[derive(Default)]
 struct Registry {
     feeds: BTreeMap<&'static str, Feed>,
-    ips: HashMap<IpAddr, usize>,
+    ips: HashMap<(IpAddr, bool), usize>,
 }
 struct Feed {
     updated: Instant,
     frame: Value,
-    sight: Value,
+    session: Option<(i32, i32)>,
     thoughts: VecDeque<(u64, u128, String)>,
     reason: String,
     shots: Vec<u8>,
@@ -40,7 +39,7 @@ impl Registry {
         self.feeds.entry(name).or_insert_with(|| Feed {
             updated: Instant::now(),
             frame: Value::Null,
-            sight: Value::Null,
+            session: None,
             thoughts: VecDeque::new(),
             reason: String::new(),
             shots: Vec::new(),
@@ -66,6 +65,16 @@ impl Cctv {
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
         self.0.lock().expect("bot CCTV registry poisoned")
     }
+    pub(super) fn entered(&self, name: &'static str, v: &PlayerView) {
+        let mut registry = self.lock();
+        let feed = registry.feed(name);
+        feed.session = Some((v.session.player, v.session.account));
+        feed.frame = Value::Null;
+        feed.updated = Instant::now();
+    }
+    pub(crate) fn binding(&self, name: &str) -> Option<(i32, i32)> {
+        self.lock().feeds.get(name).and_then(|f| f.session)
+    }
     pub(super) fn decided(
         &self,
         name: &'static str,
@@ -74,12 +83,6 @@ impl Cctv {
         reason: String,
         content: &Content,
     ) {
-        let watched = self.lock().feeds.get(name).is_some_and(|f| f.viewers > 0);
-        let sight = if watched {
-            sight(v, content)
-        } else {
-            Value::Null
-        };
         let shots: Vec<u8> = v
             .projectiles
             .iter()
@@ -95,8 +98,8 @@ impl Cctv {
         feed.frame = json!({"class":content.objects[&v.character.class].name,"level":v.character.level,
             "hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"max_mp":v.character.stats[1],
             "world":v.map.name,"x":v.position.x,"y":v.position.y,"aim":d.aim,"fired":fired,
-            "target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason});
-        feed.sight = sight;
+            "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason});
+        feed.session = Some((v.session.player, v.session.account));
         feed.shots = shots;
         feed.reason = reason;
         feed.updated = Instant::now();
@@ -128,33 +131,12 @@ impl Cctv {
             .map(|(seq, at, text)| json!({"seq":seq,"at":at,"text":text}))
             .collect();
         let event = json!({"age_ms":feed.updated.elapsed().as_millis(),"frame":feed.frame,
-            "sight":feed.sight,"thoughts":thoughts});
+            "thoughts":thoughts});
         (
             event.to_string(),
             feed.thoughts.back().map_or(seen, |t| t.0),
         )
     }
-}
-
-fn sight(v: &PlayerView, content: &Content) -> Value {
-    let (cx, cy) = tile(v.position);
-    let ground: Vec<i16> = (cy - SIGHT..=cy + SIGHT)
-        .flat_map(|y| (cx - SIGHT..=cx + SIGHT).map(move |x| (x, y)))
-        .map(|p| v.tiles.get(p).map_or(-1, |t| i16::from(t.ground)))
-        .collect();
-    let objects: Vec<_> = v
-        .objects
-        .iter()
-        .map(|o| {
-            let def = &content.objects[&o.kind];
-            json!({"name":label(o, content),"x":o.position.x,"y":o.position.y,"hp":o.hp,"max_hp":o.max_hp,
-            "level":o.level,"class":def.class,"enemy":def.enemy,"blocks":o.blocks})
-        })
-        .collect();
-    let projectiles: Vec<_> = v.projectiles.iter().map(|p| {
-        json!({"own":p.owner==v.session.player,"x":p.position.x,"y":p.position.y,"angle":p.angle})
-    }).collect();
-    json!({"x":cx-SIGHT,"y":cy-SIGHT,"size":2*SIGHT+1,"ground":ground,"objects":objects,"projectiles":projectiles})
 }
 
 // Unnamed objects show their type name, as the native client does.
@@ -201,24 +183,25 @@ pub(super) fn reason(
     format!("{activity}: {doing}")
 }
 
-struct Viewer {
+pub(crate) struct Viewer {
     cctv: Arc<Cctv>,
     name: &'static str,
     ip: IpAddr,
+    native: bool,
 }
 impl Viewer {
-    fn join(cctv: &Arc<Cctv>, name: &str, ip: IpAddr) -> Result<Self, (StatusCode, String)> {
+    pub(crate) fn join(cctv: &Arc<Cctv>, name: &str, ip: IpAddr, native: bool) -> Result<Self, (StatusCode, String)> {
         let mut registry = cctv.lock();
         let Some((&name, _)) = registry.feeds.get_key_value(name) else {
             return Err((StatusCode::NOT_FOUND, format!("no live bot named {name}")));
         };
-        if registry.ips.values().sum::<usize>() >= VIEWERS {
+        if registry.ips.iter().filter(|((_, kind), _)| *kind == native).map(|(_, count)| count).sum::<usize>() >= VIEWERS {
             return Err((
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("all {VIEWERS} bot viewer slots are in use; retry later"),
             ));
         }
-        let mine = registry.ips.entry(ip).or_default();
+        let mine = registry.ips.entry((ip, native)).or_default();
         if *mine >= VIEWERS_PER_IP {
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
@@ -231,6 +214,7 @@ impl Viewer {
             cctv: cctv.clone(),
             name,
             ip,
+            native,
         })
     }
 }
@@ -240,11 +224,11 @@ impl Drop for Viewer {
         registry.feed(self.name).viewers -= 1;
         let mine = registry
             .ips
-            .get_mut(&self.ip)
+            .get_mut(&(self.ip, self.native))
             .expect("bot viewer address missing");
         *mine -= 1;
         if *mine == 0 {
-            registry.ips.remove(&self.ip);
+            registry.ips.remove(&(self.ip, self.native));
         }
         tracing::info!(bot = self.name, "bot CCTV viewer left");
     }
@@ -254,16 +238,10 @@ pub(crate) async fn list(State(a): State<App>) -> Response {
     let bots: Vec<_> = a.cctv.lock().feeds.iter().map(|(name, f)| {
         json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame})
     }).collect();
-    let grounds: BTreeMap<_, _> = a
-        .content
-        .ground_names
-        .iter()
-        .map(|(id, name)| (id.to_string(), name))
-        .collect();
     let llm = dialogue::health(a.dialogue.as_deref());
     (
         [("cache-control", "no-store")],
-        Json(json!({"bots":bots,"llm":llm,"grounds":grounds})),
+        Json(json!({"bots":bots,"llm":llm})),
     )
         .into_response()
 }
@@ -276,7 +254,7 @@ pub(crate) async fn stream(
 ) -> Response {
     let joined = crate::server::request_ip(&a, &headers, peer)
         .map_err(|e| (StatusCode::FORBIDDEN, e.to_string()))
-        .and_then(|ip| Viewer::join(&a.cctv, &name, ip));
+        .and_then(|ip| Viewer::join(&a.cctv, &name, ip, false));
     let viewer = match joined {
         Ok(viewer) => viewer,
         Err((status, error)) => {
@@ -314,15 +292,15 @@ mod tests {
     fn viewers_are_bounded_and_released() {
         let cctv = Arc::new(Cctv::default());
         cctv.lock().feed("Triceps");
-        let refused = |name, ip| Viewer::join(&cctv, name, ip).err().unwrap().0;
+        let refused = |name, ip| Viewer::join(&cctv, name, ip, false).err().unwrap().0;
         let ip = IpAddr::from([192, 0, 2, 1]);
         assert_eq!(refused("Nobody", ip), StatusCode::NOT_FOUND);
-        let pair = [0, 1].map(|_| Viewer::join(&cctv, "Triceps", ip).unwrap());
+        let pair = [0, 1].map(|_| Viewer::join(&cctv, "Triceps", ip, false).unwrap());
         assert_eq!(refused("Triceps", ip), StatusCode::TOO_MANY_REQUESTS);
         drop(pair);
         assert!(cctv.lock().ips.is_empty() && cctv.lock().feeds["Triceps"].viewers == 0);
         let full: Vec<_> = (0..VIEWERS as u8)
-            .map(|i| Viewer::join(&cctv, "Triceps", IpAddr::from([10, 0, 0, i])).unwrap())
+            .map(|i| Viewer::join(&cctv, "Triceps", IpAddr::from([10, 0, 0, i]), false).unwrap())
             .collect();
         assert_eq!(refused("Triceps", ip), StatusCode::SERVICE_UNAVAILABLE);
         drop(full);

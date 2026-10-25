@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, watch};
+pub(crate) mod spectator;
 mod abilities;
 
 mod cell_index;
@@ -331,6 +332,7 @@ struct QueuedExperience {
 }
 
 pub struct Player {
+    spectators: Option<tokio::sync::broadcast::Sender<Packet>>,
     dungeon_entries: VecDeque<view::ObservedDungeonEntry>,
     pub character: Character,
     pub pos: Pos,
@@ -2712,6 +2714,7 @@ impl Handle {
     }
 }
 pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
+    spectator::publish(p, id, &body);
     let packet_bytes = body.len();
     if let Some(tx) = &p.tx
         && let Err(error) = tx.packets.try_send(Packet { id, body })
@@ -3425,6 +3428,7 @@ impl World {
         self.players.insert(
             id,
             Player {
+                spectators: None,
                 dungeon_entries: VecDeque::new(),
                 weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
                 committed_lifetime: ch.lifetime.clone(),
@@ -4482,6 +4486,7 @@ impl World {
         });
         let mut o = Writer::new();
         o.u8(bullet).i32(id).i16(kind as i16).f32(angle);
+        spectator::publish(&self.players[&id], 74, &o.0);
         for (other, p) in &self.players {
             if *other != id && p.known.contains(&id) && p.pos.distance(start) <= 20. {
                 send(p, 74, o.0.clone());
