@@ -1036,7 +1036,7 @@ impl World {
                 if let Some(connection) = connection {
                     cell.config = format!("conn:{connection}");
                 }
-                if (x, y) == piece.boss && matches!(kind, 0x668 | 0x678) {
+                if (x, y) == piece.boss && matches!(kind, 0x668 | 0x675 | 0x678) {
                     let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
                     self.spawn_entity(0x501, pos, items)?;
                 }

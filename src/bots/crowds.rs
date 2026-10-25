@@ -168,13 +168,21 @@ impl Crowd {
         if !matches!(v.map.name.as_str(), "Realm" | "Pirate Cave" | "Snake Pit") {
             return None;
         }
-        self.attended_destination(
-            v.time_ms,
-            v.position,
-            v.session.account,
-            group,
-            eligible_position,
-        )
+        let level = v.character.level;
+        let realm = v.map.name == "Realm";
+        let center = Pos {
+            x: v.map.width as f32 / 2.,
+            y: v.map.height as f32 / 2.,
+        };
+        let radius = v.map.width.min(v.map.height) as f32 / 2.;
+        // Realm danger rises toward the center (Godlands); players know not to teleport a fresh character there.
+        let survivable = |p: Pos| {
+            let depth = p.distance(center) / radius;
+            !realm || depth >= 0.55 || level >= 20 || (depth >= 0.35 && level >= 10)
+        };
+        self.attended_destination(v.time_ms, v.position, v.session.account, group, |p| {
+            survivable(p) && eligible_position(p)
+        })
     }
     fn attended_destination(
         &self,
