@@ -241,9 +241,16 @@ pub(super) fn ability(
     let weapon = content.get(v.character.items[0] as u16)?.projectiles[&0].clone();
     let health = v.character.hp as f32 / v.character.stats[0] as f32;
     let endangered = health < 0.6 && distance < 8.;
+    let teleport = item.abilities.iter().find_map(|a| match a {
+        Ability::Teleport { distance } => Some(*distance),
+        _ => None,
+    });
+    // A teleporting item's single cursor is the escape landing, so it cannot also aim at the enemy.
+    let aimed = teleport.is_none();
     // Snake Pit keeps a second cast in reserve for its boss.
     let worthwhile = |reach: f32, passes_cover: bool| {
-        enemy.hp > weapon.max * 2
+        aimed
+            && enemy.hp > weapon.max * 2
             && distance <= reach
             && shot_clear(v, grid, enemy.position, passes_cover)
             && (v.map.name != "Snake Pit"
@@ -271,7 +278,22 @@ pub(super) fn ability(
                 worthwhile(14., false) && grid.walkable.contains(&tile(enemy.position))
             }
             Ability::SpiritBomb => worthwhile(3., false),
-            Ability::Stasis { .. } | Ability::Decoy { .. } | Ability::Teleport { .. } => endangered,
+            // The server charges casts that only reach stasised or immune enemies.
+            Ability::Stasis { .. } => {
+                endangered
+                    && aimed
+                    && v.objects.iter().any(|o| {
+                        content.objects[&o.kind].enemy
+                            && o.hp > 0
+                            && o.position.distance(enemy.position) <= 3.
+                            && o.condition_mask
+                                .is_some_and(|m| m & (bit(STASIS) | bit(STASIS_IMMUNE)) == 0)
+                    })
+            }
+            Ability::Decoy { .. } | Ability::Teleport { .. } => endangered,
+            Ability::Condition { effect, .. } if v.character.conditions & bit(*effect) != 0 => {
+                false
+            }
             Ability::Condition { effect, .. } => match *effect {
                 INVISIBLE | INVULNERABLE | ARMORED => endangered,
                 HEALING => health < 0.75,
@@ -287,10 +309,6 @@ pub(super) fn ability(
     if !wanted {
         return Ok(None);
     }
-    let teleport = item.abilities.iter().find_map(|a| match a {
-        Ability::Teleport { distance } => Some(*distance),
-        _ => None,
-    });
     let point = match teleport {
         Some(distance) => {
             let away = angle(enemy.position, v.position);
@@ -354,4 +372,61 @@ pub(super) fn movement(
         }
     }
     best.map(|(_, point)| point)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::condition::{DAMAGING, HEALING, INVISIBLE, STASIS, bit};
+
+    fn scene(weapon: i32, ability: i32, health: f32) -> (Content, PlayerView) {
+        let (content, mut v) = super::super::quest_tests::fixture();
+        v.position = Pos { x: 40.5, y: 40.5 };
+        v.character.items[0] = weapon;
+        v.character.items[1] = ability;
+        v.character.hp = (v.character.stats[0] as f32 * health) as i32;
+        v.objects[0].position = Pos { x: 44.5, y: 40.5 };
+        (content, v)
+    }
+    fn cast(content: &Content, v: &PlayerView) -> Option<Pos> {
+        let grid = Grid::terrain(v);
+        match ability(v, content, &grid, &v.objects[0]).unwrap()? {
+            Action::Use { slot: 1, x, y } => Some(Pos { x, y }),
+            other => panic!("unexpected ability action {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rogue_cloaks_only_when_injured_and_visible() {
+        let (content, mut v) = scene(2675, 0xa56, 0.4);
+        assert!(cast(&content, &v).is_some());
+        v.character.conditions = bit(INVISIBLE);
+        assert!(cast(&content, &v).is_none());
+        let (content, v) = scene(2675, 0xa56, 1.);
+        assert!(cast(&content, &v).is_none());
+    }
+
+    #[test]
+    fn casts_skip_active_buffs_stasised_targets_and_aimless_teleports() {
+        let (content, mut v) = scene(2561, 0xa52, 0.5);
+        v.character.conditions = bit(HEALING) | bit(DAMAGING);
+        assert!(cast(&content, &v).is_none());
+        v.character.conditions = bit(HEALING);
+        assert!(cast(&content, &v).is_some());
+
+        let (content, mut v) = scene(2714, 0xae4, 0.4);
+        v.objects[0].condition_mask = Some(bit(STASIS));
+        assert!(cast(&content, &v).is_none());
+        v.objects[0].condition_mask = Some(0);
+        assert!(cast(&content, &v).unwrap().distance(v.objects[0].position) < 1e-3);
+
+        let (content, v) = scene(2565, 0xae2, 1.);
+        assert!(cast(&content, &v).is_none());
+        let (content, v) = scene(2565, 0xae2, 0.4);
+        let landing = cast(&content, &v).unwrap();
+        assert!(
+            landing.distance(Pos { x: 25.5, y: 40.5 }) < 1e-3,
+            "{landing:?}"
+        );
+    }
 }
