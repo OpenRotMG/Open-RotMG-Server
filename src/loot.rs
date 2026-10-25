@@ -946,6 +946,7 @@ fn bonus(kind: u16) -> &'static [(f64, u16)] {
         0xd59 => &[(0.001, 0xc0a)],
         0xd60 => &[(0.004, 0xc06)],
         0x1705 => &[(0.04, 0xaea)],
+        // Native's 1.5% follows period testimony, not the later 2% table: https://discord.com/channels/1558662335076376578/1558662336439386185/1563889316432973895
         0x651 | 0x652 | 0x657 | 0xd05 | 0x905..=0x907 => &[(0.015, 0xa1f)],
         0x659 => &[(0.015, 0xa21)],
         0x654 => &[(0.01, 0xa21)],
