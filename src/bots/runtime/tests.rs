@@ -14,7 +14,7 @@ async fn actor(
     guid: &str,
     name: &str,
     backpack: [i32; 8],
-) -> (Owner, i32, mpsc::Receiver<Packet>, Brain) {
+) -> (Owner, i32, ProtocolOutput, Brain) {
     let account = app.store.list(guid.into()).await.unwrap().id;
     let ch = app
         .store
@@ -68,7 +68,7 @@ async fn open(app: &App, bot: i32, peer: i32) {
         .await
         .unwrap();
 }
-async fn drain(app: &App, brain: &mut Brain, output: &mut mpsc::Receiver<Packet>) {
+async fn drain(app: &App, brain: &mut Brain, output: &mut ProtocolOutput) {
     let view = app.world.player_view(brain.session.1).await.unwrap();
     while let Ok(packet) = output.try_recv() {
         if !social::receive_life(app, brain, &packet, &view)
@@ -606,5 +606,148 @@ async fn runtime_coordinator_rebind_resumes_paid_installments_only_through_fresh
         .wait()
         .await
         .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn protocol_goto_ack_does_not_wait_for_an_owned_progress_guard() {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (owner, id, mut output, brain) = actor(&app, "protocol-progress", "Trader", [-1; 8]).await;
+    let account = brain.mind.account;
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, waiting) = tokio::sync::oneshot::channel();
+    let held_app = app.clone();
+    let held = tokio::spawn(async move {
+        lifecycle::account(&held_app, vec![account], "held_progress", |_| async move {
+            entered.send(()).unwrap();
+            waiting.await.unwrap();
+            Ok(())
+        })
+        .await
+    });
+    ready.await.unwrap();
+    let controller_app = app.clone();
+    let controller = tokio::spawn(async move {
+        let work = server::inventory(&controller_app, id, |_| Ok(None));
+        output
+            .waiting(&controller_app.world, id, work)
+            .await
+            .unwrap()
+            .unwrap();
+        output
+    });
+    app.world
+        .for_player(id)
+        .call(move |w| w.correct_position(id, 0, "protocol regression"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(5200)).await;
+    assert!(
+        !controller.is_finished(),
+        "inventory must still await the owned progress guard"
+    );
+    app.world
+        .for_player(id)
+        .call(move |w| {
+            let error = w.acknowledge_autonomous_goto(id).unwrap_err();
+            ensure!(
+                error.to_string().contains("unsolicited GOTO"),
+                "queued GOTO was not ACKed before its deadline: {error}"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    release.send(()).unwrap();
+    held.await.unwrap().unwrap();
+    let mut output = controller.await.unwrap();
+    let mut received = Vec::new();
+    while let Ok(packet) = output.try_recv() {
+        received.push(packet.id);
+    }
+    assert!(!received.contains(&wire::GOTO));
+    lifecycle::finalize(&app, id, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop(owner);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn protocol_goto_ack_validation_still_rejects_invalid_late_and_unsolicited() {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (owner, id, _output, brain) = actor(&app, "protocol-invalid", "Trader", [-1; 8]).await;
+    let character = app
+        .store
+        .load(brain.mind.account, brain.session.2)
+        .await
+        .unwrap();
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let map = Arc::new(crate::content::Map::load(&data.join("nexus.wmap"), &app.content).unwrap());
+    let mut world = crate::world::World::new(app.content.clone(), map).unwrap();
+    let (packets, _receiver) = mpsc::channel(16);
+    let (lost, _) = watch::channel(None);
+    let player = world
+        .enter(character, Some(Output { packets, lost }))
+        .unwrap();
+    world.players.get_mut(&player).unwrap().controller = crate::world::Controller::Human;
+    assert!(
+        world
+            .acknowledge_autonomous_goto(player)
+            .unwrap_err()
+            .to_string()
+            .contains("autonomous ownership")
+    );
+    world.players.get_mut(&player).unwrap().controller = crate::world::Controller::Autonomous;
+    assert!(
+        world
+            .acknowledge_autonomous_goto(player)
+            .unwrap_err()
+            .to_string()
+            .contains("unsolicited")
+    );
+    world
+        .correct_position(player, 0, "protocol validation")
+        .unwrap();
+    assert!(
+        world
+            .acknowledge_goto(player, -1)
+            .unwrap_err()
+            .to_string()
+            .contains("negative")
+    );
+    world.acknowledge_goto(player, 100).unwrap();
+    world
+        .correct_position(player, 100, "protocol clock validation")
+        .unwrap();
+    assert!(
+        world
+            .acknowledge_goto(player, 99)
+            .unwrap_err()
+            .to_string()
+            .contains("clock regressed")
+    );
+    world.acknowledge_goto(player, 100).unwrap();
+    world
+        .correct_position(player, 100, "protocol deadline validation")
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(5200)).await;
+    assert!(
+        world
+            .acknowledge_goto(player, 101)
+            .unwrap_err()
+            .to_string()
+            .contains("timed out")
+    );
+    lifecycle::finalize(&app, id, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop(owner);
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -9,6 +9,8 @@ use crate::{
 };
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
+mod protocol;
+use protocol::ProtocolOutput;
 
 // The inclusive interval also awaits policy/Store; these elapsed (not CPU) subspans leave clone/log/bookkeeping outside.
 fn record_decision_phase_elapsed<T>(
@@ -127,7 +129,7 @@ async fn enter(
     character: Character,
     world: i32,
     position: Option<Pos>,
-) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
+) -> Result<(i32, ProtocolOutput, mpsc::Sender<Packet>, Brain)> {
     enter_admitted(app, profile, character, world, position, None, None).await
 }
 async fn enter_admitted(
@@ -138,7 +140,7 @@ async fn enter_admitted(
     position: Option<Pos>,
     arrival: Option<crate::world::TransferArrival>,
     admission: Option<Vec<u8>>,
-) -> Result<(i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain)> {
+) -> Result<(i32, ProtocolOutput, mpsc::Sender<Packet>, Brain)> {
     let world = if world == -3 && position.is_none() && admission.is_none() {
         let account = character.account;
         app.world
@@ -249,10 +251,10 @@ async fn enter_admitted(
         .mind
         .bind(&view, std::hash::Hasher::finish(&generation))?;
     brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
-    Ok((id, output, sender, brain))
+    Ok((id, ProtocolOutput::new(output), sender, brain))
 }
 
-type Entry = (i32, mpsc::Receiver<Packet>, mpsc::Sender<Packet>, Brain);
+type Entry = (i32, ProtocolOutput, mpsc::Sender<Packet>, Brain);
 
 enum Reentry {
     Collective {
@@ -594,7 +596,7 @@ pub(super) async fn launch(
                     }
                     #[cfg(test)]
                     let audit_due = (selected.is_some(), brain.next_decision);
-                    let view=Arc::new(app.world.player_view(id).await?);
+                    let view=Arc::new(output.waiting(&app.world, id, app.world.player_view(id)).await?);
                     #[cfg(test)]
                     if audit_due.0 && view.tick>=audit_due.1 {
                         let audit_view=view.clone();
@@ -623,7 +625,7 @@ pub(super) async fn launch(
                         let peers = app.society.lock().expect("adventure registry poisoned").completed(account, &view, completed);
                         for peer in peers {
                             if app.society.lock().expect("adventure registry poisoned").remember(account, peer) {
-                                remember_clear_peer(&app, id, account, peer).await?;
+                                output.waiting(&app.world, id, remember_clear_peer(&app, id, account, peer)).await?;
                                 tracing::info!(account,peer,"autonomous shared clear remembered in account lock list");
                             }
                         }
@@ -663,7 +665,7 @@ pub(super) async fn launch(
                         } else if agreement.waiting.is_none() && !view.objects.iter().any(|p| p.name==agreement.partner && p.hp>0 && !p.equipped.is_empty()) {
                             Some("lost sight of partner")
                         } else { None };
-                        if let Some(reason) = reason { dialogue::end_agreement(&app, &mut brain, reason).await; }
+                        if let Some(reason) = reason { output.waiting(&app.world, id, async { dialogue::end_agreement(&app, &mut brain, reason).await; Ok(()) }).await?; }
                     }
                     brain.crowd.observe(&view, &app.content);
                     while let Some((packet, received_view)) = deferred_market.take().or_else(||output.try_recv().ok().map(|p|(p,view.clone()))) {
@@ -672,17 +674,17 @@ pub(super) async fn launch(
                             continue;
                         }
                         app.cctv.heard(profile.name, id, &packet)?;
-                        let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.player_view(id).await?) } else { None };
+                        let settled_view = if matches!(packet.id,12|23|67) { Some(output.waiting(&app.world, id, app.world.player_view(id)).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
                         brain.crowd.receive(&packet, social_view, &app.content)?;
                         let event_before = brain.mind.events.clone();
                         brain.mind.events.receive(&packet, social_view, profile.name)?;
-                        if brain.mind.events != event_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                        if brain.mind.events != event_before { brain.mind.revision = output.waiting(&app.world, id, app.store.save_bot_mind(brain.mind.clone())).await?; }
                         let social_before = brain.mind.social.clone();
-                        let socially_handled = social::receive_life(&app, &mut brain, &packet, social_view).await?;
-                        if brain.mind.social != social_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                        let socially_handled = output.waiting(&app.world, id, social::receive_life(&app, &mut brain, &packet, social_view)).await?;
+                        if brain.mind.social != social_before { brain.mind.revision = output.waiting(&app.world, id, app.store.save_bot_mind(brain.mind.clone())).await?; }
                         if socially_handled { continue; }
-                        match social::receive_market(&app,&mut brain,&packet,social_view).await? {
+                        match output.waiting(&app.world, id, social::receive_market(&app,&mut brain,&packet,social_view)).await? {
                             social::MarketUptake::Applied => continue,
                             social::MarketUptake::PendingCommit => { deferred_market=Some((packet,received_view)); break; },
                             social::MarketUptake::Unrelated => {},
@@ -727,7 +729,7 @@ pub(super) async fn launch(
                         };
                         match result {
                             Ok(reply) => {
-                                let validation = dialogue::publish(&app,&mut brain,&completed.request,&reply,&view).await;
+                                let validation = output.waiting(&app.world, id, dialogue::publish(&app,&mut brain,&completed.request,&reply,&view)).await;
                                 match validation {
                                     Ok(true) => {
                                         tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,intent=?reply.intent,"bot dialogue intention applied");
@@ -763,7 +765,7 @@ pub(super) async fn launch(
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();
                     brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
-                    let Some(mut decision) = decide_before_social(&app, &mut brain, &view).await? else { continue; };
+                    let Some(mut decision) = output.waiting(&app.world, id, decide_before_social(&app, &mut brain, &view)).await? else { continue; };
                     if ending && director::may_finish(&app, &mut brain, &view) && decision.journey.is_none() {
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
@@ -809,18 +811,18 @@ pub(super) async fn launch(
                         if let Some(action) = decision.item { actions.push(action); }
                     }
                     let diagnostic = format!("{actions:?}");
-                    match server::inventory(&app, id, move |w| {
+                    match output.waiting(&app.world, id, server::inventory(&app, id, move |w| {
                         let mut plan = None;
                         for action in actions {
                             if let Some(item) = w.autonomous_action(id, action)? { plan = Some(item); }
                         }
                         Ok(plan)
-                    }).await? {
+                    })).await? {
                         Ok(true) => {
-                            let after = app.world.player_view(id).await?;
+                            let after = output.waiting(&app.world, id, app.world.player_view(id)).await?;
                             let prior_events = brain.mind.events.clone();
                             brain.mind.events.committed(&after)?;
-                            if brain.mind.events != prior_events { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                            if brain.mind.events != prior_events { brain.mind.revision = output.waiting(&app.world, id, app.store.save_bot_mind(brain.mind.clone())).await?; }
                             tracing::info!(account, character=after.session.character, world=after.session.world,
                                 before_revision=view.character.inventory_revision, revision=after.character.inventory_revision,
                                 items=?after.character.items, actions=diagnostic, "autonomous inventory outcome");
