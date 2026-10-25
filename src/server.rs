@@ -1062,7 +1062,7 @@ fn enqueue_reply(tx: &mpsc::Sender<Packet>, packet: Packet) -> Result<()> {
 }
 
 // Packets whose only effect is on the sender's World; a queued run of them shares one world job.
-const INPUTS: [u8; 11] = [7, 11, 14, 22, 24, 38, 48, 51, 59, 64, 66];
+const INPUTS: [u8; 12] = [7, 11, 14, 22, 24, 38, 48, 51, 59, 64, 66, 76];
 type Input = Box<dyn FnOnce(&mut World) -> Result<()> + Send>;
 
 fn input(
@@ -1182,6 +1182,22 @@ fn input(
         66 | 51 => {
             collision_report(packet.id == 66, &mut r).context(CloseReason::Protocol)?;
             return Ok(None);
+        }
+        76 => {
+            r.i32()?;
+            let bullet = r.u8()?;
+            let target = r.i32()?;
+            let killed = r.u8()?;
+            r.done()?;
+            ensure!(
+                killed <= 1,
+                lifecycle::protocol("invalid predicted enemy death flag")
+            );
+            let id = character("enemy hit report before character")?;
+            if killed == 0 {
+                return Ok(None);
+            }
+            Box::new(move |w| w.native_predicted_enemy_death(id, bullet, target))
         }
         48 => {
             r.done()?;
@@ -1849,13 +1865,6 @@ async fn handle_inner(
             if let (Some(testing), Some(player)) = (&a.testing, player) {
                 testing.acknowledge_native(nonce, *player);
             }
-        }
-        76 => {
-            r.i32()?;
-            r.u8()?;
-            r.i32()?;
-            r.u8()?;
-            r.done()?;
         }
         30 => {
             let time = r.i32()?;
