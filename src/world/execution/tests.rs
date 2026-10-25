@@ -28,6 +28,7 @@ async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
             .await
     });
     let before = ready.await.unwrap();
+    let held_since = std::time::Instant::now();
     let ran = Arc::new(AtomicBool::new(false));
     let marked = ran.clone();
     let pending = handle.in_world(-1);
@@ -61,6 +62,8 @@ async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
             .tick,
         before
     );
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    let guaranteed_hold = held_since.elapsed();
     release.send(()).unwrap();
     assert_eq!(transaction.await.unwrap().unwrap(), before);
     blocked.await.unwrap().unwrap();
@@ -82,7 +85,7 @@ async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
         .slowest()
         .find(|s| s.kind == "directory_loan" && Some((s.operation, s.id)) == blocked.blocker)
         .expect("owner loan correlation missing");
-    assert!(loan.stages[4] >= blocked.stages[2]);
+    assert!(loan.stages[4] >= guaranteed_hold);
     assert!(ran.load(Ordering::Acquire));
     handle.supervisor.ensure_running().unwrap();
 }
