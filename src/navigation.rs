@@ -250,6 +250,14 @@ impl Tiles {
     pub(crate) fn points(&self) -> impl Iterator<Item = Point> + '_ {
         self.known.points()
     }
+    pub(crate) fn get(&self, point: Point) -> Option<Tile> {
+        self.contains(&point).then(|| {
+            self.geometry
+                .as_ref()
+                .expect("known terrain has no geometry")
+                .tile(point)
+        })
+    }
     pub(crate) fn iter(&self) -> impl Iterator<Item = Tile> + '_ {
         self.known.points().map(|p| {
             self.geometry
