@@ -513,32 +513,19 @@ fn idle() -> Decision {
     }
 }
 
-pub(in crate::bots) async fn receive_life(
+async fn recover_gift_receipt(
     app: &crate::server::App,
     brain: &mut Brain,
-    packet: &Packet,
     v: &PlayerView,
 ) -> Result<bool> {
     let session = [v.session.world, v.session.player, v.session.character];
-    ensure!(
-        session == [brain.session.0, brain.session.1, brain.session.2]
-            && v.session.account == brain.mind.account,
-        "social packet belongs to a replaced session"
-    );
-    if matches!(packet.id, 12 | 23 | 67)
-        && let Some(g) = brain.mind.social.gift.clone()
+    if let Some(g) = brain.mind.social.gift.clone()
         && let Some(acceptance) = g.acceptance.clone()
     {
         ensure!(
             g.matches(&acceptance, v),
             "gift acceptance belongs to another offer/session"
         );
-        if packet.id == 12 {
-            let mut r = Reader::new(&packet.body);
-            r.i32()?;
-            r.utf()?;
-            r.done()?;
-        }
         let verified = app.store.gift_committed(acceptance.clone()).await?;
         let current = app
             .world
@@ -598,9 +585,40 @@ pub(in crate::bots) async fn receive_life(
             tracing::info!(account=v.session.account,peer=g.account,transaction=%acceptance.transaction,"gift native acceptance invalidated before commitment");
             brain.mind.social.gift.as_mut().unwrap().acceptance = None;
         }
-        // Legacy results carry no transaction ID; a different completion cannot erase this pending acceptance.
-        if packet.id == 12 && (verified || current) {
-            tracing::info!(account=v.session.account,peer=g.account,transaction=%acceptance.transaction,verified,current,"legacy result did not end the owning gift transaction");
+        return Ok(verified || current);
+    }
+    Ok(false)
+}
+
+pub(in crate::bots) async fn receive_life(
+    app: &crate::server::App,
+    brain: &mut Brain,
+    packet: &Packet,
+    v: &PlayerView,
+) -> Result<bool> {
+    let session = [v.session.world, v.session.player, v.session.character];
+    ensure!(
+        session == [brain.session.0, brain.session.1, brain.session.2]
+            && v.session.account == brain.mind.account,
+        "social packet belongs to a replaced session"
+    );
+    if matches!(packet.id, 12 | 23 | 67) {
+        if packet.id == 12
+            && brain
+                .mind
+                .social
+                .gift
+                .as_ref()
+                .is_some_and(|g| g.acceptance.is_some())
+        {
+            let mut r = Reader::new(&packet.body);
+            r.i32()?;
+            r.utf()?;
+            r.done()?;
+        }
+        let protected = recover_gift_receipt(app, brain, v).await?;
+        // A legacy result cannot identify the native transaction whose receipt is still pending.
+        if packet.id == 12 && protected {
             return Ok(false);
         }
     }
@@ -613,13 +631,20 @@ pub(in crate::bots) async fn receive_life(
     )
 }
 
-async fn cancel_gift(app: &crate::server::App, brain: &mut Brain) -> Result<bool> {
+pub(super) async fn cancel_gift(
+    app: &crate::server::App,
+    brain: &mut Brain,
+    v: &PlayerView,
+) -> Result<bool> {
     let Some(g) = brain.mind.social.gift.as_mut() else {
         return Ok(false);
     };
     g.cancelled = true;
     // A mutual native accept may already own the commit; keep its receipt binding until completion.
     if !super::revoke_native_market(app, brain).await? {
+        return Ok(true);
+    }
+    if recover_gift_receipt(app, brain, v).await? {
         return Ok(true);
     }
     brain.mind.social.gift = None;
@@ -646,7 +671,7 @@ pub(in crate::bots) async fn life(
         "gift action belongs to a replaced session"
     );
     if brain.mind.social.gift.as_ref().is_some_and(|g| g.cancelled) {
-        return cancel_gift(app, brain).await;
+        return cancel_gift(app, brain, v).await;
     }
     if v.elapsed_ms >= brain.mind.market.next_message_ms
         && let Some(text) = brain.mind.social.outgoing.take()
@@ -667,7 +692,7 @@ pub(in crate::bots) async fn life(
             }
             Err(error) => {
                 tracing::warn!(account=v.session.account,%error,"social publication rejected; no assent inferred");
-                return cancel_gift(app, brain).await;
+                return cancel_gift(app, brain, v).await;
             }
         }
     }
@@ -688,7 +713,7 @@ pub(in crate::bots) async fn life(
                 }
         });
     if !allowed {
-        return cancel_gift(app, brain).await;
+        return cancel_gift(app, brain, v).await;
     }
     use crate::world::TradeAction;
     let action = if let Some(t) = &mut brain.mind.market.trade {
@@ -786,11 +811,11 @@ pub(in crate::bots) async fn life(
             }
             Err(error) => {
                 tracing::warn!(account=v.session.account,%error,"guarded gift rejected");
-                return cancel_gift(app, brain).await;
+                return cancel_gift(app, brain, v).await;
             }
         }
         if cancel {
-            return cancel_gift(app, brain).await;
+            return cancel_gift(app, brain, v).await;
         }
     }
     Ok(brain.mind.social.gift.is_some())

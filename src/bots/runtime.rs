@@ -21,6 +21,106 @@ fn record_decision_phase_elapsed<T>(
     outcome
 }
 
+// A live native window may hold movement, never the controller's survival evaluation.
+async fn decide_before_social(
+    app: &App,
+    brain: &mut Brain,
+    view: &PlayerView,
+) -> Result<Option<Decision>> {
+    let deciding = std::time::Instant::now();
+    let before = brain.mind.clone();
+    social::recover_market(app, brain).await?;
+    let prior_mind = brain.mind.clone();
+    let measure = crate::performance::Measure::start();
+    let sync_deciding = std::time::Instant::now();
+    let decision = brain.decide(view, &app.content);
+    let decision = {
+        let mut timings = brain.performance.lock().expect("bot timings poisoned");
+        timings.completed("decision_sync_work", measure.finish());
+        record_decision_phase_elapsed(
+            &mut timings,
+            "decide_sync_elapsed",
+            sync_deciding.elapsed(),
+            decision,
+        )?
+    };
+    app.cctv.decided(
+        brain.profile.name,
+        view,
+        &decision,
+        cctv::reason(brain.activity, &decision, view, &app.content),
+        &app.content,
+    );
+    let surviving = brain.activity == Activity::Survive;
+    if surviving
+        && (brain.mind.social.gift_active()
+            || brain.mind.market.trade.is_some()
+            || brain.mind.market.incoming.is_some()
+            || brain
+                .mind
+                .market
+                .bargain
+                .as_ref()
+                .is_some_and(|b| b.resolution.is_none()))
+    {
+        brain.mind.market.revoke_trade = true;
+    }
+    let revoking = std::time::Instant::now();
+    let revoked = social::revoke_market(app, brain).await;
+    let revoked = record_decision_phase_elapsed(
+        &mut brain.performance.lock().expect("bot timings poisoned"),
+        "market_revoke_await_elapsed",
+        revoking.elapsed(),
+        revoked,
+    )?;
+    let mut held = if !revoked {
+        brain.mind = prior_mind;
+        true
+    } else if surviving {
+        let pending = social::interrupt_gift(app, brain, view).await?;
+        if !pending && brain.mind.market.incoming.is_some() {
+            brain.mind.market.end_incoming(view);
+        }
+        pending
+    } else {
+        social::life(app, brain, view).await? || social::market(app, brain, view).await?
+    };
+    if !held {
+        let current = app.world.player_view(view.session.player).await?;
+        ensure!(
+            (
+                current.session.world,
+                current.session.player,
+                current.session.character
+            ) == brain.session,
+            "controller changed while coordinating social actions"
+        );
+        // A committed trade may have published after the decision's inventory snapshot.
+        held = current.lifecycle.busy
+            || current.character.inventory_revision != view.character.inventory_revision;
+    }
+    if brain.mind != before {
+        let saving = std::time::Instant::now();
+        let revision = app.store.save_bot_mind(brain.mind.clone()).await;
+        brain.mind.revision = record_decision_phase_elapsed(
+            &mut brain.performance.lock().expect("bot timings poisoned"),
+            "mind_store_await_elapsed",
+            saving.elapsed(),
+            revision,
+        )?;
+    }
+    let mut timings = brain.performance.lock().expect("bot timings poisoned");
+    timings.record("decision", deciding.elapsed());
+    if let Some(report) = timings.report() {
+        tracing::info!(name=brain.profile.name,world=%view.map.name,world_id=view.session.world,player=view.session.player,
+            known_tiles=view.tiles.len(),cover_tiles=brain.cover.len(),visited_tiles=brain.visits.len(),
+            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),crowd_contacts=brain.crowd.len(),
+            navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
+            navigation=%serde_json::json!(brain.navigation.as_ref().map(|g|g.metrics())),timings=%report,"bot performance");
+    }
+    Ok((!held).then_some(decision))
+}
+
 async fn enter(
     app: &App,
     profile: Profile,
@@ -660,56 +760,17 @@ async fn launch(
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
                     if view.lifecycle.busy { continue; }
-                    if social::life(&app, &mut brain, &view).await? { continue; }
-                    if social::market(&app, &mut brain, &view).await? { continue; }
                     if view.tick < brain.next_decision { continue; }
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();
                     brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
-                    let deciding = std::time::Instant::now();
-                    let prior_mind = brain.mind.clone();
-                    let (decision, sync_work, sync_elapsed) = {
-                        let measure = crate::performance::Measure::start();
-                        let sync_deciding = std::time::Instant::now();
-                        let decision = brain.decide(&view, &app.content);
-                        let sync_elapsed = sync_deciding.elapsed();
-                        (decision, measure.finish(), sync_elapsed)
-                    };
-                    let decision = {
-                        let mut timings = brain.performance.lock().expect("bot timings poisoned");
-                        timings.completed("decision_sync_work", sync_work);
-                        record_decision_phase_elapsed(&mut timings, "decide_sync_elapsed", sync_elapsed, decision)?
-                    };
-                    app.cctv.decided(profile.name, &view, &decision, cctv::reason(brain.activity, &decision, &view, &app.content), &app.content);
+                    let Some(decision) = decide_before_social(&app, &mut brain, &view).await? else { continue; };
                     if events::shared(&view.map.name) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
                             hp=view.character.hp,max_hp=view.character.stats[0],mp=view.character.mp,recovery=profile.recovery,
                             held_health=view.character.items.iter().skip(4).filter(|k|**k==0xa22).count(),
                             goal=?decision.goal,journey=?decision.journey,movement=?decision.movement,
                             "autonomous event action selected");
-                    }
-                    let revoking = std::time::Instant::now();
-                    let revoked = social::revoke_market(&app,&mut brain).await;
-                    if !record_decision_phase_elapsed(&mut brain.performance.lock().expect("bot timings poisoned"), "market_revoke_await_elapsed", revoking.elapsed(), revoked)? {
-                        brain.mind=prior_mind;
-                        continue;
-                    }
-                    if brain.mind != prior_mind {
-                        let saving_mind = std::time::Instant::now();
-                        let revision = app.store.save_bot_mind(brain.mind.clone()).await;
-                        brain.mind.revision = record_decision_phase_elapsed(&mut brain.performance.lock().expect("bot timings poisoned"), "mind_store_await_elapsed", saving_mind.elapsed(), revision)?;
-                    }
-                    let timings = {
-                        let mut timings = brain.performance.lock().expect("bot timings poisoned");
-                        timings.record("decision", deciding.elapsed());
-                        timings.report()
-                    };
-                    if let Some(timings)=timings {
-                        tracing::info!(name=profile.name,world=%view.map.name,world_id=view.session.world,player=view.session.player,known_tiles=view.tiles.len(),
-                            cover_tiles=brain.cover.len(),visited_tiles=brain.visits.len(),
-                            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),crowd_contacts=brain.crowd.len(),
-                            navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
-                            navigation=%serde_json::json!(brain.navigation.as_ref().map(|g|g.metrics())),timings=%timings,"bot performance");
                     }
                     #[cfg(test)]
                     let postclear_choice_sha = if selected.is_some() && brain.mind.events.postclear_observed(&view) {
@@ -904,3 +965,6 @@ fn close_controller(
     }
     owner.close(app, reason)
 }
+
+#[cfg(test)]
+mod tests;

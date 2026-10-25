@@ -4,7 +4,7 @@ use crate::world::view::VisibleObject;
 mod incoming;
 mod life;
 pub(crate) use life::Life;
-pub(super) use life::{life, receive_life};
+pub(super) use life::{cancel_gift as interrupt_gift, life, receive_life};
 
 pub(super) fn companions<'a>(
     v: &'a PlayerView,
@@ -70,7 +70,7 @@ pub(super) enum MarketUptake {
     PendingCommit,
 }
 
-async fn recover_market(app: &crate::server::App, brain: &mut Brain) -> Result<()> {
+pub(super) async fn recover_market(app: &crate::server::App, brain: &mut Brain) -> Result<()> {
     if let Some(b) = &brain.mind.market.bargain {
         let receipts = app
             .store
@@ -283,7 +283,12 @@ pub(super) async fn market(
         brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
     }
     if incoming_active {
-        return Ok(true);
+        return Ok(brain.mind.market.trade.is_some()
+            || brain.mind.market.incoming.as_ref().is_some_and(|g| {
+                v.objects
+                    .iter()
+                    .any(|p| p.id == g.player && p.position.distance(v.position) < 2.)
+            }));
     }
     let Some(b) = brain
         .mind
@@ -301,26 +306,27 @@ pub(super) async fn market(
         .position(|a| *a == v.session.account)
         .context("foreign negotiated account")?;
     let peer = 1 - side;
-    let bound = b.peer_consent.is_some_and(|s| {
-        s[0] == v.session.world
-            && v.objects.iter().any(|p| {
-                p.id == s[1]
-                    && p.account == Some(b.terms.accounts[peer])
-                    && p.name == b.terms.names[peer]
-                    && p.hp > 0
-                    && v.position.distance(p.position) < 2.
-            })
+    // Historical terms permit an inspection request, not a silent renewal of native acceptance.
+    let bound = v.objects.iter().any(|p| {
+        p.account == Some(b.terms.accounts[peer])
+            && p.name == b.terms.names[peer]
+            && p.hp > 0
+            && v.position.distance(p.position) < 2.
     });
     let meeting = Pos {
         x: b.terms.meeting[1] as f32 + 0.5,
         y: b.terms.meeting[2] as f32 + 0.5,
     };
-    if !b.own_consent
+    if !(b.agreed || b.confirmed > 0)
         || !bound
         || b.terms.expires <= pursuits::market::now()
         || v.session.world != b.terms.meeting[0]
         || v.position.distance(meeting) >= 2.
     {
+        if brain.mind.market.trade.is_some() {
+            brain.mind.market.revoke_trade = true;
+            return Ok(!revoke_market(app, brain).await?);
+        }
         return Ok(false);
     }
     let delivery = b.terms.delivery(b.confirmed)?;

@@ -80,6 +80,8 @@ impl World {
         if p.pending {
             return Ok(false);
         }
+        self.trade_requests
+            .retain(|from, (to, _)| *from != id && *to != id);
         self.cancel_trade(id, "Negotiated consent revoked; fresh agreement required.");
         tracing::info!(
             player = id,
@@ -128,6 +130,36 @@ impl World {
             })
             .context("market counterparty unavailable")?;
         ensure!(p.known.contains(peer.0), "market counterparty not observed");
+        if matches!(
+            action,
+            TradeAction::Change { .. } | TradeAction::Accept { .. }
+        ) {
+            let key = self.trade_key(id).context("market trade missing")?;
+            let trade = &self.trades[&key];
+            ensure!(
+                trade.players.contains(peer.0),
+                "market WINDOW counterparty changed"
+            );
+            let index = usize::from(trade.players[1] == id);
+            let matches = |items: &[i32], offer: &[bool; 12], side: usize| {
+                offer.iter().filter(|b| **b).count() == usize::from(delivery.quantities[side])
+                    && offer.iter().enumerate().all(|(slot, b)| {
+                        !*b || (slot >= 4 && items[slot] == delivery.terms.goods[side].kind)
+                    })
+            };
+            match &action {
+                TradeAction::Change { offer } => ensure!(
+                    matches(&trade.items[index], offer, side),
+                    "market WINDOW offer differs from remaining installment"
+                ),
+                TradeAction::Accept { mine, theirs } => ensure!(
+                    matches(&trade.items[index], mine, side)
+                        && matches(&trade.items[1 - index], theirs, 1 - side),
+                    "market WINDOW acceptance differs from remaining installment"
+                ),
+                _ => unreachable!(),
+            }
+        }
         match action {
             TradeAction::Request { name } => {
                 ensure!(

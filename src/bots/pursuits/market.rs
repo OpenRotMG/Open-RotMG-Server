@@ -723,7 +723,7 @@ impl Market {
                 d.journey = Some(Journey::Nexus);
                 return Ok(Some(d));
             }
-            if !b.agreed {
+            if !b.agreed && b.confirmed == 0 {
                 return Ok(Some(d));
             }
             let own = delivery.quantities[side] as usize;
