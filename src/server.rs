@@ -96,6 +96,7 @@ pub struct App {
     pub max_players: usize,
     pub behind_proxy: bool,
     pub shore_bots: bool,
+    pub bot_population: usize,
     pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
     pub society: Arc<Mutex<crate::bots::adventures::Society>>,
     pub cctv: Arc<crate::bots::cctv::Cctv>,

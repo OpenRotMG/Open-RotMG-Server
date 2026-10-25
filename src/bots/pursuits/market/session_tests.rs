@@ -260,7 +260,7 @@ fn market_session_idle_hook_preserves_item_and_releases_normal_portal_choice() {
     v.objects[0].account = None;
     v.objects[0].equipped.clear();
     v.objects[0].name = "Vault".into();
-    let profile = *PROFILES.iter().find(|p| p.name == "Pixl").unwrap();
+    let profile = ARCHETYPES[5];
     let mut brain = Brain::new(profile, &v);
     v.elapsed_ms = 100_000;
     v.time_ms = 100_000;
@@ -345,7 +345,10 @@ fn autonomous_session_admission_waits_for_eligibility_without_using_rng() {
 #[test]
 fn fixed_native_actor_accounts_replay_their_first_seeded_admission() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
-    for (account, name) in [(2, "Pixl"), (3, "ExElite")] {
+    for (account, name) in [
+        (2, persona::PERSONAS[0].name),
+        (3, persona::PERSONAS[1].name),
+    ] {
         let (mut m, mut v) = fixture(&c, STOCK);
         v.session.account = account;
         let grid = terrain(&mut v);

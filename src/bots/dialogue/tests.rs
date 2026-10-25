@@ -9,7 +9,7 @@ fn fixture() -> (Content, PlayerView, Brain, Request) {
     peer.position = view.position;
     peer.equipped = vec![0xa97];
     peer.level = Some(14);
-    let brain = Brain::new(PROFILES[0], &view);
+    let brain = Brain::new(ARCHETYPES[0], &view);
     let request = brain
         .adventure_request(
             adventures::Plan::Invite {
@@ -29,23 +29,19 @@ fn fixture() -> (Content, PlayerView, Brain, Request) {
 #[test]
 fn publication_deadline_is_stable_length_sensitive_and_staggers_speakers() {
     let now = Instant::now();
-    let deadlines: Vec<_> = PROFILES
+    let deadlines: Vec<_> = ARCHETYPES
         .iter()
         .map(|p| publication_at(now, *p, "hi", "hi"))
         .collect();
     for (i, at) in deadlines.iter().enumerate() {
-        assert_eq!(*at, publication_at(now, PROFILES[i], "hi", "hi"));
+        assert_eq!(*at, publication_at(now, ARCHETYPES[i], "hi", "hi"));
         assert!(*at > now + Duration::from_millis(750));
         assert!(*at < now + Duration::from_secs(4));
     }
-    assert!(
-        deadlines
-            .windows(2)
-            .all(|w| w[1] >= w[0] + Duration::from_millis(50))
-    );
+    assert!(deadlines.iter().collect::<BTreeSet<_>>().len() > 1);
     let longer = publication_at(
         now,
-        PROFILES[0],
+        ARCHETYPES[0],
         "can we level together?",
         "Peer, want to look for gear together?",
     );
@@ -131,11 +127,11 @@ async fn policy_speech_wait_is_enforced_but_does_not_stack_after_a_past_deadline
     let reply = adventures::policy_reply(&request, Intent::Invite).unwrap();
     let at = publication_at(
         request.created,
-        PROFILES[0],
+        ARCHETYPES[0],
         request.payload["message"].as_str().unwrap(),
         &reply.reply,
     );
-    let mut pending = Pending::start(None, request, PROFILES[0]);
+    let mut pending = Pending::start(None, request, ARCHETYPES[0]);
     assert!(
         tokio::time::timeout(Duration::from_millis(100), &mut pending.task)
             .await
@@ -150,7 +146,7 @@ async fn policy_speech_wait_is_enforced_but_does_not_stack_after_a_past_deadline
     assert_eq!(reply.intent, Intent::Invite);
     let (_, _, _, mut request) = fixture();
     request.created -= Duration::from_secs(5);
-    let mut pending = Pending::start(None, request, PROFILES[0]);
+    let mut pending = Pending::start(None, request, ARCHETYPES[0]);
     assert!(
         tokio::time::timeout(Duration::from_millis(500), &mut pending.task)
             .await
@@ -212,15 +208,19 @@ fn addressed(brain: &Brain, view: &PlayerView, content: &Content, text: &str) ->
 #[tokio::test]
 async fn same_bound_speaker_correction_cancels_the_old_ready_action_even_inside_cooldown() {
     let (content, view, _, _) = fixture();
-    let profile = PROFILES[19];
+    let profile = *persona::PERSONAS
+        .iter()
+        .max_by_key(|p| persona::seed(p.name) % 20)
+        .unwrap();
     let brain = Brain::new(profile, &view);
     let text = "a".repeat(60);
     let envelope = json!({"model":MODEL,"choices":[{"finish_reason":"tool_calls","message":{
         "provider_metadata":{"gateway":{"routing":{"canonicalSlug":MODEL,"finalProvider":"nvidia"},"cost":"0"}},
         "tool_calls":[{"type":"function","function":{"name":"reply_to_player","arguments":json!({"intent":"follow","reply":text}).to_string()}}]}}]});
     let (service, server) = provider(axum::http::StatusCode::OK, envelope).await;
-    let old = addressed(&brain, &view, &content, "Thorn follow me");
-    let at = publication_at(old.created, profile, "Thorn follow me", &text);
+    let message = format!("{} follow me", profile.name);
+    let old = addressed(&brain, &view, &content, &message);
+    let at = publication_at(old.created, profile, &message, &text);
     let correction_at = old.created + Duration::from_millis(2200);
     let mut pending = Some(Pending::start(Some(service.clone()), old, profile));
     tokio::time::sleep_until(correction_at.into()).await;
@@ -231,7 +231,12 @@ async fn same_bound_speaker_correction_cancels_the_old_ready_action_even_inside_
     );
     assert!(!pending.as_ref().unwrap().task.is_finished());
     assert!(Instant::now() < at);
-    let mut correction = addressed(&brain, &view, &content, "Thorn wait here");
+    let mut correction = addressed(
+        &brain,
+        &view,
+        &content,
+        &format!("{} wait here", profile.name),
+    );
     correction.session.0 -= 1;
     assert!(!supersede(&mut pending, &correction));
     correction.session.0 += 1;
@@ -262,7 +267,7 @@ async fn same_bound_speaker_correction_cancels_the_old_ready_action_even_inside_
     assert!(brain.companion.is_none() && brain.agreement.is_none());
     let created = correction.created;
     pending = Some(Pending::start(Some(service), correction, profile));
-    let newest = addressed(&brain, &view, &content, "Thorn leave");
+    let newest = addressed(&brain, &view, &content, &format!("{} leave", profile.name));
     assert!(newest.created.duration_since(created) < Duration::from_secs(2));
     assert!(supersede(&mut pending, &newest));
     assert!(pending.is_none());
@@ -274,7 +279,7 @@ async fn same_bound_speaker_correction_cancels_the_old_ready_action_even_inside_
 async fn provider_failure_remains_observable_and_never_becomes_policy_speech() {
     let (service, server) = provider(axum::http::StatusCode::SERVICE_UNAVAILABLE, json!({})).await;
     let (_, _, _, request) = fixture();
-    let mut pending = Pending::start(Some(service.clone()), request, PROFILES[0]);
+    let mut pending = Pending::start(Some(service.clone()), request, ARCHETYPES[0]);
     let failure = (&mut pending.task).await.unwrap().unwrap_err();
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());

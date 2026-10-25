@@ -10,7 +10,7 @@ Run `./run.sh 18923 --release`: no fixed crews. Visible needs trigger invitation
 
 Wizards predict visible projectile paths, lead an observed target, kite within weapon range, cast equipped spells and commit to recovery. Crews remember recent contacts, explore reachable known terrain, revisit observed Realm hunting grounds and respond to Pirate Cave calls. Visible crewmates regroup through normal teleports; separated crews can arrange a Nexus meeting through public chat. Priests cast equipped tomes for actual nearby injury, MP and accepted cooldowns.
 
-Bots start by default; `--no-shore-bots` or explicit `"shore_bots": false` disables it. Reserve at least twenty-one slots for twenty bots and a human; QA control remains separate. Living saves resume unchanged. After committed permanent death, a fresh character receives normal starter gear; Triceps/Kadabu choose Priest only if that same account earned its Wizard-level-five unlock. Dead inventory is never inherited.
+Bots start by default; `--no-shore-bots` or `"shore_bots": false` disables them. `bot_population` selects the count (default 20); reserve additional human capacity. `data/bot-personas.json` supplies reconstructed historical-rank presets with class rosters, gear and real holdings. Starting resources and prerequisite archives are synthetic, never claimed as earned gameplay; missing lifetime evidence stays unknown. New registry identities start with `persona:v1:` and explicitly granted capacity, not fictional purchases. Earlier bot accounts remain preserved but are not selected. Live actions and committed deaths still use ordinary rules; dead inventory is never inherited. See `research/personas.md` for source and reconstruction limits.
 
 Ordinary crews earned Snake Pit clears and returns. Prepared full-backpack clears verify reward exchange and consumption; native media is prepared.
 
@@ -43,7 +43,7 @@ The controller receives only observable entities/projectiles, discovered terrain
 
 Bot social ties and conversational commitments must track real actors and actions, not invent a new formal party mechanic. A bot accepting an invitation must actually behave differently. Consider an optional language model for interpreting/free-form wording, never the combat loop or direct game-state mutations. Any language service needs explicit cost/latency limits, bounded context and schema validation; outages must be observable, not disguised with canned fallback replies.
 
-Reserve capacity for humans. Keep human/bot counts distinguishable. Existing script-owned development/test actors are not an agreed population-bot identity; settle explicit controller classification when implementation starts, and never derive game-bot counts from enemy NPCs. Bots follow the real loot/XP rules and must not create an unlimited supply of saleable replacement gear.
+Reserve capacity for humans. Keep human/bot counts distinguishable. Existing script-owned development/test actors are not an agreed population-bot identity; settle explicit controller classification when implementation starts, and never derive game-bot counts from enemy NPCs. Bots follow real loot/XP rules. User-approved starting snapshots must be explicit and logged; never silently grant items during active play.
 
 ## Alternatives to compare
 

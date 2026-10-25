@@ -121,7 +121,13 @@ async fn fresh_schema_account(content: &Content) -> (std::path::PathBuf, i32) {
     eprintln!("fresh schema fixture: {}", path.display());
     let store = Store::open(&path, content).unwrap();
     let ch = store
-        .shore_character("schema-fixture".into(), "Schema".into(), content, false)
+        .persona_character(
+            "persona:v1:Schema".into(),
+            vec![Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap()],
+            vec![[-1; 8]],
+            0,
+            None,
+        )
         .await
         .unwrap();
     store
