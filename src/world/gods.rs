@@ -258,6 +258,63 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn leviathan_preserves_all_three_fans_at_the_same_nominal_cadence() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+        for cell in &mut map.cells {
+            cell.ground = 0x61;
+            cell.object = None;
+        }
+        map.spawns = vec![(12.5, 12.5)];
+        let mut world = World::new(content, Arc::new(map)).unwrap();
+        world.encounter = true;
+        let account = store.list("leviathan-audit".into()).await.unwrap();
+        let character = store
+            .create(
+                account.id,
+                world.content.get(crate::content::WIZARD).unwrap(),
+            )
+            .await
+            .unwrap();
+        world.enter(character, None).unwrap();
+        let god = world
+            .spawn_entity(0x6d8, Pos { x: 12.5, y: 22.5 }, vec![])
+            .unwrap();
+        world
+            .apply_condition(god, condition::PARALYZED, 10_000)
+            .unwrap();
+        let mut births: [Vec<u64>; 3] = Default::default();
+        for tick in 1..=180 {
+            world.now = tick * 50;
+            world.npc_step();
+            let shots = std::mem::take(&mut world.bullets);
+            if shots.is_empty() {
+                continue;
+            }
+            let phase = ((world.now - 50) / 1500 % 3) as usize;
+            assert_eq!(shots.len(), [9, 12, 2][phase]);
+            assert!(
+                shots
+                    .iter()
+                    .all(|b| b.owner == god && b.spec.speed == if phase == 2 { 85. } else { 67. })
+            );
+            births[phase].push(world.now);
+        }
+        for (phase, actual) in births.iter().enumerate() {
+            let expected: Vec<_> = (0..2)
+                .flat_map(|cycle| {
+                    (0..5).map(move |i| 50 + cycle * 4500 + phase as u64 * 1500 + i * 300)
+                })
+                .collect();
+            assert_eq!(
+                actual, &expected,
+                "Leviathan phase {phase} must emit every 300 ms"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn sprite_children_wander_when_caught_up_without_separation_or_population_changes() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
