@@ -24,6 +24,9 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Tier(3, ABILITIES)),
         ],
         0x903 => &[(0.01, Tier(2, RINGS))],
+        // Leading Trapped soul-bag entries keep first-success white odds: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Crystal.cs#L674-L677
+        0x941 => &[(0.02, Pick::Item(0xb3f)), (0.02, Pick::Item(0xa03))],
+        0x924 => &[(0.001, Pick::Item(0xc07))],
         0x957 => &[
             (0.02, Tier(5, WEAPONS)),
             (0.01, Tier(6, WEAPONS)),
@@ -851,7 +854,8 @@ pub fn fauna_private_rewards(
     rng: &mut impl Rng,
 ) -> Vec<(i32, u16)> {
     let multiplier = match kind {
-        0x20d | 0x952 | 0x903 => 1,
+        0x20d | 0x952 | 0x903 | 0x924 => 1,
+        0x941 => 8,
         0x949 | 0x950 | 0x945 | 0x957 => 2,
         _ => unreachable!("unsupported dual-channel fauna kind {kind:#x}"),
     };
@@ -1028,6 +1032,40 @@ mod tests {
                 })
                 .collect();
             assert_eq!(actual, tiers, "{kind:#x}");
+        }
+    }
+
+    #[test]
+    fn white_bag_equipment_has_a_boss_source_unless_unreferenced() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let sources = collectibles(&content);
+        let missing: Vec<_> = content
+            .objects
+            .values()
+            .filter(|o| o.class == "Equipment" && o.bag_type == 4 && !sources.contains(&o.kind))
+            .map(|o| o.name.as_str())
+            .collect();
+        assert_eq!(
+            missing,
+            [
+                "Amulet of Resurrection",
+                "Admin Sword",
+                "Penetrating Blast Spell",
+                "Prism of Dancing Swords",
+                "Skull of Endless Torment",
+                "Thousand Shot",
+                "America Ring",
+            ]
+        );
+        for kind in [0x941, 0x924] {
+            let rewards =
+                fauna_private_rewards(&content, kind, &[(7, 101)], &mut StepRng::new(0, 0));
+            assert_eq!(
+                rewards.len(),
+                1,
+                "{kind:#x}: private and deduplicated per owner"
+            );
+            assert!(rewards[0].0 == 7 && content.objects[&rewards[0].1].bag_type == 4);
         }
     }
 
