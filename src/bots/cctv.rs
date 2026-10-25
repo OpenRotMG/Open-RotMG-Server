@@ -190,12 +190,24 @@ pub(crate) struct Viewer {
     native: bool,
 }
 impl Viewer {
-    pub(crate) fn join(cctv: &Arc<Cctv>, name: &str, ip: IpAddr, native: bool) -> Result<Self, (StatusCode, String)> {
+    pub(crate) fn join(
+        cctv: &Arc<Cctv>,
+        name: &str,
+        ip: IpAddr,
+        native: bool,
+    ) -> Result<Self, (StatusCode, String)> {
         let mut registry = cctv.lock();
         let Some((&name, _)) = registry.feeds.get_key_value(name) else {
             return Err((StatusCode::NOT_FOUND, format!("no live bot named {name}")));
         };
-        if registry.ips.iter().filter(|((_, kind), _)| *kind == native).map(|(_, count)| count).sum::<usize>() >= VIEWERS {
+        if registry
+            .ips
+            .iter()
+            .filter(|((_, kind), _)| *kind == native)
+            .map(|(_, count)| count)
+            .sum::<usize>()
+            >= VIEWERS
+        {
             return Err((
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("all {VIEWERS} bot viewer slots are in use; retry later"),
@@ -303,7 +315,10 @@ mod tests {
             .map(|i| Viewer::join(&cctv, "Triceps", IpAddr::from([10, 0, 0, i]), false).unwrap())
             .collect();
         assert_eq!(refused("Triceps", ip), StatusCode::SERVICE_UNAVAILABLE);
+        let native = Viewer::join(&cctv, "Triceps", ip, true).unwrap();
+        drop(native);
         drop(full);
+        assert!(cctv.lock().ips.is_empty());
     }
 
     #[test]

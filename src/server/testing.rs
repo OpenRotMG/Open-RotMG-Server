@@ -176,6 +176,10 @@ enum Goal {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Cheat {
+    Vitals {
+        hp: i32,
+        mp: i32,
+    },
     Stats {
         values: [i32; 8],
     },
@@ -1143,6 +1147,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
                     if let Cheat::Stats{values}=&change {let values=*values;a.world.for_player(player).call(move |w| w.validate_prepared_base_stats(player,values)).await?;}
                     super::lifecycle::stage(Stage::Store);
                     match change {
+                        Cheat::Vitals{hp,mp}=>{let stats=ch.effective(&a.content)?;ensure!((1..=stats[0]).contains(&hp)&&(0..=stats[1]).contains(&mp),"prepared vitals must be living and within effective maxima");ch.hp=hp;ch.mp=mp;},
                         Cheat::Stats{values}=>{ch.base=values;let stats=ch.effective(&a.content)?;ch.hp=ch.hp.min(stats[0]);ch.mp=ch.mp.min(stats[1]);},
                         Cheat::Item{slot,item}=>{ensure!(slot<12,"invalid item slot");if item!=-1{a.content.get(u16::try_from(item)?)?;}ch.items[slot]=item;ch.effective(&a.content)?;ch.revision=a.store.exchange(vec![InventoryWrite{id:ch.id,account:ch.account,revision:ch.revision,items:ch.items.clone()}],Vec::new()).await?[0];},
                         Cheat::Teleport{..}|Cheat::StatModifier{..}|Cheat::Guild{..}|Cheat::Pause{..}|Cheat::Protection{..}=>unreachable!(),

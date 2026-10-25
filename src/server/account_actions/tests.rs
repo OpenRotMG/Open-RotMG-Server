@@ -38,6 +38,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
         content,
         swf: Arc::default(),
         origin: "http://127.0.0.1:1".into(),
+        bot_view_origin: Some("http://127.0.0.1:1".into()),
         sfx: "data/sfx".into(),
         max_players: 16,
         behind_proxy: false,

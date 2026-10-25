@@ -95,6 +95,7 @@ pub struct App {
     pub content: Arc<Content>,
     pub swf: Arc<Vec<u8>>,
     pub origin: String,
+    pub bot_view_origin: Option<String>,
     pub sfx: PathBuf,
     pub max_players: usize,
     pub behind_proxy: bool,
@@ -3144,9 +3145,18 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/health", get(health))
         .route("/api/bots", get(crate::bots::cctv::list))
         .route("/api/bots/{name}/socket", get(bot_view::socket))
-        .route_service("/api/bots/{name}/view", tower_http::services::ServeFile::new(client.join("spectator.html")))
-        .route_service("/api/bots/spectator.js", tower_http::services::ServeFile::new(client.join("spectator.js")))
-        .route_service("/api/bots/client.swf", tower_http::services::ServeFile::new(client.join("spectator.swf")))
+        .route_service(
+            "/api/bots/{name}/view",
+            tower_http::services::ServeFile::new(client.join("spectator.html")),
+        )
+        .route_service(
+            "/api/bots/spectator.js",
+            tower_http::services::ServeFile::new(client.join("spectator.js")),
+        )
+        .route_service(
+            "/api/bots/client.swf",
+            tower_http::services::ServeFile::new(client.join("spectator.swf")),
+        )
         .route("/api/bots/{name}/stream", get(crate::bots::cctv::stream))
         .route(
             "/internal/discord/critical-incident",

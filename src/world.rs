@@ -16,8 +16,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, watch};
-pub(crate) mod spectator;
 mod abilities;
+pub(crate) mod spectator;
 
 mod cell_index;
 mod charges;
@@ -7394,6 +7394,8 @@ mod hermit_loot_tests;
 mod period_loot_tests;
 #[cfg(test)]
 mod pirate_generation_tests;
+#[cfg(test)]
+mod spectator_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 #[cfg(test)]
