@@ -1096,6 +1096,122 @@ fn pyre_creates_one_public_chest_without_repeating_it_during_rebirth() {
 
 #[cfg(test)]
 #[test]
+fn tower_population_uses_the_primary_fixed_anchor_and_preserves_native_birth() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut openings = BTreeSet::new();
+    for seed in 0..16 {
+        for (terrain, owned) in [(3, false), (4, false), (3, true)] {
+            let mut map = Map {
+                width: 192,
+                height: 192,
+                cells: vec![
+                    crate::content::Cell {
+                        ground: 0x46,
+                        object: None,
+                        config: String::new(),
+                        terrain: 0,
+                        region: 0
+                    };
+                    192 * 192
+                ],
+                spawns: vec![(1., 1.)],
+            };
+            let center = 96 * 192 + 96;
+            let destination = 96 * 192 + 102;
+            map.cells[center].terrain = terrain;
+            map.cells[center].object = Some(0x100);
+            map.cells[destination] = crate::content::Cell {
+                ground: 0x46,
+                object: Some(0x105),
+                config: "name:native;size:137".into(),
+                terrain,
+                region: 0,
+            };
+            let original = Arc::new(map);
+            let mut world = World::new(content.clone(), original.clone()).unwrap();
+            let native = world.cells.ids(destination)[0];
+            let tree = world.cells.ids(center)[0];
+            let template = match &world.entities[&native].state {
+                entity_store::EntityState::Shared(t) => t.clone(),
+                _ => panic!("native Bush does not use shared scenery state"),
+            };
+            if owned {
+                world.entities.get_mut(&native).unwrap().name = "native".into();
+            }
+            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.populate_named_sites(0x928, &[4, 3], 1).unwrap();
+            let roots: Vec<_> = world
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x928)
+                .collect();
+            assert_eq!(roots.len(), 1);
+            let root = roots[0];
+            let area = world.setpieces.last().unwrap();
+            assert_eq!((area.width, area.height), (27, 27));
+            assert_eq!(
+                (root.pos.x - area.x as f32, root.pos.y - area.y as f32),
+                (19., 13.),
+                "seed {seed}"
+            );
+            assert_eq!((root.pos.x, root.pos.y), (102., 96.));
+            assert_eq!((root.home.x, root.home.y), (102., 96.));
+            assert_eq!((root.hp, root.size, root.stage), (300000, 95, Some(0)));
+            assert!(root.published && root.quest == Some(root.id) && root.camp.is_none());
+            assert!(world.walkable(root.pos));
+            assert!(world.cells.ids(destination).contains(&root.id));
+            assert!(world.quest_members(root.id, &[0x929]).is_empty());
+            let cell = &world.map.cells[destination];
+            assert_eq!(
+                (
+                    cell.ground,
+                    cell.object,
+                    cell.config.as_str(),
+                    cell.terrain,
+                    cell.region
+                ),
+                (0x46, Some(0x105), "name:native;size:137", terrain, 0)
+            );
+            assert!(world.cells.ids(destination).contains(&native));
+            assert_eq!(world.cells.ids(destination).len(), 2);
+            let e = &world.entities[&native];
+            assert_eq!((e.name.as_str(), e.size), ("native", 137));
+            if owned {
+                assert!(matches!(&e.state, entity_store::EntityState::Owned(_)));
+            } else {
+                assert!(
+                    matches!(&e.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+                );
+            }
+            assert!(!world.entities.contains_key(&tree));
+            assert!(world.map.cells[center].object.is_none());
+            assert_eq!(
+                (
+                    original.cells[destination].ground,
+                    original.cells[destination].object,
+                    original.cells[destination].config.as_str()
+                ),
+                (0x46, Some(0x105), "name:native;size:137")
+            );
+            let sides = [(13, 0), (26, 13), (13, 26), (0, 13)]
+                .into_iter()
+                .enumerate()
+                .filter_map(|(side, (x, y))| {
+                    world.map.cells[((area.y + y) * 192 + area.x + x) as usize]
+                        .object
+                        .is_none()
+                        .then_some(side)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(sides.len(), 1, "seed {seed}: Tower opening");
+            openings.insert(sides[0]);
+        }
+    }
+    assert_eq!(openings.len(), 4);
+}
+
+#[cfg(test)]
+#[test]
 fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut walls = 0;
@@ -1461,6 +1577,26 @@ fn named_site_populations_match_reference_ranges() {
                     range.contains(&count),
                     "{layout}: {kind:#x} has {count} roots, expected {range:?}"
                 );
+            }
+            for king in roots.iter().filter(|e| e.kind == 0x928) {
+                let area = world
+                    .setpieces
+                    .iter()
+                    .find(|a| king.home.x == (a.x + 19) as f32 && king.home.y == (a.y + 13) as f32)
+                    .unwrap();
+                assert_eq!((area.width, area.height), (27, 27));
+                assert_eq!((king.pos.x, king.pos.y), (king.home.x, king.home.y));
+                assert!(world.walkable(king.pos));
+                let i = king.home.y as usize * world.map.width as usize + king.home.x as usize;
+                let a = &original.cells[i];
+                let b = &world.map.cells[i];
+                assert!([4, 3].contains(&b.terrain));
+                assert_eq!(
+                    (a.ground, a.object, &a.config, a.terrain, a.region),
+                    (b.ground, b.object, &b.config, b.terrain, b.region),
+                    "{layout}: Tower birth cell repainted"
+                );
+                assert!(world.cells.ids(i).contains(&king.id));
             }
             let expected: BTreeSet<_> = world
                 .entities
