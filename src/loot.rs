@@ -975,8 +975,10 @@ fn bonus(kind: u16) -> &'static [(f64, u16)] {
         0xd59 => &[(0.001, 0xc0a)],
         0xd60 => &[(0.004, 0xc06)],
         0x1705 => &[(0.04, 0xaea)],
+        // Kithio keeps White Demon below the ordinary gods: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Mountain.cs#L15-L35
+        0x651 => &[(0.01, 0xa1f)],
         // Native's 1.5% follows period testimony, not the later 2% table: https://discord.com/channels/1558662335076376578/1558662336439386185/1563889316432973895
-        0x651 | 0x652 | 0x657 | 0xd05 | 0x905..=0x907 => &[(0.015, 0xa1f)],
+        0x652 | 0x657 | 0xd05 | 0x905..=0x907 => &[(0.015, 0xa1f)],
         0x659 => &[(0.015, 0xa21)],
         0x654 => &[(0.01, 0xa21)],
         0x91a => &[(0.02, 0xa21)],
