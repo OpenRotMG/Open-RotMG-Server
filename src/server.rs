@@ -3064,6 +3064,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             "/api/diagnostics/{key}/report",
             post(diagnostics::submit).layer(DefaultBodyLimit::max(1_500_000)),
         )
+        .route("/api/bug-reports/{id}/status", get(diagnostics::status))
         .route(
             "/api/bug-reports/{id}/screenshot.png",
             get(diagnostics::screenshot),
