@@ -441,7 +441,8 @@ impl World {
         };
         match e.kind {
             trench::HERMIT if matches!(e.stage, Some(4 | 5)) => (
-                if e.pos.distance(e.home) > 5. {
+                // The period three-tile range fits the central pool: https://web.archive.org/web/20120429072116id_/http://forums.wildshadow.com/wiki/realm-mad-god/hermit-god
+                if e.pos.distance(e.home) > 3. {
                     home(0.)
                 } else {
                     Motion::Wander

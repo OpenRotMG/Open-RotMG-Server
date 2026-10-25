@@ -7281,6 +7281,8 @@ mod death_chat_tests;
 #[cfg(test)]
 mod dungeon_return_tests;
 #[cfg(test)]
+mod hermit_leash_tests;
+#[cfg(test)]
 mod hermit_loot_tests;
 #[cfg(test)]
 mod period_loot_tests;
