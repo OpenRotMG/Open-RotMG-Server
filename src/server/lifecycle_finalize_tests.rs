@@ -33,8 +33,15 @@ impl NativeSocket {
         }
     }
     pub(super) async fn send(&mut self, packet: Packet) {
+        self.send_frame(vec![packet]).await;
+    }
+    // One WebSocket frame may carry several game packets, as Ruffle sends buffered writes.
+    pub(super) async fn send_frame(&mut self, packets: Vec<Packet>) {
         use tokio::io::AsyncWriteExt;
-        let bytes = self.codec.frame(packet.id, packet.body);
+        let bytes: Vec<u8> = packets
+            .into_iter()
+            .flat_map(|p| self.codec.frame(p.id, p.body))
+            .collect();
         let mut frame = vec![0x82];
         if bytes.len() < 126 {
             frame.push(0x80 | bytes.len() as u8);
@@ -1788,13 +1795,13 @@ async fn native_input_backlog_survives_overrunning_world() {
         .unwrap();
     let mut socket = NativeSocket::connect(port, &a.origin).await;
     let id = socket_load(&mut socket, &dir, "input-backlog", ch.id).await;
-    // Every world job waits behind a 60ms overrunning tick, as during the #486 Lord of the Lost Lands fight.
+    // A two-second stall, then 60ms overrunning ticks as during the #486 Lord of the Lost Lands fight.
     let world = a.world.for_player(id);
     let overrun = tokio::spawn(async move {
-        loop {
+        for stall in std::iter::once(2000).chain(std::iter::repeat(60)) {
             world
-                .call(|_| {
-                    std::thread::sleep(Duration::from_millis(60));
+                .call(move |_| {
+                    std::thread::sleep(Duration::from_millis(stall));
                     Ok(())
                 })
                 .await
@@ -1825,6 +1832,44 @@ async fn native_input_backlog_survives_overrunning_world() {
         "{:?}",
         String::from_utf8_lossy(&reply.body)
     );
+    drop(socket);
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dropped_connection_names_its_cause_across_restarts() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let (port, server) = socket_server(&a).await;
+    let account = a.store.list("drop-cause".into()).await.unwrap().id;
+    let ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    let id = socket_load(&mut socket, &dir, "drop-cause", ch.id).await;
+    let hit = |_| {
+        let mut hit = Writer::new();
+        hit.u8(0).i32(id);
+        Packet {
+            id: 24,
+            body: hit.0,
+        }
+    };
+    socket.send_frame((0..513).map(hit).collect()).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while a.diagnostics.previous_drop(account).is_null() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "rate-limited drop was not recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let reopened = diagnostics::Diagnostics::open(dir.join("bug-reports")).unwrap();
+    let saved = reopened.previous_drop(account);
+    assert_eq!(saved["transport"]["reason"], "Output");
+    assert_eq!(saved["transport"]["cause"], "input_rate_exceeded");
     drop(socket);
     server.abort();
 }

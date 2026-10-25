@@ -372,12 +372,10 @@ impl Directory {
             );
             return Ok(());
         }
+        let nexus = self.resolve(Target::World(-2))?.players.contains_key(&id);
         let text = if yell {
             // Period sources establish the Nexus audience, not a cross-world relay.
-            ensure!(
-                self.resolve(Target::World(-2))?.players.contains_key(&id),
-                controller("You can only /yell in the Nexus.")
-            );
+            ensure!(nexus, controller("You can only /yell in the Nexus."));
             let message = rest.trim();
             ensure!(!message.is_empty(), controller("Usage: /yell <message>"));
             message
@@ -392,12 +390,13 @@ impl Directory {
         for player in world.players.values().filter(|p| {
             p.can_chat()
                 && !p.account_lists[1].contains(&account)
-                && (yell || pos.distance(p.pos) < 15.)
+                // Build 114 made only Nexus chat local: https://web.archive.org/web/20120509232008/http://forums.wildshadow.com/node/2587
+                && (yell || !nexus || pos.distance(p.pos) < 15.)
         }) {
             send(player, packet.id, packet.body.clone());
             recipients += 1;
         }
-        tracing::info!(player=id, account, world=%world.name, yell, recipients, bytes=text.len(), "local chat delivered");
+        tracing::info!(player=id, account, world=%world.name, yell, nexus, recipients, bytes=text.len(), "public chat delivered");
         Ok(())
     }
 }
@@ -422,6 +421,51 @@ mod tests {
             text_packet("#Oryx the Mad God", 4, 5, "Uhh. So... sleepy..."),
         ] {
             assert_eq!(stars(packet), -1);
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_chat_is_nexus_local_but_world_wide_elsewhere() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let mut d =
+            Directory::test_with_seed(std::path::Path::new("data"), content, 20, 511).unwrap();
+        for (world, far_hears) in [(-2, false), (-3, true)] {
+            let mut ids = Vec::new();
+            let mut inboxes = Vec::new();
+            for role in ["speaker", "near", "far"] {
+                let account = store.list(format!("chat-{world}-{role}")).await.unwrap();
+                let ch = store
+                    .create(account.id, d.content.get(crate::content::WIZARD).unwrap())
+                    .await
+                    .unwrap();
+                let (packets, inbox) = mpsc::channel(64);
+                let (lost, _) = watch::channel(None);
+                let w = d.worlds.get_mut(&world).unwrap();
+                ids.push(w.enter(ch, Some(Output { packets, lost })).unwrap());
+                inboxes.push(inbox);
+            }
+            let w = d.worlds.get_mut(&world).unwrap();
+            let origin = w.players[&ids[0]].pos;
+            for (id, offset) in [(ids[1], 14.9), (ids[2], 60.)] {
+                w.players.get_mut(&id).unwrap().pos = Pos {
+                    x: origin.x + offset,
+                    y: origin.y,
+                };
+            }
+            for inbox in &mut inboxes {
+                while inbox.try_recv().is_ok() {}
+            }
+            d.chat(ids[0], "hello-511".into(), Instant::now()).unwrap();
+            let heard: Vec<_> = inboxes
+                .iter_mut()
+                .map(|inbox| {
+                    std::iter::from_fn(|| inbox.try_recv().ok()).any(|p| {
+                        p.id == crate::wire::TEXT && p.body.windows(9).any(|w| w == b"hello-511")
+                    })
+                })
+                .collect();
+            assert_eq!(heard, [true, true, far_hears], "world {world}");
         }
     }
 }

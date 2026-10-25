@@ -113,7 +113,11 @@ pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
     pub packets: mpsc::Sender<Packet>,
-    pub lost: watch::Sender<bool>,
+    pub lost: watch::Sender<Option<&'static str>>,
+}
+// The first cause names the disconnect; later failures of a closing connection are its consequences.
+pub(crate) fn lose(lost: &watch::Sender<Option<&'static str>>, cause: &'static str) {
+    lost.send_if_modified(|current| current.is_none() && current.replace(cause).is_none());
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -348,6 +352,7 @@ pub struct Player {
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32, i32)>,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
+    predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
@@ -517,7 +522,7 @@ impl Player {
         self.bot_goal = None;
         self.bot_aim = None;
         if let Some(output) = &self.tx {
-            let _ = output.lost.send(true);
+            lose(&output.lost, "persistence_quarantine");
         }
         // Quarantine remains authoritative even when its diagnostic sink fails.
         let error = self
@@ -1066,6 +1071,7 @@ impl Directory {
         let mut templates = BTreeMap::new();
         for name in [
             "tutorial",
+            "kitchen",
             "nexus",
             "nexus-limbo",
             "vault",
@@ -1257,6 +1263,8 @@ impl Directory {
                 .any(|(_, name, _, _)| *name == template);
         if template == "realm-shore" {
             let started = Instant::now();
+            let groves = self.realms[layout.context("Realm layout selection missing")?].groves()?;
+            world.populate_authored_groves(&groves)?;
             // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
             let beach_bum = world.rng.gen_ratio(1, 200);
             world.populate_tomb_entry()?;
@@ -1265,7 +1273,7 @@ impl Directory {
                 world.populate_beach_bum()?;
             }
             world.populate_realm_heroes()?;
-            world.populate_named_quests()?;
+            world.populate_named_quests(!groves.is_empty())?;
             world.populate_realm_events()?;
             world.populate_hermit()?;
             world.populate_manor_entry()?;
@@ -1493,7 +1501,7 @@ impl Directory {
             "dungeon requires an explicit return route"
         );
         ensure!(
-            matches!((template, account), ("vault", Some(_)))
+            matches!((template, account), ("vault", Some(_)) | ("kitchen", None))
                 || (account.is_none()
                     && crate::dungeon::DUNGEONS
                         .iter()
@@ -1511,6 +1519,8 @@ impl Directory {
             template,
             if template == "vault" {
                 "Vault"
+            } else if template == "kitchen" {
+                "Kitchen"
             } else {
                 crate::dungeon::DUNGEONS
                     .iter()
@@ -1607,6 +1617,9 @@ impl Directory {
             0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
             0x704 | 0x70e => self.dungeon_realm(world)?,
             0x71c => self.initial(-3)?,
+            // Kitchen destination: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.cs#L387-L416
+            // Reconstruction: a fresh Kitchen per use; Trapped instead caches the first Kitchen on the portal and reuses it.
+            0x71e => self.instance("kitchen", None, None)?,
             0x720 => self.instance("vault", Some(account), None)?,
             0x72f => {
                 let guild = p
@@ -2623,7 +2636,14 @@ pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
     if let Some(tx) = &p.tx
         && let Err(error) = tx.packets.try_send(Packet { id, body })
     {
-        tx.lost.send_replace(true);
+        lose(
+            &tx.lost,
+            if tx.packets.is_closed() {
+                "output_queue_closed"
+            } else {
+                "output_queue_full"
+            },
+        );
         let queue_state = match error {
             mpsc::error::TrySendError::Full(_) => "full",
             mpsc::error::TrySendError::Closed(_) => "closed",
@@ -3350,6 +3370,7 @@ impl World {
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
+                predicted_deaths: BTreeMap::new(),
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
@@ -5342,8 +5363,15 @@ impl World {
         out.i32(p.character.account)
             .i32(p.character.id)
             .utf(&p.killer);
-        send(p, 41, out.0);
         tracing::info!(player=id,character=p.character.id,killed_by=%p.killer,"permanent death committed");
+        // Low-level deaths were system notices too: https://media.gdcvault.com/gdceurope2012/Presentations/Social%20%26%20Online%20Games%20Summit/Ethan_Levy_Social%26Online_GameDesignIs.pdf#page=54
+        let message = format!(
+            "{} died at level {}, killed by {}",
+            p.character.name, p.character.level, p.killer
+        );
+        let recipients = self.broadcast_text("", &message);
+        tracing::info!(player = id, recipients, "death notice delivered");
+        send(&self.players[&id], 41, out.0);
         self.clear_abilities(id);
         self.clear_companions(id);
         Ok(())
@@ -5743,6 +5771,8 @@ impl World {
             0
         } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
+        } else if crate::loot::potion_damage(defeated.kind).is_some() {
+            0
         } else if matches!(defeated.kind, 0xd56 | 0xd59) {
             self.content.objects[&defeated.kind].hp / 20
         } else if matches!(
@@ -5794,6 +5824,10 @@ impl World {
             2
         } else if private {
             eligible.len()
+        } else if crate::loot::period_dungeon(defeated.kind)
+            || crate::loot::period_surface(defeated.kind)
+        {
+            1
         } else {
             // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
             let multiplier = match defeated.kind {
@@ -5812,13 +5846,23 @@ impl World {
                 rewards.push(0xaea);
             }
             for item in rewards {
+                let potion = self.content.objects[&item].slot_type == 10;
+                if potion
+                    && crate::loot::potion_damage(defeated.kind)
+                        .is_some_and(|required| eligible[i % eligible.len()].1 < required)
+                {
+                    continue;
+                }
                 let owner = if private {
                     eligible[i % eligible.len()].0
                 } else {
                     -1
                 };
                 let items = drops.entry(owner).or_default();
-                if !items.contains(&(item as i32)) || matches!(item, 0xa22 | 0xa23) {
+                if !items.contains(&(item as i32))
+                    || matches!(item, 0xa22 | 0xa23)
+                    || crate::loot::period_boss(defeated.kind)
+                {
                     items.push(item as i32);
                 }
             }
@@ -5852,11 +5896,8 @@ impl World {
             }
         }
         for (owner, items) in drops {
-            self.loot_bags(
-                self.ocean_reward_position(defeated)?,
-                (owner >= 0).then_some(owner),
-                &items,
-            )?;
+            let pos = self.ocean_bag_position(defeated)?;
+            self.loot_bags(pos, (owner >= 0).then_some(owner), &items)?;
         }
         Ok(())
     }
@@ -6470,10 +6511,15 @@ impl World {
                     Motion::Chase { sight, stop }
                         if target.is_some_and(|p| pos.distance(p) < sight) =>
                     {
-                        if pos.distance(target.expect("acquired chase target")) <= stop {
+                        let target = target.expect("acquired chase target");
+                        if pos.distance(target) <= stop {
                             speed = 0.;
                         }
-                        target
+                        // Per-tick aim jitter keeps chasers from pinning on one wall point: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/movement/Chasing.cs
+                        Some(Pos {
+                            x: target.x + self.rng.gen_range(-2..2) as f32 / 2.,
+                            y: target.y + self.rng.gen_range(-2..2) as f32 / 2.,
+                        })
                     }
                     Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
                         let target = match self.orbit_anchor(id, anchor, target) {
@@ -7152,6 +7198,7 @@ impl World {
         bullets.append(&mut self.bullets);
         self.bullets = bullets;
         self.detached_bullets = 0;
+        self.reconcile_enemy_deaths();
         if self.tick.is_multiple_of(2) {
             // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
             // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
@@ -7228,7 +7275,15 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 }
 
 #[cfg(test)]
+mod chase_tests;
+#[cfg(test)]
+mod death_chat_tests;
+#[cfg(test)]
 mod dungeon_return_tests;
+#[cfg(test)]
+mod hermit_loot_tests;
+#[cfg(test)]
+mod period_loot_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 #[cfg(test)]
