@@ -619,3 +619,34 @@ fn market_reserved_stock_yields_to_reflexes_without_inventing_settlement() {
         "ordinary consumption/equipment cannot take the reserved Speed"
     );
 }
+
+#[test]
+fn pirate_cave_bots_leave_through_the_realm_portal_exit() {
+    let (content, mut view) = fixture();
+    view.map.name = "Pirate Cave".into();
+    view.quest = None;
+    view.objects[0] = VisibleObject {
+        id: 3,
+        account: None,
+        kind: 0x704,
+        name: "Realm Portal".into(),
+        position: Pos { x: 12.5, y: 10.5 },
+        hp: 0,
+        max_hp: 0,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: true,
+        condition_mask: None,
+    };
+    let goal = |view: &PlayerView| {
+        Brain::new(ARCHETYPES[0], view)
+            .decide(view, &content)
+            .unwrap()
+            .goal
+    };
+    assert_eq!(goal(&view), Goal::Portal(3));
+    view.objects[0].kind = 0x71d;
+    assert_ne!(goal(&view), Goal::Portal(3));
+}

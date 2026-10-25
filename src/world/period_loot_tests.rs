@@ -168,3 +168,80 @@ async fn period_loot_keeps_ownership_threshold_boundaries_and_repeated_rewards()
         "successful independent rewards split into multiple bags"
     );
 }
+
+#[tokio::test]
+async fn native_sprite_god_attack_reward_keeps_damage_boundary_and_private_ownership() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let mut w = World::new(content, map).unwrap();
+    for id in w.entities.keys().copied().collect::<Vec<_>>() {
+        w.remove_entity(id);
+    }
+    w.encounter = true;
+    let map = Arc::make_mut(&mut w.map);
+    map.spawns = vec![(1.5, 1.5)];
+    for cell in &mut map.cells {
+        cell.ground = 0x61;
+        cell.object = None;
+    }
+    for i in 0..2 {
+        let account = store.list(format!("native-sprite-loot-{i}")).await.unwrap();
+        let ch = store
+            .create(account.id, w.content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        w.enter(ch, None).unwrap();
+    }
+    let owners: Vec<_> = w
+        .players
+        .values()
+        .map(|p| (p.character.account, p.character.id))
+        .collect();
+    assert_eq!(w.content.objects[&0xd05].hp, 2000);
+    let mut equipment = Vec::new();
+    for damage in [359, 360] {
+        for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(bag);
+        }
+        let root = w
+            .spawn_entity(0xd05, Pos { x: 3.5, y: 3.5 }, vec![])
+            .unwrap();
+        w.entities
+            .get_mut(&root)
+            .unwrap()
+            .damage
+            .insert(owners[0].1, damage);
+        // This seed succeeds on both equipment and the 1.5% Attack roll.
+        w.rng = rand::rngs::StdRng::seed_from_u64(190);
+        w.defeat_entity(root).unwrap();
+        assert!(!w.entities.contains_key(&root));
+        let mut rewards = Vec::new();
+        for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
+            assert_eq!(bag.items.len(), 8);
+            assert!(bag.extra_stats.contains(&(54, owners[0].0)));
+            assert!(bag.accessible(owners[0].0));
+            assert!(!bag.accessible(owners[1].0));
+            rewards.extend(bag.items.iter().copied().filter(|item| *item >= 0));
+        }
+        assert_eq!(
+            rewards.contains(&0xa1f),
+            damage == 360,
+            "Attack qualification at {damage} damage"
+        );
+        equipment.push(
+            rewards
+                .into_iter()
+                .filter(|item| *item != 0xa1f)
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert!(
+        !equipment[0].is_empty(),
+        "subthreshold damage still earns gear"
+    );
+    assert_eq!(
+        equipment[0], equipment[1],
+        "potion qualification must not change gear"
+    );
+}
