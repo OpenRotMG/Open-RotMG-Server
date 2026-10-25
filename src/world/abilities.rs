@@ -209,10 +209,6 @@ impl World {
             match effect {
                 Ability::Shoot => {
                     ensure!(
-                        self.players[&id].controller == Controller::Human,
-                        controller("projectile abilities require native reports")
-                    );
-                    ensure!(
                         (1..=5).contains(&item.shots)
                             && item.activations == 1
                             && item.projectiles.contains_key(&0),
@@ -266,6 +262,10 @@ impl World {
                 "ability activation applied"
             );
             match *effect {
+                // Native clients report their own ability projectiles; other controllers have no client.
+                Ability::Shoot if self.players[&id].controller != Controller::Human => {
+                    self.ability_shots(id, item, origin, pos)?
+                }
                 Ability::Shoot => {}
                 Ability::Nova => self.ability_nova(id, item, pos)?,
                 Ability::Heal { amount, range } => self.heal_ability(id, item, amount, range)?,
@@ -443,6 +443,21 @@ impl World {
                     );
                 }
             }
+        }
+        Ok(())
+    }
+    fn ability_shots(&mut self, id: i32, item: &Object, origin: Pos, target: Pos) -> Result<()> {
+        let time = self.now as i32;
+        let angle = (target.y - origin.y).atan2(target.x - origin.x);
+        let start = Pos {
+            x: origin.x + 0.3 * angle.cos(),
+            y: origin.y + 0.3 * angle.sin(),
+        };
+        let p = self.players.get_mut(&id).unwrap();
+        p.ability_shot = Some((item.kind, time, true, 0));
+        let first = p.next_bullet;
+        for i in 0..item.shots {
+            self.shoot(id, time, (first + i as u8) % 128, item.kind, start, angle)?;
         }
         Ok(())
     }
@@ -868,5 +883,51 @@ mod tests {
             .expect("real cooldown elapsed despite no simulation ticks");
         assert_eq!(world.players[&id].character.mp, mp - item.mana_cost);
         assert!(world.spend_ability(id, slot, &item, pos).is_err());
+    }
+
+    #[test]
+    fn autonomous_shoot_ability_fires_server_projectiles_under_mana_and_quiet_rules() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let content = Arc::new(Content::load(&data).unwrap());
+        let map = Arc::new(Map::load(&data.join("tutorial.wmap"), &content).unwrap());
+        let mut world = World::new(content, map).unwrap();
+        let character: Character = serde_json::from_value(serde_json::json!({
+            "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+            "class":0x31e,"base":[770,252,50,40,50,50,75,50],
+            "id":1,"account":1,"name":"Shield","level":20,"exp":0,
+            "fame":0,"hp":770,"mp":252,"revision":0,"alive":true,
+            "items":[-1,0xa09,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+        }))
+        .unwrap();
+        let id = world.enter(character, None).unwrap();
+        world.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+        let pos = world.players[&id].pos;
+        let shield = world.content.get(0xa09).unwrap().clone();
+        let slot = Slot {
+            object: id,
+            slot: 1,
+            kind: 0xa09,
+        };
+        let target = Pos {
+            x: pos.x + 2.,
+            y: pos.y,
+        };
+        world.use_item(id, slot, target).unwrap();
+        let shots: Vec<_> = world.bullets.iter().filter(|b| b.owner == id).collect();
+        assert_eq!(shots.len(), shield.shots as usize);
+        let spec = &shield.projectiles[&0];
+        assert!(
+            shots
+                .iter()
+                .all(|b| (spec.min..=spec.max).contains(&b.damage) && b.angle.abs() < 0.5)
+        );
+        assert_eq!(world.players[&id].character.mp, 252 - shield.mana_cost);
+        assert!(world.players[&id].ability_shot.is_none());
+        std::thread::sleep(Duration::from_millis(shield.cooldown_ms + 50));
+        world
+            .apply_condition(id, crate::condition::QUIET, 1000)
+            .unwrap();
+        assert!(world.use_item(id, slot, target).is_err());
+        assert_eq!(world.bullets.len(), shield.shots as usize);
     }
 }

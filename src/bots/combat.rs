@@ -211,30 +211,109 @@ pub(super) fn attack(
     {
         decision.aim = Some(angle(v.position, point));
     }
-    if decision.item.is_none()
-        && v.character.items[1] >= 0
-        && v.time_ms >= v.character.ability_ready_ms
-    {
-        let ability = content.get(v.character.items[1] as u16)?;
-        if ability.activate == "BulletNova"
-            && v.character.conditions & crate::condition::bit(crate::condition::QUIET) == 0
-            && v.character.mp >= ability.mana_cost
-            && (v.map.name != "Snake Pit"
-                || v.quest == Some(enemy.id)
-                || v.character.mp - ability.mana_cost >= ability.mana_cost)
-            && enemy.hp > projectile.max * 2
-            && v.position.distance(enemy.position) <= 15.
-            && shot_clear(v, grid, enemy.position, false)
-        {
-            // Nova bullets originate at the cursor, not after the weapon's flight time.
-            decision.item = Some(Action::Use {
-                slot: 1,
-                x: enemy.position.x,
-                y: enemy.position.y,
-            });
-        }
+    if decision.item.is_none() {
+        decision.item = ability(v, content, grid, enemy)?;
     }
     Ok(())
+}
+
+/// Uses the equipped class ability against or away from `enemy`; healing tomes belong to `social`.
+pub(super) fn ability(
+    v: &PlayerView,
+    content: &Content,
+    grid: &Grid,
+    enemy: &VisibleObject,
+) -> Result<Option<Action>> {
+    use crate::condition::*;
+    use crate::content::Ability;
+    let Ok(kind) = u16::try_from(v.character.items[1]) else {
+        return Ok(None);
+    };
+    let item = content.get(kind)?;
+    let distance = v.position.distance(enemy.position);
+    if v.time_ms < v.character.ability_ready_ms
+        || v.character.mp < item.mana_cost
+        || v.character.conditions & bit(QUIET) != 0
+        || distance > 14.
+    {
+        return Ok(None);
+    }
+    let weapon = content.get(v.character.items[0] as u16)?.projectiles[&0].clone();
+    let health = v.character.hp as f32 / v.character.stats[0] as f32;
+    let endangered = health < 0.6 && distance < 8.;
+    // Snake Pit keeps a second cast in reserve for its boss.
+    let worthwhile = |reach: f32, passes_cover: bool| {
+        enemy.hp > weapon.max * 2
+            && distance <= reach
+            && shot_clear(v, grid, enemy.position, passes_cover)
+            && (v.map.name != "Snake Pit"
+                || v.quest == Some(enemy.id)
+                || v.character.mp - item.mana_cost >= item.mana_cost)
+    };
+    let reach = |p: &crate::content::Projectile| p.speed * p.lifetime / 10000.;
+    let mut wanted = false;
+    for activation in &item.abilities {
+        wanted |= match activation {
+            Ability::Shoot => {
+                let shot = item
+                    .projectiles
+                    .get(&0)
+                    .context("ability projectile missing")?;
+                worthwhile(reach(shot), shot.passes_cover)
+            }
+            // Area abilities land at the cursor, not after the weapon's flight time.
+            Ability::Nova
+            | Ability::Poison { .. }
+            | Ability::Drain { .. }
+            | Ability::Lightning { .. }
+            | Ability::Daze { .. } => worthwhile(14., false),
+            Ability::Trap { .. } => {
+                worthwhile(14., false) && grid.walkable.contains(&tile(enemy.position))
+            }
+            Ability::SpiritBomb => worthwhile(3., false),
+            Ability::Stasis { .. } | Ability::Decoy { .. } | Ability::Teleport { .. } => endangered,
+            Ability::Condition { effect, .. } => match *effect {
+                INVISIBLE | INVULNERABLE | ARMORED => endangered,
+                HEALING => health < 0.75,
+                // Buffs start just before a melee weapon reaches its target.
+                BERSERK | DAMAGING | SPEEDY => {
+                    enemy.hp > weapon.max && distance <= reach(&weapon) + 2.
+                }
+                effect => anyhow::bail!("unsupported autonomous condition ability {effect}"),
+            },
+            Ability::Heal { .. } | Ability::Clear { .. } | Ability::Cleanse { .. } => false,
+        };
+    }
+    if !wanted {
+        return Ok(None);
+    }
+    let teleport = item.abilities.iter().find_map(|a| match a {
+        Ability::Teleport { distance } => Some(*distance),
+        _ => None,
+    });
+    let point = match teleport {
+        Some(distance) => {
+            let away = angle(enemy.position, v.position);
+            // Leave margin for movement made while this decision was computed.
+            let Some(landing) = (1..=3)
+                .rev()
+                .map(|step| Pos {
+                    x: v.position.x + away.cos() * distance * step as f32 / 4.,
+                    y: v.position.y + away.sin() * distance * step as f32 / 4.,
+                })
+                .find(|p| grid.walkable.contains(&tile(*p)))
+            else {
+                return Ok(None);
+            };
+            landing
+        }
+        None => enemy.position,
+    };
+    Ok(Some(Action::Use {
+        slot: 1,
+        x: point.x,
+        y: point.y,
+    }))
 }
 
 pub(super) fn movement(
