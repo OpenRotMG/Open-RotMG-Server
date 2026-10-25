@@ -355,6 +355,16 @@ mod tests {
                     }
                 }
             }
+            for y in 1..map.height - 1 {
+                for x in 1..map.width - 1 {
+                    assert!(
+                        passable(x, y)
+                            || !(passable(x - 1, y) && passable(x + 1, y)
+                                || passable(x, y - 1) && passable(x, y + 1)),
+                        "seed {seed}: chambers share a single wall at ({x}, {y})"
+                    );
+                }
+            }
             assert!(seen.contains(&boss));
             assert_eq!(
                 seen.len(),
