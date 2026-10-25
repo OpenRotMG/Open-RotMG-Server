@@ -6,28 +6,43 @@ pub(in crate::bots) struct Incoming {
     pub player: i32,
     pub account: i32,
     pub name: String,
+    pub quote: Option<[Goods; 2]>,
     until: u64,
     requested: bool,
+    outbound: bool,
+}
+impl Incoming {
+    pub(super) fn outbound(
+        v: &PlayerView,
+        player: i32,
+        account: i32,
+        name: String,
+        quote: [Goods; 2],
+    ) -> Self {
+        Self {
+            session: [v.session.world, v.session.player, v.session.character],
+            player,
+            account,
+            name,
+            quote: Some(quote),
+            until: v.elapsed_ms + 60_000,
+            requested: false,
+            outbound: true,
+        }
+    }
 }
 impl Market {
     pub(super) fn incoming_request(&mut self, name: String, v: &PlayerView) {
-        let reason = if self.incoming.is_some() || self.trade.is_some() {
-            "already_trading"
-        } else if self
-            .bargain
-            .as_ref()
-            .is_some_and(|b| b.resolution.is_none())
+        if self.incoming.is_some()
+            || self.trade.is_some()
+            || self.reserved_bargain()
+            || v.elapsed_ms < self.next_request_ms
+            || v.map.name != "Nexus"
+            || !super::super::settled(v)
         {
-            "active_bargain"
-        } else if v.elapsed_ms < self.next_request_ms {
-            "request_cooldown"
-        } else if v.map.name != "Nexus" {
-            "outside_nexus"
-        } else if !super::super::settled(v) {
-            "not_ready"
-        } else if !v.character.items.iter().skip(4).any(|k| *k < 0) {
-            "no_capacity"
-        } else if let Some(p) = v.objects.iter().find(|p| {
+            return;
+        }
+        if let Some(p) = v.objects.iter().find(|p| {
             p.name == name
                 && p.account.is_some()
                 && p.hp > 0
@@ -38,20 +53,13 @@ impl Market {
                 session: [v.session.world, v.session.player, v.session.character],
                 player: p.id,
                 account: p.account.unwrap(),
-                name: name.clone(),
+                name,
+                quote: self.quote.clone(),
                 until: v.elapsed_ms + 20_000,
                 requested: false,
+                outbound: false,
             });
-            "eligible_request"
-        } else {
-            "unobserved_or_out_of_reach"
-        };
-        tracing::info!(
-            account = v.session.account,
-            peer = name,
-            reason,
-            "market incoming request policy"
-        );
+        }
     }
     pub(in crate::bots) fn end_incoming(&mut self, v: &PlayerView) {
         self.incoming = None;
@@ -67,40 +75,32 @@ impl Market {
         let Some(g) = self.incoming.as_ref() else {
             return Ok(None);
         };
-        let reason = if g.session != [v.session.world, v.session.player, v.session.character]
-            || v.map.name != "Nexus"
-            || !super::super::settled(v)
-        {
-            Some("session_or_lifecycle_changed")
-        } else if v.elapsed_ms >= g.until {
-            Some("expired")
-        } else if self
-            .bargain
-            .as_ref()
-            .is_some_and(|b| b.resolution.is_none())
-        {
-            Some("active_bargain")
-        } else if !v.objects.iter().any(|p| {
-            p.id == g.player
-                && p.account == Some(g.account)
-                && p.name == g.name
-                && p.hp > 0
-                && v.position.distance(p.position) < 2.
-        }) {
-            Some("contact_changed")
-        } else {
-            None
-        };
-        if let Some(reason) = reason {
-            tracing::info!(
-                account = v.session.account,
-                peer = g.account,
-                reason,
-                "market incoming trade declined"
-            );
+        let valid = g.session == [v.session.world, v.session.player, v.session.character]
+            && v.map.name == "Nexus"
+            && super::super::settled(v)
+            && v.elapsed_ms < g.until
+            && v.character.hp * 4 >= v.character.stats[0] * 3
+            && !self.reserved_bargain();
+        let peer = v.objects.iter().find(|p| {
+            p.id == g.player && p.account == Some(g.account) && p.name == g.name && p.hp > 0
+        });
+        if !valid || peer.is_none() {
             return Ok(Some(TradeAction::Cancel));
         }
-        let Some(t) = self.trade.as_ref() else {
+        if self.incoming.as_ref().unwrap().quote.is_none() {
+            self.incoming.as_mut().unwrap().quote = self.quote(v, c, future)?;
+        }
+        let g = self.incoming.as_ref().unwrap();
+        let Some(q) = g.quote.clone() else {
+            return Ok(Some(TradeAction::Cancel));
+        };
+        if self.spare(v, c, future, q[0].kind)? < q[0].quantity {
+            return Ok(Some(TradeAction::Cancel));
+        }
+        if peer.unwrap().position.distance(v.position) >= 2. {
+            return Ok(None);
+        }
+        let Some(t) = self.trade.as_mut() else {
             if g.requested {
                 return Ok(None);
             }
@@ -108,59 +108,68 @@ impl Market {
             let g = self.incoming.as_mut().unwrap();
             g.requested = true;
             g.until = v.elapsed_ms + 60_000;
-            return Ok(Some(TradeAction::Request { name }));
-        };
-        if t.binding != g.session || t.peer != g.name || t.offers[0].iter().any(|b| *b) {
-            tracing::info!(
-                account = v.session.account,
-                reason = "binding_or_own_goods_changed",
-                "market incoming trade declined"
-            );
-            return Ok(Some(TradeAction::Cancel));
-        }
-        let mut quantities = BTreeMap::<i32, u8>::new();
-        for (slot, offered) in t.offers[1].iter().enumerate() {
-            if *offered {
-                if slot < 4 || t.items[1][slot] < 0 {
-                    tracing::info!(
-                        account = v.session.account,
-                        reason = "invalid_gift_slot",
-                        "market incoming trade declined"
-                    );
-                    return Ok(Some(TradeAction::Cancel));
-                }
-                *quantities.entry(t.items[1][slot]).or_default() += 1;
-            }
-        }
-        if quantities.is_empty() {
-            return Ok(None);
-        }
-        let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
-        let reason = if quantities.values().map(|q| *q as usize).sum::<usize>() > free {
-            Some("gift_exceeds_capacity")
-        } else {
-            let mut unwanted = false;
-            for (kind, quantity) in quantities {
-                if self.wanted(v, c, future, kind)? < quantity {
-                    unwanted = true;
-                }
-            }
-            unwanted.then_some("gift_not_needed")
-        };
-        if let Some(reason) = reason {
             tracing::info!(
                 account = v.session.account,
                 peer = g.account,
-                reason,
-                "market incoming trade declined"
+                outbound = g.outbound,
+                ?q,
+                "market inspecting native exchange"
+            );
+            return Ok(Some(TradeAction::Request { name }));
+        };
+        if t.binding != g.session || t.peer != g.name || t.items[0] != v.character.items {
+            return Ok(Some(TradeAction::Cancel));
+        }
+        let Some(mine) = select(&t.items[0], &q[0]) else {
+            return Ok(Some(TradeAction::Cancel));
+        };
+        if mine.iter().zip(t.tradeable).any(|(a, b)| *a && !b) {
+            return Ok(Some(TradeAction::Cancel));
+        }
+        let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
+        if free + usize::from(q[0].quantity) < usize::from(q[1].quantity) {
+            return Ok(Some(TradeAction::Cancel));
+        }
+        if !t.changed || t.offers[0] != mine {
+            t.changed = true;
+            t.offers[0] = mine;
+            t.ready = v.time_ms + 3000;
+            t.ready_at = v.clock_at + Duration::from_millis(3000);
+            return Ok(Some(TradeAction::Change { offer: mine }));
+        }
+        if t.offers[1].iter().all(|b| !*b) {
+            return Ok(None);
+        }
+        let compatible = t.offers[1]
+            .iter()
+            .enumerate()
+            .all(|(i, b)| !*b || (i >= 4 && t.items[1][i] == q[1].kind))
+            && t.offers[1].iter().filter(|b| **b).count() == usize::from(q[1].quantity);
+        if !compatible && v.time_ms >= t.ready && v.clock_at >= t.ready_at {
+            self.queue(
+                format!("nty need {}", goods_text(&q[1], c)?),
+                Channel::Tell(g.name.clone()),
             );
             return Ok(Some(TradeAction::Cancel));
         }
         Ok(
-            (v.time_ms >= t.ready && v.clock_at >= t.ready_at).then_some(TradeAction::Accept {
-                mine: [false; 12],
-                theirs: t.offers[1],
-            }),
+            (compatible && v.time_ms >= t.ready && v.clock_at >= t.ready_at).then_some(
+                TradeAction::Accept {
+                    mine,
+                    theirs: t.offers[1],
+                },
+            ),
         )
     }
+}
+fn select(items: &[i32], goods: &Goods) -> Option<[bool; 12]> {
+    let mut mask = [false; 12];
+    let mut count = 0;
+    for (i, k) in items.iter().enumerate().skip(4) {
+        if *k == goods.kind && count < goods.quantity {
+            mask[i] = true;
+            count += 1;
+        }
+    }
+    (count == goods.quantity).then_some(mask)
 }

@@ -156,7 +156,7 @@ async fn policy_speech_wait_is_enforced_but_does_not_stack_after_a_past_deadline
     );
 }
 
-async fn provider(
+pub(super) async fn provider(
     status: axum::http::StatusCode,
     body: Value,
 ) -> (Arc<Service>, tokio::task::JoinHandle<()>) {
@@ -289,4 +289,62 @@ async fn provider_failure_remains_observable_and_never_becomes_policy_speech() {
     assert_eq!(health["successes"], 0);
     assert_eq!(health["failures"], 1);
     assert_eq!(health["last_error"], "provider_rejected");
+}
+
+#[test]
+fn market_service_health_labels_process_budget_restart_reset_and_unknown_provider_quota() {
+    let service = Service::new(
+        "local-test-only",
+        "http://127.0.0.1:1",
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    {
+        let mut b = service.budget.lock().unwrap();
+        b.daily = 12;
+        b.contract_failed = true;
+        b.blocked_until = Instant::now() + Duration::from_secs(10);
+    }
+    let h = service.health();
+    assert_eq!(h["budget_scope"], "process-local");
+    assert_eq!(h["budget_resets_on_restart"], true);
+    assert_eq!(h["provider_quota"], "unknown");
+    assert_eq!(h["automatic_remaining"], 788);
+    assert_eq!(h["requests_remaining"], 988);
+    assert_eq!(h["contract_failed"], true);
+    assert!(h["cooldown_seconds"].as_u64().unwrap() > 0);
+    assert!(h["budget_window_resets_in_seconds"].as_u64().unwrap() <= 86400);
+    service.budget.lock().unwrap().day = Instant::now() - Duration::from_secs(86401);
+    let h = service.health();
+    assert_eq!(h["daily_requests"], 0);
+    assert_eq!(h["automatic_remaining"], 800);
+    assert_eq!(h["requests_remaining"], 1000);
+    assert_eq!(h["budget_window_resets_in_seconds"], 0);
+}
+
+#[tokio::test]
+async fn market_process_budget_reserves_human_headroom_and_caps_total_requests_before_network_use()
+{
+    let service = Service::new(
+        "local-test-only",
+        "http://127.0.0.1:1",
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    service.budget.lock().unwrap().daily = 800;
+    assert_eq!(
+        service
+            .ask(&json!({"automatic":true}), "auto-cap")
+            .await
+            .unwrap_err()
+            .0,
+        "request_budget_exhausted"
+    );
+    assert_eq!(service.health()["daily_requests"], 800);
+    service.budget.lock().unwrap().daily = 1000;
+    assert_eq!(
+        service.ask(&json!({}), "total-cap").await.unwrap_err().0,
+        "request_budget_exhausted"
+    );
+    assert_eq!(service.health()["daily_requests"], 1000);
 }

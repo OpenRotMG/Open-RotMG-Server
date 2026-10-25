@@ -71,6 +71,8 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+#[cfg(test)]
+pub(crate) use account_actions::tests::fixture as test_app;
 
 pub(crate) mod browser_link;
 pub(crate) mod diagnostics;

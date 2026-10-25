@@ -5,7 +5,7 @@ pub(super) async fn incoming(
     brain: &mut Brain,
     v: &PlayerView,
 ) -> Result<bool> {
-    let Some(g) = brain.mind.market.incoming.clone() else {
+    let Some(_) = brain.mind.market.incoming.as_ref() else {
         return Ok(false);
     };
     let action = brain
@@ -13,8 +13,15 @@ pub(super) async fn incoming(
         .market
         .incoming_action(v, &app.content, brain.mind.future_class)?;
     if let Some(action) = action {
+        let g = brain
+            .mind
+            .market
+            .incoming
+            .clone()
+            .context("incoming exchange disappeared")?;
         let cancel = matches!(action, crate::world::TradeAction::Cancel);
         let opening = matches!(action, crate::world::TradeAction::Request { .. });
+        let changed = matches!(action, crate::world::TradeAction::Change { .. });
         let id = v.session.player;
         let session = g.session;
         let result = app
@@ -27,16 +34,26 @@ pub(super) async fn incoming(
                 d.worlds
                     .get_mut(&session[0])
                     .context("incoming trade world missing")?
-                    .autonomous_incoming_trade(id, session, g.player, (g.account, g.name), action)
+                    .autonomous_incoming_trade(
+                        id,
+                        session,
+                        g.player,
+                        (g.account, g.name),
+                        action,
+                        g.quote,
+                    )
             })
             .await;
         match result {
             Ok(Some(plan)) => crate::server::persist_trade(app, plan).await?,
             Ok(None) => {
+                if changed && let Some(trade) = brain.mind.market.trade.as_mut() {
+                    trade.ready_at = app.world.clock.now() + std::time::Duration::from_millis(3000);
+                }
                 if opening {
                     tracing::info!(
                         account = v.session.account,
-                        "market incoming request opened with empty offer"
+                        "market native exchange opened; WINDOW offers remain authoritative"
                     );
                 }
             }

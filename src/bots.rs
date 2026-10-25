@@ -590,30 +590,15 @@ impl Brain {
             .social
             .healing(v, content, self.profile.companions)?;
         if decision.item.is_none()
+            && !self.mind.market.reserves_stock()
             && v.character.hp as f32 / v.character.stats[0] as f32 >= self.profile.recovery
         {
             decision.item = progression::mana(v, content)?;
         }
-        // A live bargain reserves its stock before ordinary consumption/equipment arbitration.
-        if self
-            .mind
-            .market
-            .bargain
-            .as_ref()
-            .is_some_and(|b| b.resolution.is_none())
-        {
-            let grid = self.navigation_grid(v, content, &[]);
-            if let Some(market) =
-                self.mind
-                    .market
-                    .decide(v, content, self.mind.future_class, &grid, &mut self.rng)?
-            {
-                return Ok((Activity::Trade, market));
-            }
-        }
+        let reserved = self.mind.market.reserves_stock();
         let inspecting = self.mind.inspecting(v, content);
         let perception = combat::Perception::attend(v, &self.mind.cognition, inspecting);
-        let equipment = if decision.item.is_none() {
+        let equipment = if decision.item.is_none() && !reserved {
             self.mind.assess(v, content)?
         } else {
             None
@@ -745,6 +730,19 @@ impl Brain {
         if self.reflex(v, content, &s, &mut decision)? {
             return Ok((Activity::Survive, decision));
         }
+        // Reflexes can escape a deal, but only durable receipts can settle it.
+        if reserved {
+            decision.item = None;
+            if let Some(market) = self.mind.market.decide(
+                v,
+                content,
+                self.mind.future_class,
+                &s.grid,
+                &mut self.rng,
+            )? {
+                return Ok((Activity::Trade, market));
+            }
+        }
         if (equipping && s.remedy.is_none()) || (v.map.name == "Vault" && s.inspecting) {
             return Ok((Activity::Equip, decision));
         }
@@ -772,6 +770,7 @@ impl Brain {
             return Ok((Activity::Event, event));
         }
         if decision.item.is_none()
+            && !reserved
             && s.nearest
                 .is_none_or(|e| e.position.distance(v.position) > 5.)
         {
