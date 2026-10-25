@@ -2427,6 +2427,11 @@ async fn connection_io<S, I>(
         .admission
         .take()
         .zip(session.account.as_ref().map(|owner| owner.id));
+    let dropped_account = session
+        .account
+        .as_ref()
+        .filter(|_| !reconnect_sent)
+        .map(|owner| owner.id);
     let finalization = session
         .account
         .take()
@@ -2435,6 +2440,7 @@ async fn connection_io<S, I>(
         let diagnostic = diagnostics::disconnect(
             &a,
             id,
+            dropped_account,
             &session.diagnostics,
             serde_json::json!({"reason":close_reason.to_string(),
             "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()}),

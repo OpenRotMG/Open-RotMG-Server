@@ -134,3 +134,41 @@ async fn website_screenshot_is_durable_public_png_without_leaking_queue_bytes() 
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn reports_keep_the_reporters_dropped_connection() {
+    let (_dir, a) = account_actions::tests::fixture();
+    let account = a.store.list("dropped".into()).await.unwrap().id;
+    let transport = json!({"reason":"Output","input_queue_packets":64,"output_queue_packets":0});
+    let connection = ConnectionDiagnostics::default();
+    disconnect(&a, 7, Some(account), &connection, transport.clone()).await;
+    let ch = a
+        .store
+        .create(account, a.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let presentation = a.store.presentation(account).await.unwrap();
+    let player = a
+        .world
+        .call(move |w| w.enter_at(ch, None, None, presentation))
+        .await
+        .unwrap();
+    let id = report(
+        &a,
+        account,
+        player,
+        "dropped near Skull Shrine",
+        &connection,
+        None,
+    )
+    .await
+    .unwrap();
+    let saved: Value = serde_json::from_slice(
+        &std::fs::read(a.diagnostics.root.join(format!("{id}.json"))).unwrap(),
+    )
+    .unwrap();
+    let drop = &saved["diagnostics"]["previous_drop"];
+    assert_eq!(drop["transport"], transport);
+    assert!(drop["diagnostics"]["connection"].is_object());
+    assert!(a.diagnostics.previous_drop(account + 1).is_null());
+}
