@@ -28,7 +28,7 @@ pub(super) fn start(slot: &Arc<Slot>, execution: Execution) -> Result<()> {
                     let id=slot.id;
                     drop(slot);
                     let (finished,stepped)=oneshot::channel();
-                    let body=Box::new(move|world:&mut World| {
+                    let body=Job::new("tick",std::time::Duration::ZERO,Box::new(move|world:&mut World| {
                         let run=!world.clock.paused();
                         if run {
                             let _context=crate::supervision::world(id,world.tick+1);
@@ -40,7 +40,7 @@ pub(super) fn start(slot: &Arc<Slot>, execution: Execution) -> Result<()> {
                             world.report_performance(id);
                         }
                         Box::new(move||{let _=finished.send(run);}) as crate::world::Reply
-                    });
+                    }));
                     if !run(&weak,&execution,&mut retired,body).await? { return Ok(()); }
                     if stepped.await.context("world tick completion missing")? {
                         let Some(slot)=weak.upgrade() else { return Ok(()) };
@@ -67,8 +67,10 @@ async fn run(
     weak: &Weak<Slot>,
     execution: &Execution,
     retired: &mut watch::Receiver<bool>,
-    body: Job<World>,
+    mut body: Job<World>,
 ) -> Result<bool> {
+    body.sample.stages[1] = body.enqueued.elapsed();
+    let ownership = std::time::Instant::now();
     execution.supervisor.ensure_running()?;
     let Some(slot) = weak.upgrade() else {
         return Ok(false);
@@ -80,7 +82,7 @@ async fn run(
         if *retired.borrow() {
             return Ok(false);
         }
-        if let Some(world) = slot.try_work()? {
+        if let Some(world) = slot.try_work(&mut body.sample.blocker)? {
             break world;
         }
         tokio::select! {
@@ -89,6 +91,7 @@ async fn run(
         }
         execution.supervisor.ensure_running()?;
     };
+    body.sample.stages[2] = ownership.elapsed();
     let finished = execution.pool.submit(slot.clone(), world, body)?;
     finished
         .await
@@ -104,18 +107,23 @@ async fn coordinate(
         return Ok(false);
     };
     let (finished, result) = oneshot::channel();
+    let send_started = std::time::Instant::now();
     let permit = coordinator
         .reserve()
         .await
         .context("world coordinator stopped")?;
-    permit.send(Box::new(move |directory| {
-        let started = crate::performance::Measure::start();
-        directory.coordinate(&[world]);
-        directory.performance.work("coordination", started);
-        Box::new(move || {
-            let _ = finished.send(());
-        })
-    }));
+    permit.send(Job::new(
+        "coordinate",
+        send_started.elapsed(),
+        Box::new(move |directory| {
+            let started = crate::performance::Measure::start();
+            directory.coordinate(&[world]);
+            directory.performance.work("coordination", started);
+            Box::new(move || {
+                let _ = finished.send(());
+            })
+        }),
+    ));
     tokio::select! {
         done=result=>{done.context("world coordination did not complete")?;Ok(true)},
         changed=retired.changed()=>{
