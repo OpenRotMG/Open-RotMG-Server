@@ -1075,7 +1075,6 @@ impl Directory {
             "nexus",
             "nexus-limbo",
             "vault",
-            "pirate-cave",
             crate::endgame::CASTLE,
             crate::endgame::CHAMBER,
             crate::endgame::CELLAR,
@@ -1155,6 +1154,11 @@ impl Directory {
             self.content.clone(),
             if let Some(index) = layout {
                 self.realms[index].open(&self.content)?
+            } else if template == "pirate-cave" {
+                let seed = self
+                    .prepared_seed
+                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
+                Arc::new(crate::dungeon::pirate::generate(&self.content, seed)?)
             } else if template == "abyss-of-demons" {
                 let seed = match self.prepared_seed {
                     Some(seed) => seed ^ self.next_world as u64,
@@ -7283,6 +7287,8 @@ mod dungeon_return_tests;
 mod hermit_loot_tests;
 #[cfg(test)]
 mod period_loot_tests;
+#[cfg(test)]
+mod pirate_generation_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 #[cfg(test)]
