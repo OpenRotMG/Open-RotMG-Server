@@ -71,6 +71,8 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+#[cfg(test)]
+pub(crate) use account_actions::tests::fixture as test_app;
 
 pub(crate) mod browser_link;
 pub(crate) mod diagnostics;
@@ -97,6 +99,7 @@ pub struct App {
     pub behind_proxy: bool,
     pub shore_bots: bool,
     pub bot_population: usize,
+    pub bot_session_seconds: [u64; 2],
     pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
     pub society: Arc<Mutex<crate::bots::adventures::Society>>,
     pub cctv: Arc<crate::bots::cctv::Cctv>,
