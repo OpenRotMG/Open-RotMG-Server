@@ -389,6 +389,16 @@ impl Market {
             ]
         };
         let stock = self.stock(v, c, future)?;
+        let maxing_speed = self.quote.as_ref().is_some_and(|q| q[1].kind == SPEED)
+            && v.character.base_stats[4] < c.classes[&v.character.class].caps[4];
+        if maxing_speed {
+            if v.character.items.iter().skip(4).any(|k| *k == SPEED) {
+                return Ok(None);
+            }
+            return Ok((self.count(v, DEFENSE) > 0
+                && self.wanted(v, c, future, SPEED)? >= price as u8)
+                .then(|| pair(DEFENSE, 1, SPEED, price as u8)));
+        }
         // Equipment wants must be genuine upgrades; Life is held until one is available.
         if self.count(v, LIFE) > 0
             && let Some(kind) = self.gear_want(v, c, future)?
@@ -663,6 +673,8 @@ impl Market {
         self.observe(v);
         if let Some(q) = &self.quote
             && self.wanted(v, c, future, q[1].kind)? == 0
+            && !(q[1].kind == SPEED
+                && v.character.base_stats[4] < c.classes[&v.character.class].caps[4])
         {
             self.quote = None;
             self.preparing = false;

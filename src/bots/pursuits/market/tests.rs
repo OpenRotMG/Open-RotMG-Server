@@ -249,4 +249,19 @@ fn market_trade_up_intent_farms_short_stock_instead_of_buying_its_own_speed_back
     )
     .unwrap();
     assert_eq!(m.wants_speed(&v), needed);
+    let (mut buyer, mut v) = fixture(&c, [DEFENSE, -1, -1, -1, -1, -1, -1, -1]);
+    buyer.quote = buyer.quote(&v, &c, None).unwrap();
+    assert_eq!(buyer.quote.as_ref().unwrap()[1].kind, SPEED);
+    v.character.items[4..].fill(-1);
+    v.character.items[4..8].fill(SPEED);
+    assert!(
+        buyer.quote(&v, &c, None).unwrap().is_none(),
+        "use purchased Speed for the selected maxing goal instead of selling it back"
+    );
+    v.character.base_stats[4] = c.classes[&v.character.class].caps[4];
+    assert_eq!(
+        buyer.quote(&v, &c, None).unwrap().unwrap()[1].kind,
+        DEFENSE,
+        "actual excess Speed may trade up after maxing"
+    );
 }
