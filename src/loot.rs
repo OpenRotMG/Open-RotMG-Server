@@ -916,7 +916,8 @@ pub(crate) fn period_boss(kind: u16) -> bool {
     matches!(kind, 0xd56 | 0xd59 | 0xd60)
 }
 fn independent(kind: u16) -> bool {
-    kind == crate::dungeon::tomb::TREASURE
+    period_dungeon(kind)
+        || kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
         || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50 | 0xd52 | 0xd53)
         || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b)

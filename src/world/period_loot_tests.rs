@@ -9,6 +9,12 @@ async fn period_loot_keeps_ownership_threshold_boundaries_and_repeated_rewards()
     for id in w.entities.keys().copied().collect::<Vec<_>>() {
         w.remove_entity(id);
     }
+    let map = Arc::make_mut(&mut w.map);
+    map.spawns = vec![(1.5, 1.5)];
+    for cell in &mut map.cells {
+        cell.ground = 0x61;
+        cell.object = None;
+    }
     for i in 0..3 {
         let account = store.list(format!("period-loot-{i}")).await.unwrap();
         let ch = store

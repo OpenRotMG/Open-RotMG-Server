@@ -5796,6 +5796,8 @@ impl World {
             2
         } else if private {
             eligible.len()
+        } else if crate::loot::period_dungeon(defeated.kind) {
+            1
         } else {
             // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
             let multiplier = match defeated.kind {
