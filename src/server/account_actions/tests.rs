@@ -14,6 +14,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
         started: std::time::Instant::now(),
         testing: None,
         society: Arc::default(),
+        cctv: Arc::default(),
         store: Store::open(&dir.join("game.db"), &content).unwrap(),
         world: Handle::spawn(
             match production_seed {

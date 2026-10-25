@@ -98,6 +98,7 @@ pub struct App {
     pub shore_bots: bool,
     pub dialogue: Option<Arc<crate::bots::dialogue::Service>>,
     pub society: Arc<Mutex<crate::bots::adventures::Society>>,
+    pub cctv: Arc<crate::bots::cctv::Cctv>,
     pub requests: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
     pub picture_reads: Arc<Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>>,
     pub connections: Arc<tokio::sync::Semaphore>,
@@ -124,7 +125,7 @@ fn error(e: anyhow::Error) -> Response {
     )
         .into_response()
 }
-fn request_ip(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<IpAddr> {
+pub(crate) fn request_ip(a: &App, headers: &HeaderMap, peer: SocketAddr) -> Result<IpAddr> {
     if let Some(origin) = headers.get("origin") {
         ensure!(
             origin.to_str()? == a.origin,
@@ -495,10 +496,7 @@ async fn health(State(a): State<App>) -> Response {
     let started = a.started;
     match a.world.directory(move |d| Ok(d.health(started))).await {
         Ok(mut v) => {
-            v["bot_dialogue"] = match &a.dialogue {
-                Some(service) => service.health(),
-                None => serde_json::json!({"enabled":false,"status":"disabled"}),
-            };
+            v["bot_dialogue"] = crate::bots::dialogue::health(a.dialogue.as_deref());
             Json(v).into_response()
         }
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, error(e)).into_response(),
@@ -2429,6 +2427,11 @@ async fn connection_io<S, I>(
         .admission
         .take()
         .zip(session.account.as_ref().map(|owner| owner.id));
+    let dropped_account = session
+        .account
+        .as_ref()
+        .filter(|_| !reconnect_sent)
+        .map(|owner| owner.id);
     let finalization = session
         .account
         .take()
@@ -2437,6 +2440,7 @@ async fn connection_io<S, I>(
         let diagnostic = diagnostics::disconnect(
             &a,
             id,
+            dropped_account,
             &session.diagnostics,
             serde_json::json!({"reason":close_reason.to_string(),
             "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()}),
@@ -3100,6 +3104,8 @@ fn routes(a: &App, client: PathBuf) -> Router {
         ))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
+        .route("/api/bots", get(crate::bots::cctv::list))
+        .route("/api/bots/{name}/stream", get(crate::bots::cctv::stream))
         .route(
             "/internal/discord/critical-incident",
             get(critical_incident),
