@@ -214,7 +214,8 @@ async fn enter_admitted(
         })
         .await?;
     let view = app.world.player_view(id).await?;
-    app.cctv.entered(profile.name, &view);
+    app.cctv
+        .entered(profile.name, view.session.player, view.session.account);
     tracing::info!(
         player = id,
         name = profile.name,
@@ -510,10 +511,10 @@ pub(super) async fn start_test_persona(
         app,
         profile,
         character.clone(),
-        world,
-        Some(position),
+        (world, Some(position)),
         None,
         owner,
+        None,
     )
     .await?;
     Ok(character)
@@ -953,6 +954,9 @@ pub(super) async fn launch(
                 finalized = false;
                 tracing::error!(player=id,account,%error,"autonomous finalization failed; account remains fenced");
             }
+        }
+        if finalized {
+            app.cctv.departed(profile.name, id, account);
         }
         dialogue::cancel(&mut pending);
         dialogue::end_agreement(&app, &mut brain, "controller stopped").await;

@@ -65,12 +65,29 @@ impl Cctv {
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
         self.0.lock().expect("bot CCTV registry poisoned")
     }
-    pub(super) fn entered(&self, name: &'static str, v: &PlayerView) {
+    pub(super) fn entered(&self, name: &'static str, player: i32, account: i32) {
         let mut registry = self.lock();
         let feed = registry.feed(name);
-        feed.session = Some((v.session.player, v.session.account));
+        feed.session = Some((player, account));
+        feed.shots.clear();
         feed.frame = Value::Null;
         feed.updated = Instant::now();
+    }
+    pub(super) fn departed(&self, name: &'static str, player: i32, account: i32) {
+        let mut registry = self.lock();
+        if let Some(feed) = registry.feeds.get_mut(name)
+            && feed.session == Some((player, account))
+        {
+            feed.session = None;
+            feed.frame = Value::Null;
+            feed.shots.clear();
+            feed.updated = Instant::now();
+        }
+    }
+    fn live_bots(&self) -> Vec<Value> {
+        self.lock().feeds.iter().filter(|(_,f)|f.session.is_some()).map(|(name,f)|
+            json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame})
+        ).collect()
     }
     pub(crate) fn binding(&self, name: &str) -> Option<(i32, i32)> {
         self.lock().feeds.get(name).and_then(|f| f.session)
@@ -197,7 +214,11 @@ impl Viewer {
         native: bool,
     ) -> Result<Self, (StatusCode, String)> {
         let mut registry = cctv.lock();
-        let Some((&name, _)) = registry.feeds.get_key_value(name) else {
+        let Some((&name, _)) = registry
+            .feeds
+            .get_key_value(name)
+            .filter(|(_, f)| f.session.is_some())
+        else {
             return Err((StatusCode::NOT_FOUND, format!("no live bot named {name}")));
         };
         if registry
@@ -247,9 +268,7 @@ impl Drop for Viewer {
 }
 
 pub(crate) async fn list(State(a): State<App>) -> Response {
-    let bots: Vec<_> = a.cctv.lock().feeds.iter().map(|(name, f)| {
-        json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame})
-    }).collect();
+    let bots = a.cctv.live_bots();
     let llm = dialogue::health(a.dialogue.as_deref());
     (
         [("cache-control", "no-store")],
@@ -285,6 +304,9 @@ pub(crate) async fn stream(
                 _ = ticks.tick() => {},
                 _ = shutdown.wait_for(|stop| *stop) => return None,
             }
+            if viewer.cctv.binding(viewer.name).is_none() {
+                return None;
+            }
             let (event, seen) = viewer.cctv.update(viewer.name, seen);
             let event = sse::Event::default().data(event);
             Some((
@@ -303,7 +325,7 @@ mod tests {
     #[test]
     fn viewers_are_bounded_and_released() {
         let cctv = Arc::new(Cctv::default());
-        cctv.lock().feed("Triceps");
+        cctv.entered("Triceps", 7, 1);
         let refused = |name, ip| Viewer::join(&cctv, name, ip, false).err().unwrap().0;
         let ip = IpAddr::from([192, 0, 2, 1]);
         assert_eq!(refused("Nobody", ip), StatusCode::NOT_FOUND);
@@ -319,6 +341,31 @@ mod tests {
         drop(native);
         drop(full);
         assert!(cctv.lock().ips.is_empty());
+    }
+
+    #[test]
+    fn departures_hide_only_matching_sessions_and_preserve_viewer_leases() {
+        let cctv = Arc::new(Cctv::default());
+        let ip = IpAddr::from([192, 0, 2, 1]);
+        cctv.entered("Triceps", 7, 1);
+        let viewer = Viewer::join(&cctv, "Triceps", ip, false).unwrap();
+        cctv.departed("Triceps", 8, 1);
+        assert_eq!(cctv.binding("Triceps"), Some((7, 1)));
+        assert_eq!(cctv.live_bots().len(), 1);
+        cctv.departed("Triceps", 7, 1);
+        assert!(cctv.binding("Triceps").is_none() && cctv.live_bots().is_empty());
+        assert_eq!(
+            Viewer::join(&cctv, "Triceps", ip, true).err().unwrap().0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(cctv.lock().feeds["Triceps"].viewers, 1);
+        cctv.entered("Triceps", 9, 2);
+        cctv.departed("Triceps", 7, 1);
+        assert_eq!(cctv.binding("Triceps"), Some((9, 2)));
+        assert_eq!(cctv.live_bots()[0]["name"], "Triceps");
+        drop(viewer);
+        assert!(cctv.lock().ips.is_empty());
+        assert_eq!(cctv.lock().feeds["Triceps"].viewers, 0);
     }
 
     #[test]
