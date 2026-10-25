@@ -42,6 +42,15 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
         _ => &[],
     }
 }
+// Period armor is zero-based: https://web.archive.org/web/20120202161107/http://forums.wildshadow.com/wiki/realm-mad-god/armor
+// Named identities establish selected-XML armor tier = period wiki tier + 1.
+pub(crate) fn period_dungeon(kind: u16) -> bool {
+    matches!(
+        kind,
+        0x21d..=0x220 | 0x936 | 0x683..=0x68f | 0x927 | 0xd01..=0xd04
+            | 0xd06 | 0x917 | 0xd90 | 0x66d..=0x672 | crate::dungeon::abyss::MALPHAS
+    )
+}
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
@@ -211,10 +220,16 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | crate::dungeon::jungle::WARRIOR
         | crate::dungeon::jungle::HUNTER => &[(0.1, Item(0xc1a))],
         kind if crate::dungeon::jungle::ROSTER.contains(&kind) => &[],
-        crate::dungeon::spider::BOSS => {
-            &[(0.2, Item(0xa16)), (0.2, Item(0x708)), (0.2, Item(0x709))]
-        }
-        0x21d..=0x220 => &[(0.2, Item(0x707))],
+        // https://web.archive.org/web/20120201110941/http://forums.wildshadow.com/wiki/realm-mad-god/arachna-spider-queen
+        crate::dungeon::spider::BOSS => &[
+            (0.99, Item(0x707)),
+            (0.25, Item(0x707)),
+            (0.23, Item(0x708)),
+            (0.23, Item(0x709)),
+            (0.99, Item(0xa16)),
+        ],
+        // https://web.archive.org/web/20120216023204/http://forums.wildshadow.com/wiki/realm-mad-god/brown-den-spider
+        0x21d..=0x220 => &[(0.15, Item(0x707))],
         0x21b | 0x21c | 0x937..=0x93f => &[],
         crate::dungeon::trench::HERMIT => {
             &[(0.1, Item(0xa34)), (0.1, Item(0xa4c)), (0.004, Item(0xc08))]
@@ -497,26 +512,31 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa23)),
         ],
         0x60e..=0x610 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
-        0x687..=0x689 => &[(0.01, Item(0xa22))],
-        0x68a..=0x68e => &[(0.1, Tier(1, ABILITIES))],
-        0x68f => &[(0.1, Tier(1, WEAPONS))],
+        // https://web.archive.org/web/20111126104739/http://forums.wildshadow.com/wiki/realm-mad-god/cave-pirate-brawler
+        0x687..=0x689 => &[(0.03, Item(0xa22))],
+        // https://web.archive.org/web/20111126104744/http://forums.wildshadow.com/wiki/realm-mad-god/cave-pirate-cabin-boy
+        0x68a..=0x68e => &[(0.2, Tier(1, ABILITIES))],
+        0x68f => &[(0.1, Tier(1, WEAPONS)), (0.2, Tier(1, ABILITIES))],
+        // https://web.archive.org/web/20111126105041/http://forums.wildshadow.com/wiki/realm-mad-god/pirate-lieutenant
         0x683..=0x686 => &[
-            (0.3, Tier(1, ARMOR)),
-            (0.3, Tier(1, RINGS)),
+            (0.2, Tier(1, ARMOR)),
+            (0.1, Tier(2, ARMOR)),
+            (0.05, Tier(1, RINGS)),
             (0.2, Tier(2, WEAPONS)),
             (0.1, Tier(3, WEAPONS)),
-            (0.01, Item(0xa50)),
+            (0.005, Item(0xa50)),
         ],
+        // https://web.archive.org/web/20120217160929/http://forums.wildshadow.com/wiki/realm-mad-god/dreadstump-pirate-king
         0x927 => &[
-            (0.01, Item(0xa50)),
-            (0.15, Tier(1, ARMOR)),
-            (0.5, Tier(1, RINGS)),
+            (0.05, Item(0xa50)),
+            (0.4, Tier(1, ARMOR)),
+            (0.1, Tier(1, RINGS)),
             (0.2, Tier(2, ARMOR)),
-            (0.2, Tier(2, WEAPONS)),
-            (0.25, Tier(3, ARMOR)),
-            (0.3, Tier(3, WEAPONS)),
-            (0.3, Tier(4, ARMOR)),
-            (0.4, Tier(4, WEAPONS)),
+            (0.4, Tier(2, WEAPONS)),
+            (0.1, Tier(3, ARMOR)),
+            (0.2, Tier(3, WEAPONS)),
+            (0.05, Tier(4, ARMOR)),
+            (0.1, Tier(4, WEAPONS)),
         ],
         0x172
         | 0x173
@@ -615,7 +635,31 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Tier(3, RINGS)),
             (0.05, Tier(6, WEAPONS)),
         ],
-        0xd00..=0xd04 => &[(0.02, Tier(5, WEAPONS)), (0.05, Item(0xa23))],
+        // https://web.archive.org/web/20120127132732/http://forums.wildshadow.com/wiki/realm-mad-god/sprites
+        // Keep existing unlisted candidates; absence from the wiki is not disproof.
+        0xd00 => &[(0.02, Tier(5, WEAPONS)), (0.05, Item(0xa23))],
+        0xd01 => &[
+            (0.02, Tier(5, WEAPONS)),
+            (0.05, Item(0xa23)),
+            (0.04, Tier(2, ABILITIES)),
+        ],
+        0xd02 => &[
+            (0.02, Tier(5, WEAPONS)),
+            (0.05, Item(0xa23)),
+            (0.01, Tier(6, ARMOR)),
+        ],
+        0xd03 => &[
+            (0.02, Tier(5, WEAPONS)),
+            (0.03, Item(0xa23)),
+            (0.03, Item(0xa4b)),
+            (0.02, Item(0xa2d)),
+        ],
+        0xd04 => &[
+            (0.02, Tier(5, WEAPONS)),
+            (0.05, Item(0xa23)),
+            (0.03, Item(0xa22)),
+            (0.02, Item(0xa4d)),
+        ],
         0xd95 | 0xd98..=0xd9a => &[
             (0.2, Tier(5, ARMOR)),
             (0.2, Tier(6, WEAPONS)),
@@ -624,7 +668,20 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.1, Tier(3, ABILITIES)),
             (0.1, Tier(3, RINGS)),
         ],
-        0x917 | crate::dungeon::snake::GUARD => &[
+        // https://web.archive.org/web/20120118035706/http://forums.wildshadow.com/wiki/realm-mad-god/stheno-snake-queen
+        0x917 => &[
+            (1., Item(0xa21)),
+            (0.006, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc04)),
+            (0.45, Item(0xa3e)),
+            (0.45, Item(0xa40)),
+            (0.45, Item(0xa41)),
+            (0.3, Tier(9, WEAPONS)),
+            (0.3, Tier(9, ARMOR)),
+            (0.05, Tier(10, WEAPONS)),
+            (0.05, Tier(10, ARMOR)),
+        ],
+        crate::dungeon::snake::GUARD => &[
             (1., Item(0xa21)),
             (0.05, Item(crate::endgame::INCANTATION)),
             (0.05, Item(0xc04)),
@@ -634,85 +691,101 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.2, Tier(9, WEAPONS)),
             (0.3, Tier(8, ARMOR)),
         ],
+        // https://web.archive.org/web/20120114025209/http://forums.wildshadow.com/wiki/realm-mad-god/limon-sprite-god
+        // The cloak rate is marked "???"; preserve its existing reconstruction.
         0xd06 => &[
             (1., Item(0xa4c)),
-            (0.01, Item(0xa4b)),
-            (0.01, Item(0xc03)),
+            (0.1, Item(0xa4b)),
+            (0.006, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc03)),
             (0.01, Item(0xa5a)),
-            (0.15, Tier(7, ARMOR)),
-            (0.124, Tier(4, ABILITIES)),
-            (0.11, Tier(3, RINGS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.05, Tier(3, ABILITIES)),
+            (0.01, Tier(5, ABILITIES)),
+            (0.024, Tier(4, ABILITIES)),
+            (0.05, Tier(3, RINGS)),
         ],
+        // https://web.archive.org/web/20120114021352/http://forums.wildshadow.com/wiki/realm-mad-god/septavius-ghost-god
         0xd90 => &[
             (1., Item(0xa35)),
-            (0.005, Item(crate::endgame::INCANTATION)),
-            (0.009, Item(0xc02)),
-            (0.3, Tier(7, WEAPONS)),
+            (0.006, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc02)),
+            (0.4, Tier(7, WEAPONS)),
             (0.2, Tier(8, WEAPONS)),
-            (0.2, Tier(4, ABILITIES)),
-            (0.3, Tier(3, RINGS)),
+            (0.4, Tier(3, ABILITIES)),
+            (0.15, Tier(4, ABILITIES)),
+            (0.05, Tier(5, ABILITIES)),
+            (0.4, Tier(3, RINGS)),
+            (0.12, Tier(4, RINGS)),
         ],
+        // https://web.archive.org/web/20120209020521/http://forums.wildshadow.com/wiki/realm-mad-god/imp-abyss
         0x66d => &[
-            (0.03, Item(0xa22)),
+            (0.02, Item(0xa22)),
             (0.02, Item(0xa23)),
             (0.01, Item(0xa59)),
             (0.01, Item(0xaa7)),
         ],
+        // https://web.archive.org/web/20120216011240/http://forums.wildshadow.com/wiki/realm-mad-god/demon-abyss
         0x66e => &[
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
-            (0.01, Item(0xa1c)),
-            (0.01, Item(0xa12)),
+            (0.02, Item(0xa1c)),
+            (0.02, Item(0xa12)),
         ],
+        // https://web.archive.org/web/20120216044619/http://forums.wildshadow.com/wiki/realm-mad-god/demon-warrior-abyss
         0x66f => &[
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
-            (0.01, Item(0xa3b)),
-            (0.01, Item(0xa0a)),
+            (0.02, Item(0xa3b)),
+            (0.02, Item(0xa0a)),
         ],
+        // https://web.archive.org/web/20120215021713/http://forums.wildshadow.com/wiki/realm-mad-god/demon-mage-abyss
         0x670 => &[
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
-            (0.01, Item(0xa2f)),
-            (0.01, Item(0xa3d)),
-            (0.01, Item(0xa9d)),
-            (0.01, Item(0xa5f)),
-            (0.01, Item(0xaae)),
+            (0.02, Item(0xa2f)),
+            (0.02, Item(0xa3d)),
+            (0.02, Item(0xa9d)),
+            (0.02, Item(0xa5f)),
+            (0.02, Item(0xaae)),
             (0.01, Item(0xab5)),
         ],
+        // https://web.archive.org/web/20120215010915/http://forums.wildshadow.com/wiki/realm-mad-god/brute-abyss
         0x671 => &[
-            (0.03, Item(0xa22)),
+            (0.02, Item(0xa22)),
             (0.02, Item(0xa23)),
-            (0.01, Item(0xa17)),
+            (0.02, Item(0xa17)),
             (0.01, Item(0xa6a)),
         ],
+        // https://web.archive.org/web/20120214232201/http://forums.wildshadow.com/wiki/realm-mad-god/brute-warrior-abyss
         0x672 => &[
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
-            (0.01, Item(0xa3c)),
+            (0.02, Item(0xa3c)),
             (0.01, Item(0xa4e)),
             (0.01, Item(0xa64)),
-            (0.01, Item(0xa32)),
+            (0.02, Item(0xa32)),
         ],
         0x908 => &[(0.04, Item(0xa22)), (0.06, Item(0xa23))],
         0x90b => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
         0x909 => &[],
+        // https://web.archive.org/web/20120207191548/http://forums.wildshadow.com/wiki/realm-mad-god/archdemon-malphas
         // Preserve #244's paired private-potion contract; historical allocation is separate: https://github.com/OpenRotMG/Open-RotMG-Server/issues/244
         crate::dungeon::abyss::MALPHAS => &[
             (1., Item(0xa34)),
             (1., Item(0xa20)),
-            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.006, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
-            (0.8, Tier(7, WEAPONS)),
-            (0.11, Tier(9, WEAPONS)),
-            (0.05, Tier(10, WEAPONS)),
-            (0.8, Tier(6, ARMOR)),
-            (0.4, Tier(8, ARMOR)),
-            (0.11, Tier(9, ARMOR)),
+            (0.7, Tier(7, WEAPONS)),
+            (0.4, Tier(9, WEAPONS)),
+            (0.15, Tier(10, WEAPONS)),
+            (0.7, Tier(7, ARMOR)),
+            (0.4, Tier(9, ARMOR)),
+            (0.15, Tier(10, ARMOR)),
             (0.5, Tier(3, ABILITIES)),
-            (0.06, Tier(4, ABILITIES)),
+            (0.3, Tier(4, ABILITIES)),
             (0.5, Tier(3, RINGS)),
-            (0.06, Tier(4, RINGS)),
+            (0.3, Tier(4, RINGS)),
         ],
         crate::dungeon::abyss::IDOL => &[
             (1., Item(0xa34)),
@@ -1050,6 +1123,107 @@ mod tests {
         SeedableRng,
         rngs::{StdRng, mock::StepRng},
     };
+
+    #[test]
+    fn period_dungeon_wiki_named_drop_entries() {
+        for (kind, item, expected) in [
+            (0x936, 0x707, vec![0.99, 0.25]),
+            (0x936, 0xa16, vec![0.99]),
+            (0x936, 0x708, vec![0.23]),
+            (0x936, 0x709, vec![0.23]),
+            (0x21d, 0x707, vec![0.15]),
+            (0x220, 0x707, vec![0.15]),
+            (0x683, 0xa50, vec![0.005]),
+            (0x927, 0xa50, vec![0.05]),
+            (0xd03, 0xa4b, vec![0.03]),
+            (0xd03, 0xa2d, vec![0.02]),
+            (0xd04, 0xa4d, vec![0.02]),
+            (0xd06, 0xa4b, vec![0.1]),
+            (0xd06, 0xc03, vec![0.001]),
+            (0x917, 0xa3e, vec![0.45]),
+            (0x917, 0xa40, vec![0.45]),
+            (0x917, 0xa41, vec![0.45]),
+            (0x917, 0xc04, vec![0.001]),
+            (0xd90, 0xc02, vec![0.001]),
+            (0x66d, 0xa22, vec![0.02]),
+            (0x66e, 0xa1c, vec![0.02]),
+            (0x66e, 0xa12, vec![0.02]),
+            (0x66f, 0xa3b, vec![0.02]),
+            (0x66f, 0xa0a, vec![0.02]),
+            (0x670, 0xa2f, vec![0.02]),
+            (0x670, 0xa3d, vec![0.02]),
+            (0x670, 0xab5, vec![0.01]),
+            (0x671, 0xa17, vec![0.02]),
+            (0x672, 0xa3c, vec![0.02]),
+            (0x672, 0xa32, vec![0.02]),
+        ] {
+            let actual: Vec<_> = table(kind)
+                .iter()
+                .filter_map(|(chance, pick)| {
+                    matches!(pick, Pick::Item(id) if *id == item).then_some(*chance)
+                })
+                .collect();
+            assert_eq!(actual, expected, "kind={kind:#x} item={item:#x}");
+            assert!(period_dungeon(kind));
+        }
+    }
+
+    #[test]
+    fn period_dungeon_rows_validate_without_reclassifying_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in content
+            .objects
+            .keys()
+            .copied()
+            .filter(|k| period_dungeon(*k))
+        {
+            validate(&content, kind).unwrap();
+        }
+        for (kind, tier, slots, expected) in [
+            (0x683, 1, ARMOR, 0.2),
+            (0x683, 2, ARMOR, 0.1),
+            (0x927, 1, ARMOR, 0.4),
+            (0x927, 4, ARMOR, 0.05),
+            (0x68f, 1, ABILITIES, 0.2),
+            (0xd01, 2, ABILITIES, 0.04),
+            (0xd02, 6, ARMOR, 0.01),
+            (0xd06, 7, ARMOR, 0.05),
+            (0xd06, 4, ABILITIES, 0.024),
+            (0x917, 10, WEAPONS, 0.05),
+            (0x917, 9, ARMOR, 0.3),
+            (0x917, 10, ARMOR, 0.05),
+            (0xd90, 5, ABILITIES, 0.05),
+            (crate::dungeon::abyss::MALPHAS, 9, WEAPONS, 0.4),
+            (crate::dungeon::abyss::MALPHAS, 7, ARMOR, 0.7),
+            (crate::dungeon::abyss::MALPHAS, 9, ARMOR, 0.4),
+            (crate::dungeon::abyss::MALPHAS, 10, ARMOR, 0.15),
+        ] {
+            assert!(
+                table(kind).iter().any(|(chance, pick)| {
+                    *chance == expected
+                        && matches!(pick, Pick::Tier(t, s) if *t == tier && *s == slots)
+                }),
+                "{kind:#x} tier={tier}"
+            );
+        }
+        for kind in [0x917, 0xd06, 0xd90, crate::dungeon::abyss::MALPHAS] {
+            assert!(table(kind).iter().any(|(chance, pick)| {
+                *chance == 0.006 && matches!(pick, Pick::Item(crate::endgame::INCANTATION))
+            }));
+        }
+        // These reconstruction rows must not inherit the related boss's period rates.
+        for kind in [crate::dungeon::snake::GUARD, crate::dungeon::abyss::IDOL] {
+            assert!(!period_dungeon(kind));
+            assert!(private(kind));
+            assert!(
+                table(kind)
+                    .iter()
+                    .any(|(_, pick)| { matches!(pick, Pick::Item(crate::endgame::INCANTATION)) })
+            );
+        }
+        assert!(!private(crate::dungeon::spider::BOSS));
+        assert!(!private(0xd03));
+    }
 
     #[test]
     fn coil_chest_limits_successes_without_filling_failed_rolls() {
