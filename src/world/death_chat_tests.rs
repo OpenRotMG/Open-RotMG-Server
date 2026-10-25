@@ -1,12 +1,17 @@
 use super::*;
 
-async fn fixture() -> (World, crate::store::Store, [i32; 2], mpsc::Receiver<Packet>) {
+async fn fixture() -> (
+    World,
+    crate::store::Store,
+    [i32; 2],
+    Vec<mpsc::Receiver<Packet>>,
+) {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let mut world = World::new(content, map).unwrap();
     let mut ids = Vec::new();
-    let (packets, mut inbox) = mpsc::channel(64);
+    let mut inboxes = Vec::new();
     let (lost, _) = watch::channel(false);
     for role in ["victim", "witness"] {
         let account = store.list(format!("death-chat-{role}")).await.unwrap();
@@ -20,11 +25,14 @@ async fn fixture() -> (World, crate::store::Store, [i32; 2], mpsc::Receiver<Pack
         if role == "victim" {
             ch.name = "Victim".into();
         }
-        let output = (role == "witness").then(|| Output {
-            packets: packets.clone(),
+        let (packets, mut inbox) = mpsc::channel(64);
+        let output = Some(Output {
+            packets,
             lost: lost.clone(),
         });
         ids.push(world.enter(ch, output).unwrap());
+        while inbox.try_recv().is_ok() {}
+        inboxes.push(inbox);
     }
     let origin = world.players[&ids[0]].pos;
     let witness = world.players.get_mut(&ids[1]).unwrap();
@@ -32,8 +40,7 @@ async fn fixture() -> (World, crate::store::Store, [i32; 2], mpsc::Receiver<Pack
         x: origin.x,
         y: origin.y - 60.,
     };
-    while inbox.try_recv().is_ok() {}
-    (world, store, [ids[0], ids[1]], inbox)
+    (world, store, [ids[0], ids[1]], inboxes)
 }
 
 fn messages(inbox: &mut mpsc::Receiver<Packet>) -> Vec<String> {
@@ -56,7 +63,8 @@ fn messages(inbox: &mut mpsc::Receiver<Packet>) -> Vec<String> {
 #[tokio::test]
 async fn death_chat_is_world_wide_once_and_only_after_successful_persistence() {
     for fail in [false, true] {
-        let (mut world, store, [victim, witness], mut inbox) = fixture().await;
+        let (mut world, store, [victim, witness], inboxes) = fixture().await;
+        let [mut victim_inbox, mut inbox]: [_; 2] = inboxes.try_into().unwrap();
         assert!(world.finish_death(victim).is_err());
         assert!(messages(&mut inbox).is_empty());
         let p = world.players.get_mut(&victim).unwrap();
@@ -84,6 +92,9 @@ async fn death_chat_is_world_wide_once_and_only_after_successful_persistence() {
             .unwrap();
         assert!(store.fame(ch.account, ch.id).await.is_ok());
         world.finish_death(victim).unwrap();
+        assert_eq!(victim_inbox.try_recv().unwrap().id, wire::TEXT);
+        assert_eq!(victim_inbox.try_recv().unwrap().id, 41);
+        assert!(victim_inbox.try_recv().is_err());
         assert_eq!(
             messages(&mut inbox),
             ["Victim died at level 1, killed by Medusa"]
