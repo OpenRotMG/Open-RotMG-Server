@@ -156,6 +156,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         behind_proxy: config.behind_proxy,
         shore_bots: config.shore_bots,
         bot_population: config.bot_population,
+        bot_session_seconds: config.bot_session_seconds,
         dialogue,
         society: Arc::default(),
         cctv: Arc::default(),

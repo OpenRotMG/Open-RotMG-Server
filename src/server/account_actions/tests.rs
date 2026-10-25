@@ -43,6 +43,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
         behind_proxy: false,
         shore_bots: false,
         bot_population: 0,
+        bot_session_seconds: [1800, 5400],
         dialogue: None,
         requests: Arc::default(),
         picture_reads: Arc::default(),

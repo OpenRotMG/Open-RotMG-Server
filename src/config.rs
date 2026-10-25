@@ -20,12 +20,17 @@ pub struct Config {
     pub bot_llm: bool,
     #[serde(default = "default_bot_population")]
     pub bot_population: usize,
+    #[serde(default = "default_bot_session_seconds")]
+    pub bot_session_seconds: [u64; 2],
     pub realm_seed: u64,
     #[serde(default = "default_realm_count")]
     pub realm_count: usize,
 }
 fn default_realm_count() -> usize {
     2
+}
+fn default_bot_session_seconds() -> [u64; 2] {
+    [1800, 5400]
 }
 fn default_bot_population() -> usize {
     20
@@ -110,6 +115,7 @@ impl Config {
                 shore_bots: true,
                 bot_llm: false,
                 bot_population: default_bot_population(),
+                bot_session_seconds: default_bot_session_seconds(),
                 realm_seed: rand::random(),
                 realm_count: default_realm_count(),
             }
@@ -179,6 +185,12 @@ impl Config {
             !self.shore_bots || self.max_players > self.bot_population,
             "adventuring bots require capacity for {} bots plus a human",
             self.bot_population
+        );
+        ensure!(
+            (30..=86400).contains(&self.bot_session_seconds[0])
+                && self.bot_session_seconds[0] <= self.bot_session_seconds[1]
+                && self.bot_session_seconds[1] <= 86400,
+            "bot_session_seconds must be an ordered range between 30 and 86400 seconds"
         );
         ensure!(
             self.bot_population <= crate::bots::persona_count(),
