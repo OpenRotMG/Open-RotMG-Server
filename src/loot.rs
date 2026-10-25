@@ -366,6 +366,26 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.04, Tier(5, RINGS)),
             (0.001, Item(crate::endgame::INCANTATION)),
         ],
+        // Item lists match the May-June 2012 Wild Shadow skeleton pages, e.g. https://web.archive.org/web/20120608231314/http://forums.wildshadow.com/wiki/realm-mad-god/skeleton-mage
+        // Rates are realm-src@1855c017 community values (data/REALM-SRC-LICENSE), whose Mage lists Comet Staff twice; kept once:
+        // https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.Deathmage.cs
+        0x65a => &[(0.02, Item(0xa01)), (0.02, Item(0xa15))],
+        0x65b => &[
+            (0.03, Item(0xa01)),
+            (0.02, Item(0xa0a)),
+            (0.02, Item(0xa67)),
+        ],
+        0x65c => &[
+            (0.03, Item(0xa01)),
+            (0.02, Item(0xa0b)),
+            (0.01, Item(0xa57)),
+            (0.01, Item(0xaa4)),
+        ],
+        0x65d => &[
+            (0.02, Item(0xa05)),
+            (0.02, Item(0xa99)),
+            (0.02, Item(0xa2f)),
+        ],
         // Behavior coverage alone does not establish new drop probabilities.
         kind if crate::encounter::fauna::ROSTER.contains(&kind)
             || crate::encounter::landmarks::ROSTER.contains(&kind) =>
@@ -934,7 +954,7 @@ pub fn collectibles(content: &Content) -> std::collections::BTreeSet<u16> {
                 .flat_map(|(_, pick)| candidates(content, *pick))
                 .chain(bonus(kind).iter().map(|(_, item)| *item))
         })
-        .chain([0x678, 0x67d, 0x668].into_iter().flat_map(|kind| {
+        .chain([0x678, 0x67d, 0x668, 0x925].into_iter().flat_map(|kind| {
             chest_table(kind)
                 .into_iter()
                 .flat_map(|(_, pick)| candidates(content, pick))
@@ -1022,7 +1042,7 @@ fn independent(kind: u16) -> bool {
         || kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
         || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50 | 0xd52 | 0xd53)
-        || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b)
+        || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b | 0x65a..=0x65d)
         || matches!(kind, 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL)
         || matches!(
             kind,
@@ -1151,6 +1171,25 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
             (0.5, Tier(1, &[10])),
         ];
     }
+    // The June 2012 wiki's Deathmage Chest lists these tiers without rates; rates are realm-src Graveyard.cs:
+    // https://web.archive.org/web/20120610073636id_/http://forums.wildshadow.com:80/wiki/realm-mad-god/deathmage
+    // https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/Graveyard.cs
+    if kind == 0x925 {
+        return vec![
+            (0.3, Tier(4, WEAPONS)),
+            (0.2, Tier(5, WEAPONS)),
+            (0.1, Tier(6, WEAPONS)),
+            (0.3, Tier(3, ARMOR)),
+            (0.2, Tier(4, ARMOR)),
+            (0.1, Tier(5, ARMOR)),
+            (0.3, Tier(1, ABILITIES)),
+            (0.2, Tier(2, ABILITIES)),
+            (0.2, Tier(3, ABILITIES)),
+            (0.25, Tier(1, RINGS)),
+            (0.15, Tier(2, RINGS)),
+            (0.5, Tier(1, &[10])),
+        ];
+    }
     // Monster-page chest rates override the generic community-server pools.
     // https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant
     let (weapon, armor, tier_rates, ring, ring_rates, ability_rates) = match kind {
@@ -1179,7 +1218,7 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
     .collect()
 }
 pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Result<Vec<i32>> {
-    if kind != crate::dungeon::jungle::COIL {
+    if !matches!(kind, crate::dungeon::jungle::COIL | 0x925) {
         let mut items = Vec::new();
         for (chance, pick) in chest_table(kind) {
             let pool = candidates(content, pick);
@@ -1204,7 +1243,7 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
         let probability = chance / pool.len() as f64;
         consideration.extend(pool.into_iter().map(|id| (probability, id)));
     }
-    // TempleA/B.cs (realm-src@1855c017; data/REALM-SRC-LICENSE) use GetLoots(3, 8) as a success ceiling.
+    // TempleA/B.cs and Graveyard.cs (realm-src@1855c017; data/REALM-SRC-LICENSE) use GetLoots(3, 8) as a success ceiling.
     let maximum = rng.gen_range(3..8);
     let mut items = Vec::new();
     for (chance, id) in consideration {

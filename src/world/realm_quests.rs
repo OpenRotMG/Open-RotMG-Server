@@ -104,7 +104,7 @@ impl World {
             quest::validate(&self.content, *kind)?;
             crate::loot::validate(&self.content, *kind)?;
         }
-        for kind in 0x678..=0x67c {
+        for kind in (0x678..=0x67c).chain([0x925]).chain(0x65a..=0x65e) {
             crate::encounter::validate(&self.content, kind)?;
             crate::loot::validate(&self.content, kind)?;
         }
@@ -117,6 +117,8 @@ impl World {
             (0x928, &[4, 3][..], 8..15),
             (0x675, &[5, 2][..], 0..5),
             (0x678, &[8, 5][..], 0..5),
+            // Period "Setpiece Location: Low Plains"; LowSand and 5..9 are SetPieces.cs only: https://web.archive.org/web/20120610073636id_/http://forums.wildshadow.com:80/wiki/realm-mad-god/deathmage
+            (0x925, &[8, 9][..], 5..10),
         ]
         .into_iter()
         .skip(usize::from(authored_groves))
@@ -1504,6 +1506,7 @@ fn named_site_populations_match_reference_ranges() {
             (0x928, &[4, 3][..], 14),
             (0x675, &[5, 2][..], 0),
             (0x678, &[8, 5][..], 0),
+            (0x925, &[8, 9][..], 9),
         ] {
             dense.populate_named_sites(kind, terrains, count).unwrap();
             let roots: Vec<_> = dense.entities.values().filter(|e| e.kind == kind).collect();
