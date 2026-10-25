@@ -445,7 +445,7 @@ mod tests {
         enemy.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
         let (tx, mut rx) = mpsc::channel(16);
         let (other, mut other_rx) = mpsc::channel(16);
-        let (lost, _) = watch::channel(false);
+        let (lost, _) = watch::channel(None);
         for (player, packets) in [(id, tx), (observer, other)] {
             world.players.get_mut(&player).unwrap().controller = Controller::Human;
             world.updates(player, true).unwrap();
