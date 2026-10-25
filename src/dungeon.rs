@@ -4,6 +4,7 @@ pub mod davy;
 pub mod jungle;
 pub mod lab;
 pub mod manor;
+pub mod pirate;
 pub mod snake;
 pub mod spider;
 pub mod sprite;
