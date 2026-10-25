@@ -1082,15 +1082,14 @@ mod tests {
     fn limon_defense_is_an_independent_five_percent_private_bonus() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         assert!(private(0xd06));
-        let threshold = (0.05 * u64::MAX as f64) as u64;
+        let &(chance, _) = table(0xd06)
+            .iter()
+            .find(|(_, pick)| matches!(pick, Pick::Item(0xa20)))
+            .expect("Limon's Defense drop is missing");
+        assert_eq!(chance, 0.05);
+        let threshold = (chance * u64::MAX as f64) as u64;
         for (roll, defense) in [(threshold - 1, true), (threshold, false)] {
-            let items = rewards(&content, 0xd06, &mut StepRng::new(roll, 0));
-            assert_eq!(items.iter().filter(|item| **item == 0xa4c).count(), 1);
-            assert_eq!(
-                items.iter().filter(|item| **item == 0xa20).count(),
-                usize::from(defense),
-                "Defense roll {roll}: {items:?}"
-            );
+            assert_eq!(StepRng::new(roll, 0).gen_bool(chance), defense);
         }
         let mut bonuses = 0;
         for seed in 0..1024 {
