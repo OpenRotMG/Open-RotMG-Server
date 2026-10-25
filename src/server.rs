@@ -1062,7 +1062,7 @@ fn enqueue_reply(tx: &mpsc::Sender<Packet>, packet: Packet) -> Result<()> {
 }
 
 // Packets whose only effect is on the sender's World; a queued run of them shares one world job.
-const INPUTS: [u8; 11] = [7, 11, 14, 22, 24, 38, 48, 51, 59, 64, 66];
+const INPUTS: [u8; 12] = [7, 11, 14, 22, 24, 38, 48, 51, 59, 64, 66, 76];
 type Input = Box<dyn FnOnce(&mut World) -> Result<()> + Send>;
 
 fn input(
@@ -1182,6 +1182,22 @@ fn input(
         66 | 51 => {
             collision_report(packet.id == 66, &mut r).context(CloseReason::Protocol)?;
             return Ok(None);
+        }
+        76 => {
+            r.i32()?;
+            let bullet = r.u8()?;
+            let target = r.i32()?;
+            let killed = r.u8()?;
+            r.done()?;
+            ensure!(
+                killed <= 1,
+                lifecycle::protocol("invalid predicted enemy death flag")
+            );
+            let id = character("enemy hit report before character")?;
+            if killed == 0 {
+                return Ok(None);
+            }
+            Box::new(move |w| w.native_predicted_enemy_death(id, bullet, target))
         }
         48 => {
             r.done()?;
@@ -1850,13 +1866,6 @@ async fn handle_inner(
                 testing.acknowledge_native(nonce, *player);
             }
         }
-        76 => {
-            r.i32()?;
-            r.u8()?;
-            r.i32()?;
-            r.u8()?;
-            r.done()?;
-        }
         30 => {
             let time = r.i32()?;
             let s = slot(&mut r).context(CloseReason::Protocol)?;
@@ -2163,6 +2172,25 @@ fn outgoing_burst(
         std::iter::from_fn(move || rx.try_recv().ok().map(|packet| (packet, rx.len() + 1)))
             .take(ready),
     )
+}
+
+#[cfg(test)]
+#[test]
+fn predicted_enemy_deaths_reach_the_owning_world_without_granting_hits() {
+    assert!(INPUTS.contains(&76), "predicted enemy deaths are discarded");
+    let packet = |killed| {
+        let mut w = Writer::new();
+        w.i32(1000).u8(1).i32(42).u8(killed);
+        Packet { id: 76, body: w.0 }
+    };
+    let now = std::time::Instant::now();
+    assert!(input(&packet(1), Some(1), now, true).unwrap().is_some());
+    assert!(input(&packet(0), Some(1), now, true).unwrap().is_none());
+    assert!(input(&packet(2), Some(1), now, true).is_err());
+    assert!(input(&packet(1), None, now, true).is_err());
+    let mut trailing = packet(1);
+    trailing.body.push(0);
+    assert!(input(&trailing, Some(1), now, true).is_err());
 }
 
 #[cfg(test)]

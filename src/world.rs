@@ -352,6 +352,7 @@ pub struct Player {
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32, i32)>,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
+    predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
@@ -3369,6 +3370,7 @@ impl World {
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
+                predicted_deaths: BTreeMap::new(),
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
@@ -7196,6 +7198,7 @@ impl World {
         bullets.append(&mut self.bullets);
         self.bullets = bullets;
         self.detached_bullets = 0;
+        self.reconcile_enemy_deaths();
         if self.tick.is_multiple_of(2) {
             // The client moves each object (target - shown) / tickTime with no clamp: a late tick advertised as 100ms
             // overshoots, and a catch-up tick shorter than the 100ms cadence would fling objects across the screen.
