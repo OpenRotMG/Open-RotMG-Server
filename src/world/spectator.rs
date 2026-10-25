@@ -43,6 +43,7 @@ impl Handle {
         self.request(
             &slot.mailbox,
             "world",
+            "spectate",
             |w| w.performance.get_mut(),
             move |w| {
                 let Some(p) = w.players.get(&player) else {
