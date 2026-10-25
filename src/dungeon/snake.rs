@@ -135,19 +135,30 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         ],
         spawns: vec![(centers[0].0 as f32 + 0.5, centers[0].1 as f32 + 0.5)],
     };
+    // The April 2012 run shows a notched square; sizes match the pinned FSoD map: https://www.youtube.com/watch?v=gWLn80rNsxU&t=120
+    let boss = |x: i32, y: i32| x.abs().max(y.abs()) <= 15 && x.abs().min(y.abs()) < 12;
     for (i, &(cx, cy)) in centers.iter().enumerate() {
         if i >= ordinary {
             treasure_room(&mut map, cx, cy);
             continue;
         }
-        let radius = if i == 6 { 16 } else { rng.gen_range(7..=9) };
+        let radius = if i == 6 { 15 } else { rng.gen_range(7..=9) };
         for y in -radius..=radius {
             for x in -radius..=radius {
-                if x * x + y * y > radius * radius {
+                let inside = if i == 6 {
+                    boss(x, y)
+                } else {
+                    x * x + y * y <= radius * radius
+                };
+                if !inside {
                     continue;
                 }
                 let cell = &mut map.cells[((cy + y) * width + cx + x) as usize];
-                cell.ground = if i == 6 && x * x + y * y > (radius - 1) * (radius - 1) {
+                cell.ground = if i == 6
+                    && [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                        .iter()
+                        .any(|&(x, y)| !boss(x, y))
+                {
                     0x32
                 } else {
                     match rng.gen_range(0..10) {
@@ -273,6 +284,34 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
 mod tests {
     use super::*;
     use std::collections::{BTreeSet, VecDeque};
+
+    #[test]
+    fn stheno_room_is_a_notched_square() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for seed in 0..8 {
+            let map = generate(&content, seed).unwrap();
+            let boss = map
+                .cells
+                .iter()
+                .position(|c| c.object == Some(BOSS))
+                .unwrap() as i32;
+            let (bx, by) = (boss % map.width, boss / map.width);
+            for dy in -16i32..=16 {
+                for dx in -16i32..=16 {
+                    let (near, far) = (dx.abs().min(dy.abs()), dx.abs().max(dy.abs()));
+                    let cell = &map.cells[((by + dy) * map.width + bx + dx) as usize];
+                    let inside = far <= 15 && near < 12;
+                    let edge = inside && (far == 15 || near == 11 && far >= 12);
+                    if far <= 15 {
+                        assert_eq!(cell.ground != 0xff, inside, "seed {seed} at {dx},{dy}");
+                    } else if near > 2 {
+                        assert_eq!(cell.ground, 0xff, "seed {seed} outside {dx},{dy}");
+                    }
+                    assert_eq!(cell.ground == 0x32, edge, "seed {seed} border {dx},{dy}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn reconstructed_connectors_are_four_tiles_and_reach_every_room_after_digging() {
