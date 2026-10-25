@@ -139,7 +139,7 @@ impl World {
         Ok(())
     }
     pub(super) fn ocean_walkable(&self, kind: u16, pos: Pos) -> bool {
-        self.walkable(pos)
+        (kind != trench::HERMIT && self.walkable(pos))
             || ((0xd61..=0xd64).contains(&kind)
                 && self
                     .map
@@ -441,7 +441,8 @@ impl World {
         };
         match e.kind {
             trench::HERMIT if matches!(e.stage, Some(4 | 5)) => (
-                if e.pos.distance(e.home) > 5. {
+                // Prefer the period home range over the later fork's five-tile leash: https://web.archive.org/web/20120429072116id_/http://forums.wildshadow.com/wiki/realm-mad-god/hermit-god
+                if e.pos.distance(e.home) > 3. {
                     home(0.)
                 } else {
                     Motion::Wander
