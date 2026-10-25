@@ -1097,13 +1097,13 @@ fn pyre_creates_one_public_chest_without_repeating_it_during_rebirth() {
 fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut walls = 0;
-    for (seed, width, height, old_x, old_y, old_hole) in [
-        (8, 25, 26, 12, 13, true),
-        (13, 26, 25, 12, 12, false),
-        (1, 25, 26, 12, 12, true),
-        (12, 26, 25, 13, 12, false),
+    for (seed, width, height, old_x, old_y, old_hole, keep) in [
+        (8, 25, 26, 12, 13, true, false),
+        (13, 26, 25, 12, 12, false, false),
+        (1, 25, 26, 12, 12, true, false),
+        (12, 26, 25, 13, 12, false, true),
     ] {
-        for terrain in [6, 7] {
+        for (terrain, owned) in [(6, false), (7, false), (6, true)] {
             let mut map = Map {
                 width: 192,
                 height: 192,
@@ -1135,11 +1135,14 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
             let native_ids: Vec<_> = (0..192 * 192)
                 .map(|i| world.cells.ids(i).first().copied())
                 .collect();
-            let removed = world.cells.ids(destination)[0];
-            let template = match &world.entities[&removed].state {
+            let birth_native = world.cells.ids(destination)[0];
+            let template = match &world.entities[&birth_native].state {
                 entity_store::EntityState::Shared(t) => t.clone(),
                 _ => panic!("native Bush does not use shared scenery state"),
             };
+            if owned {
+                world.entities.get_mut(&birth_native).unwrap().name = "native".to_owned();
+            }
             let retained = old_hole.then(|| world.cells.ids(old)[0]);
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
             world.populate_named_sites(0x91b, &[6, 7], 1).unwrap();
@@ -1162,8 +1165,6 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
             assert_eq!((root.hp, root.size, root.stage), (300000, 120, Some(0)));
             assert!(root.published && root.quest == Some(root.id) && root.camp.is_none());
             assert!(world.cells.ids(destination).contains(&root.id));
-            assert!(!world.entities.contains_key(&removed));
-            assert!(!world.cells.ids(destination).contains(&removed));
             let cell = &world.map.cells[destination];
             assert_eq!(
                 (
@@ -1173,8 +1174,27 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
                     cell.terrain,
                     cell.region
                 ),
-                (0xad, None, "", terrain, 0)
+                if keep {
+                    (0x46, Some(0x105), "name:native;size:137", terrain, 0)
+                } else {
+                    (0xad, None, "", terrain, 0)
+                },
+                "seed {seed}, terrain {terrain}, owned {owned}"
             );
+            assert_eq!(world.entities.contains_key(&birth_native), keep);
+            assert_eq!(world.cells.ids(destination).contains(&birth_native), keep);
+            assert_eq!(world.cells.ids(destination).len(), 1 + usize::from(keep));
+            if keep {
+                let native = &world.entities[&birth_native];
+                assert_eq!((native.name.as_str(), native.size), ("native", 137));
+                if owned {
+                    assert!(matches!(&native.state, entity_store::EntityState::Owned(_)));
+                } else {
+                    assert!(
+                        matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+                    );
+                }
+            }
             for (dx, dy) in [(0., 0.), (1., 0.), (-1., 0.), (0., 1.), (0., -1.)] {
                 assert!(
                     world.walkable(Pos {
@@ -1502,6 +1522,13 @@ fn named_site_populations_match_reference_ranges() {
                 assert!(root.published && root.hp > 0 && root.camp.is_none());
                 assert_eq!(root.quest, Some(root.id));
                 if matches!(root.kind, 0x91f | 0x91b) {
+                    if root.kind == 0x91b {
+                        assert!(
+                            world.walkable(root.pos),
+                            "{layout}: blocked Lich {}",
+                            root.id
+                        );
+                    }
                     let area = world
                         .setpieces
                         .iter()
