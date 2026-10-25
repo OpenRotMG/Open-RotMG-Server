@@ -1237,7 +1237,7 @@ async fn handle(
     packets: Vec<(Packet, std::time::Instant)>,
     session: &mut Session,
     tx: &mpsc::Sender<Packet>,
-    lost: &tokio::sync::watch::Sender<bool>,
+    lost: &tokio::sync::watch::Sender<Option<&'static str>>,
 ) -> Result<()> {
     let entry = lifecycle::drain::entry(a)?;
     if let (Some(owner), Some(player)) = (&session.account, session.player) {
@@ -1307,7 +1307,7 @@ async fn handle_inner(
     packet: Packet,
     session: &mut Session,
     tx: &mpsc::Sender<Packet>,
-    lost: &tokio::sync::watch::Sender<bool>,
+    lost: &tokio::sync::watch::Sender<Option<&'static str>>,
     received: std::time::Instant,
 ) -> Result<()> {
     let Session {
@@ -2134,7 +2134,7 @@ async fn connection(
 async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
     output: &mut S,
     message: Message,
-    lost: &mut tokio::sync::watch::Receiver<bool>,
+    lost: &mut tokio::sync::watch::Receiver<Option<&'static str>>,
     shutdown: &mut tokio::sync::watch::Receiver<bool>,
     cancel: Option<tokio::sync::watch::Receiver<bool>>,
     drain: &mut tokio::sync::watch::Receiver<u64>,
@@ -2142,7 +2142,7 @@ async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
     tokio::select! {
         biased;
         _ = drain.changed() => Err(CloseReason::Shutdown),
-        _ = async { if !*lost.borrow() { let _ = lost.changed().await; } } => Err(CloseReason::Output),
+        _ = async { if lost.borrow().is_none() { let _ = lost.changed().await; } } => Err(CloseReason::Output),
         _ = async { if !*shutdown.borrow() { let _ = shutdown.changed().await; } } => Err(CloseReason::Shutdown),
         _ = async { match cancel { Some(mut cancel) => { if !*cancel.borrow() { let _ = cancel.changed().await; } }, None => std::future::pending::<()>().await } } => Err(CloseReason::Controller),
         sent = tokio::time::timeout(std::time::Duration::from_secs(5), output.send(message)) => match sent {
@@ -2227,7 +2227,7 @@ async fn connection_io<S, I>(
         return;
     };
     let (tx, mut rx) = mpsc::channel::<Packet>(64);
-    let (lost, mut lost_rx) = tokio::sync::watch::channel(false);
+    let (lost, mut lost_rx) = tokio::sync::watch::channel(None);
     // Actor work and output backpressure must not manufacture late, clustered input receipts.
     let (mut incoming, input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
     let mut shutdown = a.shutdown.subscribe();
@@ -2269,7 +2269,7 @@ async fn connection_io<S, I>(
         };
     }
     'connection: loop {
-        if *lost_rx.borrow() {
+        if lost_rx.borrow().is_some() {
             close_reason = CloseReason::Output;
             break;
         }
@@ -2430,7 +2430,7 @@ async fn connection_io<S, I>(
     let dropped_account = session
         .account
         .as_ref()
-        .filter(|_| !reconnect_sent)
+        .filter(|_| !reconnect_sent && close_reason != CloseReason::Shutdown)
         .map(|owner| owner.id);
     let finalization = session
         .account
@@ -2442,7 +2442,7 @@ async fn connection_io<S, I>(
             id,
             dropped_account,
             &session.diagnostics,
-            serde_json::json!({"reason":close_reason.to_string(),
+            serde_json::json!({"reason":close_reason.to_string(),"cause":*lost_rx.borrow(),
             "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()}),
         );
         if std::panic::AssertUnwindSafe(diagnostic)

@@ -440,7 +440,7 @@ mod tests {
                     .await
                     .unwrap();
                 let (packets, inbox) = mpsc::channel(64);
-                let (lost, _) = watch::channel(false);
+                let (lost, _) = watch::channel(None);
                 let w = d.worlds.get_mut(&world).unwrap();
                 ids.push(w.enter(ch, Some(Output { packets, lost })).unwrap());
                 inboxes.push(inbox);

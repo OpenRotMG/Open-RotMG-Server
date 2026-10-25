@@ -45,7 +45,7 @@ pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
             character = p.character.id,
             "GOTO acknowledgement backlog exceeded"
         );
-        output.lost.send_replace(true);
+        lose(&output.lost, "goto_ack_backlog");
         return;
     }
     // ACK has no object ID, so other players' GOTOs must share the same FIFO.
@@ -75,7 +75,7 @@ impl Player {
                 "tick acknowledgement backlog exceeded"
             );
             if let Some(output) = &self.tx {
-                output.lost.send_replace(true);
+                lose(&output.lost, "tick_ack_backlog");
             }
             return;
         }
@@ -315,7 +315,7 @@ impl World {
                     .is_some_and(|(_, sent)| sent.elapsed() > ACK_TIMEOUT)
             {
                 if let Some(output) = &p.tx {
-                    output.lost.send_replace(true);
+                    lose(&output.lost, "goto_ack_timeout");
                 }
                 p.departing = true;
                 tracing::error!(

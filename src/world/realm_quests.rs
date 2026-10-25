@@ -1470,7 +1470,7 @@ mod ghost_throw_tests {
                         ch.clone(),
                         Some(Output {
                             packets: tx,
-                            lost: watch::channel(false).0,
+                            lost: watch::channel(None).0,
                         }),
                     )
                     .unwrap();

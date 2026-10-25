@@ -44,7 +44,7 @@ impl Directory {
         p.bot_aim = None;
         let connected =
             p.tx.as_ref()
-                .is_some_and(|o| !*o.lost.borrow() && !o.packets.is_closed());
+                .is_some_and(|o| !o.lost.borrow().is_some() && !o.packets.is_closed());
         tracing::info!(
             player = id,
             character = p.character.id,
