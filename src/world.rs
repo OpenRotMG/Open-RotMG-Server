@@ -6470,10 +6470,15 @@ impl World {
                     Motion::Chase { sight, stop }
                         if target.is_some_and(|p| pos.distance(p) < sight) =>
                     {
-                        if pos.distance(target.expect("acquired chase target")) <= stop {
+                        let target = target.expect("acquired chase target");
+                        if pos.distance(target) <= stop {
                             speed = 0.;
                         }
-                        target
+                        // Per-tick aim jitter keeps chasers from pinning on one wall point: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/movement/Chasing.cs
+                        Some(Pos {
+                            x: target.x + self.rng.gen_range(-2..2) as f32 / 2.,
+                            y: target.y + self.rng.gen_range(-2..2) as f32 / 2.,
+                        })
                     }
                     Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
                         let target = match self.orbit_anchor(id, anchor, target) {
@@ -7227,6 +7232,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }
 
+#[cfg(test)]
+mod chase_tests;
 #[cfg(test)]
 mod dungeon_return_tests;
 #[cfg(test)]
