@@ -1047,7 +1047,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let (guid, account) = match existing {
                 Some(found) => found,
                 None => {
-                    let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE name=?1 COLLATE NOCASE)", [&name], |r| r.get(0))?;
+                    let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE name=?1 COLLATE NOCASE AND NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=accounts.id))", [&name], |r| r.get(0))?;
                     ensure!(!taken, anyhow::anyhow!(Rejected("persona name is already in use")).context(format!("persona {identity} already belongs to another account")));
                     let guid = format!("persona-{:032x}", rand::random::<u128>());
                     tx.execute("INSERT INTO accounts(guid,name,character_slots,vault_mask) VALUES(?1,?2,14,?3)", params![guid, name, (1 << vault.len()) - 1])?;
