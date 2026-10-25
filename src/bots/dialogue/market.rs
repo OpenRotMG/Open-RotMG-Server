@@ -6,7 +6,12 @@ pub(super) struct Wording {
     result: Arc<Mutex<Option<std::result::Result<String, Failure>>>>,
 }
 
-pub(super) const PROMPT: &str = "Generate your own terse 2012 Realm player trade speech. Use reply_to_player once with the sole allowed intent. Write a TEMPLATE: never substitute facts into tokens. For market_advertise use SELL {give} LINK {want} or BUY {want} LINK {give}, optionally followed by ' @{name}'. SELL is wts, selling, sell, s>, or trading. BUY is wtb, buying, or buy. LINK is for or =. Caps and extra whitespace are allowed. For market_refuse the grammar is 'nty need {want}' or 'nah need {want}' or 'no thx need {want}'. Vary wording and capitalization for the supplied speaker/style, keeping their preferred voice. Tokens must occur exactly once. No other words, numbers, punctuation, goods, promises, acceptance or invented terms. The program inserts inventory-validated facts AFTER generation. WINDOW offers are the only trade acceptance authority.";
+pub(super) const PROMPT: &str = r#"Write a reusable 2012 Realm trade-chat TEMPLATE using reply_to_player once with the sole allowed intent.
+The brace tokens are LITERAL text: {give}, {want}, @{name}. Never replace them with items, numbers or a real name.
+For market_advertise, examples of valid reply strings are "wts {give} for {want}", "SELLING {give} = {want}", "wtb {want} for {give}" and "s> {give} for {want} @{name}".
+Choose a seller opening (wts, selling, sell, s>, trading) followed by {give}, then for or =, then {want}; or a buyer opening (wtb, buying, buy) followed by {want}, then for or =, then {give}. Optionally append literal @{name}.
+For market_refuse, reply exactly "nty need {want}", "nah need {want}" or "no thx need {want}", with your own capitalization.
+Vary opening and capitalization for the supplied personality/style seed. Keep every required brace token exactly once. No other words, quotes, punctuation, promises or acceptance. Real current inventory facts are inserted by the program only after generation. Native trade windows alone authorize acceptance."#;
 
 fn validated_template_words(
     template: &str,
@@ -124,7 +129,7 @@ impl Service {
         let service = self.clone();
         let name = name.to_owned();
         let payload = json!({"allowed_intents":[intent],"automatic":true,"market_generation":true,
-            "bot":{"name":name,"personality":personality,"style_seed":name.bytes().fold(0u32, |h,b| h.wrapping_mul(31).wrapping_add(u32::from(b)))},
+            "bot":{"personality":personality,"style_seed":name.bytes().fold(0u32, |h,b| h.wrapping_mul(31).wrapping_add(u32::from(b)))},
             "message":"Generate a trade speech template in my own voice, using only the given grammar."});
         tokio::spawn(async move {
             let start = Instant::now();

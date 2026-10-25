@@ -233,17 +233,18 @@ impl Service {
             b.calls += 1;
             b.daily += 1;
         }
+        let market_generation = payload["market_generation"] == true;
         let schema = json!({"type":"object","properties":{
-            "intent":{"type":"string","enum":payload["allowed_intents"],"description":"Actual action. Invite proposes the supplied objective; join accepts that invitation; leave parts company without promising to hold position; wait holds position; talk changes no commitment."},
-            "reply":{"type":"string","maxLength":90,"description":"Short chat consistent with the selected action."}},"required":["intent","reply"],"additionalProperties":false});
-        let prompt = if payload["market_generation"] == true {
+            "intent":{"type":"string","enum":payload["allowed_intents"],"description":if market_generation {"The sole allowed market intent."} else {"Actual action. Invite proposes the supplied objective; join accepts that invitation; leave parts company without promising to hold position; wait holds position; talk changes no commitment."}},
+            "reply":{"type":"string","maxLength":90,"description":if market_generation {"Reusable template retaining literal brace tokens, e.g. wts {give} for {want} or nty need {want}. Never substitute items or names."} else {"Short chat consistent with the selected action."}}},"required":["intent","reply"],"additionalProperties":false});
+        let prompt = if market_generation {
             market::PROMPT
         } else if payload["allowed_intents"] == json!(["invite"]) {
             INVITE_PROMPT
         } else {
             PROMPT
         };
-        let body = json!({"model":MODEL,"stream":false,"max_tokens":300,"temperature":if payload["market_generation"] == true {0.7}else{0.0},"reasoning_effort":"none",
+        let body = json!({"model":MODEL,"stream":false,"max_tokens":300,"temperature":if market_generation {0.7}else{0.0},"reasoning_effort":"none",
             "providerOptions":{"gateway":{"only":["nvidia"]}},
             "tools":[{"type":"function","function":{"name":"reply_to_player","description":"Choose the real action and a matching short reply.","parameters":schema,"strict":true}}],
             "tool_choice":{"type":"function","function":{"name":"reply_to_player"}},"parallel_tool_calls":false,
