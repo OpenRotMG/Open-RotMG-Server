@@ -13,6 +13,7 @@ use std::{
 };
 
 mod gold;
+mod projectiles;
 
 const REFERENCE: &str = "07ae4fc3ca021a5bf08bbf94f057f7620be18b85e01abd763b3a198382e8fa48";
 const OLD: [&str; 4] = [
@@ -190,6 +191,7 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
     let mut loading = 0;
     let mut music = 0;
     let mut gold = 0;
+    let mut projectiles = 0;
     while p < body.len() {
         let h = u16::from_le_bytes(
             body.get(p..p + 2)
@@ -222,6 +224,7 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
             music += m;
             gold += g;
             loading += patch_loading(&mut abc)?;
+            projectiles += projectiles::patch(&mut abc)?;
             let mut d = data[..offset].to_vec();
             d.extend(abc);
             d
@@ -248,6 +251,10 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
     ensure!(
         loading == 1,
         "expected one exact loading-readiness method, found {loading}"
+    );
+    ensure!(
+        projectiles == 1,
+        "expected one exact projectile target filter, found {projectiles}"
     );
     let mut result = source[..8].to_vec();
     result[4..8].copy_from_slice(&((out.len() + 8) as u32).to_le_bytes());

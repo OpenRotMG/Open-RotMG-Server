@@ -606,6 +606,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.15, Tier(7, ARMOR)),
             (0.124, Tier(4, ABILITIES)),
             (0.11, Tier(3, RINGS)),
+            // Later comparator's optional bonus, not recovered 123.5.1 odds: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/logic/db/BehaviorDb.SpriteWorld.cs#L143-L145
+            (0.05, Item(0xa20)),
         ],
         0xd90 => &[
             (1., Item(0xa35)),
@@ -1076,6 +1078,29 @@ mod tests {
             );
             assert!(rewards[0].0 == 7 && content.objects[&rewards[0].1].bag_type == 4);
         }
+    }
+
+    #[test]
+    fn limon_defense_is_an_independent_five_percent_private_bonus() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert!(private(0xd06));
+        let &(chance, _) = table(0xd06)
+            .iter()
+            .find(|(_, pick)| matches!(pick, Pick::Item(0xa20)))
+            .expect("Limon's Defense drop is missing");
+        assert_eq!(chance, 0.05);
+        let threshold = (chance * u64::MAX as f64) as u64;
+        for (roll, defense) in [(threshold - 1, true), (threshold, false)] {
+            assert_eq!(StepRng::new(roll, 0).gen_bool(chance), defense);
+        }
+        let mut bonuses = 0;
+        for seed in 0..1024 {
+            let items = rewards(&content, 0xd06, &mut StdRng::seed_from_u64(seed));
+            assert_eq!(items.iter().filter(|item| **item == 0xa4c).count(), 1);
+            assert!(items.iter().filter(|item| **item == 0xa20).count() <= 1);
+            bonuses += usize::from(items.contains(&0xa20));
+        }
+        assert!((1..1024).contains(&bonuses), "Defense must remain optional");
     }
 
     #[test]
