@@ -469,7 +469,8 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
                 1 => (0..3)
                     .map(|i| fan(0, 4, 10., 300, 15.).offset(60. + i as f32 * 120.))
                     .collect(),
-                _ => vec![fan(1, 2, 15., 100, 15.).predict(1.)],
+                // Blue pairs are not a faster phase in the older table: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Mountain.cs#L320-L343
+                _ => vec![fan(1, 2, 15., 300, 15.).predict(1.)],
             }
         }
         0x906 | 0x907 if hp < 400 => vec![ring(0, 8, 50, 0.).fixed(0.)],
