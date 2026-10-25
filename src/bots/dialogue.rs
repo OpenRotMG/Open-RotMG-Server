@@ -749,6 +749,13 @@ impl Brain {
         v: &PlayerView,
     ) -> Result<()> {
         ensure!(
+            request.payload["allowed_intents"]
+                .as_array()
+                .context("missing dialogue choices")?
+                .contains(&serde_json::to_value(reply.intent)?),
+            "dialogue intention not requested"
+        );
+        ensure!(
             self.session == request.session
                 && (v.session.world, v.session.player, v.session.character) == request.session,
             Obsolete("session_changed")
@@ -775,13 +782,6 @@ impl Brain {
             Obsolete("speaker_left_perception")
         );
         if request.plan.is_some() {
-            ensure!(
-                request.payload["allowed_intents"]
-                    .as_array()
-                    .context("missing invitation choices")?
-                    .contains(&serde_json::to_value(reply.intent)?),
-                "invitation intention not allowed"
-            );
             if matches!(reply.intent, Intent::Invite | Intent::Join) {
                 ensure!(
                     v.character.hp * 4 >= v.character.stats[0] * 3

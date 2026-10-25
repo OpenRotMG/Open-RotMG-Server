@@ -154,6 +154,22 @@ fn delayed_dialogue_revalidates_world_peer_lifecycle_intent_and_expiry() {
             .unwrap_err()
             .is::<Obsolete>()
     );
+    let peer = view.objects.remove(0);
+    assert!(
+        !brain
+            .validate_dialogue(&request, &unrequested, &view)
+            .unwrap_err()
+            .is::<Obsolete>()
+    );
+    view.lifecycle.busy = true;
+    assert!(
+        !brain
+            .validate_dialogue(&request, &unrequested, &view)
+            .unwrap_err()
+            .is::<Obsolete>()
+    );
+    view.lifecycle.busy = false;
+    view.objects.push(peer);
     let hp = view.character.hp;
     view.character.hp = 1;
     obsolete(
