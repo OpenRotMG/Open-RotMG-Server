@@ -101,34 +101,74 @@ fn delayed_dialogue_revalidates_world_peer_lifecycle_intent_and_expiry() {
     assert_eq!(invite.reply, "Peer, want to look for better gear together?");
     assert!(request.payload.get("recent_public_utterances").is_none());
     assert!(brain.validate_dialogue(&request, &invite, &view).is_ok());
+    let obsolete = |error: anyhow::Error, reason| {
+        assert_eq!(error.downcast_ref::<Obsolete>().unwrap().0, reason);
+    };
     view.session.world -= 1;
-    assert!(brain.validate_dialogue(&request, &invite, &view).is_err());
+    obsolete(
+        brain
+            .validate_dialogue(&request, &invite, &view)
+            .unwrap_err(),
+        "session_changed",
+    );
     view.session.world += 1;
     let peer = view.objects.remove(0);
-    assert!(brain.validate_dialogue(&request, &invite, &view).is_err());
+    obsolete(
+        brain
+            .validate_dialogue(&request, &invite, &view)
+            .unwrap_err(),
+        "speaker_left_perception",
+    );
     view.objects.push(peer);
     view.objects[0].name = "SomeoneElse".into();
-    assert!(brain.validate_dialogue(&request, &invite, &view).is_err());
+    obsolete(
+        brain
+            .validate_dialogue(&request, &invite, &view)
+            .unwrap_err(),
+        "speaker_left_perception",
+    );
     view.objects[0].name = request.name.clone();
     view.lifecycle.busy = true;
-    assert!(brain.validate_dialogue(&request, &invite, &view).is_err());
+    obsolete(
+        brain
+            .validate_dialogue(&request, &invite, &view)
+            .unwrap_err(),
+        "controller_busy",
+    );
+    view.lifecycle.quarantined = true;
+    assert!(
+        !brain
+            .validate_dialogue(&request, &invite, &view)
+            .unwrap_err()
+            .is::<Obsolete>()
+    );
+    view.lifecycle.quarantined = false;
     view.lifecycle.busy = false;
     let unrequested = Reply {
         intent: Intent::Join,
         reply: "yes".into(),
     };
     assert!(
-        brain
+        !brain
             .validate_dialogue(&request, &unrequested, &view)
-            .is_err()
+            .unwrap_err()
+            .is::<Obsolete>()
     );
-    request.created = Instant::now() - Duration::from_secs(11);
-    assert!(
+    let hp = view.character.hp;
+    view.character.hp = 1;
+    obsolete(
         brain
             .validate_dialogue(&request, &invite, &view)
-            .unwrap_err()
-            .to_string()
-            .contains("expired")
+            .unwrap_err(),
+        "adventurer_no_longer_ready",
+    );
+    view.character.hp = hp;
+    request.created = Instant::now() - Duration::from_secs(11);
+    obsolete(
+        brain
+            .validate_dialogue(&request, &invite, &view)
+            .unwrap_err(),
+        "response_expired",
     );
     assert!(brain.agreement.is_none());
     assert_eq!(brain.invitation_until, 0);

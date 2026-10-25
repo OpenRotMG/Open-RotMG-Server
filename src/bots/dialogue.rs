@@ -90,6 +90,15 @@ pub(super) struct Request {
     pub(super) payload: Value,
     pub(super) plan: Option<adventures::Plan>,
 }
+#[derive(Debug)]
+pub(super) struct Obsolete(pub &'static str);
+impl std::fmt::Display for Obsolete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for Obsolete {}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Failure(pub &'static str);
 impl std::fmt::Display for Failure {
@@ -527,18 +536,13 @@ pub(super) async fn publish(
         };
         ensure!(
             purpose.ready(v, &app.content),
-            "adventure no longer safe or ready: level={} hp={}/{} mp={}/{}",
-            v.character.level,
-            v.character.hp,
-            v.character.stats[0],
-            v.character.mp,
-            v.character.stats[1]
+            Obsolete("adventure_no_longer_ready")
         );
         ensure!(
             v.objects
                 .iter()
                 .any(|p| p.id == request.speaker && purpose.public_ready(p, &app.content)),
-            "adventure peer no longer ready"
+            Obsolete("adventure_peer_no_longer_ready")
         );
     }
     ensure!(
@@ -563,7 +567,7 @@ pub(super) async fn publish(
         .directory(move |d| {
             ensure!(
                 created.elapsed() <= Duration::from_secs(10),
-                "dialogue expired before publication"
+                Obsolete("response_expired")
             );
             let now = d.tick * 50;
             let world = d.location(player)?;
@@ -747,28 +751,28 @@ impl Brain {
         ensure!(
             self.session == request.session
                 && (v.session.world, v.session.player, v.session.character) == request.session,
-            "dialogue session changed"
+            Obsolete("session_changed")
         );
         ensure!(
             request.created.elapsed() <= DEADLINE + Duration::from_secs(2),
-            "dialogue response expired"
+            Obsolete("response_expired")
         );
         ensure!(
             v.lifecycle.alive
                 && !v.lifecycle.death_pending
                 && !v.lifecycle.departing
-                && !v.lifecycle.busy
                 && !v.lifecycle.quarantined
                 && matches!(v.lifecycle.output, OutputState::Live),
             "dialogue controller unavailable"
         );
+        ensure!(!v.lifecycle.busy, Obsolete("controller_busy"));
         ensure!(
             v.objects.iter().any(|p| p.id == request.speaker
                 && p.name == request.name
                 && p.hp > 0
                 && !p.equipped.is_empty()
                 && p.position.distance(v.position) <= 12.),
-            "dialogue speaker left perception"
+            Obsolete("speaker_left_perception")
         );
         if request.plan.is_some() {
             ensure!(
@@ -783,7 +787,7 @@ impl Brain {
                     v.character.hp * 4 >= v.character.stats[0] * 3
                         && v.character.mp * 3 >= v.character.stats[1]
                         && self.agreement.is_none(),
-                    "adventurer no longer ready"
+                    Obsolete("adventurer_no_longer_ready")
                 );
             }
         } else {

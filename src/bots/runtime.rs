@@ -734,8 +734,15 @@ pub(super) async fn launch(
                                     }
                                     Ok(false) => {}
                                     Err(error) => {
-                                        tracing::error!(request=%completed.id,player=id,%error,"bot dialogue intention rejected");
-                                        dialogue::failed(&app, &completed.request, &completed.id, "rejected").await;
+                                        if let Some(obsolete) = error.downcast_ref::<dialogue::Obsolete>() {
+                                            tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,
+                                                reason=obsolete.0,hp=view.character.hp,mp=view.character.mp,
+                                                "bot dialogue canceled; pending intention not published");
+                                        } else {
+                                            tracing::error!(request=%completed.id,player=id,%error,busy=view.lifecycle.busy,
+                                                output=?view.lifecycle.output,"bot dialogue intention rejected");
+                                            dialogue::failed(&app, &completed.request, &completed.id, "rejected").await;
+                                        }
                                     }
                                 }
                             }
