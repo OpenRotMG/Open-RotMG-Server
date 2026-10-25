@@ -42,13 +42,22 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
         _ => &[],
     }
 }
-// Period armor is zero-based: https://web.archive.org/web/20120202161107/http://forums.wildshadow.com/wiki/realm-mad-god/armor
-// Named identities establish selected-XML armor tier = period wiki tier + 1.
 pub(crate) fn period_dungeon(kind: u16) -> bool {
     matches!(
         kind,
         0x21d..=0x220 | 0x936 | 0x683..=0x68f | 0x927 | 0xd01..=0xd04
             | 0xd06 | 0x917 | 0xd90 | 0x66d..=0x672 | crate::dungeon::abyss::MALPHAS
+    )
+}
+pub(crate) fn period_surface(kind: u16) -> bool {
+    matches!(
+        kind,
+        0x202 | 0x204 | 0x205 | 0x209 | 0x20d | 0x20f
+            | 0x600..=0x602 | 0x604 | 0x606 | 0x607 | 0x609 | 0x60a | 0x60c..=0x610
+            | 0x614 | 0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
+            | 0x624..=0x626 | 0x629..=0x62f | 0x631..=0x633
+            | 0x63b | 0x63c | 0x63e..=0x640 | 0x642..=0x645 | 0x647..=0x64d
+            | 0x64f | 0x650 | 0x900..=0x902
     )
 }
 fn table(kind: u16) -> &'static [(f64, Pick)] {
@@ -290,14 +299,21 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa22)),
             (0.02, Item(0xa23)),
         ],
-        0x205 | 0x20d | 0x20f | 0x202 | 0x635 | 0x636 | 0x639 | 0x6c5 | 0x7f22 | 0x6c7 | 0x6c9
-        | 0x6d1 | 0x951 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
-        0x903 | 0x209 => &[(0.04, Item(0xa22)), (0.01, Item(0xa23))],
+        0x205 | 0x20d | 0x20f | 0x202 => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
+        0x635 | 0x636 | 0x639 | 0x6c5 | 0x7f22 | 0x6c7 | 0x6c9 | 0x6d1 | 0x951 => {
+            &[(0.03, Item(0xa22)), (0.02, Item(0xa23))]
+        }
+        0x903 => &[(0.04, Item(0xa22)), (0.01, Item(0xa23))],
+        0x209 => &[
+            (0.03, Item(0xa22)),
+            (0.03, Item(0xa23)),
+            (0.01, Item(0xa54)),
+        ],
         0x904 => &[(0.03, Item(0xa23)), (0.01, Tier(5, WEAPONS))],
         0x204 => &[
             (0.01, Tier(2, ARMOR)),
-            (0.03, Item(0xa22)),
-            (0.02, Item(0xa23)),
+            (0.01, Item(0xa22)),
+            (0.01, Item(0xa23)),
         ],
         // GPL-3.0 realm-src@1855c017, BehaviorDb.{LotLL,GhostShip}.cs; NR-Core and Skilly.
         0xd50 => &[
@@ -443,24 +459,47 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x602 | 0x604 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
         0x603 | 0x954 => &[],
         0x6d2..=0x6d7 => &[],
-        0x624 => &[(0.03, Tier(5, WEAPONS)), (0.03, Item(0xa23))],
-        0x625 => &[(0.03, Tier(2, ABILITIES)), (0.03, Item(0xa23))],
-        0x626 => &[(0.03, Tier(5, ARMOR)), (0.03, Item(0xa23))],
-        0x62d | 0x631 => &[(0.03, Tier(5, WEAPONS)), (0.03, Item(0xa22))],
-        0x62e => &[(0.03, Tier(5, ARMOR)), (0.03, Item(0xa22))],
-        0x62f => &[(0.03, Item(0xa22)), (0.01, Tier(2, RINGS))],
+        0x624 => &[(0.02, Tier(5, WEAPONS)), (0.05, Item(0xa23))],
+        0x625 => &[(0.04, Tier(2, ABILITIES)), (0.05, Item(0xa23))],
+        0x626 => &[(0.01, Tier(6, ARMOR)), (0.05, Item(0xa23))],
+        0x62d => &[(0.04, Tier(5, WEAPONS)), (0.03, Item(0xa22))],
+        0x631 => &[
+            (0.04, Tier(5, WEAPONS)),
+            (0.03, Item(0xa22)),
+            (0.03, Item(0xa23)),
+        ],
+        0x62e => &[(0.04, Tier(6, ARMOR)), (0.03, Item(0xa22))],
+        0x632 => &[
+            (0.1, Tier(3, WEAPONS)),
+            (0.05, Tier(4, WEAPONS)),
+            (0.04, Tier(6, ARMOR)),
+            (0.05, Tier(1, RINGS)),
+            (0.05, Tier(1, ABILITIES)),
+            (0.03, Item(0xa23)),
+        ],
+        0x62f => &[(0.03, Item(0xa22)), (0.05, Tier(2, RINGS))],
+        0x633 => &[
+            (0.1, Tier(3, WEAPONS)),
+            (0.05, Tier(4, WEAPONS)),
+            (0.1, Tier(3, ARMOR)),
+            (0.05, Tier(4, ARMOR)),
+            (0.05, Tier(2, RINGS)),
+            (0.05, Tier(1, ABILITIES)),
+            (0.03, Item(0xa23)),
+        ],
         0x629 | 0x62b => &[(0.03, Item(0xa22))],
         0x62a | 0x647 | 0x648 => &[(0.03, Item(0xa23))],
+        // Orc King: Wild Shadow wiki, snapshot 20120207192955 (portals unchanged).
         0x62c => &[
-            (0.2, Tier(3, WEAPONS)),
-            (0.1, Tier(4, WEAPONS)),
-            (0.05, Tier(5, WEAPONS)),
-            (0.2, Tier(3, ARMOR)),
-            (0.1, Tier(4, ARMOR)),
-            (0.05, Tier(5, ARMOR)),
-            (0.05, Tier(2, ABILITIES)),
+            (0.16, Tier(3, WEAPONS)),
+            (0.08, Tier(4, WEAPONS)),
+            (0.04, Tier(5, WEAPONS)),
+            (0.16, Tier(4, ARMOR)),
+            (0.08, Tier(5, ARMOR)),
+            (0.04, Tier(6, ARMOR)),
+            (0.10, Tier(2, ABILITIES)),
             (0.03, Item(0xa22)),
-            (0.01, Tier(2, RINGS)),
+            (0.05, Tier(2, RINGS)),
         ],
         0x6c6 => &[
             (0.1, Tier(4, WEAPONS)),
@@ -473,7 +512,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x900 => &[
             (0.04, Item(0xa22)),
             (0.01, Item(0xa23)),
-            (0.01, Tier(3, ARMOR)),
+            (0.01, Tier(4, ARMOR)),
         ],
         0x901 => &[
             (0.04, Item(0xa22)),
@@ -485,7 +524,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xa23)),
             (0.01, Tier(2, RINGS)),
         ],
-        0x612 | 0x613 | 0x618 => &[(0.03, Item(0xa22))],
+        0x612 | 0x613 => &[(0.03, Item(0xa22))],
+        0x618 => &[(0.04, Item(0xa22))],
         0x619 => &[(0.03, Item(0xa23))],
         0x953 => &[
             (0.2, Tier(1, WEAPONS)),
@@ -495,23 +535,21 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.02, Item(0xa23)),
         ],
         0x614 => &[
-            (0.2, Tier(3, WEAPONS)),
-            (0.2, Tier(3, ARMOR)),
-            (0.2, Tier(1, RINGS)),
-            (0.2, Tier(1, ABILITIES)),
-            (0.03, Item(0xa22)),
+            (0.30, Tier(3, WEAPONS)),
+            (0.30, Tier(3, ARMOR)),
+            (0.09, Tier(1, RINGS)),
+            (0.38, Tier(1, ABILITIES)),
+            (0.02, Item(0xa22)),
             (0.02, Item(0xa23)),
         ],
         0x61a => &[
-            (0.2, Tier(2, WEAPONS)),
-            (0.1, Tier(3, WEAPONS)),
-            (0.2, Tier(2, ARMOR)),
-            (0.1, Tier(3, ARMOR)),
-            (0.1, Tier(1, RINGS)),
-            (0.1, Tier(1, ABILITIES)),
+            (0.30, Tier(3, WEAPONS)),
+            (0.30, Tier(3, ARMOR)),
+            (0.12, Tier(1, RINGS)),
+            (0.39, Tier(1, ABILITIES)),
             (0.03, Item(0xa23)),
         ],
-        0x60e..=0x610 => &[(0.03, Item(0xa22)), (0.02, Item(0xa23))],
+        0x60e..=0x610 => &[(0.04, Item(0xa22)), (0.04, Item(0xa23))],
         // https://web.archive.org/web/20111126104739/http://forums.wildshadow.com/wiki/realm-mad-god/cave-pirate-brawler
         0x687..=0x689 => &[(0.03, Item(0xa22))],
         // https://web.archive.org/web/20111126104744/http://forums.wildshadow.com/wiki/realm-mad-god/cave-pirate-cabin-boy
@@ -551,16 +589,14 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | crate::dungeon::snake::SPAWNER
         | crate::dungeon::snake::DART => &[],
         0xdaa..=0xdaf => &[(0.25, Item(0xa22)), (0.25, Item(0xa23))],
-        0x605..=0x607
-        | 0x60a
-        | 0x60c
-        | 0x615
+        0x606 | 0x615 => &[(0.04, Item(0xa22)), (0.03, Item(0xa23))],
+        0x61c | 0x61e | 0x63b | 0x64a..=0x64d => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
+        0x607 | 0x60a | 0x60c | 0x61d | 0x63c | 0x63f | 0x642..=0x644 => {
+            &[(0.05, Item(0xa22)), (0.03, Item(0xa23))]
+        }
+        0x605
         | 0x616
-        | 0x61c..=0x61e
-        | 0x63a..=0x63c
-        | 0x63f
-        | 0x642..=0x644
-        | 0x64a..=0x64d
+        | 0x63a
         | 0xd91..=0xd94
         | 0xd96
         | 0xd97
@@ -568,29 +604,82 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xda4..=0xda6
         | 0xdb0..=0xdb2 => &[(0.05, Item(0xa22)), (0.03, Item(0xa23))],
         0x60d => &[
-            (0.10, Tier(3, WEAPONS)),
-            (0.10, Tier(3, ARMOR)),
-            (0.10, Tier(1, RINGS)),
-            (0.10, Tier(1, ABILITIES)),
-            (0.03, Item(0xa22)),
+            (0.30, Tier(3, WEAPONS)),
+            (0.30, Tier(3, ARMOR)),
+            (0.11, Tier(1, RINGS)),
+            (0.39, Tier(1, ABILITIES)),
+            (0.04, Item(0xa22)),
         ],
-        0x609 | 0x617 => &[
-            (0.2, Tier(2, WEAPONS)),
-            (0.2, Tier(2, ARMOR)),
-            (0.2, Tier(1, RINGS)),
-            (0.2, Tier(1, ABILITIES)),
-            (0.03, Item(0xa22)),
+        0x609 => &[
+            (0.36, Tier(2, WEAPONS)),
+            (0.10, Tier(3, WEAPONS)),
+            (0.36, Tier(2, ARMOR)),
+            (0.11, Tier(1, RINGS)),
+            (0.39, Tier(1, ABILITIES)),
+            (0.02, Item(0xa22)),
             (0.02, Item(0xa23)),
         ],
-        0x61f | 0x632 | 0x633 | 0x63e => &[
+        0x617 => &[
+            (0.30, Tier(2, WEAPONS)),
+            (0.30, Tier(2, ARMOR)),
+            (0.11, Tier(1, RINGS)),
+            (0.39, Tier(1, ABILITIES)),
+            (0.02, Item(0xa22)),
+            (0.02, Item(0xa23)),
+        ],
+        // Dwarf King has no monster-page rates; tier pages fill this pool.
+        0x61f => &[
+            (0.20, Tier(2, WEAPONS)),
+            (0.10, Tier(3, WEAPONS)),
+            (0.50, Tier(4, WEAPONS)),
+            (0.32, Tier(1, ARMOR)),
+            (0.16, Tier(2, ARMOR)),
+            (0.08, Tier(3, ARMOR)),
+            (0.04, Tier(4, ARMOR)),
+            (0.10, Tier(1, RINGS)),
+            (0.10, Tier(1, ABILITIES)),
+        ],
+        0x63e => &[
             (0.1, Tier(3, WEAPONS)),
             (0.05, Tier(4, WEAPONS)),
             (0.1, Tier(3, ARMOR)),
             (0.05, Tier(4, ARMOR)),
             (0.05, Tier(1, RINGS)),
             (0.05, Tier(1, ABILITIES)),
+            (0.03, Item(0xa22)),
         ],
-        0x640 | 0x645 | 0x646 | 0x649 | 0x64f | 0x650 | 0x905 => &[
+        0x645 => &[
+            (0.16, Tier(5, WEAPONS)),
+            (0.08, Tier(6, WEAPONS)),
+            (0.16, Tier(4, ARMOR)),
+            (0.08, Tier(5, ARMOR)),
+            (0.04, Tier(6, ARMOR)),
+            (0.05, Tier(3, RINGS)),
+            (0.03, Tier(3, ABILITIES)),
+            (0.03, Item(0xa23)),
+        ],
+        0x64f => &[
+            (0.16, Tier(5, WEAPONS)),
+            (0.08, Tier(6, WEAPONS)),
+            (0.16, Tier(4, ARMOR)),
+            (0.08, Tier(5, ARMOR)),
+            (0.04, Tier(6, ARMOR)),
+            (0.05, Tier(3, RINGS)),
+            (0.03, Tier(3, ABILITIES)),
+            (0.03, Item(0xa22)),
+        ],
+        0x640 | 0x649 | 0x650 => &[
+            (0.16, Tier(5, WEAPONS)),
+            (0.08, Tier(6, WEAPONS)),
+            (0.04, Tier(7, WEAPONS)),
+            (0.16, Tier(5, ARMOR)),
+            (0.08, Tier(6, ARMOR)),
+            (0.04, Tier(7, ARMOR)),
+            (0.05, Tier(3, RINGS)),
+            (0.10, Tier(3, ABILITIES)),
+            (0.005, Item(0xaa9)),
+        ],
+        0x646 | 0x905 => &[
             (0.16, Tier(5, WEAPONS)),
             (0.08, Tier(6, WEAPONS)),
             (0.16, Tier(4, ARMOR)),
@@ -1124,6 +1213,128 @@ mod tests {
         SeedableRng,
         rngs::{StdRng, mock::StepRng},
     };
+
+    fn surface_rate(kind: u16, expected: Pick) -> Option<f64> {
+        table(kind).iter().find_map(|(chance, pick)| {
+            let same = match (*pick, expected) {
+                (Pick::Item(a), Pick::Item(b)) => a == b,
+                (Pick::Tier(a, slots_a), Pick::Tier(b, slots_b)) => a == b && slots_a == slots_b,
+                _ => false,
+            };
+            same.then_some(*chance)
+        })
+    }
+
+    #[test]
+    fn wild_shadow_surface_monster_pages_correct_rates_and_wrong_tiers() {
+        use Pick::{Item, Tier};
+        for (kind, pick, chance) in [
+            (0x202, Item(0xa23), 0.03),
+            (0x204, Tier(2, ARMOR), 0.01),
+            (0x204, Item(0xa22), 0.01),
+            (0x209, Item(0xa54), 0.01),
+            (0x601, Tier(1, ARMOR), 0.20),
+            (0x606, Item(0xa22), 0.04),
+            (0x609, Tier(2, WEAPONS), 0.36),
+            (0x609, Tier(2, ARMOR), 0.36),
+            (0x609, Item(0xa22), 0.02),
+            (0x60d, Tier(3, ARMOR), 0.30),
+            (0x60d, Tier(1, ABILITIES), 0.39),
+            (0x60e, Item(0xa23), 0.04),
+            (0x614, Tier(3, ARMOR), 0.30),
+            (0x614, Tier(1, ABILITIES), 0.38),
+            (0x617, Tier(2, ARMOR), 0.30),
+            (0x618, Item(0xa22), 0.04),
+            (0x61a, Tier(3, WEAPONS), 0.30),
+            (0x61a, Tier(1, RINGS), 0.12),
+            (0x61c, Item(0xa22), 0.03),
+            (0x624, Tier(5, WEAPONS), 0.02),
+            (0x625, Tier(2, ABILITIES), 0.04),
+            (0x626, Tier(6, ARMOR), 0.01),
+            (0x626, Item(0xa23), 0.05),
+            (0x62c, Tier(2, ABILITIES), 0.10),
+            (0x62c, Tier(2, RINGS), 0.05),
+            (0x62d, Tier(5, WEAPONS), 0.04),
+            (0x62e, Tier(6, ARMOR), 0.04),
+            (0x62f, Tier(2, RINGS), 0.05),
+            (0x631, Item(0xa23), 0.03),
+            (0x632, Tier(6, ARMOR), 0.04),
+            (0x633, Tier(2, RINGS), 0.05),
+            (0x63b, Item(0xa22), 0.03),
+            (0x63e, Item(0xa22), 0.03),
+            (0x640, Tier(7, WEAPONS), 0.04),
+            (0x645, Item(0xa23), 0.03),
+            (0x649, Tier(3, ABILITIES), 0.10),
+            (0x64a, Item(0xa22), 0.03),
+            (0x64f, Item(0xa22), 0.03),
+            (0x650, Item(0xaa9), 0.005),
+            (0x900, Tier(4, ARMOR), 0.01),
+        ] {
+            assert!(period_surface(kind), "{kind:#x}");
+            assert_eq!(surface_rate(kind, pick), Some(chance), "{kind:#x}");
+        }
+        for (kind, wrong_tier) in [
+            (0x204, Tier(1, ARMOR)),
+            (0x601, Tier(0, ARMOR)),
+            (0x609, Tier(1, ARMOR)),
+            (0x60d, Tier(2, ARMOR)),
+            (0x614, Tier(2, ARMOR)),
+            (0x617, Tier(1, ARMOR)),
+            (0x61a, Tier(2, WEAPONS)),
+        ] {
+            assert_eq!(surface_rate(kind, wrong_tier), None, "{kind:#x}");
+        }
+    }
+
+    #[test]
+    fn wild_shadow_tier_pages_fill_dwarf_king_and_elf_wizard_gaps() {
+        use Pick::Tier;
+        for (kind, pick, chance) in [
+            (0x609, Tier(3, WEAPONS), 0.10),
+            (0x61f, Tier(2, WEAPONS), 0.20),
+            (0x61f, Tier(3, WEAPONS), 0.10),
+            (0x61f, Tier(4, WEAPONS), 0.50),
+            (0x61f, Tier(1, ARMOR), 0.32),
+            (0x61f, Tier(2, ARMOR), 0.16),
+            (0x61f, Tier(3, ARMOR), 0.08),
+            (0x61f, Tier(4, ARMOR), 0.04),
+            (0x61f, Tier(1, RINGS), 0.10),
+            (0x61f, Tier(1, ABILITIES), 0.10),
+        ] {
+            assert_eq!(surface_rate(kind, pick), Some(chance), "{kind:#x}");
+        }
+    }
+
+    #[test]
+    fn period_surface_preserves_unlisted_bonuses_and_excludes_other_seams() {
+        for (kind, pick, chance) in [
+            (0x606, Pick::Item(0xa23), 0.03),
+            (0x607, Pick::Item(0xa22), 0.05),
+            (0x631, Pick::Item(0xa22), 0.03),
+            (0x632, Pick::Tier(3, WEAPONS), 0.10),
+            (0x633, Pick::Tier(3, ARMOR), 0.10),
+            (0x63e, Pick::Tier(4, WEAPONS), 0.05),
+            (0x645, Pick::Tier(5, WEAPONS), 0.16),
+            (0x64f, Pick::Tier(3, ABILITIES), 0.03),
+        ] {
+            assert_eq!(surface_rate(kind, pick), Some(chance), "{kind:#x}");
+        }
+        for kind in [
+            0x651, 0x659, 0x6d8, 0x91a, 0xd05, 0x668, 0x675, 0x678, 0x67d, 0x91c, 0x920, 0x92d,
+            0x927, 0x683, 0x936, 0x957,
+        ] {
+            assert!(!period_surface(kind), "{kind:#x}");
+        }
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in content
+            .objects
+            .keys()
+            .copied()
+            .filter(|kind| period_surface(*kind))
+        {
+            validate(&content, kind).unwrap();
+        }
+    }
 
     #[test]
     fn period_dungeon_wiki_named_drop_entries() {
