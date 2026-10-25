@@ -119,6 +119,9 @@ pub(crate) struct Market {
     pub bargain: Option<Bargain>,
     history: VecDeque<Bargain>,
     vault: Option<Vec<i32>>,
+    // Old exports retain this hint without restoring the process-local ad timer.
+    #[serde(default, rename = "next_ad")]
+    legacy_next_ad: u64,
     #[serde(skip)]
     next_ad: u64,
     #[serde(skip)]

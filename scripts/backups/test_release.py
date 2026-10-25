@@ -73,6 +73,14 @@ class ReleaseContract(unittest.TestCase):
             revision = work / 'REVISION'
             revision.write_text('a' * 40)
             with closing(sqlite3.connect(game)) as db, db:
+                minds = db.execute('SELECT account,mind FROM bot_minds').fetchall()
+                self.assertTrue(minds)
+                for account, raw in minds:
+                    mind = json.loads(raw)
+                    mind['market'].pop('quote')
+                    mind['market'].pop('preparing')
+                    mind['market']['next_ad'] = 123456
+                    db.execute('UPDATE bot_minds SET mind=? WHERE account=?', (json.dumps(mind), account))
                 owner = db.execute('SELECT min(id) FROM accounts').fetchone()[0]
                 db.execute('UPDATE accounts SET credits=credits+3725 WHERE id=?', (owner,))
                 for index, reward in enumerate(backup.gold_reward_types(18)[3:], 1):
