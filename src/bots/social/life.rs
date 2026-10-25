@@ -631,7 +631,7 @@ pub(in crate::bots) async fn receive_life(
     )
 }
 
-pub(super) async fn cancel_gift(
+pub(in crate::bots) async fn cancel_gift(
     app: &crate::server::App,
     brain: &mut Brain,
     v: &PlayerView,
