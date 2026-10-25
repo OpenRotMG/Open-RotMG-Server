@@ -653,7 +653,7 @@ impl Piece {
         }
         if !matches!(
             kind,
-            0x91b | 0x935 | 0xd59 | 0xd50 | 0xe37 | 0x67d | crate::dungeon::tomb::SPHINX
+            0x91b | 0x935 | 0xd59 | 0xd50 | 0xd5f | 0xe37 | 0x67d | crate::dungeon::tomb::SPHINX
         ) {
             p.set(p.boss.0, p.boss.1, if kind == 0x668 { 2 } else { 1 });
             if kind == 0xdc2 {
@@ -732,7 +732,7 @@ impl World {
         tracing::info!(kind, count = items.len(), "landmark chest rewards created");
         Ok(())
     }
-    fn setpiece_scenery_clear(&self, index: usize) -> bool {
+    pub(super) fn setpiece_scenery_clear(&self, index: usize) -> bool {
         self.cells.ids(index).iter().all(|id| {
             let e = &self.entities[id];
             let object = &self.content.objects[&e.kind];
@@ -937,7 +937,7 @@ impl World {
                     && a.x + a.width < self.map.width
                     && a.y + a.height < self.map.height
                     && (kind != 0x67d || self.walkable(boss))
-                    && (kind != 0x91b
+                    && (!matches!(kind, 0x91b | 0xd5f)
                         || piece.cells[piece.boss.1 * piece.width + piece.boss.0] != 0
                         || self.walkable(boss))
                     && castle_chest.is_none_or(|i| self.walkable(Pos {
@@ -959,7 +959,7 @@ impl World {
                     // Offset anchors must retain habitat at the actual destination, not only the sampled center.
                     && (!matches!(kind, 0x91b | 0x91f | 0xdc2 | 0x67d)
                         || self.map.cell(boss.x, boss.y).is_some_and(|c| terrains.contains(&c.terrain)))
-                    && (!matches!(kind, 0x91b | 0x67d)
+                    && (!matches!(kind, 0x91b | 0x67d | 0xd5f)
                         || self.setpiece_scenery_clear(boss.y as usize * self.map.width as usize + boss.x as usize))
                     && quest_positions.iter().all(|p| p.distance(boss) >= 32.)
                     && (a.y..a.y + a.height).all(|y| {
@@ -1408,6 +1408,57 @@ mod tests {
             }
         }
         assert!(changes.into_iter().all(|count| count > 0));
+    }
+
+    #[test]
+    fn pentaract_native_controller_cell_preserves_admission() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        for mode in 0..8 {
+            let mut map = temple_test_map(0);
+            let center = 96 * 192 + 96;
+            let hole = 76 * 192 + 76;
+            map.cells[center].terrain = 1;
+            map.cells[center].object = Some(if mode == 0 { 0x100 } else { 0x105 });
+            match mode {
+                3 => map.cells[center].ground = 0xbc,
+                4 => map.cells[hole].ground = 0xf4,
+                5 => map.cells[hole].region = 1,
+                6 => map.cells[hole].ground = 0x73,
+                7 => map.cells[hole].object = Some(0x1f3),
+                _ => {}
+            }
+            let original = Arc::new(map);
+            let mut world = World::new(content.clone(), original.clone()).unwrap();
+            if mode == 1 {
+                let native = world.cells.ids(center)[0];
+                world
+                    .entities
+                    .get_mut(&native)
+                    .unwrap()
+                    .extra_stats
+                    .push((54, 7));
+            }
+            if mode == 2 {
+                world
+                    .spawn_entity(0x501, Pos { x: 96.5, y: 96.5 }, vec![])
+                    .unwrap();
+            }
+            if mode == 4 {
+                world.realm_layout = Some("classic-world-01-reconstruction".into());
+            }
+            let ids: BTreeSet<_> = world.entities.keys().copied().collect();
+            let native_ids = world.cells.ids(center).to_vec();
+            world.rng = rand::rngs::StdRng::seed_from_u64(12351);
+            let result = world.place_named_setpiece(0xd5f, &[1]);
+            assert!(
+                result.is_err(),
+                "Pentaract admission mode {mode}: {result:?}"
+            );
+            assert!(Arc::ptr_eq(&original, &world.map));
+            assert!(world.setpieces.is_empty() && world.event_sites.is_empty());
+            assert_eq!(world.entities.keys().copied().collect::<BTreeSet<_>>(), ids);
+            assert_eq!(world.cells.ids(center), native_ids.as_slice());
+        }
     }
 
     fn temple_test_map(terrain: u8) -> Map {
