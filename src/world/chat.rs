@@ -87,21 +87,6 @@ impl World {
         );
         Ok(())
     }
-    pub(crate) fn dialogue_notice(&self, speaker: i32, text: &str, failed: bool) -> Result<()> {
-        validate(text)?;
-        let p = self
-            .players
-            .get(&speaker)
-            .context("dialogue recipient left world")?;
-        ensure!(p.can_chat(), "dialogue recipient unavailable");
-        let packet = if failed {
-            chat_error(text)
-        } else {
-            chat_info(text)
-        };
-        send(p, packet.id, packet.body);
-        Ok(())
-    }
     pub fn account_list_target(&self, id: i32, target: i32) -> Result<i32> {
         let sender = self.players.get(&id).context("player missing")?;
         let target_player = self

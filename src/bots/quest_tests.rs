@@ -562,6 +562,65 @@ fn nexus_familiarity_does_not_preempt_banking() {
 }
 
 #[test]
+fn market_reserved_stock_yields_to_reflexes_without_inventing_settlement() {
+    use pursuits::market::{Bargain, Goods, Terms};
+    let (content, mut view) = fixture();
+    view.character.hp = 30;
+    view.character.items[4] = 0xa21;
+    let mut brain = Brain::new(ARCHETYPES[0], &view);
+    brain.mind.market.bargain = Some(Bargain {
+        terms: Terms {
+            version: 1,
+            accounts: [1, 2],
+            names: ["Me".into(), "Peer".into()],
+            goods: [
+                Goods {
+                    kind: 0xa21,
+                    quantity: 1,
+                },
+                Goods {
+                    kind: 0xa20,
+                    quantity: 1,
+                },
+            ],
+            meeting: [-2, 10, 10],
+            expires: pursuits::market::now() + 120,
+            batch: 1,
+        },
+        own_consent: true,
+        agreed: true,
+        peer_consent: Some([-2, 2, 1]),
+        confirmed: 0,
+        consent_revision: 0,
+        rounds: 1,
+        resolution: None,
+    });
+    let d = brain.decide(&view, &content).unwrap();
+    assert_eq!(d.goal, Goal::Recover);
+    assert!(matches!(d.journey, Some(Journey::Nexus)));
+    assert!(d.item.is_none());
+    assert_eq!(brain.mind.market.bargain.as_ref().unwrap().confirmed, 0);
+    assert!(
+        brain
+            .mind
+            .market
+            .bargain
+            .as_ref()
+            .unwrap()
+            .resolution
+            .is_none()
+    );
+    view.character.hp = view.character.stats[0];
+    view.tick += 100;
+    view.time_ms += 5000;
+    let d = brain.decide(&view, &content).unwrap();
+    assert!(
+        d.item.is_none(),
+        "ordinary consumption/equipment cannot take the reserved Speed"
+    );
+}
+
+#[test]
 fn pirate_cave_bots_leave_through_the_realm_portal_exit() {
     let (content, mut view) = fixture();
     view.map.name = "Pirate Cave".into();
