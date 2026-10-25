@@ -78,6 +78,7 @@ fn center(room: usize) -> (i32, i32) {
 fn index(x: i32, y: i32) -> usize {
     (y * 164 + x) as usize
 }
+// Reconstructed map-wide bands avoid room seams: https://discord.com/channels/1558662335076376578/1558662336439386185/1563883820896493629
 fn missing_tile_at(x: i32, y: i32, phase: i32) -> bool {
     (x + 2 * y + phase).rem_euclid(13) < 3
 }
