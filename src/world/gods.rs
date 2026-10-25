@@ -31,10 +31,11 @@ impl World {
             0x652 => (Motion::Wander, 2.),
             0x653 => {
                 let camp = &self.camps[e.camp.context("Sprite Child has no bounded family")?];
-                if self.population[camp.start]
+                let leader = self.population[camp.start]
                     .entity
-                    .is_some_and(|id| self.entities.contains_key(&id))
-                {
+                    .and_then(|id| self.entities.get(&id));
+                // Freezing at the catch-up radius strands siblings; the reference yields to wandering: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Mountain.cs#L66-L70
+                if leader.is_some_and(|leader| e.pos.distance(leader.pos) > 2.) {
                     (
                         Motion::Protect {
                             anchor: Anchor::CampLeader,
@@ -249,5 +250,153 @@ impl World {
             *angle += (aim.y - e.pos.y).atan2(aim.x - e.pos.x) - heading;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sprite_children_wander_when_caught_up_without_separation_or_population_changes() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let map = Map {
+            width: 64,
+            height: 64,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x60,
+                    object: None,
+                    config: String::new(),
+                    terrain: 1,
+                    region: 0
+                };
+                64 * 64
+            ],
+            spawns: vec![(32.5, 40.5)],
+        };
+        let mut world = World::new(content, Arc::new(map)).unwrap();
+        world.name = "Realm".into();
+        world.encounter = true;
+        world.safe = false;
+        world.rng = rand::rngs::StdRng::seed_from_u64(472);
+        world.configure_population().unwrap();
+        let family = population::FAMILIES
+            .iter()
+            .find(|f| f.leader == 0x652)
+            .unwrap();
+        let center = Pos { x: 32.5, y: 32.5 };
+        let positions = (0..family.size())
+            .map(|i| Pos {
+                x: center.x + i as f32,
+                y: center.y,
+            })
+            .collect();
+        world.place_camp(family, positions).unwrap();
+        let god = world.population[0].entity.unwrap();
+        let children: Vec<_> = world
+            .population
+            .iter()
+            .skip(1)
+            .filter_map(|s| s.entity)
+            .collect();
+        assert_eq!(children.len(), 3);
+        assert_eq!(world.population.len(), 6);
+        assert_eq!(world.population_count(1), 4);
+        let account = store.list("sprite-child-regression".into()).await.unwrap();
+        let ch = store
+            .create(
+                account.id,
+                world.content.get(crate::content::WIZARD).unwrap(),
+            )
+            .await
+            .unwrap();
+        world.enter(ch, None).unwrap();
+        // A stationary parent isolates the missing idle branch from parent-driven catch-up.
+        world
+            .apply_condition(god, condition::PARALYZED, 5000)
+            .unwrap();
+        world
+            .apply_condition(children[2], condition::PARALYZED, 5000)
+            .unwrap();
+        let stack = Pos {
+            x: center.x + 0.5,
+            y: center.y,
+        };
+        for id in &children {
+            world.move_entity_colliding(*id, stack, 10., true).unwrap();
+        }
+        let starting: Vec<_> = children.iter().map(|id| world.entities[id].pos).collect();
+        world.now += 50;
+        world.npc_step();
+        for (index, id) in children[..2].iter().enumerate() {
+            assert!(
+                world.entities[id].pos.distance(starting[index]) > 0.1,
+                "caught-up Sprite Child {id} stayed stacked"
+            );
+            assert!(matches!(
+                world.god_movement(*id, None, 0).unwrap(),
+                (Motion::Wander, 4.)
+            ));
+        }
+        assert!(
+            world.entities[&children[0]]
+                .pos
+                .distance(world.entities[&children[1]].pos)
+                > 0.01
+        );
+        assert_eq!(world.entities[&children[2]].pos.distance(starting[2]), 0.);
+        assert_eq!(world.entities[&god].pos.distance(center), 0.);
+        assert_eq!(world.entities[&god].hp, 2000);
+        assert!(children.iter().all(|id| world.entities[id].hp == 50));
+        let far = Pos {
+            x: center.x + 5.,
+            y: center.y,
+        };
+        world
+            .move_entity_colliding(children[0], far, 10., true)
+            .unwrap();
+        assert!(matches!(
+            world.god_movement(children[0], None, 0).unwrap(),
+            (
+                Motion::Protect {
+                    anchor: Anchor::CampLeader,
+                    distance: 2.
+                },
+                4.
+            )
+        ));
+        world.now += 50;
+        world.npc_step();
+        assert!(world.entities[&children[0]].pos.distance(center) < far.distance(center));
+        world.remove_entity(god);
+        assert!(children.iter().all(|id| world.entities.contains_key(id)));
+        assert_eq!(world.population_count(1), 3);
+        assert!(children.iter().all(|id| matches!(
+            world.god_movement(*id, None, 0).unwrap(),
+            (Motion::Wander, 4.)
+        )));
+        world
+            .move_entity_colliding(
+                children[0],
+                Pos {
+                    x: center.x + 25.,
+                    y: center.y,
+                },
+                30.,
+                true,
+            )
+            .unwrap();
+        assert!(matches!(
+            world.god_movement(children[0], None, 0).unwrap(),
+            (
+                Motion::Protect {
+                    anchor: Anchor::Home,
+                    distance: 1.
+                },
+                6.
+            )
+        ));
     }
 }
