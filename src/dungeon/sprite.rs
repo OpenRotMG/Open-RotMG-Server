@@ -4,7 +4,8 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 
 const TREES: [u16; 5] = [0x175, 0x176, 0x177, 0x178, 0x179];
 const SPRITES: [u16; 5] = [0xd00, 0xd01, 0xd02, 0xd03, 0xd04];
-const DIRECTIONS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+type Point = (i32, i32);
+const DIRECTIONS: [Point; 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 const PITCH: i32 = 16;
 const ROOM: i32 = 6;
 // The preserved map gives Limon a 30-tile platform: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
@@ -38,13 +39,13 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     }
     let reach = |i: usize| if i == boss { ARENA } else { ROOM };
     // Grid centers stay on paint()'s conveyor origin, with a two-tile void margin.
-    let shift = |axis: fn(&(i32, i32)) -> i32| {
+    let shift = |axis: fn(&Point) -> i32| {
         let low = rooms.iter().enumerate().map(|(i, p)| axis(p) - reach(i));
         12 - PITCH * (10 + low.min().unwrap()).div_euclid(PITCH)
     };
     let (ox, oy) = (shift(|p| p.0), shift(|p| p.1));
     let centers: Vec<_> = rooms.iter().map(|(x, y)| (x + ox, y + oy)).collect();
-    let extent = |axis: fn(&(i32, i32)) -> i32| {
+    let extent = |axis: fn(&Point) -> i32| {
         let high = centers.iter().enumerate().map(|(i, p)| axis(p) + reach(i));
         high.max().unwrap() + 3
     };
@@ -151,7 +152,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     Ok(map)
 }
 
-fn spine(rng: &mut rand::rngs::StdRng) -> Option<(Vec<(i32, i32)>, (i32, i32))> {
+fn spine(rng: &mut rand::rngs::StdRng) -> Option<(Vec<Point>, Point)> {
     let mut rooms = vec![(0, 0)];
     for _ in 1..rng.gen_range(5..=8) {
         let (x, y) = *rooms.last()?;
@@ -172,7 +173,7 @@ fn spine(rng: &mut rand::rngs::StdRng) -> Option<(Vec<(i32, i32)>, (i32, i32))> 
     Some((rooms, *arenas.choose(rng)?))
 }
 
-fn apart(room: (i32, i32), arena: (i32, i32)) -> bool {
+fn apart(room: Point, arena: Point) -> bool {
     let gap = ROOM + ARENA + 2;
     (room.0 - arena.0).abs() > gap || (room.1 - arena.1).abs() > gap
 }
