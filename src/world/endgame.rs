@@ -823,7 +823,13 @@ impl World {
                         && open(x, y)
                         && [(-1, -1), (-1, 1), (1, -1), (1, 1)]
                             .iter()
-                            .any(|&(dx, dy)| !open(x - dx, y) && !open(x, y - dy))
+                            .any(|&(dx, dy)| {
+                                !open(x - dx, y)
+                                    && !open(x, y - dy)
+                                    && open(x + dx, y)
+                                    && open(x, y + dy)
+                                    && open(x + dx, y + dy)
+                            })
                 })
                 .collect();
             ensure!(!corners.is_empty(), "Wine Cellar map has no barrel corners");
