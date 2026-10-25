@@ -239,11 +239,12 @@ fn market_trade_up_intent_farms_short_stock_instead_of_buying_its_own_speed_back
     }
     // If another real upgrade is still possible, the target remains valid; otherwise it is retired.
     let needed = m.wanted(&v, &c, None, DEFENSE).unwrap() > 0;
+    let grid = super::session_tests::terrain(&mut v);
     m.decide(
         &v,
         &c,
         None,
-        &Grid::terrain(&v),
+        &grid,
         &mut rand::rngs::mock::StepRng::new(0, 1),
     )
     .unwrap();

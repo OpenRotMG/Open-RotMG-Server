@@ -2,7 +2,7 @@ use super::tests::fixture;
 use super::*;
 use rand::rngs::{StdRng, mock::StepRng};
 
-fn terrain(v: &mut PlayerView) -> Grid {
+pub(super) fn terrain(v: &mut PlayerView) -> Grid {
     let geometry =
         crate::navigation::Geometry::new((20, 20), vec![0; 400], &BTreeMap::from([(0, 1.)]));
     v.tiles = Arc::new(crate::navigation::Tiles::new(

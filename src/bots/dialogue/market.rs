@@ -7,7 +7,7 @@ pub(super) struct Wording {
     result: Arc<Mutex<Option<std::result::Result<String, Failure>>>>,
 }
 
-pub(super) const PROMPT: &str = "Generate your own terse 2012 Realm player trade speech. Use reply_to_player once with the sole allowed intent. Write a TEMPLATE: never substitute facts into tokens. For market_advertise the grammar is VERB {give} LINK {want}, optionally followed by ' @{name}'. VERB is wts, selling, sell, s>, or trading. LINK is for or =. Caps and extra whitespace are allowed. For market_refuse the grammar is 'nty need {want}' or 'nah need {want}' or 'no thx need {want}'. Vary wording and capitalization for the supplied speaker/style, keeping their preferred voice. Tokens must occur exactly once. No other words, numbers, punctuation, goods, promises, acceptance or invented terms. The program inserts inventory-validated facts AFTER generation. WINDOW offers are the only trade acceptance authority.";
+pub(super) const PROMPT: &str = "Generate your own terse 2012 Realm player trade speech. Use reply_to_player once with the sole allowed intent. Write a TEMPLATE: never substitute facts into tokens. For market_advertise use SELL {give} LINK {want} or BUY {want} LINK {give}, optionally followed by ' @{name}'. SELL is wts, selling, sell, s>, or trading. BUY is wtb, buying, or buy. LINK is for or =. Caps and extra whitespace are allowed. For market_refuse the grammar is 'nty need {want}' or 'nah need {want}' or 'no thx need {want}'. Vary wording and capitalization for the supplied speaker/style, keeping their preferred voice. Tokens must occur exactly once. No other words, numbers, punctuation, goods, promises, acceptance or invented terms. The program inserts inventory-validated facts AFTER generation. WINDOW offers are the only trade acceptance authority.";
 
 fn render(
     template: &str,
@@ -24,13 +24,15 @@ fn render(
     let valid = match intent {
         Intent::MarketAdvertise => {
             (words.len() == 4 || (words.len() == 5 && lower[4] == "@{name}"))
-                && matches!(
+                && matches!(lower[2].as_str(), "for" | "=")
+                && ((matches!(
                     lower[0].as_str(),
                     "wts" | "selling" | "sell" | "s>" | "trading"
-                )
-                && lower[1] == "{give}"
-                && matches!(lower[2].as_str(), "for" | "=")
-                && lower[3] == "{want}"
+                ) && lower[1] == "{give}"
+                    && lower[3] == "{want}")
+                    || (matches!(lower[0].as_str(), "wtb" | "buying" | "buy")
+                        && lower[1] == "{want}"
+                        && lower[3] == "{give}"))
         }
         Intent::MarketRefuse => {
             matches!(lower.as_slice(), [a,b,c] if matches!(a.as_str(), "nty" | "nah") && b == "need" && c == "{want}")
@@ -150,7 +152,11 @@ mod tests {
     use super::*;
     #[test]
     fn generated_market_templates_cannot_change_inventory_prices_or_consent() {
-        for text in ["WTS {give} FOR {want}", "selling {give} = {want} @{name}"] {
+        for text in [
+            "WTS {give} FOR {want}",
+            "selling {give} = {want} @{name}",
+            "WTB {want} FOR {give}",
+        ] {
             let generated =
                 render(text, Intent::MarketAdvertise, "4 spd", "1 def", "Trader").unwrap();
             assert!(generated.contains("4 spd") && generated.contains("1 def"));
