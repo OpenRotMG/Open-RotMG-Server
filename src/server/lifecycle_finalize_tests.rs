@@ -1788,13 +1788,13 @@ async fn native_input_backlog_survives_overrunning_world() {
         .unwrap();
     let mut socket = NativeSocket::connect(port, &a.origin).await;
     let id = socket_load(&mut socket, &dir, "input-backlog", ch.id).await;
-    // Every world job waits behind a 60ms overrunning tick, as during the #486 Lord of the Lost Lands fight.
+    // A two-second stall, then 60ms overrunning ticks as during the #486 Lord of the Lost Lands fight.
     let world = a.world.for_player(id);
     let overrun = tokio::spawn(async move {
-        loop {
+        for stall in std::iter::once(2000).chain(std::iter::repeat(60)) {
             world
-                .call(|_| {
-                    std::thread::sleep(Duration::from_millis(60));
+                .call(move |_| {
+                    std::thread::sleep(Duration::from_millis(stall));
                     Ok(())
                 })
                 .await
