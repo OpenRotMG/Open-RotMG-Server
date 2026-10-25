@@ -18,7 +18,7 @@ pub(super) fn ready(p: &Player) -> bool {
         && !p.pending
         && p.tx
             .as_ref()
-            .is_none_or(|tx| !*tx.lost.borrow() && !tx.packets.is_closed())
+            .is_none_or(|tx| !tx.lost.borrow().is_some() && !tx.packets.is_closed())
 }
 
 pub(super) fn effect(kind: u8, target: i32, position: Pos) -> Vec<u8> {

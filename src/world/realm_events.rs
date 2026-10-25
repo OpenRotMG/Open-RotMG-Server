@@ -78,7 +78,7 @@ async fn reserved_event_sites_remain_original_and_ordinary_quests_exist_at_creat
         .unwrap()
         .clone();
     let (packets, mut receiver) = mpsc::channel(128);
-    let (lost, _) = watch::channel(false);
+    let (lost, _) = watch::channel(None);
     let player = world
         .enter_at(
             ch,

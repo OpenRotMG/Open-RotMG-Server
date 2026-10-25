@@ -113,7 +113,11 @@ pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
     pub packets: mpsc::Sender<Packet>,
-    pub lost: watch::Sender<bool>,
+    pub lost: watch::Sender<Option<&'static str>>,
+}
+// The first cause names the disconnect; later failures of a closing connection are its consequences.
+pub(crate) fn lose(lost: &watch::Sender<Option<&'static str>>, cause: &'static str) {
+    lost.send_if_modified(|current| current.is_none() && current.replace(cause).is_none());
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -517,7 +521,7 @@ impl Player {
         self.bot_goal = None;
         self.bot_aim = None;
         if let Some(output) = &self.tx {
-            let _ = output.lost.send(true);
+            lose(&output.lost, "persistence_quarantine");
         }
         // Quarantine remains authoritative even when its diagnostic sink fails.
         let error = self
@@ -2629,7 +2633,14 @@ pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
     if let Some(tx) = &p.tx
         && let Err(error) = tx.packets.try_send(Packet { id, body })
     {
-        tx.lost.send_replace(true);
+        lose(
+            &tx.lost,
+            if tx.packets.is_closed() {
+                "output_queue_closed"
+            } else {
+                "output_queue_full"
+            },
+        );
         let queue_state = match error {
             mpsc::error::TrySendError::Full(_) => "full",
             mpsc::error::TrySendError::Closed(_) => "closed",

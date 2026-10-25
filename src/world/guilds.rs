@@ -96,7 +96,7 @@ impl Directory {
             id: wire::INVITED_TO_GUILD,
             body: out.0,
         }) {
-            let _ = output.lost.send(true);
+            lose(&output.lost, "guild_invite_queue");
             bail!("Player cannot receive guild invitations: {error}");
         }
         self.guild_invites.insert(

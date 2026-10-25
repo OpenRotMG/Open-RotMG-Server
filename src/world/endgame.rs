@@ -576,7 +576,7 @@ impl Directory {
                     && p.persistence_failure.is_none()
                     && p.tx
                         .as_ref()
-                        .is_some_and(|tx| !tx.packets.is_closed() && !*tx.lost.borrow())
+                        .is_some_and(|tx| !tx.packets.is_closed() && !tx.lost.borrow().is_some())
             })
             .map(|(id, _)| *id)
             .collect();
@@ -697,7 +697,7 @@ impl Directory {
         let output =
             p.tx.clone()
                 .context("collective transfer recipient lacks an owned RECONNECT output")?;
-        if output.packets.is_closed() || *output.lost.borrow() {
+        if output.packets.is_closed() || output.lost.borrow().is_some() {
             self.endgame.forced.remove(&player);
             tracing::info!(
                 player,

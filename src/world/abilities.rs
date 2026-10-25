@@ -86,7 +86,7 @@ impl World {
         );
         ensure!(
             p.tx.as_ref()
-                .is_none_or(|tx| !*tx.lost.borrow() && !tx.packets.is_closed()),
+                .is_none_or(|tx| !tx.lost.borrow().is_some() && !tx.packets.is_closed()),
             controller("ability connection is closed")
         );
         ensure!(
