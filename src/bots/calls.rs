@@ -6,20 +6,18 @@ enum Activity {
     Gods,
     Demon,
     Sphinx,
+    Snake,
 }
 impl Activity {
     fn parse(text: &str) -> Option<Self> {
+        let text = text.to_ascii_lowercase();
         let words = text.split_whitespace().collect::<Vec<_>>();
         match words.as_slice() {
-            [tp] if tp.eq_ignore_ascii_case("tp") => Some(Self::Help),
-            [tp, activity] if tp.eq_ignore_ascii_case("tp") => {
-                match activity.to_ascii_lowercase().as_str() {
-                    "gods" => Some(Self::Gods),
-                    "demon" => Some(Self::Demon),
-                    "sphynix" | "sphinx" => Some(Self::Sphinx),
-                    _ => None,
-                }
-            }
+            ["snake"] | ["snake", "pit"] | ["snake", "here"] | ["tp", "snake"] => Some(Self::Snake),
+            ["tp"] => Some(Self::Help),
+            ["tp", "gods"] => Some(Self::Gods),
+            ["tp", "demon"] => Some(Self::Demon),
+            ["tp", "sphynix" | "sphinx"] => Some(Self::Sphinx),
             _ => None,
         }
     }
@@ -58,6 +56,7 @@ impl Calls {
     }
 }
 impl Brain {
+    #[cfg(test)]
     fn call_ready(
         &self,
         v: &PlayerView,
@@ -65,6 +64,24 @@ impl Brain {
         activity: Activity,
         caller: i32,
     ) -> Result<bool> {
+        Ok(self.call_rejection(v, c, activity, caller)?.is_none())
+    }
+    fn speed_motive(&self, v: &PlayerView, c: &Content) -> Option<&'static str> {
+        if v.character.base_stats[4] < c.classes[&v.character.class].caps[4] {
+            Some("max_speed")
+        } else if self.mind.market.wants_speed(v) {
+            Some("speed_for_market")
+        } else {
+            None
+        }
+    }
+    fn call_rejection(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        activity: Activity,
+        caller: i32,
+    ) -> Result<Option<&'static str>> {
         if !v.map.allow_teleport
             || !v.lifecycle.alive
             || v.lifecycle.busy
@@ -72,12 +89,19 @@ impl Brain {
             || v.lifecycle.departing
             || v.lifecycle.quarantined
             || !matches!(v.lifecycle.output, OutputState::Live)
-            || v.character.items[0] < 0
-            || v.character.hp * 4 < v.character.stats[0] * 3
-            || v.time_ms < self.next_teleport
+        {
+            return Ok(Some("lifecycle_or_map"));
+        }
+        if v.character.items[0] < 0 || v.character.hp * 4 < v.character.stats[0] * 3 {
+            return Ok(Some("health_or_weapon"));
+        }
+        if v.time_ms < self.next_teleport
             || v.tick < self.recover_until
             || matches!(self.goal, Goal::Recover | Goal::Dodge | Goal::Remedy(_))
-            || self.group.is_some()
+        {
+            return Ok(Some("cooldown_or_recovering"));
+        }
+        if self.group.is_some()
             || self.agreement.is_some()
             || self.companion.is_some()
             || self.proposing
@@ -93,7 +117,7 @@ impl Brain {
                 .as_ref()
                 .is_some_and(|b| b.resolution.is_none())
         {
-            return Ok(false);
+            return Ok(Some("social_or_trade_commitment"));
         }
         let interested = match activity {
             Activity::Help => {
@@ -104,9 +128,21 @@ impl Brain {
                 v.map.name == "Realm" && progression::ready(v, c, 0x718)
             }
             Activity::Sphinx => v.map.name == "Realm" && events::ready(v, c),
+            Activity::Snake => v.map.name == "Realm" && progression::ready(v, c, 0x718),
         };
         if !interested {
-            return Ok(false);
+            return Ok(Some("activity_readiness"));
+        }
+        if activity == Activity::Snake {
+            if self.speed_motive(v, c).is_none() {
+                return Ok(Some("no_speed_need"));
+            }
+            if !v.character.items.iter().skip(4).any(|k| *k == -1) {
+                return Ok(Some("no_reward_space"));
+            }
+            if !v.character.items.iter().skip(4).any(|k| *k == 0xa22) {
+                return Ok(Some("no_health_reserve"));
+            }
         }
         let weapon = c.get(v.character.items[0] as u16)?;
         let projectile = weapon
@@ -127,7 +163,7 @@ impl Brain {
                 || (!can_fight && distance < 8.)
                 || (can_fight && progression::vulnerable(o) && (distance < range || engaged))
         }) {
-            return Ok(false);
+            return Ok(Some("nearby_combat_or_danger"));
         }
         for bag in v
             .objects
@@ -135,10 +171,10 @@ impl Brain {
             .filter(|o| c.objects[&o.kind].class == "Container")
         {
             if progression::pickup(v, c, bag, self.mind.future_class)?.is_some() {
-                return Ok(false);
+                return Ok(Some("useful_loot"));
             }
         }
-        Ok(true)
+        Ok(None)
     }
     pub(super) fn receive_call(
         &mut self,
@@ -168,26 +204,20 @@ impl Brain {
             );
             return Ok(());
         }
-        let Some(peer) = v.objects.iter().find(|p| {
-            p.id == actor
-                && p.name == name
-                && p.hp > 0
-                && !p.equipped.is_empty()
-                && p.account.is_some_and(|a| a > 0 && a != v.session.account)
-                && p.position.distance(v.position) < 15.
+        let Some(peer) = v.player_markers.iter().find(|p| {
+            p.id == actor && p.name == name && p.account > 0 && p.account != v.session.account
         }) else {
             tracing::info!(
                 account = v.session.account,
                 actor,
                 name,
-                world = v.session.world,
                 ?activity,
                 reason = "unbound_speaker",
                 "public activity call declined"
             );
             return Ok(());
         };
-        let caller = peer.account.expect("bound public account");
+        let caller = peer.account;
         self.calls.observe(v);
         if self
             .calls
@@ -218,17 +248,30 @@ impl Brain {
                 .checked_add(60_000)
                 .context("public call dedup deadline overflow")?,
         });
-        if self.calls.opportunity.is_some()
-            || !self.call_ready(v, c, activity, caller)?
-            || peer.position.distance(v.position) <= 7.
-        {
+        let rejection = if self.calls.opportunity.is_some() {
+            Some("another_call_pending")
+        } else if !crowds::survivable(v, peer.position) {
+            Some("unsafe_realm_destination")
+        } else if v.objects.iter().find(|p| p.id == actor).is_some_and(|p| {
+            p.account != Some(caller)
+                || p.name != name
+                || p.equipped.is_empty()
+                || p.hp <= 0
+                || p.hp * 4 < p.max_hp * 3
+        }) {
+            Some("caller_unfit")
+        } else if peer.position.distance(v.position) <= 7. {
+            Some("already_near_caller")
+        } else {
+            self.call_rejection(v, c, activity, caller)?
+        };
+        if let Some(reason) = rejection {
             tracing::info!(
                 account = v.session.account,
                 caller,
                 actor,
-                world = v.session.world,
                 ?activity,
-                reason = "busy_unready_or_already_company_close",
+                reason,
                 "public activity call declined"
             );
             return Ok(());
@@ -251,6 +294,11 @@ impl Brain {
                 actor,
                 world = v.session.world,
                 ?activity,
+                motive = if activity == Activity::Snake {
+                    self.speed_motive(v, c)
+                } else {
+                    Some("shared_activity")
+                },
                 "public activity call accepted"
             );
         } else {
@@ -276,17 +324,29 @@ impl Brain {
             .player_markers
             .iter()
             .find(|p| p.id == o.actor && p.account == o.account && p.name == o.name);
-        let live = v.objects.iter().find(|p| p.id == o.actor).is_none_or(|p| {
-            p.hp > 0 && !p.equipped.is_empty() && p.account == Some(o.account) && p.name == o.name
-        });
-        if o.world != v.session.world
-            || !live
-            || !self.call_ready(v, c, o.activity, o.account)?
-            || target.is_none_or(|p| p.position.distance(v.position) <= 7.)
-        {
-            tracing::info!(account=v.session.account,caller=o.account,target=o.actor,world=v.session.world,activity=?o.activity,reason="identity_readiness_or_distance_changed","public activity call declined");
+        let rejection = if o.world != v.session.world || target.is_none() {
+            Some("lost_public_identity")
+        } else if v.objects.iter().find(|p| p.id == o.actor).is_some_and(|p| {
+            p.hp <= 0
+                || p.hp * 4 < p.max_hp * 3
+                || p.equipped.is_empty()
+                || p.account != Some(o.account)
+                || p.name != o.name
+        }) {
+            Some("caller_unfit")
+        } else if target.is_some_and(|p| !crowds::survivable(v, p.position)) {
+            Some("unsafe_realm_destination")
+        } else if target.is_some_and(|p| p.position.distance(v.position) <= 7.) {
+            Some("already_near_caller")
+        } else {
+            self.call_rejection(v, c, o.activity, o.account)?
+        };
+        if let Some(reason) = rejection {
+            tracing::info!(account=v.session.account,caller=o.account,target=o.actor,activity=?o.activity,reason,"public activity call declined");
             return Ok(None);
         }
+        let marker = target.expect("validated call marker").clone();
+        self.crowd.heed_call(v, marker);
         tracing::info!(account=v.session.account,caller=o.account,target=o.actor,world=v.session.world,activity=?o.activity,"public activity call dispatched");
         Ok(Some(o.actor))
     }

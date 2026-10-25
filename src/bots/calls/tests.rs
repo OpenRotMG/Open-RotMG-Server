@@ -428,11 +428,13 @@ fn public_call_dedup_window_is_bounded_without_evicting_live_refusals() {
     v.character.hp = 100;
     for account in 40..72 {
         v.objects[0].account = Some(account);
+        v.player_markers[0].account = account;
         b.receive(packet(40, "Caller", "", "tp"), &v, false, &c)
             .unwrap();
     }
     assert_eq!(b.calls.seen.len(), 32);
     v.objects[0].account = Some(99);
+    v.player_markers[0].account = 99;
     v.character.hp = 500;
     let next = b.rng.clone().next_u64();
     b.receive(packet(40, "Caller", "", "tp"), &v, false, &c)
@@ -526,4 +528,282 @@ async fn public_call_ordinary_teleport_keeps_target_health_lifecycle_world_known
         d.teleport(*a, *b, now + std::time::Duration::from_secs(10))
             .is_ok()
     );
+}
+
+#[test]
+fn snake_call_aliases_share_one_opportunity_and_need_not_be_level_twenty() {
+    let (c, mut v, mut b) = realm_fixture();
+    v.character.level = 14;
+    assert!(progression::ready(&v, &c, 0x718));
+    let mut expected = b.rng.clone();
+    assert!(expected.gen_bool(0.5));
+    for text in ["snake", "SNAKE PIT", "snake here", "tp snake"] {
+        assert_eq!(Activity::parse(text), Some(Activity::Snake));
+        b.receive(packet(40, "Caller", "", text), &v, false, &c)
+            .unwrap();
+    }
+    assert_eq!(b.calls.seen.len(), 1);
+    assert_eq!(b.rng.clone().next_u64(), expected.clone().next_u64());
+    let d = b.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Follow(40));
+    assert!(matches!(d.journey, Some(Journey::Regroup(40))));
+    assert!(b.calls.opportunity.is_none());
+    assert_eq!(b.rng.clone().next_u64(), expected.clone().next_u64());
+}
+
+#[test]
+fn snake_call_rejections_are_specific_and_never_reroll_after_danger() {
+    let (c, mut v, mut b) = realm_fixture();
+    v.character.level = 13;
+    assert_eq!(
+        b.call_rejection(&v, &c, Activity::Snake, 40).unwrap(),
+        Some("activity_readiness")
+    );
+    v.character.level = 14;
+    v.character.base_stats[4] = c.classes[&v.character.class].caps[4];
+    assert_eq!(
+        b.call_rejection(&v, &c, Activity::Snake, 40).unwrap(),
+        Some("no_speed_need")
+    );
+    v.character.base_stats[4] = 25;
+    v.character.items[4] = -1;
+    v.character.items[5] = -1;
+    assert_eq!(
+        b.call_rejection(&v, &c, Activity::Snake, 40).unwrap(),
+        Some("no_health_reserve")
+    );
+    v.character.items[4] = 0xa22;
+    v.character.items[4..].fill(0xa22);
+    assert_eq!(
+        b.call_rejection(&v, &c, Activity::Snake, 40).unwrap(),
+        Some("no_reward_space")
+    );
+    v.character.items[6] = -1;
+    red_demon(&c, &mut v, 6.);
+    assert_eq!(
+        b.call_rejection(&v, &c, Activity::Snake, 40).unwrap(),
+        Some("nearby_combat_or_danger")
+    );
+    let next = b.rng.clone().next_u64();
+    b.receive(packet(40, "Caller", "", "snake pit"), &v, false, &c)
+        .unwrap();
+    assert!(b.calls.opportunity.is_none());
+    v.objects.pop();
+    b.receive(packet(40, "Caller", "", "tp snake"), &v, false, &c)
+        .unwrap();
+    assert!(b.calls.opportunity.is_none());
+    assert_eq!(b.rng.clone().next_u64(), next);
+}
+
+#[test]
+fn snake_call_binds_public_markers_and_rejects_unfit_or_unsafe_destinations() {
+    for case in [
+        "low_caller_health",
+        "unsafe_destination",
+        "unrelated_chat",
+        "marker_only",
+    ] {
+        let (c, mut v, mut b) = realm_fixture();
+        v.character.level = 14;
+        match case {
+            "low_caller_health" => v.objects[0].hp = 50,
+            "unsafe_destination" => v.player_markers[0].position = Pos { x: 16., y: 16. },
+            "marker_only" => v.objects.clear(),
+            _ => (),
+        }
+        let next = b.rng.clone().next_u64();
+        b.receive(
+            packet(
+                40,
+                "Caller",
+                "",
+                if case == "unrelated_chat" {
+                    "i like snakes"
+                } else {
+                    "snake"
+                },
+            ),
+            &v,
+            false,
+            &c,
+        )
+        .unwrap();
+        if case == "marker_only" {
+            assert_eq!(b.call_target(&v, &c).unwrap(), Some(40));
+        } else {
+            assert!(b.calls.opportunity.is_none(), "{case}");
+            assert_eq!(b.rng.clone().next_u64(), next, "{case}");
+        }
+    }
+    let (c, mut v, mut b) = realm_fixture();
+    b.receive(packet(40, "Caller", "", "snake"), &v, false, &c)
+        .unwrap();
+    assert!(b.calls.opportunity.is_some());
+    red_demon(&c, &mut v, 6.);
+    assert_eq!(b.call_target(&v, &c).unwrap(), None);
+}
+
+#[test]
+fn crowd_approach_arrival_company_separation_and_temporary_independence() {
+    let (c, mut v, mut b) = realm_fixture();
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert_eq!(b.crowd.destination(&v, None, |_| true).unwrap().id, 40);
+    b.crowd.approach_selected(40);
+    v.objects[0].position.y -= 2.;
+    v.player_markers[0].position = v.objects[0].position;
+    v.time_ms += 100;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert!(b.crowd.keeping_company(40));
+    let d = b.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Follow(40));
+    v.tick += 1;
+    v.time_ms += 100;
+    v.player_markers[0].position.y += 2.;
+    v.objects[0].position = v.player_markers[0].position;
+    let d = b.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Follow(40));
+    assert!(d.movement.is_some());
+    v.player_markers[0].position.y += 40.;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert!(!b.crowd.keeping_company(40));
+    assert!(b.crowd.destination(&v, None, |_| true).is_none());
+    v.time_ms += 30_001;
+    v.player_markers[0].position = Pos { x: 10.5, y: 18.5 };
+    v.objects[0].position = v.player_markers[0].position;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert_eq!(b.crowd.destination(&v, None, |_| true).unwrap().id, 40);
+    b.crowd.approach_selected(40);
+    v.objects[0].position.y -= 2.;
+    v.player_markers[0].position = v.objects[0].position;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert!(b.crowd.keeping_company(40));
+    v.time_ms += 90_000;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert!(!b.crowd.keeping_company(40));
+}
+
+#[test]
+fn crowd_nearby_reachable_mob_clearing_outranks_travel_and_company() {
+    let (c, mut v, mut b) = realm_fixture();
+    let kind = c
+        .objects
+        .values()
+        .find(|o| o.enemy && o.name == "Gray Blob")
+        .unwrap()
+        .kind;
+    let enemy = VisibleObject {
+        id: 50,
+        account: None,
+        kind,
+        name: "Gray Blob".into(),
+        position: Pos { x: 10.5, y: 16.5 },
+        hp: c.objects[&kind].hp,
+        max_hp: c.objects[&kind].hp,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    };
+    v.objects.push(enemy);
+    b.crowd.heed_call(&v, v.player_markers[0].clone());
+    let d = b.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Fight(50));
+    assert!(d.aim.is_some());
+}
+
+#[tokio::test]
+async fn snake_call_dispatch_uses_ordinary_directory_teleport() {
+    use crate::{store::Store, world::Directory};
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let mut directory =
+        Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 8, 12351).unwrap();
+    let mut ids = Vec::new();
+    for guid in ["snake-call-responder", "snake-call-caller"] {
+        let account = store.list(guid.into()).await.unwrap();
+        let mut character = store
+            .create(account.id, content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        character.level = 14;
+        character.base = [500, 200, 35, 10, 25, 30, 30, 25];
+        character.hp = 500;
+        character.mp = 200;
+        character.items = vec![
+            0xa9e, 0xa2e, 0xa80, -1, 0xa22, 0xa22, -1, -1, -1, -1, -1, -1,
+        ];
+        ids.push(
+            directory
+                .worlds
+                .get_mut(&-3)
+                .unwrap()
+                .enter(character, None)
+                .unwrap(),
+        );
+    }
+    let (responder, caller) = (ids[0], ids[1]);
+    let world = directory.worlds.get_mut(&-3).unwrap();
+    let start = world.players[&responder].pos;
+    let destination = [
+        Pos {
+            x: start.x + 8.,
+            y: start.y,
+        },
+        Pos {
+            x: start.x - 8.,
+            y: start.y,
+        },
+        Pos {
+            x: start.x,
+            y: start.y + 8.,
+        },
+        Pos {
+            x: start.x,
+            y: start.y - 8.,
+        },
+    ]
+    .into_iter()
+    .find(|p| world.walkable(*p))
+    .expect("walkable nearby public caller");
+    world.players.get_mut(&caller).unwrap().pos = destination;
+    world.updates(responder, true).unwrap();
+    let name = world.players[&caller].character.name.clone();
+    let mut view = directory.player_view(responder).unwrap();
+    // No socket is needed to exercise the ordinary Directory teleport guards in this prepared fixture.
+    view.lifecycle.output = OutputState::Live;
+    let mut brain = Brain::new(ARCHETYPES[5], &view);
+    brain.rng = fixture(4).2.rng;
+    assert!(progression::ready(&view, &content, 0x718));
+    brain
+        .receive(
+            packet(caller, &name, "", "snake pit"),
+            &view,
+            false,
+            &content,
+        )
+        .unwrap();
+    let target = brain
+        .call_target(&view, &content)
+        .unwrap()
+        .expect("ready speed-seeker accepts Snake call");
+    assert_eq!(target, caller);
+    let receipt = directory
+        .teleport(responder, target, std::time::Instant::now())
+        .unwrap();
+    assert_eq!(receipt.target, caller);
+    assert_eq!(receipt.world, -3);
+    assert!(receipt.position.distance(destination) < 3.);
+}
+
+#[test]
+fn crowd_approach_to_a_moving_stranger_is_bounded_before_arrival() {
+    let (c, mut v, mut b) = realm_fixture();
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    b.crowd.approach_selected(40);
+    v.time_ms += 90_000;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert!(!b.crowd.keeping_company(40));
+    assert!(b.crowd.destination(&v, None, |_| true).is_none());
 }
