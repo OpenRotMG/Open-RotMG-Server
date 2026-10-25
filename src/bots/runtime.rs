@@ -680,7 +680,7 @@ async fn launch(
                         timings.completed("decision_sync_work", sync_work);
                         record_decision_phase_elapsed(&mut timings, "decide_sync_elapsed", sync_elapsed, decision)?
                     };
-                    app.cctv.decided(profile.name, &view, &decision, cctv::reason(&decision, &view, &app.content), &app.content);
+                    app.cctv.decided(profile.name, &view, &decision, cctv::reason(brain.activity, &decision, &view, &app.content), &app.content);
                     if events::shared(&view.map.name) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
                             hp=view.character.hp,max_hp=view.character.stats[0],mp=view.character.mp,recovery=profile.recovery,

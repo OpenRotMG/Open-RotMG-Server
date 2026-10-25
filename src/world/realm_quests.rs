@@ -839,6 +839,168 @@ impl World {
 
 #[cfg(test)]
 #[test]
+fn pyre_creates_one_public_chest_without_repeating_it_during_rebirth() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut map = Map {
+        width: 192,
+        height: 192,
+        cells: vec![
+            crate::content::Cell {
+                ground: 0x46,
+                object: None,
+                config: String::new(),
+                terrain: 0,
+                region: 0
+            };
+            192 * 192
+        ],
+        spawns: vec![(1., 1.)],
+    };
+    map.cells[96 * 192 + 96].terrain = 5;
+    let original = Arc::new(map);
+    let mut world = World::new(content.clone(), original.clone()).unwrap();
+    world.encounter = true;
+    world.name = "Realm".to_owned();
+    world.rng = rand::rngs::StdRng::seed_from_u64(12351);
+    world.populate_named_sites(0x675, &[5, 2], 1).unwrap();
+    let roots: Vec<_> = world
+        .entities
+        .values()
+        .filter(|e| e.kind == 0x675)
+        .collect();
+    assert_eq!(roots.len(), 1);
+    let root = roots[0];
+    let tag = root.id;
+    let home = root.home;
+    let area = world.setpieces.last().unwrap();
+    assert_eq!((area.width, area.height), (30, 30));
+    assert_eq!(
+        (root.pos.x - area.x as f32, root.pos.y - area.y as f32),
+        (15.5, 15.5)
+    );
+    assert_eq!(
+        (root.pos.x, root.pos.y, home.x, home.y),
+        (96.5, 96.5, 96.5, 96.5)
+    );
+    assert_eq!((root.hp, root.size, root.stage), (3000, 100, Some(0)));
+    assert!(root.published && root.quest == Some(tag) && root.camp.is_none());
+    let chests: Vec<_> = world
+        .entities
+        .values()
+        .filter(|e| e.kind == 0x501)
+        .collect();
+    assert_eq!(
+        chests.len(),
+        1,
+        "Pyre must create exactly one startup chest"
+    );
+    let chest = chests[0];
+    let chest_id = chest.id;
+    let items = chest.items.clone();
+    assert_eq!(
+        (chest.pos.x, chest.pos.y, chest.home.x, chest.home.y),
+        (96.5, 96.5, 96.5, 96.5)
+    );
+    assert!(
+        chest.published && chest.quest.is_none() && chest.parent.is_none() && chest.camp.is_none()
+    );
+    assert!(chest.accessible(1) && chest.accessible(2));
+    assert!(!chest.extra_stats.iter().any(|(key, _)| *key == 54));
+    assert_eq!(items.len(), 8);
+    let eligible = crate::loot::collectibles(&content);
+    for item in items.iter().filter(|item| **item >= 0) {
+        assert_eq!(content.objects[&(*item as u16)].class, "Equipment");
+        assert!(eligible.contains(&(*item as u16)));
+    }
+    let index = 96 * 192 + 96;
+    assert!(world.cells.ids(index).contains(&tag) && world.cells.ids(index).contains(&chest_id));
+    let cell = &world.map.cells[index];
+    assert_eq!(
+        (
+            cell.ground,
+            cell.object,
+            cell.config.as_str(),
+            cell.terrain,
+            cell.region
+        ),
+        (0xf2, None, "", 5, 0)
+    );
+    assert!(!world.bag_expiry.contains_key(&chest_id));
+    let mut current = tag;
+    for expected in [0x6c2, 0x6c1] {
+        world
+            .damage_enemy(-1, current, 1000000, true, &[], None)
+            .unwrap();
+        assert!(world.critical_deaths.is_empty());
+        let replacement = world
+            .entities
+            .values()
+            .find(|e| e.kind == expected && e.quest == Some(tag))
+            .unwrap();
+        current = replacement.id;
+        assert_eq!((replacement.home.x, replacement.home.y), (home.x, home.y));
+        assert_eq!(
+            world
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x501)
+                .map(|e| e.id)
+                .collect::<Vec<_>>(),
+            vec![chest_id]
+        );
+        assert_eq!(world.entities[&chest_id].items, items);
+        if expected == 0x6c2 {
+            world.quest_mechanics(current).unwrap();
+            world.now += 2000;
+            world.quest_mechanics(current).unwrap();
+        }
+    }
+    world
+        .damage_enemy(-1, current, 1000000, true, &[], None)
+        .unwrap();
+    assert_eq!(world.critical_deaths, vec![tag]);
+    world
+        .damage_enemy(-1, current, 1000000, true, &[], None)
+        .unwrap();
+    assert_eq!(world.critical_deaths, vec![tag]);
+    assert_eq!(
+        world
+            .entities
+            .values()
+            .filter(|e| e.kind == 0x501)
+            .map(|e| e.id)
+            .collect::<Vec<_>>(),
+        vec![chest_id]
+    );
+    world.entities.get_mut(&chest_id).unwrap().items.fill(-1);
+    world.now += 120000;
+    world.step();
+    assert!(
+        world.entities[&chest_id].accessible(1)
+            && world.entities[&chest_id]
+                .items
+                .iter()
+                .all(|item| *item == -1)
+    );
+    assert!(!world.bag_expiry.contains_key(&chest_id));
+    let mut missing = Content::load(std::path::Path::new("data")).unwrap();
+    missing
+        .objects
+        .retain(|_, o| !(o.tier == Some(5) && crate::loot::WEAPONS.contains(&o.slot_type)));
+    let mut invalid = World::new(Arc::new(missing), original).unwrap();
+    invalid.rng = rand::rngs::StdRng::seed_from_u64(12351);
+    let error = invalid.populate_named_sites(0x675, &[5, 2], 1).unwrap_err();
+    assert!(format!("{error:#}").contains("landmark 0x675 chest has an empty selected tier"));
+    assert!(
+        invalid
+            .entities
+            .values()
+            .all(|e| !matches!(e.kind, 0x675 | 0x501))
+    );
+}
+
+#[cfg(test)]
+#[test]
 fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut walls = 0;

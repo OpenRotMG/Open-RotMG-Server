@@ -5854,11 +5854,8 @@ impl World {
             }
         }
         for (owner, items) in drops {
-            self.loot_bags(
-                self.ocean_reward_position(defeated)?,
-                (owner >= 0).then_some(owner),
-                &items,
-            )?;
+            let pos = self.ocean_bag_position(defeated)?;
+            self.loot_bags(pos, (owner >= 0).then_some(owner), &items)?;
         }
         Ok(())
     }
@@ -6472,10 +6469,15 @@ impl World {
                     Motion::Chase { sight, stop }
                         if target.is_some_and(|p| pos.distance(p) < sight) =>
                     {
-                        if pos.distance(target.expect("acquired chase target")) <= stop {
+                        let target = target.expect("acquired chase target");
+                        if pos.distance(target) <= stop {
                             speed = 0.;
                         }
-                        target
+                        // Per-tick aim jitter keeps chasers from pinning on one wall point: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/movement/Chasing.cs
+                        Some(Pos {
+                            x: target.x + self.rng.gen_range(-2..2) as f32 / 2.,
+                            y: target.y + self.rng.gen_range(-2..2) as f32 / 2.,
+                        })
                     }
                     Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
                         let target = match self.orbit_anchor(id, anchor, target) {
@@ -7230,7 +7232,11 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 }
 
 #[cfg(test)]
+mod chase_tests;
+#[cfg(test)]
 mod dungeon_return_tests;
+#[cfg(test)]
+mod hermit_loot_tests;
 #[cfg(test)]
 mod sphinx_loot_tests;
 #[cfg(test)]

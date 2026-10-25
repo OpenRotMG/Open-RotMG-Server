@@ -3,6 +3,17 @@ use super::realm_setpieces::Area;
 use super::*;
 use rand::seq::SliceRandom;
 
+pub(super) const HERMIT_SPAWNERS: [(i32, i32); 8] = [
+    (13, 8),
+    (20, 17),
+    (16, 8),
+    (18, 8),
+    (10, 13),
+    (21, 13),
+    (11, 17),
+    (15, 18),
+];
+
 fn hermit_radius(x: i32, y: i32) -> f32 {
     ((x as f32 - 16.).powi(2) + ((y as f32 - 14.) * 1.1).powi(2)).sqrt()
 }
@@ -130,16 +141,7 @@ impl World {
         e.stage = Some(0);
         e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
         e.extra_stats = vec![(61, 2)];
-        for (x, y) in [
-            (13, 8),
-            (20, 17),
-            (16, 8),
-            (18, 8),
-            (10, 13),
-            (21, 13),
-            (11, 17),
-            (15, 18),
-        ] {
+        for (x, y) in HERMIT_SPAWNERS {
             let id = self
                 .spawn_entity(
                     0xd65,
