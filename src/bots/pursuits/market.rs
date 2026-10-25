@@ -7,6 +7,8 @@ use incoming::Incoming;
 #[cfg(test)]
 mod incoming_tests;
 #[cfg(test)]
+mod quote_tests;
+#[cfg(test)]
 mod session_tests;
 #[cfg(test)]
 mod tests;
@@ -276,12 +278,12 @@ impl Market {
             return Ok(0);
         }
         let desired = if kind == LIFE {
-            if self.gear_want(v, c, future)?.is_some() {
+            if self.gear_want(v, c, future, LIFE_GEAR_TIER)?.is_some() {
                 2
             } else {
                 0
             }
-        } else if kind == DEFENSE && self.gear_want(v, c, future)?.is_some() {
+        } else if kind == DEFENSE && self.gear_want(v, c, future, 8)?.is_some() {
             7
         } else if let Some(index) = progression::potion_index(c, kind)? {
             (c.classes[&v.character.class].caps[index] - v.character.base_stats[index]).clamp(0, 16)
@@ -359,12 +361,16 @@ impl Market {
             batch.is_some_and(|n| self.count(v, SPEED) < usize::from(n))
         })
     }
-    fn gear_want(&self, v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Option<i32>> {
-        for item in c
-            .objects
-            .values()
-            .filter(|o| o.class == "Equipment" && !o.consumable && o.tier.is_some_and(|t| t >= 8))
-        {
+    fn gear_want(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+        minimum_tier: u8,
+    ) -> Result<Option<i32>> {
+        for item in c.objects.values().filter(|o| {
+            o.class == "Equipment" && !o.consumable && o.tier.is_some_and(|t| t >= minimum_tier)
+        }) {
             if self.wanted(v, c, future, i32::from(item.kind))? > 0 {
                 return Ok(Some(i32::from(item.kind)));
             }
@@ -402,12 +408,6 @@ impl Market {
                 && self.wanted(v, c, future, SPEED)? >= price as u8)
                 .then(|| pair(DEFENSE, 1, SPEED, price as u8)));
         }
-        // Equipment wants must be genuine upgrades; Life is held until one is available.
-        if self.count(v, LIFE) > 0
-            && let Some(kind) = self.gear_want(v, c, future)?
-        {
-            return Ok(Some(pair(LIFE, 1, kind, 1)));
-        }
         if self.count(v, DEFENSE) >= life_price as usize && self.wanted(v, c, future, LIFE)? > 0 {
             return Ok(Some(pair(DEFENSE, life_price as u8, LIFE, 1)));
         }
@@ -422,6 +422,12 @@ impl Market {
         {
             return Ok(Some(pair(DEFENSE, 1, SPEED, price as u8)));
         }
+        // Life savings must not hide already-funded potion exchanges.
+        if self.count(v, LIFE) > 0
+            && let Some(kind) = self.gear_want(v, c, future, LIFE_GEAR_TIER)?
+        {
+            return Ok(Some(pair(LIFE, 1, kind, 1)));
+        }
         if let Some(g) = stock.into_iter().find(|g| {
             !matches!(g.kind, SPEED | DEFENSE | LIFE)
                 && c.objects[&(g.kind as u16)].tier.is_some_and(|t| t >= 3)
@@ -431,7 +437,11 @@ impl Market {
                 .get(g.kind as u16)?
                 .tier
                 .context("trade gear without tier")?;
-            let payment = if tier >= 10 { LIFE } else { DEFENSE };
+            let payment = if tier >= LIFE_GEAR_TIER {
+                LIFE
+            } else {
+                DEFENSE
+            };
             if self.wanted(v, c, future, payment)? == 0 {
                 return Ok(None);
             }
@@ -439,7 +449,7 @@ impl Market {
                 g.kind,
                 1,
                 payment,
-                if tier >= 10 {
+                if tier >= LIFE_GEAR_TIER {
                     1
                 } else {
                     (1 + style(&self.name) % 2) as u8
@@ -1157,6 +1167,7 @@ impl Market {
 pub(in crate::bots) const SPEED: i32 = 0xa21;
 const DEFENSE: i32 = 0xa20;
 const LIFE: i32 = 0xae9;
+const LIFE_GEAR_TIER: u8 = 10;
 fn style(name: &str) -> u32 {
     name.bytes()
         .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)))
