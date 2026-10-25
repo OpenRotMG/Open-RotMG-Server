@@ -78,6 +78,36 @@ fn center(room: usize) -> (i32, i32) {
 fn index(x: i32, y: i32) -> usize {
     (y * 164 + x) as usize
 }
+fn missing_tile_at(x: i32, y: i32, phase: i32) -> bool {
+    (x + 2 * y + phase).rem_euclid(13) < 3
+}
+fn apply_floor_pattern(map: &mut Map, rooms: &[usize], events: &[usize], phase: i32) {
+    for y in 0..map.height {
+        for x in 0..map.width {
+            let cell = &mut map.cells[(y * map.width + x) as usize];
+            if cell.region != 0
+                || !matches!(cell.ground, 0xe0 | 0xe2)
+                || !missing_tile_at(x, y, phase)
+            {
+                continue;
+            }
+            let protected = rooms.iter().any(|&room| {
+                let extent = if room == 12 {
+                    19
+                } else if events.contains(&room) || room % 7 == 0 {
+                    10
+                } else {
+                    return false;
+                };
+                let (cx, cy) = center(room);
+                (x - cx).abs() <= extent && (y - cy).abs() <= extent
+            });
+            if !protected {
+                cell.ground = MISSING_TILE;
+            }
+        }
+    }
+}
 fn adjacent(a: usize, b: usize) -> bool {
     let (x, y) = (a % 5, a / 5);
     let (u, v) = (b % 5, b / 5);
@@ -253,11 +283,14 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             continue;
         }
         if !treasures.contains(&room) {
+            // Keep the draw for ordinary rooms to prevent later actor/population drift.
             let bend = rng.gen_range(0..7);
-            for y in cy - 6..=cy + 6 {
-                for x in cx - 6..=cx + 6 {
-                    if (x - cx + 2 * (y - cy) + bend).rem_euclid(13) < 3 {
-                        map.cells[index(x, y)].ground = MISSING_TILE;
+            if events.contains(&room) || room % 7 == 0 {
+                for y in cy - 6..=cy + 6 {
+                    for x in cx - 6..=cx + 6 {
+                        if (x - cx + 2 * (y - cy) + bend).rem_euclid(13) < 3 {
+                            map.cells[index(x, y)].ground = MISSING_TILE;
+                        }
                     }
                 }
             }
@@ -336,6 +369,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             }
         }
     }
+    apply_floor_pattern(&mut map, &rooms, &events, (seed % 7) as i32);
     for y in 1..163 {
         for x in 1..163 {
             if map.cells[index(x, y)].ground == 0xff
@@ -392,6 +426,160 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
 mod tests {
     use super::*;
     use std::collections::{BTreeSet, VecDeque};
+
+    #[test]
+    fn missing_tile_field_keeps_signed_modulo_slope_period_and_width() {
+        for phase in 0..7 {
+            for y in -13..=13 {
+                for x in -26..=26 {
+                    assert_eq!(
+                        missing_tile_at(x, y, phase),
+                        missing_tile_at(x + 13, y, phase)
+                    );
+                    assert_eq!(
+                        missing_tile_at(x, y, phase),
+                        missing_tile_at(x + 2, y - 1, phase)
+                    );
+                }
+                assert_eq!(
+                    (-13..0).filter(|&x| missing_tile_at(x, y, phase)).count(),
+                    3
+                );
+            }
+            for (residue, expected) in [(0, true), (2, true), (3, false), (12, false)] {
+                assert_eq!(missing_tile_at(residue - phase - 13, 0, phase), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn floor_pattern_only_changes_eligible_ground_not_metadata() {
+        let grounds = [0xe0, 0xe2, 0xff, 0xe4, MISSING_TILE, QUICKSAND, 0xe1, 0xe0];
+        let mut map = Map {
+            width: grounds.len() as i32 * 13,
+            height: 1,
+            cells: vec![
+                Cell {
+                    ground: 0xff,
+                    object: Some(WALL),
+                    config: "conn:33686018".into(),
+                    terrain: 7,
+                    region: 0
+                };
+                grounds.len() * 13
+            ],
+            spawns: vec![(0.5, 0.5)],
+        };
+        for (n, ground) in grounds.into_iter().enumerate() {
+            map.cells[n * 13].ground = ground;
+        }
+        map.cells[7 * 13].region = 1;
+        let mut expected = map.clone();
+        expected.cells[0].ground = MISSING_TILE;
+        expected.cells[13].ground = MISSING_TILE;
+        apply_floor_pattern(&mut map, &[], &[], 0);
+        assert_eq!(
+            serde_json::to_value(map).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
+
+    #[test]
+    fn floor_pattern_protects_closed_boss_event_and_switch_boxes() {
+        let rooms = [0, 1, 12];
+        for (room, extent) in [(12, 19), (1, 10), (0, 10)] {
+            let (cx, cy) = center(room);
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                for (distance, expected) in [(extent, 0xe0), (extent + 1, MISSING_TILE)] {
+                    let (x, y) = (cx + dx * distance, cy + dy * distance);
+                    let mut map = Map {
+                        width: 164,
+                        height: 164,
+                        cells: vec![
+                            Cell {
+                                ground: 0xe0,
+                                object: None,
+                                config: String::new(),
+                                terrain: 0,
+                                region: 0
+                            };
+                            164 * 164
+                        ],
+                        spawns: vec![],
+                    };
+                    apply_floor_pattern(&mut map, &rooms, &[1], (-x - 2 * y).rem_euclid(13));
+                    assert_eq!(
+                        map.cells[index(x, y)].ground,
+                        expected,
+                        "room {room}, coordinate ({x},{y})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_rooms_and_corridors_share_one_global_floor_field() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let rooms: Vec<_> = (0..25).filter(|r| ![7, 11, 13, 17].contains(r)).collect();
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            let repeated = generate(&content, seed).unwrap();
+            assert_eq!(
+                serde_json::to_value(&map).unwrap(),
+                serde_json::to_value(&repeated).unwrap()
+            );
+            let events: Vec<_> = rooms
+                .iter()
+                .copied()
+                .filter(|&room| {
+                    let (x, y) = center(room);
+                    matches!(map.cells[index(x, y)].object, Some(SARCOPHAGUS | TREASURE))
+                })
+                .collect();
+            let (mut ordinary, mut shoulders, mut corridors) = (0, 0, 0);
+            for y in 0..map.height {
+                for x in 0..map.width {
+                    if rooms.iter().any(|&room| {
+                        let (cx, cy) = center(room);
+                        let extent = if room == 12 {
+                            19
+                        } else if events.contains(&room) || room % 7 == 0 {
+                            10
+                        } else {
+                            return false;
+                        };
+                        (x - cx).abs() <= extent && (y - cy).abs() <= extent
+                    }) {
+                        continue;
+                    }
+                    let c = &map.cells[index(x, y)];
+                    if c.region != 0 || !matches!(c.ground, 0xe0 | 0xe2 | MISSING_TILE) {
+                        continue;
+                    }
+                    let in_box = |extent| {
+                        rooms.iter().any(|&room| {
+                            let (cx, cy) = center(room);
+                            (x - cx).abs() <= extent && (y - cy).abs() <= extent
+                        })
+                    };
+                    ordinary += usize::from(in_box(6));
+                    shoulders += usize::from(c.ground == MISSING_TILE && in_box(10) && !in_box(6));
+                    corridors += usize::from(c.ground == MISSING_TILE && !in_box(10));
+                    assert_eq!(
+                        c.ground == MISSING_TILE,
+                        (x + 2 * y + (seed % 7) as i32).rem_euclid(13) < 3,
+                        "seed {seed}, coordinate ({x},{y}), ground {:#x}",
+                        c.ground
+                    );
+                }
+            }
+            assert!(
+                ordinary > 0 && shoulders > 0 && corridors > 0,
+                "seed {seed}: {ordinary} ordinary, {shoulders} shoulders, {corridors} corridors"
+            );
+        }
+    }
 
     #[test]
     fn footage_layout_keeps_selected_floors_hollow_pillars_and_connected_two_tile_passages() {
