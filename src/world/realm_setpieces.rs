@@ -1045,8 +1045,9 @@ impl World {
                             .push((41, connection));
                     }
                     if object == 0x194 || kind == 0x678 && object == 0x18e {
-                        self.entities.get_mut(&id).unwrap().size =
-                            if self.rng.gen_bool(0.5) { 120 } else { 140 };
+                        let size = if self.rng.gen_bool(0.5) { 120 } else { 140 };
+                        self.entities.get_mut(&id).unwrap().size = size;
+                        Arc::make_mut(&mut self.map).cells[index].config = format!("size:{size}");
                     }
                 }
             }
@@ -1605,6 +1606,60 @@ mod tests {
             (2..=4)
                 .flat_map(|mark| (0..3).map(move |ground| (mark, ground)))
                 .collect()
+        );
+    }
+
+    #[test]
+    fn landmark_tree_sizes_survive_native_map_reload() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut sizes = BTreeSet::new();
+        for (kind, tree, terrain) in [(0x91f, 0x194, 7), (0x678, 0x18e, 8)] {
+            for seed in 0..16 {
+                let mut world =
+                    World::new(content.clone(), Arc::new(temple_test_map(terrain))).unwrap();
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                world.place_named_setpiece(kind, &[terrain]).unwrap();
+                let trees: Vec<_> = world
+                    .entities
+                    .values()
+                    .filter(|e| e.kind == tree)
+                    .map(|e| (e.pos, e.size))
+                    .collect();
+                assert!(!trees.is_empty());
+                for &(pos, size) in &trees {
+                    assert!(matches!(size, 120 | 140));
+                    let cell = world.map.cell(pos.x, pos.y).unwrap();
+                    assert_eq!((cell.ground, cell.object), (0x46, Some(tree)));
+                    assert_eq!(
+                        cell.config,
+                        format!("size:{size}"),
+                        "{kind:#x}, seed {seed}"
+                    );
+                    sizes.insert((tree, size));
+                }
+                let reloaded = World::new(content.clone(), world.map.clone()).unwrap();
+                assert_eq!(
+                    reloaded
+                        .entities
+                        .values()
+                        .filter(|e| e.kind == tree)
+                        .count(),
+                    trees.len()
+                );
+                for (pos, size) in trees {
+                    let native = reloaded.entities_at(pos).find(|e| e.kind == tree).unwrap();
+                    assert_eq!(
+                        (native.pos.x, native.pos.y, native.size),
+                        (pos.x, pos.y, size)
+                    );
+                    assert!(native.published);
+                    assert_eq!((native.home.x, native.home.y), (pos.x, pos.y));
+                }
+            }
+        }
+        assert_eq!(
+            sizes,
+            BTreeSet::from([(0x194, 120), (0x194, 140), (0x18e, 120), (0x18e, 140)])
         );
     }
 
