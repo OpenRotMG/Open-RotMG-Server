@@ -5359,8 +5359,15 @@ impl World {
         out.i32(p.character.account)
             .i32(p.character.id)
             .utf(&p.killer);
-        send(p, 41, out.0);
         tracing::info!(player=id,character=p.character.id,killed_by=%p.killer,"permanent death committed");
+        // Low-level deaths were system notices too: https://media.gdcvault.com/gdceurope2012/Presentations/Social%20%26%20Online%20Games%20Summit/Ethan_Levy_Social%26Online_GameDesignIs.pdf#page=54
+        let message = format!(
+            "{} died at level {}, killed by {}",
+            p.character.name, p.character.level, p.killer
+        );
+        let recipients = self.broadcast_text("", &message);
+        tracing::info!(player = id, recipients, "death notice delivered");
+        send(&self.players[&id], 41, out.0);
         self.clear_abilities(id);
         self.clear_companions(id);
         Ok(())
@@ -7264,6 +7271,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 
 #[cfg(test)]
 mod chase_tests;
+#[cfg(test)]
+mod death_chat_tests;
 #[cfg(test)]
 mod dungeon_return_tests;
 #[cfg(test)]
