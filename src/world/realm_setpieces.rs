@@ -888,6 +888,17 @@ impl World {
             })
             .collect();
         candidates.shuffle(&mut self.rng);
+        let castle_chest = if kind == 0x67d {
+            Some(
+                piece
+                    .cells
+                    .iter()
+                    .position(|mark| *mark == 7)
+                    .context("Castle missing chest marker")?,
+            )
+        } else {
+            None
+        };
         let area = candidates
             .into_iter()
             .map(|(x, y)| Area {
@@ -902,6 +913,10 @@ impl World {
                     && a.y > 0
                     && a.x + a.width < self.map.width
                     && a.y + a.height < self.map.height
+                    && castle_chest.is_none_or(|i| self.walkable(Pos {
+                        x: (a.x + (i % piece.width) as i32) as f32 + 0.5,
+                        y: (a.y + (i / piece.width) as i32) as f32 + 0.5,
+                    }))
                     && (!matches!(kind, 0x935 | 0xd59 | 0xd50)
                         || self.walkable(Pos {
                             x: (a.x + a.width / 2) as f32 + 0.5,
@@ -957,11 +972,16 @@ impl World {
                 if mark == 0 {
                     continue;
                 }
-                let (ground, object) = Piece::tile(kind, mark);
                 let pos = Pos {
                     x: area.x as f32 + x as f32 + 0.5,
                     y: area.y as f32 + y as f32 + 0.5,
                 };
+                if kind == 0x67d && mark == 7 {
+                    let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
+                    self.spawn_entity(0x501, pos, items)?;
+                    continue;
+                }
+                let (ground, object) = Piece::tile(kind, mark);
                 let index = pos.y as usize * self.map.width as usize + pos.x as usize;
                 let old: Vec<_> = self.cells.ids(index).to_vec();
                 for id in old {
@@ -997,9 +1017,7 @@ impl World {
                 if let Some(connection) = connection {
                     cell.config = format!("conn:{connection}");
                 }
-                if mark == 7 && kind == 0x67d
-                    || (x, y) == piece.boss && matches!(kind, 0x668 | 0x678)
-                {
+                if (x, y) == piece.boss && matches!(kind, 0x668 | 0x678) {
                     let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
                     self.spawn_entity(0x501, pos, items)?;
                 }
@@ -1091,6 +1109,10 @@ mod tests {
     #[test]
     fn cyclops_raw_destination_preserves_spacing_and_habitat_before_writes() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        assert!(content.objects[&0x100].blocks && !content.objects[&0x100].full_occupy);
+        assert!(content.objects[&0x1f3].full_occupy && content.grounds[&0xbc] <= 0.);
+        assert!(!content.objects[&0x105].blocks && content.objects[&0x105].static_object);
+        assert!(content.grounds[&0x72] > 0. && content.grounds[&0x73] > 0.);
         let mut witnessed = BTreeSet::new();
         for seed in 0..16 {
             let plan = Piece::build(0x67d, &mut rand::rngs::StdRng::seed_from_u64(seed));
@@ -1103,7 +1125,7 @@ mod tests {
                 y: (96 + dy) as f32,
             };
             witnessed.insert((plan.width, plan.height, plan.boss));
-            for mode in 0..3 {
+            for mode in 0..11 {
                 if mode == 2 && (dx, dy) == (0, 0) {
                     continue;
                 }
@@ -1111,6 +1133,22 @@ mod tests {
                 map.cells[96 * 192 + 96].terrain = 3;
                 if mode != 2 {
                     map.cells[expected.y as usize * 192 + expected.x as usize].terrain = 3;
+                }
+                let marker = plan.cells.iter().position(|m| *m == 7).unwrap();
+                let chest_pos = Pos {
+                    x: (96 - plan.width as i32 / 2 + (marker % plan.width) as i32) as f32 + 0.5,
+                    y: (96 - plan.height as i32 / 2 + (marker / plan.width) as i32) as f32 + 0.5,
+                };
+                let cell = &mut map.cells[chest_pos.y as usize * 192 + chest_pos.x as usize];
+                match mode {
+                    3 => cell.ground = 0xbc,
+                    4 => cell.object = Some(0x100),
+                    5 => cell.object = Some(0x1f3),
+                    6 => cell.ground = 0xf4,
+                    7 => cell.region = 1,
+                    8 => cell.ground = 0x72,
+                    9 => cell.ground = 0x73,
+                    _ => {}
                 }
                 let original = Arc::new(map);
                 let mut world = World::new(content.clone(), original.clone()).unwrap();
@@ -1125,6 +1163,12 @@ mod tests {
                     )
                     .unwrap();
                 world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                if mode == 6 {
+                    world.realm_layout = Some("classic-world-01-reconstruction".into());
+                }
+                let prior_chest = (mode == 10)
+                    .then(|| world.spawn_entity(0x501, chest_pos, vec![-1; 8]).unwrap());
+                let ids_before: BTreeSet<_> = world.entities.keys().copied().collect();
                 world.rng = rand::rngs::StdRng::seed_from_u64(seed);
                 let result = world.place_named_setpiece(0x67d, &[3]);
                 assert_eq!(
@@ -1139,9 +1183,23 @@ mod tests {
                     );
                     assert_eq!(world.map.cell(pos.x, pos.y).unwrap().terrain, 3);
                 } else {
-                    assert!(Arc::ptr_eq(&original, &world.map) && world.setpieces.is_empty());
-                    assert_eq!(world.entities.len(), 1);
-                    assert!(world.entities.contains_key(&previous));
+                    assert!(
+                        Arc::ptr_eq(&original, &world.map)
+                            && world.setpieces.is_empty()
+                            && world.event_sites.is_empty()
+                    );
+                    assert_eq!(
+                        world.entities.keys().copied().collect::<BTreeSet<_>>(),
+                        ids_before
+                    );
+                    if let Some(id) = prior_chest {
+                        assert!(
+                            world
+                                .cells
+                                .ids(chest_pos.y as usize * 192 + chest_pos.x as usize)
+                                .contains(&id)
+                        );
+                    }
                 }
             }
         }

@@ -996,13 +996,116 @@ impl World {
 
 #[cfg(test)]
 #[test]
+fn castle_chest_preserves_native_fields_and_scenery() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut witnessed = BTreeSet::new();
+    for seed in 0..16 {
+        let original = Arc::new(Map {
+            width: 192,
+            height: 192,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x47,
+                    object: Some(0x105),
+                    config: "name:native;size:137".into(),
+                    terrain: 3,
+                    region: 0,
+                };
+                192 * 192
+            ],
+            spawns: vec![(1., 1.)],
+        });
+        let mut world = World::new(content.clone(), original.clone()).unwrap();
+        let native_ids: Vec<_> = (0..192 * 192).map(|i| world.cells.ids(i)[0]).collect();
+        let template = match &world.entities[&native_ids[0]].state {
+            entity_store::EntityState::Shared(t) => t.clone(),
+            _ => panic!("native Bush does not use shared scenery state"),
+        };
+        world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+        world.populate_landmark_heroes(0x67d, &[3], 1).unwrap();
+        let chest = world.entities.values().find(|e| e.kind == 0x501).unwrap();
+        let root = world.entities.values().find(|e| e.kind == 0x67d).unwrap();
+        assert_eq!(world.setpieces.len(), 1);
+        assert_eq!(
+            world.entities.values().filter(|e| e.kind == 0x501).count(),
+            1
+        );
+        assert!(chest.published && chest.items.len() == 8 && world.walkable(chest.pos));
+        assert_eq!((chest.pos.x.fract(), chest.pos.y.fract()), (0.5, 0.5));
+        assert_eq!((root.pos.x.fract(), root.pos.y.fract()), (0., 0.));
+        assert!(root.pos.distance(chest.pos) > 6.);
+        let index = chest.pos.y as usize * 192 + chest.pos.x as usize;
+        let actual = &world.map.cells[index];
+        let before = &original.cells[index];
+        assert_eq!(
+            (
+                actual.ground,
+                actual.object,
+                &actual.config,
+                actual.terrain,
+                actual.region
+            ),
+            (
+                before.ground,
+                before.object,
+                &before.config,
+                before.terrain,
+                before.region
+            ),
+            "seed {seed}"
+        );
+        let native = &world.entities[&native_ids[index]];
+        assert_eq!(
+            (native.kind, native.name.as_str(), native.size),
+            (0x105, "native", 137)
+        );
+        assert_eq!((native.pos.x, native.pos.y), (chest.pos.x, chest.pos.y));
+        assert!(
+            matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+        );
+        assert_eq!(world.cells.ids(index).len(), 2);
+        assert!(
+            world.cells.ids(index).contains(&native.id)
+                && world.cells.ids(index).contains(&chest.id)
+        );
+        let boss_cell = world.map.cell(root.pos.x, root.pos.y).unwrap();
+        assert_eq!(
+            (
+                boss_cell.ground,
+                boss_cell.object,
+                boss_cell.config.as_str()
+            ),
+            (0x60, None, "")
+        );
+        let area = world.setpieces[0];
+        witnessed.insert((
+            area.width,
+            area.height,
+            ((chest.pos.x - area.x as f32) * 2.) as i32,
+            ((chest.pos.y - area.y as f32) * 2.) as i32,
+        ));
+    }
+    assert_eq!(
+        witnessed,
+        BTreeSet::from([
+            (31, 40, 31, 55),
+            (40, 31, 25, 31),
+            (31, 40, 31, 25),
+            (40, 31, 55, 31)
+        ])
+    );
+}
+
+#[cfg(test)]
+#[test]
 fn landmark_hero_boundaries_fit_published_layouts() {
     let data = std::path::Path::new("data");
     let content = Arc::new(Content::load(data).unwrap());
     let mut cyclops_anchors = BTreeSet::new();
     for source in crate::terrain::realms::sources(data).unwrap() {
         for counts in [[3, 4], [4, 6]] {
-            let mut world = World::new(content.clone(), source.open(&content).unwrap()).unwrap();
+            let birth_map = source.open(&content).unwrap();
+            let mut world = World::new(content.clone(), birth_map.clone()).unwrap();
             world.realm_layout = Some(source.name().to_owned());
             world.rng = rand::rngs::StdRng::seed_from_u64(12351);
             for (kind, terrains, count) in [
@@ -1036,6 +1139,27 @@ fn landmark_hero_boundaries_fit_published_layouts() {
                         .find(|c| c.kind == 0x501 && area.distance(c.pos) == 0.)
                         .unwrap();
                     assert_eq!((chest.pos.x.fract(), chest.pos.y.fract()), (0.5, 0.5));
+                    assert!(world.walkable(chest.pos));
+                    let chest_index =
+                        chest.pos.y as usize * world.map.width as usize + chest.pos.x as usize;
+                    let original = &birth_map.cells[chest_index];
+                    let current = &world.map.cells[chest_index];
+                    assert_eq!(
+                        (
+                            current.ground,
+                            current.object,
+                            &current.config,
+                            current.terrain,
+                            current.region
+                        ),
+                        (
+                            original.ground,
+                            original.object,
+                            &original.config,
+                            original.terrain,
+                            original.region
+                        )
+                    );
                     let local = match (
                         area.width,
                         area.height,
