@@ -4,35 +4,32 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 
 const TREES: [u16; 5] = [0x175, 0x176, 0x177, 0x178, 0x179];
 const SPRITES: [u16; 5] = [0xd00, 0xd01, 0xd02, 0xd03, 0xd04];
+type Point = (i32, i32);
+const DIRECTIONS: [Point; 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+const PITCH: i32 = 16;
+const ROOM: i32 = 6;
+// The preserved map gives Limon a 30-tile platform: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
+const ARENA: i32 = 15;
 
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let directions = [(1i32, 0), (-1, 0), (0, 1), (0, -1)];
-    let mut rooms = vec![(0i32, 0i32)];
-    let mut edges = Vec::new();
-    let spine = rng.gen_range(5..=8);
-    for parent in 0..spine {
-        let (x, y) = rooms[parent];
-        let choices: Vec<_> = directions
-            .iter()
-            .map(|(dx, dy)| (x + dx, y + dy))
-            .filter(|p| !rooms.contains(p))
-            .collect();
-        rooms.push(
-            *choices
-                .choose(&mut rng)
-                .context("Sprite World spine exhausted")?,
-        );
-        edges.push((parent, parent + 1));
-    }
-    let boss = rooms.len() - 1;
+    let (mut rooms, arena) = (0..64)
+        .find_map(|_| spine(&mut rng))
+        .context("Sprite World arena never fit")?;
+    let boss = rooms.len();
+    let mut edges: Vec<_> = (0..boss).map(|i| (i, i + 1)).collect();
+    rooms.push(arena);
     for _ in 0..rng.gen_range(2..=5) {
         let choices: Vec<_> = rooms
             .iter()
             .enumerate()
             .filter(|(i, _)| *i != 0 && *i != boss)
-            .flat_map(|(i, (x, y))| directions.iter().map(move |(dx, dy)| (i, (x + dx, y + dy))))
-            .filter(|(_, p)| !rooms.contains(p))
+            .flat_map(|(i, (x, y))| {
+                DIRECTIONS
+                    .iter()
+                    .map(move |(dx, dy)| (i, (x + dx * PITCH, y + dy * PITCH)))
+            })
+            .filter(|(_, p)| !rooms.contains(p) && apart(*p, arena))
             .collect();
         let (parent, pos) = *choices
             .choose(&mut rng)
@@ -40,14 +37,19 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         edges.push((parent, rooms.len()));
         rooms.push(pos);
     }
-    let min_x = rooms.iter().map(|p| p.0).min().unwrap();
-    let min_y = rooms.iter().map(|p| p.1).min().unwrap();
-    let centers: Vec<_> = rooms
-        .iter()
-        .map(|(x, y)| ((x - min_x) * 16 + 12, (y - min_y) * 16 + 12))
-        .collect();
-    let width = centers.iter().map(|p| p.0).max().unwrap() + 14;
-    let height = centers.iter().map(|p| p.1).max().unwrap() + 14;
+    let reach = |i: usize| if i == boss { ARENA } else { ROOM };
+    // Grid centers stay on paint()'s conveyor origin, with a two-tile void margin.
+    let shift = |axis: fn(&Point) -> i32| {
+        let low = rooms.iter().enumerate().map(|(i, p)| axis(p) - reach(i));
+        12 - PITCH * (10 + low.min().unwrap()).div_euclid(PITCH)
+    };
+    let (ox, oy) = (shift(|p| p.0), shift(|p| p.1));
+    let centers: Vec<_> = rooms.iter().map(|(x, y)| (x + ox, y + oy)).collect();
+    let extent = |axis: fn(&Point) -> i32| {
+        let high = centers.iter().enumerate().map(|(i, p)| axis(p) + reach(i));
+        high.max().unwrap() + 3
+    };
+    let (width, height) = (extent(|p| p.0), extent(|p| p.1));
     let mut map = Map {
         width,
         height,
@@ -67,7 +69,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
     for (i, &(cx, cy)) in centers.iter().enumerate() {
         let radius = if i == boss {
-            8
+            ARENA
         } else if i == 0 {
             6
         } else {
@@ -150,6 +152,32 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     Ok(map)
 }
 
+fn spine(rng: &mut rand::rngs::StdRng) -> Option<(Vec<Point>, Point)> {
+    let mut rooms = vec![(0, 0)];
+    for _ in 1..rng.gen_range(5..=8) {
+        let (x, y) = *rooms.last()?;
+        let next: Vec<_> = DIRECTIONS
+            .iter()
+            .map(|(dx, dy)| (x + dx * PITCH, y + dy * PITCH))
+            .filter(|p| !rooms.contains(p))
+            .collect();
+        rooms.push(*next.choose(rng)?);
+    }
+    let (x, y) = *rooms.last()?;
+    // The longer final bridge keeps the arena from absorbing the platforms beside it.
+    let arenas: Vec<_> = DIRECTIONS
+        .iter()
+        .map(|(dx, dy)| (x + dx * (PITCH + 8), y + dy * (PITCH + 8)))
+        .filter(|&a| rooms.iter().all(|&r| apart(r, a)))
+        .collect();
+    Some((rooms, *arenas.choose(rng)?))
+}
+
+fn apart(room: Point, arena: Point) -> bool {
+    let gap = ROOM + ARENA + 2;
+    (room.0 - arena.0).abs() > gap || (room.1 - arena.1).abs() > gap
+}
+
 fn paint(map: &mut Map, x: i32, y: i32) {
     map.cells[(y * map.width + x) as usize].ground =
         match ((x - 12).rem_euclid(8), (y - 12).rem_euclid(8)) {
@@ -187,6 +215,36 @@ mod tests {
                 BTreeSet::from([0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xfe]),
                 "seed {seed}"
             );
+        }
+    }
+
+    #[test]
+    fn limon_arena_is_a_separate_thirty_one_tile_platform() {
+        let content = Content::load(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data"
+        )))
+        .unwrap();
+        for seed in 0..256 {
+            let map = generate(&content, seed).unwrap();
+            let at = |x: i32, y: i32| &map.cells[(y * map.width + x) as usize];
+            let i = map
+                .cells
+                .iter()
+                .position(|c| c.object == Some(0xd06))
+                .unwrap() as i32;
+            let (lx, ly) = (i % map.width, i / map.width);
+            for y in ly - 15..=ly + 15 {
+                for x in lx - 15..=lx + 15 {
+                    assert!((0xa0..=0xa4).contains(&at(x, y).ground), "seed {seed}");
+                }
+            }
+            let ring = (lx - 16..=lx + 16)
+                .flat_map(|x| [(x, ly - 16), (x, ly + 16)])
+                .chain((ly - 15..=ly + 15).flat_map(|y| [(lx - 16, y), (lx + 16, y)]))
+                .filter(|&(x, y)| at(x, y).ground != 0xfe)
+                .count();
+            assert_eq!(ring, 2, "seed {seed}: arena joined another platform");
         }
     }
 }

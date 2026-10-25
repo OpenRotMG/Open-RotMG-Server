@@ -15,13 +15,16 @@ impl Room {
     fn center(self) -> (i32, i32) {
         (self.x + self.w / 2, self.y + self.h / 2)
     }
-    fn overlaps(self, b: Self) -> bool {
-        self.x <= b.x + b.w
-            && b.x <= self.x + self.w
-            && self.y <= b.y + b.h
-            && b.y <= self.y + self.h
+    fn overlaps(self, b: Self, gap: i32) -> bool {
+        self.x <= b.x + b.w + gap
+            && b.x <= self.x + self.w + gap
+            && self.y <= b.y + b.h + gap
+            && b.y <= self.y + self.h + gap
     }
 }
+
+// The 2012 example layout leaves void around chambers instead of packing them wall to wall: https://web.archive.org/web/20120425182543/http://forums.wildshadow.com/wiki/realm-mad-god/undead-lair
+const GAP: i32 = 4;
 
 // A lair room holds one enemy group, as in the map this server shipped before the
 // procedural generator (data/undead-lair.wmap): skeletons, mummies, constructs, slimes,
@@ -71,34 +74,42 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                             round,
                         };
                         let corridor = if horizontal {
-                            r.x = if positive { p.x + p.w + 1 } else { p.x - w - 1 };
+                            r.x = if positive {
+                                p.x + p.w + GAP
+                            } else {
+                                p.x - w - GAP
+                            };
                             r.y += offset;
                             Room {
                                 x: if positive { p.x + p.w - 3 } else { r.x + w - 3 },
                                 y: cy + offset - 1,
-                                w: 7,
+                                w: GAP + 6,
                                 h: 3,
                                 depth: 0,
                                 round: false,
                             }
                         } else {
-                            r.y = if positive { p.y + p.h + 1 } else { p.y - h - 1 };
+                            r.y = if positive {
+                                p.y + p.h + GAP
+                            } else {
+                                p.y - h - GAP
+                            };
                             r.x += offset;
                             Room {
                                 x: cx + offset - 1,
                                 y: if positive { p.y + p.h - 3 } else { r.y + h - 3 },
                                 w: 3,
-                                h: 7,
+                                h: GAP + 6,
                                 depth: 0,
                                 round: false,
                             }
                         };
-                        if rooms.iter().any(|o| r.overlaps(*o))
-                            || edges.iter().any(|e| r.overlaps(*e))
+                        if rooms.iter().any(|o| r.overlaps(*o, GAP - 1))
+                            || edges.iter().any(|e| r.overlaps(*e, 0))
                             || rooms
                                 .iter()
                                 .enumerate()
-                                .any(|(i, o)| i != parent && corridor.overlaps(*o))
+                                .any(|(i, o)| i != parent && corridor.overlaps(*o, 0))
                         {
                             continue;
                         }
@@ -353,6 +364,16 @@ mod tests {
                     if passable(p.0, p.1) && seen.insert(p) {
                         queue.push_back(p);
                     }
+                }
+            }
+            for y in 1..map.height - 1 {
+                for x in 1..map.width - 1 {
+                    assert!(
+                        passable(x, y)
+                            || !(passable(x - 1, y) && passable(x + 1, y)
+                                || passable(x, y - 1) && passable(x, y + 1)),
+                        "seed {seed}: chambers share a single wall at ({x}, {y})"
+                    );
                 }
             }
             assert!(seen.contains(&boss));
