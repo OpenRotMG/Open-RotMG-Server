@@ -26,8 +26,17 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Tier(3, ABILITIES)),
         ],
         0x903 => &[(0.01, Tier(2, RINGS))],
-        // Leading Trapped soul-bag entries keep first-success white odds: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Crystal.cs#L674-L677
-        0x941 => &[(0.02, Pick::Item(0xb3f)), (0.02, Pick::Item(0xa03))],
+        // Trapped's ordered first-success soul bag: Wand, Sword, then Att/Def/Dex/Spd/Vit/Wis potions: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Crystal.cs#L674-L684
+        0x941 => &[
+            (0.02, Pick::Item(0xb3f)),
+            (0.02, Pick::Item(0xa03)),
+            (0.5, Pick::Item(0xa1f)),
+            (0.5, Pick::Item(0xa20)),
+            (0.5, Pick::Item(0xa4c)),
+            (0.5, Pick::Item(0xa21)),
+            (0.5, Pick::Item(0xa34)),
+            (0.5, Pick::Item(0xa35)),
+        ],
         0x924 => &[(0.001, Pick::Item(0xc07))],
         0x957 => &[
             (0.02, Tier(5, WEAPONS)),

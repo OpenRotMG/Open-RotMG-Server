@@ -140,6 +140,8 @@ impl World {
             4 if age >= 4000 => Some(5),
             5 if age >= 50 => {
                 let new = self.transform_fauna(id, 0x941)?;
+                // Crystal-form hits earn no Prisoner drops: https://web.archive.org/web/20120613203408id_/http://forums.wildshadow.com:80/wiki/realm-mad-god/crystal-prisoner
+                self.entities.get_mut(&new).unwrap().damage.clear();
                 self.landmark_enter(new, 0);
                 self.landmark_shield(new, true);
                 self.entities.get_mut(&new).unwrap().next_aux = self.now + 200;
