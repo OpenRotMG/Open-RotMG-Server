@@ -481,7 +481,7 @@ fn hello(dir: &std::path::Path, password: &str) -> Packet {
 async fn login(mut app: App, packet: Packet) -> Result<Session> {
     let mut session = Session::default();
     let (tx, _rx) = mpsc::channel(64);
-    let lost = tokio::sync::watch::channel(false).0;
+    let lost = tokio::sync::watch::channel(None).0;
     handle(
         &mut app,
         vec![(packet, std::time::Instant::now())],

@@ -439,7 +439,7 @@ async fn native_state(a: &App, t: &Testing, actors: Vec<i32>) -> Result<Value> {
         ensure!(d.worlds.values().flat_map(|w| w.players.values()).filter(|p| p.controller == crate::world::Controller::Human).all(|p| actors.contains(&p.character.id)), "every connected native participant must be configured");
         let states = actors.into_iter().map(|actor| {
             for (world,w) in &d.worlds { for (id,p) in &w.players { if p.character.id == actor {
-                let stage = if p.death_pending { "dying" } else if !p.character.alive { "dead" } else if p.native_transferring() { "transferring" } else if p.tx.as_ref().is_none_or(|o| o.packets.is_closed() || *o.lost.borrow()) { "lost" } else if p.pending || p.progress_started { "busy" } else if !p.native_ready(paused) { "loading" } else { "ready" };
+                let stage = if p.death_pending { "dying" } else if !p.character.alive { "dead" } else if p.native_transferring() { "transferring" } else if p.tx.as_ref().is_none_or(|o| o.packets.is_closed() || o.lost.borrow().is_some()) { "lost" } else if p.pending || p.progress_started { "busy" } else if !p.native_ready(paused) { "loading" } else { "ready" };
                 return json!({"actor":actor,"stage":stage,"player":id,"world":world,"world_name":w.name,"client_time":p.native_time()});
             } } }
             json!({"actor":actor,"stage":if d.character_transferring(actor){"transferring"}else{"disconnected"}})
