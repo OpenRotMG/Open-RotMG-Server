@@ -1443,17 +1443,12 @@ mod tests {
     #[test]
     fn coil_chest_limits_successes_without_filling_failed_rolls() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for (kind, limit) in [(crate::dungeon::jungle::COIL, 3)] {
-            let items = landmark_chest(&content, kind, &mut StepRng::new(0, 0)).unwrap();
-            assert_eq!(items.len(), 8);
-            assert_eq!(
-                items.iter().filter(|item| **item >= 0).count(),
-                limit,
-                "{kind:#x}"
-            );
-            let empty = landmark_chest(&content, kind, &mut StepRng::new(0, u64::MAX)).unwrap();
-            assert_eq!(empty, vec![-1; 8], "{kind:#x}");
-        }
+        let kind = crate::dungeon::jungle::COIL;
+        let items = landmark_chest(&content, kind, &mut StepRng::new(0, 0)).unwrap();
+        assert_eq!(items.len(), 8);
+        assert_eq!(items.iter().filter(|item| **item >= 0).count(), 3);
+        let empty = landmark_chest(&content, kind, &mut StepRng::new(0, u64::MAX)).unwrap();
+        assert_eq!(empty, vec![-1; 8]);
     }
 
     #[test]
