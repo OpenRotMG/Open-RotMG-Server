@@ -9,6 +9,8 @@ pub const BOSS: u16 = 0x936;
 pub const EGG: u16 = 0x21b;
 pub const HATCHLING: u16 = 0x21c;
 pub const WEB_INTERVAL: u64 = 100;
+const WALL: u16 = 0x1e8;
+const WALL_WEB: u16 = 0x732;
 pub const ROSTER: [u16; 16] = [
     EGG, HATCHLING, 0x21d, 0x21e, 0x21f, 0x220, BOSS, 0x937, 0x938, 0x939, 0x93a, 0x93b, 0x93c,
     0x93d, 0x93e, 0x93f,
@@ -65,7 +67,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                     .iter()
                     .any(|(x, y)| map.cells[(y * size + x) as usize].ground == 0x2f)
             {
-                map.cells[i].object = Some(0x1e8);
+                map.cells[i].object = Some(WALL);
             }
         }
     }
@@ -80,14 +82,40 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 Some([0x1fc, 0x1fd, 0x1fe, 0x1800][rng.gen_range(0..4)]);
         }
     }
-    // Build 122 documents surrounding pillars, but their material and spacing are reconstructed.
+    // Wall columns/webs, not Grey Pillars: https://www.youtube.com/watch?v=4e_NAJKzL6Y&t=110s. Placements remain reconstructed.
     for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
         let cell = &mut map.cells[((16 + dy) * size + 72 + dx) as usize];
         ensure!(
             cell.ground == 0x2f && cell.object.is_none(),
             "Spider Den boss pillar requires empty Spider Dirt at offset ({dx}, {dy})"
         );
-        cell.object = Some(0x17b);
+        cell.object = Some(WALL);
+        let web = &mut map.cells[((16 + dy) * size + 71 + dx) as usize];
+        ensure!(
+            web.ground == 0x2f && web.object.is_none(),
+            "Spider Den column web requires empty adjacent Spider Dirt at offset ({dx}, {dy})"
+        );
+        web.object = Some(WALL_WEB);
+    }
+    for (i, (cx, cy)) in rooms.iter().copied().enumerate() {
+        let radius = if i == rooms.len() - 1 { 12 } else { 6 };
+        for (dx, dy) in [
+            (-radius, -radius),
+            (radius, -radius),
+            (-radius, radius),
+            (radius, radius),
+        ] {
+            let (x, y) = (cx + dx, cy + dy);
+            let i = (y * size + x) as usize;
+            if map.cells[i].ground == 0x2f
+                && map.cells[i].object.is_none()
+                && [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                    .iter()
+                    .any(|(x, y)| map.cells[(y * size + x) as usize].object == Some(WALL))
+            {
+                map.cells[i].object = Some(WALL_WEB);
+            }
+        }
     }
     map.cells[(16 * size + 72) as usize].object = Some(BOSS);
     let spawn = &mut map.cells[(74 * size + 12) as usize];
@@ -181,5 +209,89 @@ pub fn profile(kind: u16) -> Profile {
         speed,
         interval,
         range,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn wall_columns_and_webs_preserve_spider_den_routes_and_populations() {
+    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let wall = content.get(WALL).unwrap();
+    let old_cover = content.get(0x17b).unwrap();
+    assert!(wall.static_object && wall.full_occupy && !old_cover.full_occupy);
+    assert_eq!(wall.blocks, old_cover.blocks);
+    assert_eq!(wall.occupy_square, old_cover.occupy_square);
+    assert_eq!(wall.enemy_occupy_square, old_cover.enemy_occupy_square);
+    let web = content.get(WALL_WEB).unwrap();
+    assert!(web.static_object && !web.enemy && web.projectiles.is_empty());
+    assert!(!web.blocks && !web.full_occupy && !web.occupy_square && !web.enemy_occupy_square);
+    for seed in 0..32 {
+        let map = generate(&content, seed).unwrap();
+        let count = |kind| map.cells.iter().filter(|c| c.object == Some(kind)).count();
+        assert_eq!((map.width, map.height), (90, 90));
+        assert_eq!(map.spawns, [(12.5, 74.5)]);
+        assert_eq!(map.cells[74 * 90 + 12].region, 1);
+        assert_eq!(map.cells[16 * 90 + 72].object, Some(BOSS));
+        assert_eq!(count(BOSS), 1);
+        assert_eq!(count(EGG), 5);
+        assert_eq!(count(WALL_WEB), 30);
+        assert_eq!(count(0x17b), 0);
+        assert_eq!(
+            map.cells
+                .iter()
+                .filter(|c| c.object.is_some_and(|k| ROSTER.contains(&k)))
+                .count(),
+            26
+        );
+        assert_eq!(
+            map.cells
+                .iter()
+                .filter(|c| matches!(c.object, Some(0x1fc | 0x1fd | 0x1fe | 0x1800)))
+                .count(),
+            10
+        );
+        assert_eq!(
+            map.cells
+                .iter()
+                .filter(|c| c.ground == 0x2f && c.object == Some(WALL))
+                .count(),
+            4
+        );
+        for (i, cell) in map
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.object == Some(WALL_WEB))
+        {
+            let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+            assert_eq!(cell.ground, 0x2f);
+            assert!(
+                [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                    .iter()
+                    .any(|(x, y)| map.cells[(y * map.width + x) as usize].object == Some(WALL))
+            );
+        }
+        let mut seen = vec![false; map.cells.len()];
+        let mut queue = std::collections::VecDeque::from([(12, 74)]);
+        while let Some((x, y)) = queue.pop_front() {
+            if x < 0 || y < 0 || x >= map.width || y >= map.height {
+                continue;
+            }
+            let i = (y * map.width + x) as usize;
+            let cell = &map.cells[i];
+            if seen[i]
+                || cell.ground != 0x2f
+                || cell.object.is_some_and(|k| content.objects[&k].blocks)
+            {
+                continue;
+            }
+            seen[i] = true;
+            queue.extend([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]);
+        }
+        assert!(seen[16 * 90 + 72]);
+        assert_eq!(
+            seen.iter().filter(|v| **v).count(),
+            map.cells.iter().filter(|c| c.ground == 0x2f).count() - 4
+        );
     }
 }
