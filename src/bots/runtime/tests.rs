@@ -634,6 +634,7 @@ async fn protocol_goto_ack_does_not_wait_for_an_owned_progress_guard() {
             .waiting(&controller_app.world, id, work)
             .await
             .unwrap()
+            .unwrap()
             .unwrap();
         output
     });
@@ -743,6 +744,137 @@ async fn protocol_goto_ack_validation_still_rejects_invalid_late_and_unsolicited
             .to_string()
             .contains("timed out")
     );
+    lifecycle::finalize(&app, id, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop(owner);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+async fn dialogue_publication_protocol_failure(packet: u8, count: usize, expected: &str) {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (owner, id, _output, brain) = actor(&app, "publication-protocol", "Trader", [-1; 8]).await;
+    let view = app.world.player_view(id).await.unwrap();
+    let request = dialogue::Request {
+        speaker: id,
+        name: "Peer".into(),
+        session: brain.session,
+        created: std::time::Instant::now(),
+        payload: serde_json::json!({}),
+        plan: None,
+    };
+    for obsolete in [false, true] {
+        let (tx, rx) = mpsc::channel(OUTPUT_CAPACITY + 1);
+        for _ in 0..count {
+            tx.send(Packet {
+                id: packet,
+                body: vec![],
+            })
+            .await
+            .unwrap();
+        }
+        let mut output = ProtocolOutput::new(rx);
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let settled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let completed = settled.clone();
+        let publication = async move {
+            wait.await.unwrap();
+            completed.store(true, std::sync::atomic::Ordering::SeqCst);
+            if obsolete {
+                Err(anyhow::anyhow!(dialogue::Obsolete("publication_obsolete")))
+            } else {
+                Err(anyhow::anyhow!("publication_rejected"))
+            }
+        };
+        let (result, ()) = tokio::join!(
+            publish_dialogue(
+                &app,
+                &mut output,
+                &request,
+                "protocol-regression",
+                &view,
+                dialogue::Intent::Talk,
+                publication
+            ),
+            async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                assert!(!settled.load(std::sync::atomic::Ordering::SeqCst));
+                release.send(()).unwrap();
+            }
+        );
+        assert!(settled.load(std::sync::atomic::Ordering::SeqCst));
+        let error = result.expect_err(
+            "controller must propagate transport failure, not handle it as a dialogue rejection",
+        );
+        let detail = format!("{error:#}");
+        assert!(detail.contains(expected), "{detail}");
+        assert!(
+            detail.contains(if obsolete {
+                "publication_obsolete"
+            } else {
+                "publication_rejected"
+            }),
+            "{detail}"
+        );
+        assert!(!error.is::<dialogue::Obsolete>());
+    }
+    lifecycle::finalize(&app, id, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop(owner);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn dialogue_publication_propagates_overflow_after_work_settles() {
+    dialogue_publication_protocol_failure(
+        wire::TEXT,
+        OUTPUT_CAPACITY + 1,
+        "deferred output queue full",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn dialogue_publication_propagates_ack_failure_after_work_settles() {
+    dialogue_publication_protocol_failure(wire::GOTO, 1, "unsolicited GOTO acknowledgement").await;
+}
+
+#[tokio::test]
+async fn dialogue_publication_keeps_inner_rejection_and_obsolete_nonterminal() {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (owner, id, mut output, brain) = actor(&app, "publication-inner", "Trader", [-1; 8]).await;
+    let view = app.world.player_view(id).await.unwrap();
+    let request = dialogue::Request {
+        speaker: id,
+        name: "Peer".into(),
+        session: brain.session,
+        created: std::time::Instant::now(),
+        payload: serde_json::json!({}),
+        plan: None,
+    };
+    for error in [
+        anyhow::anyhow!("publication_rejected"),
+        anyhow::anyhow!(dialogue::Obsolete("publication_obsolete")),
+    ] {
+        publish_dialogue(
+            &app,
+            &mut output,
+            &request,
+            "inner-regression",
+            &view,
+            dialogue::Intent::Talk,
+            async { Err(error) },
+        )
+        .await
+        .unwrap();
+    }
     lifecycle::finalize(&app, id, CloseReason::Controller)
         .unwrap()
         .wait()

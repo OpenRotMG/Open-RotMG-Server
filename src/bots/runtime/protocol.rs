@@ -19,16 +19,17 @@ impl ProtocolOutput {
             .unwrap_or_else(|| self.packets.try_recv())
     }
     // Transfers/finalization end the ACK context, so only session-stable work belongs here.
+    // Publication may reject work nonterminally; transport failures must still stop the controller.
     pub(super) async fn waiting<T>(
         &mut self,
         world: &crate::world::Handle,
         id: i32,
         work: impl Future<Output = Result<T>>,
-    ) -> Result<T> {
+    ) -> Result<Result<T>> {
         tokio::pin!(work);
         loop {
             let received: Result<()> = tokio::select! {
-                result = &mut work => return result,
+                result = &mut work => return Ok(result),
                 packet = self.packets.recv() => {
                     match packet {
                         Some(packet) if packet.id == wire::GOTO => {
@@ -108,7 +109,7 @@ mod tests {
                         .contains("deferred output queue full")
                 );
             } else {
-                result.unwrap();
+                result.unwrap().unwrap();
             }
             for n in 0..count.min(OUTPUT_CAPACITY) {
                 assert_eq!(output.try_recv().unwrap().body, (n as u32).to_be_bytes());
