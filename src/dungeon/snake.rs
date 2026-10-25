@@ -114,9 +114,14 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         .map(|p| p.1)
         .min()
         .context("Snake Pit has no rooms")?;
+    let top = if rooms[ordinary..].iter().any(|p| p.1 == min_y) {
+        30
+    } else {
+        20
+    };
     let centers: Vec<_> = rooms
         .iter()
-        .map(|(x, y)| ((x - min_x) * 32 + 20, (y - min_y) * 32 + 20))
+        .map(|(x, y)| ((x - min_x) * 32 + 20, (y - min_y) * 32 + top))
         .collect();
     let width = centers.iter().map(|p| p.0).max().unwrap() + 21;
     let height = centers.iter().map(|p| p.1).max().unwrap() + 21;
@@ -261,14 +266,31 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
 }
 
 fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
+    // Floor rails, a button alcove and a lower side entry are visible here; dimensions are reconstructed: https://www.youtube.com/watch?v=o90GtXTf9Mw&t=720
+    let cy = cy - 12;
+    let inside = |x: i32, y: i32| {
+        y.abs() <= 16
+            && x.abs()
+                <= match y {
+                    ..=-11 | 7..=9 => 2,
+                    _ => 7,
+                }
+    };
     for dy in -16i32..=16 {
         for dx in -7i32..=7 {
-            let cell = &mut map.cells[((cy + dy) * map.width + cx + dx) as usize];
-            cell.ground = 0xca;
-            if dy.abs() == 7 && dx.abs() > 1 {
-                cell.ground = 0x16;
-                cell.object = Some(0x170);
+            if !inside(dx, dy) {
+                continue;
             }
+            let edge = [(dx - 1, dy), (dx + 1, dy), (dx, dy - 1), (dx, dy + 1)]
+                .iter()
+                .any(|&(x, y)| !inside(x, y));
+            map.cells[((cy + dy) * map.width + cx + dx) as usize].ground = if edge {
+                0x32
+            } else if dx.abs() <= 1 && (dy + 12).abs() <= 1 {
+                0xc3
+            } else {
+                0xca
+            };
         }
     }
     map.cells[((cy - 12) * map.width + cx) as usize].object = Some(BUTTON);
@@ -284,6 +306,60 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
 mod tests {
     use super::*;
     use std::collections::{BTreeSet, VecDeque};
+
+    #[test]
+    fn treasure_rooms_have_walkable_rails_and_a_lower_entry() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let mut treasures = 0;
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            for (i, _) in map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.object == Some(SPAWNER))
+            {
+                let (cx, cy) = (i as i32 % map.width, i as i32 / map.width);
+                treasures += 1;
+                let inside = |x: i32, y: i32| {
+                    y.abs() <= 16
+                        && x.abs()
+                            <= match y {
+                                ..=-11 | 7..=9 => 2,
+                                _ => 7,
+                            }
+                };
+                assert!(cx > 7 && cy > 16 && cy + 16 < map.height - 1);
+                for dy in -16..=16 {
+                    for dx in -7..=7 {
+                        let cell = &map.cells[((cy + dy) * map.width + cx + dx) as usize];
+                        assert_eq!(
+                            cell.ground != 0xff,
+                            inside(dx, dy),
+                            "seed {seed} outline {dx},{dy}"
+                        );
+                        if !inside(dx, dy) {
+                            continue;
+                        }
+                        let edge = [(dx - 1, dy), (dx + 1, dy), (dx, dy - 1), (dx, dy + 1)]
+                            .iter()
+                            .any(|&(x, y)| !inside(x, y));
+                        assert_eq!(cell.ground == 0x32, edge, "seed {seed} rail {dx},{dy}");
+                        assert_ne!(
+                            cell.object,
+                            Some(0x170),
+                            "seed {seed} blocked room {dx},{dy}"
+                        );
+                    }
+                }
+                assert_eq!(
+                    map.cells[((cy - 12) * map.width + cx) as usize].object,
+                    Some(BUTTON)
+                );
+            }
+        }
+        assert!(treasures > 0);
+    }
 
     #[test]
     fn stheno_room_is_a_notched_square() {
