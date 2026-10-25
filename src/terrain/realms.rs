@@ -50,12 +50,61 @@ impl Asset {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Grove {
+    pub(crate) bounds: [i32; 4],
+    pub(crate) spawn: [i32; 2],
+    pub(crate) trees: usize,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Groves {
+    layout: String,
+    sha256: String,
+    groves: Vec<Grove>,
+}
+
 pub(crate) enum Source {
     Encoded(Asset),
     #[cfg(test)]
     Fixture(Arc<Map>),
 }
 impl Source {
+    pub(crate) fn groves(&self) -> Result<Vec<Grove>> {
+        let asset = match self {
+            Self::Encoded(asset) if asset.profile == "fsod" => return Ok(Vec::new()),
+            Self::Encoded(asset) => asset,
+            #[cfg(test)]
+            Self::Fixture(_) => return Ok(Vec::new()),
+        };
+        let records: Vec<Groves> =
+            serde_json::from_str(include_str!("../../data/realm-groves.json"))
+                .context("parse authored Grove registry")?;
+        let mut matches = records.into_iter().filter(|r| r.layout == asset.id);
+        let record = matches
+            .next()
+            .with_context(|| format!("{} has no authored Grove registry", asset.id))?;
+        ensure!(
+            matches.next().is_none(),
+            "duplicate Grove registry for {}",
+            asset.id
+        );
+        ensure!(
+            record.sha256 == asset.sha256,
+            "{} Grove registry hash mismatch: expected {}, loaded {}",
+            asset.id,
+            record.sha256,
+            asset.sha256
+        );
+        ensure!(
+            (17..25).contains(&record.groves.len()),
+            "{} has invalid authored Grove count {}",
+            asset.id,
+            record.groves.len()
+        );
+        Ok(record.groves)
+    }
     pub(crate) fn name(&self) -> &str {
         match self {
             Self::Encoded(asset) => &asset.id,
@@ -289,4 +338,26 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
         map.spawns.push((x as f32 + 0.5, y as f32 + 0.5));
     }
     Ok(())
+}
+
+#[test]
+fn authored_grove_registry_refuses_changed_layout_hashes() {
+    for mut source in sources(Path::new("data")).unwrap() {
+        if source.name().starts_with("realm-fsod-") {
+            assert!(source.groves().unwrap().is_empty());
+        } else {
+            assert!(!source.groves().unwrap().is_empty());
+            let Source::Encoded(asset) = &mut source else {
+                unreachable!()
+            };
+            asset.sha256 = "0".repeat(64);
+            assert!(
+                source
+                    .groves()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Grove registry hash mismatch")
+            );
+        }
+    }
 }
