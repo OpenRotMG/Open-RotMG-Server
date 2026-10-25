@@ -816,14 +816,33 @@ impl World {
                         continue;
                     }
                     if self.now < moving_until {
-                        let goal = Pos {
-                            x: pos.x + angle.cos() * speed * 0.05,
-                            y: pos.y + angle.sin() * speed * 0.05,
+                        assert!(
+                            angle.is_finite() && speed.is_finite() && speed >= 0.,
+                            "invalid decoy trajectory for {id}: angle={angle}, speed={speed}"
+                        );
+                        let distance = speed * 0.05;
+                        let delta = Pos {
+                            x: angle.cos() * distance,
+                            y: angle.sin() * distance,
                         };
-                        if self.walkable(goal) {
-                            self.move_entity(id, goal, speed * 0.05)
-                                .expect("validated decoy movement");
-                        }
+                        let samples = (distance / 0.1).ceil().max(1.) as usize;
+                        // Legal endpoints can straddle a blocked corner; wall contact stops this step.
+                        let blocked = (1..=samples).any(|i| {
+                            !self.walkable(Pos {
+                                x: pos.x + delta.x / samples as f32 * i as f32,
+                                y: pos.y + delta.y / samples as f32 * i as f32,
+                            })
+                        });
+                        let resolved = if blocked {
+                            pos
+                        } else {
+                            Pos {
+                                x: pos.x + delta.x,
+                                y: pos.y + delta.y,
+                            }
+                        };
+                        self.position_entity(id, resolved)
+                            .expect("validated decoy movement");
                     }
                 }
                 Deployment::Bomb => {
@@ -846,6 +865,154 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decoy_world(origin: Pos, angle: f32, blocked: Option<(usize, usize)>) -> (World, i32, i32) {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut map = Map {
+            width: 32,
+            height: 32,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x46,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0,
+                };
+                32 * 32
+            ],
+            spawns: vec![(origin.x, origin.y)],
+        };
+        if let Some((x, y)) = blocked {
+            map.cells[y * 32 + x].ground = 255;
+        }
+        let mut world = World::new(content, Arc::new(map)).unwrap();
+        let character: Character = serde_json::from_value(serde_json::json!({
+            "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+            "class":0x324,"base":[720,252,50,25,75,75,40,50],
+            "id":1,"account":1,"name":"Decoy","level":20,"exp":0,
+            "fame":0,"hp":720,"mp":252,"revision":0,"alive":true,
+            "items":[-1,0xae3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+        }))
+        .unwrap();
+        let owner = world.enter(character, None).unwrap();
+        world.players.get_mut(&owner).unwrap().last_motion = Some((angle, world.now));
+        world
+            .use_item(
+                owner,
+                Slot {
+                    object: owner,
+                    slot: 1,
+                    kind: 0xae3,
+                },
+                origin,
+            )
+            .unwrap();
+        assert_eq!(world.players[&owner].character.mp, 192);
+        let decoy = *world.ability_state.objects.keys().next().unwrap();
+        assert_eq!(world.ability_state.objects[&decoy].owner, owner);
+        (world, owner, decoy)
+    }
+
+    #[test]
+    fn decoy_tick_stops_before_blocked_intermediate_tile_with_walkable_endpoint() {
+        let origin = Pos { x: 4.9, y: 4.7 };
+        let angle = std::f32::consts::FRAC_PI_4;
+        let (mut world, owner, decoy) = decoy_world(origin, angle, Some((5, 4)));
+        let distance = world.players[&owner]
+            .speed(&world.content, world.now)
+            .unwrap()
+            * 50.;
+        let goal = Pos {
+            x: origin.x + angle.cos() * distance,
+            y: origin.y + angle.sin() * distance,
+        };
+        assert!(world.walkable(origin) && world.walkable(goal));
+        assert!(!world.walkable(Pos { x: 5.03, y: 4.83 }));
+        world.step();
+        let stopped = world.entities[&decoy].pos;
+        assert!(world.walkable(stopped));
+        assert!(stopped.x < 5. && stopped.y < 5.);
+        for _ in 0..28 {
+            world.step();
+        }
+        assert!(world.entities[&decoy].pos.distance(stopped) < 1e-6);
+        assert_eq!(world.ability_state.objects[&decoy].owner, owner);
+    }
+
+    #[test]
+    fn decoy_tick_stops_at_blocking_object_corner() {
+        let origin = Pos { x: 4.9, y: 4.7 };
+        let (mut world, _, decoy) = decoy_world(origin, std::f32::consts::FRAC_PI_4, None);
+        world
+            .spawn_entity(0xde5, Pos { x: 5.5, y: 4.5 }, vec![])
+            .unwrap();
+        assert!(!world.walkable(Pos { x: 5.03, y: 4.83 }));
+        world.step();
+        assert!(world.entities[&decoy].pos.distance(origin) < 1e-6);
+    }
+
+    #[test]
+    fn decoy_tick_stops_at_blocked_endpoint_and_world_edge() {
+        for (origin, blocked) in [
+            (Pos { x: 4.9, y: 4.5 }, Some((5, 4))),
+            (Pos { x: 31.9, y: 4.5 }, None),
+        ] {
+            let (mut world, _, decoy) = decoy_world(origin, 0., blocked);
+            world.step();
+            assert!(world.entities[&decoy].pos.distance(origin) < 1e-6);
+            for _ in 0..59 {
+                world.step();
+            }
+            assert!(!world.entities.contains_key(&decoy));
+            assert!(!world.ability_state.objects.contains_key(&decoy));
+        }
+    }
+
+    #[test]
+    fn decoy_tick_open_motion_stops_at_half_duration_then_expires() {
+        let origin = Pos { x: 4.9, y: 4.5 };
+        let (mut world, owner, decoy) = decoy_world(origin, 0., None);
+        let character = world.players[&owner].character.clone();
+        world.step();
+        assert!((world.entities[&decoy].pos.x - origin.x - 0.48).abs() < 1e-5);
+        for _ in 0..28 {
+            world.step();
+        }
+        let stopped = world.entities[&decoy].pos;
+        for _ in 0..30 {
+            world.step();
+        }
+        assert!(world.entities[&decoy].pos.distance(stopped) < 1e-6);
+        assert_eq!(world.players[&owner].character.items, character.items);
+        assert_eq!(world.players[&owner].character.revision, character.revision);
+        assert_eq!(world.ability_state.objects[&decoy].owner, owner);
+        world.step();
+        assert!(!world.entities.contains_key(&decoy));
+        assert!(world.ability_state.objects.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid decoy trajectory")]
+    fn decoy_tick_rejects_nonfinite_trajectory() {
+        let (mut world, _, decoy) = decoy_world(Pos { x: 4.5, y: 4.5 }, 0., None);
+        let Deployment::Decoy { speed, .. } =
+            &mut world.ability_state.objects.get_mut(&decoy).unwrap().kind
+        else {
+            unreachable!();
+        };
+        *speed = f32::NAN;
+        world.step();
+    }
+
+    #[test]
+    fn decoy_tick_removes_departing_owners_deployment() {
+        let (mut world, owner, decoy) = decoy_world(Pos { x: 4.5, y: 4.5 }, 0., None);
+        world.players.get_mut(&owner).unwrap().departing = true;
+        world.step();
+        assert!(!world.entities.contains_key(&decoy));
+        assert!(world.ability_state.objects.is_empty());
+    }
 
     #[test]
     fn ability_cooldown_uses_elapsed_unpaused_time_not_world_steps() {
