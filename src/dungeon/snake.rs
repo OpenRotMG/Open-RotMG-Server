@@ -42,81 +42,108 @@ pub fn shield(elapsed: u64) -> bool {
 
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let directions = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-    let mut rooms = vec![(0i32, 0i32)];
-    let mut edges = Vec::new();
-    for parent in 0..6 {
-        let (x, y) = rooms[parent];
-        let choices: Vec<_> = directions
-            .iter()
-            .map(|(dx, dy)| (x + dx, y + dy))
-            .filter(|p| !rooms.contains(p))
-            .collect();
-        rooms.push(
-            *choices
-                .choose(&mut rng)
-                .context("Snake Pit spine exhausted")?,
-        );
-        edges.push((parent, parent + 1));
-    }
-    for _ in 0..rng.gen_range(3..=8) {
-        let choices: Vec<_> = rooms
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != 0 && *i != 6)
-            .flat_map(|(i, (x, y))| directions.iter().map(move |(dx, dy)| (i, (x + dx, y + dy))))
-            .filter(|(_, p)| !rooms.contains(p))
-            .collect();
-        let (parent, pos) = *choices
-            .choose(&mut rng)
-            .context("Snake Pit branches exhausted")?;
-        edges.push((parent, rooms.len()));
-        rooms.push(pos);
-    }
-    let ordinary = rooms.len();
-    // Keep existing circular-room rolls independent of optional treasure placement.
     let mut treasure_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7472_6561_7375_7265);
-    let mut candidates: Vec<_> = (1..ordinary)
-        .filter(|&i| i != 6)
-        .flat_map(|i| [-1, 1].map(|dx| (i, (rooms[i].0 + dx, rooms[i].1))))
-        .filter(|&(parent, pos)| {
-            !rooms.contains(&pos)
-                && rooms
-                    .iter()
-                    .enumerate()
-                    .all(|(i, &(x, y))| i == parent || (x - pos.0).abs() + (y - pos.1).abs() > 1)
-        })
-        .collect();
-    candidates.shuffle(&mut treasure_rng);
-    let mut spaces: Vec<(usize, (i32, i32))> = Vec::new();
-    for candidate in candidates {
-        if spaces
-            .iter()
-            .all(|&(_, (x, y))| (x - candidate.1.0).abs() + (y - candidate.1.1).abs() > 1)
-        {
-            spaces.push(candidate);
-            if spaces.len() == 3 {
-                break;
+    let mut attempts = 0;
+    let (edges, ordinary, spaces, half, centers) = loop {
+        attempts += 1;
+        ensure!(
+            attempts <= 100,
+            "Snake Pit rooms could not be separated for seed {seed}"
+        );
+        let directions = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+        let mut rooms = vec![(0i32, 0i32)];
+        let mut edges = Vec::new();
+        for parent in 0..6 {
+            let (x, y) = rooms[parent];
+            let choices: Vec<_> = directions
+                .iter()
+                .map(|(dx, dy)| (x + dx, y + dy))
+                .filter(|p| !rooms.contains(p))
+                .collect();
+            rooms.push(
+                *choices
+                    .choose(&mut rng)
+                    .context("Snake Pit spine exhausted")?,
+            );
+            edges.push((parent, parent + 1));
+        }
+        for _ in 0..rng.gen_range(3..=8) {
+            let choices: Vec<_> = rooms
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != 0 && *i != 6)
+                .flat_map(|(i, (x, y))| {
+                    directions.iter().map(move |(dx, dy)| (i, (x + dx, y + dy)))
+                })
+                .filter(|(_, p)| !rooms.contains(p))
+                .collect();
+            let (parent, pos) = *choices
+                .choose(&mut rng)
+                .context("Snake Pit branches exhausted")?;
+            edges.push((parent, rooms.len()));
+            rooms.push(pos);
+        }
+        let ordinary = rooms.len();
+        let mut candidates: Vec<_> = (1..ordinary)
+            .filter(|&i| i != 6)
+            .flat_map(|i| [-1, 1].map(|dx| (i, (rooms[i].0 + dx, rooms[i].1))))
+            .filter(|&(parent, pos)| {
+                !rooms.contains(&pos)
+                    && rooms.iter().enumerate().all(|(i, &(x, y))| {
+                        i == parent || (x - pos.0).abs() + (y - pos.1).abs() > 1
+                    })
+            })
+            .collect();
+        candidates.shuffle(&mut treasure_rng);
+        let mut spaces: Vec<(usize, (i32, i32))> = Vec::new();
+        for candidate in candidates {
+            if spaces
+                .iter()
+                .all(|&(_, (x, y))| (x - candidate.1.0).abs() + (y - candidate.1.1).abs() > 1)
+            {
+                spaces.push(candidate);
+                if spaces.len() == 3 {
+                    break;
+                }
             }
         }
-    }
-    for &(parent, pos) in &spaces[..treasure_rng.gen_range(0..=spaces.len())] {
-        edges.push((parent, rooms.len()));
-        rooms.push(pos);
-    }
-    let min_x = rooms
+        for &(parent, pos) in &spaces[..treasure_rng.gen_range(0..=spaces.len())] {
+            edges.push((parent, rooms.len()));
+            rooms.push(pos);
+        }
+        let half: Vec<(i32, i32)> = (0..rooms.len())
+            .map(|i| match i {
+                6 => (15, 15),
+                i if i >= ordinary => (7, 16),
+                _ => {
+                    let r = rng.gen_range(7..=9);
+                    (r, r)
+                }
+            })
+            .collect();
+        let mut centers = vec![(0, 0); rooms.len()];
+        for &(a, b) in &edges {
+            let (dx, dy) = (rooms[b].0 - rooms[a].0, rooms[b].1 - rooms[a].1);
+            // Size necks from room edges; the 2012 footage shows short links, not long grid gaps: https://www.youtube.com/watch?v=gWLn80rNsxU&t=60
+            let step = 1 + rng.gen_range(5..=7);
+            centers[b] = (
+                centers[a].0 + dx * (half[a].0 + half[b].0 + step),
+                centers[a].1 + dy * (half[a].1 + half[b].1 + step),
+            );
+        }
+        let apart = |i: usize, j: usize| {
+            (centers[i].0 - centers[j].0).abs() >= half[i].0 + half[j].0 + 3
+                || (centers[i].1 - centers[j].1).abs() >= half[i].1 + half[j].1 + 3
+        };
+        if (0..rooms.len()).all(|i| (0..i).all(|j| apart(i, j))) {
+            break (edges, ordinary, spaces, half, centers);
+        }
+    };
+    let min_x = centers.iter().map(|p| p.0).min().unwrap();
+    let min_y = centers.iter().map(|p| p.1).min().unwrap();
+    let centers: Vec<_> = centers
         .iter()
-        .map(|p| p.0)
-        .min()
-        .context("Snake Pit has no rooms")?;
-    let min_y = rooms
-        .iter()
-        .map(|p| p.1)
-        .min()
-        .context("Snake Pit has no rooms")?;
-    let centers: Vec<_> = rooms
-        .iter()
-        .map(|(x, y)| ((x - min_x) * 32 + 20, (y - min_y) * 32 + 20))
+        .map(|(x, y)| (x - min_x + 20, y - min_y + 20))
         .collect();
     let width = centers.iter().map(|p| p.0).max().unwrap() + 21;
     let height = centers.iter().map(|p| p.1).max().unwrap() + 21;
@@ -142,7 +169,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             treasure_room(&mut map, cx, cy);
             continue;
         }
-        let radius = if i == 6 { 15 } else { rng.gen_range(7..=9) };
+        let radius = half[i].0;
         for y in -radius..=radius {
             for x in -radius..=radius {
                 let inside = if i == 6 {
@@ -250,8 +277,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     }
     tracing::info!(
         seed,
-        rooms = rooms.len(),
-        treasure_rooms = rooms.len() - ordinary,
+        rooms = centers.len(),
+        treasure_rooms = centers.len() - ordinary,
+        attempts,
         treasure_slots = spaces.len(),
         width,
         height,
@@ -314,9 +342,9 @@ mod tests {
     }
 
     #[test]
-    fn reconstructed_connectors_are_four_tiles_and_reach_every_room_after_digging() {
+    fn connectors_are_short_four_tile_necks_that_reach_every_room_after_digging() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for seed in 0..32 {
+        for seed in 0..512 {
             let map = generate(&content, seed).unwrap();
             let count = |kind| map.cells.iter().filter(|c| c.object == Some(kind)).count();
             assert_eq!(count(BOSS), 1);
@@ -363,9 +391,12 @@ mod tests {
                         }
                     }
                 }
-                assert_eq!(
+                let (short, long) = (
                     (x1 - x0 + 1).min(y1 - y0 + 1),
-                    4,
+                    (x1 - x0 + 1).max(y1 - y0 + 1),
+                );
+                assert!(
+                    short == 4 && (5..=9).contains(&long),
                     "seed {seed}, soft component {x0},{y0}..{x1},{y1}"
                 );
             }
