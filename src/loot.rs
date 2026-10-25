@@ -975,8 +975,10 @@ fn bonus(kind: u16) -> &'static [(f64, u16)] {
         0xd59 => &[(0.001, 0xc0a)],
         0xd60 => &[(0.004, 0xc06)],
         0x1705 => &[(0.04, 0xaea)],
+        // Kithio keeps White Demon below the ordinary gods: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Mountain.cs#L15-L35
+        0x651 => &[(0.01, 0xa1f)],
         // Native's 1.5% follows period testimony, not the later 2% table: https://discord.com/channels/1558662335076376578/1558662336439386185/1563889316432973895
-        0x651 | 0x652 | 0x657 | 0xd05 | 0x905..=0x907 => &[(0.015, 0xa1f)],
+        0x652 | 0x657 | 0xd05 | 0x905..=0x907 => &[(0.015, 0xa1f)],
         0x659 => &[(0.015, 0xa21)],
         0x654 => &[(0.01, 0xa21)],
         0x91a => &[(0.02, 0xa21)],
@@ -1619,6 +1621,42 @@ mod tests {
         assert_eq!(content.objects[&0xa12].tier, Some(8));
         assert_eq!(chance(crate::endgame::ORYX, 10, WEAPONS), Some(0.07));
         assert_eq!(chance(crate::endgame::ORYX2, 13, ARMOR), Some(0.05));
+    }
+
+    #[test]
+    fn white_demon_attack_uses_one_percent_without_changing_gear_or_other_gods() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let boundary = (0.01 * u64::MAX as f64) as u64;
+        // Keep gear's u32 draws zero: constant rejected samples would never terminate.
+        let mask = !u64::from(u32::MAX);
+        for roll in [
+            boundary & mask,
+            (boundary + (1 << 32)) & mask,
+            ((0.0125 * u64::MAX as f64) as u64) & mask,
+        ] {
+            let white = rewards(&content, 0x651, &mut StepRng::new(roll, 0));
+            assert_eq!(
+                white.contains(&0xa1f),
+                roll < boundary,
+                "White Demon Attack at random sample {roll}"
+            );
+            let gear: Vec<_> = white.into_iter().filter(|item| *item != 0xa1f).collect();
+            assert!(!gear.is_empty());
+            for kind in [0x652, 0x657, 0xd05] {
+                let sibling = rewards(&content, kind, &mut StepRng::new(roll, 0));
+                assert!(sibling.contains(&0xa1f), "{kind:#x} keeps its 1.5% roll");
+                assert_eq!(
+                    gear,
+                    sibling
+                        .into_iter()
+                        .filter(|item| *item != 0xa1f)
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        assert_eq!(bonus(0x651), &[(0.01, 0xa1f)]);
+        assert_eq!(potion_damage(0x651), Some(180));
+        assert!(private(0x651));
     }
 
     #[test]
