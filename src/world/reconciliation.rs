@@ -45,7 +45,7 @@ pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
             character = p.character.id,
             "GOTO acknowledgement backlog exceeded"
         );
-        output.lost.send_replace(true);
+        lose(&output.lost, "goto_ack_backlog");
         return;
     }
     // ACK has no object ID, so other players' GOTOs must share the same FIFO.
@@ -75,7 +75,7 @@ impl Player {
                 "tick acknowledgement backlog exceeded"
             );
             if let Some(output) = &self.tx {
-                output.lost.send_replace(true);
+                lose(&output.lost, "tick_ack_backlog");
             }
             return;
         }
@@ -107,6 +107,95 @@ impl Player {
 }
 
 impl World {
+    fn predicted_death_target(&self, id: i32, target: i32) -> Option<&Entity> {
+        let p = self.players.get(&id)?;
+        if p.controller != Controller::Human || !p.active() || !p.known.contains(&target) {
+            return None;
+        }
+        self.entities
+            .get(&target)
+            .filter(|e| e.hp > 0 && self.content.objects[&e.kind].enemy)
+    }
+
+    pub fn native_predicted_enemy_death(&mut self, id: i32, bullet: u8, target: i32) -> Result<()> {
+        self.players
+            .get(&id)
+            .context("enemy death report player missing")?;
+        if self.predicted_death_target(id, target).is_some() {
+            let bullets = &self.bullets;
+            self.players
+                .get_mut(&id)
+                .unwrap()
+                .predicted_deaths
+                .entry(target)
+                .or_insert_with(|| {
+                    let born = bullets
+                        .iter()
+                        .find(|b| b.friendly && b.owner == id && b.id == bullet)
+                        .map(|b| b.born);
+                    (bullet, born)
+                });
+        }
+        Ok(())
+    }
+
+    pub(super) fn reconcile_enemy_deaths(&mut self) {
+        let pending: Vec<_> = self
+            .players
+            .iter()
+            .flat_map(|(&id, p)| {
+                p.predicted_deaths
+                    .iter()
+                    .map(move |(&target, &(bullet, born))| (id, target, bullet, born))
+            })
+            .collect();
+        for (id, target, bullet, born) in pending {
+            let alive = self.predicted_death_target(id, target).is_some();
+            if alive
+                && self.bullets.iter().any(|b| {
+                    b.friendly
+                        && b.owner == id
+                        && b.id == bullet
+                        && Some(b.born) == born
+                        && !b.hit.contains(&target)
+                })
+            {
+                continue;
+            }
+            self.players
+                .get_mut(&id)
+                .unwrap()
+                .predicted_deaths
+                .remove(&target);
+            if !alive {
+                continue;
+            }
+            let e = &self.entities[&target];
+            let mut make = Writer::new();
+            make.i16(0).i16(1).i16(e.kind as i16);
+            make.0
+                .extend(self.stats(target, id).expect("known living enemy stats"));
+            make.i16(0);
+            // Sticky native deaths need DROP then MAKE after projectile resolution: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/objects/GameObject.as#L684-L693
+            let mut drop = Writer::new();
+            drop.i16(0).i16(0).i16(1).i32(target);
+            let p = &self.players[&id];
+            send(p, wire::UPDATE, drop.0);
+            send(p, wire::UPDATE, make.0);
+            tracing::info!(
+                player = id,
+                target,
+                enemy_kind = e.kind,
+                bullet,
+                projectile_born_ms = ?born,
+                game_ms = self.now,
+                hp = e.hp,
+                conditions = e.conditions(self.now),
+                "native enemy death prediction reconciled"
+            );
+        }
+    }
+
     pub fn acknowledge_tick(&mut self, id: i32, tick: i32) -> Result<()> {
         let p = self
             .players
@@ -315,7 +404,7 @@ impl World {
                     .is_some_and(|(_, sent)| sent.elapsed() > ACK_TIMEOUT)
             {
                 if let Some(output) = &p.tx {
-                    output.lost.send_replace(true);
+                    lose(&output.lost, "goto_ack_timeout");
                 }
                 p.departing = true;
                 tracing::error!(
@@ -330,6 +419,153 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn predicted_enemy_death_waits_for_authority_and_rebuilds_only_the_sender_view() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let content = Arc::new(Content::load(&data).unwrap());
+        let map = Arc::new(Map::load(&data.join("nexus.wmap"), &content).unwrap());
+        let mut world = World::new(content, map).unwrap();
+        let mut character: Character = serde_json::from_value(serde_json::json!({
+            "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+            "class":0x31e,"base":[200,100,15,0,7,10,10,10],
+            "id":1,"account":1,"name":"Prediction","level":1,"exp":0,
+            "fame":0,"hp":200,"mp":100,"revision":0,"alive":true,
+            "items":[0xa00,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+        }))
+        .unwrap();
+        let id = world.enter(character.clone(), None).unwrap();
+        character.id = 2;
+        character.account = 2;
+        let observer = world.enter(character, None).unwrap();
+        let pos = world.players[&id].pos;
+        let target = world.spawn_entity(0x6b1, pos, vec![]).unwrap();
+        let enemy = world.entities.get_mut(&target).unwrap();
+        enemy.hp = 1;
+        enemy.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
+        let (tx, mut rx) = mpsc::channel(16);
+        let (other, mut other_rx) = mpsc::channel(16);
+        let (lost, _) = watch::channel(None);
+        for (player, packets) in [(id, tx), (observer, other)] {
+            world.players.get_mut(&player).unwrap().controller = Controller::Human;
+            world.updates(player, true).unwrap();
+            let p = world.players.get_mut(&player).unwrap();
+            assert!(p.known.contains(&target));
+            p.tx = Some(Output {
+                packets,
+                lost: lost.clone(),
+            });
+        }
+        let start = Pos {
+            x: pos.x + 0.3,
+            y: pos.y,
+        };
+        let bullet = world.players[&id].next_bullet;
+        world.shoot(id, 1000, bullet, 0xa00, start, 0.).unwrap();
+        for _ in 0..3 {
+            world
+                .native_predicted_enemy_death(id, bullet, target)
+                .unwrap();
+        }
+        assert_eq!(world.players[&id].predicted_deaths.len(), 1);
+        while rx.try_recv().is_ok() {}
+        while other_rx.try_recv().is_ok() {}
+        world.reconcile_enemy_deaths();
+        assert!(
+            rx.try_recv().is_err(),
+            "an unresolved projectile is not a false prediction"
+        );
+        assert_eq!(world.players[&id].predicted_deaths.len(), 1);
+        assert_eq!(
+            world
+                .damage_enemy(id, target, 1000, false, &[], Some(bullet))
+                .unwrap(),
+            0
+        );
+        world.bullets[0].hit.insert(target);
+        let projectile = world.bullets[0].clone();
+        while rx.try_recv().is_ok() {}
+        while other_rx.try_recv().is_ok() {}
+        world.step();
+        let drop = rx
+            .try_recv()
+            .expect("surviving enemy must clear native sticky death");
+        assert_eq!(drop.id, wire::UPDATE);
+        let mut r = crate::wire::Reader::new(&drop.body);
+        assert_eq!(
+            (
+                r.i16().unwrap(),
+                r.i16().unwrap(),
+                r.i16().unwrap(),
+                r.i32().unwrap()
+            ),
+            (0, 0, 1, target)
+        );
+        r.done().unwrap();
+        let make = rx.try_recv().expect("separate MAKE must follow DROP");
+        assert_eq!(make.id, wire::UPDATE);
+        let mut r = crate::wire::Reader::new(&make.body);
+        assert_eq!(
+            (r.i16().unwrap(), r.i16().unwrap(), r.i16().unwrap()),
+            (0, 1, 0x6b1)
+        );
+        assert_eq!(r.i32().unwrap(), target);
+        r.f32().unwrap();
+        r.f32().unwrap();
+        let mut stats = BTreeMap::new();
+        for _ in 0..r.i16().unwrap() {
+            stats.insert(r.u8().unwrap(), r.i32().unwrap());
+        }
+        assert_eq!(stats[&1], 1);
+        assert_ne!(
+            stats[&29] & crate::condition::bit(crate::condition::INVULNERABLE),
+            0
+        );
+        assert_eq!(r.i16().unwrap(), 0);
+        r.done().unwrap();
+        assert!(rx.try_recv().is_err());
+        assert!(
+            other_rx.try_recv().is_err(),
+            "another client's object is unchanged"
+        );
+        assert_eq!(world.entities[&target].hp, 1);
+        assert_eq!(world.entities[&target].damage.values().sum::<i32>(), 0);
+        assert_eq!(world.players[&id].character.kills, 0);
+        assert!(world.players[&id].predicted_deaths.is_empty());
+        let next = world.bullets.len();
+        world.bullets.push(projectile);
+        world.bullets[next].hit.clear();
+        world
+            .native_predicted_enemy_death(id, bullet, target)
+            .unwrap();
+        world.bullets[next].born += 50;
+        world.reconcile_enemy_deaths();
+        assert!(
+            world.players[&id].predicted_deaths.is_empty(),
+            "reused bullet ID cannot retain an older prediction"
+        );
+        assert_eq!(
+            (rx.try_recv().unwrap().id, rx.try_recv().unwrap().id),
+            (wire::UPDATE, wire::UPDATE)
+        );
+        world
+            .native_predicted_enemy_death(id, bullet, target)
+            .unwrap();
+        world.entities.get_mut(&target).unwrap().hp = 0;
+        world.reconcile_enemy_deaths();
+        assert!(
+            rx.try_recv().is_err(),
+            "a genuine death must never be recreated"
+        );
+        world.entities.get_mut(&target).unwrap().hp = 1;
+        world.players.get_mut(&id).unwrap().known.remove(&target);
+        for unknown in [target, observer, i32::MAX] {
+            world
+                .native_predicted_enemy_death(id, bullet, unknown)
+                .unwrap();
+        }
+        assert!(world.players[&id].predicted_deaths.is_empty());
+    }
 
     #[test]
     fn native_dexterity_drop_reconciles_only_until_tick_ack_without_extra_damage() {

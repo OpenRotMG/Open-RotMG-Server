@@ -1033,6 +1033,12 @@ impl Brain {
                     }
                 }
             }
+            if retreat
+                && decision.item.is_none()
+                && let Some(enemy) = nearest
+            {
+                decision.item = combat::ability(v, content, grid, enemy)?;
+            }
             if let Some(enemy) = opponent {
                 combat::attack(
                     v,
@@ -1687,13 +1693,8 @@ fn selected_profile(name: &str) -> Result<Profile> {
         .find(|p| p.name == name)
         .context("unknown actual gameplay profile")
 }
-pub fn validate_test_class(class: u16, profile: &str) -> Result<()> {
-    ensure!(
-        matches!(class, crate::content::WIZARD | crate::content::PRIEST),
-        "this source implements only Wizard and Priest gameplay controllers"
-    );
-    selected_profile(profile)?;
-    Ok(())
+pub fn validate_test_profile(profile: &str) -> Result<()> {
+    selected_profile(profile).map(|_| ())
 }
 pub async fn start_test(
     app: &crate::server::App,
@@ -1703,7 +1704,6 @@ pub async fn start_test(
     profile: &str,
     owner: crate::server::Owner,
 ) -> Result<()> {
-    validate_test_class(character.class, profile)?;
     runtime::start_selected(
         app,
         selected_profile(profile)?,

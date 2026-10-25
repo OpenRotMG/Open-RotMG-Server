@@ -9,7 +9,97 @@ use crate::{
 };
 
 impl World {
-    pub(super) fn populate_named_quests(&mut self) -> Result<()> {
+    pub(super) fn populate_authored_groves(
+        &mut self,
+        groves: &[crate::terrain::realms::Grove],
+    ) -> Result<()> {
+        use realm_setpieces::Area;
+        let mut areas = Vec::new();
+        for grove in groves {
+            let [x, y, width, height] = grove.bounds;
+            let area = Area {
+                x,
+                y,
+                width,
+                height,
+            };
+            let pos = Pos {
+                x: grove.spawn[0] as f32,
+                y: grove.spawn[1] as f32,
+            };
+            ensure!(
+                x > 0
+                    && y > 0
+                    && width > 0
+                    && height > 0
+                    && x.checked_add(width).is_some_and(|v| v < self.map.width)
+                    && y.checked_add(height).is_some_and(|v| v < self.map.height),
+                "invalid authored Grove bounds {:?} in {:?}",
+                grove.bounds,
+                self.realm_layout
+            );
+            ensure!(
+                pos.x >= x as f32
+                    && pos.x < (x + width) as f32
+                    && pos.y >= y as f32
+                    && pos.y < (y + height) as f32
+                    && self.walkable(pos)
+                    && self
+                        .map
+                        .cell(pos.x, pos.y)
+                        .is_some_and(|c| c.ground == 0x46 && [6, 7].contains(&c.terrain)),
+                "blocked or invalid authored Grove anchor {:?} in {:?}",
+                grove.spawn,
+                self.realm_layout
+            );
+            ensure!(
+                areas
+                    .iter()
+                    .chain(&self.setpieces)
+                    .all(|a| area.separate(a)),
+                "overlapping authored Grove {:?} in {:?}",
+                grove.bounds,
+                self.realm_layout
+            );
+            let trees = (y..y + height)
+                .flat_map(|yy| (x..x + width).map(move |xx| (xx, yy)))
+                .filter(|(xx, yy)| {
+                    self.map.cells[(yy * self.map.width + xx) as usize].object == Some(0x194)
+                })
+                .count();
+            ensure!(
+                trees == grove.trees && trees > 0,
+                "authored Grove {:?} in {:?}: expected {} cherry trees, found {trees}",
+                grove.bounds,
+                self.realm_layout,
+                grove.trees
+            );
+            areas.push(area);
+        }
+        // Grove binds one Ent to its foliage; these hash-pinned image-guided anchors are engineered, not recovered coordinates: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/Grove.cs
+        for (grove, area) in groves.iter().zip(areas) {
+            self.setpieces.push(area);
+            let pos = Pos {
+                x: grove.spawn[0] as f32,
+                y: grove.spawn[1] as f32,
+            };
+            let id = self.spawn_entity(0x91f, pos, vec![])?;
+            let e = self.entities.get_mut(&id).unwrap();
+            e.quest = Some(id);
+            e.stage = Some(0);
+            e.size = 140;
+            tracing::info!(
+                layout = self.realm_layout,
+                entity = id,
+                x = pos.x,
+                y = pos.y,
+                "finite authored Grove Ent placed"
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn populate_named_quests(&mut self, authored_groves: bool) -> Result<()> {
         for kind in quest::ROSTER {
             quest::validate(&self.content, *kind)?;
             crate::loot::validate(&self.content, *kind)?;
@@ -27,7 +117,10 @@ impl World {
             (0x928, &[4, 3][..], 8..15),
             (0x675, &[5, 2][..], 0..5),
             (0x678, &[8, 5][..], 0..5),
-        ] {
+        ]
+        .into_iter()
+        .skip(usize::from(authored_groves))
+        {
             let count = self.rng.gen_range(count);
             self.populate_named_sites(kind, terrains, count)?;
         }
@@ -194,12 +287,14 @@ impl World {
             e.stage = Some(0);
             e.activated = Some(self.now);
             let lifetime = match kind {
-                0x91d => 130000,
-                0x92a..=0x92c => 160000,
-                _ => 90000,
+                // The Master's Decay is ordered by the King, not a lifetime: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.GhostKing.cs#L165-L240
+                0x929 => None,
+                0x91d => Some(130000),
+                0x92a..=0x92c => Some(160000),
+                _ => Some(90000),
             };
             e.expires
-                .set(Some(self.now + lifetime), child, &mut self.timed_ids);
+                .set(lifetime.map(|ms| self.now + ms), child, &mut self.timed_ids);
             e.size = self.content.objects[&kind].size;
             if matches!(kind, 0x91e | 0x923 | 0x929..=0x92c) {
                 e.condition |= condition::bit(condition::INVULNERABLE);
@@ -1004,13 +1099,13 @@ fn pyre_creates_one_public_chest_without_repeating_it_during_rebirth() {
 fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut walls = 0;
-    for (seed, width, height, old_x, old_y, old_hole) in [
-        (8, 25, 26, 12, 13, true),
-        (13, 26, 25, 12, 12, false),
-        (1, 25, 26, 12, 12, true),
-        (12, 26, 25, 13, 12, false),
+    for (seed, width, height, old_x, old_y, old_hole, keep) in [
+        (8, 25, 26, 12, 13, true, false),
+        (13, 26, 25, 12, 12, false, false),
+        (1, 25, 26, 12, 12, true, false),
+        (12, 26, 25, 13, 12, false, true),
     ] {
-        for terrain in [6, 7] {
+        for (terrain, owned) in [(6, false), (7, false), (6, true)] {
             let mut map = Map {
                 width: 192,
                 height: 192,
@@ -1042,11 +1137,14 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
             let native_ids: Vec<_> = (0..192 * 192)
                 .map(|i| world.cells.ids(i).first().copied())
                 .collect();
-            let removed = world.cells.ids(destination)[0];
-            let template = match &world.entities[&removed].state {
+            let birth_native = world.cells.ids(destination)[0];
+            let template = match &world.entities[&birth_native].state {
                 entity_store::EntityState::Shared(t) => t.clone(),
                 _ => panic!("native Bush does not use shared scenery state"),
             };
+            if owned {
+                world.entities.get_mut(&birth_native).unwrap().name = "native".to_owned();
+            }
             let retained = old_hole.then(|| world.cells.ids(old)[0]);
             world.rng = rand::rngs::StdRng::seed_from_u64(seed);
             world.populate_named_sites(0x91b, &[6, 7], 1).unwrap();
@@ -1069,8 +1167,6 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
             assert_eq!((root.hp, root.size, root.stage), (300000, 120, Some(0)));
             assert!(root.published && root.quest == Some(root.id) && root.camp.is_none());
             assert!(world.cells.ids(destination).contains(&root.id));
-            assert!(!world.entities.contains_key(&removed));
-            assert!(!world.cells.ids(destination).contains(&removed));
             let cell = &world.map.cells[destination];
             assert_eq!(
                 (
@@ -1080,8 +1176,27 @@ fn lich_population_uses_the_fixed_anchor_and_preserves_old_native_holes() {
                     cell.terrain,
                     cell.region
                 ),
-                (0xad, None, "", terrain, 0)
+                if keep {
+                    (0x46, Some(0x105), "name:native;size:137", terrain, 0)
+                } else {
+                    (0xad, None, "", terrain, 0)
+                },
+                "seed {seed}, terrain {terrain}, owned {owned}"
             );
+            assert_eq!(world.entities.contains_key(&birth_native), keep);
+            assert_eq!(world.cells.ids(destination).contains(&birth_native), keep);
+            assert_eq!(world.cells.ids(destination).len(), 1 + usize::from(keep));
+            if keep {
+                let native = &world.entities[&birth_native];
+                assert_eq!((native.name.as_str(), native.size), ("native", 137));
+                if owned {
+                    assert!(matches!(&native.state, entity_store::EntityState::Owned(_)));
+                } else {
+                    assert!(
+                        matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
+                    );
+                }
+            }
             for (dx, dy) in [(0., 0.), (1., 0.), (-1., 0.), (0., 1.), (0., -1.)] {
                 assert!(
                     world.walkable(Pos {
@@ -1260,6 +1375,8 @@ fn named_site_populations_match_reference_ranges() {
     let mut oasis_sites = 0;
     for source in crate::terrain::realms::sources(data).unwrap() {
         let layout = source.name().to_owned();
+        let groves = source.groves().unwrap();
+        let original = source.open(&content).unwrap();
         // Fixed boundary requests avoid depending on a lucky population draw.
         let mut dense = World::new(content.clone(), source.open(&content).unwrap()).unwrap();
         dense.realm_layout = Some(layout.clone());
@@ -1357,19 +1474,74 @@ fn named_site_populations_match_reference_ranges() {
                 directory.endgame.realms[world_id].cycle.remaining, expected,
                 "{layout}: only actual living roots bind closure"
             );
+            if !groves.is_empty() {
+                assert_eq!(
+                    roots.iter().filter(|e| e.kind == 0x91f).count(),
+                    groves.len(),
+                    "{layout}: no additional random groves"
+                );
+                for grove in &groves {
+                    let [x, y] = grove.spawn;
+                    let matching: Vec<_> = roots
+                        .iter()
+                        .filter(|e| e.kind == 0x91f && e.pos.x == x as f32 && e.pos.y == y as f32)
+                        .collect();
+                    assert_eq!(
+                        matching.len(),
+                        1,
+                        "{layout}: empty or duplicate authored Grove at {x},{y}"
+                    );
+                    let ent = matching[0];
+                    assert_eq!((ent.hp, ent.stage, ent.size), (300000, Some(0), 140));
+                    assert!(
+                        world
+                            .cells
+                            .ids(y as usize * world.map.width as usize + x as usize)
+                            .contains(&ent.id)
+                    );
+                    let [left, top, width, height] = grove.bounds;
+                    assert!(
+                        world
+                            .setpieces
+                            .iter()
+                            .any(|a| (a.x, a.y, a.width, a.height) == (left, top, width, height))
+                    );
+                    for yy in top..top + height {
+                        for xx in left..left + width {
+                            let i = (yy * world.map.width + xx) as usize;
+                            let a = &original.cells[i];
+                            let b = &world.map.cells[i];
+                            assert_eq!(
+                                (a.ground, a.object, &a.config, a.terrain, a.region),
+                                (b.ground, b.object, &b.config, b.terrain, b.region),
+                                "{layout}: grove cell {xx},{yy} repainted"
+                            );
+                        }
+                    }
+                }
+            }
             for (index, root) in roots.iter().enumerate() {
                 assert!(root.published && root.hp > 0 && root.camp.is_none());
                 assert_eq!(root.quest, Some(root.id));
                 if matches!(root.kind, 0x91f | 0x91b) {
+                    if root.kind == 0x91b {
+                        assert!(
+                            world.walkable(root.pos),
+                            "{layout}: blocked Lich {}",
+                            root.id
+                        );
+                    }
                     let area = world
                         .setpieces
                         .iter()
                         .find(|a| a.distance(root.pos) == 0.)
                         .unwrap();
-                    assert_eq!(
-                        (root.pos.x - area.x as f32, root.pos.y - area.y as f32),
-                        (13., 13.)
-                    );
+                    if root.kind != 0x91f || groves.is_empty() {
+                        assert_eq!(
+                            (root.pos.x - area.x as f32, root.pos.y - area.y as f32),
+                            (13., 13.)
+                        );
+                    }
                     assert_eq!((root.home.x, root.home.y), (root.pos.x, root.pos.y));
                     assert!(
                         [6, 7].contains(&world.map.cell(root.pos.x, root.pos.y).unwrap().terrain)
@@ -1436,6 +1608,60 @@ fn named_site_populations_match_reference_ranges() {
 }
 
 #[cfg(test)]
+#[test]
+fn malformed_authored_groves_fail_before_publishing_roots_or_mutating_map() {
+    use crate::{content::Cell, terrain::realms::Grove};
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut map = Map {
+        width: 64,
+        height: 64,
+        cells: vec![
+            Cell {
+                ground: 0x46,
+                object: None,
+                config: String::new(),
+                terrain: 6,
+                region: 0
+            };
+            64 * 64
+        ],
+        spawns: vec![(1.5, 1.5)],
+    };
+    map.cells[20 * 64 + 20].object = Some(0x194);
+    let map = Arc::new(map);
+    let good = Grove {
+        bounds: [20, 20, 25, 25],
+        spawn: [33, 33],
+        trees: 1,
+    };
+    for groves in [
+        vec![Grove {
+            bounds: [63, 63, 25, 25],
+            ..good.clone()
+        }],
+        vec![
+            good.clone(),
+            Grove {
+                spawn: [20, 20],
+                ..good.clone()
+            },
+        ],
+        vec![good.clone(), good.clone()],
+        vec![Grove {
+            trees: 2,
+            ..good.clone()
+        }],
+    ] {
+        let mut world = World::new(content.clone(), map.clone()).unwrap();
+        let before = world.entities.len();
+        assert!(world.populate_authored_groves(&groves).is_err());
+        assert!(world.setpieces.is_empty());
+        assert_eq!(world.entities.len(), before);
+        assert!(Arc::ptr_eq(&map, &world.map));
+    }
+}
+
+#[cfg(test)]
 mod ghost_throw_tests {
     use super::*;
 
@@ -1470,7 +1696,7 @@ mod ghost_throw_tests {
                         ch.clone(),
                         Some(Output {
                             packets: tx,
-                            lost: watch::channel(false).0,
+                            lost: watch::channel(None).0,
                         }),
                     )
                     .unwrap();
@@ -1539,5 +1765,58 @@ mod ghost_throw_tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn ghost_master_waits_with_the_invulnerable_king_until_overly_long_combat() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+        for cell in &mut map.cells {
+            cell.ground = 0x61;
+            cell.object = None;
+        }
+        let mut w = World::new(content, Arc::new(map)).unwrap();
+        for id in w.entities.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(id);
+        }
+        let root = w
+            .spawn_entity(0x928, Pos { x: 12.5, y: 12.5 }, vec![])
+            .unwrap();
+        w.entities.get_mut(&root).unwrap().quest = Some(root);
+        w.damage_enemy(-1, root, 1, true, &[], None).unwrap();
+        let mut waited = None;
+        for _ in 0..3600 {
+            let Some(king) = w.entities.get(&root) else {
+                break;
+            };
+            if king.stage == Some(7) {
+                let since = *waited.get_or_insert(w.now);
+                assert_ne!(king.condition & condition::bit(condition::INVULNERABLE), 0);
+                assert_eq!(
+                    w.quest_members(root, &[0x929]).len() + w.pending_named(root, Some(0x929)),
+                    1,
+                    "Ghost Master vanished {}ms into the king's invulnerable wait",
+                    w.now - since
+                );
+            }
+            w.now += 50;
+            w.named_birth_step();
+            w.mechanic_expiry();
+            w.quest_mechanics(root).unwrap();
+        }
+        assert!(!w.entities.contains_key(&root));
+        assert_eq!(w.now - waited.unwrap(), 140000);
+        assert!(
+            !w.entities
+                .values()
+                .any(|e| e.quest == Some(root) && e.kind == 0x929)
+        );
+        assert_eq!(
+            w.entities
+                .values()
+                .filter(|e| e.quest == Some(root) && e.kind == 0x92d)
+                .count(),
+            1
+        );
     }
 }

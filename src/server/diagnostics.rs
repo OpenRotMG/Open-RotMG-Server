@@ -13,10 +13,24 @@ pub struct Diagnostics {
     source_revision: Option<String>,
     browsers: Mutex<HashMap<String, std::sync::Weak<Mutex<Browser>>>>,
     files: Mutex<Reports>,
-    drops: Mutex<HashMap<i32, (Instant, Value)>>,
+    drops: Mutex<HashMap<i32, Value>>,
+    anonymous_reports: Mutex<HashMap<IpAddr, Instant>>,
 }
-// Players report after reconnecting, so a dropped connection must outlive it: https://github.com/OpenRotMG/Open-RotMG-Server/issues/469
-const DROP_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+// Players report after reconnecting, so a dropped connection must outlive it and any deploy restart: https://github.com/OpenRotMG/Open-RotMG-Server/issues/469
+const DROP_WINDOW_MS: u64 = 600_000;
+const DROPS: &str = "recent-drops.state";
+fn unix_ms() -> u64 {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    u64::try_from(now.expect("system clock predates Unix epoch").as_millis())
+        .expect("unix time fits u64")
+}
+fn drop_age(drop: &Value) -> u64 {
+    unix_ms().saturating_sub(
+        drop["at_unix_ms"]
+            .as_u64()
+            .expect("validated drop timestamp"),
+    )
+}
 #[derive(Default)]
 struct Reports {
     pending: BTreeSet<String>,
@@ -112,6 +126,17 @@ impl Diagnostics {
                 note_progress(&report)?;
             }
         }
+        let drops: HashMap<i32, Value> = match std::fs::read(root.join(DROPS)) {
+            Ok(bytes) => {
+                serde_json::from_slice(&bytes).context("invalid stored disconnect diagnostics")?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(e) => return Err(e.into()),
+        };
+        ensure!(
+            drops.values().all(|d| d["at_unix_ms"].is_u64()),
+            "stored disconnect diagnostics lack a timestamp"
+        );
         let executable = std::env::current_exe()?;
         let source_revision = match std::fs::read_to_string(executable.with_file_name("REVISION")) {
             Ok(value) => {
@@ -131,14 +156,24 @@ impl Diagnostics {
             binary_sha256: format!("{:x}", Sha256::digest(std::fs::read(executable)?)),
             browsers: Mutex::default(),
             files: Mutex::new(pending),
-            drops: Mutex::default(),
+            drops: Mutex::new(drops),
+            anonymous_reports: Mutex::default(),
         })
     }
-    fn previous_drop(&self, account: i32) -> Value {
+    pub(super) fn previous_drop(&self, account: i32) -> Value {
         let drops = self.drops.lock().expect("drop diagnostics poisoned");
-        drops.get(&account).filter(|(at, _)| at.elapsed() < DROP_WINDOW).map_or(Value::Null, |(at, drop)| {
-            json!({"age_ms": at.elapsed().as_millis(), "transport": drop["transport"], "diagnostics": drop["diagnostics"]})
+        let drop = drops.get(&account).filter(|d| drop_age(d) < DROP_WINDOW_MS);
+        drop.map_or(Value::Null, |d| {
+            let mut d = d.clone();
+            d["age_ms"] = json!(drop_age(&d));
+            d
         })
+    }
+    fn note_drop(&self, account: i32, drop: Value) -> Result<()> {
+        let mut drops = self.drops.lock().expect("drop diagnostics poisoned");
+        drops.retain(|_, d| drop_age(d) < DROP_WINDOW_MS);
+        drops.insert(account, drop);
+        self.write_file(DROPS, &json!(*drops))
     }
     pub fn browser(&self, key: &str) -> Result<Arc<Mutex<Browser>>> {
         ensure!(
@@ -245,23 +280,22 @@ impl Diagnostics {
         }
         tracing::info!(report_id=%id, target=%receipt.target, external_id=%receipt.id, notes_through=through, "bug report delivery acknowledged");
         Ok(if notify {
-            Some((
-                serde_json::from_value(report["context"]["player_id"].clone())?,
-                serde_json::from_value(report["account_id"].clone())?,
-                receipt.id.clone(),
-            ))
+            report_owner(&report)?.map(|(account, player)| (player, account, receipt.id.clone()))
         } else {
             None
         })
     }
     fn write(&self, report: &Value) -> Result<()> {
-        use std::io::Write;
         let id = report["id"].as_str().context("missing report ID")?;
         ensure!(valid_id(id), "invalid report ID");
-        let path = self.root.join(format!("{id}.json"));
+        self.write_file(&format!("{id}.json"), report)
+    }
+    fn write_file(&self, name: &str, value: &Value) -> Result<()> {
+        use std::io::Write;
+        let path = self.root.join(name);
         let temp = self
             .root
-            .join(format!("{id}-{:016x}.tmp", rand::random::<u64>()));
+            .join(format!("{name}-{:016x}.tmp", rand::random::<u64>()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -270,7 +304,7 @@ impl Diagnostics {
             options.mode(0o600);
         }
         let mut file = options.open(&temp)?;
-        file.write_all(&serde_json::to_vec_pretty(report)?)?;
+        file.write_all(&serde_json::to_vec_pretty(value)?)?;
         file.sync_all()?;
         std::fs::rename(temp, path)?;
         std::fs::File::open(&self.root)?.sync_all()?;
@@ -567,19 +601,13 @@ pub(super) async fn disconnect(
         }
     }
     if let Some(account) = dropped_account {
-        let mut drops = a
-            .diagnostics
-            .drops
-            .lock()
-            .expect("drop diagnostics poisoned");
-        drops.retain(|_, (at, _)| at.elapsed() < DROP_WINDOW);
-        drops.insert(
-            account,
-            (
-                Instant::now(),
-                json!({"transport": transport, "diagnostics": public_diagnostics(&report)}),
-            ),
-        );
+        let drop = json!({"at_unix_ms": unix_ms(), "transport": transport, "diagnostics": public_diagnostics(&report)});
+        let diagnostics = a.diagnostics.clone();
+        match tokio::task::spawn_blocking(move || diagnostics.note_drop(account, drop)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::error!(account, %error, "disconnect diagnostics not saved"),
+            Err(error) => tracing::error!(account, %error, "disconnect diagnostics writer failed"),
+        }
     }
 }
 
@@ -628,6 +656,43 @@ pub async fn report(
     connection: &ConnectionDiagnostics,
     screenshot: Option<String>,
 ) -> Result<String> {
+    save_report(
+        a,
+        Some((account, player)),
+        message,
+        connection.snapshot(),
+        screenshot,
+    )
+    .await
+}
+fn report_owner(report: &Value) -> Result<Option<(i32, i32)>> {
+    let account: Option<i32> = serde_json::from_value(
+        report
+            .get("account_id")
+            .context("missing report account")?
+            .clone(),
+    )?;
+    match account {
+        Some(account) => Ok(Some((
+            account,
+            serde_json::from_value(report["context"]["player_id"].clone())?,
+        ))),
+        None => {
+            ensure!(
+                report.get("context") == Some(&Value::Null),
+                "anonymous report has game context"
+            );
+            Ok(None)
+        }
+    }
+}
+async fn save_report(
+    a: &App,
+    owner: Option<(i32, i32)>,
+    message: &str,
+    connection: Value,
+    screenshot: Option<String>,
+) -> Result<String> {
     ensure!(
         a.discord_link_token.is_some(),
         "Discord bug reporting is not configured."
@@ -641,24 +706,33 @@ pub async fn report(
         "Bug message is too long (maximum 4000 characters)."
     );
     let requested = Instant::now();
-    let context = a.world.directory(move |d| d.bug_context(player)).await?;
+    let context = match owner {
+        Some((_, player)) => a.world.directory(move |d| d.bug_context(player)).await?,
+        None => Value::Null,
+    };
     let id = {
         use rand::RngCore;
         let mut bytes = [0u8; 12];
         rand::rngs::OsRng.fill_bytes(&mut bytes);
         bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
     };
-    let reporter_name = context["player_name"]
-        .as_str()
-        .context("bug reporter name missing")?;
+    let reporter_name = if owner.is_some() {
+        context["player_name"]
+            .as_str()
+            .context("bug reporter name missing")?
+    } else {
+        "Website visitor (no character connected)"
+    };
     let mut report = json!({"schema": 3, "reporter_name": reporter_name, "id": id, "created_at_unix_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis(),
-        "delivery": {"status": "pending", "notes_through": 0}, "notes": [], "message_untrusted": message, "account_id": account,
+        "delivery": {"status": "pending", "notes_through": 0}, "notes": [], "message_untrusted": message, "account_id": owner.map(|(account, _)| account),
         "server_binary_sha256": a.diagnostics.binary_sha256, "server_source_revision": a.diagnostics.source_revision, "protocol_build": "123.5.1", "context": context,
         "server_uptime_ms": a.started.elapsed().as_millis(), "configured_player_cap": a.max_players,
-        "context_request_ms": requested.elapsed().as_secs_f64() * 1000.0, "connection": connection.snapshot(),
+        "context_request_ms": requested.elapsed().as_secs_f64() * 1000.0, "connection": connection,
         "capture_window_seconds": 120});
     report["diagnostics"] = public_diagnostics(&report);
-    report["diagnostics"]["previous_drop"] = a.diagnostics.previous_drop(account);
+    report["diagnostics"]["previous_drop"] = owner.map_or(Value::Null, |(account, _)| {
+        a.diagnostics.previous_drop(account)
+    });
     report["diagnostics_url"] = json!(format!(
         "{}/api/bug-reports/{id}/diagnostics.json",
         a.origin
@@ -670,10 +744,13 @@ pub async fn report(
     }
     let object = report.as_object_mut().expect("report object");
     object.remove("connection");
-    object.insert("context".into(), json!({"player_id": player}));
+    object.insert(
+        "context".into(),
+        owner.map_or(Value::Null, |(_, player)| json!({"player_id": player})),
+    );
     let diagnostics = a.diagnostics.clone();
     tokio::task::spawn_blocking(move || diagnostics.save(&report)).await??;
-    tracing::info!(report_id=%id, account, player, "bug report saved; awaiting Discord delivery");
+    tracing::info!(report_id=%id, ?owner, "bug report saved; awaiting Discord delivery");
     Ok(id)
 }
 #[derive(Deserialize)]
@@ -708,6 +785,7 @@ fn screenshot_png(encoded: &str) -> Result<Vec<u8>> {
 }
 pub async fn submit(
     State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(key): Path<String>,
     headers: HeaderMap,
     Json(input): Json<WebReportInput>,
@@ -716,7 +794,24 @@ pub async fn submit(
         ensure!(headers.get("origin").and_then(|v|v.to_str().ok()) == Some(a.origin.as_str()), "Bug report origin denied.");
         ensure!(!input.message.trim().is_empty() && input.message.chars().count() <= 4000, "Describe the bug in 1–4000 characters.");
         screenshot_png(&input.screenshot)?;
-        let browser = a.diagnostics.browsers.lock().expect("diagnostics poisoned").get(&key).and_then(|b|b.upgrade()).context("Connect to a character before submitting a bug report.")?;
+        ensure!(key.len() == 32 && key.bytes().all(|b| b.is_ascii_hexdigit()), "invalid diagnostic session");
+        let browser = a.diagnostics.browsers.lock().expect("diagnostics poisoned").get(&key).and_then(|b|b.upgrade());
+        let connected = browser.as_ref().is_some_and(|b| b.lock().expect("browser poisoned").reports.as_ref().is_some_and(|s| !s.is_closed()));
+        if !connected {
+            // Anonymous input has no game authority; bound it by trusted peer IP: https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html#http-return-code
+            let ip = super::request_ip(&a, &headers, peer)?;
+            {
+                let mut recent = a.diagnostics.anonymous_reports.lock().expect("anonymous report rates poisoned");
+                recent.retain(|_, at| at.elapsed().as_secs() < 30);
+                ensure!(!recent.contains_key(&ip), "Wait 30 seconds between bug reports.");
+                ensure!(recent.len() < 4096, "Anonymous report limit reached; try later.");
+                recent.insert(ip, Instant::now());
+            }
+            let connection = json!({"user_agent":headers.get("user-agent").map(|v| v.to_str()).transpose()?,"rtt_samples":[],"browser_samples":[]});
+            let id = save_report(&a, None, &input.message, connection, Some(input.screenshot)).await?;
+            return Ok(json!({"id":id}));
+        }
+        let browser = browser.context("connected diagnostic session missing")?;
         let (reply, response) = tokio::sync::oneshot::channel();
         {
             let mut browser = browser.lock().expect("browser poisoned");
@@ -758,6 +853,43 @@ pub(super) async fn from_session(a: &App, session: &Session, request: WebReport)
         tracing::warn!(%error, "website bug report failed");
     }
     let _ = request.reply.send(result);
+}
+pub async fn status(State(a): State<App>, Path(id): Path<String>) -> Response {
+    if !valid_id(&id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let result = tokio::task::spawn_blocking(move || -> Result<Option<Value>> {
+        let bytes = match std::fs::read(a.diagnostics.root.join(format!("{id}.json"))) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let report: Value = serde_json::from_slice(&bytes)?;
+        ensure!(report["id"] == id, "stored report identity mismatch");
+        let url = match report["delivery"].get("issue_number") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(issue)) => {
+                Receipt {
+                    target: "issue_number".into(),
+                    id: issue.clone(),
+                    through: None,
+                }
+                .validate()?;
+                Some(format!(
+                    "https://github.com/OpenRotMG/Open-RotMG-Server/issues/{issue}"
+                ))
+            }
+            Some(_) => bail!("invalid stored issue number"),
+        };
+        Ok(Some(json!({"url":url})))
+    })
+    .await;
+    match result {
+        Ok(Ok(Some(value))) => ([("cache-control", "no-store")], Json(value)).into_response(),
+        Ok(Ok(None)) => StatusCode::NOT_FOUND.into_response(),
+        Ok(Err(error)) => super::error(error),
+        Err(error) => super::error(error.into()),
+    }
 }
 pub async fn screenshot(State(a): State<App>, Path(id): Path<String>) -> Response {
     if !valid_id(&id) {
@@ -899,15 +1031,17 @@ pub async fn receipt(
         if receipt.target == "issue_number" {
             let diagnostics = a.diagnostics.clone();
             let (id, issue) = (id.clone(), receipt.id.clone());
-            let account = tokio::task::spawn_blocking(move || -> Result<i32> {
+            let owner = tokio::task::spawn_blocking(move || -> Result<Option<(i32, i32)>> {
                 let report: Value = serde_json::from_slice(&std::fs::read(diagnostics.root.join(format!("{id}.json")))?)?;
                 ensure!(report["id"] == id && matches!(report["delivery"]["status"].as_str(), Some("pending" | "delivered")), "invalid stored bug report");
                 ensure!(report["delivery"]["issue_number"].is_null() || report["delivery"]["issue_number"] == issue, "conflicting delivery receipt");
-                Ok(serde_json::from_value(report["account_id"].clone())?)
+                report_owner(&report)
             }).await??;
             // Keep the report retryable until its once-only reward is durable.
-            a.store.reward_first_bug(account).await?;
-            super::gold::sync(&a, account).await?;
+            if let Some((account, _)) = owner {
+                a.store.reward_first_bug(account).await?;
+                super::gold::sync(&a, account).await?;
+            }
         }
         let world = a.world.clone();
         let notification = tokio::task::spawn_blocking(move || a.diagnostics.acknowledge(&id, &receipt)).await??;

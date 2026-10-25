@@ -23,7 +23,7 @@ impl Directory {
             return Ok(false);
         };
         if output.packets.try_send(packet).is_err() {
-            output.lost.send_replace(true);
+            lose(&output.lost, "gold_notice_queue");
             tracing::warn!(
                 account,
                 "gold notification deferred: connection queue full or closed"

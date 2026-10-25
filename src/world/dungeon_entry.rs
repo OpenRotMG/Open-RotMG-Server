@@ -27,7 +27,7 @@ pub(super) fn observing(p: &Player) -> bool {
         && !p.paused
         && p.tx
             .as_ref()
-            .is_none_or(|tx| !*tx.lost.borrow() && !tx.packets.is_closed())
+            .is_none_or(|tx| !tx.lost.borrow().is_some() && !tx.packets.is_closed())
 }
 fn sees(w: &World, observer: i32, target: i32) -> bool {
     let p = &w.players[&observer];
