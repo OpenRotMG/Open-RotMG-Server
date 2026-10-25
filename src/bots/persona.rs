@@ -133,7 +133,24 @@ pub(super) fn life(
         archived.items.fill(-1);
         roster.push(archived);
     }
-    Ok((roster, vault(p, content, rng)?))
+    let mut storage = vault(p, content, rng)?;
+    if p.role == Role::Trader {
+        let currency = ["Potion of Speed", "Potion of Defense", "Potion of Life"]
+            [(seed(p.identity) % 3) as usize];
+        let kind = named(content, currency)?;
+        let merchant = roster
+            .iter_mut()
+            .find(|ch| ch.alive)
+            .context("trader preset has no living character")?;
+        // Trading starts with held goods withdrawn from its own snapshot, not a fictitious wallet.
+        for slot in merchant.items.iter_mut().skip(7) {
+            if let Some(item) = storage.iter_mut().flatten().find(|item| **item == kind) {
+                *slot = *item;
+                *item = -1;
+            }
+        }
+    }
+    Ok((roster, storage))
 }
 
 fn prerequisites(content: &Content, class: u16, needed: &mut BTreeMap<u16, i32>) {
@@ -325,6 +342,32 @@ fn every_persona_gets_a_valid_life_matching_its_stars() {
                     .keys()
                     .all(|class| content.unlocked(*class, &levels).unwrap())
             );
+        }
+        if p.role == Role::Trader && p.stars >= 13 {
+            assert!(
+                roster.iter().find(|ch| ch.alive).unwrap().items[7..]
+                    .iter()
+                    .any(|kind| *kind >= 0)
+            );
+            for (name, per) in [
+                ("Potion of Life", 12),
+                ("Potion of Defense", 5),
+                ("Potion of Speed", 4),
+            ] {
+                let kind = named(&content, name).unwrap();
+                let total = vault
+                    .iter()
+                    .flatten()
+                    .chain(roster.iter().flat_map(|ch| &ch.items))
+                    .filter(|item| **item == kind)
+                    .count();
+                assert_eq!(
+                    total,
+                    p.stars as usize * 2 / per,
+                    "{} currency duplicated by starting withdrawal",
+                    p.name
+                );
+            }
         }
         assert!(!vault.is_empty());
     }

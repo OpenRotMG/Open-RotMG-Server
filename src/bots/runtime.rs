@@ -320,7 +320,16 @@ async fn persona_character(app: &App, profile: Profile) -> Result<Character> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
     let (roster, vault) = persona::life(&profile, &app.content, &mut rng)?;
     app.store
-        .persona_character(profile.identity.into(), roster, vault, rand::random())
+        .persona_character(
+            profile.identity.into(),
+            roster,
+            vault,
+            if profile.role == persona::Role::Trader {
+                0
+            } else {
+                rand::random()
+            },
+        )
         .await
 }
 async fn continue_character(
