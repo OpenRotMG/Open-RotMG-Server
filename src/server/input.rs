@@ -44,7 +44,8 @@ where
     S: Stream<Item = Result<Message, E>> + Send + Unpin + 'static,
     E: Display + Send + 'static,
 {
-    let (tx, rx) = mpsc::channel(64);
+    // Input keeps its socket receipt time while queued; MAX_FRAME bytes and 512 packets/s bound it, so a stalled world need not drop players.
+    let (tx, rx) = mpsc::channel(512);
     let last_frame = Arc::new(Mutex::new(None));
     let received_frame = last_frame.clone();
     let task = tokio::spawn(async move {

@@ -1070,6 +1070,7 @@ impl Directory {
         let mut templates = BTreeMap::new();
         for name in [
             "tutorial",
+            "kitchen",
             "nexus",
             "nexus-limbo",
             "vault",
@@ -1497,7 +1498,7 @@ impl Directory {
             "dungeon requires an explicit return route"
         );
         ensure!(
-            matches!((template, account), ("vault", Some(_)))
+            matches!((template, account), ("vault", Some(_)) | ("kitchen", None))
                 || (account.is_none()
                     && crate::dungeon::DUNGEONS
                         .iter()
@@ -1515,6 +1516,8 @@ impl Directory {
             template,
             if template == "vault" {
                 "Vault"
+            } else if template == "kitchen" {
+                "Kitchen"
             } else {
                 crate::dungeon::DUNGEONS
                     .iter()
@@ -1611,6 +1614,9 @@ impl Directory {
             0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
             0x704 | 0x70e => self.dungeon_realm(world)?,
             0x71c => self.initial(-3)?,
+            // Kitchen destination: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.cs#L387-L416
+            // Reconstruction: a fresh Kitchen per use; Trapped instead caches the first Kitchen on the portal and reuses it.
+            0x71e => self.instance("kitchen", None, None)?,
             0x720 => self.instance("vault", Some(account), None)?,
             0x72f => {
                 let guild = p
