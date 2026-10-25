@@ -100,6 +100,38 @@ def sync_directory(path):
         os.close(fd)
 
 
+def write_json(path, record):
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.metadata-', delete=False) as temporary:
+        stage = Path(temporary.name)
+    try:
+        with stage.open('w') as stream:
+            json.dump(record, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        stage.replace(path)
+        sync_directory(path.parent)
+    finally:
+        stage.unlink(missing_ok=True)
+
+
+def record_source(target, output):
+    if target.resolve() != target:
+        raise RuntimeError('Cargo target must not contain symlinks')
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / '.source.json'
+    if path.is_symlink():
+        raise RuntimeError('Cargo source provenance must not be a symlink')
+    present = path.exists()
+    record = json.loads(path.read_text()) if present else {'version': 1, 'source': str(ROOT), 'outputs': []}
+    original = record.copy() if isinstance(record, dict) else record
+    if not isinstance(record, dict) or record.get('version') != 1 or record.get('source') != str(ROOT) or not isinstance(record.get('outputs'), list) or any(not isinstance(p, str) or not Path(p).is_absolute() for p in record['outputs']):
+        raise RuntimeError('Cargo source provenance does not match this checkout')
+    if output is not None:
+        record['outputs'] = sorted(set(record['outputs']) | {str(output.absolute()), str(output.resolve())})
+    if not present or record != original:
+        write_json(path, record)
+
+
 def retain_binary(executable, output):
     root = Path(os.environ.get('OPENROTMG_RETAINED_STORE', Path.home() / '.local/share/openrotmg/retained-binaries'))
     if not root.is_absolute() or root.resolve() != root:
@@ -155,16 +187,7 @@ def retain_binary(executable, output):
                 raise RuntimeError('Invalid retained binary provenance')
             record['sources'] = sorted(set(record['sources']) | {str(ROOT)})
             record['outputs'] = sorted(set(record['outputs']) | {str(output.absolute()), str(output.resolve())})
-            with tempfile.NamedTemporaryFile(dir=root, prefix='.provenance-', delete=False) as temporary:
-                metadata_stage = Path(temporary.name)
-            try:
-                with metadata_stage.open('w') as stream:
-                    json.dump(record, stream)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                metadata_stage.replace(provenance)
-            finally:
-                metadata_stage.unlink(missing_ok=True)
+            write_json(provenance, record)
         sync_directory(root)
         with tempfile.NamedTemporaryFile(dir=output.parent, prefix='.openrotmg-', delete=False) as temporary:
             stage = Path(temporary.name)
@@ -235,10 +258,12 @@ def main(argv=None):
             # Cargo tracks env! inputs; runtime diagnostics and job counts need no separate target tree.
             settings = {key: value for key, value in os.environ.items()
                         if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))
-                        and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'CARGO_BUILD_JOBS')}
+                        and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'RUST_MIN_STACK', 'CARGO_BUILD_JOBS')}
             # Cargo can treat an older sibling checkout's different inputs as fresh.
             key = hashlib.sha256(json.dumps([str(ROOT), version, settings], sort_keys=True).encode()).hexdigest()[:20]
             target = root / key
+            # Failed builds can stop before Cargo emits source-bound depfiles.
+            record_source(target, args.output)
             print(f'Cargo target: {target}; checkout={ROOT}', flush=True)
             return execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output, lock)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:

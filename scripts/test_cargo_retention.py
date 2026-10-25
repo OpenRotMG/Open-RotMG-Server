@@ -53,6 +53,29 @@ class RetainedELFTests(unittest.TestCase):
         self.retain('run-b')
         self.assertEqual(list(self.pool.glob('*.json')), [])
 
+    def test_source_is_attributed_before_any_compiler_artifact_exists(self):
+        target = self.root / 'target'
+        output = self.root / 'run/openrotmg'
+        m.record_source(target, output)
+        self.assertEqual(json.loads((target / '.source.json').read_text()),
+                         {'version': 1, 'source': str(m.ROOT), 'outputs': [str(output)]})
+
+    def test_source_identity_cannot_be_reassigned(self):
+        target = self.root / 'target'
+        m.record_source(target, None)
+        with patch.object(m, 'ROOT', self.root / 'different-source'):
+            with self.assertRaisesRegex(RuntimeError, 'does not match'):
+                m.record_source(target, None)
+
+    def test_runtime_stack_size_does_not_duplicate_compiler_targets(self):
+        with patch.object(m, 'cache_root', return_value=self.root / 'cargo'), \
+                patch.object(m.subprocess, 'check_output', return_value='fixture compiler'), \
+                patch.object(m, 'execute', return_value=0) as execute:
+            for size in ('16777216', '67108864'):
+                with patch.dict(os.environ, {'RUST_MIN_STACK': size}):
+                    self.assertEqual(m.main(['test']), 0)
+            self.assertEqual(execute.call_args_list[0].args[1], execute.call_args_list[1].args[1])
+
     def test_compiler_overwrite_cannot_modify_retained_evidence(self):
         a = self.retain('run-a')
         before = a.read_bytes()
