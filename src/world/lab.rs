@@ -264,6 +264,46 @@ impl World {
             let e = self.entities.get_mut(&id).unwrap();
             e.stage = Some(stage);
             e.size = [150, 150, 175, 200][stage as usize];
+        } else if kind == lab::CREATION {
+            let (stage, pos) = (e.stage, e.pos);
+            let inside = |pool| {
+                self.actors().any(|p| {
+                    p.kind == pool
+                        && (p.pos.x as i32 - pos.x as i32).abs() < 2
+                        && (p.pos.y as i32 - pos.y as i32).abs() < 2
+                })
+            };
+            match stage {
+                // Coils AND Dr Terrible open the room: https://web.archive.org/web/20261025211723/https://wikiwiki.jp/rmd/Tesla%20Coil (2012-08-30). realm-src's coil-only Open Wall is marked "need fix".
+                None if self.cleared && !self.actors().any(|e| e.kind == lab::TESLA) => {
+                    let walls: Vec<_> = self
+                        .entities
+                        .values()
+                        .filter(|e| e.kind == lab::EMERGENCY)
+                        .map(|e| e.id)
+                        .collect();
+                    for &wall in &walls {
+                        self.remove_entity(wall);
+                    }
+                    tracing::info!(walls = walls.len(), "Mad Lab secret room opened");
+                    self.lab_stage(id, 1);
+                }
+                // Invincible until the Hexxer turns it into a random pet; a DeHexxer reverts it: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation
+                Some(1) if inside(lab::HEXXER) => {
+                    let pet = self.rng.gen_range(2..=7);
+                    self.entities.get_mut(&id).unwrap().condition &=
+                        !condition::bit(condition::INVINCIBLE);
+                    self.landmark_texture(id, pet);
+                    self.lab_stage(id, 2);
+                }
+                Some(2) if inside(lab::DEHEXXER) => {
+                    self.entities.get_mut(&id).unwrap().condition |=
+                        condition::bit(condition::INVINCIBLE);
+                    self.landmark_texture(id, 0);
+                    self.lab_stage(id, 1);
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
@@ -277,6 +317,18 @@ impl World {
                     distance: 0.1,
                 },
                 nr_speed(1.),
+            )
+        } else if e.kind == lab::CREATION
+            && e.stage == Some(2)
+            && e.activated.is_some_and(|t| self.now >= t + 10000)
+        {
+            // The pet returns to a DeHexxer "after a while" (https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation); 10 s is reconstruction.
+            (
+                Motion::Protect {
+                    anchor: Anchor::Kind(lab::DEHEXXER),
+                    distance: 0.1,
+                },
+                nr_speed(0.5),
             )
         } else {
             let p = lab::profile(e.kind);
@@ -304,6 +356,8 @@ impl World {
             0x978 => vec![],
             0x993..=0x996 if e.stage != Some(1) => vec![],
             0x993..=0x996 => fan(0, 20, 18., 22.5f32.to_radians() + 171f32.to_radians()),
+            // Phase 1 fires 3 H Creation Waves at the player: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation; the 20° gap is reconstruction.
+            lab::CREATION if e.stage == Some(1) => fan(1, 3, 20., heading),
             0x990 => vec![(0, 0.)],
             0x991 => vec![(0, std::f32::consts::PI)],
             0x979 | 0x1e25 | 0x12aa => fan(0, 2, 20., heading),
