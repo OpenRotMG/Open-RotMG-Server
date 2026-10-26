@@ -166,6 +166,9 @@ fn equipped_twenty_leaves_passive_company_for_published_realm_event() {
     assert!(d.journey.is_none(), "no blind event teleport");
     v.character.hp = 50;
     v.character.items[4..6].fill(-1);
+    v.tick += 10;
+    v.time_ms += 500;
+    v.elapsed_ms += 500;
     assert_eq!(b.decide(&v, &c).unwrap().goal, Goal::Recover);
 }
 
