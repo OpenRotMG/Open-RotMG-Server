@@ -549,6 +549,9 @@ impl World {
             let mut out = Writer::new();
             out.utf(&self.players[&id].character.name);
             send(&self.players[&target], 61, out.0);
+            // The requester needs a separate confirmation: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.Trade.cs#L85-L94
+            let notice = chat_info(&format!("You have sent a trade request to {name}!"));
+            send(&self.players[&id], notice.id, notice.body);
             tracing::info!(
                 player = id,
                 partner = target,
@@ -850,6 +853,32 @@ mod community_tests {
                 items: p.items.clone(),
             })
             .collect()
+    }
+    #[tokio::test]
+    async fn trade_request_confirmation_is_private_and_only_sent_for_a_new_request() {
+        let (mut w, _, ids, mut receivers) = fixture().await;
+        let names = ids.map(|id| w.players[&id].character.name.clone());
+        assert!(w.request_trade(ids[0], "Nobody".into()).is_err());
+        assert!(receivers.iter_mut().all(|r| r.try_recv().is_err()));
+        w.request_trade(ids[0], names[1].clone()).unwrap();
+        let notice = receivers[0].try_recv().expect("sender confirmation");
+        let expected = chat_info(&format!("You have sent a trade request to {}!", names[1]));
+        assert_eq!((notice.id, notice.body), (expected.id, expected.body));
+        let request = receivers[1].try_recv().unwrap();
+        assert_eq!(request.id, 61);
+        let mut body = wire::Reader::new(&request.body);
+        assert_eq!(body.utf().unwrap(), names[0]);
+        body.done().unwrap();
+        assert!(receivers.iter_mut().all(|r| r.try_recv().is_err()));
+        assert!(w.trades.is_empty());
+        w.request_trade(ids[1], names[0].clone()).unwrap();
+        for receiver in &mut receivers {
+            assert_eq!(receiver.try_recv().unwrap().id, 67);
+            assert!(
+                receiver.try_recv().is_err(),
+                "no request notice on acceptance"
+            );
+        }
     }
     #[tokio::test]
     async fn nearby_autonomous_trade_request_reaches_controller_without_assuming_consent() {
