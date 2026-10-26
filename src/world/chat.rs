@@ -69,23 +69,74 @@ impl Player {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DialoguePeerUnavailable {
+    LeftWorld,
+    Unavailable,
+    NotKnown,
+    Ignored,
+    OutOfRange,
+}
+impl DialoguePeerUnavailable {
+    pub(crate) fn reason(self) -> &'static str {
+        match self {
+            Self::LeftWorld => "speaker_left_world",
+            Self::Unavailable => "speaker_unavailable",
+            Self::NotKnown => "speaker_no_longer_known",
+            Self::Ignored => "speaker_ignores_dialogue",
+            Self::OutOfRange => "speaker_out_of_chat_range",
+        }
+    }
+}
+
 impl World {
-    pub(crate) fn dialogue_participants(&self, bot: i32, speaker: i32) -> Result<()> {
-        let sender = self.players.get(&bot).context("dialogue bot left world")?;
-        let peer = self
-            .players
-            .get(&speaker)
-            .context("dialogue speaker left world")?;
+    pub(crate) fn dialogue_participants(
+        &self,
+        bot: i32,
+        speaker: i32,
+    ) -> Result<Option<DialoguePeerUnavailable>> {
         ensure!(
-            sender.controller == Controller::Autonomous
-                && sender.can_chat()
-                && peer.can_chat()
-                && sender.known.contains(&speaker)
-                && !peer.account_lists[1].contains(&sender.character.account)
-                && sender.pos.distance(peer.pos) <= 12.,
-            "dialogue participants unavailable"
+            bot > 0 && speaker > 0 && bot != speaker,
+            "invalid dialogue participants"
         );
-        Ok(())
+        let sender = self.players.get(&bot).context("dialogue bot left world")?;
+        ensure!(
+            sender.controller == Controller::Autonomous,
+            "dialogue controller is not autonomous"
+        );
+        ensure!(sender.can_chat(), "dialogue controller unavailable");
+        ensure!(
+            sender
+                .tx
+                .as_ref()
+                .is_some_and(|tx| tx.lost.borrow().is_none() && !tx.packets.is_closed()),
+            "dialogue controller output unavailable"
+        );
+        ensure!(
+            sender.pos.x.is_finite() && sender.pos.y.is_finite(),
+            "dialogue controller position is not finite"
+        );
+        let Some(peer) = self.players.get(&speaker) else {
+            return Ok(Some(DialoguePeerUnavailable::LeftWorld));
+        };
+        let distance = sender.pos.distance(peer.pos);
+        ensure!(
+            distance.is_finite(),
+            "dialogue participant distance is not finite"
+        );
+        if !peer.can_chat() {
+            return Ok(Some(DialoguePeerUnavailable::Unavailable));
+        }
+        if !sender.known.contains(&speaker) {
+            return Ok(Some(DialoguePeerUnavailable::NotKnown));
+        }
+        if peer.account_lists[1].contains(&sender.character.account) {
+            return Ok(Some(DialoguePeerUnavailable::Ignored));
+        }
+        if distance > 12. {
+            return Ok(Some(DialoguePeerUnavailable::OutOfRange));
+        }
+        Ok(None)
     }
     pub fn account_list_target(&self, id: i32, target: i32) -> Result<i32> {
         let sender = self.players.get(&id).context("player missing")?;
@@ -452,5 +503,175 @@ mod tests {
                 .collect();
             assert_eq!(heard, [true, true, far_hears], "world {world}");
         }
+    }
+
+    #[tokio::test]
+    async fn dialogue_world_eligibility_distinguishes_peer_drift_from_own_failures() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let mut d =
+            Directory::test_with_seed(std::path::Path::new("data"), content, 20, 511).unwrap();
+        let mut ids = Vec::new();
+        let mut inboxes = Vec::new();
+        for role in ["bot", "peer"] {
+            let account = store.list(format!("dialogue-world-{role}")).await.unwrap();
+            let ch = store
+                .create(account.id, d.content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap();
+            let (packets, inbox) = mpsc::channel(64);
+            let (lost, _) = watch::channel(None);
+            ids.push(
+                d.worlds
+                    .get_mut(&-2)
+                    .unwrap()
+                    .enter(ch, Some(Output { packets, lost }))
+                    .unwrap(),
+            );
+            inboxes.push(inbox);
+        }
+        let (id, peer) = (ids[0], ids[1]);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        let origin = w.players[&id].pos;
+        let account = w.players[&id].character.account;
+        w.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+        w.players.get_mut(&id).unwrap().known.insert(peer);
+        w.players.get_mut(&peer).unwrap().pos = origin;
+        assert_eq!(w.dialogue_participants(id, peer).unwrap(), None);
+        w.players.get_mut(&peer).unwrap().pos.x = origin.x + 12.;
+        assert_eq!(w.dialogue_participants(id, peer).unwrap(), None);
+        w.players.get_mut(&peer).unwrap().pos.x = origin.x + 13.;
+        assert_eq!(
+            w.dialogue_participants(id, peer).unwrap(),
+            Some(DialoguePeerUnavailable::OutOfRange)
+        );
+        w.players.get_mut(&peer).unwrap().pos = origin;
+        w.players.get_mut(&id).unwrap().known.remove(&peer);
+        assert_eq!(
+            w.dialogue_participants(id, peer).unwrap(),
+            Some(DialoguePeerUnavailable::NotKnown)
+        );
+        w.players.get_mut(&id).unwrap().known.insert(peer);
+        w.players.get_mut(&peer).unwrap().account_lists[1].insert(account);
+        assert_eq!(
+            w.dialogue_participants(id, peer).unwrap(),
+            Some(DialoguePeerUnavailable::Ignored)
+        );
+        w.players.get_mut(&peer).unwrap().account_lists[1].clear();
+        for condition in [
+            "dead",
+            "zero_hp",
+            "death_pending",
+            "departing",
+            "quarantined",
+        ] {
+            let p = w.players.get_mut(&peer).unwrap();
+            let hp = p.character.hp;
+            match condition {
+                "dead" => p.character.alive = false,
+                "zero_hp" => p.character.hp = 0,
+                "death_pending" => p.death_pending = true,
+                "departing" => p.departing = true,
+                "quarantined" => p.persistence_failure = Some("peer fixture failure".into()),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                w.dialogue_participants(id, peer).unwrap(),
+                Some(DialoguePeerUnavailable::Unavailable),
+                "{condition}"
+            );
+            let p = w.players.get_mut(&peer).unwrap();
+            p.character.alive = true;
+            p.character.hp = hp;
+            p.death_pending = false;
+            p.departing = false;
+            p.persistence_failure = None;
+        }
+        let absent = w.players.remove(&peer).unwrap();
+        assert_eq!(
+            w.dialogue_participants(id, peer).unwrap(),
+            Some(DialoguePeerUnavailable::LeftWorld)
+        );
+        let mut concealed = Vec::new();
+        for x_axis in [true, false] {
+            for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let mut position = origin;
+                if x_axis {
+                    position.x = invalid;
+                } else {
+                    position.y = invalid;
+                }
+                w.players.get_mut(&id).unwrap().pos = position;
+                if let Ok(status) = w.dialogue_participants(id, peer) {
+                    concealed.push(format!("x_axis={x_axis} invalid={invalid}: {status:?}"));
+                }
+            }
+        }
+        w.players.get_mut(&id).unwrap().pos = origin;
+        assert!(
+            concealed.is_empty(),
+            "absent peer concealed malformed owner: {concealed:?}"
+        );
+        w.players.insert(peer, absent);
+        // An obsolete peer must not conceal a broken owner.
+        w.players.get_mut(&peer).unwrap().pos.x = origin.x + 13.;
+        for condition in [
+            "human",
+            "qa",
+            "dead",
+            "zero_hp",
+            "death_pending",
+            "departing",
+            "quarantined",
+            "detached",
+            "lost",
+        ] {
+            let p = w.players.get_mut(&id).unwrap();
+            let hp = p.character.hp;
+            let output = p.tx.clone();
+            match condition {
+                "human" => p.controller = Controller::Human,
+                "qa" => p.controller = Controller::Qa,
+                "dead" => p.character.alive = false,
+                "zero_hp" => p.character.hp = 0,
+                "death_pending" => p.death_pending = true,
+                "departing" => p.departing = true,
+                "quarantined" => p.persistence_failure = Some("own fixture failure".into()),
+                "detached" => p.tx = None,
+                "lost" => {
+                    p.tx.as_ref()
+                        .unwrap()
+                        .lost
+                        .send_replace(Some("fixture output lost"));
+                }
+                _ => unreachable!(),
+            }
+            assert!(w.dialogue_participants(id, peer).is_err(), "{condition}");
+            let p = w.players.get_mut(&id).unwrap();
+            p.controller = Controller::Autonomous;
+            p.character.alive = true;
+            p.character.hp = hp;
+            p.death_pending = false;
+            p.departing = false;
+            p.persistence_failure = None;
+            p.tx = output;
+            p.tx.as_ref().unwrap().lost.send_replace(None);
+        }
+        for (bot, speaker) in [(id, id), (0, peer), (id, 0), (id, -1), (-1, peer)] {
+            assert!(w.dialogue_participants(bot, speaker).is_err());
+        }
+        for invalid in [f32::NAN, f32::INFINITY] {
+            w.players.get_mut(&peer).unwrap().pos.x = invalid;
+            assert!(w.dialogue_participants(id, peer).is_err());
+            w.players.get_mut(&peer).unwrap().pos.x = origin.x + 13.;
+            w.players.get_mut(&id).unwrap().pos.x = invalid;
+            assert!(w.dialogue_participants(id, peer).is_err());
+            w.players.get_mut(&id).unwrap().pos = origin;
+        }
+        let (packets, inbox) = mpsc::channel(1);
+        drop(inbox);
+        let (lost, _) = watch::channel(None);
+        w.players.get_mut(&id).unwrap().tx = Some(Output { packets, lost });
+        assert!(w.dialogue_participants(id, peer).is_err());
     }
 }
