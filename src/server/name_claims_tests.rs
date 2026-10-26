@@ -171,6 +171,8 @@ async fn name_claims_native_free_paid_and_rejections_preserve_wallet_and_active_
     a.world.clock.set_paused(true);
     let names = crate::bots::profiles();
     let (first, _) = running(&a, names[0]).await;
+    let binding = a.cctv.binding(names[0]).unwrap();
+    assert_eq!(binding.1, first.account);
     let (protected, _) = running(&a, names[1]).await;
     let paid = persona(&a, "Paidbot").await;
     let account = registered(&a, "nativehuman").await;
@@ -212,6 +214,16 @@ async fn name_claims_native_free_paid_and_rejections_preserve_wallet_and_active_
     assert_eq!(native_name(&mut socket, names[0]).await, (1, String::new()));
     assert_eq!(a.store.presentation(account).await.unwrap().credits, 1600);
     assert!(!a.owners.lock().unwrap().contains_key(&first.account));
+    assert_eq!(a.cctv.binding(names[0]), None);
+    assert!(
+        a.world
+            .spectate(binding.0, binding.1)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let error = a.world.spectate(id, account).await.err().unwrap();
+    assert!(error.to_string().contains("not an autonomous bot"));
     assert_eq!(
         native_name(&mut socket, "pAiDbOt").await,
         (1, String::new())
@@ -614,4 +626,168 @@ async fn name_claims_pending_permanent_death_settles_without_replacement_or_inve
         a.store.vaults(bot.account).await.unwrap()[0].items,
         vec![0xa1f; 8]
     );
+}
+
+#[tokio::test]
+async fn name_claims_human_owner_controls_social_and_guild_resolution() {
+    use crate::store::GuildAction;
+    let (_dir, a) = test_app();
+    a.world.clock.set_paused(true);
+    let archived = persona(&a, "Keeper").await;
+    a.store
+        .retire_persona("persona:v1:Keeper".into(), archived.account)
+        .await
+        .unwrap();
+    let current = persona(&a, "Keeper").await;
+    assert_eq!(
+        a.store.account_named("KEEPER".into()).await.unwrap(),
+        archived.account
+    );
+    let human = registered(&a, "nameowner").await;
+    let founder = registered(&a, "namefounder").await;
+    assert_eq!(request(&a, "nameowner", "Keeper").await, "<Success/>");
+    let target = a.store.account_named("kEePeR".into()).await.unwrap();
+    assert_eq!(target, human);
+    let lists = a
+        .store
+        .edit_account_list(founder, 1, true, target)
+        .await
+        .unwrap();
+    assert_eq!(lists[1], std::collections::BTreeSet::from([human]));
+    a.store
+        .create_prepared_guild(vec![founder, human, current.account], "Name Owners".into())
+        .await
+        .unwrap();
+    assert!(
+        a.store
+            .change_guild(
+                human,
+                GuildAction::Rank {
+                    name: "KEEPER".into(),
+                    rank: 10
+                }
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cannot make")
+    );
+    let changed = a
+        .store
+        .change_guild(
+            founder,
+            GuildAction::Rank {
+                name: "KEEPER".into(),
+                rank: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(changed.1, human);
+    assert_eq!(
+        a.store
+            .presentation(human)
+            .await
+            .unwrap()
+            .guild
+            .unwrap()
+            .rank,
+        10
+    );
+    assert_eq!(
+        a.store
+            .presentation(current.account)
+            .await
+            .unwrap()
+            .guild
+            .unwrap()
+            .rank,
+        0
+    );
+    assert!(
+        a.store
+            .change_guild(current.account, GuildAction::Remove("Keeper".into()))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cannot remove")
+    );
+    let outsider = registered(&a, "nameoutsider").await;
+    a.store
+        .create_prepared_guild(vec![outsider], "Other Owners".into())
+        .await
+        .unwrap();
+    assert!(
+        a.store
+            .change_guild(outsider, GuildAction::Remove("Keeper".into()))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cannot remove")
+    );
+    assert_eq!(
+        a.store
+            .change_guild(founder, GuildAction::Remove("keeper".into()))
+            .await
+            .unwrap()
+            .1,
+        human
+    );
+    assert!(a.store.presentation(human).await.unwrap().guild.is_none());
+    assert!(
+        a.store
+            .presentation(current.account)
+            .await
+            .unwrap()
+            .guild
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn name_claims_ambiguous_human_owners_are_errors_not_arbitrary_social_or_guild_targets() {
+    use crate::store::GuildAction;
+    let (_dir, a) = test_app();
+    let first = registered(&a, "ambiguousone").await;
+    let second = registered(&a, "ambiguoustwo").await;
+    let founder = registered(&a, "ambiguousfounder").await;
+    a.store
+        .choose_name(first, "Duplicate".into())
+        .await
+        .unwrap();
+    a.store.rename(second, "dUpLiCaTe".into()).await.unwrap();
+    assert!(
+        a.store
+            .account_named("DUPLICATE".into())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Ambiguous human name ownership")
+    );
+    a.store
+        .create_prepared_guild(vec![founder, first, second], "Ambiguous Owners".into())
+        .await
+        .unwrap();
+    for action in [
+        GuildAction::Rank {
+            name: "Duplicate".into(),
+            rank: 10,
+        },
+        GuildAction::Remove("Duplicate".into()),
+    ] {
+        assert!(
+            a.store
+                .change_guild(founder, action)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Ambiguous human name ownership")
+        );
+    }
+    for id in [first, second] {
+        assert_eq!(
+            a.store.presentation(id).await.unwrap().guild.unwrap().rank,
+            0
+        );
+    }
 }
