@@ -304,8 +304,8 @@ impl World {
                             p.character.mp = (p.character.mp + amount)
                                 .min(p.effective(&self.content, self.now)?[1]);
                             let restored = p.character.mp - before;
-                            // Match requested cyan without changing shared notification styling: https://github.com/OpenRotMG/Open-RotMG-Server/issues/322
-                            self.consumable_restored(target, restored, 0xff00ffff);
+                            // #600: FSoD's light blue is a reconstruction, not recovered 123.5.1 RGB.
+                            self.consumable_restored(target, restored, 0xff6084e0);
                         }
                     }
                     if let Some(range) = range {
@@ -349,3 +349,6 @@ impl World {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
