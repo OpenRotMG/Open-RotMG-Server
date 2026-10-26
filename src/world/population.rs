@@ -256,7 +256,7 @@ impl World {
                 continue;
             };
             if !positions.iter().all(|pos| {
-                self.players.values().all(|p| p.pos.distance(*pos) >= 0.75)
+                self.players.values().all(|p| p.pos.distance(*pos) >= 12.)
                     && self
                         .map
                         .spawns

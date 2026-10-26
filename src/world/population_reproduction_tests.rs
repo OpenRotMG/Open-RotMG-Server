@@ -31,7 +31,7 @@ async fn habitat(seed: u64) -> World {
     w.population_regions[1].target = 0;
     w.population_regions[1].limit = 64;
     let id = w.enter(character, None).unwrap();
-    w.players.get_mut(&id).unwrap().pos = Pos { x: 80.5, y: 64.5 };
+    w.players.get_mut(&id).unwrap().pos = Pos { x: 84., y: 64.5 };
     w
 }
 
@@ -77,6 +77,38 @@ async fn ordinary_god_reproduction_uses_active_minute_not_regional_refill() {
 fn attempt(w: &mut World, id: i32) -> population::Reproduction {
     w.god_reproduction.insert(id, 0);
     w.reproduce_god(id, 50).unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn reproduction_retains_initial_player_clearance_while_parent_is_active() {
+    let mut w = habitat(41).await;
+    let center = Pos { x: 64.5, y: 64.5 };
+    let id = parent(&mut w, 0x651, center);
+    let player = *w.players.keys().next().unwrap();
+    w.players.get_mut(&player).unwrap().pos = center;
+    w.now += 50;
+    w.npc_step();
+    assert!(w.entities[&id].activated.is_some());
+    let actors = w.actor_ids.clone();
+    assert_eq!(attempt(&mut w, id), population::Reproduction::NoSite);
+    assert_eq!(w.actor_ids, actors);
+    assert_eq!(w.population_count(1), 1);
+    assert_eq!(w.population.len(), 1);
+    assert_eq!(w.god_reproduction[&id], 60000);
+
+    let clear_player = Pos { x: 84., y: 64.5 };
+    assert!(center.distance(clear_player) < 20.);
+    w.players.get_mut(&player).unwrap().pos = clear_player;
+    w.god_reproduction.insert(id, 0);
+    w.now += 50;
+    w.npc_step();
+    assert_eq!(w.actor_ids.len(), actors.len() + 1);
+    assert_eq!(w.population_count(1), 2);
+    assert_eq!(w.god_reproduction[&id], 60000);
+    let child = w.actors().find(|e| e.id != id).unwrap();
+    assert_eq!(child.kind, 0x651);
+    assert!(child.pos.distance(clear_player) >= 12.);
+    assert!((child.pos.distance(center) - 5.).abs() < 0.0001);
 }
 
 #[tokio::test]
@@ -151,7 +183,7 @@ async fn reproduction_clock_freezes_outside_simulation_and_in_stasis() {
     w.now += 120000;
     w.npc_step();
     assert_eq!(w.god_reproduction[&id], 59950);
-    w.players.get_mut(&player).unwrap().pos = Pos { x: 80.5, y: 64.5 };
+    w.players.get_mut(&player).unwrap().pos = Pos { x: 84., y: 64.5 };
     w.entities.get_mut(&id).unwrap().condition |= crate::condition::bit(crate::condition::STASIS);
     w.now += 120000;
     w.npc_step();
@@ -232,6 +264,11 @@ async fn reproduction_new_sprite_root_owns_its_family_and_reserves_full_cost() {
     let members: Vec<_> = w.camp_members(camp).map(|e| e.id).collect();
     assert_eq!(members.len(), family.initial());
     assert!(members.iter().all(|id| w.entities[id].parent.is_none()));
+    assert!(members.iter().all(|id| {
+        w.players
+            .values()
+            .all(|p| w.entities[id].pos.distance(p.pos) >= 12.)
+    }));
     w.remove_entity(root);
     assert!(members.iter().all(|id| w.entities.contains_key(id)));
 }
