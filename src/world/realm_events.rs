@@ -95,7 +95,8 @@ fn event_factory_retains_unpainted_root_cells() {
                 (index, (id, world.cells.ids(index + 15)[0]))
             })
             .collect();
-        world.rng = rand::rngs::StdRng::seed_from_u64(12351);
+        // Seed 6 erodes the first Skull's birth cell without fabricating a stencil hole.
+        world.rng = rand::rngs::StdRng::seed_from_u64(6);
         world.populate_realm_events().unwrap();
         assert_eq!(world.setpieces.len(), 6);
         assert_eq!(world.event_sites.len(), 6);
@@ -105,6 +106,26 @@ fn event_factory_retains_unpainted_root_cells() {
                 2
             );
         }
+        let skull = world
+            .entities
+            .values()
+            .find(|e| e.kind == 0xd56 && world.event_sites[0].area.distance(e.pos) == 0.)
+            .unwrap();
+        let skull_index = skull.pos.y as usize * 384 + skull.pos.x as usize;
+        assert_eq!(
+            fields(&world.map.cells[skull_index]),
+            fields(&original.cells[skull_index]),
+            "eroded Skull birth must not paint or clear its native cell"
+        );
+        let skull_native = natives[&skull_index].0;
+        assert!(world.cells.ids(skull_index).contains(&skull_native));
+        assert_eq!(
+            matches!(
+                &world.entities[&skull_native].state,
+                entity_store::EntityState::Owned(_)
+            ),
+            owned
+        );
         for root in world.entities.values().filter(|e| e.kind == 0xd5f) {
             let index = root.pos.y as usize * 384 + root.pos.x as usize;
             assert_eq!(
@@ -159,7 +180,7 @@ fn event_factory_retains_unpainted_root_cells() {
         world.encounter = true;
         world.reserve_realm_events().unwrap();
         assert_eq!(world.event_reserves.len(), 7);
-        for kind in [0xd59, 0xd50, 0xd5f] {
+        for kind in [0xd56, 0xd59, 0xd50, 0xd5f] {
             let pending: Vec<_> = world
                 .event_reserves
                 .iter()
@@ -167,9 +188,19 @@ fn event_factory_retains_unpainted_root_cells() {
                 .cloned()
                 .collect();
             assert_eq!(pending.len(), if kind == 0xd50 { 1 } else { 2 });
-            if kind != 0xd5f {
+            if matches!(kind, 0xd59 | 0xd50) {
                 assert!(pending.iter().all(|e| e.site.cells.is_empty()));
             }
+            let (painted, pending): (Vec<_>, Vec<_>) = pending.into_iter().partition(|e| {
+                let index = e.root.pos.y as usize * 384 + e.root.pos.x as usize;
+                e.site.cells.iter().any(|(i, _)| *i == index)
+            });
+            assert_eq!(painted.len(), usize::from(kind == 0xd56));
+            // The painted sibling must not satisfy the choice while its eroded root is blocked.
+            let painted_blockers: Vec<_> = painted
+                .iter()
+                .map(|e| world.spawn_entity(0x501, e.root.pos, vec![]).unwrap())
+                .collect();
             world.event_waiting = Some(42);
             world.event_choice = Some(kind);
             for mode in 0..7 {
@@ -255,6 +286,13 @@ fn event_factory_retains_unpainted_root_cells() {
             let index = event.root.pos.y as usize * 384 + event.root.pos.x as usize;
             let native = natives[&index].0;
             world.entities.get_mut(&native).unwrap().name = "post-reserve native".into();
+            if kind == 0xd56 {
+                let cell = &mut Arc::make_mut(&mut world.map).cells[index];
+                cell.ground = 0xd6;
+                cell.config = "name:post-reserve;size:137".into();
+                cell.terrain = 7;
+                cell.region = 9;
+            }
             let before = fields(&world.map.cells[index]);
             let ids = world.cells.ids(index).to_vec();
             assert!(
@@ -294,10 +332,17 @@ fn event_factory_retains_unpainted_root_cells() {
                 )
             );
             assert_eq!(fields(&world.map.cells[index]), before);
-            assert_eq!(
-                fields(&world.map.cells[index]),
-                fields(&original.cells[index])
-            );
+            if kind == 0xd56 {
+                assert_eq!(
+                    fields(&original.cells[index]),
+                    (0x46, Some(0x105), "name:native;size:137".into(), 1, 0)
+                );
+            } else {
+                assert_eq!(
+                    fields(&world.map.cells[index]),
+                    fields(&original.cells[index])
+                );
+            }
             assert_eq!(world.entities[&native].name, "post-reserve native");
             assert!(ids.iter().all(|id| world.cells.ids(index).contains(id)));
             assert!(world.cells.ids(index).contains(&event.root.id));
@@ -307,6 +352,29 @@ fn event_factory_retains_unpainted_root_cells() {
                 entity_store::EntityState::Owned(_)
             ));
             assert!(world.walkable(admitted.pos));
+            if kind == 0xd56 {
+                for id in painted_blockers {
+                    world.remove_entity(id);
+                }
+                let sibling = &painted[0];
+                let tree = world.spawn_entity(0x100, sibling.root.pos, vec![]).unwrap();
+                assert!(!world.walkable(sibling.root.pos));
+                world.event_waiting = Some(43);
+                world.event_choice = Some(kind);
+                assert!(
+                    matches!(world.earn_realm_event(43).unwrap(), EventAdmission::Spawned(id) if id == sibling.root.id)
+                );
+                let sibling_index = sibling.root.pos.y as usize * 384 + sibling.root.pos.x as usize;
+                assert_eq!(
+                    fields(&world.map.cells[sibling_index]),
+                    (0xd6, None, "".into(), 1, 0)
+                );
+                assert!(!world.entities.contains_key(&tree));
+                assert!(!world.entities.contains_key(&natives[&sibling_index].0));
+                assert!(world.cells.ids(sibling_index).contains(&sibling.root.id));
+                assert_eq!(fields(&world.map.cells[index]), before);
+                assert_eq!((world.event_waiting, world.event_choice), (None, None));
+            }
             if kind == 0xd5f {
                 let root = event.root.id;
                 let towers = world.quest_members(root, &[0xd5e]);
@@ -762,6 +830,15 @@ impl World {
             .iter()
             .enumerate()
             .filter(|(_, event)| {
+                let root_index =
+                    event.root.pos.y as usize * self.map.width as usize + event.root.pos.x as usize;
+                let native_root = matches!(event.root.kind, 0xd59 | 0xd50 | 0xd5f)
+                    || event.root.kind == 0xd56
+                        && !event
+                            .site
+                            .cells
+                            .iter()
+                            .any(|(index, _)| *index == root_index);
                 // Admission is not a reservation: actual initial-group dispatch rechecks its budget.
                 Some(event.root.kind) == self.event_choice
                     && owned + 1 + event.children.len() + mandatory_initial_summons(event.root.kind)
@@ -771,13 +848,10 @@ impl World {
                             && event.site.area.distance(p.pos) >= 4.
                     })
                     && self.event_site_clear(&event.site)
-                    // These native root cells are not part of the painted-site swap.
-                    && (!matches!(event.root.kind, 0xd59 | 0xd50 | 0xd5f)
+                    // An eroded birth cell is outside the painted-site swap.
+                    && (!native_root
                         || self.walkable(event.root.pos)
-                            && self.setpiece_scenery_clear(
-                                event.root.pos.y as usize * self.map.width as usize
-                                    + event.root.pos.x as usize,
-                            ))
+                            && self.setpiece_scenery_clear(root_index))
             })
             .map(|(index, _)| index)
             .collect();
