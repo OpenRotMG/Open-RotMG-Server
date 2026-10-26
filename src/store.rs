@@ -928,6 +928,16 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             .map_err(|_| anyhow::anyhow!("account store stopped"))?;
         rx.await.context("account worker failed")?
     }
+    pub(crate) async fn account_guid(&self, account: i32) -> Result<String> {
+        self.call(move |db| {
+            Ok(
+                db.query_row("SELECT guid FROM accounts WHERE id=?1", [account], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .await
+    }
     pub async fn list(&self, guid: String) -> Result<Account> {
         let id = self.guest(guid, true).await?;
         self.list_id(id).await

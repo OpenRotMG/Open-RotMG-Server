@@ -7,6 +7,8 @@ use std::{net::SocketAddr, path::PathBuf};
 pub struct Config {
     pub bind: SocketAddr,
     pub origin: String,
+    #[serde(default)]
+    pub bot_view_origin: Option<String>,
     pub data: PathBuf,
     pub client: PathBuf,
     pub state: PathBuf,
@@ -38,6 +40,7 @@ fn default_bot_population() -> usize {
 fn default_shore_bots() -> bool {
     true
 }
+
 impl Config {
     pub fn load(args: &[String]) -> Result<(Self, bool)> {
         let mut file = None;
@@ -103,6 +106,7 @@ impl Config {
             Self {
                 bind: "127.0.0.1:18923".parse()?,
                 origin: "http://127.0.0.1:18923".into(),
+                bot_view_origin: Some("http://127.0.0.1:18923".into()),
                 data: root.join("data"),
                 client: root
                     .parent()
@@ -130,6 +134,7 @@ impl Config {
             config.bind.set_port(port);
             if file.is_none() {
                 config.origin = format!("http://{}", config.bind);
+                config.bot_view_origin = Some(config.origin.clone());
             }
         }
         if let Some(enabled) = shore_bots {
@@ -160,6 +165,19 @@ impl Config {
             self.bind.ip().is_loopback(),
             "backend bind must be loopback; terminate public TLS at the proxy"
         );
+        if let Some(origin) = &self.bot_view_origin {
+            let url = reqwest::Url::parse(origin).context("invalid bot_view_origin")?;
+            let local = url.host_str().is_some_and(|h| {
+                h == "localhost"
+                    || h.parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback())
+            });
+            ensure!(
+                url.origin().ascii_serialization() == *origin
+                    && (url.scheme() == "https" || local && url.scheme() == "http"),
+                "bot_view_origin requires an exact HTTPS origin, or loopback HTTP"
+            );
+        }
         let uri: axum::http::Uri = self.origin.parse().context("invalid public origin")?;
         ensure!(
             uri.authority().is_some()
@@ -208,5 +226,31 @@ impl Config {
             "data, client and state paths must be absolute"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod bot_view_tests {
+    use super::*;
+    #[test]
+    fn bot_view_origin_is_explicit_and_local_defaults_track_the_port() {
+        let (mut config, _) = Config::load(&["--port".into(), "19023".into()]).unwrap();
+        assert_eq!(
+            config.bot_view_origin.as_deref(),
+            Some(config.origin.as_str())
+        );
+        for origin in [
+            "https://game.example/path",
+            "https://user@game.example",
+            "http://game.example",
+            "https://game.example/",
+        ] {
+            config.bot_view_origin = Some(origin.into());
+            assert!(config.validate(false).is_err(), "{origin}");
+        }
+        config.bot_view_origin = Some("https://game.example".into());
+        config.validate(false).unwrap();
+        config.bot_view_origin = None;
+        config.validate(false).unwrap();
     }
 }

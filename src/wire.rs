@@ -75,6 +75,9 @@ impl<'a> Reader<'a> {
         let n = u16::from_be_bytes(self.take(2)?.try_into()?) as usize;
         Ok(std::str::from_utf8(self.take(n)?)?.to_owned())
     }
+    pub(crate) fn remaining(&self) -> &[u8] {
+        &self.data[self.pos..]
+    }
     pub fn done(&self) -> Result<()> {
         ensure!(
             self.pos == self.data.len(),
@@ -149,6 +152,7 @@ impl Rc4 {
     }
 }
 
+#[derive(Clone)]
 pub struct Packet {
     pub id: u8,
     pub body: Vec<u8>,

@@ -1659,6 +1659,14 @@ fn selected_profile(name: &str) -> Result<Profile> {
 pub fn validate_test_profile(profile: &str) -> Result<()> {
     selected_profile(profile).map(|_| ())
 }
+pub async fn start_test_persona(
+    app: &crate::server::App,
+    profile: &str,
+    world: i32,
+    position: Pos,
+) -> Result<crate::store::Character> {
+    runtime::start_test_persona(app, selected_profile(profile)?, world, position).await
+}
 pub async fn start_test(
     app: &crate::server::App,
     character: crate::store::Character,
