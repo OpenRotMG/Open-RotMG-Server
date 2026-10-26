@@ -1017,17 +1017,13 @@ async fn name_claims_native_unpublished_admission_rejects_without_poisoning_the_
         "Persona admission is busy; retry name choice shortly"
     );
     assert!(!lifecycle::state(&a, human).unwrap().2);
-    a.world
-        .for_player(id)
-        .call(move |w| {
-            let p = &w.players[&id];
-            assert!(
-                p.character.alive && !p.pending && !p.departing && p.persistence_failure.is_none()
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
+    let view = a.world.player_view(id).await.unwrap();
+    assert!(
+        view.lifecycle.alive
+            && !view.lifecycle.busy
+            && !view.lifecycle.departing
+            && !view.lifecycle.quarantined
+    );
     drop(owner);
     assert_eq!(
         native_name(&mut socket, "Admitting").await,
