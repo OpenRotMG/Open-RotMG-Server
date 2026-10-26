@@ -210,7 +210,7 @@ fn tracking_is_bounded_and_existing_useful_activity_wins() {
             |_| true
         ));
     }
-    assert!(available(
+    assert!(!available(
         &[(78., Goal::Hunt(1), Pos { x: 20., y: 0. })],
         origin,
         8.,
