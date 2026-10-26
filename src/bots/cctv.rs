@@ -195,6 +195,8 @@ pub(super) fn reason(
         (None, Goal::Revisit(..)) => "returning to remembered loot".into(),
         (None, Goal::Survey(..)) => "heading to a realm event".into(),
         (None, Goal::Explore(..)) => "exploring".into(),
+        (None, Goal::Linger) => "keeping a personal Nexus spot".into(),
+        (None, Goal::NexusNoRoom) => "waiting: no clear reachable Nexus spot".into(),
         (None, Goal::Wait) => "waiting".into(),
     };
     format!("{activity}: {doing}")
