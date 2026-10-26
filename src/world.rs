@@ -1431,7 +1431,6 @@ impl Directory {
         if template != crate::endgame::CASTLE {
             return self.instance(template, None, Some(DungeonReturn::Random));
         }
-        self.reserve_worlds(1, &[])?;
         let world = self.make(template, "Oryx's Castle", false, None)?;
         let id = self.next_world;
         self.next_world = id
@@ -1461,44 +1460,6 @@ impl Directory {
                 .portals
                 .values()
                 .any(|p| p.origin == id || p.destination == Some(id))
-    }
-    fn reserve_worlds(&mut self, slots: usize, keep: &[i32]) -> Result<()> {
-        let needed = (self.worlds.len() + slots).saturating_sub(12);
-        if needed == 0 {
-            return Ok(());
-        }
-        // Empty caches must not deny entry, but live portals and transfers still own their worlds.
-        let retired: Vec<_> = self
-            .worlds
-            .keys()
-            .copied()
-            .filter(|id| !keep.contains(id) && self.reclaimable_world(*id))
-            .take(needed)
-            .collect();
-        ensure!(
-            retired.len() == needed,
-            "world instance limit reached: {} worlds, {slots} requested, {} reclaimable",
-            self.worlds.len(),
-            retired.len()
-        );
-        for id in retired {
-            self.worlds
-                .get(&id)
-                .expect("selected reclaimable world missing");
-            ensure!(
-                self.reclaimable_world(id),
-                "world {id} changed before capacity reclamation"
-            );
-            let world = self.worlds.remove(&id).unwrap();
-            self.idle.remove(&id);
-            tracing::info!(
-                world = id,
-                name = world.name,
-                owner = world.owner,
-                "empty world reclaimed for capacity"
-            );
-        }
-        Ok(())
     }
     pub(crate) fn instance(
         &mut self,
@@ -1531,7 +1492,6 @@ impl Directory {
         {
             return Ok(*id);
         }
-        self.reserve_worlds(1, &[])?;
         let mut world = self.make(
             template,
             if template == "vault" {
@@ -7452,6 +7412,8 @@ mod dungeon_return_tests;
 mod hermit_leash_tests;
 #[cfg(test)]
 mod hermit_loot_tests;
+#[cfg(test)]
+mod instance_lifetime_tests;
 #[cfg(test)]
 mod period_loot_tests;
 #[cfg(test)]
