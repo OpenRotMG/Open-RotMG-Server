@@ -228,6 +228,7 @@ async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collect
     let winner = player(owners[0].0);
     let peer = player(owners[1].0);
     let outsider = player(owners[5].0);
+    w.players.get_mut(&winner).unwrap().controller = Controller::Human;
     let from = Slot {
         object: bag,
         slot: 0,
@@ -323,6 +324,7 @@ async fn god_shared_collection_failed_receipt_retains_reservation_without_credit
     let winner = player(owners[0].0);
     let peer = player(owners[1].0);
     let outsider = player(owners[5].0);
+    w.players.get_mut(&winner).unwrap().controller = Controller::Human;
     let from = Slot {
         object: bag,
         slot: 0,
@@ -335,6 +337,7 @@ async fn god_shared_collection_failed_receipt_retains_reservation_without_credit
     };
     let before = store.load(owners[0].0, owners[0].1).await.unwrap();
     let plan = w.swap(winner, from, to(winner)).unwrap();
+    assert_eq!(plan.collected, Some(0xa3c));
     let error = w
         .finish_inventory(
             plan,
