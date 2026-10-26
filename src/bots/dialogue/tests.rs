@@ -1,4 +1,15 @@
 use super::*;
+use tracing_subscriber::prelude::*;
+
+#[derive(Clone, Default)]
+struct ErrorEvents(Arc<std::sync::atomic::AtomicUsize>);
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ErrorEvents {
+    fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
+        if *event.metadata().level() == tracing::Level::ERROR {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
 
 fn fixture() -> (Content, PlayerView, Brain, Request) {
     let (content, mut view) = super::super::quest_tests::fixture();
@@ -354,18 +365,22 @@ async fn same_bound_speaker_correction_cancels_the_old_ready_action_even_inside_
 
 #[tokio::test]
 async fn provider_failure_remains_observable_and_never_becomes_policy_speech() {
+    let errors = ErrorEvents::default();
+    let _subscriber =
+        tracing::subscriber::set_default(tracing_subscriber::registry().with(errors.clone()));
     let (service, server) = provider(axum::http::StatusCode::SERVICE_UNAVAILABLE, json!({})).await;
     let (_, _, _, request) = fixture();
     let mut pending = Pending::start(Some(service.clone()), request, ARCHETYPES[0]);
     let failure = (&mut pending.task).await.unwrap().unwrap_err();
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
-    assert_eq!(failure.0, "provider_rejected");
+    assert_eq!(failure.reason(), "provider_rejected");
     let health = service.health();
     assert_eq!(health["model"], MODEL);
     assert_eq!(health["successes"], 0);
     assert_eq!(health["failures"], 1);
     assert_eq!(health["last_error"], "provider_rejected");
+    assert!(errors.0.load(std::sync::atomic::Ordering::Relaxed) > 0);
 }
 
 #[test]
@@ -414,14 +429,81 @@ async fn market_process_budget_reserves_human_headroom_and_caps_total_requests_b
             .ask(&json!({"automatic":true}), "auto-cap")
             .await
             .unwrap_err()
-            .0,
+            .reason(),
         "request_budget_exhausted"
     );
     assert_eq!(service.health()["daily_requests"], 800);
     service.budget.lock().unwrap().daily = 1000;
     assert_eq!(
-        service.ask(&json!({}), "total-cap").await.unwrap_err().0,
+        service
+            .ask(&json!({}), "total-cap")
+            .await
+            .unwrap_err()
+            .reason(),
         "request_budget_exhausted"
     );
     assert_eq!(service.health()["daily_requests"], 1000);
+}
+
+#[tokio::test]
+async fn local_capacity_denial_is_not_a_provider_attempt() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let service = Arc::new(
+        Service::new(
+            "local-test-only",
+            &format!("http://{}", listener.local_addr().unwrap()),
+            DEADLINE,
+        )
+        .unwrap(),
+    );
+    assert!(service.automatic_available());
+    let _permits = service.slots.clone().try_acquire_many_owned(2).unwrap();
+    assert!(!service.automatic_available());
+    let errors = ErrorEvents::default();
+    let _subscriber =
+        tracing::subscriber::set_default(tracing_subscriber::registry().with(errors.clone()));
+    let (_, _, _, request) = fixture();
+    let mut pending = Pending::start(Some(service.clone()), request, ARCHETYPES[0]);
+    let failure = (&mut pending.task).await.unwrap().unwrap_err();
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(service.budget.lock().unwrap().calls, 0);
+    let health = service.health();
+    assert_eq!(health["daily_requests"], 0);
+    assert_eq!(health["successes"], 0);
+    assert_eq!(health["failures"], 0);
+    assert_eq!(health["last_error"], Value::Null);
+    assert_eq!(health["last_latency_ms"], Value::Null);
+    assert_eq!(health["status"], "busy");
+    assert_eq!(health["local_capacity_denials"], 1);
+    assert_eq!(failure.to_string(), "local_capacity");
+    assert_eq!(errors.0.load(std::sync::atomic::Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn provider_error_text_busy_stays_a_failure() {
+    let service = Service::new("local-test-only", "http://127.0.0.1:1", DEADLINE).unwrap();
+    service.completed(&Err(Failure::Error("busy")), Duration::from_millis(5));
+    let health = service.health();
+    assert_eq!(health["failures"], 1);
+    assert_eq!(health["successes"], 0);
+    assert_eq!(health["last_error"], "busy");
+    assert_eq!(health["last_latency_ms"], 5);
+    assert_eq!(health["status"], "error");
+    let permits = service.slots.clone().try_acquire_many_owned(2).unwrap();
+    let denied = service.ask(&json!({}), "local-denied").await.unwrap_err();
+    service.completed(&Err(denied), Duration::ZERO);
+    assert_eq!(service.health()["failures"], 1);
+    assert_eq!(service.health()["last_error"], "busy");
+    assert_eq!(service.health()["last_latency_ms"], 5);
+    drop(permits);
+    service.slots.close();
+    let closed = service.ask(&json!({}), "closed").await.unwrap_err();
+    assert!(matches!(closed, Failure::Error("service_closed")));
+    service.completed(&Err(closed), Duration::ZERO);
+    assert_eq!(service.health()["failures"], 2);
+    assert_eq!(service.health()["last_error"], "service_closed");
 }

@@ -42,7 +42,7 @@ fn validated_template_words(
         _ => false,
     };
     if !valid {
-        return Err(Failure("invalid_market_wording"));
+        return Err(Failure::Error("invalid_market_wording"));
     }
     Ok(words)
 }
@@ -64,9 +64,9 @@ fn render(
         });
     }
     let text = result.join(" ");
-    crate::world::chat::validate(&text).map_err(|_| Failure("invalid_market_wording"))?;
+    crate::world::chat::validate(&text).map_err(|_| Failure::Error("invalid_market_wording"))?;
     if text.encode_utf16().count() > 128 {
-        return Err(Failure("invalid_market_wording"));
+        return Err(Failure::Error("invalid_market_wording"));
     }
     Ok(text)
 }
@@ -136,7 +136,7 @@ impl Service {
             let id = format!("market-{:016x}", rand::random::<u64>());
             let reply = service.ask(&payload, &id).await.and_then(|reply| {
                 if reply.intent != intent {
-                    return Err(Failure("invalid_market_wording"));
+                    return Err(Failure::Error("invalid_market_wording"));
                 }
                 if let Err(error) = validated_template_words(&reply.reply, intent) {
                     tracing::error!(request=id, bot=name, ?intent, template=?reply.reply, "provider returned invalid market template");
@@ -145,8 +145,16 @@ impl Service {
                 Ok(reply)
             });
             service.completed(&reply, start.elapsed());
-            if let Err(error) = &reply {
-                tracing::error!(request=id, bot=name, %error, "market generation failed; no substitute speech");
+            match &reply {
+                Err(Failure::LocalCapacity) => tracing::info!(
+                    request = id,
+                    bot = name,
+                    "market generation skipped after local capacity denial; no substitute speech"
+                ),
+                Err(error) => {
+                    tracing::error!(request=id, bot=name, %error, "market generation failed; no substitute speech")
+                }
+                Ok(_) => {}
             }
             *result.lock().expect("market speech result poisoned") = Some(reply.map(|r| r.reply));
         });
