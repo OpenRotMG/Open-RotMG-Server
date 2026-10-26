@@ -806,6 +806,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn intention_schema_evolution_preserves_legacy_and_rejects_opaque_export_fields() {
+        let mut current = serde_json::to_value(crate::bots::pursuits::Mind::new(17)).unwrap();
+        current["revision"] = serde_json::json!(1);
+        current["intentions"]["next_id"] = serde_json::json!(2);
+        current["intentions"]["main"] =
+            serde_json::json!({"id":1,"character":3,"objective":"reach20","target":20});
+        current["intentions"]["detour"] = serde_json::json!({"runtime":7,"world":-3,"remaining_ms":90000,"opportunity":{"kind":"loot","object":8,"item":2591,"count":0,"revision":2}});
+        let mut legacy = current.clone();
+        legacy["schema"] = serde_json::json!(1);
+        legacy.as_object_mut().unwrap().remove("intentions");
+        for original in [legacy, current] {
+            let decoded: crate::bots::pursuits::Mind =
+                serde_json::from_value(original.clone()).unwrap();
+            decoded.validate().unwrap();
+            let saved = serde_json::to_value(decoded).unwrap();
+            assert!(known_fields(&original, &saved));
+            let mut opaque = original;
+            opaque["intentions"]["credential"] = serde_json::json!("must-not-export");
+            if opaque["schema"] == 1 {
+                assert!(serde_json::from_value::<crate::bots::pursuits::Mind>(opaque).is_err());
+            } else {
+                assert!(!known_fields(&opaque, &saved));
+            }
+        }
+    }
+
+    #[test]
     fn legacy_market_ad_hint_remains_known_without_allowing_opaque_fields() {
         let mut mind = crate::bots::pursuits::Mind::new(17);
         mind.revision = 1;

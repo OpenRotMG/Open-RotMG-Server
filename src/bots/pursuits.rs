@@ -64,6 +64,8 @@ pub(crate) struct Experience {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct Mind {
     pub schema: u8,
+    #[serde(default)]
+    pub intentions: Option<intentions::Intentions>,
     pub account: i32,
     pub revision: i64,
     #[serde(skip)]
@@ -87,7 +89,8 @@ pub(crate) struct Mind {
 impl Mind {
     pub(crate) fn new(account: i32) -> Self {
         Self {
-            schema: 1,
+            schema: 2,
+            intentions: Some(intentions::Intentions::default()),
             account,
             revision: 0,
             binding: 0,
@@ -105,7 +108,11 @@ impl Mind {
     }
     pub(crate) fn validate(&self) -> Result<()> {
         ensure!(
-            self.schema == 1 && self.account > 0 && self.revision >= 0,
+            matches!(
+                (self.schema, self.intentions.is_some()),
+                (1, false) | (2, true)
+            ) && self.account > 0
+                && self.revision >= 0,
             "invalid account mind binding/schema"
         );
         ensure!(
@@ -145,6 +152,9 @@ impl Mind {
                     && a.revision >= 0,
                 "invalid supply activity evidence"
             );
+        }
+        if let Some(intentions) = &self.intentions {
+            intentions.validate()?;
         }
         self.market.validate(self.account)?;
         self.social.validate(self.account)?;
@@ -190,6 +200,11 @@ impl Mind {
         }
     }
     pub(super) fn end(&mut self, v: &PlayerView, reason: &str) {
+        if reason == "character_died_steps_invalidated"
+            && let Some(intentions) = &mut self.intentions
+        {
+            intentions.end("character died; old goal and steps invalidated");
+        }
         match self.activity.take() {
             Some(a) => self.record(v, reason, a.id),
             None if reason == "character_died_steps_invalidated" => self.record(v, reason, 0),
@@ -198,6 +213,14 @@ impl Mind {
     }
     pub(super) fn bind(&mut self, v: &PlayerView, runtime: u64) -> Result<()> {
         self.validate()?;
+        if self.schema == 1 {
+            self.schema = 2;
+            self.intentions = Some(intentions::Intentions::default());
+        }
+        self.intentions
+            .as_mut()
+            .expect("validated intentions")
+            .bind(v, runtime);
         self.market.bind();
         self.social.bind();
         self.events.bind();

@@ -3148,6 +3148,10 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/health", get(health))
         .route("/api/bots", get(crate::bots::cctv::list))
         .route("/api/bots/{name}/socket", get(bot_view::socket))
+        .route(
+            "/api/bots/{name}/perspective/{target}",
+            get(bot_view::perspective::get),
+        )
         .route_service(
             "/api/bots/{name}/view",
             tower_http::services::ServeFile::new(client.join("spectator.html")),

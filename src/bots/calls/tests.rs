@@ -33,6 +33,7 @@ fn fixture(account: i32) -> (Content, PlayerView, Brain) {
             class: crate::content::WIZARD,
             level: 20,
             experience: 0,
+            fame: 0,
             hp: 500,
             mp: 200,
             stats,

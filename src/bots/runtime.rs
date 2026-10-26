@@ -49,6 +49,7 @@ async fn decide_before_social(
         view,
         &decision,
         cctv::reason(brain.activity, &decision, view, &app.content),
+        &brain.intent,
         &app.content,
     );
     let surviving = brain.activity == Activity::Survive;
@@ -813,7 +814,7 @@ pub(super) async fn launch(
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
                         tracing::info!(account,name=profile.name,"session finished; returning to Nexus before logout");
-                        app.cctv.decided(profile.name, &view, &decision, "session finished; returning to Nexus before logout".into(), &app.content);
+                        app.cctv.decided(profile.name, &view, &decision, "session finished; returning to Nexus before logout".into(), &serde_json::json!({"goal":null,"plan":"End this session","step":"Return to Nexus before logout","mode":"necessary","reason":"session deadline reached","resume":null}), &app.content);
                     }
                     if events::shared(&view.map.name) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,

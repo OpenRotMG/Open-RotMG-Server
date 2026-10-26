@@ -22,6 +22,7 @@ pub(crate) mod dialogue;
 mod director;
 mod entries;
 mod events;
+mod intentions;
 
 #[cfg(test)]
 mod nexus_spacing_tests;
@@ -244,6 +245,7 @@ struct Scene<'a> {
 struct Brain {
     profile: Profile,
     activity: Activity,
+    intent: serde_json::Value,
     mind: pursuits::Mind,
     group: Option<adventures::Adventure>,
     group_lost_since: Option<u64>,
@@ -303,6 +305,7 @@ impl Brain {
         Self {
             profile,
             activity: Activity::Busy,
+            intent: serde_json::Value::Null,
             mind,
             group: None,
             group_lost_since: None,
@@ -570,12 +573,30 @@ impl Brain {
             journey: None,
             chat: None,
         };
-        if v.lifecycle.busy {
-            self.set_activity(v, Activity::Busy);
-            return Ok(decision);
-        }
-        let (activity, decision) = self.arbitrate(v, content, decision)?;
+        self.mind
+            .intentions
+            .as_mut()
+            .context("unmigrated account intentions")?
+            .observe(v, content)?;
+        let (activity, decision) = if v.lifecycle.busy {
+            (Activity::Busy, decision)
+        } else {
+            self.arbitrate(v, content, decision)?
+        };
         self.set_activity(v, activity);
+        let committed = self.committed(v);
+        self.intent = self
+            .mind
+            .intentions
+            .as_mut()
+            .expect("observed intentions")
+            .payload(
+                v,
+                activity,
+                &decision,
+                cctv::reason(activity, &decision, v, content),
+                committed,
+            );
         Ok(decision)
     }
     fn set_activity(&mut self, v: &PlayerView, activity: Activity) {
@@ -757,6 +778,17 @@ impl Brain {
                 return Ok((Activity::Trade, market));
             }
         }
+        if !self.committed(v)
+            && self
+                .mind
+                .intentions
+                .as_ref()
+                .expect("observed intentions")
+                .expired()
+        {
+            decision.journey = Some(Journey::Nexus);
+            return Ok((Activity::Adventure, decision));
+        }
         if (equipping && s.remedy.is_none()) || (v.map.name == "Vault" && s.inspecting) {
             return Ok((Activity::Equip, decision));
         }
@@ -824,7 +856,21 @@ impl Brain {
                     .social
                     .decide(v, &s.grid, self.profile.companions, banking)
         {
-            return Ok((Activity::Social, social));
+            let committed = self.committed(v);
+            if self
+                .mind
+                .intentions
+                .as_ref()
+                .expect("observed intentions")
+                .eligible(v, &social.goal, committed)
+            {
+                self.mind
+                    .intentions
+                    .as_mut()
+                    .expect("observed intentions")
+                    .selected(v, content, &social.goal, committed, self.mind.future_class)?;
+                return Ok((Activity::Social, social));
+            }
         }
         if v.map.name == "Nexus" && self.agreement.is_none() && v.time_ms < self.nexus_until {
             if decision.item.is_none()
@@ -889,6 +935,19 @@ impl Brain {
             Activity::Adventure,
             self.adventure(v, content, &s, decision, banking)?,
         ))
+    }
+
+    fn committed(&self, v: &PlayerView) -> bool {
+        self.agreement.is_some()
+            || self.companion.is_some()
+            || self.group.is_some()
+            || self.proposing
+            || self
+                .offered
+                .as_ref()
+                .is_some_and(|o| o.until > v.elapsed_ms)
+            || self.mind.social.gift_active()
+            || self.mind.market.reserves_stock()
     }
 
     /// Safety always outranks any activity: retreat, dodge, or leave for the Nexus.
@@ -1235,6 +1294,9 @@ impl Brain {
                 ));
             }
         }
+        let committed = self.committed(v);
+        let intentions = self.mind.intentions.as_ref().expect("observed intentions");
+        choices.retain(|(_, goal, _)| intentions.eligible(v, goal, committed));
         let witnessed_portal = self.witnessed_portal(v, content, &choices, range);
         if let Some(portal) = witnessed_portal {
             let position = v
@@ -1304,12 +1366,29 @@ impl Brain {
                 } else {
                     64.
                 } + self.profile.companions;
-                if !choices.iter().any(|(s, _, _)| *s > score)
+                if self
+                    .mind
+                    .intentions
+                    .as_ref()
+                    .expect("observed intentions")
+                    .eligible(v, &Goal::Follow(marker.id), committed)
+                    && !choices.iter().any(|(s, _, _)| *s > score)
                     && peaceful
                     && distance > 24.
                     && v.map.allow_teleport
                     && v.time_ms >= self.next_teleport
                 {
+                    self.mind
+                        .intentions
+                        .as_mut()
+                        .expect("observed intentions")
+                        .selected(
+                            v,
+                            content,
+                            &Goal::Follow(marker.id),
+                            committed,
+                            self.mind.future_class,
+                        )?;
                     self.next_teleport = v.time_ms + 10000;
                     decision.goal = Goal::Follow(marker.id);
                     decision.journey = Some(Journey::Regroup(marker.id));
@@ -1343,6 +1422,11 @@ impl Brain {
             } else {
                 self.hunting = None;
             }
+        }
+        let intentions = self.mind.intentions.as_ref().expect("observed intentions");
+        choices.retain(|(_, goal, _)| intentions.eligible(v, goal, committed));
+        for (score, goal, _) in &mut choices {
+            *score += intentions.bonus(v, goal);
         }
         // Exploration's maximum score is 20; a clear higher-ranked route makes its full-map search irrelevant.
         if !choices.iter().any(|(score, goal, position)| {
@@ -1539,6 +1623,11 @@ impl Brain {
                 }
                 self.crowd.approach_selected(id);
             }
+            self.mind
+                .intentions
+                .as_mut()
+                .expect("observed intentions")
+                .selected(v, content, &goal, committed, self.mind.future_class)?;
             decision.goal = goal;
             decision.movement = movement;
             if (self.agreement.is_some()
