@@ -25,6 +25,8 @@ mod events;
 mod intentions;
 
 #[cfg(test)]
+mod adventure_tests;
+#[cfg(test)]
 mod nexus_spacing_tests;
 mod persona;
 mod progression;
@@ -275,6 +277,7 @@ struct Brain {
     next_teleport: u64,
     next_bank: u64,
     inland_reached: bool,
+    godlands: Option<Pos>,
     nexus_until: u64,
     nexus_spot: Option<Pos>,
     portal: Option<(i32, u64)>,
@@ -339,6 +342,7 @@ impl Brain {
             next_teleport: 0,
             next_bank: 0,
             inland_reached: false,
+            godlands: None,
             nexus_until: if view.map.name == "Nexus" {
                 view.time_ms + 10000
             } else {
@@ -857,12 +861,13 @@ impl Brain {
                     .decide(v, &s.grid, self.profile.companions, banking)
         {
             let committed = self.committed(v);
-            if self
-                .mind
-                .intentions
-                .as_ref()
-                .expect("observed intentions")
-                .eligible(v, &social.goal, committed)
+            if (!matches!(social.goal, Goal::Follow(_)) || s.quarry.is_none())
+                && self
+                    .mind
+                    .intentions
+                    .as_ref()
+                    .expect("observed intentions")
+                    .eligible(v, &social.goal, committed)
             {
                 self.mind
                     .intentions
@@ -1146,6 +1151,37 @@ impl Brain {
         if v.map.name == "Realm" && v.position.distance(inland) <= 12. {
             self.inland_reached = true;
         }
+        let farming = v.map.name == "Realm"
+            && events::ready(v, content)
+            && health >= (self.profile.recovery + 0.1).max(0.75);
+        if farming {
+            let reachable = grid.reachable(v.position);
+            if self.godlands.is_none_or(|p| {
+                p.distance(v.position) <= 2.
+                    || self.blocked.contains_key(&tile(p))
+                    || !reachable.contains(&tile(p))
+            }) {
+                // Retain a discovered hunting destination until arrival, not a new orbit every step.
+                self.godlands = v
+                    .tiles
+                    .iter()
+                    .filter(|t| matches!(t.ground, 0x60 | 0x6a))
+                    .map(|t| (t.x, t.y))
+                    .filter(|t| !self.blocked.contains_key(t) && reachable.contains(t))
+                    .filter(|t| center(*t).distance(v.position) > 8.)
+                    .min_by(|a, b| {
+                        self.visits.get(a).cmp(&self.visits.get(b)).then_with(|| {
+                            center(*a)
+                                .distance(v.position)
+                                .total_cmp(&center(*b).distance(v.position))
+                        })
+                    })
+                    .map(center);
+            }
+            if let Some(ground) = self.godlands {
+                choices.push((60. + self.profile.resources, Goal::Venture, ground));
+            }
+        }
         if v.map.name == "Realm" && progression::ready(v, content, 0x718) && !self.inland_reached {
             choices.push((60. + self.profile.resources, Goal::Venture, inland));
         }
@@ -1168,6 +1204,16 @@ impl Brain {
                     0.
                 };
             choices.push((score, Goal::Fight(enemy.id), enemy.position));
+            if farming
+                && content.objects[&enemy.kind].god
+                && content.objects[&enemy.kind].terrain == 1
+            {
+                choices.push((
+                    76. + self.profile.resources,
+                    Goal::Hunt(enemy.id),
+                    enemy.position,
+                ));
+            }
             if events::shared(&v.map.name)
                 && progression::vulnerable(enemy)
                 && events::objective(enemy.kind)
@@ -1342,6 +1388,7 @@ impl Brain {
                 !self.blocked.contains_key(&tile(position))
             })
             && let Some(peer) = &recent_company
+            && peer.position.distance(v.position) > 7.
         {
             choices.push((
                 80. + self.profile.companions,
@@ -1355,12 +1402,18 @@ impl Brain {
         if self.agreement.is_none()
             && self.companion.is_none()
             && recent_company.is_none()
+            && !choices
+                .iter()
+                .any(|(_, goal, _)| matches!(goal, Goal::Venture))
+            && crowds::cooperative_available(&choices, v.position, range, |position| {
+                !self.blocked.contains_key(&tile(position))
+            })
             && let Some(marker) = self.crowd.destination(v, self.group.as_ref(), |position| {
                 !self.blocked.contains_key(&tile(position))
             })
         {
             let distance = marker.position.distance(v.position);
-            if distance > 7. || self.crowd.keeping_company(marker.id) {
+            if distance > 7. {
                 let score = if self.crowd.keeping_company(marker.id) {
                     80.
                 } else {

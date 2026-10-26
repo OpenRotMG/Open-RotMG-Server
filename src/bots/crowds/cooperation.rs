@@ -230,7 +230,7 @@ pub(in crate::bots) fn available(
     !choices.iter().any(|(score, goal, target)| {
         eligible_position(*target)
             && (*score >= 95.
-                || matches!(goal, Goal::Loot(_))
+                || matches!(goal, Goal::Loot(_) | Goal::Hunt(_))
                 || matches!(goal, Goal::Fight(_)) && position.distance(*target) < range)
     })
 }
