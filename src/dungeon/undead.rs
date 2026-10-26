@@ -290,6 +290,93 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
     #[test]
+    fn arrival_room_bounds_doorway_and_map_metadata() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            let (sx, sy) = map.spawns[0];
+            let (sx, sy) = (sx as i32, sy as i32);
+            let cell = |x, y| &map.cells[(y * map.width + x) as usize];
+            let region = cell(sx + 1, sy).region;
+            assert!(region >= 3);
+            let sites: Vec<_> = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.region == region || c.region == 1)
+                .map(|(i, _)| (i as i32 % map.width, i as i32 / map.width))
+                .collect();
+            let left = sites.iter().map(|p| p.0).min().unwrap();
+            let right = sites.iter().map(|p| p.0).max().unwrap();
+            let top = sites.iter().map(|p| p.1).min().unwrap();
+            let bottom = sites.iter().map(|p| p.1).max().unwrap();
+            let (width, height) = (right - left + 1, bottom - top + 1);
+            let round = cell(left, top).region != region;
+            assert!((13..=21).contains(&width) && (13..=21).contains(&height));
+            if round {
+                assert_eq!((width, height), (17, 17));
+            }
+            assert_eq!((sx, sy), (left + width / 2, top + height / 2));
+            for y in top..=bottom {
+                for x in left..=right {
+                    assert_eq!(
+                        cell(x, y).region == region || cell(x, y).region == 1,
+                        !round || (x - sx).pow(2) + (y - sy).pow(2) <= 64,
+                        "seed {seed}, arrival mask at ({x}, {y})"
+                    );
+                }
+            }
+            let mut objects = BTreeMap::new();
+            for &(x, y) in &sites {
+                if let Some(kind) = cell(x, y).object {
+                    *objects.entry(kind).or_insert(0) += 1;
+                }
+            }
+            assert_eq!(
+                objects,
+                BTreeMap::from([(0x703, 1), (0x1801, 1), (0x1802, 1)])
+            );
+            assert_eq!(map.spawns, vec![(sx as f32 + 0.5, sy as f32 + 0.5)]);
+            assert_eq!(map.cells.iter().filter(|c| c.region == 1).count(), 1);
+            assert!(
+                map.cells
+                    .iter()
+                    .all(|c| c.terrain == 0 && c.config.is_empty())
+            );
+            let doors: Vec<_> = (top..=bottom)
+                .flat_map(|y| [(left - 1, y), (right + 1, y)])
+                .chain((left..=right).flat_map(|x| [(x, top - 1), (x, bottom + 1)]))
+                .filter(|&(x, y)| cell(x, y).ground != 0xfe)
+                .collect();
+            assert_eq!(doors.len(), 3, "seed {seed}: arrival doorway {doors:?}");
+            let (x, y) = doors[0];
+            let normal = if x < left {
+                (-1, 0)
+            } else if x > right {
+                (1, 0)
+            } else if y < top {
+                (0, -1)
+            } else {
+                (0, 1)
+            };
+            for &(x, y) in &doors {
+                assert!(if normal.0 == 0 {
+                    y == doors[0].1
+                } else {
+                    x == doors[0].0
+                });
+                for step in 0..GAP {
+                    let c = cell(x + normal.0 * step, y + normal.1 * step);
+                    assert_eq!((c.ground, c.object, c.region), (5, None, 0));
+                }
+            }
+            eprintln!(
+                "seed {seed}: arrival {width}x{height}, round={round}, doorway={doors:?}, exterior connector={GAP}x3"
+            );
+        }
+    }
+
+    #[test]
     fn endpoint_motifs_keep_eight_boss_candles_and_connected_room_families() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         assert_eq!(content.grounds[&0x65], content.grounds[&5]);
