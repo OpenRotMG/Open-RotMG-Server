@@ -8,6 +8,47 @@ pub(super) struct Region {
     kinds: Vec<u16>,
 }
 
+#[test]
+fn classic_lowland_population_matches_visible_ground() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    for source in crate::terrain::realms::sources(data).unwrap() {
+        if !source.name().starts_with("classic-world-") {
+            continue;
+        }
+        let map = source.open(&content).unwrap();
+        // Period Low Forest/Low Plains screenshots identify these palettes, unlike generated maps: https://wikiwiki.jp/rmd/%E5%9C%B0%E5%BD%A2
+        for (ground, terrain) in [(0x56, 10), (0x57, 9)] {
+            let cells: Vec<_> = map.cells.iter().filter(|c| c.ground == ground).collect();
+            assert!(!cells.is_empty());
+            assert!(
+                cells.iter().all(|c| c.terrain == terrain),
+                "{} ground {ground:#x}",
+                source.name()
+            );
+        }
+        let mut world = World::new(content.clone(), map).unwrap();
+        world.populate_realm_population().unwrap();
+        for (ground, terrain) in [(0x56, 10), (0x57, 9)] {
+            let members: Vec<_> = world
+                .population
+                .iter()
+                .filter(|s| world.map.cell(s.pos.x, s.pos.y).unwrap().ground == ground)
+                .collect();
+            assert!(
+                !members.is_empty(),
+                "{} ground {ground:#x} has no population",
+                source.name()
+            );
+            assert!(
+                members
+                    .iter()
+                    .all(|s| world.population_terrain(s) == terrain)
+            );
+        }
+    }
+}
+
 impl World {
     pub(super) fn configure_population(&mut self) -> Result<()> {
         ensure!(

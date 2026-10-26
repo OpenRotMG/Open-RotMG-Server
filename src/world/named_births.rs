@@ -35,26 +35,14 @@ impl World {
                 tracing::debug!(owner, kind, "named toss refused: blocked landing");
                 continue;
             }
-            let own = self
-                .entities
-                .values()
-                .filter(|e| e.quest == Some(tag))
-                .count()
-                + self.pending_named(tag, None);
-            let live = self
-                .entities
-                .values()
-                .filter(|e| e.quest == Some(tag) && e.kind == kind)
-                .count()
+            let own = self.quest_entities(tag).count() + self.pending_named(tag, None);
+            let live = self.quest_entities(tag).filter(|e| e.kind == kind).count()
                 + self.pending_named(tag, Some(kind));
             if own >= 32 || live >= maximum {
                 break;
             }
             ensure!(
-                self.entities
-                    .values()
-                    .filter(|e| e.parent.is_some() || e.quest.is_some())
-                    .count()
+                self.summon_entities().count()
                     + self.named_births.len()
                     + self.abyss_pending_count()
                     < 256,
@@ -126,9 +114,8 @@ impl World {
             "admitted named landing became blocked"
         );
         let old = self
-            .entities
-            .values()
-            .filter(|e| e.quest == Some(birth.tag) && e.kind == birth.kind)
+            .quest_entities(birth.tag)
+            .filter(|e| e.kind == birth.kind)
             .map(|e| e.id)
             .collect::<BTreeSet<_>>();
         self.quest_birth(
@@ -139,9 +126,8 @@ impl World {
             0.,
         )?;
         let mut born = self
-            .entities
-            .values()
-            .filter(|e| e.quest == Some(birth.tag) && e.kind == birth.kind && !old.contains(&e.id))
+            .quest_entities(birth.tag)
+            .filter(|e| e.kind == birth.kind && !old.contains(&e.id))
             .map(|e| e.id);
         let id = born
             .next()
@@ -150,6 +136,7 @@ impl World {
             born.next().is_none(),
             "one named toss created multiple entities"
         );
+        drop(born);
         self.configure_landmark_child(id);
         tracing::debug!(
             owner = birth.owner,

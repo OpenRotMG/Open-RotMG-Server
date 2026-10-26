@@ -403,7 +403,8 @@ impl Intentions {
                     .filter(|k| **k >= 0)
                     .all(|k| matches!(*k, 0xa22..=0xa23) || self.speed() && *k == 0xa21)
             }),
-            Goal::Follow(_) => self.speed(),
+            // Company is a detour from leveling and fame too, not a substitute for progress.
+            Goal::Follow(_) => true,
             Goal::Portal(id) if v.map.name == "Realm" => {
                 v.objects.iter().find(|p| p.id == *id).is_some_and(|p| {
                     crate::dungeon::DUNGEONS

@@ -11,6 +11,8 @@ pub const SPAWNER: u16 = 0xe28;
 pub const DART: u16 = 0xe25;
 pub const GUARD_RAGE_HP: i32 = 3300;
 const TREASURE_ENTRY_RISE: i32 = 12;
+// Keep bounds and darts on the eleven-tile rails of this later inactive template: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/maps/wmap%27s/snakepit%20treasure%20test.wmap
+const TREASURE_HALF_WIDTH: i32 = 5;
 
 // The modified 7.0 server provides explicit timings, not an authenticated 123.5.1 AI script.
 pub fn phase(elapsed: u64) -> (u64, u64) {
@@ -115,7 +117,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         let half: Vec<(i32, i32)> = (0..rooms.len())
             .map(|i| match i {
                 6 => (15, 15),
-                i if i >= ordinary => (7, 16),
+                i if i >= ordinary => (TREASURE_HALF_WIDTH, 16),
                 _ => {
                     let r = rng.gen_range(7..=9);
                     (r, r)
@@ -317,11 +319,11 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
             && x.abs()
                 <= match y {
                     ..=-11 | 7..=9 => 2,
-                    _ => 7,
+                    _ => TREASURE_HALF_WIDTH,
                 }
     };
     for dy in -16i32..=16 {
-        for dx in -7i32..=7 {
+        for dx in -TREASURE_HALF_WIDTH..=TREASURE_HALF_WIDTH {
             if !inside(dx, dy) {
                 continue;
             }
@@ -340,7 +342,7 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
     map.cells[((cy - 12) * map.width + cx) as usize].object = Some(BUTTON);
     map.cells[(cy * map.width + cx) as usize].object = Some(SPAWNER);
     for dy in [-4, -2, 0, 2, 4] {
-        for dx in [-7, 7] {
+        for dx in [-TREASURE_HALF_WIDTH, TREASURE_HALF_WIDTH] {
             map.cells[((cy + dy) * map.width + cx + dx) as usize].object = Some(DART);
         }
     }
@@ -370,7 +372,7 @@ mod tests {
                         && x.abs()
                             <= match y {
                                 ..=-11 | 7..=9 => 2,
-                                _ => 7,
+                                _ => 5,
                             }
                 };
                 assert!(cx > 7 && cy > 16 && cy + 16 < map.height - 1);
@@ -378,9 +380,11 @@ mod tests {
                     for dx in -7..=7 {
                         let cell = &map.cells[((cy + dy) * map.width + cx + dx) as usize];
                         assert_eq!(
-                            cell.ground != 0xff,
+                            matches!(cell.ground, 0x32 | 0xca | 0xc3),
                             inside(dx, dy),
-                            "seed {seed} outline {dx},{dy}"
+                            "seed {seed}, spawner {cx},{cy}, map {}x{}, outline {dx},{dy}",
+                            map.width,
+                            map.height
                         );
                         if !inside(dx, dy) {
                             continue;
@@ -400,6 +404,15 @@ mod tests {
                     map.cells[((cy - 12) * map.width + cx) as usize].object,
                     Some(BUTTON)
                 );
+                for dy in [-4, -2, 0, 2, 4] {
+                    for dx in [-5, 5] {
+                        assert_eq!(
+                            map.cells[((cy + dy) * map.width + cx + dx) as usize].object,
+                            Some(DART),
+                            "seed {seed} dart {dx},{dy}"
+                        );
+                    }
+                }
             }
         }
         assert!(treasures > 0);

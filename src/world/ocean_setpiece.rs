@@ -137,7 +137,7 @@ impl World {
             vec![],
         )?;
         let e = self.entities.get_mut(&root).unwrap();
-        e.quest = Some(root);
+        e.quest.set(Some(root), root, &mut self.quest_ids);
         e.stage = Some(0);
         e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
         e.extra_stats = vec![(61, 2)];
@@ -154,7 +154,7 @@ impl World {
                 .with_context(|| format!("Hermit spawner placement failed at offset {x},{y}"))?;
             let e = self.entities.get_mut(&id).unwrap();
             e.parent.set(Some(root), id, &mut self.timed_ids);
-            e.quest = Some(root);
+            e.quest.set(Some(root), id, &mut self.quest_ids);
             e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
         }
         for (x, y) in [(11, 7), (20, 7), (8, 13), (20, 19)] {

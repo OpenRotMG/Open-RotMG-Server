@@ -971,7 +971,7 @@ impl World {
                 }
                 _ => continue,
             };
-            let tag = match e.quest {
+            let tag = match *e.quest {
                 Some(tag) => tag,
                 None => e.id,
             };
