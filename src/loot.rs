@@ -979,9 +979,9 @@ fn bonus(kind: u16) -> &'static [(f64, u16)] {
         0x651 => &[(0.01, 0xa1f)],
         // Native's 1.5% follows period testimony, not the later 2% table: https://discord.com/channels/1558662335076376578/1558662336439386185/1563889316432973895
         0x652 | 0x657 | 0xd05 | 0x905..=0x907 => &[(0.015, 0xa1f)],
-        0x659 => &[(0.015, 0xa21)],
+        // Djinn uses Kithio's qualified 1.5% roll, not the reconstructed 2%: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Mountain.cs#L334-L343
+        0x659 | 0x91a => &[(0.015, 0xa21)],
         0x654 => &[(0.01, 0xa21)],
-        0x91a => &[(0.02, 0xa21)],
         0x655 | 0x658 => &[(0.015, 0xa20)],
         0x656 => &[(0.01, 0xa20)],
         0x6d8 => &[(0.025, 0xa20)],
@@ -1069,13 +1069,12 @@ fn independent(kind: u16) -> bool {
         )
         || matches!(kind, 0x651..=0x659 | 0xd05 | 0x91a | 0x6d8 | 0xd56 | 0xd59)
 }
-/// Stat potions from these Realm gods need the wiki's soulbound damage; other god loot needs any hit.
+/// Realm god potions need 18% of selected max HP; other god loot needs any hit.
 pub(crate) fn potion_damage(kind: u16) -> Option<i32> {
     match kind {
-        0x651 | 0x655 | 0x657..=0x659 => Some(180),
+        0x651 | 0x655 | 0x657..=0x659 | 0x91a => Some(180),
         0x656 => Some(270),
         0x652 | 0x654 | 0x6d8 | 0xd05 => Some(360),
-        0x91a => Some(0),
         _ => None,
     }
 }
@@ -1657,6 +1656,27 @@ mod tests {
         assert_eq!(bonus(0x651), &[(0.01, 0xa1f)]);
         assert_eq!(potion_damage(0x651), Some(180));
         assert!(private(0x651));
+    }
+
+    #[test]
+    fn djinn_speed_uses_a_one_and_half_percent_private_roll() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let boundary = (0.015 * u64::MAX as f64) as u64;
+        let mask = !u64::from(u32::MAX);
+        for roll in [
+            boundary & mask,
+            (boundary + (1 << 32)) & mask,
+            ((0.0175 * u64::MAX as f64) as u64) & mask,
+        ] {
+            let items = rewards(&content, 0x91a, &mut StepRng::new(roll, 0));
+            assert_eq!(
+                items.contains(&0xa21),
+                roll < boundary,
+                "Djinn Speed at random sample {roll}"
+            );
+        }
+        assert_eq!(bonus(0x91a), &[(0.015, 0xa21)]);
+        assert!(private(0x91a));
     }
 
     #[test]
