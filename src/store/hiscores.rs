@@ -111,11 +111,14 @@ impl Store {
                     row["quests"]=total.checked_add(c.lifetime.qualified_quests).context("quest total overflow")?.into();
                 }
             }
+            let mut living = Vec::new();
             for c in characters.values().filter(|c| c.alive) {
                 if let Some(row)=records.get_mut(&c.account) {
                     ensure!(c.fame >= 0, "negative persisted fame for character {}", c.id);
                     let best=row["base_fame"].as_i64().context("invalid best fame")?;
                     if i64::from(c.fame)>best {row["base_fame"]=c.fame.into();}
+                    // Equipment only: inventories stay private.
+                    living.push(serde_json::json!({"account":c.account,"id":c.id,"class":c.class,"level":c.level,"exp":c.exp,"fame":c.fame,"stats":c.base,"equipment":c.items.get(..4).context("character without equipment slots")?,"tex1":c.tex1,"tex2":c.tex2,"created_at":c.created_at}));
                 }
             }
             {
@@ -125,7 +128,26 @@ impl Store {
                 }
             }
             tx.commit()?;
-            Ok(serde_json::json!({"updated_at":now()?,"players":records.into_values().collect::<Vec<_>>()}))
+            Ok(serde_json::json!({"updated_at":now()?,"players":records.into_values().collect::<Vec<_>>(),"characters":living}))
+        }).await
+    }
+    /// Player deaths from `since` (inclusive), oldest first, at most 500; bots and non-competitors never appear.
+    pub async fn graveyard(&self, since: i64) -> Result<serde_json::Value> {
+        let legacy_base = self.legacy_base;
+        self.call(move |db| {
+            let tx=db.transaction()?;
+            let mut deaths=Vec::new();
+            {
+                let mut q=tx.prepare("SELECT d.snapshot,d.receipt,d.killed_by,d.died_at FROM deaths d JOIN characters c ON c.id=d.character JOIN competitors k ON k.account=c.account WHERE d.died_at>=?1 AND NOT EXISTS(SELECT 1 FROM shore_bots b WHERE b.account=c.account) ORDER BY d.died_at,d.character LIMIT 500")?;
+                for row in q.query_map([since],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?)))? {
+                    let (raw,paid,killed_by,died_at)=row?;
+                    let receipt=death_awards::decode_receipt(&paid)?;
+                    let c=receipt.character(&raw,legacy_base)?;
+                    deaths.push(serde_json::json!({"account":c.account,"id":c.id,"name":c.name,"class":c.class,"level":c.level,"base_fame":receipt.base,"total_fame":receipt.total,"died_at":died_at,"killed_by":killed_by,"equipment":c.items.get(..4).context("death without equipment slots")?,"tex1":c.tex1,"tex2":c.tex2}));
+                }
+            }
+            tx.commit()?;
+            Ok(serde_json::json!({"deaths":deaths}))
         }).await
     }
     pub async fn collection(&self, account: i32) -> Result<serde_json::Value> {
@@ -143,6 +165,81 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn characters_and_graveyard_list_only_competing_players() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "graveyard-{}-{}.db",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let store = Store::open(&path, &content).unwrap();
+        let mut owners = Vec::new();
+        for name in ["Player", "Shorebot", "Outsider"] {
+            let id = store
+                .register(
+                    format!("graveyard-{name}"),
+                    format!("{name}@example.invalid"),
+                    "fixture-password".into(),
+                )
+                .await
+                .unwrap();
+            store.choose_name(id, name.into()).await.unwrap();
+            if name != "Outsider" {
+                store.compete(id).await.unwrap();
+            }
+            owners.push(id);
+        }
+        let bot = owners[1];
+        store
+            .call(move |db| {
+                db.execute(
+                    "INSERT INTO shore_bots(name,account) VALUES('fixture',?1)",
+                    [bot],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut live = Vec::new();
+        for owner in owners.iter().copied() {
+            // Each account has one slot, so the death comes first and frees it.
+            for alive in [false, true] {
+                let mut ch = store
+                    .create(owner, content.get(WIZARD).unwrap())
+                    .await
+                    .unwrap();
+                ch.level = 20;
+                ch.exp = 20000;
+                ch.fame = 70;
+                store.progress(ch.clone()).await.unwrap();
+                if alive {
+                    ch.fame = 90;
+                    live.push(ch);
+                } else {
+                    ch.alive = false;
+                    ch.hp = 0;
+                    store.death(ch, "fixture".into()).await.unwrap();
+                }
+            }
+        }
+        // Live world state wins over saved fame, and bots stay out even when online.
+        let scores = store.hiscores(live.clone()).await.unwrap();
+        let characters = scores["characters"].as_array().unwrap();
+        assert_eq!(characters.len(), 1);
+        assert_eq!(characters[0]["id"], live[0].id);
+        assert_eq!(characters[0]["fame"], 90);
+        assert_eq!(characters[0]["equipment"].as_array().unwrap().len(), 4);
+        let deaths = store.graveyard(0).await.unwrap();
+        let deaths = deaths["deaths"].as_array().unwrap();
+        assert_eq!(deaths.len(), 1);
+        assert_eq!(deaths[0]["account"], owners[0]);
+        assert_eq!(deaths[0]["base_fame"], 70);
+        assert_eq!(deaths[0]["killed_by"], "fixture");
+        let later = store.graveyard(i64::MAX).await.unwrap();
+        assert!(later["deaths"].as_array().unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn star_hiscores_match_retained_class_bests_not_wallet_or_uncommitted_fame() {
