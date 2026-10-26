@@ -629,12 +629,10 @@ impl Piece {
                     }
                     p = p.rotate();
                 }
-                let seed = rng.r#gen();
+                let erosion = super::skull_erosion::SkullErosion::new(rng.r#gen());
                 for x in 0..33 {
                     for y in 0..33 {
-                        if crate::terrain::noise(seed, x as f64 / 33. * 8., y as f64 / 33. * 8.)
-                            < 0.2
-                        {
+                        if erosion.erodes(x, y) {
                             p.set(x, y, 0);
                         }
                     }
@@ -1659,7 +1657,7 @@ mod tests {
     #[test]
     fn unpainted_event_roots_require_safe_native_admission() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        for (kind, seed, birth) in [(0xd5f, 12351, 0), (0xd56, 6, 0), (0xd56, 0, 4)] {
+        for (kind, seed, birth) in [(0xd5f, 12351, 0), (0xd56, 116, 0), (0xd56, 0, 4)] {
             let piece = Piece::build(kind, &mut rand::rngs::StdRng::seed_from_u64(seed));
             assert_eq!(
                 piece.cells[piece.boss.1 * piece.width + piece.boss.0],

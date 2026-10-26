@@ -95,8 +95,8 @@ fn event_factory_retains_unpainted_root_cells() {
                 (index, (id, world.cells.ids(index + 15)[0]))
             })
             .collect();
-        // Seed 6 erodes the first Skull's birth cell without fabricating a stencil hole.
-        world.rng = rand::rngs::StdRng::seed_from_u64(6);
+        // Seed 116 exercises both eroded and painted births without fabricating a stencil hole.
+        world.rng = rand::rngs::StdRng::seed_from_u64(116);
         world.populate_realm_events().unwrap();
         assert_eq!(world.setpieces.len(), 6);
         assert_eq!(world.event_sites.len(), 6);
