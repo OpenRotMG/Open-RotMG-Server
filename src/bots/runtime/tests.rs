@@ -179,6 +179,7 @@ async fn incoming_window(
     drain(app, brain, output).await;
     assert!(brain.mind.market.incoming.is_some());
     for _ in 0..2 {
+        advance(app, 400).await;
         let view = app.world.player_view(id).await.unwrap();
         assert!(
             decide_before_social(app, brain, &view)
@@ -300,6 +301,7 @@ async fn runtime_market_empty_offer_has_bounded_negotiation_then_releases_contro
     assert!(logs.records().iter().any(|r| r["fields"]["message"]
         == "market speech unavailable: dialogue service disabled; no substitute speech"));
     drain(&app, &mut brain, &mut output).await;
+    advance(&app, 400).await;
     let view = app.world.player_view(id).await.unwrap();
     assert!(
         decide_before_social(&app, &mut brain, &view)
@@ -456,6 +458,7 @@ async fn runtime_market_peer_disconnect_or_death_closes_unaccepted_window() {
             "only committed death removes saved character"
         );
         drain(&app, &mut brain, &mut output).await;
+        advance(&app, 400).await;
         let view = app.world.player_view(id).await.unwrap();
         assert!(
             decide_before_social(&app, &mut brain, &view)
@@ -542,6 +545,7 @@ async fn runtime_market_accepted_commit_is_settled_before_controller_reassessmen
             items: p.items.clone(),
         })
         .collect();
+    advance(&app, 400).await;
     let busy = app.world.player_view(id).await.unwrap();
     assert!(busy.lifecycle.busy);
     assert!(
