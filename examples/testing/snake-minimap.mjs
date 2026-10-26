@@ -18,7 +18,8 @@ export async function run(game) {
   const hidden=walls.filter(e=>!known.has(`${Math.floor(e.pos.x)},${Math.floor(e.pos.y)}`));
   game.check('intact walls hide deeper tunnel tiles',hidden.length>0);
   game.check('hidden walls are not streamed as objects',hidden.every(e=>!view.view.objects.some(o=>o.id===e.id)));
-  const wall=view.view.objects.filter(e=>e.kind===0x172&&Math.abs(e.position.x-view.view.position.x)<0.6&&e.position.y<view.view.position.y).sort((a,b)=>b.position.y-a.position.y)[0];
+  const distance=e=>Math.hypot(e.position.x-view.view.position.x,e.position.y-view.view.position.y);
+  const wall=view.view.objects.filter(e=>e.kind===0x172).sort((a,b)=>distance(a)-distance(b))[0];
   game.check('near soft wall is visible',Boolean(wall));
   const before=await game.observe();
   await game.act({keys:[],duration_ms:2000,target:{entity:wall.id,camera_angle:7*Math.PI/4,fire:true}});
