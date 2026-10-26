@@ -317,10 +317,11 @@ mod tests {
             let bottom = sites.iter().map(|p| p.1).max().unwrap();
             let (width, height) = (right - left + 1, bottom - top + 1);
             let round = cell(left, top).region != region;
-            assert!((13..=21).contains(&width) && (13..=21).contains(&height));
-            if round {
-                assert_eq!((width, height), (17, 17));
-            }
+            assert!(
+                round,
+                "seed {seed}: arrival inherited an ordinary rectangle"
+            );
+            assert_eq!((width, height), (17, 17));
             assert_eq!((sx, sy), (left + width / 2, top + height / 2));
             for y in top..=bottom {
                 for x in left..=right {
