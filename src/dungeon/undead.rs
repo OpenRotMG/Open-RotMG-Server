@@ -56,9 +56,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         // Broader chambers relieve crowding without adding long corridors: https://web.archive.org/web/20120425182543/http://forums.wildshadow.com/wiki/realm-mad-god/undead-lair
         let w = if round { 17 } else { rng.gen_range(13..=21) };
         let h = if round { w } else { rng.gen_range(13..=21) };
-        // Independent 2012 entrances are rounded; the existing 17-cell size remains reconstructed.
+        // Compact arrival with pillar/candle groups: https://www.youtube.com/watch?v=SXTEcrN4bII&t=46s (11-cell raster is a later-map reconstruction, not recovered 123.5.1 dimensions).
         let (w, h, round) = if entrance.is_none() && rooms.iter().any(|r| r.depth == 9) {
-            (17, 17, true)
+            (11, 11, true)
         } else {
             (w, h, round)
         };
@@ -175,12 +175,17 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         for y in room.y..room.y + room.h {
             for x in room.x..room.x + room.w {
                 let (dx, dy) = (x - cx, y - cy);
-                if room.round && dx * dx + dy * dy > (room.w / 2).pow(2) {
+                let radius = dx * dx + dy * dy;
+                let limit = if number == entrance {
+                    32
+                } else {
+                    (room.w / 2).pow(2)
+                };
+                if room.round && radius > limit {
                     continue;
                 }
                 let i = (y * width + x) as usize;
                 map.cells[i].region = number as u8 + 2; // room identity, region 1 marks the spawn
-                let radius = dx * dx + dy * dy;
                 map.cells[i].ground = if number == 0 && (13..=18).contains(&radius)
                     || (number == 0 || number == entrance) && radius <= 1
                 {
@@ -244,7 +249,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     map.spawns.push((sx as f32 + 0.5, sy as f32 + 0.5));
     // The 2012 footage shows dark endpoint motifs and eight boss candles: https://www.youtube.com/watch?v=SXTEcrN4bII&t=237s (tile raster reconstructed, not an original template).
     for (endpoint, x, y) in [("entrance", sx, sy), ("boss", bx, by)] {
-        let candles: &[(i32, i32, u16)] = if endpoint == "boss" {
+        let decorations: &[(i32, i32, u16)] = if endpoint == "boss" {
             &[
                 (-4, 0, 0x1802),
                 (4, 0, 0x1802),
@@ -256,14 +261,31 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 (3, 3, 0x1802),
             ]
         } else {
-            &[(-2, 0, 0x1801), (2, 0, 0x1802)]
+            &[
+                (-3, -3, 0x17b),
+                (3, -3, 0x17b),
+                (-3, 3, 0x17b),
+                (3, 3, 0x17b),
+                (-4, -3, 0x1801),
+                (4, -3, 0x1801),
+                (-4, 3, 0x1801),
+                (4, 3, 0x1801),
+                (-3, -4, 0x1802),
+                (3, -4, 0x1802),
+                (-3, 4, 0x1802),
+                (3, 4, 0x1802),
+                (-4, -4, 0x1801),
+                (4, -4, 0x1801),
+                (-4, 4, 0x1801),
+                (4, 4, 0x1801),
+            ]
         };
-        for &(dx, dy, kind) in candles {
+        for &(dx, dy, kind) in decorations {
             let (x, y) = (x + dx, y + dy);
             let cell = &mut map.cells[(y * width + x) as usize];
             ensure!(
                 matches!(cell.ground, 5 | 0x65 | 0xd4) && cell.object.is_none(),
-                "Undead Lair seed {seed}: {endpoint} candle requires empty floor at ({x}, {y}); ground={:#x}, object={:?}, region={}",
+                "Undead Lair seed {seed}: {endpoint} decoration requires empty floor at ({x}, {y}); ground={:#x}, object={:?}, region={}",
                 cell.ground,
                 cell.object,
                 cell.region
@@ -327,13 +349,13 @@ mod tests {
                 round,
                 "seed {seed}: arrival inherited an ordinary rectangle"
             );
-            assert_eq!((width, height), (17, 17));
+            assert_eq!((width, height), (11, 11));
             assert_eq!((sx, sy), (left + width / 2, top + height / 2));
             for y in top..=bottom {
                 for x in left..=right {
                     assert_eq!(
                         cell(x, y).region == region || cell(x, y).region == 1,
-                        !round || (x - sx).pow(2) + (y - sy).pow(2) <= 64,
+                        (x - sx).pow(2) + (y - sy).pow(2) <= 32,
                         "seed {seed}, arrival mask at ({x}, {y})"
                     );
                 }
@@ -346,7 +368,7 @@ mod tests {
             }
             assert_eq!(
                 objects,
-                BTreeMap::from([(0x703, 1), (0x1801, 1), (0x1802, 1)])
+                BTreeMap::from([(0x17b, 4), (0x703, 1), (0x1801, 8), (0x1802, 4)])
             );
             assert_eq!(map.spawns, vec![(sx as f32 + 0.5, sy as f32 + 0.5)]);
             assert_eq!(map.cells.iter().filter(|c| c.region == 1).count(), 1);
@@ -451,10 +473,16 @@ mod tests {
                         .any(|f| actors.iter().all(|k| f.contains(k)))
                 );
             }
-            let passable = |x, y| {
+            let floor = |x, y| {
                 (0..map.width).contains(&x)
                     && (0..map.height).contains(&y)
                     && cell(x, y).ground != 0xfe
+            };
+            let passable = |x, y| {
+                floor(x, y)
+                    && cell(x, y)
+                        .object
+                        .is_none_or(|kind| !content.objects[&kind].blocks)
             };
             let mut seen = BTreeSet::from([spawn]);
             let mut queue = VecDeque::from([spawn]);
@@ -468,9 +496,9 @@ mod tests {
             for y in 1..map.height - 1 {
                 for x in 1..map.width - 1 {
                     assert!(
-                        passable(x, y)
-                            || !(passable(x - 1, y) && passable(x + 1, y)
-                                || passable(x, y - 1) && passable(x, y + 1)),
+                        floor(x, y)
+                            || !(floor(x - 1, y) && floor(x + 1, y)
+                                || floor(x, y - 1) && floor(x, y + 1)),
                         "seed {seed}: chambers share a single wall at ({x}, {y})"
                     );
                 }
@@ -478,7 +506,11 @@ mod tests {
             assert!(seen.contains(&boss));
             assert_eq!(
                 seen.len(),
-                map.cells.iter().filter(|c| c.ground != 0xfe).count(),
+                map.cells
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| passable(*i as i32 % map.width, *i as i32 / map.width))
+                    .count(),
                 "seed {seed}"
             );
         }
