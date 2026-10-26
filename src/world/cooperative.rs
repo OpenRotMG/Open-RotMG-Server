@@ -105,6 +105,7 @@ impl World {
         // Abyss dungeon anchoring relies on player teleports: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
         matches!(
             self.name.as_str(),
+            // Build 123.0.0 exposes Nexus Teleport: https://www.youtube.com/watch?v=Ex_Ix3dlB4U&t=299
             "Nexus"
                 | "Realm"
                 | "Pirate Cave"
@@ -339,6 +340,13 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nexus_keeps_player_teleport_permission() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let d = Directory::test_with_seed(std::path::Path::new("data"), content, 20, 616).unwrap();
+        assert!(d.worlds[&-2].allow_teleport());
+    }
 
     #[tokio::test]
     async fn abyss_teleport_advertises_and_uses_the_guarded_player_path() {
