@@ -104,8 +104,28 @@ async fn name_claims_http_active_persona_stops_and_saves_before_human_publicatio
     crate::bots::start_test(&a, bot.clone(), -2, Pos { x: 77.5, y: 72.5 }, name, owner)
         .await
         .unwrap();
-    registered(&a, "activehuman").await;
+    let human = registered(&a, "activehuman").await;
+    let cleared_before_publication = Arc::new(AtomicBool::new(false));
+    let observed = cleared_before_publication.clone();
+    let cctv = a.cctv.clone();
+    a.store
+        .lifecycle_test_job(move |db| {
+            db.update_hook(Some(
+                move |action: rusqlite::hooks::Action, _: &str, table: &str, row: i64| {
+                    if action == rusqlite::hooks::Action::SQLITE_UPDATE
+                        && table == "accounts"
+                        && row == i64::from(human)
+                    {
+                        observed.store(cctv.binding(name).is_none(), Ordering::SeqCst);
+                    }
+                },
+            ));
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(request(&a, "activehuman", name).await, "<Success/>");
+    assert!(cleared_before_publication.load(Ordering::SeqCst));
     assert!(!a.owners.lock().unwrap().contains_key(&bot.account));
     a.world
         .directory(move |d| {
@@ -790,4 +810,120 @@ async fn name_claims_ambiguous_human_owners_are_errors_not_arbitrary_social_or_g
             0
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn name_claims_wait_for_an_accepted_autonomous_transfer_before_releasing_the_name() {
+    let (dir, a) = test_app();
+    a.world.clock.set_paused(true);
+    let name = crate::bots::profiles()[0];
+    let bot = persona(&a, name).await;
+    let human = registered(&a, "transferhuman").await;
+    let (source, position) = a
+        .world
+        .directory(|d| {
+            let source = d.instance(
+                "snake-pit",
+                None,
+                Some(crate::world::DungeonReturn::Realm(1)),
+            )?;
+            let w = d.worlds.get_mut(&source).unwrap();
+            let (x, y) = w.map.spawns[0];
+            let position = Pos {
+                x: x as f32 + 0.5,
+                y: y as f32 + 0.5,
+            };
+            w.spawn_entity(0x71d, position, vec![])?;
+            Ok((source, position))
+        })
+        .await
+        .unwrap();
+    let owner = a.claim(bot.account).unwrap();
+    crate::bots::start_test(&a, bot.clone(), source, position, name, owner)
+        .await
+        .unwrap();
+    let (player, account) = a.cctv.binding(name).unwrap();
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let character = bot.id;
+    a.store
+        .lifecycle_test_job(move |db| {
+            let mut entered = Some(entered);
+            db.update_hook(Some(
+                move |action: rusqlite::hooks::Action, _: &str, table: &str, row: i64| {
+                    if action == rusqlite::hooks::Action::SQLITE_UPDATE
+                        && table == "characters"
+                        && row == i64::from(character)
+                        && let Some(entered) = entered.take()
+                    {
+                        entered.send(()).unwrap();
+                        wait.recv().unwrap();
+                    }
+                },
+            ));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let release = Release(Some(release));
+    a.world.clock.set_paused(false);
+    tokio::time::timeout(std::time::Duration::from_secs(10), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    a.world.clock.set_paused(true);
+    a.world
+        .directory(move |d| {
+            assert!(d.worlds[&source].players[&player].departing);
+            assert!(d.worlds.values().map(|w| w.reserved_slots()).sum::<usize>() > 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let app = a.clone();
+    let claim = tokio::spawn(async move { request(&app, "transferhuman", name).await });
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT name FROM accounts WHERE id=?1", [human], |r| r
+            .get::<_, String>(
+            0
+        ))
+        .unwrap(),
+        format!("Guest{human}")
+    );
+    assert!(!claim.is_finished());
+    drop(release);
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(10), claim)
+            .await
+            .unwrap()
+            .unwrap(),
+        "<Success/>"
+    );
+    assert_eq!(a.cctv.binding(name), None);
+    a.world
+        .directory(move |d| {
+            assert!(
+                !d.worlds
+                    .values()
+                    .any(|w| w.players.values().any(|p| p.character.account == account))
+            );
+            assert_eq!(
+                d.worlds.values().map(|w| w.reserved_slots()).sum::<usize>(),
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(a.store.load(bot.account, bot.id).await.unwrap().alive);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM characters WHERE account=?1",
+            [account],
+            |r| r.get::<_, i32>(0)
+        )
+        .unwrap(),
+        1
+    );
 }

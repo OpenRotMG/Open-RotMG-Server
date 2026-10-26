@@ -96,6 +96,24 @@ pub(super) fn human_name_taken(db: &Connection, name: &str, except: i32) -> Resu
     )?)
 }
 
+pub(super) fn named_account(db: &Connection, name: &str) -> Result<Option<i32>> {
+    // Historical persona rows keep their names after a human claims the active name.
+    let (humans, human, oldest): (i32, Option<i32>, Option<i32>) = db.query_row(
+        "WITH matching AS (
+            SELECT id,NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=accounts.id)
+                OR EXISTS(SELECT 1 FROM credentials WHERE account=accounts.id) AS human
+            FROM accounts WHERE name=?1 COLLATE NOCASE
+        ) SELECT count(*) FILTER(WHERE human),min(id) FILTER(WHERE human),min(id) FROM matching",
+        [name],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    ensure!(
+        humans <= 1,
+        Rejected("Ambiguous human name ownership; contact the server operator.")
+    );
+    Ok(if humans == 1 { human } else { oldest })
+}
+
 fn name_choice_check(
     db: &Connection,
     account: i32,

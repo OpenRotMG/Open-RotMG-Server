@@ -280,7 +280,7 @@ impl Store {
                 }
                 GuildAction::Rank { name, rank } => {
                     let author = member(&tx, account)?;
-                    let target: i32 = tx.query_row("SELECT id FROM accounts WHERE name=?1 COLLATE NOCASE", [name], |r| r.get(0)).optional()?.context("Player not found.")?;
+                    let target = accounts::named_account(&tx, &name)?.context("Player not found.")?;
                     let old = member(&tx, target)?;
                     ensure!(author.id == old.id && allowed_rank(author.rank, old.rank, rank), "You cannot make that guild rank change.");
                     tx.execute("UPDATE guild_members SET rank=?2 WHERE account=?1", params![target,rank])?;
@@ -288,7 +288,7 @@ impl Store {
                 }
                 GuildAction::Remove(name) => {
                     let author = member(&tx, account)?;
-                    let target: i32 = tx.query_row("SELECT id FROM accounts WHERE name=?1 COLLATE NOCASE", [name], |r| r.get(0)).optional()?.context("Player not found.")?;
+                    let target = accounts::named_account(&tx, &name)?.context("Player not found.")?;
                     let old = member(&tx, target)?;
                     ensure!(author.id == old.id && (account == target || (author.rank >= 20 && author.rank > old.rank)), "You cannot remove that guild member.");
                     tx.execute("DELETE FROM guild_members WHERE account=?1", [target])?;
