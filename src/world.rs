@@ -66,6 +66,8 @@ mod ocean_setpiece;
 
 mod population;
 mod population_density;
+#[cfg(test)]
+mod population_reproduction_tests;
 
 mod realm_events;
 mod realm_voice;
