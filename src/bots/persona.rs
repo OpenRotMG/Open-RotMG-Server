@@ -4,6 +4,8 @@ use rand::seq::SliceRandom;
 use serde::Deserialize;
 
 #[cfg(test)]
+mod population_tests;
+#[cfg(test)]
 mod stock_tests;
 use std::sync::LazyLock;
 
@@ -28,7 +30,7 @@ struct Entry {
     role: Role,
 }
 
-/// Historical names/rank bands; exact stars and roles are reconstructed presets, not measured lives.
+/// Referenced names; careers, current lives, gear and wealth are synthetic, not those players' histories.
 pub(crate) static PERSONAS: LazyLock<Vec<Profile>> = LazyLock::new(|| {
     let entries: Vec<Entry> = serde_json::from_str(include_str!("../../data/bot-personas.json"))
         .expect("data/bot-personas.json is a valid persona list");
@@ -118,6 +120,18 @@ pub(super) fn life(
         roster.push(character(content, class, 20, exp, p.stars, rng)?);
     }
     ensure!(left == 0, "{} cannot hold {} stars", p.name, p.stars);
+    // Account fame must not force every adventurer's current character to be level 20.
+    if p.stars > 0 && p.role != Role::Trader && seed(p.identity) % 2 == 1 {
+        let class = roster[0].class;
+        for ch in &mut roster {
+            ch.alive = false;
+            ch.hp = 0;
+            ch.items.fill(-1);
+        }
+        let level = rng.gen_range(1..=19);
+        let exp = level_start(level)? + rng.gen_range(0..experience_goal(level)?);
+        roster.insert(0, character(content, class, level, exp, p.stars, rng)?);
+    }
     let mut needed = BTreeMap::new();
     if p.stars >= 26 {
         // Veteran presets own an unlocked roster, not fabricated kills or deaths.
@@ -196,7 +210,8 @@ fn character(
     for i in MAX_ORDER.into_iter().take(maxed as usize) {
         ch.base[i] = rules.caps[i];
     }
-    let veteran = level == 20;
+    // Experienced accounts can equip a leveling character without granting maxed stats.
+    let veteran = level == 20 || stars >= 26;
     let tiers = [
         if veteran {
             8 + stars / 13
@@ -346,6 +361,26 @@ fn every_persona_gets_a_valid_life_matching_its_stars() {
         assert_eq!(presentation.stars(), p.stars, "{}", p.name);
         for c in &roster {
             c.effective(&content).unwrap();
+            let definition = content.get(c.class).unwrap();
+            for (slot, item) in c.items[..4]
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| **item >= 0)
+            {
+                assert_eq!(
+                    content.get(*item as u16).unwrap().slot_type,
+                    definition.slots[slot]
+                );
+            }
+            for (base, cap) in c.base.iter().zip(content.classes[&c.class].caps) {
+                assert!(*base <= cap, "{} exceeds a class stat cap", p.name);
+            }
+            if c.alive && c.level < 20 {
+                assert!(
+                    (level_start(c.level).unwrap()..level_start(c.level + 1).unwrap())
+                        .contains(&c.exp)
+                );
+            }
             if c.alive {
                 assert!(
                     c.items[..2].iter().all(|item| *item >= 0),
