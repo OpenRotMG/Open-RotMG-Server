@@ -285,7 +285,6 @@ impl Directory {
                     self.worlds[&origin].walkable(pos),
                     "authored Chamber entrance position blocked"
                 );
-                self.reserve_worlds(1, &origins)?;
                 let destination = self.instance(crate::endgame::CHAMBER, None, None)?;
                 let portal =
                     match self
@@ -544,7 +543,6 @@ impl Directory {
     }
     fn replace_realm(&mut self, origin: i32) -> Result<()> {
         self.worlds.get(&origin).context("closing Realm missing")?;
-        self.reserve_worlds(2, &[origin])?;
         let castle = self.make(CASTLE, "Oryx's Castle", false, None)?;
         let realm = self.make("realm-shore", "Realm", false, None)?;
         let next_cycle = RealmCycle::new(realm.hero_identities())?;

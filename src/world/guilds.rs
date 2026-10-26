@@ -211,7 +211,6 @@ impl Directory {
         {
             return Ok(*id);
         }
-        self.reserve_worlds(1, &[])?;
         let mut world = self.make(
             &format!("guild-hall-{}", guild.level),
             "Guild Hall",
