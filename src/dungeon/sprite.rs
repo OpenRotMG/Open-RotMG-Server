@@ -8,7 +8,6 @@ type Point = (i32, i32);
 const DIRECTIONS: [Point; 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 const PITCH: i32 = 16;
 const ROOM: i32 = 6;
-// The preserved map gives Limon a 30-tile platform: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
 const ARENA: i32 = 15;
 
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
@@ -38,7 +37,6 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         rooms.push(pos);
     }
     let reach = |i: usize| if i == boss { ARENA } else { ROOM };
-    // Grid centers stay on paint()'s conveyor origin, with a two-tile void margin.
     let shift = |axis: fn(&Point) -> i32| {
         let low = rooms.iter().enumerate().map(|(i, p)| axis(p) - reach(i));
         12 - PITCH * (10 + low.min().unwrap()).div_euclid(PITCH)
@@ -65,8 +63,6 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         ],
         spawns: vec![],
     };
-    // White stationary floors and compact platforms/two-tile bridges match the preserved map:
-    // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
     for (i, &(cx, cy)) in centers.iter().enumerate() {
         let radius = if i == boss {
             ARENA
@@ -124,6 +120,31 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             );
         }
     }
+    // Reconstruct the irregular bands in this later map, not an authenticated 2012 generator:
+    // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
+    for (i, &(cx, cy)) in centers.iter().enumerate() {
+        let radius = if i == boss { ARENA } else { PITCH / 2 };
+        for _ in 0..rng.gen_range(radius..=radius * 2) {
+            let color = rng.gen_range(0xa1..=0xa4);
+            let length = rng.gen_range(3..=radius * 2 + 1);
+            let thickness = rng.gen_range(1..=3);
+            let (w, h) = if rng.gen_bool(0.5) {
+                (length, thickness)
+            } else {
+                (thickness, length)
+            };
+            let x0 = rng.gen_range(cx - radius..=cx + radius - w + 1);
+            let y0 = rng.gen_range(cy - radius..=cy + radius - h + 1);
+            for y in y0..y0 + h {
+                for x in x0..x0 + w {
+                    let cell = &mut map.cells[(y * width + x) as usize];
+                    if cell.ground != 0xfe && ((x - sx).abs() > 1 || (y - sy).abs() > 1) {
+                        cell.ground = color;
+                    }
+                }
+            }
+        }
+    }
     ensure!(map.spawns.len() == 1, "Sprite World lost its entrance");
     ensure!(
         map.cells.iter().filter(|c| c.object == Some(0xd06)).count() == 1
@@ -144,7 +165,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         seed,
         rooms = rooms.len(),
         gods,
-        floor_pattern = "White",
+        floor_pattern = "SeededBands",
         width,
         height,
         "generated varied Sprite World"
@@ -179,14 +200,7 @@ fn apart(room: Point, arena: Point) -> bool {
 }
 
 fn paint(map: &mut Map, x: i32, y: i32) {
-    map.cells[(y * map.width + x) as usize].ground =
-        match ((x - 12).rem_euclid(8), (y - 12).rem_euclid(8)) {
-            (_, 2) => 0xa1,
-            (_, 3) => 0xa2,
-            (2, _) => 0xa3,
-            (3, _) => 0xa4,
-            _ => 0xa0,
-        };
+    map.cells[(y * map.width + x) as usize].ground = 0xa0;
 }
 
 fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
@@ -208,14 +222,32 @@ mod tests {
             "/data"
         )))
         .unwrap();
+        let mut patterns = BTreeSet::new();
         for seed in 0..16 {
             let map = generate(&content, seed).unwrap();
+            assert_eq!(
+                serde_json::to_value(&map).unwrap(),
+                serde_json::to_value(generate(&content, seed).unwrap()).unwrap()
+            );
+            let (sx, sy) = map.spawns[0];
+            let (sx, sy) = (sx as i32, sy as i32);
+            patterns.insert(
+                (sy - 6..=sy + 6)
+                    .flat_map(|y| (sx - 6..=sx + 6).map(move |x| (x, y)))
+                    .map(|(x, y)| map.cells[(y * map.width + x) as usize].ground)
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(map.cells[(sy * map.width + sx) as usize].ground, 0xa0);
             assert_eq!(
                 map.cells.iter().map(|c| c.ground).collect::<BTreeSet<_>>(),
                 BTreeSet::from([0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xfe]),
                 "seed {seed}"
             );
         }
+        assert!(
+            patterns.len() > 1,
+            "conveyors repeat the same entrance pattern"
+        );
     }
 
     #[test]
