@@ -40,6 +40,8 @@ fn potion_feedback_uses_light_blue_for_mana_and_green_for_health_after_commit() 
                 .apply_condition(id, crate::condition::QUIET, 1000)
                 .unwrap();
         }
+        let p = &world.players[&id];
+        let before = if mana { p.character.mp } else { p.character.hp };
         while received.try_recv().is_ok() {}
         let slot = Slot {
             object: id,
@@ -62,7 +64,7 @@ fn potion_feedback_uses_light_blue_for_mana_and_green_for_health_after_commit() 
         assert_eq!(p.character.revision, 1);
         assert_eq!(
             if mana { p.character.mp } else { p.character.hp },
-            base[usize::from(mana)] - deficit + gain
+            before + gain
         );
         let notifications: Vec<_> = std::iter::from_fn(|| received.try_recv().ok())
             .filter(|packet| matches!(packet.id, wire::NOTIFICATION | wire::SHOW_EFFECT))
