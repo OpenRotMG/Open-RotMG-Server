@@ -78,6 +78,7 @@ mod realm_portal;
 mod realm_quests;
 
 mod realm_setpieces;
+mod sight;
 mod skull_erosion;
 
 mod spider;
@@ -371,6 +372,7 @@ pub struct Player {
     tiles: BTreeSet<(i16, i16)>,
     tile_updates: Vec<(i16, i16, u8)>,
     tile_scan: Option<(i32, i32)>,
+    sight_tiles: Option<BTreeSet<(i16, i16)>>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
     death_lifetime: Option<crate::store::FameLifetime>,
@@ -3186,6 +3188,9 @@ impl World {
             },
         );
         self.index_actor(id);
+        if self.content.objects[&kind].blocks_sight {
+            self.invalidate_sight();
+        }
         Ok(id)
     }
     fn index_actor(&mut self, id: i32) {
@@ -3308,6 +3313,9 @@ impl World {
             self.cells.remove(cell, id),
             "entity absent from spatial index"
         );
+        if self.content.objects[&entity.kind].blocks_sight {
+            self.invalidate_sight();
+        }
         entity
     }
     pub fn map_info(&self) -> Vec<u8> {
@@ -3461,6 +3469,7 @@ impl World {
                 tiles: BTreeSet::new(),
                 tile_updates: vec![],
                 tile_scan: None,
+                sight_tiles: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
                 death_lifetime: None,
@@ -3781,9 +3790,16 @@ impl World {
         self.visible_with(id, self.quest_target(id))
     }
     fn visible_with(&self, id: i32, quest: Option<i32>) -> BTreeSet<i32> {
-        let pos = self.players[&id].pos;
+        let player = &self.players[&id];
+        let pos = player.pos;
         self.entities_near(pos, 20.)
-            .filter(|e| e.accessible(self.players[&id].character.account))
+            .filter(|e| e.accessible(player.character.account))
+            .filter(|e| {
+                player
+                    .sight_tiles
+                    .as_ref()
+                    .is_none_or(|sight| sight.contains(&(e.pos.x as i16, e.pos.y as i16)))
+            })
             .map(|e| e.id)
             .chain(quest)
             .chain(
@@ -3802,6 +3818,20 @@ impl World {
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
         let started = crate::performance::Measure::start();
+        let pos = self.players[&id].pos;
+        let center = (pos.x as i32, pos.y as i32);
+        let rescan = initial || self.players[&id].tile_scan != Some(center);
+        if rescan {
+            let sight = (self.name == "Snake Pit").then(|| self.room_sight(center));
+            if let Some(sight) = &sight {
+                tracing::debug!(
+                    player = id,
+                    tiles = sight.len(),
+                    "Snake Pit sight recalculated"
+                );
+            }
+            self.players.get_mut(&id).unwrap().sight_tiles = sight;
+        }
         // Nothing below changes quest eligibility, so one evaluation serves visibility and the quest arrow.
         let quest = self.quest_target(id);
         let mut visible = self.visible_with(id, quest);
@@ -3812,11 +3842,7 @@ impl World {
         // Private-container owner stats dereference the native map's self player.
         added.sort_by_key(|entity| (*entity != id, *entity));
         let dropped: Vec<i32> = previous.difference(&visible).copied().collect();
-        let pos = self.players[&id].pos;
         let mut tiles = Vec::new();
-        let center = (pos.x as i32, pos.y as i32);
-        // Discovered tiles only grow, so rescanning the same centre cannot find anything new.
-        let rescan = initial || self.players[&id].tile_scan != Some(center);
         for y in ((pos.y as i32 - 20).max(0))..=(pos.y as i32 + 20).min(self.map.height - 1) {
             for x in ((pos.x as i32 - 20).max(0))..=(pos.x as i32 + 20).min(self.map.width - 1) {
                 let dx = x - pos.x as i32;
@@ -3824,6 +3850,10 @@ impl World {
                 if rescan
                     && dx * dx + dy * dy <= 20 * 20
                     && !self.players[&id].tiles.contains(&(x as i16, y as i16))
+                    && self.players[&id]
+                        .sight_tiles
+                        .as_ref()
+                        .is_none_or(|sight| sight.contains(&(x as i16, y as i16)))
                 {
                     tiles.push((
                         x as i16,
@@ -7460,6 +7490,8 @@ mod period_loot_tests;
 mod pirate_generation_tests;
 #[cfg(test)]
 mod reward_accuracy_tests;
+#[cfg(test)]
+mod sight_tests;
 #[cfg(test)]
 mod spectator_tests;
 #[cfg(test)]
