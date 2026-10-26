@@ -163,6 +163,445 @@ async fn consume_survival(app: &App, brain: &mut Brain) {
     assert!(after.character.hp > view.character.hp);
 }
 
+async fn incoming_window(
+    app: &App,
+    id: i32,
+    peer: i32,
+    brain: &mut Brain,
+    output: &mut mpsc::Receiver<Packet>,
+) {
+    nearby(app, id, peer).await;
+    app.world
+        .for_player(peer)
+        .call(move |w| w.request_trade(peer, "Trader".into()))
+        .await
+        .unwrap();
+    drain(app, brain, output).await;
+    assert!(brain.mind.market.incoming.is_some());
+    for _ in 0..2 {
+        let view = app.world.player_view(id).await.unwrap();
+        assert!(
+            decide_before_social(app, brain, &view)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        drain(app, brain, output).await;
+    }
+    assert_eq!(
+        brain.mind.market.trade.as_ref().unwrap().offers[0]
+            .iter()
+            .filter(|b| **b)
+            .count(),
+        4
+    );
+}
+
+#[tokio::test]
+async fn runtime_market_empty_offer_has_bounded_negotiation_then_releases_controller() {
+    let logs = DialogueLogs::default();
+    let sink = logs.clone();
+    let _subscriber = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .json()
+            .with_writer(move || sink.clone())
+            .finish(),
+    );
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    assert!(
+        app.dialogue.is_none(),
+        "modelOFF must not substitute canned speech"
+    );
+    let (_owner, id, mut output, mut brain) = actor(
+        &app,
+        "empty-market-bot",
+        "Trader",
+        [0xa21, 0xa21, 0xa21, 0xa21, -1, -1, -1, -1],
+    )
+    .await;
+    // Even an unoffered payment is not permission to inspect or take human stock.
+    let (_peer_owner, peer, mut peer_output, _) = actor(
+        &app,
+        "empty-market-human",
+        "Peer",
+        [0xa20, -1, -1, -1, -1, -1, -1, -1],
+    )
+    .await;
+    incoming_window(&app, id, peer, &mut brain, &mut output).await;
+    let before = app.world.player_view(id).await.unwrap();
+    let human_before = app.world.player_view(peer).await.unwrap();
+    advance(&app, 3100).await;
+    let view = app.world.player_view(id).await.unwrap();
+    assert!(
+        decide_before_social(&app, &mut brain, &view)
+            .await
+            .unwrap()
+            .is_none(),
+        "empty is an inspection wait, not immediate refusal or gift consent"
+    );
+    advance(&app, 17_100).await;
+    let view = app.world.player_view(id).await.unwrap();
+    let released = decide_before_social(&app, &mut brain, &view).await.unwrap();
+    assert!(
+        released.is_some(),
+        "empty human offer still holds controller after 20s negotiation window"
+    );
+    assert!(brain.mind.market.incoming.is_none());
+    assert!(brain.mind.market.trade.is_none());
+    assert_closed(&app, id).await;
+    assert_eq!(
+        app.world.player_view(id).await.unwrap().character.items,
+        before.character.items
+    );
+    assert_eq!(
+        app.world
+            .player_view(id)
+            .await
+            .unwrap()
+            .character
+            .inventory_revision,
+        before.character.inventory_revision
+    );
+    assert_eq!(
+        app.world.player_view(peer).await.unwrap().character.items,
+        human_before.character.items
+    );
+    assert_eq!(
+        app.world
+            .player_view(peer)
+            .await
+            .unwrap()
+            .character
+            .inventory_revision,
+        human_before.character.inventory_revision
+    );
+    let mut cancelled = false;
+    while let Ok(packet) = peer_output.try_recv() {
+        if packet.id == 12 {
+            let mut reader = Reader::new(&packet.body);
+            assert_ne!(reader.i32().unwrap(), 0);
+            assert_eq!(reader.utf().unwrap(), "Trade canceled!");
+            reader.done().unwrap();
+            cancelled = true;
+        }
+    }
+    assert!(cancelled, "human must receive ordinary native cancellation");
+    assert!(
+        brain.mind.market.outgoing.is_none(),
+        "modelOFF explicitly discards unavailable speech"
+    );
+    assert!(brain.mind.market.bargain.is_none());
+    assert!(
+        logs.records()
+            .iter()
+            .any(|r| r["fields"]["reason"] == "empty_offer_timeout")
+    );
+    assert!(logs.records().iter().any(|r| r["fields"]["message"]
+        == "market speech unavailable: dialogue service disabled; no substitute speech"));
+    drain(&app, &mut brain, &mut output).await;
+    let view = app.world.player_view(id).await.unwrap();
+    assert!(
+        decide_before_social(&app, &mut brain, &view)
+            .await
+            .unwrap()
+            .is_some(),
+        "next ordinary decision is no longer held by refused exchange"
+    );
+    for player in [id, peer] {
+        lifecycle::finalize(&app, player, CloseReason::Controller)
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn runtime_market_valid_offer_waits_and_changed_offer_restarts_inspection_not_consent() {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (_owner, id, mut output, mut brain) = actor(
+        &app,
+        "changed-market-bot",
+        "Trader",
+        [0xa21, 0xa21, 0xa21, 0xa21, -1, -1, -1, -1],
+    )
+    .await;
+    let (_peer_owner, peer, _peer_output, _) = actor(
+        &app,
+        "changed-market-human",
+        "Peer",
+        [0xa20, 0xa22, -1, -1, -1, -1, -1, -1],
+    )
+    .await;
+    incoming_window(&app, id, peer, &mut brain, &mut output).await;
+    let mut payment = [false; 12];
+    payment[4] = true;
+    app.world
+        .for_player(peer)
+        .call(move |w| w.change_trade(peer, payment))
+        .await
+        .unwrap();
+    drain(&app, &mut brain, &mut output).await;
+    advance(&app, 20_100).await;
+    let view = app.world.player_view(id).await.unwrap();
+    assert!(
+        decide_before_social(&app, &mut brain, &view)
+            .await
+            .unwrap()
+            .is_none(),
+        "valid payment waits for human acceptance beyond empty-offer deadline"
+    );
+    let mine = brain.mind.market.trade.as_ref().unwrap().offers[0];
+    app.world
+        .for_player(peer)
+        .call(move |w| w.change_trade(peer, [false; 12]))
+        .await
+        .unwrap();
+    drain(&app, &mut brain, &mut output).await;
+    advance(&app, 19_100).await;
+    let view = app.world.player_view(id).await.unwrap();
+    assert!(
+        decide_before_social(&app, &mut brain, &view)
+            .await
+            .unwrap()
+            .is_none(),
+        "removing payment gets a fresh bounded inspection wait"
+    );
+    let mut wrong = [false; 12];
+    wrong[5] = true;
+    app.world
+        .for_player(peer)
+        .call(move |w| {
+            w.change_trade(peer, wrong)?;
+            ensure!(
+                w.accept_trade(peer, wrong, mine).is_err(),
+                "changed payment cannot inherit prior acceptance/countdown"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drain(&app, &mut brain, &mut output).await;
+    advance(&app, 3100).await;
+    let view = app.world.player_view(id).await.unwrap();
+    assert!(
+        decide_before_social(&app, &mut brain, &view)
+            .await
+            .unwrap()
+            .is_some(),
+        "unmatched selected goods must refuse and reassess"
+    );
+    assert_closed(&app, id).await;
+    assert_eq!(
+        app.world
+            .player_view(id)
+            .await
+            .unwrap()
+            .character
+            .inventory_revision,
+        view.character.inventory_revision
+    );
+    for player in [id, peer] {
+        lifecycle::finalize(&app, player, CloseReason::Controller)
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn runtime_market_peer_disconnect_or_death_closes_unaccepted_window() {
+    for death in [false, true] {
+        let (dir, app) = server::test_app();
+        app.world.clock.set_paused(true);
+        let (_owner, id, mut output, mut brain) = actor(
+            &app,
+            "depart-market-bot",
+            "Trader",
+            [0xa21, 0xa21, 0xa21, 0xa21, -1, -1, -1, -1],
+        )
+        .await;
+        let (_peer_owner, peer, _peer_output, _) =
+            actor(&app, "depart-market-human", "Peer", [-1; 8]).await;
+        incoming_window(&app, id, peer, &mut brain, &mut output).await;
+        let human = app.world.player_view(peer).await.unwrap();
+        if death {
+            app.world
+                .for_player(peer)
+                .call(move |w| {
+                    let p = w.players.get_mut(&peer).unwrap();
+                    p.character.hp = 0;
+                    p.death_pending = true;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        lifecycle::finalize(&app, peer, CloseReason::Transport)
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+        assert_eq!(
+            app.store
+                .load(human.session.account, human.session.character)
+                .await
+                .is_err(),
+            death,
+            "only committed death removes saved character"
+        );
+        drain(&app, &mut brain, &mut output).await;
+        let view = app.world.player_view(id).await.unwrap();
+        assert!(
+            decide_before_social(&app, &mut brain, &view)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(brain.mind.market.incoming.is_none());
+        assert!(brain.mind.market.trade.is_none());
+        assert_closed(&app, id).await;
+        assert_eq!(
+            app.world
+                .player_view(id)
+                .await
+                .unwrap()
+                .character
+                .inventory_revision,
+            view.character.inventory_revision
+        );
+        lifecycle::finalize(&app, id, CloseReason::Controller)
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn runtime_market_accepted_commit_is_settled_before_controller_reassessment() {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (_owner, id, mut output, mut brain) = actor(
+        &app,
+        "commit-market-bot",
+        "Trader",
+        [0xa21, 0xa21, 0xa21, 0xa21, -1, -1, -1, -1],
+    )
+    .await;
+    let (_peer_owner, peer, _peer_output, _) = actor(
+        &app,
+        "commit-market-human",
+        "Peer",
+        [0xa20, -1, -1, -1, -1, -1, -1, -1],
+    )
+    .await;
+    incoming_window(&app, id, peer, &mut brain, &mut output).await;
+    let before = app.world.player_view(id).await.unwrap();
+    let human_before = app.world.player_view(peer).await.unwrap();
+    let mut payment = [false; 12];
+    payment[4] = true;
+    app.world
+        .for_player(peer)
+        .call(move |w| w.change_trade(peer, payment))
+        .await
+        .unwrap();
+    drain(&app, &mut brain, &mut output).await;
+    advance(&app, 3100).await;
+    let view = app.world.player_view(id).await.unwrap();
+    assert!(
+        decide_before_social(&app, &mut brain, &view)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let mine = brain.mind.market.trade.as_ref().unwrap().offers[0];
+    let plan = app
+        .world
+        .for_player(peer)
+        .call(move |w| {
+            w.accept_trade(peer, payment, mine)?
+                .context("human mutual acceptance must create actual commit plan")
+        })
+        .await
+        .unwrap();
+    let transaction = plan.transaction.clone();
+    let writes: Vec<_> = plan
+        .plans
+        .iter()
+        .map(|p| InventoryWrite {
+            id: p.character,
+            account: p.account,
+            revision: p.revision,
+            items: p.items.clone(),
+        })
+        .collect();
+    let busy = app.world.player_view(id).await.unwrap();
+    assert!(busy.lifecycle.busy);
+    assert!(
+        decide_before_social(&app, &mut brain, &busy)
+            .await
+            .unwrap()
+            .is_none(),
+        "accepted work must fence reassessment"
+    );
+    server::persist_trade(&app, plan).await.unwrap();
+    drain(&app, &mut brain, &mut output).await;
+    let after = app.world.player_view(id).await.unwrap();
+    let human_after = app.world.player_view(peer).await.unwrap();
+    assert_eq!(
+        after.character.inventory_revision,
+        before.character.inventory_revision + 1
+    );
+    assert_eq!(
+        human_after.character.inventory_revision,
+        human_before.character.inventory_revision + 1
+    );
+    assert_eq!(
+        &after.character.items[4..],
+        &[0xa20, -1, -1, -1, -1, -1, -1, -1]
+    );
+    assert_eq!(
+        &human_after.character.items[4..],
+        &[0xa21, 0xa21, 0xa21, 0xa21, -1, -1, -1, -1]
+    );
+    let revisions = app
+        .store
+        .exchange_trade(transaction, writes, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        revisions.len(),
+        2,
+        "immutable durable receipt permits idempotent settlement, not duplicate payment"
+    );
+    for current in [after, human_after] {
+        let saved = app
+            .store
+            .load(current.session.account, current.session.character)
+            .await
+            .unwrap();
+        assert_eq!(saved.items, current.character.items);
+        assert_eq!(saved.revision, current.character.inventory_revision);
+    }
+    assert!(brain.mind.market.trade.is_none());
+    assert!(brain.mind.market.incoming.is_none());
+    for player in [id, peer] {
+        lifecycle::finalize(&app, player, CloseReason::Controller)
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[tokio::test]
 async fn runtime_coordinator_survival_preempts_active_incoming_gift_and_legacy_windows() {
     let (dir, app) = server::test_app();
