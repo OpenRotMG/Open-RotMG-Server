@@ -772,9 +772,7 @@ thread_local! {
 }
 pub(super) async fn entry_boundary(app: &App, id: i32, admitted: bool) -> Result<()> {
     let hook = ENTRY_BOUNDARY.with(|slot| {
-        let Some((player, mode)) = slot.get() else {
-            return None;
-        };
+        let (player, mode) = slot.get()?;
         let after = !matches!(mode, EntryBoundary::Freeze | EntryBoundary::Shutdown);
         if player != id || admitted != after {
             return None;
