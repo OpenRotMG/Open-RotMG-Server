@@ -73,6 +73,7 @@ mod realm_portal;
 mod realm_quests;
 
 mod realm_setpieces;
+mod skull_erosion;
 
 mod spider;
 
