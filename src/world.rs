@@ -4268,14 +4268,12 @@ impl World {
         let x1 = (a.x.max(b.x) as i32 + 1).min(self.map.width - 1);
         let y0 = (a.y.min(b.y) as i32 - 1).max(0);
         let y1 = (a.y.max(b.y) as i32 + 1).min(self.map.height - 1);
-        (y0..=y1).flat_map(move |y| {
-            (x0..=x1).flat_map(move |x| {
-                self.cells
-                    .ids((y * self.map.width + x) as usize)
-                    .iter()
-                    .map(|id| self.entities.get(id).expect("occupied cell missing entity"))
+        (y0..=y1)
+            .flat_map(move |y| {
+                (x0..=x1)
+                    .flat_map(move |x| self.cells.ids((y * self.map.width + x) as usize).iter())
             })
-        })
+            .map(move |id| self.entities.get(id).expect("occupied cell missing entity"))
     }
 
     pub fn native_shoot_received(
