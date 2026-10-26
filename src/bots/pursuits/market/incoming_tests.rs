@@ -19,9 +19,78 @@ fn opened(m: &mut Market, v: &PlayerView, c: &Content) {
         offers: [[false; 12]; 2],
         ready: v.time_ms,
         ready_at: v.clock_at,
+        empty_offer_until: v.clock_at + Duration::from_secs(20),
         changed: false,
     });
 }
+#[test]
+fn incoming_empty_offer_refuses_after_inspection_without_using_unoffered_stock() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    for hidden in [-1, DEFENSE, 0xa22] {
+        let (mut m, mut v) = fixture(&c, [SPEED, SPEED, SPEED, SPEED, -1, -1, -1, -1]);
+        opened(&mut m, &v, &c);
+        m.trade.as_mut().unwrap().items[1][4] = hidden;
+        m.incoming_action(&v, &c, None).unwrap();
+        v.time_ms += 19_999;
+        v.clock_at += Duration::from_millis(19_999);
+        assert!(m.incoming_action(&v, &c, None).unwrap().is_none());
+        v.time_ms += 1;
+        v.clock_at += Duration::from_millis(1);
+        assert!(matches!(
+            m.incoming_action(&v, &c, None).unwrap(),
+            Some(TradeAction::Cancel)
+        ));
+        assert_eq!(m.outgoing.as_ref().unwrap().text, "nty need 1 def");
+        assert!(m.bargain.is_none());
+    }
+}
+
+#[test]
+fn incoming_changed_empty_offer_gets_inspection_time_but_cannot_extend_exchange_expiry() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let (mut m, mut v) = fixture(&c, [SPEED, SPEED, SPEED, SPEED, -1, -1, -1, -1]);
+    opened(&mut m, &v, &c);
+    m.incoming_action(&v, &c, None).unwrap();
+    let change = |m: &mut Market, v: &PlayerView, selected: bool| {
+        let mut body = wire::Writer::new();
+        body.i16(12);
+        for i in 0..12 {
+            body.u8(u8::from(selected && i == 4));
+        }
+        m.trade_packet(
+            &Packet {
+                id: 23,
+                body: body.0,
+            },
+            v,
+        )
+        .unwrap();
+    };
+    v.time_ms += 19_000;
+    v.clock_at += Duration::from_secs(19);
+    change(&mut m, &v, true);
+    change(&mut m, &v, false);
+    let until = m.trade.as_ref().unwrap().empty_offer_until;
+    assert_eq!(until, v.clock_at + Duration::from_secs(20));
+    v.time_ms += 10_000;
+    v.clock_at += Duration::from_secs(10);
+    change(&mut m, &v, false);
+    assert_eq!(
+        m.trade.as_ref().unwrap().empty_offer_until,
+        until,
+        "duplicate packets cannot renew negotiation"
+    );
+    assert!(m.incoming_action(&v, &c, None).unwrap().is_none());
+    // Continued real offer changes do not renew the separate overall exchange lease.
+    v.elapsed_ms += 60_000;
+    change(&mut m, &v, true);
+    change(&mut m, &v, false);
+    assert!(matches!(
+        m.incoming_action(&v, &c, None).unwrap(),
+        Some(TradeAction::Cancel)
+    ));
+}
+
 #[test]
 fn incoming_human_exchange_selects_advertised_real_goods_and_requires_payment() {
     let c = Content::load(std::path::Path::new("data")).unwrap();

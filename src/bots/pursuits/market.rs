@@ -164,6 +164,7 @@ pub(in crate::bots) struct SessionTrade {
     pub offers: [[bool; 12]; 2],
     pub ready: u64,
     pub ready_at: Instant,
+    pub empty_offer_until: Instant,
     pub changed: bool,
 }
 impl Market {
@@ -1127,6 +1128,7 @@ impl Market {
                     offers: [[false; 12]; 2],
                     ready: v.time_ms + 3000,
                     ready_at: v.clock_at + Duration::from_millis(3000),
+                    empty_offer_until: v.clock_at + Duration::from_secs(20),
                     changed: false,
                 });
             }
@@ -1134,6 +1136,9 @@ impl Market {
                 let values = read_offer(&mut r)?;
                 r.done()?;
                 if let Some(t) = &mut self.trade {
+                    if t.offers[1] != values {
+                        t.empty_offer_until = v.clock_at + Duration::from_secs(20);
+                    }
                     t.offers[1] = values;
                     t.ready = v.time_ms + 3000;
                     t.ready_at = v.clock_at + Duration::from_millis(3000);
