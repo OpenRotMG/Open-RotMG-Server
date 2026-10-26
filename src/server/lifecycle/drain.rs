@@ -85,15 +85,28 @@ impl Drop for Entry {
         }
     }
 }
+#[derive(Debug)]
+pub(crate) struct UnadmittedEntry;
+impl std::fmt::Display for UnadmittedEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("server admission is frozen")
+    }
+}
+impl std::error::Error for UnadmittedEntry {}
+
 pub(crate) fn entry(a: &App) -> Result<Entry> {
     enter(a, false)
 }
 fn enter(a: &App, http: bool) -> Result<Entry> {
     let mut state = a.admission.state.lock().expect("admission poisoned");
-    ensure!(
-        state.current.is_none() && !*a.shutdown.borrow(),
-        controller("server admission is frozen")
-    );
+    if state.current.is_some() || *a.shutdown.borrow() {
+        // An admitted scope must retain its rejection, not become a normal bot stop.
+        return Err(if !http && ADMITTED.try_with(|_| ()).is_err() {
+            anyhow::Error::new(CloseReason::Controller).context(UnadmittedEntry)
+        } else {
+            controller("server admission is frozen")
+        });
+    }
     current_entry(a, &state)?;
     // Controller concurrency is already bounded by connections/claims, independently of HTTP load.
     if http {
@@ -408,5 +421,59 @@ pub(crate) async fn http_entry(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("accepted HTTP task failed: {error}"),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn drain_entry_cancellation_cannot_relabel_admitted_http_claim_or_stale_generation_errors()
+     {
+        let (dir, app) = crate::server::test_app();
+        let accepted = entry(&app).unwrap();
+        let prepared = prepare(&app);
+        let entries = app.admission.state.lock().unwrap().entries;
+        let rejected = entry(&app).err().unwrap();
+        assert!(rejected.is::<UnadmittedEntry>());
+        assert_eq!(
+            rejected.downcast_ref::<CloseReason>(),
+            Some(&CloseReason::Controller)
+        );
+        assert_eq!(app.admission.state.lock().unwrap().entries, entries);
+        let http = enter(&app, true).err().unwrap();
+        assert!(!http.is::<UnadmittedEntry>());
+        assert_eq!(
+            http.downcast_ref::<CloseReason>(),
+            Some(&CloseReason::Controller)
+        );
+        assert_eq!(app.admission.state.lock().unwrap().http_entries, 0);
+        assert!(!app.try_claim(1).err().unwrap().is::<UnadmittedEntry>());
+        accepted
+            .scope(async {
+                let rejected = entry(&app).err().unwrap();
+                assert!(!rejected.is::<UnadmittedEntry>());
+                assert_eq!(
+                    rejected.downcast_ref::<CloseReason>(),
+                    Some(&CloseReason::Controller)
+                );
+            })
+            .await;
+        terminate(&app).await.unwrap();
+        cancel(&app, &prepared.receipt).unwrap();
+        let rejected = ADMITTED
+            .scope((app.admission.clone(), 0), async {
+                entry(&app).err().unwrap()
+            })
+            .await;
+        assert!(!rejected.is::<UnadmittedEntry>());
+        assert_eq!(
+            rejected.downcast_ref::<CloseReason>(),
+            Some(&CloseReason::Controller)
+        );
+        assert_eq!(app.admission.state.lock().unwrap().entries, 0);
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

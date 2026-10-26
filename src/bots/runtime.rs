@@ -610,7 +610,18 @@ pub(super) async fn launch(
                         _=drain.changed()=>break,
                     }
                     if app.world.clock.paused() { continue; }
-                    let _entry = lifecycle::drain::entry(&app)?;
+                    #[cfg(test)]
+                    tests::entry_boundary(&app, id, false).await?;
+                    let _entry = match lifecycle::drain::entry(&app) {
+                        Ok(entry) => entry,
+                        Err(error) if error.is::<lifecycle::drain::UnadmittedEntry>() => {
+                            tracing::info!(player=id,name=profile.name,"autonomous controller stopped before admission");
+                            break;
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    #[cfg(test)]
+                    tests::entry_boundary(&app, id, true).await?;
                     if let Some(transfer) = server::automatic_transfer(&app, id).await? {
                         dialogue::cancel(&mut pending);
                         dialogue::end_agreement(&app, &mut brain, "world changed").await;
