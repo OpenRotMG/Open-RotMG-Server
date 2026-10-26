@@ -757,3 +757,246 @@ async fn society_runtime_cancels_same_pending_request_without_chat_application_o
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[derive(Clone, Copy)]
+enum EntryBoundary {
+    Freeze,
+    Shutdown,
+    Protocol,
+    World,
+    Io,
+    Claim,
+}
+thread_local! {
+    static ENTRY_BOUNDARY: std::cell::Cell<Option<(i32, EntryBoundary)>> = const { std::cell::Cell::new(None) };
+}
+pub(super) async fn entry_boundary(app: &App, id: i32, admitted: bool) -> Result<()> {
+    let hook = ENTRY_BOUNDARY.with(|slot| {
+        let (player, mode) = slot.get()?;
+        let after = !matches!(mode, EntryBoundary::Freeze | EntryBoundary::Shutdown);
+        if player != id || admitted != after {
+            return None;
+        }
+        slot.set(None);
+        Some(mode)
+    });
+    let Some(mode) = hook else {
+        return Ok(());
+    };
+    if matches!(mode, EntryBoundary::Shutdown) {
+        app.shutdown.send_replace(true);
+    }
+    lifecycle::drain::prepare(app);
+    match mode {
+        EntryBoundary::Freeze | EntryBoundary::Shutdown => Ok(()),
+        EntryBoundary::Protocol => {
+            app.world
+                .for_player(id)
+                .call(move |w| w.acknowledge_autonomous_goto(id))
+                .await
+        }
+        EntryBoundary::World => {
+            app.world
+                .directory::<()>(|_| anyhow::bail!("post-freeze World failure"))
+                .await
+        }
+        EntryBoundary::Io => {
+            let path = std::env::temp_dir().join("drain-entry-io-never-created");
+            assert!(!path.exists());
+            std::fs::File::open(path)?;
+            Ok(())
+        }
+        EntryBoundary::Claim => app.try_claim(999_999).map(drop),
+    }
+}
+async fn drain_entry_bot(app: &App) -> (i32, i32, i32) {
+    let account = app.store.list("drain-entry-bot".into()).await.unwrap().id;
+    let ch = app
+        .store
+        .create(account, app.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let character = ch.id;
+    let owner = app.claim(account).unwrap();
+    start_selected(app, profile(), ch, -2, Pos { x: 77.5, y: 72.5 }, owner)
+        .await
+        .unwrap();
+    let id = app
+        .world
+        .directory(move |d| {
+            Ok(*d.worlds[&-2]
+                .players
+                .iter()
+                .find(|(_, p)| p.character.id == character)
+                .unwrap()
+                .0)
+        })
+        .await
+        .unwrap();
+    (account, character, id)
+}
+async fn reach_entry_boundary(app: &App, id: i32, mode: EntryBoundary) {
+    ENTRY_BOUNDARY.with(|slot| slot.set(Some((id, mode))));
+    app.world.clock.set_paused(false);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while ENTRY_BOUNDARY.with(|slot| slot.get().is_some()) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+fn assert_entry_stop(logs: &DialogueLogs, id: i32) {
+    let rows: Vec<_> = logs
+        .records()
+        .into_iter()
+        .filter(|r| r["fields"]["player"] == id)
+        .collect();
+    assert!(
+        rows.iter().any(|r| r["level"] == "INFO"
+            && r["fields"]["message"] == "autonomous controller stopped before admission"),
+        "{rows:?}"
+    );
+    assert!(!rows.iter().any(|r| r["level"] == "ERROR"), "{rows:?}");
+}
+
+#[tokio::test]
+async fn drain_entry_runtime_freeze_before_new_entry_is_expected_stop() {
+    for mode in [EntryBoundary::Freeze, EntryBoundary::Shutdown] {
+        let logs = DialogueLogs::default();
+        let sink = logs.clone();
+        let _subscriber = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .json()
+                .with_writer(move || sink.clone())
+                .finish(),
+        );
+        let (dir, app) = server::test_app();
+        app.world.clock.set_paused(true);
+        let (account, _, id) = drain_entry_bot(&app).await;
+        reach_entry_boundary(&app, id, mode).await;
+        tokio::time::timeout(Duration::from_secs(5), lifecycle::drain::terminate(&app))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(lifecycle::state(&app, account).is_none());
+        assert!(!app.world.supervisor.account_fenced(account).unwrap());
+        assert_entry_stop(&logs, id);
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn drain_entry_runtime_preserves_actual_failures_after_admission_even_when_frozen() {
+    for mode in [
+        EntryBoundary::Protocol,
+        EntryBoundary::World,
+        EntryBoundary::Io,
+        EntryBoundary::Claim,
+    ] {
+        let logs = DialogueLogs::default();
+        let sink = logs.clone();
+        let _subscriber = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .json()
+                .with_writer(move || sink.clone())
+                .finish(),
+        );
+        let (dir, app) = server::test_app();
+        app.world.clock.set_paused(true);
+        let (_, _, id) = drain_entry_bot(&app).await;
+        reach_entry_boundary(&app, id, mode).await;
+        let stopped = logs.wait("autonomous controller stopped", id).await;
+        assert_eq!(stopped["level"], "ERROR");
+        let error = stopped["fields"]["error"].as_str().unwrap();
+        let expected = match mode {
+            EntryBoundary::Protocol => "unsolicited GOTO acknowledgement",
+            EntryBoundary::World => "post-freeze World failure",
+            EntryBoundary::Io => "No such file or directory",
+            EntryBoundary::Claim => "server admission is frozen",
+            _ => unreachable!(),
+        };
+        assert!(error.contains(expected), "{stopped}");
+        assert!(!logs.records().iter().any(|r| r["fields"]["player"] == id
+            && r["fields"]["message"] == "autonomous controller stopped before admission"));
+        let drain = tokio::time::timeout(Duration::from_secs(5), lifecycle::drain::terminate(&app))
+            .await
+            .unwrap();
+        if matches!(mode, EntryBoundary::World | EntryBoundary::Io) {
+            assert!(drain.is_err());
+        } else {
+            drain.unwrap();
+        }
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn drain_entry_runtime_waits_for_already_accepted_progress_before_release() {
+    let logs = DialogueLogs::default();
+    let sink = logs.clone();
+    let _subscriber = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .json()
+            .with_writer(move || sink.clone())
+            .finish(),
+    );
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (account, character, id) = drain_entry_bot(&app).await;
+    let expected_tiles = app
+        .world
+        .for_player(id)
+        .call(move |w| {
+            let lifetime = &mut w.players.get_mut(&id).unwrap().character.lifetime;
+            lifetime.tiles += 1;
+            Ok(lifetime.tiles)
+        })
+        .await
+        .unwrap();
+    let (committed, release) = app.store.lifecycle_test_pause_reply();
+    let saving_app = app.clone();
+    let saving = tokio::spawn(async move { server::persistence_tick(&saving_app).await });
+    tokio::time::timeout(Duration::from_secs(5), committed)
+        .await
+        .unwrap()
+        .unwrap();
+    reach_entry_boundary(&app, id, EntryBoundary::Shutdown).await;
+    let draining_app = app.clone();
+    let draining = tokio::spawn(async move { lifecycle::drain::terminate(&draining_app).await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!saving.is_finished());
+    assert!(!draining.is_finished());
+    assert!(lifecycle::state(&app, account).unwrap().0);
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), saving)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), draining)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(lifecycle::state(&app, account).is_none());
+    assert!(!app.world.supervisor.account_fenced(account).unwrap());
+    assert_eq!(
+        app.store
+            .load(account, character)
+            .await
+            .unwrap()
+            .lifetime
+            .tiles,
+        expected_tiles
+    );
+    assert_eq!(
+        app.store.load(account, character).await.unwrap().revision,
+        0
+    );
+    assert_entry_stop(&logs, id);
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}
