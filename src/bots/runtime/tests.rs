@@ -1000,3 +1000,158 @@ async fn drain_entry_runtime_waits_for_already_accepted_progress_before_release(
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+struct DialogueWorldBoundary {
+    player: i32,
+    ready: tokio::sync::oneshot::Sender<()>,
+    release: tokio::sync::oneshot::Receiver<()>,
+}
+thread_local! {
+    static DIALOGUE_WORLD_BOUNDARY: std::cell::RefCell<Option<DialogueWorldBoundary>> = const { std::cell::RefCell::new(None) };
+}
+pub(in crate::bots) async fn dialogue_world_boundary(player: i32) {
+    let hook = DIALOGUE_WORLD_BOUNDARY.with(|slot| {
+        let mut hook = slot.borrow_mut();
+        if hook.as_ref().is_some_and(|hook| hook.player == player) {
+            hook.take()
+        } else {
+            None
+        }
+    });
+    if let Some(hook) = hook {
+        hook.ready.send(()).unwrap();
+        hook.release.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn dialogue_world_runtime_cancels_after_validated_view_before_authoritative_publication() {
+    let logs = DialogueLogs::default();
+    let sink = logs.clone();
+    let _subscriber = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .json()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish(),
+    );
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (peer_owner, peer, mut peer_output, _) =
+        actor(&app, "world-dialogue-peer", "Peer", [-1; 8]).await;
+    let peer_view = app.world.player_view(peer).await.unwrap();
+    app.society
+        .lock()
+        .unwrap()
+        .register(peer_view.session.account, Default::default());
+    let account = app
+        .store
+        .list("world-dialogue-bot".into())
+        .await
+        .unwrap()
+        .id;
+    let mut character = app
+        .store
+        .create(account, app.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    character.base[0] = 500;
+    character.hp = 500;
+    let selected = character.id;
+    let owner = app.claim(account).unwrap();
+    start_selected(&app, profile(), character, -2, peer_view.position, owner)
+        .await
+        .unwrap();
+    let id = app
+        .world
+        .directory(move |d| {
+            Ok(*d.worlds[&-2]
+                .players
+                .iter()
+                .find(|(_, p)| p.character.id == selected)
+                .unwrap()
+                .0)
+        })
+        .await
+        .unwrap();
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, waiting) = tokio::sync::oneshot::channel();
+    DIALOGUE_WORLD_BOUNDARY.with(|slot| {
+        *slot.borrow_mut() = Some(DialogueWorldBoundary {
+            player: id,
+            ready: entered,
+            release: waiting,
+        })
+    });
+    while peer_output.try_recv().is_ok() {}
+    app.world.clock.set_paused(false);
+    let scheduled = logs.wait("bot dialogue publication scheduled", id).await;
+    let request = scheduled["fields"]["request"].as_str().unwrap();
+    tokio::time::timeout(Duration::from_secs(10), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    app.world.clock.set_paused(true);
+    app.world
+        .directory(move |d| {
+            let w = d.worlds.get_mut(&-2).unwrap();
+            w.dialogue_participants(id, peer)?;
+            assert!(w.players[&id].known.contains(&peer));
+            let pos = w.players[&id].pos;
+            w.players.get_mut(&peer).unwrap().pos = Pos {
+                x: pos.x + 13.,
+                y: pos.y,
+            };
+            Ok(())
+        })
+        .await
+        .unwrap();
+    release.send(()).unwrap();
+    let row = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(row) = logs.records().into_iter().find(|r| {
+                r["fields"]["request"] == request
+                    && matches!(
+                        r["fields"]["message"].as_str(),
+                        Some(
+                            "bot dialogue canceled; pending intention not published"
+                                | "bot dialogue intention rejected"
+                        )
+                    )
+            }) {
+                break row;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(row["level"], "INFO", "{row}");
+    assert_eq!(row["fields"]["reason"], "speaker_out_of_chat_range");
+    for row in logs
+        .records()
+        .into_iter()
+        .filter(|r| r["fields"]["request"] == request)
+    {
+        assert_ne!(row["level"], "ERROR");
+        assert_ne!(row["fields"]["message"], "bot dialogue intention applied");
+        assert_ne!(
+            row["fields"]["message"],
+            "bot dialogue interaction unavailable"
+        );
+        assert_ne!(row["fields"]["message"], "bot dialogue provider succeeded");
+    }
+    assert!(!std::iter::from_fn(|| peer_output.try_recv().ok()).any(|p| p.id == wire::TEXT));
+    assert!(app.society.lock().unwrap().outgoing(account, 0).is_none());
+    assert!(app.society.lock().unwrap().group(account, 0).is_none());
+    lifecycle::finalize(&app, peer, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop(peer_owner);
+    app.shutdown.send_replace(true);
+    lifecycle::drain::terminate(&app).await.unwrap();
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}

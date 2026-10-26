@@ -603,6 +603,8 @@ pub(super) async fn publish(
     };
     let reply_intent = reply.intent;
     let joined = reply.intent == Intent::Join;
+    #[cfg(test)]
+    super::runtime::tests::dialogue_world_boundary(player).await;
     let published = app
         .world
         .directory(move |d| {
