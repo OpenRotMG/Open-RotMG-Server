@@ -457,3 +457,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "gods_white_demon_tests.rs"]
+mod white_demon_tests;
