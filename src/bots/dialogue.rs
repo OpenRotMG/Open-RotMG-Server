@@ -100,10 +100,21 @@ impl std::fmt::Display for Obsolete {
 impl std::error::Error for Obsolete {}
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Failure(pub &'static str);
+pub(super) enum Failure {
+    LocalCapacity,
+    Error(&'static str),
+}
+impl Failure {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::LocalCapacity => "local_capacity",
+            Self::Error(reason) => reason,
+        }
+    }
+}
 impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
+        f.write_str(self.reason())
     }
 }
 impl std::error::Error for Failure {}
@@ -114,6 +125,7 @@ struct Budget {
     daily: u32,
     successes: u64,
     failures: u64,
+    local_capacity_denials: u64,
     last_error: Option<&'static str>,
     last_latency_ms: Option<u128>,
     contract_failed: bool,
@@ -171,6 +183,7 @@ impl Service {
                 daily: 0,
                 successes: 0,
                 failures: 0,
+                local_capacity_denials: 0,
                 last_error: None,
                 last_latency_ms: None,
                 contract_failed: false,
@@ -190,33 +203,43 @@ impl Service {
         let b = self.budget.lock().expect("dialogue budget poisoned");
         let remaining = Duration::from_secs(86400).saturating_sub(b.day.elapsed());
         let requests = if remaining.is_zero() { 0 } else { b.daily };
-        json!({"enabled":true,"model":MODEL,"status":if b.contract_failed || b.last_error.is_some(){"error"}else{"ready"},
+        let permits = self.slots.available_permits();
+        json!({"enabled":true,"model":MODEL,"status":if b.contract_failed || b.last_error.is_some(){"error"}else if permits == 0 {"busy"}else{"ready"},
             "last_error":b.last_error,"successes":b.successes,"failures":b.failures,"daily_requests":requests,
+            "local_capacity_denials":b.local_capacity_denials,
             "budget_scope":"process-local","budget_resets_on_restart":true,"budget_window_seconds":86400,
             "budget_window_resets_in_seconds":remaining.as_secs(),"provider_quota":"unknown",
             "automatic_limit":800,"automatic_remaining":800u32.saturating_sub(requests),
             "daily_limit":1000,"requests_remaining":1000u32.saturating_sub(requests),
             "contract_failed":b.contract_failed,"cooldown_seconds":b.blocked_until.saturating_duration_since(Instant::now()).as_millis().div_ceil(1000),
-            "last_latency_ms":b.last_latency_ms,"in_flight":2-self.slots.available_permits()})
+            "last_latency_ms":b.last_latency_ms,"in_flight":2-permits})
     }
     pub(super) async fn ask(
         &self,
         payload: &Value,
         request: &str,
     ) -> std::result::Result<Reply, Failure> {
-        let _permit = self
-            .slots
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| Failure("busy"))?;
+        let _permit = match self.slots.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                self.budget
+                    .lock()
+                    .expect("dialogue budget poisoned")
+                    .local_capacity_denials += 1;
+                return Err(Failure::LocalCapacity);
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => {
+                return Err(Failure::Error("service_closed"));
+            }
+        };
         {
             let now = Instant::now();
             let mut b = self.budget.lock().expect("dialogue budget poisoned");
             if b.contract_failed {
-                return Err(Failure("provider_contract_changed"));
+                return Err(Failure::Error("provider_contract_changed"));
             }
             if now < b.blocked_until {
-                return Err(Failure("rate_limited"));
+                return Err(Failure::Error("rate_limited"));
             }
             if now.duration_since(b.minute) >= Duration::from_secs(60) {
                 b.minute = now;
@@ -234,7 +257,7 @@ impl Service {
                         1000
                     }
             {
-                return Err(Failure("request_budget_exhausted"));
+                return Err(Failure::Error("request_budget_exhausted"));
             }
             b.calls += 1;
             b.daily += 1;
@@ -284,7 +307,7 @@ impl Service {
                 retry_after_ms = delay.as_millis(),
                 "bot dialogue provider rate limited; request failed without retry"
             );
-            return Err(Failure("rate_limited"));
+            return Err(Failure::Error("rate_limited"));
         }
         if !status.is_success() {
             tracing::error!(
@@ -292,21 +315,21 @@ impl Service {
                 http_status = status.as_u16(),
                 "bot dialogue provider rejected request"
             );
-            return Err(Failure("provider_rejected"));
+            return Err(Failure::Error("provider_rejected"));
         }
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(network_error)? {
             if bytes.len() + chunk.len() > 65536 {
-                return Err(Failure("response_too_large"));
+                return Err(Failure::Error("response_too_large"));
             }
             bytes.extend_from_slice(&chunk);
         }
         let envelope: Value =
-            serde_json::from_slice(&bytes).map_err(|_| Failure("invalid_response"))?;
+            serde_json::from_slice(&bytes).map_err(|_| Failure::Error("invalid_response"))?;
         let choices = envelope["choices"]
             .as_array()
             .filter(|v| v.len() == 1)
-            .ok_or(Failure("invalid_response"))?;
+            .ok_or(Failure::Error("invalid_response"))?;
         let gateway = &choices[0]["message"]["provider_metadata"]["gateway"];
         if envelope["model"] != MODEL
             || gateway["routing"]["canonicalSlug"] != MODEL
@@ -322,23 +345,24 @@ impl Service {
                 model = MODEL,
                 "bot dialogue provider/model/zero-cost receipt changed; further requests blocked"
             );
-            return Err(Failure("provider_contract_changed"));
+            return Err(Failure::Error("provider_contract_changed"));
         }
         if choices[0]["finish_reason"] != "tool_calls" {
-            return Err(Failure("incomplete_response"));
+            return Err(Failure::Error("incomplete_response"));
         }
         let calls = choices[0]["message"]["tool_calls"]
             .as_array()
             .filter(|c| c.len() == 1)
-            .ok_or(Failure("invalid_response"))?;
+            .ok_or(Failure::Error("invalid_response"))?;
         if calls[0]["type"] != "function" || calls[0]["function"]["name"] != "reply_to_player" {
-            return Err(Failure("invalid_response"));
+            return Err(Failure::Error("invalid_response"));
         }
         let text = calls[0]["function"]["arguments"]
             .as_str()
-            .ok_or(Failure("invalid_response"))?;
-        let reply: Reply = serde_json::from_str(text).map_err(|_| Failure("invalid_response"))?;
-        crate::world::chat::validate(&reply.reply).map_err(|_| Failure("invalid_reply"))?;
+            .ok_or(Failure::Error("invalid_response"))?;
+        let reply: Reply =
+            serde_json::from_str(text).map_err(|_| Failure::Error("invalid_response"))?;
+        crate::world::chat::validate(&reply.reply).map_err(|_| Failure::Error("invalid_reply"))?;
         if reply.reply.encode_utf16().count() > 90
             || reply.reply.trim().starts_with('/')
             || (reply.intent == Intent::Invite
@@ -346,7 +370,7 @@ impl Service {
                     .as_str()
                     .is_none_or(|name| !invitation(&reply.reply, name)))
         {
-            return Err(Failure("invalid_reply"));
+            return Err(Failure::Error("invalid_reply"));
         }
         tracing::info!(
             request,
@@ -365,15 +389,18 @@ impl Service {
         elapsed: Duration,
     ) {
         let mut b = self.budget.lock().expect("dialogue budget poisoned");
-        b.last_latency_ms = Some(elapsed.as_millis());
         match result {
+            // Admission denial is not a completed provider attempt.
+            Err(Failure::LocalCapacity) => {}
             Ok(_) => {
+                b.last_latency_ms = Some(elapsed.as_millis());
                 b.successes += 1;
                 b.last_error = None;
             }
-            Err(e) => {
+            Err(Failure::Error(reason)) => {
+                b.last_latency_ms = Some(elapsed.as_millis());
                 b.failures += 1;
-                b.last_error = Some(e.0);
+                b.last_error = Some(*reason);
             }
         }
     }
@@ -424,6 +451,16 @@ pub(super) fn cancel(pending: &mut Option<Pending>) {
     }
 }
 
+pub(super) fn skipped(interaction: &Request, request: Option<&str>, reason: &'static str) {
+    tracing::info!(
+        request,
+        player = interaction.session.1,
+        speaker = interaction.speaker,
+        reason,
+        "bot dialogue interaction skipped; no generated reply"
+    );
+}
+
 pub(super) async fn failed(
     app: &crate::server::App,
     interaction: &Request,
@@ -447,9 +484,9 @@ pub(super) async fn failed(
 }
 fn network_error(error: reqwest::Error) -> Failure {
     if error.is_timeout() {
-        Failure("timeout")
+        Failure::Error("timeout")
     } else {
-        Failure("transport_error")
+        Failure::Error("transport_error")
     }
 }
 
@@ -474,10 +511,10 @@ impl Pending {
         let policy = if service.is_none() {
             Some(
                 serde_json::from_value(payload["allowed_intents"][0].clone())
-                    .map_err(|_| Failure("invalid_policy_intent"))
+                    .map_err(|_| Failure::Error("invalid_policy_intent"))
                     .and_then(|intent| {
                         adventures::policy_reply(&request, intent)
-                            .map_err(|_| Failure("invalid_policy_reply"))
+                            .map_err(|_| Failure::Error("invalid_policy_reply"))
                     }),
             )
         } else {
@@ -491,6 +528,10 @@ impl Pending {
                 match &result {
                     Ok(_) => {
                         tracing::info!(request=%log_id,player=bot,speaker,model=MODEL,elapsed_ms=start.elapsed().as_millis(),"bot dialogue provider succeeded")
+                    }
+                    Err(Failure::LocalCapacity) => {
+                        tracing::info!(request=%log_id,player=bot,speaker,reason="local_capacity",
+                            "bot dialogue admission denied; no provider request")
                     }
                     Err(error) => {
                         tracing::error!(request=%log_id,player=bot,speaker,model=MODEL,elapsed_ms=start.elapsed().as_millis(),%error,"bot dialogue interaction failed")

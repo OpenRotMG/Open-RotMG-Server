@@ -385,25 +385,42 @@ pub(super) fn clear_cover(
     if v.character.conditions & crate::content::STUNNED != 0 {
         return None;
     }
-    let wall = v
+    let (wall, movement) = v
         .objects
         .iter()
         .filter(|o| {
             o.blocks
                 && o.hp > 0
                 && content.objects[&o.kind].destructible
-                && v.position.distance(o.position) < range
                 && sight(v, grid, o.position, passes_cover, Some(o.id))
         })
-        .min_by(|a, b| {
+        .filter_map(|wall| {
+            // Fully discovered rooms have no walkable frontier until their tunnel cover is broken.
+            let movement = if v.position.distance(wall.position) < range {
+                None
+            } else {
+                let (x, y) = tile(wall.position);
+                Some(
+                    [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+                        .into_iter()
+                        .filter_map(|point| grid.next(v.position, center(point)))
+                        .min_by(|a, b| {
+                            a.distance(wall.position)
+                                .total_cmp(&b.distance(wall.position))
+                        })?,
+                )
+            };
+            Some((wall, movement))
+        })
+        .min_by(|(a, _), (b, _)| {
             a.position
                 .distance(destination)
                 .total_cmp(&b.position.distance(destination))
         })?;
     Some(Decision {
         goal: Goal::Break(wall.id),
-        movement: None,
-        aim: Some(angle(v.position, wall.position)),
+        movement,
+        aim: movement.is_none().then(|| angle(v.position, wall.position)),
         item: None,
         journey: None,
         chat: None,

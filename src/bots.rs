@@ -31,6 +31,10 @@ pub(crate) mod pursuits;
 #[cfg(test)]
 mod quest_tests;
 mod realms;
+#[cfg(test)]
+mod snake_exit_tests;
+#[cfg(test)]
+mod snake_routing_tests;
 mod social;
 
 /// Who a bot is: identity, temperament and skill. Built from `persona::PERSONAS`.
@@ -1111,7 +1115,11 @@ impl Brain {
             {
                 choices.push((110., Goal::Hunt(enemy.id), enemy.position));
             }
-            if v.quest == Some(enemy.id) && !protected && (v.character.level >= 3 || d <= 48.) {
+            // Stheno's shield cannot prevent approaching the quest that wakes her encounter.
+            if v.quest == Some(enemy.id)
+                && (!protected || v.map.name == "Snake Pit")
+                && (v.character.level >= 3 || d <= 48.)
+            {
                 choices.push((
                     if v.map.name == "Snake Pit" || events::shared(&v.map.name) {
                         97.
@@ -1174,7 +1182,7 @@ impl Brain {
                 }
                 // The committed exit is public even when a straggler missed personal clear credit.
                 "Pirate Cave" => p.kind == 0x704,
-                "Snake Pit" => p.kind == 0x71d,
+                "Snake Pit" => matches!(p.kind, 0x704 | 0x71d),
                 "Oryx's Castle" => p.kind == 0xd7b && events::ready(v, content),
                 "Oryx's Chamber" => p.kind == 0x71d || p.kind == 0x700 && events::ready(v, content),
                 "Wine Cellar" | "Mad Lab" => matches!(p.kind, 0x71d | 0x712),
@@ -1188,7 +1196,7 @@ impl Brain {
             })
         {
             let exiting = portal.kind == 0x71d
-                || v.map.name == "Pirate Cave"
+                || matches!(v.map.name.as_str(), "Pirate Cave" | "Snake Pit")
                 || portal.kind == 0x712 && events::shared(&v.map.name);
             if exiting || ((peaceful || matches!(portal.kind, 0xd7b | 0x700)) && health >= 0.75) {
                 let reward_waiting = choices.iter().any(|(_, goal, _)| {
