@@ -173,7 +173,113 @@ fn member_positions(center: Pos, terrain: u8) -> Vec<Pos> {
         })
         .collect()
 }
+// Only unconditional Mountain Reproduce states are supported here; Djinn's Idle state is separate.
+fn god_density_max(kind: u16) -> Option<usize> {
+    match kind {
+        0x652 | 0x658 => Some(2),
+        0x651 | 0x654..=0x657 | 0x659 => Some(3),
+        _ => None,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Reproduction {
+    Density,
+    Capacity,
+    NoSite,
+    Born(i32),
+}
+
 impl World {
+    pub(super) fn reproduce_god(&mut self, id: i32, delta: u64) -> Result<Option<Reproduction>> {
+        let e = self.entities.get(&id).context("reproducing god missing")?;
+        let Some(maximum) = god_density_max(e.kind).filter(|_| e.population_slot.is_some()) else {
+            return Ok(None);
+        };
+        let (kind, center) = (e.kind, e.pos);
+        let remaining = self.god_reproduction.entry(id).or_insert(60000);
+        // Reproduce checks the stored clock before subtracting the active tick, with no catch-up bursts.
+        if *remaining > 0 {
+            *remaining = remaining.saturating_sub(delta);
+            return Ok(None);
+        }
+        *remaining = 60000;
+        let outcome = self.try_reproduce_god(kind, center, maximum)?;
+        tracing::debug!(
+            entity = id,
+            kind,
+            ?outcome,
+            "ordinary god reproduction evaluated"
+        );
+        Ok(Some(outcome))
+    }
+
+    fn try_reproduce_god(
+        &mut self,
+        kind: u16,
+        center: Pos,
+        maximum: usize,
+    ) -> Result<Reproduction> {
+        // CountEntity includes the parent and every same-type enemy, not just its camp or spawn group.
+        if self
+            .actors_near(center, 10.)
+            .filter(|e| e.kind == kind)
+            .count()
+            >= maximum
+        {
+            return Ok(Reproduction::Density);
+        }
+        let object = self.content.get(kind)?;
+        ensure!(
+            object.god && object.terrain == 1,
+            "reproduction contradicts selected god habitat"
+        );
+        let terrain = object.terrain;
+        let family = FAMILIES.iter().find(|f| f.leader == kind);
+        if !self.population_space(terrain, family.map_or(1, |f| f.initial()))? {
+            return Ok(Reproduction::Capacity);
+        }
+        for _ in 0..10 {
+            let angle = self.rng.gen_range(0.0..std::f32::consts::TAU);
+            let pos = Pos {
+                x: center.x + 5. * angle.cos(),
+                y: center.y + 5. * angle.sin(),
+            };
+            if !self.family_ground(pos, terrain) {
+                continue;
+            }
+            let positions = match family {
+                Some(family) => self.family_layout(pos, family, &[]),
+                None => Some(vec![pos]),
+            };
+            let Some(positions) = positions else {
+                continue;
+            };
+            if !positions.iter().all(|pos| {
+                self.players.values().all(|p| p.pos.distance(*pos) >= 0.75)
+                    && self
+                        .map
+                        .spawns
+                        .iter()
+                        .all(|(x, y)| pos.distance(Pos { x: *x, y: *y }) >= 12.)
+            }) {
+                continue;
+            }
+            let id = match family {
+                Some(family) => {
+                    let slot = self.population.len();
+                    self.place_camp(family, positions)?;
+                    self.population[slot]
+                        .entity
+                        .context("new god family lacks its root")?
+                }
+                None => self.place_population_solo(kind, pos)?,
+            };
+            return Ok(Reproduction::Born(id));
+        }
+        Ok(Reproduction::NoSite)
+    }
+
     pub(super) fn camp_members(&self, camp: usize) -> impl Iterator<Item = &Entity> {
         let c = self.camps.get(camp).expect("ordinary camp index missing");
         self.population[c.start..c.start + c.family.size()]

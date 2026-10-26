@@ -120,6 +120,18 @@ impl World {
         self.population_counts[terrain as usize] += 1;
         Ok(())
     }
+    pub(super) fn place_population_solo(&mut self, kind: u16, pos: Pos) -> Result<i32> {
+        let entity = self.spawn_entity(kind, pos, vec![])?;
+        let slot = self.population.len();
+        self.population.push(Spawn {
+            kind,
+            pos,
+            entity: Some(entity),
+            camp: None,
+        });
+        self.mark_population(entity, slot)?;
+        Ok(entity)
+    }
     pub(super) fn sample_population_group(&mut self, kind: u16) -> usize {
         match self.content.objects[&kind].spawn_group {
             None => 1,
@@ -195,15 +207,7 @@ impl World {
                 Some(family) => self.place_camp(family, positions)?,
                 None => {
                     let pos = positions[0];
-                    let entity = self.spawn_entity(kind, pos, vec![])?;
-                    let slot = self.population.len();
-                    self.population.push(Spawn {
-                        kind,
-                        pos,
-                        entity: Some(entity),
-                        camp: None,
-                    });
-                    self.mark_population(entity, slot)?;
+                    self.place_population_solo(kind, pos)?;
                 }
             }
         }
