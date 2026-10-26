@@ -307,6 +307,9 @@ def wait_job(directory):
             return code
         state = unit_state(load(directory)['unit'])
         if state['ActiveState'] in ('inactive', 'failed'):
+            # Stop-post may publish the receipt while systemctl is queried.
+            if (directory / 'collection.json').exists():
+                continue
             raise RuntimeError(f'Job ended without a cleanup receipt; see {directory}')
         time.sleep(0.2)
 
@@ -321,6 +324,8 @@ def allocate(kind, arguments, service=None):
     if not ID.fullmatch(identifier):
         raise RuntimeError('Invalid service invocation ID')
     directory = root / identifier
+    command = command_for(kind, arguments, ROOT, directory / 'results')
+    head = None if service else subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     directory.mkdir(mode=0o700)
     results = directory / 'results'
     results.mkdir(mode=0o700)
@@ -331,9 +336,9 @@ def allocate(kind, arguments, service=None):
     unit = f'openrotmg-cache-{service}.service' if service else f'openrotmg-qa-{identifier}.service'
     row = {'version': 1 if service else 2, 'scratch_root': str(temporary_root) if temporary_root is not None else None,
            'id': identifier, 'uid': os.getuid(), 'source': str(ROOT), 'unit': unit,
-           'service': service, 'command': command_for(kind, arguments, ROOT, results),
+           'service': service, 'command': command,
            'runner_sha256': hashlib.sha256(data).hexdigest(), 'created': time.time(),
-           'head': None if service else subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+           'head': head,
            'preservation_required': 'OPENROTMG_QA_PRESERVATION_FILE' in os.environ,
            'preservation_policy': str(Path(os.environ.get('OPENROTMG_QA_PRESERVATION_FILE',
                 Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'openrotmg/qa-preservation.json')).absolute())}

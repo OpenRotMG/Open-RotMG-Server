@@ -45,7 +45,7 @@ class JobTests(unittest.TestCase):
             for directory in self.jobs.iterdir():
                 if qa.ID.fullmatch(directory.name) and (directory / 'job.json').exists():
                     row = json.loads((directory / 'job.json').read_text())
-                    if qa.unit_state(row['unit'])['ActiveState'] not in ('inactive', 'failed'):
+                    if qa.unit_state(row['unit'])['ActiveState'] in ('activating', 'active'):
                         subprocess.run(['systemctl', '--user', 'stop', row['unit']], check=True, capture_output=True)
                     if 'cgroup' in row:
                         eventually(lambda: not qa.group_processes(row['cgroup']))
@@ -64,6 +64,31 @@ class JobTests(unittest.TestCase):
         path = directory / 'collection.json'
         eventually(path.exists)
         return json.loads(path.read_text())
+
+    def test_non_git_source_does_not_publish_unattributed_job(self):
+        source = self.base / 'not-a-checkout'
+        source.mkdir()
+        with patch.dict(os.environ, self.env), patch.object(qa, 'ROOT', source):
+            with self.assertRaises(subprocess.CalledProcessError):
+                qa.allocate('exec', ['true'])
+        self.assertFalse(self.jobs.exists() and any(qa.ID.fullmatch(p.name) for p in self.jobs.iterdir()))
+
+    def test_invalid_command_does_not_publish_unattributed_job(self):
+        for kind, arguments in [('cargo', ['clean']), ('native', ['case.mjs', '--run-dir', '/tmp/not-owned']), ('exec', [])]:
+            with self.subTest(kind=kind), patch.dict(os.environ, self.env):
+                with self.assertRaises(RuntimeError):
+                    qa.allocate(kind, arguments)
+                self.assertFalse(self.jobs.exists() and any(qa.ID.fullmatch(p.name) for p in self.jobs.iterdir()))
+
+    def test_receipt_published_during_terminal_state_query_is_read(self):
+        with patch.dict(os.environ, self.env):
+            directory = qa.allocate('exec', ['true'])
+        def retire(unit):
+            qa.save(directory / 'command.json', {'returncode': 0})
+            qa.save(directory / 'collection.json', {'status': 'reclaimed', 'service_result': 'success'})
+            return {'ActiveState': 'inactive'}
+        with patch.object(qa, 'unit_state', side_effect=retire):
+            self.assertEqual(qa.wait_job(directory), 0)
 
     def test_success_and_failure_keep_evidence_and_remove_only_scratch(self):
         for exit_code in (0, 37):
