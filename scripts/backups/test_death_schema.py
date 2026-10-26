@@ -31,7 +31,7 @@ class DeathSchema(unittest.TestCase):
             backup.restore(legacy, baseline)
             subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(baseline / 'game.db'), str(root / 'data')], check=True)
             valid = backup.export(baseline / 'game.db', baseline / 'levels.sqlite', directory / 'valid.gz', revision, revision, revision)
-            self.assertEqual(valid['schema'], 18)
+            self.assertEqual(valid['schema'], 19)
             self.assertEqual(valid['game']['legacy_claims'], [])
             for case, (old, new) in enumerate([
                 ('character INTEGER PRIMARY KEY', 'character INTEGER'),
@@ -103,7 +103,7 @@ class DeathSchema(unittest.TestCase):
             self.assertEqual(len(proof['level_credits']), 2)
             archive = directory / 'paid.gz'
             bundle = backup.export(written / 'game.db', directory / 'levels.sqlite', archive, revision, revision, revision)
-            self.assertEqual(bundle['schema'], 18)
+            self.assertEqual(bundle['schema'], 19)
             self.assertEqual(len(bundle['game']['bot_minds']), 2)
             self.assertEqual(len(bundle['game']['trade_transactions']), 1)
             for case in ('revision', 'unknown_mind', 'owners', 'revisions', 'market_key'):
