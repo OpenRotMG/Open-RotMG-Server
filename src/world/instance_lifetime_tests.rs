@@ -14,7 +14,7 @@ async fn character(store: &crate::store::Store, d: &Directory, name: &str) -> Ch
 }
 
 #[tokio::test]
-async fn earned_dungeons_and_occupied_vaults_are_not_limited_to_twelve_worlds() {
+async fn god_defeats_publish_dungeons_past_twelve_worlds_and_preserve_vaults() {
     let mut d = directory();
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &d.content).unwrap();
     let vault_portal = d.worlds[&-2]
@@ -79,20 +79,66 @@ async fn earned_dungeons_and_occupied_vaults_are_not_limited_to_twelve_worlds() 
         ));
     }
     assert_eq!(d.worlds.len(), 12);
-    let (x, y) = d.worlds[&-3].map.spawns[0];
+    let ch = character(&store, &d, "god-hunter").await;
+    let player = d.worlds.get_mut(&-3).unwrap().enter(ch, None).unwrap();
+    let pos = d.worlds[&-3].players[&player].pos;
     let mut portals = Vec::new();
-    for _ in 0..8 {
-        let portal = d
-            .drop_dungeon_portal(-3, 0x70c, Pos { x, y })
-            .expect("earned Sprite World must be published even with twelve live worlds");
-        let destination = d.portals[&portal].destination.unwrap();
-        assert!(d.worlds[&-3].entities[&portal].published);
-        assert!(matches!(
-            d.worlds[&destination].return_route,
-            Some(DungeonReturn::Realm(-3))
-        ));
-        let actors = d.worlds[&destination].actor_ids.clone();
-        portals.push((portal, destination, actors));
+    for (enemy, name, kind, chance, dungeon) in [
+        (0x654, "Medusa", 0x71b, 0.1, "Abyss of Demons"),
+        (0x659, "Ghost God", 0x71a, 0.17, "Undead Lair"),
+        (0x657, "Flying Brain", 0x890, 0.17, "Mad Lab"),
+        (0x653, "Sprite Child", 0x70c, 0.25, "Sprite World"),
+    ] {
+        assert_eq!(d.content.objects[&enemy].name, name);
+        assert_eq!(crate::dungeon::portal_drop(enemy), Some((kind, chance)));
+        for succeeds in [false, true, true] {
+            let seed = (0..64)
+                .find(|seed| rand::rngs::StdRng::seed_from_u64(*seed).gen_bool(chance) == succeeds)
+                .unwrap();
+            let before: BTreeSet<_> = d.portals.keys().copied().collect();
+            let w = d.worlds.get_mut(&-3).unwrap();
+            let target = w.spawn_entity(enemy, pos, vec![]).unwrap();
+            w.damage_enemy(player, target, 1, true, &[], None).unwrap();
+            assert!(w.portal_requests.is_empty());
+            let hp = w.entities[&target].hp;
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.damage_enemy(player, target, hp, true, &[], None).unwrap();
+            assert!(!w.entities.contains_key(&target));
+            assert_eq!(w.portal_requests.len(), usize::from(succeeds));
+            w.damage_enemy(player, target, hp, true, &[], None).unwrap();
+            assert_eq!(w.portal_requests.len(), usize::from(succeeds));
+            // A successful death roll must create a portal, not just queue one: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/DropPortalOnDeath.cs#L42-L44
+            d.coordinate(&[-3]);
+            let created: Vec<_> = d
+                .portals
+                .keys()
+                .filter(|id| !before.contains(id))
+                .copied()
+                .collect();
+            println!(
+                "{name}: roll={succeeds}, published={}, loaded_worlds={}",
+                created.len(),
+                d.worlds.len()
+            );
+            assert_eq!(
+                created.len(),
+                usize::from(succeeds),
+                "{name}: successful death roll lost during portal publication"
+            );
+            assert!(d.worlds[&-3].portal_requests.is_empty());
+            for portal in created {
+                let destination = d.portals[&portal].destination.unwrap();
+                assert_eq!(d.worlds[&-3].entities[&portal].kind, kind);
+                assert!(d.worlds[&-3].entities[&portal].published);
+                assert_eq!(d.worlds[&destination].name, dungeon);
+                assert!(matches!(
+                    d.worlds[&destination].return_route,
+                    Some(DungeonReturn::Realm(-3))
+                ));
+                let actors = d.worlds[&destination].actor_ids.clone();
+                portals.push((portal, destination, actors));
+            }
+        }
     }
     assert_eq!(d.worlds.len(), 20);
     for (vault, player, before) in residents {
