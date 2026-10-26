@@ -337,7 +337,13 @@ impl Directory {
                 .players
                 .values()
                 .filter(|p| p.can_chat())
-                .map(|p| p.character.name.as_str())
+                .map(|p| {
+                    if p.controller == Controller::Autonomous {
+                        format!("{} [bot]", p.character.name)
+                    } else {
+                        p.character.name.clone()
+                    }
+                })
                 .collect();
             let packet = chat_info(&format!("Players online: {}", names.join(", ")));
             send(&world.players[&id], packet.id, packet.body);
@@ -464,7 +470,8 @@ mod tests {
     async fn who_labels_only_autonomous_players_in_the_current_world() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
-        let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 20, 647).unwrap();
+        let mut d =
+            Directory::test_with_seed(std::path::Path::new("data"), content, 20, 647).unwrap();
         let mut actors = Vec::new();
         let mut inboxes = Vec::new();
         for (name, controller, world, alive) in [
@@ -475,7 +482,10 @@ mod tests {
             ("Elsewhere", Controller::Autonomous, -3, true),
         ] {
             let account = store.list(format!("who-{name}")).await.unwrap();
-            let mut ch = store.create(account.id, d.content.get(crate::content::WIZARD).unwrap()).await.unwrap();
+            let mut ch = store
+                .create(account.id, d.content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap();
             ch.name = name.into();
             let (packets, inbox) = mpsc::channel(64);
             let (lost, _) = watch::channel(None);
@@ -483,11 +493,15 @@ mod tests {
             let id = w.enter(ch, Some(Output { packets, lost })).unwrap();
             let p = w.players.get_mut(&id).unwrap();
             p.controller = controller;
-            if !alive { p.character.hp = 0; }
+            if !alive {
+                p.character.hp = 0;
+            }
             actors.push(id);
             inboxes.push(inbox);
         }
-        for inbox in &mut inboxes { while inbox.try_recv().is_ok() {} }
+        for inbox in &mut inboxes {
+            while inbox.try_recv().is_ok() {}
+        }
         d.chat(actors[0], "/who".into(), Instant::now()).unwrap();
         let reply = inboxes[0].try_recv().unwrap();
         assert_eq!(reply.id, wire::TEXT);
@@ -497,7 +511,10 @@ mod tests {
         assert_eq!(r.i32().unwrap(), -1);
         assert_eq!(r.u8().unwrap(), 0);
         assert_eq!(r.utf().unwrap(), "");
-        assert_eq!(r.utf().unwrap(), "Players online: Botanic, OldTimer [bot], Scripted");
+        assert_eq!(
+            r.utf().unwrap(),
+            "Players online: Botanic, OldTimer [bot], Scripted"
+        );
         assert_eq!(r.utf().unwrap(), "");
         r.done().unwrap();
         assert!(inboxes.iter_mut().all(|inbox| inbox.try_recv().is_err()));
@@ -506,8 +523,30 @@ mod tests {
         w.players.get_mut(&actors[0]).unwrap().controller = Controller::Autonomous;
         d.chat(actors[0], "/WHO".into(), Instant::now()).unwrap();
         let reply = inboxes[0].try_recv().unwrap();
-        assert!(reply.body.windows(b"Botanic [bot]".len()).any(|w| w == b"Botanic [bot]"));
-        assert!(!reply.body.windows(b"OldTimer [bot]".len()).any(|w| w == b"OldTimer [bot]"));
+        assert!(
+            reply
+                .body
+                .windows(b"Botanic [bot]".len())
+                .any(|w| w == b"Botanic [bot]")
+        );
+        assert!(
+            !reply
+                .body
+                .windows(b"OldTimer [bot]".len())
+                .any(|w| w == b"OldTimer [bot]")
+        );
+        for (command, error) in [
+            ("/who OldTimer", "Usage: /who"),
+            ("/whom", "Unknown chat command."),
+        ] {
+            assert_eq!(
+                d.chat(actors[0], command.into(), Instant::now())
+                    .unwrap_err()
+                    .to_string(),
+                error
+            );
+        }
+        assert!(inboxes.iter_mut().all(|inbox| inbox.try_recv().is_err()));
     }
 
     #[tokio::test]
