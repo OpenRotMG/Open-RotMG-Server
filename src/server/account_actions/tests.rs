@@ -61,6 +61,8 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
         name_claims: Arc::default(),
         bots: Arc::default(),
         quarantined: Arc::default(),
+        #[cfg(test)]
+        persona_departure_gate: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
     };
     (dir, app)

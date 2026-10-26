@@ -153,6 +153,9 @@ struct LeaseCleanup {
 #[derive(Clone)]
 pub(crate) struct SessionControl {
     autonomous: bool,
+    account: i32,
+    generation: Arc<()>,
+    registry: std::sync::Weak<Mutex<BTreeMap<i32, Claim>>>,
     pub(super) cancel: tokio::sync::watch::Sender<bool>,
     pub(super) done: tokio::sync::watch::Receiver<Completion>,
     completion: tokio::sync::watch::Sender<Completion>,
@@ -160,6 +163,47 @@ pub(crate) struct SessionControl {
 
 impl SessionControl {
     pub(crate) fn complete(self, result: Result<()>) {
+        if !self.autonomous {
+            self.publish(result);
+            return;
+        }
+        let Some(registry) = self.registry.upgrade() else {
+            self.publish(Err(anyhow::anyhow!(
+                "controller completion lost ownership registry"
+            )));
+            report_failure(
+                "controller completion lost ownership registry",
+                "autonomous completion failed",
+            );
+            return;
+        };
+        let mut owners = registry.lock().expect("ownership registry poisoned");
+        let Some(claim) = owners
+            .get_mut(&self.account)
+            .filter(|c| Arc::ptr_eq(&c.generation, &self.generation))
+        else {
+            let error = format!(
+                "account={} stale autonomous completion generation",
+                self.account
+            );
+            report_failure(&error, "autonomous completion failed");
+            self.publish(Err(anyhow::Error::msg(error)));
+            return;
+        };
+        if let Err(error) = &result {
+            let message = fence(
+                claim,
+                self.account,
+                "autonomous_completion",
+                Stage::Retirement,
+                format!("{error:#}"),
+            );
+            report_failure(&message, "autonomous completion failed");
+        }
+        self.publish(result);
+        finish(&mut owners, self.account);
+    }
+    fn publish(&self, result: Result<()>) {
         self.completion.send_if_modified(|current| {
             if current.is_some() {
                 return false;
@@ -208,6 +252,9 @@ fn finish(owners: &mut BTreeMap<i32, Claim>, id: i32) {
         && !claim.pending
         && claim.avatar.is_none()
         && claim.failure.is_none()
+        && claim.control.as_ref().is_none_or(|control| {
+            !control.autonomous || matches!(*control.done.borrow(), Some(Ok(())))
+        })
         && claim
             .finalization
             .as_ref()
@@ -240,6 +287,9 @@ impl Owner {
         ensure!(claim.control.is_none(), "controller already registered");
         let control = SessionControl {
             autonomous,
+            account: self.id,
+            generation: self.generation.clone(),
+            registry: Arc::downgrade(&self.registry),
             cancel,
             done,
             completion,
@@ -560,8 +610,8 @@ impl App {
     pub(crate) async fn stop_persona(&self, account: i32) -> Result<()> {
         self.world.supervisor.check_account(account)?;
         let control = {
-            let owners = self.owners.lock().expect("ownership registry poisoned");
-            match owners.get(&account) {
+            let mut owners = self.owners.lock().expect("ownership registry poisoned");
+            match owners.get_mut(&account) {
                 None => return Ok(()),
                 Some(claim) => {
                     ensure!(
@@ -576,6 +626,18 @@ impl App {
                         control.autonomous,
                         "name collision is not an autonomous session"
                     );
+                    if control.cancel.is_closed() {
+                        let message = fence(
+                            claim,
+                            account,
+                            "persona_completion",
+                            Stage::Retirement,
+                            "controller completion is unavailable; operator inspection required"
+                                .into(),
+                        );
+                        report_failure(&message, "name claim refused");
+                        return Err(crate::store::Rejected("Persona controller completion is unavailable; name was not claimed. Operator inspection required.").into());
+                    }
                     control.cancel.send_replace(true);
                     control
                 }
@@ -1057,6 +1119,9 @@ pub(super) fn preserve_uncertain(
         .filter(|(_, claim)| {
             claim.pending
                 || claim.failure.is_some()
+                || claim.control.as_ref().is_some_and(|control| {
+                    control.autonomous && !matches!(*control.done.borrow(), Some(Ok(())))
+                })
                 || claim
                     .finalization
                     .as_ref()

@@ -21,16 +21,24 @@ async fn registered_name(store: &Store, identity: &str) -> String {
 }
 
 async fn request(a: &App, identity: &str, name: &str) -> String {
+    request_secret(a, identity, name, None).await
+}
+
+async fn request_secret(a: &App, identity: &str, name: &str, secret: Option<&str>) -> String {
+    let mut fields = HashMap::from([
+        ("guid".into(), format!("{identity}@example.test")),
+        ("password".into(), "test-password".into()),
+        ("name".into(), name.into()),
+    ]);
+    if let Some(secret) = secret {
+        fields.insert("secret".into(), secret.into());
+    }
     let response = account_request(
         State(a.clone()),
         ConnectInfo("127.0.0.1:12345".parse().unwrap()),
         HeaderMap::new(),
         axum::extract::Path("setName".into()),
-        Form(HashMap::from([
-            ("guid".into(), format!("{identity}@example.test")),
-            ("password".into(), "test-password".into()),
-            ("name".into(), name.into()),
-        ])),
+        Form(fields),
     )
     .await;
     String::from_utf8(
@@ -1010,7 +1018,19 @@ async fn name_claims_native_unpublished_admission_rejects_without_poisoning_the_
             body: body.0,
         })
         .await;
-    let packet = socket.receive_one_of(&[0, 20]).await;
+    let packet = match std::panic::AssertUnwindSafe(socket.receive_one_of(&[0, 20]))
+        .catch_unwind()
+        .await
+    {
+        Ok(packet) => packet,
+        Err(_) => {
+            let fenced = lifecycle::state(&a, human).is_some_and(|state| state.2);
+            let quarantined = a.world.player_view(id).await.unwrap().lifecycle.quarantined;
+            panic!(
+                "native name request lost connection before result20; claimant_fenced={fenced}; quarantined={quarantined}"
+            );
+        }
+    };
     let mut reader = Reader::new(&packet.body);
     let status = if packet.id == 0 {
         reader.i32().unwrap()
@@ -1093,13 +1113,12 @@ async fn name_claims_cancelled_accepted_entry_with_stale_cctv_is_refused_without
     launch.abort();
     assert!(launch.await.unwrap_err().is_cancelled());
     drop(release);
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while a.owners.lock().unwrap().contains_key(&account) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    lifecycle::finalize(&a, binding.0, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    assert!(a.owners.lock().unwrap().contains_key(&account));
     assert!(
         a.world
             .spectate(binding.0, binding.1)
@@ -1111,7 +1130,10 @@ async fn name_claims_cancelled_accepted_entry_with_stale_cctv_is_refused_without
     assert!(a.store.load(account, bot.id).await.unwrap().alive);
     assert_eq!(a.cctv.binding(name), Some(binding));
     let reply = request(&a, "cancelledentryhuman", name).await;
-    assert!(reply.contains("session cleanup is incomplete"), "{reply}");
+    assert!(
+        reply.contains("controller completion is unavailable"),
+        "{reply}"
+    );
     assert!(reply.contains("Operator inspection required"), "{reply}");
     assert_eq!(
         registered_name(&a.store, "cancelledentryhuman").await,
@@ -1123,5 +1145,182 @@ async fn name_claims_cancelled_accepted_entry_with_stale_cctv_is_refused_without
         a.cctv.binding(name),
         Some(binding),
         "refusal must not guess a CCTV cleanup"
+    );
+}
+
+pub(crate) async fn departure_gate(a: &App, account: i32) -> Result<()> {
+    let gate = {
+        let mut gate = a.persona_departure_gate.lock().unwrap();
+        if gate
+            .as_ref()
+            .is_some_and(|(target, _, _)| *target == account)
+        {
+            gate.take()
+        } else {
+            None
+        }
+    };
+    if let Some((_, entered, release)) = gate {
+        entered
+            .send(())
+            .map_err(|_| anyhow::anyhow!("departure test observer closed"))?;
+        release.await.context("departure test gate closed")?;
+    }
+    Ok(())
+}
+
+struct ReleaseDeparture(Option<tokio::sync::oneshot::Sender<()>>);
+impl Drop for ReleaseDeparture {
+    fn drop(&mut self) {
+        if let Some(release) = self.0.take() {
+            let _ = release.send(());
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn name_claims_wait_for_controller_completion_after_avatar_finalization() {
+    let (_dir, a) = test_app();
+    a.world.clock.set_paused(true);
+    let name = crate::bots::profiles()[0];
+    let (bot, player) = running(&a, name).await;
+    let human = registered(&a, "completionhuman").await;
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = tokio::sync::oneshot::channel();
+    *a.persona_departure_gate.lock().unwrap() = Some((bot.account, entered, wait));
+    let release = ReleaseDeparture(Some(release));
+    let app = a.clone();
+    let stopping = tokio::spawn(async move { app.stop_persona(bot.account).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        a.world
+            .spectate(player, bot.account)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        a.owners.lock().unwrap().contains_key(&bot.account),
+        "finalized controller must remain discoverable until completion"
+    );
+    assert!(a.cctv.binding(name).is_some());
+    let app = a.clone();
+    let claim = tokio::spawn(async move { request(&app, "completionhuman", name).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while a.name_claims.try_lock().is_ok() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        registered_name(&a.store, "completionhuman").await,
+        format!("Guest{human}")
+    );
+    assert!(!claim.is_finished());
+    drop(release);
+    stopping.await.unwrap().unwrap();
+    assert_eq!(claim.await.unwrap(), "<Success/>");
+    assert!(!a.owners.lock().unwrap().contains_key(&bot.account));
+    assert_eq!(a.cctv.binding(name), None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn name_claims_native_settles_claimant_assist_credit_before_bot_stop_completes() {
+    use lifecycle_finalize_tests::*;
+    let (dir, a) = test_app();
+    a.world.clock.set_paused(true);
+    let name = crate::bots::profiles()[0];
+    let (bot, _) = running(&a, name).await;
+    let human = registered(&a, "credithuman").await;
+    let mut character = a
+        .store
+        .create(human, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    character.exp = 49;
+    a.store.progress(character.clone()).await.unwrap();
+    let (port, server) = socket_server(&a).await;
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    socket
+        .send(socket_hello_password(
+            &dir,
+            "credithuman@example.test",
+            "test-password",
+            -2,
+            None,
+        ))
+        .await;
+    socket.receive(wire::MAP_INFO).await;
+    socket
+        .send(Packet {
+            id: wire::LOAD,
+            body: character.id.to_be_bytes().to_vec(),
+        })
+        .await;
+    let player = Reader::new(&socket.receive(wire::CREATE_SUCCESS).await.body)
+        .i32()
+        .unwrap();
+    a.world
+        .for_player(player)
+        .call(move |w| {
+            w.players
+                .get_mut(&player)
+                .unwrap()
+                .queue_experience(1, Some(bot.id), true)
+        })
+        .await
+        .unwrap();
+    assert_eq!(native_name(&mut socket, name).await, (1, String::new()));
+    assert_eq!(a.store.assist_count(bot.id).await.unwrap(), 1);
+    assert_eq!(a.store.load(human, character.id).await.unwrap().level, 2);
+    assert_eq!(
+        a.store
+            .load(bot.account, bot.id)
+            .await
+            .unwrap()
+            .lifetime
+            .level_assists,
+        1
+    );
+    assert!(!lifecycle::state(&a, human).unwrap().2);
+    assert!(a.kick(human).await.unwrap());
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn name_claims_http_unsupported_secret_cannot_stop_or_claim_a_persona() {
+    let (_dir, a) = test_app();
+    a.world.clock.set_paused(true);
+    let name = crate::bots::profiles()[0];
+    let (bot, _) = running(&a, name).await;
+    let human = registered(&a, "secrethuman").await;
+    let binding = a.cctv.binding(name);
+    let reply = request_secret(
+        &a,
+        "secrethuman",
+        name,
+        Some("unsupported-platform-fixture"),
+    )
+    .await;
+    assert!(
+        reply.contains("external platform authentication is not implemented"),
+        "{reply}"
+    );
+    assert_eq!(
+        registered_name(&a.store, "secrethuman").await,
+        format!("Guest{human}")
+    );
+    assert_eq!(a.store.presentation(human).await.unwrap().credits, 100);
+    assert!(a.owners.lock().unwrap().contains_key(&bot.account));
+    assert!(lifecycle::state(&a, human).is_none());
+    assert_eq!(a.cctv.binding(name), binding);
+    assert_eq!(
+        request_secret(&a, "secrethuman", name, Some("")).await,
+        "<Success/>"
     );
 }

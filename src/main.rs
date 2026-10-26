@@ -187,6 +187,8 @@ async fn serve(args: Vec<String>) -> Result<()> {
         bots: Arc::default(),
         #[cfg(test)]
         quarantined: Arc::default(),
+        #[cfg(test)]
+        persona_departure_gate: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
     };
     server::serve(app, config.bind, client).await

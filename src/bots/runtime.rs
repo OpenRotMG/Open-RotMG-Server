@@ -987,6 +987,14 @@ pub(super) async fn launch(
                 result = Err(error);
             }
         }
+        #[cfg(test)]
+        if finalized
+            && let Err(error) =
+                crate::server::name_claims_tests::departure_gate(&app, account).await
+        {
+            finalized = false;
+            result = Err(error);
+        }
         if finalized {
             app.cctv.departed(profile.name, id, account);
         }
