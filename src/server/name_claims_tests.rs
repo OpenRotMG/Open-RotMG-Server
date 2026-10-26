@@ -927,3 +927,26 @@ async fn name_claims_wait_for_an_accepted_autonomous_transfer_before_releasing_t
         1
     );
 }
+
+#[tokio::test]
+async fn name_claims_unpublished_persona_admission_rejects_without_fencing_the_human() {
+    let (_dir, a) = test_app();
+    let bot = persona(&a, "Admitting").await;
+    let owner = a.claim(bot.account).unwrap();
+    let human = registered(&a, "admissionretry").await;
+    let reply = request(&a, "admissionretry", "Admitting").await;
+    assert!(reply.contains("Persona admission is busy"), "{reply}");
+    assert!(
+        lifecycle::state(&a, human).is_none(),
+        "a rejected name request cannot fence its human owner"
+    );
+    assert_eq!(
+        a.store.list("admissionretry".into()).await.unwrap().name,
+        format!("Guest{human}")
+    );
+    drop(owner);
+    assert_eq!(
+        request(&a, "admissionretry", "Admitting").await,
+        "<Success/>"
+    );
+}
