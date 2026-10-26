@@ -1090,8 +1090,73 @@ pub(crate) fn potion_damage(kind: u16) -> Option<i32> {
         _ => None,
     }
 }
+pub(crate) fn item_qualified(kind: u16, item: u16, damage: i32, max_hp: i32) -> bool {
+    // Kithio LootDefs.Threshold uses >=, not the generic world's strict > gate.
+    kind != 0xd90 || item != 0xc02 || i64::from(damage) * 100 >= i64::from(max_hp) * 15
+}
+
+fn god_equipment(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
+    let mut items = Vec::new();
+    for (chance, pick) in table(kind) {
+        let pool = candidates(content, *pick);
+        assert!(!pool.is_empty(), "validated god loot candidates");
+        let probability = chance / pool.len() as f64;
+        for item in pool {
+            if rng.gen_bool(probability) {
+                items.push(item);
+            }
+        }
+    }
+    items
+}
+
+pub(crate) struct GodLoot {
+    pub shared: Vec<u16>,
+    pub shared_owners: Vec<i32>,
+    pub private: std::collections::BTreeMap<i32, Vec<u16>>,
+}
+
+pub(crate) fn god_loot(
+    content: &Content,
+    kind: u16,
+    contributors: &[(i32, i32)],
+    rng: &mut impl Rng,
+) -> GodLoot {
+    let required = potion_damage(kind).expect("ordinary god reward path");
+    assert!(!contributors.is_empty(), "god loot needs contributors");
+    let mut loot = GodLoot {
+        shared: Vec::new(),
+        shared_owners: Vec::new(),
+        private: std::collections::BTreeMap::new(),
+    };
+    for item in god_equipment(content, kind, rng) {
+        if content.objects[&item].soulbound {
+            let owner = contributors.choose(rng).expect("nonempty contributors").0;
+            // Do not retain Kithio Loots.cs's duplicate soulbound entry in shared loot.
+            loot.private.entry(owner).or_default().push(item);
+        } else {
+            loot.shared.push(item);
+        }
+    }
+    for &(owner, damage) in contributors {
+        if damage >= required {
+            for &(chance, item) in bonus(kind) {
+                if rng.gen_bool(chance) {
+                    loot.private.entry(owner).or_default().push(item);
+                }
+            }
+        }
+        if !loot.private.contains_key(&owner) {
+            loot.shared_owners.push(owner);
+        }
+    }
+    loot
+}
+
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if independent(kind) {
+    let mut items = if potion_damage(kind).is_some() {
+        god_equipment(content, kind, rng)
+    } else if independent(kind) {
         let mut items = Vec::new();
         for (chance, pick) in table(kind) {
             if rng.gen_bool(*chance) {
@@ -1288,6 +1353,83 @@ mod tests {
             };
             same.then_some(*chance)
         })
+    }
+
+    #[test]
+    fn doom_only_uses_inclusive_fractional_threshold() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert_eq!(surface_rate(0xd90, Pick::Item(0xc02)), Some(0.001));
+        let hp = content.objects[&0xd90].hp;
+        assert_eq!(hp, 8000);
+        for damage in [800, 801, 1199, 1200, 1201] {
+            assert_eq!(item_qualified(0xd90, 0xc02, damage, hp), damage >= 1200);
+            for item in [0xa35, 0x722, 0xa12] {
+                assert!(item_qualified(0xd90, item, damage, hp));
+            }
+            assert!(item_qualified(0xd06, 0xc03, damage, hp));
+        }
+        assert!(!item_qualified(0xd90, 0xc02, 1200, 8001));
+        assert!(item_qualified(0xd90, 0xc02, 1201, 8001));
+    }
+
+    #[test]
+    fn god_tier_candidates_expand_independently_without_eight_item_cap() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let expected: Vec<_> = table(0x651)
+            .iter()
+            .flat_map(|(_, pick)| candidates(&content, *pick))
+            .collect();
+        assert_eq!(
+            expected
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            expected.len()
+        );
+        assert!(expected.len() > 8);
+        for count in [1, 2, 5] {
+            let owners: Vec<_> = (1..=count).map(|account| (account, 1)).collect();
+            // No bounded integer draws: only Bernoulli samples, all below p/N.
+            let loot = god_loot(&content, 0x651, &owners, &mut StepRng::new(0, 1));
+            assert_eq!(loot.shared, expected);
+            assert!(loot.private.is_empty());
+            assert_eq!(loot.shared_owners, (1..=count).collect::<Vec<_>>());
+            let qualified: Vec<_> = (1..=count).map(|account| (account, 180)).collect();
+            let loot = god_loot(&content, 0x651, &qualified, &mut StepRng::new(0, 1));
+            assert_eq!(loot.shared, expected);
+            assert!(
+                loot.shared_owners.is_empty(),
+                "Kithio excludes private reward recipients"
+            );
+            assert_eq!(loot.private.len(), count as usize);
+            assert!(loot.private.values().all(|items| *items == [0xa1f]));
+        }
+    }
+
+    #[test]
+    fn god_bound_equipment_is_allocated_once_and_never_in_shared_loot() {
+        let mut content = Content::load(std::path::Path::new("data")).unwrap();
+        let pool = candidates(&content, Pick::Tier(6, WEAPONS));
+        for kind in &pool {
+            content.objects.get_mut(kind).unwrap().soulbound = true;
+        }
+        let owners = [(10, 1), (20, 1), (30, 1), (40, 1), (50, 1)];
+        let mut bound_success = false;
+        for seed in 0..1024 {
+            let loot = god_loot(&content, 0x651, &owners, &mut StdRng::seed_from_u64(seed));
+            assert!(loot.shared.iter().all(|kind| !pool.contains(kind)));
+            let mut allocated = std::collections::BTreeSet::new();
+            for (owner, items) in loot.private {
+                assert!(owners.iter().any(|(account, _)| *account == owner));
+                assert!(!loot.shared_owners.contains(&owner));
+                for item in items {
+                    assert!(pool.contains(&item));
+                    assert!(allocated.insert(item), "one allocation per shared success");
+                    bound_success = true;
+                }
+            }
+        }
+        assert!(bound_success);
     }
 
     #[test]

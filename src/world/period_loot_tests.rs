@@ -50,18 +50,16 @@ async fn period_loot_keeps_ownership_threshold_boundaries_and_repeated_rewards()
             w.drop_loot(&defeated).unwrap();
             let mut rewards = BTreeMap::<i32, Vec<i32>>::new();
             for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
-                let owner = bag
-                    .extra_stats
-                    .iter()
-                    .find(|(stat, _)| *stat == 54)
-                    .expect("private reward")
-                    .1;
-                assert!(owners[..2].iter().any(|(account, _)| *account == owner));
                 assert_eq!(bag.items.len(), 8);
-                rewards
-                    .entry(owner)
-                    .or_default()
-                    .extend(bag.items.iter().copied().filter(|id| *id >= 0));
+                assert!(!bag.accessible(owners[2].0));
+                for (owner, _) in &owners[..2] {
+                    if bag.accessible(*owner) {
+                        rewards
+                            .entry(*owner)
+                            .or_default()
+                            .extend(bag.items.iter().copied().filter(|id| *id >= 0));
+                    }
+                }
             }
             if kind == 0x655 {
                 assert!(
@@ -200,6 +198,17 @@ async fn god_potion_rewards_keep_damage_boundaries_and_private_ownership() {
         .collect();
     for (kind, potion, required) in [(0xd05, 0xa1f, 360), (0x91a, 0xa21, 180)] {
         assert_eq!(w.content.objects[&kind].hp * 18 / 100, required);
+        let seed = (0..4096)
+            .find(|seed| {
+                let loot = crate::loot::god_loot(
+                    &w.content,
+                    kind,
+                    &[(owners[0].0, required), (owners[1].0, 1)],
+                    &mut rand::rngs::StdRng::seed_from_u64(*seed),
+                );
+                !loot.shared.is_empty() && loot.private.contains_key(&owners[0].0)
+            })
+            .expect("bounded seed search exercises both shared equipment and private potion");
         let mut equipment = Vec::new();
         for damage in [required - 1, required, required + 1] {
             for bag in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
@@ -208,21 +217,22 @@ async fn god_potion_rewards_keep_damage_boundaries_and_private_ownership() {
             let root = w
                 .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
                 .unwrap();
-            w.entities
-                .get_mut(&root)
-                .unwrap()
-                .damage
-                .insert(owners[0].1, damage);
-            // This seed succeeds on both equipment and the 1.5% potion roll.
-            w.rng = rand::rngs::StdRng::seed_from_u64(190);
+            w.entities.get_mut(&root).unwrap().damage =
+                [(owners[0].1, damage), (owners[1].1, 1)].into();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
             w.defeat_entity(root).unwrap();
             assert!(!w.entities.contains_key(&root));
             let mut rewards = Vec::new();
             for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
                 assert_eq!(bag.items.len(), 8);
-                assert!(bag.extra_stats.contains(&(54, owners[0].0)));
-                assert!(bag.accessible(owners[0].0));
-                assert!(!bag.accessible(owners[1].0));
+                if bag.items.contains(&potion) {
+                    assert!(bag.extra_stats.contains(&(54, owners[0].0)));
+                    assert!(bag.accessible(owners[0].0));
+                    assert!(!bag.accessible(owners[1].0));
+                } else {
+                    assert!(bag.accessible(owners[1].0));
+                    assert_eq!(bag.accessible(owners[0].0), damage < required);
+                }
                 rewards.extend(bag.items.iter().copied().filter(|item| *item >= 0));
             }
             assert_eq!(
