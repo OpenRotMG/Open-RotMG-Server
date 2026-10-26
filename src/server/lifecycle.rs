@@ -569,10 +569,9 @@ impl App {
                         "persona account is fenced: {:?}",
                         claim.failure
                     );
-                    let control = claim
-                        .control
-                        .clone()
-                        .context("Persona admission is busy; retry name choice shortly")?;
+                    let control = claim.control.clone().ok_or(crate::store::Rejected(
+                        "Persona admission is busy; retry name choice shortly",
+                    ))?;
                     ensure!(
                         control.autonomous,
                         "name collision is not an autonomous session"

@@ -16,11 +16,14 @@ pub(super) async fn prepare(
         Err(reason) => return Ok(Err(reason)),
     };
     for bot in &stopped {
-        a.stop_persona(*bot).await.map_err(|error| {
-            anyhow::anyhow!(
-                "Could not release persona account {bot}; name was not claimed: {error:#}"
-            )
-        })?;
+        if let Err(error) = a.stop_persona(*bot).await {
+            if let Some(crate::store::Rejected(reason)) = error.downcast_ref() {
+                return Ok(Err(*reason));
+            }
+            let message =
+                format!("Could not release persona account {bot}; name was not claimed: {error:#}");
+            return Err(error.context(message));
+        }
     }
     Ok(Ok(stopped))
 }
