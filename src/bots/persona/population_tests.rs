@@ -72,9 +72,14 @@ async fn new_cohorts_mix_current_levels_independently_of_account_rank() {
         "selected classes={}, twinks={twinks}, poor={poor}, wealthy={wealthy}",
         classes.len()
     );
+    let level_twenty: usize = histograms.iter().map(|histogram| histogram[3]).sum();
+    assert!(
+        (40..=64).contains(&level_twenty),
+        "L20 admission share: {level_twenty}/160"
+    );
     for histogram in histograms {
         assert!(
-            (8..=20).contains(&histogram[3]),
+            (1..=20).contains(&histogram[3]),
             "L20 must remain present without dominating: {histogram:?}"
         );
         assert!(
