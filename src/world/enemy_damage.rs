@@ -228,7 +228,7 @@ mod tests {
                 let e = world.entities.get_mut(&boss).unwrap();
                 e.condition = protection;
                 if kind == 0x920 {
-                    e.quest = Some(boss);
+                    e.quest.set(Some(boss), boss, &mut world.quest_ids);
                 }
                 let hp = world.entities[&boss].hp;
                 let damage = world
