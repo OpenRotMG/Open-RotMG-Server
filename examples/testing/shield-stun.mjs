@@ -16,16 +16,17 @@ export async function run(game){
   const before=await game.inspect(),old=before.diagnostic.entities.find(e=>e.id===boss.id);assert(old.condition&(1<<24));
   await game.act({keys:[' '],mouse:{x:450,y:300},duration_ms:300});
   const hit=await game.inspect(),target=hit.diagnostic.entities.find(e=>e.id===boss.id);
-  await game.act({keys:[],duration_ms:2300},{name:'shield-stun',when:view=>view.game_ms>=before.view.time_ms+2500});
+  await game.act({keys:[],duration_ms:500},{name:'shield-stun',when:view=>view.game_ms>=before.view.time_ms+1500});
   const during=await game.inspect(),current=during.diagnostic.entities.find(e=>e.id===boss.id);
   await writeFile(join(root,'shield-observations.json'),JSON.stringify({before,hit,during},null,2));
   game.check('native shield spends mana',hit.view.character.mp<before.view.character.mp);
   game.check('invulnerable Septavius keeps all HP',target.hp===old.hp);
   game.check('native shield applies Stunned through invulnerability',Object.hasOwn(target.statuses,'7'));
+  game.check('observed suppression window is inside the stun deadline',during.view.time_ms<target.statuses['7'][1]);
   game.check('stunned boss fires no new projectiles',current.bullet===target.bullet);
-  await game.act({keys:[],duration_ms:1800});
+  await game.act({keys:[],duration_ms:1200});
   const after=await game.inspect(),resumed=after.diagnostic.entities.find(e=>e.id===boss.id);
   await writeFile(join(root,'shield-observations.json'),JSON.stringify({before,hit,during,after},null,2));
-  game.check('boss resumes attacks after stun expires',resumed.bullet!==current.bullet);
+  game.check('boss resumes attacks after stun expires',after.view.time_ms>=target.statuses['7'][1]&&resumed.bullet!==current.bullet);
   game.check('same living Knight',after.view.lifecycle.alive&&after.view.session.character===before.view.session.character);
 }
