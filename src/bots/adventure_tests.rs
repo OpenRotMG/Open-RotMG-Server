@@ -36,7 +36,7 @@ fn peer(v: &mut PlayerView, id: i32, position: Pos) {
 }
 
 #[test]
-fn arrived_three_brain_company_chain_resumes_independent_routes() {
+fn constructed_three_brain_arrival_resumes_independent_routes() {
     let separated = [
         Pos { x: 10.5, y: 10.5 },
         Pos { x: 19., y: 10.5 },
@@ -273,7 +273,7 @@ fn prepared_hunter_prefers_observed_suitable_god_over_empty_ground() {
 }
 
 #[test]
-fn godlands_route_keeps_progressing_into_discovered_hunting_terrain() {
+fn constructed_godlands_route_keeps_progressing_into_discovered_hunting_terrain() {
     let (c, mut v) = hunting_scene(20, true);
     let mut b = Brain::new(ARCHETYPES[0], &v);
     b.inland_reached = true;
@@ -330,31 +330,114 @@ fn genuine_shared_damage_company_can_travel_then_yield_on_arrival() {
     assert!(d.movement.is_some());
 }
 
-#[test]
-fn isolated_known_godlands_does_not_suppress_reachable_company() {
-    let (c, mut v) = hunting_scene(20, true);
+fn godlands_corridor(open: bool) -> Arc<crate::navigation::Tiles> {
     let mut ground = vec![1; 128 * 128];
-    for t in v.tiles.iter() {
-        ground[t.y as usize * 128 + t.x as usize] = t.ground;
+    for y in 18..30 {
+        for x in 18..30 {
+            ground[y * 128 + x] = 0x6a;
+        }
     }
     for i in 17..31 {
         for (x, y) in [(i, 17), (i, 30), (17, i), (30, i)] {
             ground[y * 128 + x] = 255;
         }
     }
+    if open {
+        ground[18 * 128 + 17] = 1;
+    }
     let geometry = crate::navigation::Geometry::new(
         (128, 128),
         ground,
         &BTreeMap::from([(1, 1.), (0x6a, 1.), (255, 0.)]),
     );
-    v.tiles = Arc::new(crate::navigation::Tiles::new(
+    Arc::new(crate::navigation::Tiles::new(
         geometry,
         (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
-    ));
+    ))
+}
+
+#[test]
+fn isolated_known_godlands_does_not_suppress_reachable_company() {
+    let (c, mut v) = hunting_scene(20, true);
+    v.tiles = godlands_corridor(false);
     peer(&mut v, 3, Pos { x: 2.5, y: 10.5 });
     let mut b = Brain::new(ARCHETYPES[0], &v);
     b.inland_reached = true;
     let d = b.decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Follow(3));
     assert!(d.movement.unwrap().x < v.position.x);
+}
+
+#[test]
+fn cached_godlands_revalidates_navigation_before_vetoing_reachable_company() {
+    for obstruction in ["terrain", "cover", "enemy"] {
+        let (c, mut v) = hunting_scene(20, true);
+        v.tiles = godlands_corridor(true);
+        let mut b = Brain::new(ARCHETYPES[0], &v);
+        b.inland_reached = true;
+        let first = b.decide(&v, &c).unwrap();
+        assert_eq!(first.goal, Goal::Venture);
+        let cached = b.godlands.expect("first decision caches reachable hunting ground");
+        assert!(b.navigation.as_ref().unwrap().reachable(v.position).contains(&tile(cached)));
+        b.goal = first.goal;
+        b.destination = first.movement;
+        match obstruction {
+            "terrain" => v.tiles = godlands_corridor(false),
+            "cover" | "enemy" => {
+                let mut obstacle = quest_tests::fixture().1.objects.remove(0);
+                obstacle.id = 4;
+                obstacle.position = Pos { x: 17.5, y: 18.5 };
+                if obstruction == "cover" {
+                    obstacle.kind = c.objects.values().find(|o| o.blocks && !o.enemy).unwrap().kind;
+                    obstacle.blocks = true;
+                } else {
+                    obstacle.kind = 0x91f;
+                    obstacle.max_hp = 300000;
+                    assert!(!progression::can_fight(&v, &c, &obstacle));
+                }
+                v.objects.push(obstacle);
+            }
+            _ => unreachable!(),
+        }
+        peer(&mut v, 3, Pos { x: 2.5, y: 10.5 });
+        v.tick += 10;
+        v.time_ms += 500;
+        v.elapsed_ms += 500;
+        let next = b.decide(&v, &c).unwrap();
+        assert_eq!(next.goal, Goal::Follow(3), "{obstruction} disconnects the retained destination");
+        assert!(next.movement.unwrap().x < v.position.x);
+        assert!(next.journey.is_none());
+        assert!(b.godlands.is_none());
+    }
+}
+
+#[test]
+fn cached_godlands_controls_class_resources_and_equipped_rookie_risk() {
+    for class in [crate::content::WIZARD, crate::content::PRIEST] {
+        let (c, mut v) = hunting_scene(20, true);
+        v.character.class = class;
+        let slot = c.objects[&class].slots[0];
+        let weapon = c.objects.values().find(|o| o.slot_type == slot && o.tier == Some(7) && !o.projectiles.is_empty()).unwrap().kind;
+        v.character.items.fill(-1);
+        v.character.items[0] = i32::from(weapon);
+        v.character.mp = 0;
+        assert!(!events::ready(&v, &c));
+        let mut b = Brain::new(ARCHETYPES[0], &v);
+        b.inland_reached = true;
+        assert_ne!(b.decide(&v, &c).unwrap().goal, Goal::Venture);
+        v.character.mp = v.character.stats[1];
+        let mut b = Brain::new(ARCHETYPES[0], &v);
+        b.inland_reached = true;
+        assert_eq!(b.decide(&v, &c).unwrap().goal, Goal::Venture);
+    }
+    let (c, mut v) = hunting_scene(20, true);
+    v.character.hp = 400;
+    let rookie = Profile { stars: 0, attention: 1, reaction: 20, recovery: 0.9, knows_minimap: false, ..ARCHETYPES[0] };
+    assert!(events::ready(&v, &c));
+    let mut b = Brain::new(rookie, &v);
+    b.inland_reached = true;
+    assert_eq!(b.decide(&v, &c).unwrap().goal, Goal::Recover);
+    let mut b = Brain::new(ARCHETYPES[1], &v);
+    b.inland_reached = true;
+    assert_eq!(b.decide(&v, &c).unwrap().goal, Goal::Venture);
 }
