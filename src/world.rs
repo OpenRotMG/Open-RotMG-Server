@@ -4189,6 +4189,7 @@ impl World {
             .filter(|e| self.actor_ids.contains(&e.id))
             .count()
     }
+    #[cfg(test)]
     fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
         self.non_population_ids
             .iter()
