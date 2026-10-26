@@ -12,6 +12,32 @@ pub(super) fn terrain(v: &mut PlayerView) -> Grid {
     Grid::terrain(v)
 }
 #[test]
+fn stocked_trader_personas_use_their_visit_to_sell_but_cannot_invent_stock() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let profile = *persona::PERSONAS
+        .iter()
+        .find(|p| p.role == persona::Role::Trader)
+        .unwrap();
+    let mut admitted = 0;
+    for account in 1..=20 {
+        let (_, mut v) = fixture(&c, [SPEED; 8]);
+        v.session.account = account;
+        terrain(&mut v);
+        let mut brain = Brain::new(profile, &v);
+        brain.decide(&v, &c).unwrap();
+        admitted += usize::from(brain.mind.market.session.is_some());
+        v.character.items[4..].fill(-1);
+        let mut empty = Brain::new(profile, &v);
+        empty.decide(&v, &c).unwrap();
+        assert!(empty.mind.market.session.is_none());
+    }
+    assert_eq!(
+        admitted, 20,
+        "stocked traders should not decline their reason for visiting"
+    );
+}
+
+#[test]
 fn market_sessions_scatter_on_walkable_nexus_tiles_and_are_bounded() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
     let mut anchors = BTreeSet::new();
@@ -55,11 +81,10 @@ fn market_ad_cadence_repeats_truthfully_and_changed_stock_invalidates_pending_ge
         .unwrap();
     assert!(m.outgoing.is_none());
     v.elapsed_ms = due;
-    m.guild = true;
     m.decide(&v, &c, None, &grid, &mut StepRng::new(0, 1))
         .unwrap();
     assert_eq!(m.outgoing.as_ref().unwrap().text, ad.text);
-    assert_eq!(m.outgoing.as_ref().unwrap().channel, Channel::Guild);
+    assert_eq!(m.outgoing.as_ref().unwrap().channel, Channel::Local);
     v.character.items[4] = -1;
     assert!(!m.message_current(&ad, &v, &c, None).unwrap());
     v.character.items[4] = DEFENSE;

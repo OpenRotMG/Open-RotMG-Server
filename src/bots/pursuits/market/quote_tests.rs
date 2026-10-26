@@ -71,6 +71,41 @@ fn market_mind_mixed_stock_prioritizes_potion_quotes_before_life_gear() {
 }
 
 #[test]
+fn life_buyers_choose_different_real_upgrades_without_changing_quotes_each_tick() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let mut wants = BTreeSet::new();
+    for name in ["A", "B", "C"] {
+        let (mut m, v) = fixture(&c, [LIFE, -1, -1, -1, -1, -1, -1, -1]);
+        m.name = name.into();
+        let q = m.quote(&v, &c, None).unwrap().unwrap();
+        assert_eq!(m.quote(&v, &c, None).unwrap().unwrap(), q);
+        assert!(m.wanted(&v, &c, None, q[1].kind).unwrap() > 0);
+        wants.insert(q[1].kind);
+    }
+    assert!(
+        wants.len() >= 3,
+        "all Life buyers want the same gear: {wants:?}"
+    );
+}
+
+#[test]
+fn gear_sellers_choose_different_owned_spares_and_never_offer_equipped_items() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let mut sales = BTreeSet::new();
+    for name in ["A", "B"] {
+        let (mut m, v) = fixture(&c, [0xad3, 0xaf9, -1, -1, -1, -1, -1, -1]);
+        m.name = name.into();
+        let q = m.quote(&v, &c, None).unwrap().unwrap();
+        assert_eq!(m.quote(&v, &c, None).unwrap().unwrap(), q);
+        assert!(v.character.items[4..].contains(&q[0].kind));
+        assert!(!v.character.items[..4].contains(&q[0].kind));
+        assert!(fair(&q, &c));
+        sales.insert(q[0].kind);
+    }
+    assert_eq!(sales.len(), 2, "every seller selected the same first spare");
+}
+
+#[test]
 fn market_life_buy_quote_uses_the_existing_life_sell_tier_and_real_upgrade_need() {
     let c = Content::load(std::path::Path::new("data")).unwrap();
     let (m, v) = fixture(&c, [LIFE, -1, -1, -1, -1, -1, -1, -1]);
