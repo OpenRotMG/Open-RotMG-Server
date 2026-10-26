@@ -695,6 +695,7 @@ impl Piece {
                 | 0xd59
                 | 0xd50
                 | 0xd5f
+                | 0xd56
                 | 0xe37
                 | 0x67d
                 | 0x925
@@ -986,6 +987,10 @@ impl World {
                     && a.x + a.width < self.map.width
                     && a.y + a.height < self.map.height
                     && (!matches!(kind, 0x67d | 0x928 | 0x925) || self.walkable(boss))
+                    && (kind != 0xd56
+                        || piece.cells[piece.boss.1 * piece.width + piece.boss.0] != 0
+                        || self.walkable(boss)
+                            && self.setpiece_scenery_clear(boss.y as usize * self.map.width as usize + boss.x as usize))
                     && (!matches!(kind, 0x91b | 0xd5f)
                         || piece.cells[piece.boss.1 * piece.width + piece.boss.0] != 0
                         || self.walkable(boss))
@@ -1652,53 +1657,88 @@ mod tests {
     }
 
     #[test]
-    fn pentaract_native_controller_cell_preserves_admission() {
+    fn unpainted_event_roots_require_safe_native_admission() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        for mode in 0..8 {
-            let mut map = temple_test_map(0);
-            let center = 96 * 192 + 96;
-            let hole = 76 * 192 + 76;
-            map.cells[center].terrain = 1;
-            map.cells[center].object = Some(if mode == 0 { 0x100 } else { 0x105 });
-            match mode {
-                3 => map.cells[center].ground = 0xbc,
-                4 => map.cells[hole].ground = 0xf4,
-                5 => map.cells[hole].region = 1,
-                6 => map.cells[hole].ground = 0x73,
-                7 => map.cells[hole].object = Some(0x1f3),
-                _ => {}
-            }
-            let original = Arc::new(map);
-            let mut world = World::new(content.clone(), original.clone()).unwrap();
-            if mode == 1 {
-                let native = world.cells.ids(center)[0];
-                world
-                    .entities
-                    .get_mut(&native)
-                    .unwrap()
-                    .extra_stats
-                    .push((54, 7));
-            }
-            if mode == 2 {
-                world
-                    .spawn_entity(0x501, Pos { x: 96.5, y: 96.5 }, vec![])
-                    .unwrap();
-            }
-            if mode == 4 {
-                world.realm_layout = Some("classic-world-01-reconstruction".into());
-            }
-            let ids: BTreeSet<_> = world.entities.keys().copied().collect();
-            let native_ids = world.cells.ids(center).to_vec();
-            world.rng = rand::rngs::StdRng::seed_from_u64(12351);
-            let result = world.place_named_setpiece(0xd5f, &[1]);
-            assert!(
-                result.is_err(),
-                "Pentaract admission mode {mode}: {result:?}"
+        for (kind, seed, birth) in [(0xd5f, 12351, 0), (0xd56, 6, 0), (0xd56, 0, 4)] {
+            let piece = Piece::build(kind, &mut rand::rngs::StdRng::seed_from_u64(seed));
+            assert_eq!(
+                piece.cells[piece.boss.1 * piece.width + piece.boss.0],
+                birth
             );
-            assert!(Arc::ptr_eq(&original, &world.map));
-            assert!(world.setpieces.is_empty() && world.event_sites.is_empty());
-            assert_eq!(world.entities.keys().copied().collect::<BTreeSet<_>>(), ids);
-            assert_eq!(world.cells.ids(center), native_ids.as_slice());
+            for mode in 0..8 {
+                let mut map = temple_test_map(0);
+                let center = 96 * 192 + 96;
+                let edge = 96 - piece.width / 2;
+                let hole = edge * 192 + edge;
+                map.cells[center].terrain = 1;
+                map.cells[center].object = Some(if mode == 0 { 0x100 } else { 0x105 });
+                match mode {
+                    3 => map.cells[center].ground = 0xbc,
+                    4 => map.cells[hole].ground = 0xf4,
+                    5 => map.cells[hole].region = 1,
+                    6 => map.cells[hole].ground = 0x73,
+                    7 => map.cells[hole].object = Some(0x1f3),
+                    _ => {}
+                }
+                let original = Arc::new(map);
+                let mut world = World::new(content.clone(), original.clone()).unwrap();
+                if mode == 1 {
+                    let native = world.cells.ids(center)[0];
+                    world
+                        .entities
+                        .get_mut(&native)
+                        .unwrap()
+                        .extra_stats
+                        .push((54, 7));
+                }
+                if mode == 2 {
+                    world
+                        .spawn_entity(0x501, Pos { x: 96.5, y: 96.5 }, vec![])
+                        .unwrap();
+                }
+                if mode == 4 {
+                    world.realm_layout = Some("classic-world-01-reconstruction".into());
+                }
+                let ids: BTreeSet<_> = world.entities.keys().copied().collect();
+                let native_ids = world.cells.ids(center).to_vec();
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let result = world.place_named_setpiece(kind, &[1]);
+                if birth == 4 && mode == 0 {
+                    let pos = result.unwrap();
+                    assert_eq!((pos.x, pos.y), (96.5, 96.5));
+                    let cell = &world.map.cells[center];
+                    assert_eq!(
+                        (
+                            cell.ground,
+                            cell.object,
+                            cell.config.as_str(),
+                            cell.terrain,
+                            cell.region
+                        ),
+                        (0xd6, None, "", 1, 0)
+                    );
+                    assert!(native_ids.iter().all(|id| !world.entities.contains_key(id)));
+                    assert!(world.walkable(pos));
+                    assert_eq!((world.setpieces.len(), world.event_sites.len()), (1, 1));
+                    assert_eq!(
+                        (
+                            original.cells[center].ground,
+                            original.cells[center].object,
+                            original.cells[center].config.as_str()
+                        ),
+                        (0x46, Some(0x100), "name:source")
+                    );
+                } else {
+                    assert!(
+                        result.is_err(),
+                        "native admission {kind:#x}, seed {seed}, mode {mode}: {result:?}"
+                    );
+                    assert!(Arc::ptr_eq(&original, &world.map));
+                    assert!(world.setpieces.is_empty() && world.event_sites.is_empty());
+                    assert_eq!(world.entities.keys().copied().collect::<BTreeSet<_>>(), ids);
+                    assert_eq!(world.cells.ids(center), native_ids.as_slice());
+                }
+            }
         }
     }
 
