@@ -1158,15 +1158,21 @@ async fn dialogue_world_runtime_cancels_after_validated_view_before_authoritativ
 
 #[tokio::test]
 async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
-    for drift in [
-        "range",
-        "known",
-        "ignore",
-        "peer_left",
-        "peer_dead",
-        "peer_departing",
-        "text",
-        "rate",
+    for (drift, malformed_owner) in [
+        ("range", None),
+        ("known", None),
+        ("ignore", None),
+        ("peer_left", None),
+        ("peer_dead", None),
+        ("peer_departing", None),
+        ("text", None),
+        ("rate", None),
+        ("absent_invalid_owner", Some((true, f32::NAN))),
+        ("absent_invalid_owner", Some((true, f32::INFINITY))),
+        ("absent_invalid_owner", Some((true, f32::NEG_INFINITY))),
+        ("absent_invalid_owner", Some((false, f32::NAN))),
+        ("absent_invalid_owner", Some((false, f32::INFINITY))),
+        ("absent_invalid_owner", Some((false, f32::NEG_INFINITY))),
     ] {
         let (dir, app) = server::test_app();
         app.world.clock.set_paused(true);
@@ -1196,12 +1202,27 @@ async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
             reply: "Peer, want to look for better gear together?".into(),
         };
         brain.validate_dialogue(&request, &reply, &view).unwrap();
-        if drift == "peer_left" {
+        if matches!(drift, "peer_left" | "absent_invalid_owner") {
             lifecycle::finalize(&app, peer, CloseReason::Controller)
                 .unwrap()
                 .wait()
                 .await
                 .unwrap();
+            if let Some((x_axis, invalid)) = malformed_owner {
+                app.world
+                    .for_player(id)
+                    .call(move |w| {
+                        let position = &mut w.players.get_mut(&id).unwrap().pos;
+                        if x_axis {
+                            position.x = invalid;
+                        } else {
+                            position.y = invalid;
+                        }
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            }
         } else {
             app.world
                 .directory(move |d| {
@@ -1276,13 +1297,14 @@ async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
         let error = dialogue::publish(&app, &mut brain, &request, &reply, &view)
             .await
             .unwrap_err();
-        if matches!(drift, "text" | "rate") {
+        if matches!(drift, "text" | "rate" | "absent_invalid_owner") {
             assert!(!error.is::<dialogue::Obsolete>(), "{drift}: {error:#}");
             assert!(
-                error.to_string().contains(if drift == "text" {
-                    "control characters"
-                } else {
-                    "Chat rate limit"
+                error.to_string().contains(match drift {
+                    "text" => "control characters",
+                    "rate" => "Chat rate limit",
+                    "absent_invalid_owner" => "dialogue controller position is not finite",
+                    _ => unreachable!(),
                 }),
                 "{error:#}"
             );

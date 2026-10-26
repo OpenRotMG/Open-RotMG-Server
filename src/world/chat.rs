@@ -588,6 +588,26 @@ mod tests {
             w.dialogue_participants(id, peer).unwrap(),
             Some(DialoguePeerUnavailable::LeftWorld)
         );
+        let mut concealed = Vec::new();
+        for x_axis in [true, false] {
+            for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let mut position = origin;
+                if x_axis {
+                    position.x = invalid;
+                } else {
+                    position.y = invalid;
+                }
+                w.players.get_mut(&id).unwrap().pos = position;
+                if let Ok(status) = w.dialogue_participants(id, peer) {
+                    concealed.push(format!("x_axis={x_axis} invalid={invalid}: {status:?}"));
+                }
+            }
+        }
+        w.players.get_mut(&id).unwrap().pos = origin;
+        assert!(
+            concealed.is_empty(),
+            "absent peer concealed malformed owner: {concealed:?}"
+        );
         w.players.insert(peer, absent);
         // An obsolete peer must not conceal a broken owner.
         w.players.get_mut(&peer).unwrap().pos.x = origin.x + 13.;
