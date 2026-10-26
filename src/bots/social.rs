@@ -268,7 +268,17 @@ pub(super) async fn market(
                 Ok(None) => {}
                 Err(error) => {
                     brain.mind.market.outgoing = None;
-                    tracing::error!(account=v.session.account, %error, "market generation failed; no substitute speech");
+                    if matches!(
+                        error.downcast_ref::<dialogue::Failure>(),
+                        Some(dialogue::Failure::LocalCapacity)
+                    ) {
+                        tracing::info!(
+                            account = v.session.account,
+                            "market speech skipped after local capacity denial; no substitute speech"
+                        );
+                    } else {
+                        tracing::error!(account=v.session.account, %error, "market generation failed; no substitute speech");
+                    }
                 }
             }
         } else {
