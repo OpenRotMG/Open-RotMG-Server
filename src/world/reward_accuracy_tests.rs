@@ -235,7 +235,7 @@ async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collect
     };
     let to = |id| Slot {
         object: id,
-        slot: 4,
+        slot: 5,
         kind: -1,
     };
     assert!(!w.visible(outsider).contains(&bag));
@@ -268,7 +268,8 @@ async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collect
         "committed item cannot be collected twice"
     );
     let saved = store.load(owners[0].0, owners[0].1).await.unwrap();
-    assert_eq!(saved.items[4], item);
+    assert_eq!(saved.items[5], item);
+    assert_eq!(saved.items[4], 0xa22);
     assert_eq!(saved.revision, revision);
 }
 
@@ -329,7 +330,7 @@ async fn god_shared_collection_failed_receipt_retains_reservation_without_credit
     };
     let to = |id| Slot {
         object: id,
-        slot: 4,
+        slot: 5,
         kind: -1,
     };
     let before = store.load(owners[0].0, owners[0].1).await.unwrap();
