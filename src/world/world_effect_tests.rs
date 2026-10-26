@@ -32,13 +32,13 @@ async fn world_effect_index_preserves_births_removal_transform_and_live_effects(
     check(&world);
     assert_eq!(world.world_effect_ids.len(), 3);
     let extra = world
-        .spawn_entity(HEXXER, Pos { x: 25.5, y: 25.5 }, vec![])
+        .spawn_entity(HEXXER, Pos { x: 18.5, y: 25.5 }, vec![])
         .unwrap();
     check(&world);
     world.remove_entity(extra);
     check(&world);
     let ordinary = world
-        .spawn_entity(0x671, Pos { x: 30.5, y: 30.5 }, vec![])
+        .spawn_entity(0x671, Pos { x: 18.5, y: 30.5 }, vec![])
         .unwrap();
     let bum = world.transform_fauna(ordinary, BUM).unwrap();
     check(&world);
