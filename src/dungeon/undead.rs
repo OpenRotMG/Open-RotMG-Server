@@ -56,6 +56,12 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         // Broader chambers relieve crowding without adding long corridors: https://web.archive.org/web/20120425182543/http://forums.wildshadow.com/wiki/realm-mad-god/undead-lair
         let w = if round { 17 } else { rng.gen_range(13..=21) };
         let h = if round { w } else { rng.gen_range(13..=21) };
+        // Independent 2012 entrances are rounded; the existing 17-cell size remains reconstructed.
+        let (w, h, round) = if entrance.is_none() && rooms.iter().any(|r| r.depth == 9) {
+            (17, 17, true)
+        } else {
+            (w, h, round)
+        };
         let mut candidates = vec![];
         for (parent, p) in rooms.iter().enumerate() {
             if p.depth == 10 || entrance == Some(parent) || parent == 0 && number > 1 {
