@@ -17,7 +17,7 @@ fn tracked_children_preserve_wave_selection_deadlines_and_lifecycle() {
         .unwrap();
     let check = |w: &World| {
         for owner in [parent, other] {
-            for kind in [0x669, 0x66a, 0x66b, 0x150] {
+            for kind in [0x669, 0x66a, 0x66b, 0x122] {
                 assert_eq!(
                     w.summoned_children(owner, kind)
                         .map(|e| e.id)
@@ -27,6 +27,14 @@ fn tracked_children_preserve_wave_selection_deadlines_and_lifecycle() {
                         .filter(|e| e.parent == Some(owner) && e.kind == kind)
                         .map(|e| e.id)
                         .collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    w.summoned_children(owner, kind)
+                        .filter(|e| w.actor_ids.contains(&e.id))
+                        .count(),
+                    w.actors()
+                        .filter(|e| e.parent == Some(owner) && e.kind == kind)
+                        .count()
                 );
             }
         }
@@ -41,8 +49,9 @@ fn tracked_children_preserve_wave_selection_deadlines_and_lifecycle() {
         .spawn_entity(0x669, Pos { x: 12.5, y: 65.5 }, vec![])
         .unwrap();
     let scenery = w
-        .spawn_entity(0x150, Pos { x: 18.5, y: 50.5 }, vec![])
+        .spawn_entity(0x122, Pos { x: 18.5, y: 50.5 }, vec![])
         .unwrap();
+    assert!(!w.actor_ids.contains(&scenery));
     for id in [existing, expires, scenery] {
         w.entities
             .get_mut(&id)

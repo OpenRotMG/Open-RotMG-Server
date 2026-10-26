@@ -9,7 +9,11 @@ pub(super) struct Actors {
 }
 
 impl World {
-    fn summoned_children(&self, parent: i32, kind: u16) -> impl Iterator<Item = &Entity> {
+    pub(super) fn summoned_children(
+        &self,
+        parent: i32,
+        kind: u16,
+    ) -> impl Iterator<Item = &Entity> {
         // Parent assignments enter timed_ids; scenery cannot contribute to a summon wave.
         self.timed_ids
             .iter()
