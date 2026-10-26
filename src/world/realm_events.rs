@@ -143,7 +143,7 @@ fn event_factory_retains_unpainted_root_cells() {
             );
             assert_eq!((root.pos.x.fract(), root.pos.y.fract()), (0.5, 0.5));
             assert_eq!((root.home.x, root.home.y), (root.pos.x, root.pos.y));
-            assert_eq!((root.quest, root.stage), (Some(root.id), Some(0)));
+            assert_eq!((*root.quest, root.stage), (Some(root.id), Some(0)));
             assert_ne!(root.condition & condition::bit(condition::INVINCIBLE), 0);
             assert!(world.walkable(root.pos));
             assert!(!world.entities.contains_key(&platform_tree));
@@ -159,7 +159,7 @@ fn event_factory_retains_unpainted_root_cells() {
                 .map(|id| {
                     let e = &world.entities[&id];
                     assert_eq!((e.home.x, e.home.y), (e.pos.x, e.pos.y));
-                    assert_eq!((e.quest, e.stage), (Some(root.id), Some(0)));
+                    assert_eq!((*e.quest, e.stage), (Some(root.id), Some(0)));
                     assert_eq!(world.map.cell(e.pos.x, e.pos.y).unwrap().ground, 0xf2);
                     ((e.pos.x - root.pos.x) as i32, (e.pos.y - root.pos.y) as i32)
                 })
@@ -393,7 +393,7 @@ fn event_factory_retains_unpainted_root_cells() {
                 assert_eq!(revived.len(), 5);
                 let replacement = revived.iter().find(|id| !towers.contains(id)).unwrap();
                 let e = &world.entities[replacement];
-                assert_eq!((e.home.x, e.home.y, e.quest), (home.x, home.y, Some(root)));
+                assert_eq!((e.home.x, e.home.y, *e.quest), (home.x, home.y, Some(root)));
                 for id in revived {
                     world.defeat_entity(id).unwrap();
                 }
@@ -954,7 +954,7 @@ impl World {
             let pos = self.place_named_setpiece(kind, &[1])?;
             let root = self.spawn_entity(kind, pos, vec![])?;
             let e = self.entities.get_mut(&root).unwrap();
-            e.quest = Some(root);
+            e.quest.set(Some(root), root, &mut self.quest_ids);
             e.stage = Some(0);
             e.next_aux = match kind {
                 0xd56 => 500,
@@ -971,7 +971,7 @@ impl World {
                     };
                     let id = self.spawn_entity(0xd5e, tower, vec![])?;
                     let e = self.entities.get_mut(&id).unwrap();
-                    e.quest = Some(root);
+                    e.quest.set(Some(root), id, &mut self.quest_ids);
                     e.home = tower;
                     e.stage = Some(0);
                 }
@@ -1159,7 +1159,7 @@ impl World {
         }
         let corpse = self.spawn_entity(0xd60, defeated.pos, vec![])?;
         let e = self.entities.get_mut(&corpse).unwrap();
-        e.quest = Some(tag);
+        e.quest.set(Some(tag), corpse, &mut self.quest_ids);
         e.home = defeated.home;
         e.damage = defeated.damage.clone();
         e.activated = Some(self.now);

@@ -59,7 +59,11 @@ impl World {
             return Ok(0);
         }
         let flags = e.conditions(self.now);
-        let affects = !crate::condition::protected(flags);
+        // Invulnerability blocks HP loss, not projectile conditions: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L93-L117
+        let affects = flags
+            & (crate::condition::bit(crate::condition::INVINCIBLE)
+                | crate::condition::bit(crate::condition::STASIS))
+            == 0;
         let damage =
             crate::condition::damage(raw, self.content.objects[&e.kind].defense, flags, piercing);
         // Evaluation shells select a fight; only the transformed boss can be defeated for rewards.
@@ -171,5 +175,95 @@ impl World {
             tracing::info!(entity = target, kind, owner = owner, "enemy defeated");
         }
         Ok(actual)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::condition::{self, INVINCIBLE, INVULNERABLE, STASIS, STUNNED};
+
+    #[test]
+    fn shield_stuns_invulnerable_bosses_without_damage_or_credit() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let shield = content.get(0xa0c).unwrap().projectiles[&0].clone();
+        assert_eq!(shield.effects, [(STUNNED, 3000)]);
+        let map = Arc::new(Map {
+            width: 40,
+            height: 40,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x61,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0
+                };
+                1600
+            ],
+            spawns: vec![(20.5, 20.5)],
+        });
+        for kind in [0xd90, 0x920] {
+            for protection in [
+                0,
+                condition::bit(INVULNERABLE),
+                condition::bit(INVINCIBLE),
+                condition::bit(STASIS),
+                condition::bit(INVULNERABLE) | condition::bit(12),
+            ] {
+                let mut world = World::new(content.clone(), map.clone()).unwrap();
+                world.encounter = true;
+                let base = content.classes[&0x31e].caps;
+                let character = serde_json::from_value(serde_json::json!({
+                    "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+                    "class":0x31e,"base":base,"id":1,"account":1,"name":"Stun",
+                    "level":20,"exp":0,"fame":0,"hp":base[0],"mp":base[1],
+                    "revision":0,"alive":true,"items":[-1,0xa0c,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+                }))
+                .unwrap();
+                let player = world.enter(character, None).unwrap();
+                let boss = world
+                    .spawn_entity(kind, Pos { x: 22.5, y: 20.5 }, vec![])
+                    .unwrap();
+                let e = world.entities.get_mut(&boss).unwrap();
+                e.condition = protection;
+                if kind == 0x920 {
+                    e.quest.set(Some(boss), boss, &mut world.quest_ids);
+                }
+                let hp = world.entities[&boss].hp;
+                let damage = world
+                    .damage_enemy(player, boss, 500, false, &shield.effects, Some(0))
+                    .unwrap();
+                let e = &world.entities[&boss];
+                let should_stun = protection
+                    & (condition::bit(INVINCIBLE) | condition::bit(STASIS) | condition::bit(12))
+                    == 0;
+                assert_eq!(
+                    e.conditions(world.now) & condition::bit(STUNNED) != 0,
+                    should_stun,
+                    "boss {kind:#x}, protection {protection:#x}"
+                );
+                if protection != 0 {
+                    assert_eq!((damage, e.hp, e.damage[&1]), (0, hp, 0));
+                } else {
+                    assert!(damage > 0 && e.hp < hp);
+                }
+                if should_stun {
+                    for _ in 0..59 {
+                        world.now += 50;
+                        assert!(world.npc_step().iter().all(|(owner, _)| *owner != boss));
+                    }
+                    assert!(
+                        world.entities[&boss].conditions(world.now) & condition::bit(STUNNED) != 0
+                    );
+                    let mut resumed = false;
+                    for _ in 0..60 {
+                        world.now += 50;
+                        resumed |= world.npc_step().iter().any(|(owner, _)| *owner == boss);
+                    }
+                    assert!(resumed, "boss {kind:#x} must resume after stun expires");
+                }
+            }
+        }
     }
 }
