@@ -553,11 +553,11 @@ pub(super) async fn launch(
     app.store
         .persona_name_available(character.account, character.name.clone())
         .await?;
-    let (mut cancel, completion) = owner.control(true)?;
     let (world, position) = location;
     owner.admit_controller(app)?;
     let mut drain = lifecycle::drain::stopping(app);
     let entry = lifecycle::drain::entry(app)?;
+    let (mut cancel, completion) = owner.control(true)?;
     let account = character.account;
     let mut completed = [character.pirate_caves, character.dungeons[0]];
     owner.arm_cleanup(app, tokio::runtime::Handle::current());
