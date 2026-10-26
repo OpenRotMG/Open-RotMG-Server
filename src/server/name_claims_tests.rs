@@ -112,6 +112,8 @@ async fn name_claims_http_active_persona_stops_and_saves_before_human_publicatio
     crate::bots::start_test(&a, bot.clone(), -2, Pos { x: 77.5, y: 72.5 }, name, owner)
         .await
         .unwrap();
+    let _viewer =
+        crate::bots::cctv::Viewer::join(&a.cctv, name, "127.0.0.1".parse().unwrap(), true).unwrap();
     let human = registered(&a, "activehuman").await;
     let cleared_before_publication = Arc::new(AtomicBool::new(false));
     let observed = cleared_before_publication.clone();
@@ -134,6 +136,13 @@ async fn name_claims_http_active_persona_stops_and_saves_before_human_publicatio
         .unwrap();
     assert_eq!(request(&a, "activehuman", name).await, "<Success/>");
     assert!(cleared_before_publication.load(Ordering::SeqCst));
+    assert_eq!(
+        crate::bots::cctv::Viewer::join(&a.cctv, name, "127.0.0.2".parse().unwrap(), true)
+            .err()
+            .unwrap()
+            .0,
+        StatusCode::NOT_FOUND
+    );
     assert!(!a.owners.lock().unwrap().contains_key(&bot.account));
     a.world
         .directory(move |d| {
@@ -1037,4 +1046,82 @@ async fn name_claims_native_unpublished_admission_rejects_without_poisoning_the_
     assert!(a.kick(human).await.unwrap());
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn name_claims_cancelled_accepted_entry_with_stale_cctv_is_refused_without_claiming() {
+    let (_dir, a) = test_app();
+    a.world.clock.set_paused(true);
+    let name = crate::bots::profiles()[0];
+    let bot = persona(&a, name).await;
+    let human = registered(&a, "cancelledentryhuman").await;
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let account = bot.account;
+    a.store
+        .lifecycle_test_job(move |db| {
+            let mut entered = Some(entered);
+            db.update_hook(Some(
+                move |action: rusqlite::hooks::Action, _: &str, table: &str, row: i64| {
+                    if action == rusqlite::hooks::Action::SQLITE_INSERT
+                        && table == "bot_minds"
+                        && row == i64::from(account)
+                        && let Some(entered) = entered.take()
+                    {
+                        entered.send(()).unwrap();
+                        wait.recv().unwrap();
+                    }
+                },
+            ));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let release = Release(Some(release));
+    let owner = a.claim(bot.account).unwrap();
+    let app = a.clone();
+    let character = bot.clone();
+    let launch = tokio::spawn(async move {
+        crate::bots::start_test(&app, character, -2, Pos { x: 77.5, y: 72.5 }, name, owner).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    let binding = a.cctv.binding(name).unwrap();
+    assert_eq!(binding.1, bot.account);
+    launch.abort();
+    assert!(launch.await.unwrap_err().is_cancelled());
+    drop(release);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while a.owners.lock().unwrap().contains_key(&account) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        a.world
+            .spectate(binding.0, binding.1)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(a.store.bot_mind(account).await.unwrap().is_some());
+    assert!(a.store.load(account, bot.id).await.unwrap().alive);
+    assert_eq!(a.cctv.binding(name), Some(binding));
+    let reply = request(&a, "cancelledentryhuman", name).await;
+    assert!(reply.contains("session cleanup is incomplete"), "{reply}");
+    assert!(reply.contains("Operator inspection required"), "{reply}");
+    assert_eq!(
+        registered_name(&a.store, "cancelledentryhuman").await,
+        format!("Guest{human}")
+    );
+    assert_eq!(a.store.presentation(human).await.unwrap().credits, 100);
+    assert!(lifecycle::state(&a, human).is_none());
+    assert_eq!(
+        a.cctv.binding(name),
+        Some(binding),
+        "refusal must not guess a CCTV cleanup"
+    );
 }
