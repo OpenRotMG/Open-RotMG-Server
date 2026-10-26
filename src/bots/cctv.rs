@@ -98,6 +98,7 @@ impl Cctv {
         v: &PlayerView,
         d: &Decision,
         reason: String,
+        intent: &Value,
         content: &Content,
     ) {
         let shots: Vec<u8> = v
@@ -115,7 +116,7 @@ impl Cctv {
         feed.frame = json!({"class":content.objects[&v.character.class].name,"level":v.character.level,
             "hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"max_mp":v.character.stats[1],
             "world":v.map.name,"x":v.position.x,"y":v.position.y,"aim":d.aim,"fired":fired,
-            "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason});
+            "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason,"intent":intent});
         feed.session = Some((v.session.player, v.session.account));
         feed.shots = shots;
         feed.reason = reason;

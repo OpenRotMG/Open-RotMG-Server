@@ -27,6 +27,7 @@ pub(super) fn fixture(c: &Content, backpack: [i32; 8]) -> (Market, PlayerView) {
             class: crate::content::WIZARD,
             level: 20,
             experience: 0,
+            fame: 0,
             hp: stats[0],
             mp: stats[1],
             stats,

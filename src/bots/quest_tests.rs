@@ -37,6 +37,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
             class: crate::content::WIZARD,
             level: 14,
             experience: 20000,
+            fame: 20,
             hp: stats[0],
             mp: stats[1],
             stats,
