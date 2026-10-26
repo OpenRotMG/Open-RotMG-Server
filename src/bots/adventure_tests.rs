@@ -377,8 +377,16 @@ fn cached_godlands_revalidates_navigation_before_vetoing_reachable_company() {
         b.inland_reached = true;
         let first = b.decide(&v, &c).unwrap();
         assert_eq!(first.goal, Goal::Venture);
-        let cached = b.godlands.expect("first decision caches reachable hunting ground");
-        assert!(b.navigation.as_ref().unwrap().reachable(v.position).contains(&tile(cached)));
+        let cached = b
+            .godlands
+            .expect("first decision caches reachable hunting ground");
+        assert!(
+            b.navigation
+                .as_ref()
+                .unwrap()
+                .reachable(v.position)
+                .contains(&tile(cached))
+        );
         b.goal = first.goal;
         b.destination = first.movement;
         match obstruction {
@@ -388,7 +396,12 @@ fn cached_godlands_revalidates_navigation_before_vetoing_reachable_company() {
                 obstacle.id = 4;
                 obstacle.position = Pos { x: 17.5, y: 18.5 };
                 if obstruction == "cover" {
-                    obstacle.kind = c.objects.values().find(|o| o.blocks && !o.enemy).unwrap().kind;
+                    obstacle.kind = c
+                        .objects
+                        .values()
+                        .find(|o| o.blocks && !o.enemy)
+                        .unwrap()
+                        .kind;
                     obstacle.blocks = true;
                 } else {
                     obstacle.kind = 0x91f;
@@ -404,7 +417,11 @@ fn cached_godlands_revalidates_navigation_before_vetoing_reachable_company() {
         v.time_ms += 500;
         v.elapsed_ms += 500;
         let next = b.decide(&v, &c).unwrap();
-        assert_eq!(next.goal, Goal::Follow(3), "{obstruction} disconnects the retained destination");
+        assert_eq!(
+            next.goal,
+            Goal::Follow(3),
+            "{obstruction} disconnects the retained destination"
+        );
         assert!(next.movement.unwrap().x < v.position.x);
         assert!(next.journey.is_none());
         assert!(b.godlands.is_none());
@@ -417,7 +434,12 @@ fn cached_godlands_controls_class_resources_and_equipped_rookie_risk() {
         let (c, mut v) = hunting_scene(20, true);
         v.character.class = class;
         let slot = c.objects[&class].slots[0];
-        let weapon = c.objects.values().find(|o| o.slot_type == slot && o.tier == Some(7) && !o.projectiles.is_empty()).unwrap().kind;
+        let weapon = c
+            .objects
+            .values()
+            .find(|o| o.slot_type == slot && o.tier == Some(7) && !o.projectiles.is_empty())
+            .unwrap()
+            .kind;
         v.character.items.fill(-1);
         v.character.items[0] = i32::from(weapon);
         v.character.mp = 0;
@@ -432,7 +454,14 @@ fn cached_godlands_controls_class_resources_and_equipped_rookie_risk() {
     }
     let (c, mut v) = hunting_scene(20, true);
     v.character.hp = 400;
-    let rookie = Profile { stars: 0, attention: 1, reaction: 20, recovery: 0.9, knows_minimap: false, ..ARCHETYPES[0] };
+    let rookie = Profile {
+        stars: 0,
+        attention: 1,
+        reaction: 20,
+        recovery: 0.9,
+        knows_minimap: false,
+        ..ARCHETYPES[0]
+    };
     assert!(events::ready(&v, &c));
     let mut b = Brain::new(rookie, &v);
     b.inland_reached = true;

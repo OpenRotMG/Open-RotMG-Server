@@ -1155,11 +1155,12 @@ impl Brain {
             && events::ready(v, content)
             && health >= (self.profile.recovery + 0.1).max(0.75);
         if farming {
-            if self
-                .godlands
-                .is_none_or(|p| p.distance(v.position) <= 2. || self.blocked.contains_key(&tile(p)))
-            {
-                let reachable = grid.reachable(v.position);
+            let reachable = grid.reachable(v.position);
+            if self.godlands.is_none_or(|p| {
+                p.distance(v.position) <= 2.
+                    || self.blocked.contains_key(&tile(p))
+                    || !reachable.contains(&tile(p))
+            }) {
                 // Retain a discovered hunting destination until arrival, not a new orbit every step.
                 self.godlands = v
                     .tiles
