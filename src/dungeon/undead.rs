@@ -279,6 +279,11 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         rooms = rooms.len(),
         width,
         height,
+        entrance_x = sx,
+        entrance_y = sy,
+        entrance_width = rooms[entrance].w,
+        entrance_height = rooms[entrance].h,
+        entrance_round = rooms[entrance].round,
         "generated reconstructed Undead Lair"
     );
     Ok(map)
