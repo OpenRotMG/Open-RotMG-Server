@@ -204,7 +204,8 @@ mod tests {
             .unwrap();
         let mut live = Vec::new();
         for owner in owners.iter().copied() {
-            for alive in [true, false] {
+            // Each account has one slot, so the death comes first and frees it.
+            for alive in [false, true] {
                 let mut ch = store
                     .create(owner, content.get(WIZARD).unwrap())
                     .await
