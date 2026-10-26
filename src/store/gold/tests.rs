@@ -205,7 +205,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        18
+        19
     );
     check_schema(&db, 18).unwrap();
     let gold = reopened.gold(account).await.unwrap();

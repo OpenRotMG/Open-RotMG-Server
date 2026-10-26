@@ -9,6 +9,7 @@ mod account_actions;
 mod accounts;
 pub(crate) mod browser_link;
 mod character_slots;
+mod discord_gold;
 mod vaults;
 pub use vaults::{VAULT_CHESTS, VAULT_PRICE};
 mod consumables;
@@ -605,7 +606,7 @@ impl Store {
         ensure!(
             matches!(
                 version,
-                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18
+                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19
             ),
             "unsupported game database schema {version}"
         );
@@ -638,6 +639,7 @@ impl Store {
             "gold reward history missing; restore reviewed state instead of allowing duplicate grants"
         );
         gold::check_schema(&c, version)?;
+        discord_gold::check_schema(&c, version)?;
         let credits_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
             [],
@@ -709,6 +711,14 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
  CREATE TABLE IF NOT EXISTS bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)));")?;
         guilds::migrate(&migration, version)?;
         gold::migrate(&migration, version, rewards_exist)?;
+        if version < 19 {
+            migration.execute_batch(&discord_gold::SCHEMA.replacen(
+                "CREATE TABLE",
+                "CREATE TABLE IF NOT EXISTS",
+                1,
+            ))?;
+        }
+        discord_gold::check_schema(&migration, 19)?;
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
         }
@@ -802,7 +812,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 18)?;
+        migration.pragma_update(None, "user_version", 19)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

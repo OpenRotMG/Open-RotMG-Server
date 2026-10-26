@@ -41,7 +41,9 @@ DEATHS_SQL = "CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES chara
 CLAIMS_SQL = "CREATE TABLE legacy_claims(account INTEGER NOT NULL REFERENCES accounts(id),class INTEGER NOT NULL CHECK(typeof(class)='integer' AND class BETWEEN 0 AND 65535),character INTEGER NOT NULL UNIQUE REFERENCES deaths(character),PRIMARY KEY(account,class))"
 CREDITS_SQL = "CREATE TABLE level_credits(recipient INTEGER NOT NULL REFERENCES characters(id),reached_level INTEGER NOT NULL CHECK(typeof(reached_level)='integer' AND reached_level BETWEEN 2 AND 20),giver INTEGER NOT NULL REFERENCES characters(id),PRIMARY KEY(recipient,reached_level),CHECK(recipient<>giver))"
 CREDITS_INDEX_SQL = 'CREATE INDEX level_credits_by_giver ON level_credits(giver)'
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME}
+DISCORD_GOLD_SQL = "CREATE TABLE discord_gold_grants(request_id TEXT PRIMARY KEY NOT NULL,account INTEGER NOT NULL REFERENCES accounts(id),discord_id TEXT NOT NULL,actor_id TEXT NOT NULL,amount INTEGER NOT NULL CHECK(typeof(amount)='integer' AND amount BETWEEN 1 AND 2147483647))"
+DISCORD_GOLD_GAME = {**DEATH_FAME_GAME, 'discord_gold_grants': ('request_id', 'account', 'discord_id', 'actor_id', 'amount')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -57,7 +59,8 @@ AUTH_VAULTS_GAME = {**AUTH_SLOTS_GAME, 'accounts': VAULTS_GAME['accounts'], 'vau
 RELOADED_FAME_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
 RELOADED_PICTURES_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
 RELOADED_COMMUNITY_GAME = {**RELOADED_PICTURES_GAME, 'trade_transactions': COMMUNITY_GAME['trade_transactions'], 'bot_minds': COMMUNITY_GAME['bot_minds']}
-RELOADED_GAME = {**RELOADED_COMMUNITY_GAME, 'deaths': DEATH_FAME_GAME['deaths'], 'legacy_claims': DEATH_FAME_GAME['legacy_claims'], 'level_credits': DEATH_FAME_GAME['level_credits']}
+RELOADED_DEATH_FAME_GAME = {**RELOADED_COMMUNITY_GAME, 'deaths': DEATH_FAME_GAME['deaths'], 'legacy_claims': DEATH_FAME_GAME['legacy_claims'], 'level_credits': DEATH_FAME_GAME['level_credits']}
+RELOADED_GAME = {**RELOADED_DEATH_FAME_GAME, 'discord_gold_grants': DISCORD_GOLD_GAME['discord_gold_grants']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -174,6 +177,9 @@ def snapshot(path, schema, *, include_schema=False):
             for table, expected in COMMUNITY_SQL.items():
                 if db.execute("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() != (expected,):
                     raise ValueError('Unsupported canonical community metadata: ' + table)
+        if 'discord_gold_grants' in schema:
+            if db.execute("SELECT sql FROM sqlite_schema WHERE name='discord_gold_grants'").fetchone() != (DISCORD_GOLD_SQL,):
+                raise ValueError('Unsupported Discord gold grant metadata')
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
@@ -478,6 +484,13 @@ def validate(bundle):
             raise ValueError('Invalid gold reward')
     if len({(row['account'], row['reward']) for row in rewards}) != len(rewards):
         raise ValueError('Duplicate gold reward')
+    requests = set()
+    for row in bundle['game'].get('discord_gold_grants', []):
+        if type(row['account']) is not int or row['account'] not in accounts or type(row['amount']) is not int or not 1 <= row['amount'] <= 2147483647 or any(not isinstance(row[key], str) or not re.fullmatch(r'[0-9]{17,20}', row[key]) for key in ['request_id', 'discord_id', 'actor_id']):
+            raise ValueError('Invalid Discord gold grant')
+        if row['request_id'] in requests:
+            raise ValueError('Duplicate Discord gold grant')
+        requests.add(row['request_id'])
     lists = {}
     for row in bundle['game'].get('account_lists', []):
         if any(type(row[key]) is not int or not 0 < row[key] <= 2147483647 or row[key] not in accounts for key in ['account', 'target']) or type(row['list_id']) is not int or row['list_id'] not in (0, 1) or row['account'] == row['target']:
@@ -520,7 +533,7 @@ def gold_reward_sql(version):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_GAME], include_schema=True)
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if (stored_version > max(GAME_SCHEMAS) or
             ((max(versions) >= 12 or stored_version >= 12) and stored_version not in versions)):
@@ -608,6 +621,8 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += '\n' + ';\n'.join(COMMUNITY_SQL.values()) + ';'
     if bundle['schema'] >= 17:
         definitions['game'] += '\nDROP TABLE deaths;\n' + DEATHS_SQL + ';\n' + CLAIMS_SQL + ';\n' + CREDITS_SQL + ';\n' + CREDITS_INDEX_SQL + ';\nCREATE INDEX deaths_by_time ON deaths(died_at);'
+    if bundle['schema'] >= 19:
+        definitions['game'] += '\n' + DISCORD_GOLD_SQL + ';'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

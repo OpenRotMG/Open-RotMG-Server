@@ -81,7 +81,9 @@ mod guilds;
 mod hiscores;
 pub(crate) mod testing;
 mod updates;
-use account_actions::{discord_announce, discord_kick, discord_recover, reset_password};
+use account_actions::{
+    discord_announce, discord_gold, discord_kick, discord_recover, reset_password,
+};
 use hiscores::{collection, discord_link, hiscores};
 #[derive(Clone)]
 pub struct App {
@@ -3124,6 +3126,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/api/account/link/start", post(browser_link::start))
         .route("/api/account/link/complete", post(browser_link::complete))
         .route("/api/account/link/callback", get(browser_link::callback))
+        .route("/internal/discord/gold", post(discord_gold))
         .route("/internal/discord/kick", post(discord_kick))
         .route("/internal/discord/recover", post(discord_recover))
         .route("/api/account/recover", post(reset_password));

@@ -15,6 +15,7 @@ from release_contract import check
 def legacy_copy(bundle):
     old = deepcopy(bundle)
     old['schema'] = 15
+    del old['game']['discord_gold_grants']
     del old['game']['legacy_claims'], old['game']['level_credits'], old['game']['bot_minds'], old['game']['trade_transactions']
     # This copied fixture represents the old base+equipment writer, preserving its recorded spends.
     old_totals = {}
@@ -37,6 +38,7 @@ def legacy_copy(bundle):
 
 class ReleaseContract(unittest.TestCase):
     def check_fame_migration(self, migrated, original):
+        self.assertEqual(migrated.pop('discord_gold_grants'), [])
         for table in ['bot_minds', 'trade_transactions']:
             self.assertEqual(migrated[table], original.get(table, []))
             if table not in original:
@@ -86,13 +88,14 @@ class ReleaseContract(unittest.TestCase):
                 for index, reward in enumerate(backup.gold_reward_types(18)[3:], 1):
                     db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', (owner, reward, index, index if index % 2 else None))
             bundle = backup.export(game, discord, work / 'new.gz', revision, revision, revision)
-            self.assertEqual(bundle['schema'], 18)
+            self.assertEqual(bundle['schema'], 19)
             restored = work / 'new'
             backup.restore(work / 'new.gz', restored)
             subprocess.run([binary, '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
             self.assertEqual(backup.snapshot(restored / 'game.db', backup.RELOADED_GAME), bundle['game'])
             old = deepcopy(bundle)
             old['schema'] = 17
+            del old['game']['discord_gold_grants']
             with self.assertRaisesRegex(ValueError, 'Invalid gold reward'):
                 backup.validate(old)
             old['game']['gold_rewards'] = [r for r in old['game']['gold_rewards'] if not r['reward'].startswith('class_star_')]
@@ -106,8 +109,8 @@ class ReleaseContract(unittest.TestCase):
             self.assertEqual(exported['game'], old['game'])
             subprocess.run([binary, '--backup-load', str(old_game), str(root / 'data')], check=True)
             migrated = backup.export(old_game, work / 'old/levels.sqlite', work / 'migrated.gz', revision, revision, revision)
-            self.assertEqual(migrated['schema'], 18)
-            self.assertEqual(migrated['game'], old['game'])
+            self.assertEqual(migrated['schema'], 19)
+            self.assertEqual(migrated['game'], dict(old['game'], discord_gold_grants=[]))
             with closing(sqlite3.connect(old_game)) as db, db:
                 db.executescript('ALTER TABLE gold_rewards RENAME TO preserved_gold; ' + backup.gold_reward_sql(17) + '; INSERT INTO gold_rewards SELECT * FROM preserved_gold; DROP TABLE preserved_gold;')
             before = old_game.read_bytes()
@@ -142,7 +145,7 @@ class ReleaseContract(unittest.TestCase):
                 self.assertIsNone(rewards[0][1])
                 self.assertIsNone(rewards[1][1])
                 self.assertGreater(rewards[2][1], 0)
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 18)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 19)
                 for table, column, default in [('characters', 'revision', '0'), ('characters', 'alive', '1'), ('deaths', 'died_at', 'unixepoch()')]:
                     with self.subTest(default=table + '.' + column):
                         self.assertEqual(db.execute('SELECT dflt_value FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone(), (default,))
@@ -156,7 +159,7 @@ class ReleaseContract(unittest.TestCase):
                 for row in [(owner, 'discord_link', 123, None), (owner, 'invalid', 123, None), (owner, 'collection_top_half', 0, None), (owner, 'collection_top_half', 123, 0), (99999, 'discord_link', 123, None)]:
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
-            self.assertEqual(bundle['schema'], 18)
+            self.assertEqual(bundle['schema'], 19)
             canonical16 = legacy_copy(bundle)
             canonical16['schema'] = 16
             for table in ['bot_minds', 'trade_transactions']:
@@ -281,7 +284,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.export(malformed_db, Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'malformed-death.gz', revision, revision, revision)
                 self.assertEqual(malformed_db.read_bytes(), original)
                 self.assertFalse((Path(temporary) / 'malformed-death.gz').exists())
-            for version in [0, 11, 12, 13, 14, 15, 16, 19]:
+            for version in [0, 11, 12, 13, 14, 15, 16, 20]:
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')

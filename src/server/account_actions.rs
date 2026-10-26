@@ -23,6 +23,45 @@ pub(super) struct ResetRequest {
 pub(super) struct AnnounceRequest {
     text: String,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GoldRequest {
+    discord_id: String,
+    amount: i32,
+    request_id: String,
+    actor_id: String,
+}
+pub(super) async fn discord_gold(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<GoldRequest>,
+) -> Response {
+    if let Some(response) = private_denial(&a, peer, &headers) {
+        return response;
+    }
+    json_result(
+        async {
+            // Finish publication even if Discord's HTTP deadline expires after the durable credit.
+            tokio::spawn(async move {
+                let (account, balance) = a
+                    .store
+                    .grant_discord_gold(
+                        request.discord_id,
+                        request.amount,
+                        request.request_id,
+                        request.actor_id,
+                    )
+                    .await?;
+                super::gold::sync(&a, account).await?;
+                Ok(serde_json::json!({"balance":balance}))
+            })
+            .await
+            .context("gold grant task failed")?
+        }
+        .await,
+    )
+}
 pub(super) async fn discord_announce(
     State(a): State<App>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -135,5 +174,7 @@ pub(super) async fn reset_password(
     )
 }
 
+#[cfg(test)]
+mod gold_tests;
 #[cfg(test)]
 pub(crate) mod tests;
