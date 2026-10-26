@@ -24,6 +24,17 @@ pub(super) async fn prepare(
                 format!("Could not release persona account {bot}; name was not claimed: {error:#}");
             return Err(error.context(message));
         }
+        if let Some((persona, player)) = a.cctv.account_session(*bot) {
+            tracing::error!(
+                account = *bot,
+                persona,
+                player,
+                "name claim refused: CCTV session remains after account stop"
+            );
+            return Ok(Err(
+                "Persona session cleanup is incomplete; name was not claimed. Operator inspection required.",
+            ));
+        }
     }
     Ok(Ok(stopped))
 }
