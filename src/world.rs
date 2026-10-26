@@ -72,6 +72,8 @@ mod population_reproduction_tests;
 mod realm_events;
 mod realm_voice;
 
+#[cfg(test)]
+mod quest_index_tests;
 mod realm_portal;
 mod realm_quests;
 
@@ -195,7 +197,7 @@ pub struct EntityData {
     camp: Option<usize>,
     #[serde(skip)]
     population_slot: Option<usize>,
-    quest: Option<i32>,
+    quest: tracked::Tracked<i32>,
     expires: tracked::Tracked<u64>,
     next_aux: u64,
     blocked_since: Option<u64>,
@@ -237,7 +239,7 @@ impl std::fmt::Debug for Entity {
         out.field("parent", &self.parent);
         out.field("camp", &self.camp);
         out.field("population_slot", &self.population_slot);
-        out.field("quest", &self.quest);
+        out.field("quest", &*self.quest);
         out.field("expires", &self.expires);
         out.field("next_aux", &self.next_aux);
         out.field("blocked_since", &self.blocked_since);
@@ -753,6 +755,8 @@ pub struct World {
     world_effect_ids: BTreeSet<i32>,
     // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
     timed_ids: BTreeSet<i32>,
+    // Quest roots can have neither a parent nor an expiry, so timed_ids cannot cover membership.
+    quest_ids: BTreeSet<i32>,
     gun_ids: BTreeSet<i32>,
     pentaract_ids: BTreeSet<i32>,
     // Terminal deadlines run in every world, including Realms without any Flamers.
@@ -2808,7 +2812,7 @@ impl World {
                             parent: Default::default(),
                             camp: None,
                             population_slot: None,
-                            quest: None,
+                            quest: Default::default(),
                             expires: Default::default(),
                             next_aux: 0,
                             blocked_since: None,
@@ -2885,6 +2889,7 @@ impl World {
             navigation_geometry: Box::default(),
             realm_layout: None,
             timed_ids: BTreeSet::new(),
+            quest_ids: BTreeSet::new(),
             gun_ids,
             abyss_flamer_ids: actor_ids
                 .iter()
@@ -3171,7 +3176,7 @@ impl World {
                     parent: Default::default(),
                     camp: None,
                     population_slot: None,
-                    quest: None,
+                    quest: Default::default(),
                     expires: Default::default(),
                     next_aux: 0,
                     blocked_since: None,
@@ -3192,6 +3197,9 @@ impl World {
         self.cells.insert(cell, id, actor);
         if e.parent.is_some() || e.expires.is_some() {
             self.timed_ids.insert(id);
+        }
+        if e.quest.is_some() {
+            self.quest_ids.insert(id);
         }
         if !actor {
             return;
@@ -3251,6 +3259,7 @@ impl World {
         self.actor_ids.remove(&id);
         self.world_effect_ids.remove(&id);
         self.timed_ids.remove(&id);
+        self.quest_ids.remove(&id);
         self.gun_ids.remove(&id);
         self.pentaract_ids.remove(&id);
         self.abyss_flamer_ids.remove(&id);
@@ -4159,6 +4168,28 @@ impl World {
     fn world_effect_actors(&self) -> impl Iterator<Item = &Entity> {
         self.world_effect_ids.iter().map(|id| &self.entities[id])
     }
+    fn quest_entities(&self, tag: i32) -> impl Iterator<Item = &Entity> {
+        self.quest_ids
+            .iter()
+            .map(|id| &self.entities[id])
+            .filter(move |e| e.quest == Some(tag))
+    }
+    fn quest_actors(&self, tag: i32) -> impl Iterator<Item = &Entity> {
+        self.quest_entities(tag)
+            .filter(|e| self.actor_ids.contains(&e.id))
+    }
+    fn summon_entities(&self) -> impl Iterator<Item = &Entity> {
+        self.timed_ids
+            .union(&self.quest_ids)
+            .map(|id| &self.entities[id])
+            .filter(|e| e.parent.is_some() || e.quest.is_some())
+    }
+    fn summon_count(&self) -> usize {
+        self.summon_entities()
+            .filter(|e| self.actor_ids.contains(&e.id))
+            .count()
+    }
+    #[cfg(test)]
     fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
         self.non_population_ids
             .iter()
@@ -5685,7 +5716,7 @@ impl World {
                 let assigned = p.quest == Some(e.id)
                     || (crate::quest::final_root(e.kind)
                         && e.quest.is_some()
-                        && p.qualified_quest == e.quest);
+                        && p.qualified_quest == *e.quest);
                 if assigned
                     && p.character.hp > 0
                     && e.damage
@@ -5766,7 +5797,7 @@ impl World {
             self.critical_deaths.push(defeated.id);
         } else if (crate::quest::final_root(defeated.kind)
             || matches!(defeated.kind, 0x678 | 0xd50 | 0xd54))
-            && let Some(original) = defeated.quest
+            && let Some(original) = *defeated.quest
         {
             self.critical_deaths.push(original);
         }

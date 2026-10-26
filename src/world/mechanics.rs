@@ -80,8 +80,8 @@ impl World {
                 .context("player-relative movement lacks a visible target"),
             encounter::Anchor::QuestMember(kind) => {
                 let tag = e.quest.context("quest anchor lacks encounter ownership")?;
-                self.actors()
-                    .filter(|x| x.quest == Some(tag) && x.kind == kind)
+                self.quest_actors(tag)
+                    .filter(|x| x.kind == kind)
                     .min_by(|a, b| a.pos.distance(e.pos).total_cmp(&b.pos.distance(e.pos)))
                     .map(|x| x.pos)
                     .context("own quest anchor absent")
@@ -173,9 +173,7 @@ impl World {
     }
 
     pub(super) fn summon_occupancy(&self) -> usize {
-        self.actors()
-            .filter(|e| e.parent.is_some() || e.quest.is_some())
-            .count()
+        self.summon_count()
             + self.named_births.len()
             + self.manor_births.len()
             + self.abyss_pending_count()
@@ -666,7 +664,7 @@ impl World {
                 self.remove_entity(child);
             }
         }
-        if let Some(tag) = defeated.quest {
+        if let Some(tag) = *defeated.quest {
             if defeated.kind == 0x929 {
                 let king = self
                     .actors()

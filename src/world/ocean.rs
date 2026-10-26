@@ -47,12 +47,7 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         ensure!(
-            self.actors()
-                .filter(|e| e.parent.is_some() || e.quest.is_some())
-                .count()
-                + self.named_births.len()
-                + self.abyss_pending_count()
-                < 256,
+            self.summon_count() + self.named_births.len() + self.abyss_pending_count() < 256,
             "ocean summon budget exhausted"
         );
         ensure!(
@@ -65,7 +60,7 @@ impl World {
         let quest = self.entities[&parent].quest;
         let e = self.entities.get_mut(&id).unwrap();
         e.parent.set(Some(parent), id, &mut self.timed_ids);
-        e.quest = quest;
+        e.quest.set(*quest, id, &mut self.quest_ids);
         Ok(id)
     }
     pub(super) fn ocean_reward_position(&self, e: &Entity) -> Result<Pos> {
@@ -120,9 +115,7 @@ impl World {
             "Hermit requires its eight owned tentacle spawners"
         );
         ensure!(
-            self.actors()
-                .filter(|e| e.parent.is_some() || e.quest.is_some())
-                .count()
+            self.summon_count()
                 + self.named_births.len()
                 + self.abyss_pending_count()
                 + positions.len()
@@ -194,12 +187,7 @@ impl World {
             positions.push(destination);
         }
         ensure!(
-            self.actors()
-                .filter(|e| e.parent.is_some() || e.quest.is_some())
-                .count()
-                + self.named_births.len()
-                + self.abyss_pending_count()
-                + count
+            self.summon_count() + self.named_births.len() + self.abyss_pending_count() + count
                 <= 256,
             "ocean toss exceeds summon budget"
         );
