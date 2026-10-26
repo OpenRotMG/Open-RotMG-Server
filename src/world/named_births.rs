@@ -136,6 +136,7 @@ impl World {
             born.next().is_none(),
             "one named toss created multiple entities"
         );
+        drop(born);
         self.configure_landmark_child(id);
         tracing::debug!(
             owner = birth.owner,
