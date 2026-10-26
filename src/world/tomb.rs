@@ -40,7 +40,11 @@ impl World {
         // One selected PerRealmMax site feeds the shared director, which reserves and earns the actor.
         let pos = self.place_named_setpiece(d::SPHINX, &[1])?;
         let id = self.spawn_entity(d::SPHINX, pos, vec![])?;
-        self.entities.get_mut(&id).unwrap().quest = Some(id);
+        self.entities
+            .get_mut(&id)
+            .unwrap()
+            .quest
+            .set(Some(id), id, &mut self.quest_ids);
         tracing::info!(
             entity = id,
             kind = d::SPHINX,

@@ -85,7 +85,7 @@ impl World {
             };
             let id = self.spawn_entity(0x91f, pos, vec![])?;
             let e = self.entities.get_mut(&id).unwrap();
-            e.quest = Some(id);
+            e.quest.set(Some(id), id, &mut self.quest_ids);
             e.stage = Some(0);
             e.size = 140;
             tracing::info!(
@@ -134,7 +134,7 @@ impl World {
             let pos = self.place_named_setpiece(kind, terrains)?;
             let id = self.spawn_entity(kind, pos, vec![])?;
             let e = self.entities.get_mut(&id).unwrap();
-            e.quest = Some(id);
+            e.quest.set(Some(id), id, &mut self.quest_ids);
             e.stage = (kind != 0x678).then_some(0);
             e.size = self.content.objects[&kind].size;
             tracing::info!(
@@ -148,8 +148,8 @@ impl World {
     }
     pub(super) fn quest_members(&self, id: i32, kinds: &[u16]) -> Vec<i32> {
         let tag = self.entities[&id].quest.expect("named quest membership");
-        self.non_population_actors()
-            .filter(|e| e.quest == Some(tag) && kinds.contains(&e.kind))
+        self.quest_actors(tag)
+            .filter(|e| self.non_population_ids.contains(&e.id) && kinds.contains(&e.kind))
             .map(|e| e.id)
             .collect()
     }
@@ -172,7 +172,7 @@ impl World {
         tracing::debug!(
             entity = id,
             kind = e.kind,
-            quest = e.quest,
+            quest = *e.quest,
             stage,
             "named quest phase entered"
         );
@@ -233,12 +233,8 @@ impl World {
     ) -> Result<()> {
         crate::encounter::validate(&self.content, kind)?;
         let (tag, home, center) = owner;
-        let own =
-            self.actors().filter(|e| e.quest == Some(tag)).count() + self.pending_named(tag, None);
-        let live = self
-            .actors()
-            .filter(|e| e.quest == Some(tag) && e.kind == kind)
-            .count()
+        let own = self.quest_actors(tag).count() + self.pending_named(tag, None);
+        let live = self.quest_actors(tag).filter(|e| e.kind == kind).count()
             + self.pending_named(tag, Some(kind));
         let count = count.min(maximum.saturating_sub(live));
         if count == 0 {
@@ -255,12 +251,7 @@ impl World {
             return Ok(());
         }
         ensure!(
-            self.actors()
-                .filter(|e| e.parent.is_some() || e.quest.is_some())
-                .count()
-                + self.named_births.len()
-                + self.abyss_pending_count()
-                + count
+            self.summon_count() + self.named_births.len() + self.abyss_pending_count() + count
                 <= 256,
             "shared summon budget exhausted"
         );
@@ -284,7 +275,7 @@ impl World {
             let p = positions[n * positions.len() / count];
             let child = self.spawn_entity(kind, p, vec![])?;
             let e = self.entities.get_mut(&child).unwrap();
-            e.quest = Some(tag);
+            e.quest.set(Some(tag), child, &mut self.quest_ids);
             e.home = home;
             e.stage = Some(0);
             e.activated = Some(self.now);
@@ -302,7 +293,7 @@ impl World {
                 e.condition |= condition::bit(condition::INVULNERABLE);
             }
         }
-        tracing::debug!(
+        tracing::info!(
             quest = tag,
             kind,
             count,
@@ -318,7 +309,7 @@ impl World {
         let new = self.spawn_entity(kind, old.pos, vec![])?;
         let mut old = self.remove_entity(id);
         let e = self.entities.get_mut(&new).unwrap();
-        e.quest = old.quest;
+        e.quest.set(*old.quest, new, &mut self.quest_ids);
         e.home = old.home;
         e.damage = std::mem::take(&mut old.damage);
         e.stage = None;
@@ -338,7 +329,7 @@ impl World {
             entity = id,
             replacement = new,
             kind,
-            quest = e.quest,
+            quest = *e.quest,
             "named quest transformed without rewards"
         );
         Ok(new)
@@ -1462,7 +1453,11 @@ fn grove_root_uses_source_anchor_for_birth_habitat_and_spacing() {
                 vec![],
             )
             .unwrap();
-        world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+        world.entities.get_mut(&previous).unwrap().quest.set(
+            Some(previous),
+            previous,
+            &mut world.quest_ids,
+        );
         let result = world.populate_named_sites(0x91f, &[7], 1);
         assert_eq!(result.is_ok(), accepted, "{label}: {result:?}");
         if accepted {
@@ -1828,7 +1823,11 @@ mod ghost_throw_tests {
                 w.now = 10000;
                 let center = Pos { x: 12.5, y: 12.5 };
                 let root = w.spawn_entity(0x928, center, vec![]).unwrap();
-                w.entities.get_mut(&root).unwrap().quest = Some(root);
+                w.entities
+                    .get_mut(&root)
+                    .unwrap()
+                    .quest
+                    .set(Some(root), root, &mut w.quest_ids);
                 let (tx, mut rx) = mpsc::channel(64);
                 let player = w
                     .enter(
@@ -1921,7 +1920,11 @@ mod ghost_throw_tests {
         let root = w
             .spawn_entity(0x928, Pos { x: 12.5, y: 12.5 }, vec![])
             .unwrap();
-        w.entities.get_mut(&root).unwrap().quest = Some(root);
+        w.entities
+            .get_mut(&root)
+            .unwrap()
+            .quest
+            .set(Some(root), root, &mut w.quest_ids);
         w.damage_enemy(-1, root, 1, true, &[], None).unwrap();
         let mut waited = None;
         for _ in 0..3600 {

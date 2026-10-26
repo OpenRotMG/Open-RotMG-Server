@@ -9,7 +9,11 @@ impl World {
             let items = crate::loot::landmark_chest(&self.content, COIL, &mut self.rng)?;
             self.spawn_entity(0x501, pos, items)?;
             let id = self.spawn_entity(COIL, pos, vec![])?;
-            self.entities.get_mut(&id).unwrap().quest = Some(id);
+            self.entities
+                .get_mut(&id)
+                .unwrap()
+                .quest
+                .set(Some(id), id, &mut self.quest_ids);
             tracing::info!(
                 entity = id,
                 x = pos.x,
@@ -28,7 +32,7 @@ impl World {
             e.stage = Some(0);
             e.activated.get_or_insert(self.now);
             if e.kind == COIL {
-                e.quest = Some(id);
+                e.quest.set(Some(id), id, &mut self.quest_ids);
                 e.next_aux = self.now + 3000;
             }
         }

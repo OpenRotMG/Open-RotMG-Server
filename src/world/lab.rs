@@ -76,11 +76,7 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         ensure!(
-            self.actors()
-                .filter(|e| e.parent.is_some() || e.quest.is_some())
-                .count()
-                + self.lab_tosses.len()
-                < 256,
+            self.summon_count() + self.lab_tosses.len() < 256,
             "Lab shared summon budget exhausted"
         );
         let id = self.spawn_entity(kind, position, vec![])?;

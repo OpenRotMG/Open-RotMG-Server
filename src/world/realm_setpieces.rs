@@ -1279,7 +1279,11 @@ mod tests {
                         vec![],
                     )
                     .unwrap();
-                world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                world.entities.get_mut(&previous).unwrap().quest.set(
+                    Some(previous),
+                    previous,
+                    &mut world.quest_ids,
+                );
                 let ids: BTreeSet<_> = world.entities.values().map(|e| e.id).collect();
                 let indices: Vec<_> = [center, destination, hole]
                     .map(|i| world.cells.ids(i).to_vec())
@@ -1535,7 +1539,11 @@ mod tests {
                         vec![],
                     )
                     .unwrap();
-                world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                world.entities.get_mut(&previous).unwrap().quest.set(
+                    Some(previous),
+                    previous,
+                    &mut world.quest_ids,
+                );
                 let ids: BTreeSet<_> = world.entities.values().map(|e| e.id).collect();
                 let index_ids = world.cells.ids(destination).to_vec();
                 world.rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -1903,7 +1911,11 @@ mod tests {
                             vec![],
                         )
                         .unwrap();
-                    world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                    world.entities.get_mut(&previous).unwrap().quest.set(
+                        Some(previous),
+                        previous,
+                        &mut world.quest_ids,
+                    );
                     if mode == 6 {
                         world.realm_layout = Some("classic-world-01-reconstruction".into());
                     }
@@ -2109,7 +2121,11 @@ mod tests {
                     .spawn_entity(0x91b, Pos { x, y: 93.5 }, vec![])
                     .unwrap();
                 if mode != 5 {
-                    world.entities.get_mut(&previous).unwrap().quest = Some(previous);
+                    world.entities.get_mut(&previous).unwrap().quest.set(
+                        Some(previous),
+                        previous,
+                        &mut world.quest_ids,
+                    );
                 }
                 world.rng = rand::rngs::StdRng::seed_from_u64(seed);
                 let result = world.place_named_setpiece(0xdc2, &[7]);
