@@ -741,6 +741,8 @@ pub struct World {
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
+    // Pool effects and Beach announcements must not scan every actor each tick.
+    world_effect_ids: BTreeSet<i32>,
     // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
     timed_ids: BTreeSet<i32>,
     gun_ids: BTreeSet<i32>,
@@ -2849,15 +2851,16 @@ impl World {
                         match k {
                             "name" => e.name = v.into(),
                             "size" => e.size = v.parse()?,
-                            "eff" => {
-                                e.condition |= i32::from_str_radix(v.trim_start_matches("0x"), 16)?
-                            }
-                            "conn" | "mtype" | "mcount" | "mtime" | "nstar" => {
+                            "eff" | "conn" | "mtype" | "mcount" | "mtime" | "nstar" => {
                                 let value = if let Some(hex) = v.strip_prefix("0x") {
                                     u32::from_str_radix(hex, 16)? as i32
                                 } else {
                                     v.parse()?
                                 };
+                                if k == "eff" {
+                                    e.condition |= value;
+                                    continue;
+                                }
                                 let stat = match k {
                                     "conn" => 41,
                                     "mtype" => 34,
@@ -2922,6 +2925,11 @@ impl World {
                 .values()
                 .filter(|e| e.kind == 0xd5f)
                 .map(|e| e.id)
+                .collect(),
+            world_effect_ids: actor_ids
+                .iter()
+                .copied()
+                .filter(|id| Self::has_world_effect(entities[id].kind))
                 .collect(),
             entities,
             non_population_ids: actor_ids.clone(),
@@ -3217,6 +3225,9 @@ impl World {
             return;
         }
         self.actor_ids.insert(id);
+        if Self::has_world_effect(kind) {
+            self.world_effect_ids.insert(id);
+        }
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
         }
@@ -3266,6 +3277,7 @@ impl World {
     }
     fn remove_entity(&mut self, id: i32) -> Entity {
         self.actor_ids.remove(&id);
+        self.world_effect_ids.remove(&id);
         self.timed_ids.remove(&id);
         self.gun_ids.remove(&id);
         self.pentaract_ids.remove(&id);
@@ -4162,6 +4174,17 @@ impl World {
                 .get(id)
                 .expect("simulated entity missing from storage")
         })
+    }
+    fn has_world_effect(kind: u16) -> bool {
+        matches!(
+            kind,
+            crate::dungeon::beach::BUM
+                | crate::dungeon::lab::HEXXER
+                | crate::dungeon::lab::DEHEXXER
+        )
+    }
+    fn world_effect_actors(&self) -> impl Iterator<Item = &Entity> {
+        self.world_effect_ids.iter().map(|id| &self.entities[id])
     }
     fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
         self.non_population_ids
@@ -7409,6 +7432,8 @@ mod sphinx_loot_tests;
 mod sphinx_site_tests;
 #[cfg(test)]
 mod weapon_tests;
+#[cfg(test)]
+mod world_effect_tests;
 
 #[cfg(test)]
 impl World {
@@ -7452,6 +7477,48 @@ impl World {
         p.bot_goal = None;
         p.bot_aim = None;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn native_map_effects_use_decimal_or_prefixed_hex_numbers() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    assert!(!content.objects[&0x105].stasis_immune);
+    let map = |literal: &str| {
+        Arc::new(Map {
+            width: 1,
+            height: 1,
+            cells: vec![crate::content::Cell {
+                ground: 0x46,
+                object: Some(0x105),
+                config: format!("name:native;eff:{literal};size:137;conn:16"),
+                terrain: 0,
+                region: 0,
+            }],
+            spawns: vec![(0.5, 0.5)],
+        })
+    };
+    for (literal, expected) in [
+        ("16", 16),
+        ("0x10", 16),
+        ("+16", 16),
+        ("-16", -16),
+        ("0x80000000", i32::MIN),
+        ("0xffffffff", -1),
+    ] {
+        let world = World::new(content.clone(), map(literal)).unwrap();
+        let entity = world.entities.values().next().unwrap();
+        assert_eq!(entity.condition, expected, "eff:{literal}");
+        assert_eq!(entity.name, "native");
+        assert_eq!(entity.size, 137);
+        assert!(entity.extra_stats.contains(&(41, 16)));
+    }
+    for literal in ["0x0x10", "0x100000000", "2147483648", "garbage"] {
+        assert!(
+            World::new(content.clone(), map(literal)).is_err(),
+            "eff:{literal}"
+        );
     }
 }
 

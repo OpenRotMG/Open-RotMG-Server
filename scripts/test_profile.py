@@ -29,6 +29,16 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'clock'):
             profile.incident(json.dumps(event), 42)
 
+    def test_journal_transport_preserves_large_normal_game_records(self):
+        command = profile.journal_command('openrotmg')
+        self.assertIn('--all', command)
+        self.assertEqual(command[command.index('-o') + 1], 'json')
+        event = self.event()
+        record = json.loads(event['MESSAGE'])
+        record['fields'] = {'message': 'world performance', 'timings': 'x' * 6000}
+        event['MESSAGE'] = json.dumps(record)
+        self.assertIsNone(profile.incident(json.dumps(event), 42))
+
     def test_unstructured_panic_is_explicit_and_not_a_fake_incident(self):
         with patch.object(profile, 'emit') as emit:
             self.assertIsNone(profile.incident(json.dumps({'_PID': '42', 'MESSAGE': 'thread panicked'}), 42))

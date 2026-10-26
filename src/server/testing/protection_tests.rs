@@ -172,3 +172,43 @@ async fn prepared_protection_uses_real_conditions_and_rejects_without_fencing() 
     app.shutdown.send_replace(true);
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn world_info_keeps_prepared_seeds_lossless_for_javascript() {
+    let (dir, mut app) = crate::server::account_actions::tests::fixture();
+    write_json(
+        &dir.join("testing.json"),
+        &json!({"schema":1,"provenance":"prepared"}),
+    )
+    .unwrap();
+    app.testing = Testing::open(&dir).unwrap();
+    app.control = Some("protection-test".into());
+    app.world.clock.set_paused(true);
+    for (i, (seed, expected)) in [
+        (Some(u64::MAX), json!("18446744073709551615")),
+        (Some(9_007_199_254_740_993), json!("9007199254740993")),
+        (Some(0), json!("0")),
+        (None, Value::Null),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        app.world
+            .in_world(-2)
+            .call(move |w| {
+                w.prepared_seed = seed;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let info = request(
+            &app,
+            &format!("seed-{i}"),
+            json!({"op":"world_info","world":-2}),
+        )
+        .await;
+        assert_eq!(info["prepared_seed"], expected);
+    }
+    app.shutdown.send_replace(true);
+    fs::remove_dir_all(dir).unwrap();
+}

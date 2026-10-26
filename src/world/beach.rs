@@ -10,7 +10,7 @@ impl World {
             return;
         }
         let unannounced = self
-            .actors()
+            .world_effect_actors()
             .filter(|e| e.kind == BUM && e.stage.is_none())
             .map(|e| e.id)
             .collect::<Vec<_>>();

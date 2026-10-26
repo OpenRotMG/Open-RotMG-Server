@@ -17,7 +17,7 @@ pub(super) struct Toss {
 impl World {
     pub(super) fn lab_step(&mut self) {
         let pools: Vec<_> = self
-            .actors()
+            .world_effect_actors()
             .filter(|e| matches!(e.kind, lab::HEXXER | lab::DEHEXXER))
             .map(|e| (e.kind, e.pos))
             .collect();

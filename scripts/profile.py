@@ -61,6 +61,11 @@ def incident(line, pid):
     return {'logged_at': record['timestamp'], 'world': fields.get('world'), 'sample': sample}
 
 
+def journal_command(service):
+    # Without --all, journalctl replaces JSON fields larger than 4 KiB with null.
+    return ['journalctl', '--all', '-u', service, '-f', '--since', 'now', '-o', 'json', '--no-pager']
+
+
 def cache_binary(directory):
     subprocess.run(['perf', '--buildid-dir', str(directory / 'buildids'),
                     'buildid-cache', '--add', str(directory / 'binary')], check=True, timeout=15)
@@ -120,8 +125,7 @@ def run(service, root):
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     perf = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    journal = subprocess.Popen(['journalctl', '-u', service, '-f', '--since', 'now', '-o', 'json', '--no-pager'],
-                               stdout=subprocess.PIPE, stderr=None)
+    journal = subprocess.Popen(journal_command(service), stdout=subprocess.PIPE, stderr=None)
     selector = selectors.DefaultSelector()
     buffers = {}
     for stream, name in [(perf.stderr, 'perf'), (journal.stdout, 'journal')]:
