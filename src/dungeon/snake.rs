@@ -273,10 +273,13 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     map.cells[(sy * width + sx) as usize].region = 1;
     map.cells[(sy * width + sx) as usize].object = Some(0x703);
     let (bx, by) = centers[6];
-    // Later map has four clear rim tiles, mixed north/south cover and permanent sides; footprints/split remain reconstructed: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/snakepit.wmap
+    // Reconstruct the later map's notched shoulders, rim clearance and mixed cover, not rectangular bars: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/snakepit.wmap
     for (dx, dy) in [(-10, 0), (10, 0), (0, -10), (0, 10)] {
-        for along in -2..=2 {
-            for thick in 0..2 {
+        for along in -2i32..=2 {
+            for thick in -1..=1 {
+                if thick == -1 && along.abs() == 2 || thick == 1 && along == 0 {
+                    continue;
+                }
                 let (x, y) = if dx == 0 {
                     (bx + along, by + dy + thick * dy.signum())
                 } else {
@@ -419,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn stheno_room_is_a_notched_square_with_mixed_cover() {
+    fn stheno_room_and_cover_have_notched_outlines() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for seed in 0..8 {
             let map = generate(&content, seed).unwrap();
@@ -450,10 +453,20 @@ mod tests {
                         assert_eq!(cell.ground, 0xff, "seed {seed} outside {dx},{dy}");
                     }
                     assert_eq!(cell.ground == 0x32, edge, "seed {seed} border {dx},{dy}");
+                    let expected_cover =
+                        matches!((far, near), (9, 0..=1) | (10, 0..=2) | (11, 1..=2));
+                    assert_eq!(
+                        matches!(cell.object, Some(0x170 | 0x172)) && inside,
+                        expected_cover,
+                        "seed {seed} cover {dx},{dy}"
+                    );
+                    if expected_cover {
+                        assert_eq!(cell.ground, 0x16);
+                    }
                 }
             }
             for (group, [hard, soft]) in cover.into_iter().enumerate() {
-                assert_eq!(hard + soft, 10, "seed {seed}, cover {group}");
+                assert_eq!(hard + soft, 12, "seed {seed}, cover {group}");
                 assert!(
                     hard > 0,
                     "seed {seed}, cover {group} needs permanent shelter"
