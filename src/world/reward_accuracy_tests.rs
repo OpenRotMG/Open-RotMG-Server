@@ -271,3 +271,91 @@ async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collect
     assert_eq!(saved.items[4], item);
     assert_eq!(saved.revision, revision);
 }
+
+#[tokio::test]
+async fn god_shared_bags_reject_exhausted_capacity_without_an_extra_entity() {
+    let (mut w, _store, owners) = reward_world().await;
+    let pos = Pos { x: 1.5, y: 1.5 };
+    for _ in 0..128 {
+        w.loot_bag(pos, None, vec![0xa3c]).unwrap();
+    }
+    let entities = w.entities.len();
+    let error = w
+        .god_loot_bags(
+            pos,
+            crate::loot::GodLoot {
+                shared: vec![0xa3c],
+                shared_owners: vec![owners[0].0, owners[1].0],
+                private: BTreeMap::new(),
+            },
+        )
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("transient loot bag limit reached")
+    );
+    assert_eq!(w.bag_expiry.len(), 128);
+    assert_eq!(w.entities.len(), entities);
+}
+
+#[tokio::test]
+async fn god_shared_collection_failed_receipt_retains_reservation_without_credit() {
+    let (mut w, store, owners) = reward_world().await;
+    w.god_loot_bags(
+        Pos { x: 1.5, y: 1.5 },
+        crate::loot::GodLoot {
+            shared: vec![0xa3c],
+            shared_owners: vec![owners[0].0, owners[1].0],
+            private: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let bag = *w.bag_expiry.keys().next().unwrap();
+    let player = |account| {
+        w.players
+            .iter()
+            .find(|(_, p)| p.character.account == account)
+            .map(|(id, _)| *id)
+            .unwrap()
+    };
+    let winner = player(owners[0].0);
+    let peer = player(owners[1].0);
+    let outsider = player(owners[5].0);
+    let from = Slot {
+        object: bag,
+        slot: 0,
+        kind: 0xa3c,
+    };
+    let to = |id| Slot {
+        object: id,
+        slot: 4,
+        kind: -1,
+    };
+    let before = store.load(owners[0].0, owners[0].1).await.unwrap();
+    let plan = w.swap(winner, from, to(winner)).unwrap();
+    let error = w
+        .finish_inventory(
+            plan,
+            Err(anyhow::anyhow!("injected collection receipt failure")),
+        )
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("injected collection receipt failure")
+    );
+    assert!(w.players[&winner].persistence_failure.is_some());
+    assert!(w.players[&winner].pending);
+    assert!(w.entities[&bag].reserved);
+    assert_eq!(w.entities[&bag].items[0], 0xa3c);
+    assert!(w.entities[&bag].drop_slots.contains(&0));
+    assert_eq!(w.players[&winner].character.items, before.items);
+    assert_eq!(w.players[&winner].character.revision, before.revision);
+    assert!(w.swap(peer, from, to(peer)).is_err());
+    assert!(w.swap(outsider, from, to(outsider)).is_err());
+    let saved = store.load(owners[0].0, owners[0].1).await.unwrap();
+    assert_eq!(saved.items, before.items);
+    assert_eq!(saved.revision, before.revision);
+    assert_eq!(saved.lifetime, before.lifetime);
+}
