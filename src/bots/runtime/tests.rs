@@ -1155,3 +1155,154 @@ async fn dialogue_world_runtime_cancels_after_validated_view_before_authoritativ
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
+    for drift in [
+        "range",
+        "known",
+        "ignore",
+        "peer_left",
+        "peer_dead",
+        "peer_departing",
+        "text",
+        "rate",
+    ] {
+        let (dir, app) = server::test_app();
+        app.world.clock.set_paused(true);
+        let (_owner, id, mut output, mut brain) =
+            actor(&app, "world-guards-bot", "Trader", [-1; 8]).await;
+        let (_peer_owner, peer, mut peer_output, _) =
+            actor(&app, "world-guards-peer", "Peer", [-1; 8]).await;
+        nearby(&app, id, peer).await;
+        let view = app.world.player_view(id).await.unwrap();
+        let own = view.session.account;
+        let other = app.world.player_view(peer).await.unwrap().session.account;
+        let request = brain
+            .adventure_request(
+                adventures::Plan::Invite {
+                    peer: adventures::Member {
+                        account: other,
+                        name: "Peer".into(),
+                    },
+                    purpose: adventures::Purpose::Equipment,
+                },
+                &view,
+                &app.content,
+            )
+            .unwrap();
+        let mut reply = dialogue::Reply {
+            intent: dialogue::Intent::Invite,
+            reply: "Peer, want to look for better gear together?".into(),
+        };
+        brain.validate_dialogue(&request, &reply, &view).unwrap();
+        if drift == "peer_left" {
+            lifecycle::finalize(&app, peer, CloseReason::Controller)
+                .unwrap()
+                .wait()
+                .await
+                .unwrap();
+        } else {
+            app.world
+                .directory(move |d| {
+                    let now = d.clock.now();
+                    if drift == "rate" {
+                        for _ in 0..3 {
+                            d.chat(id, "budget control".into(), now)?;
+                        }
+                    }
+                    let w = d.worlds.get_mut(&-2).unwrap();
+                    match drift {
+                        "range" => {
+                            let pos = w.players[&id].pos;
+                            w.players.get_mut(&peer).unwrap().pos = Pos {
+                                x: pos.x + 13.,
+                                y: pos.y,
+                            };
+                        }
+                        "known" => {
+                            w.players.get_mut(&id).unwrap().known.remove(&peer);
+                        }
+                        "ignore" => {
+                            w.sync_account_lists(peer, Some([vec![], vec![own]]))?;
+                        }
+                        "peer_dead" => w.players.get_mut(&peer).unwrap().character.hp = 0,
+                        "peer_departing" => w.players.get_mut(&peer).unwrap().departing = true,
+                        "text" | "rate" => {}
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        while output.try_recv().is_ok() {}
+        while peer_output.try_recv().is_ok() {}
+        let invalid = dialogue::Reply {
+            intent: dialogue::Intent::Join,
+            reply: "yes".into(),
+        };
+        let error = dialogue::publish(&app, &mut brain, &request, &invalid, &view)
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "dialogue intention not requested");
+        assert!(!error.is::<dialogue::Obsolete>());
+        let mut unauthorized = request.clone();
+        unauthorized.plan = Some(adventures::Plan::Answer(adventures::Offer {
+            from: adventures::Member {
+                account: other,
+                name: "Peer".into(),
+            },
+            to: adventures::Member {
+                account: 999_999,
+                name: "Another".into(),
+            },
+            purpose: adventures::Purpose::Equipment,
+            until: 60000,
+            text: "want gear?".into(),
+            answer_started: true,
+        }));
+        let error = dialogue::publish(&app, &mut brain, &unauthorized, &reply, &view)
+            .await
+            .unwrap_err();
+        assert!(!error.is::<dialogue::Obsolete>(), "{drift}: {error:#}");
+        if drift == "text" {
+            reply.reply = "Peer, want \0gear?".into();
+        }
+        let error = dialogue::publish(&app, &mut brain, &request, &reply, &view)
+            .await
+            .unwrap_err();
+        if matches!(drift, "text" | "rate") {
+            assert!(!error.is::<dialogue::Obsolete>(), "{drift}: {error:#}");
+            assert!(
+                error.to_string().contains(if drift == "text" {
+                    "control characters"
+                } else {
+                    "Chat rate limit"
+                }),
+                "{error:#}"
+            );
+        } else {
+            let reason = match drift {
+                "range" => "speaker_out_of_chat_range",
+                "known" => "speaker_no_longer_known",
+                "ignore" => "speaker_ignores_dialogue",
+                "peer_left" => "speaker_left_world",
+                "peer_dead" | "peer_departing" => "speaker_unavailable",
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                error.downcast_ref::<dialogue::Obsolete>().unwrap().0,
+                reason
+            );
+        }
+        assert!(!std::iter::from_fn(|| output.try_recv().ok()).any(|p| p.id == wire::TEXT));
+        assert!(!std::iter::from_fn(|| peer_output.try_recv().ok()).any(|p| p.id == wire::TEXT));
+        assert!(brain.agreement.is_none());
+        assert_eq!(brain.invitation_until, 0);
+        assert!(app.society.lock().unwrap().outgoing(own, 0).is_none());
+        assert!(app.society.lock().unwrap().group(own, 0).is_none());
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
