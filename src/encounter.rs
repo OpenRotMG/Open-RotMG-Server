@@ -76,6 +76,17 @@ pub struct Profile {
     pub interval: u64,
     pub range: f32,
 }
+// Kithio d15f321, compiled BehaviorDb.Mountain/Shoot: cooldown is checked before decrement.
+// At our 50 ms tick, a 500 ms cooldown fires again after 550 ms, without an entry delay.
+pub(crate) fn white_demon_schedule(age: u64) -> attacks::Schedule {
+    let mut attack = attacks::Attack::fan(0, 3, 20., 550, 10.);
+    attack.predict = attacks::Prediction::Lead(1.);
+    attacks::Schedule {
+        state: 0,
+        age,
+        attacks: vec![attack],
+    }
+}
 pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
@@ -259,7 +270,18 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0x64b => (chase(1.), 12., 500, 3.),
         0x64f => (chase(7.), 15., 500, 10.),
         0x650 => (chase(1.), 10., 500, 10.),
-        0x651 => (chase(4.), 6., 1000, 10.),
+        0x651 => (
+            Follow {
+                sight: 10.,
+                stop: 7.,
+                idle: nr_speed(0.4),
+                duration: 0,
+                cooldown: 0,
+            },
+            nr_speed(1.),
+            550,
+            10.,
+        ),
         0x654 => (chase(4.), 6., 1000, 12.),
         0x652 | 0xd05 => (Wander, 2., 1000, 12.),
         0x653 => (
@@ -527,7 +549,7 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
         0x62b => vec![],
 
         0x650 => spread(0, 3, 7., heading),
-        0x651 => spread(0, 3, 15., heading),
+        0x651 => spread(0, 3, 20., heading),
         0x654 | 0x655 => spread(0, 5, 10., heading),
         0x657 => ring(0, 5, heading),
         0x91a => vec![],
