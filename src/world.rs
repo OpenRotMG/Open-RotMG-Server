@@ -7394,6 +7394,8 @@ mod hermit_loot_tests;
 #[cfg(test)]
 mod period_loot_tests;
 #[cfg(test)]
+mod reward_accuracy_tests;
+#[cfg(test)]
 mod pirate_generation_tests;
 #[cfg(test)]
 mod spectator_tests;
