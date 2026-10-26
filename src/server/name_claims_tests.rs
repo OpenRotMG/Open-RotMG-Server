@@ -12,6 +12,14 @@ async fn registered(a: &App, identity: &str) -> i32 {
         .unwrap()
 }
 
+async fn registered_name(store: &Store, identity: &str) -> String {
+    store
+        .characters(format!("{identity}@example.test"), "test-password".into())
+        .await
+        .unwrap()
+        .name
+}
+
 async fn request(a: &App, identity: &str, name: &str) -> String {
     let response = account_request(
         State(a.clone()),
@@ -71,7 +79,7 @@ async fn name_claims_http_inactive_and_archived_personas_preserve_identity_and_b
         );
     }
     let reopened = Store::open(&dir.join("game.db"), &a.content).unwrap();
-    assert_eq!(reopened.list("human".into()).await.unwrap().name, "kEePeR");
+    assert_eq!(registered_name(&reopened, "human").await, "kEePeR");
     assert!(
         reopened
             .persona_character(
@@ -540,7 +548,7 @@ async fn name_claims_wait_for_accepted_inventory_progress_and_departure_save() {
         reopened.load(bot.account, bot.id).await.unwrap().items[0],
         -1
     );
-    assert_eq!(reopened.list("heldhuman".into()).await.unwrap().name, name);
+    assert_eq!(registered_name(&reopened, "heldhuman").await, name);
 }
 
 #[tokio::test]
@@ -583,7 +591,7 @@ async fn name_claims_save_and_claim_failures_are_visible_without_human_publicati
         }
         let reopened = Store::open(&dir.join("game.db"), &a.content).unwrap();
         assert_eq!(
-            reopened.list("failurehuman".into()).await.unwrap().name,
+            registered_name(&reopened, "failurehuman").await,
             format!("Guest{human}")
         );
         a.shutdown.send_replace(true);
@@ -941,7 +949,7 @@ async fn name_claims_unpublished_persona_admission_rejects_without_fencing_the_h
         "a rejected name request cannot fence its human owner"
     );
     assert_eq!(
-        a.store.list("admissionretry".into()).await.unwrap().name,
+        registered_name(&a.store, "admissionretry").await,
         format!("Guest{human}")
     );
     drop(owner);
@@ -949,4 +957,88 @@ async fn name_claims_unpublished_persona_admission_rejects_without_fencing_the_h
         request(&a, "admissionretry", "Admitting").await,
         "<Success/>"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn name_claims_native_unpublished_admission_rejects_without_poisoning_the_human() {
+    use lifecycle_finalize_tests::*;
+    let (dir, a) = test_app();
+    a.world.clock.set_paused(true);
+    let bot = persona(&a, "Admitting").await;
+    let owner = a.claim(bot.account).unwrap();
+    let human = registered(&a, "nativeadmission").await;
+    let character = a
+        .store
+        .create(human, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let (port, server) = socket_server(&a).await;
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    socket
+        .send(socket_hello_password(
+            &dir,
+            "nativeadmission@example.test",
+            "test-password",
+            -2,
+            None,
+        ))
+        .await;
+    socket.receive(wire::MAP_INFO).await;
+    socket
+        .send(Packet {
+            id: wire::LOAD,
+            body: character.id.to_be_bytes().to_vec(),
+        })
+        .await;
+    let id = Reader::new(&socket.receive(wire::CREATE_SUCCESS).await.body)
+        .i32()
+        .unwrap();
+    let mut body = Writer::new();
+    body.utf("Admitting");
+    socket
+        .send(Packet {
+            id: 33,
+            body: body.0,
+        })
+        .await;
+    let packet = socket.receive_one_of(&[0, 20]).await;
+    let mut reader = Reader::new(&packet.body);
+    let status = if packet.id == 0 {
+        reader.i32().unwrap()
+    } else {
+        i32::from(reader.u8().unwrap())
+    };
+    let reason = reader.utf().unwrap();
+    reader.done().unwrap();
+    assert_eq!(packet.id, 20, "status={status}, reason={reason}");
+    assert_eq!(status, 0);
+    assert_eq!(
+        reason,
+        "Persona admission is busy; retry name choice shortly"
+    );
+    assert!(!lifecycle::state(&a, human).unwrap().2);
+    a.world
+        .for_player(id)
+        .call(move |w| {
+            let p = &w.players[&id];
+            assert!(
+                p.character.alive && !p.pending && !p.departing && p.persistence_failure.is_none()
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(owner);
+    assert_eq!(
+        native_name(&mut socket, "Admitting").await,
+        (1, String::new())
+    );
+    assert_eq!(
+        a.store.account_named("ADMITTING".into()).await.unwrap(),
+        human
+    );
+    assert_eq!(a.store.presentation(human).await.unwrap().credits, 100);
+    assert!(a.kick(human).await.unwrap());
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
 }
