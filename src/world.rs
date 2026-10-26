@@ -2337,6 +2337,7 @@ fn execute_directory_job(directory: &mut Directory, mut job: Job<Directory>) {
     let _context =
         crate::performance::attribution::Context::enter(job.sample.operation, job.sample.id);
     job.sample.stages[1] = job.enqueued.elapsed();
+    let execution = crate::performance::attribution::Execution::start();
     let work = crate::performance::Measure::start();
     let reply = (job.body)(directory);
     let work = work.finish();
@@ -2356,6 +2357,8 @@ fn execute_directory_job(directory: &mut Directory, mut job: Job<Directory>) {
     let dispatch = Instant::now();
     reply();
     job.sample.stages[6] = dispatch.elapsed();
+    job.sample.execution = execution.map(crate::performance::attribution::Execution::finish);
+    job.sample.incident(None);
     directory.attribution.record(job.sample);
     if let Some(attribution) = directory.attribution.report() {
         crate::performance::attribution::Attribution::emit(attribution, None);
@@ -2423,6 +2426,7 @@ impl Handle {
                         let mut sample=crate::performance::attribution::Sample::new("coordinator_tick");
                         let _context=crate::performance::attribution::Context::enter(sample.operation,sample.id);
                         let late=scheduled.elapsed().as_micros() as u64;
+                        let stamp=crate::performance::attribution::Execution::start();
                         let execution=crate::performance::Measure::start();
                         let measuring=crate::performance::Measure::start();
                         let start=Instant::now(); directory.coordinator_step();
@@ -2454,6 +2458,8 @@ impl Handle {
                         let publish=publish.finish();
                         sample.stages[5]=publish.wall;
                         sample.publish_cpu=publish.cpu;
+                        sample.execution=stamp.map(crate::performance::attribution::Execution::finish);
+                        sample.incident(None);
                         directory.attribution.record(sample);
                         if let Some(attribution)=directory.attribution.report() {
                             crate::performance::attribution::Attribution::emit(attribution,None);
