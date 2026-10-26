@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -27,7 +28,7 @@ class LauncherTests(unittest.TestCase):
                                   'ruffle/lock.json': json.dumps(self.lock).encode()})
         self.selection = {'client': self.revision, 'client_archive_sha256': hashlib.sha256(self.data).hexdigest(),
                           'runtime_version': self.lock['version'], 'runtime_bundle_sha256': self.lock['bundleSha256']}
-        self.patch = patch.multiple(launcher, ROOT=self.root, LOG=self.root / ".local/server.log")
+        self.patch = patch.multiple(launcher, ROOT=self.root / 'source', LOG=self.root / ".local/server.log")
         self.patch.start()
         self.resolve = patch.object(launcher, 'client_selection', return_value=self.selection)
         self.resolve.start()
@@ -65,7 +66,7 @@ class LauncherTests(unittest.TestCase):
     def test_failed_build_never_starts_a_stale_retained_binary(self):
         (self.client / 'scripts').mkdir(parents=True)
         (self.client / 'scripts/run.py').touch()
-        with patch('sys.argv', ['run.py', '8081']), \
+        with patch('sys.argv', ['run.py', '8081', '--client', str(self.client)]), \
                 patch.object(launcher.shutil, 'which', return_value='/cargo'), \
                 patch.object(launcher, 'prepare_client', return_value=self.client), \
                 patch.object(launcher, 'run', side_effect=[0, 37]) as run:
@@ -85,6 +86,62 @@ class LauncherTests(unittest.TestCase):
 
 
 
+
+
+    def shared_client(self):
+        stream = io.BytesIO()
+        with ZipFile(stream, 'w') as archive:
+            archive.writestr('ruffle.js', b'runtime')
+            archive.writestr('runtime.wasm', b'wasm')
+        runtime = stream.getvalue()
+        self.selection['runtime_bundle_sha256'] = hashlib.sha256(runtime).hexdigest()
+        self.lock['bundleSha256'] = self.selection['runtime_bundle_sha256']
+        with ZipFile(io.BytesIO(self.data)) as archive:
+            files = {name.removeprefix(self.prefix + '/'): archive.read(name) for name in archive.namelist()}
+        files['ruffle/lock.json'] = json.dumps(self.lock).encode()
+        self.data = self.archive(files)
+        self.selection['client_archive_sha256'] = hashlib.sha256(self.data).hexdigest()
+
+        def install(command, client, log):
+            (client / f'.ruffle-{self.lock["version"]}.zip').write_bytes(runtime)
+            (client / 'vendor').mkdir()
+            with ZipFile(io.BytesIO(runtime)) as archive:
+                archive.extractall(client / 'vendor')
+            return 0
+        return install
+
+    def test_deployed_client_is_verified_and_reused_across_run_states(self):
+        install = self.shared_client()
+        with patch.dict(os.environ, XDG_CACHE_HOME=str(self.root / 'cache')), \
+                patch.object(launcher, 'urlopen') as fetch, \
+                patch.object(launcher, 'run', side_effect=install) as prepare:
+            fetch.return_value.__enter__.return_value.read.return_value = self.data
+            first = launcher.prepare_client()
+            original = (first / 'vendor/runtime.wasm').stat()
+            launcher.LOG = self.root / 'second-state/server.log'
+            launcher.LOG.parent.mkdir()
+            second = launcher.prepare_client()
+            after = (second / 'vendor/runtime.wasm').stat()
+        self.assertEqual(first, second)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(prepare.call_count, 1)
+        self.assertEqual((original.st_ino, original.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
+        self.assertEqual(json.loads((launcher.LOG.parent / 'client-selection.json').read_text()), self.selection)
+        self.assertFalse((launcher.LOG.parent / self.prefix).exists())
+
+    def test_modified_shared_runtime_fails_instead_of_rebuilding_or_replacing_it(self):
+        install = self.shared_client()
+        with patch.dict(os.environ, XDG_CACHE_HOME=str(self.root / 'cache')), \
+                patch.object(launcher, 'urlopen') as fetch, \
+                patch.object(launcher, 'run', side_effect=install) as prepare:
+            fetch.return_value.__enter__.return_value.read.return_value = self.data
+            client = launcher.prepare_client()
+            path = client / 'vendor/runtime.wasm'
+            path.write_bytes(b'changed')
+            with self.assertRaisesRegex(RuntimeError, 'Shared runtime asset changed'):
+                launcher.prepare_client()
+            self.assertEqual(path.read_bytes(), b'changed')
+            self.assertEqual(prepare.call_count, 1)
 
 
 if __name__ == '__main__':

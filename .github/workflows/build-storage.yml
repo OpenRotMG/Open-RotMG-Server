@@ -6,6 +6,26 @@ on:
 permissions:
   contents: read
 jobs:
+  qa-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Start the isolated runner's user manager
+        run: |
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Verify real job lifetimes and scratch collection
+        run: python3 scripts/qa.py exec -- python3 -B -W error::ResourceWarning -m unittest discover -s scripts -p test_qa.py -v
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: qa-lifecycle-results
+          path: ~/.local/state/openrotmg/qa-jobs/
+          if-no-files-found: error
+          retention-days: 7
   test:
     runs-on: ubuntu-22.04
     timeout-minutes: 20

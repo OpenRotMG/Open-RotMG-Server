@@ -217,7 +217,10 @@ export async function runCase(scenario, options) {
     guardian=startChild(process.execPath,[join(root,'scripts/native-test-process.mjs'),out],{stdio:['ignore','ignore',await log('guardian.log')]},controller.signal);
     guardian.closed.then(value=>{if(!closing)fail(Error('Cleanup guardian exited early: '+JSON.stringify(value)));});
     report.guardian=guardian.child.pid;await guardian.started;
-    report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]])report.inputs[name]=createHash('sha256').update(await readFile(path)).digest('hex');
+    report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]]){
+      const bytes=await readFile(path);report.inputs[name]=createHash('sha256').update(bytes).digest('hex');
+      if(name==='case')await writeFile(join(out,'case.mjs'),bytes,{mode:0o600});
+    }
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);if(archive)assert(typeof fixtureModule.readArchive==='function'&&!Object.hasOwn(fixtureModule,'prepare')&&!Object.hasOwn(fixtureModule,'enter')&&!Object.hasOwn(fixtureModule,'fixture')&&!Object.hasOwn(fixtureModule,'run'),'Archive requires readArchive only: no fixture/prepare/enter/run');else assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');hasNativeEntry(fixtureModule);
     let spec=archive?null:fixtureModule.prepare===undefined?await prepareFixture(fixtureModule,api,controller.signal):null;
     port=await freePort(archive?archive.port:0);chromePort=await freePort();assert.notEqual(port,chromePort,'Ports collided; no launch attempted');
