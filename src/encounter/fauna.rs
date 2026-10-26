@@ -7,7 +7,7 @@ pub(crate) const ROSTER: &[u16] = &[
     0x620, 0x622, 0x623, 0x6c5, 0x7f22, 0x205, 0x947, 0x948, 0x949, 0x945, 0x946, 0x952, 0x202,
     0x204, 0x20d, 0x20e, 0x20f, 0x635, 0x636, 0x637, 0x639, 0x6c4, 0x6c7, 0x6c8, 0x6c9, 0x6d1,
     0x206, 0x207, 0x208, 0x209, 0xda0, 0xda1, 0xda7, 0xda8, 0xda9, 0x903, 0x904, 0x950, 0x951,
-    0x955, 0x957, 0x958, 0x959, 0x960, 0x961,
+    0x955, 0x957, 0x958, 0x959, 0x960, 0x961, 0x7f00, 0x7f01,
 ];
 pub(crate) fn profile(kind: u16) -> Profile {
     let charge = |sight, cooldown, delay, stop, idle| Motion::Charge {
@@ -87,6 +87,8 @@ pub(crate) fn profile(kind: u16) -> Profile {
             10.,
         ),
         0x946 => (Motion::Wander, 4., 1000, 10.),
+        0x7f00 => (chase(10., 1.), super::nr_speed(0.05), 250, 3.),
+        0x7f01 => (Motion::Wander, super::nr_speed(0.4), 1000, 8.),
         _ => panic!("unknown fauna profile {kind:#x}"),
     };
     Profile {
@@ -206,6 +208,13 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
             )]
         }
         0x205 => vec![fan(0, 3, 15., 1000, 6.)],
+        // Kithio Sumo Master: awake Shoot(3) every 250 ms; rage Gold Bullet Shoot(8) every 150 ms for 700 ms, then 400 ms rest; Lil Sumo Shoot(8):
+        // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Lowland.cs#L157-L214
+        0x7f00 => vec![
+            fan(0, 1, 0., 250, 3.).enabled(hp >= 170),
+            fan(1, 1, 0., 150, 8.).enabled(hp < 170 && elapsed % 1100 < 700),
+        ],
+        0x7f01 => vec![fan(0, 1, 0., 1000, 8.)],
         0x946..=0x949 => vec![fan(0, 1, 0., 1000, 10.)],
         0x945 => {
             let phase = elapsed % 2900;
