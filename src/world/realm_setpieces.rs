@@ -1090,7 +1090,10 @@ impl World {
                     ground
                 };
                 cell.object = object;
-                cell.config.clear();
+                // Pyre clones native tiles, changing ground/object but retaining their raw configuration.
+                if kind != 0x675 {
+                    cell.config.clear();
+                }
                 let connection = (object == Some(crate::dungeon::tomb::WALL)).then(|| {
                     [(0, -1), (1, 0), (0, 1), (-1, 0)]
                         .into_iter()
@@ -1149,6 +1152,62 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pyre_paint_retains_native_config_without_configuring_its_chest() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut map = temple_test_map(0);
+        let center = 96 * 192 + 96;
+        let corner = 81 * 192 + 81;
+        map.cells[center].terrain = 3;
+        for index in [center, corner] {
+            map.cells[index].object = Some(0x105);
+            map.cells[index].config = "name:native;size:137".into();
+        }
+        let original = Arc::new(map);
+        let mut world = World::new(content.clone(), original.clone()).unwrap();
+        let painted_scenery = world.cells.ids(center)[0];
+        let untouched_scenery = world.cells.ids(corner)[0];
+        world.rng = rand::rngs::StdRng::seed_from_u64(0);
+        let pos = world.place_named_setpiece(0x675, &[3]).unwrap();
+        assert_eq!((pos.x, pos.y), (96.5, 96.5));
+        let cell = &world.map.cells[center];
+        assert_eq!(
+            (
+                cell.ground,
+                cell.object,
+                cell.config.as_str(),
+                cell.terrain,
+                cell.region
+            ),
+            (0xf2, None, "name:native;size:137", 3, 0)
+        );
+        assert!(!world.entities.contains_key(&painted_scenery));
+        assert_eq!(world.cells.ids(corner), &[untouched_scenery]);
+        let cell = &world.map.cells[corner];
+        assert_eq!(
+            (
+                cell.ground,
+                cell.object,
+                cell.config.as_str(),
+                cell.terrain,
+                cell.region
+            ),
+            (0x46, Some(0x105), "name:native;size:137", 0, 0)
+        );
+        assert_eq!(original.cells[center].object, Some(0x105));
+        assert_eq!(original.cells[center].config, "name:native;size:137");
+        let chests: Vec<_> = world
+            .entities
+            .values()
+            .filter(|e| e.kind == 0x501)
+            .collect();
+        assert!(!chests.is_empty());
+        for chest in chests {
+            assert_ne!(chest.name, "native");
+            assert_eq!(chest.size, content.objects[&0x501].size);
+        }
+    }
 
     #[test]
     fn tower_fixed_birth_preserves_spacing_and_native_admission() {
