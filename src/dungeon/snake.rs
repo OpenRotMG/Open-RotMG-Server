@@ -273,8 +273,8 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     map.cells[(sy * width + sx) as usize].region = 1;
     map.cells[(sy * width + sx) as usize].object = Some(0x703);
     let (bx, by) = centers[6];
-    // Boss cover is permanent, unlike tunnel blocks: https://bluenosersguide.weebly.com/snake-pit.html
-    for (dx, dy) in [(-6, 0), (6, 0), (0, -6), (0, 6)] {
+    // Four clear rim tiles match this later map's cover bounds; footprints remain reconstructed: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/snakepit.wmap
+    for (dx, dy) in [(-10, 0), (10, 0), (0, -10), (0, 10)] {
         for along in -2..=2 {
             for thick in 0..2 {
                 let (x, y) = if dx == 0 {
@@ -441,6 +441,24 @@ mod tests {
                     }
                     assert_eq!(cell.ground == 0x32, edge, "seed {seed} border {dx},{dy}");
                 }
+            }
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let outer = (1..=15)
+                    .filter(|r| {
+                        (-2..=2).any(|along| {
+                            let (x, y) = (bx + r * dx + along * dy, by + r * dy + along * dx);
+                            matches!(
+                                map.cells[(y * map.width + x) as usize].object,
+                                Some(0x170 | 0x172)
+                            )
+                        })
+                    })
+                    .max();
+                assert_eq!(
+                    outer,
+                    Some(11),
+                    "seed {seed} cover {dx},{dy}: four clear rim tiles"
+                );
             }
         }
     }
