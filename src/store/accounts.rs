@@ -114,12 +114,14 @@ pub(super) fn named_account(db: &Connection, name: &str) -> Result<Option<i32>> 
     Ok(if humans == 1 { human } else { oldest })
 }
 
+type NameChoiceReady = (i32, i32, Vec<i32>);
+
 fn name_choice_check(
     db: &Connection,
     account: i32,
     name: &str,
     allow_paid: bool,
-) -> Result<std::result::Result<(i32, i32, Vec<i32>), &'static str>> {
+) -> Result<std::result::Result<NameChoiceReady, &'static str>> {
     if !(3..=10).contains(&name.len()) || !name.bytes().all(|c| c.is_ascii_alphabetic()) {
         return Ok(Err("names must be 3–10 letters"));
     }

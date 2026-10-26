@@ -90,6 +90,13 @@ use account_actions::{
     discord_announce, discord_gold, discord_kick, discord_recover, reset_password,
 };
 use hiscores::{collection, discord_link, graveyard, hiscores};
+#[cfg(test)]
+pub(crate) type PersonaDepartureGate = (
+    i32,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+
 #[derive(Clone)]
 pub struct App {
     pub started: std::time::Instant,
@@ -127,15 +134,7 @@ pub struct App {
     #[cfg(test)]
     pub quarantined: Arc<Mutex<Vec<Owner>>>,
     #[cfg(test)]
-    pub(crate) persona_departure_gate: Arc<
-        Mutex<
-            Option<(
-                i32,
-                tokio::sync::oneshot::Sender<()>,
-                tokio::sync::oneshot::Receiver<()>,
-            )>,
-        >,
-    >,
+    pub(crate) persona_departure_gate: Arc<Mutex<Option<PersonaDepartureGate>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
     pub(crate) admission: Arc<lifecycle::drain::Admission>,
 }

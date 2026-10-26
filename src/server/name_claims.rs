@@ -47,15 +47,14 @@ pub(super) async fn native(
     tx: &mpsc::Sender<Packet>,
 ) -> Result<()> {
     let names = a.name_claims.clone().lock_owned().await;
-    if let Some(id) = player {
-        if let Err(reason) = a
+    if let Some(id) = player
+        && let Err(reason) = a
             .world
             .for_player(id)
             .call(move |w| w.check_name_choice(id, account))
             .await?
-        {
-            return reply(tx, Some(reason));
-        }
+    {
+        return reply(tx, Some(reason));
     }
     let stopped = match prepare(a, account, name.clone(), player.is_some()).await? {
         Ok(stopped) => stopped,

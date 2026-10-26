@@ -855,8 +855,8 @@ async fn name_claims_wait_for_an_accepted_autonomous_transfer_before_releasing_t
             let w = d.worlds.get_mut(&source).unwrap();
             let (x, y) = w.map.spawns[0];
             let position = Pos {
-                x: x as f32 + 0.5,
-                y: y as f32 + 0.5,
+                x: x + 0.5,
+                y: y + 0.5,
             };
             w.spawn_entity(0x71d, position, vec![])?;
             Ok((source, position))
