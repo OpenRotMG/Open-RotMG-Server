@@ -557,10 +557,10 @@ impl Intentions {
         });
         let optional = self.matches(&d.goal);
         let necessary = committed
-            || (!matches!(
+            || !(matches!(
                 activity,
                 Activity::Adventure | Activity::Event | Activity::Linger
-            ) && !(activity == Activity::Social && optional))
+            ) || activity == Activity::Social && optional)
             || matches!(d.goal, Goal::Recover | Goal::Dodge | Goal::Remedy(_));
         let optional = !necessary && optional;
         let reason = if necessary {
