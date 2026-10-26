@@ -72,6 +72,61 @@ pub(crate) fn micros(duration: Duration) -> u64 {
         .expect("attribution duration exceeds u64")
 }
 
+#[derive(serde::Serialize)]
+pub(crate) struct Execution {
+    tid: i32,
+    start_ns: u64,
+    end_ns: u64,
+}
+impl Execution {
+    #[cfg(target_os = "linux")]
+    fn now() -> u64 {
+        let mut ts = std::mem::MaybeUninit::<libc::timespec>::uninit();
+        let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, ts.as_mut_ptr()) };
+        assert_eq!(
+            result,
+            0,
+            "profiling monotonic clock failed: {}",
+            std::io::Error::last_os_error()
+        );
+        let ts = unsafe { ts.assume_init() };
+        u64::try_from(ts.tv_sec)
+            .expect("negative monotonic seconds")
+            .checked_mul(1_000_000_000)
+            .and_then(|s| {
+                s.checked_add(
+                    ts.tv_nsec
+                        .try_into()
+                        .expect("negative monotonic nanoseconds"),
+                )
+            })
+            .expect("profiling timestamp overflow")
+    }
+    pub(crate) fn start() -> Option<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            thread_local! { static TID: i32 = unsafe { libc::gettid() }; }
+            Some(Self {
+                tid: TID.with(|id| *id),
+                start_ns: Self::now(),
+                end_ns: 0,
+            })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+    pub(crate) fn finish(mut self) -> Self {
+        #[cfg(target_os = "linux")]
+        {
+            self.end_ns = Self::now();
+            assert!(self.end_ns >= self.start_ns, "profiling clock regressed");
+        }
+        self
+    }
+}
+
 pub(crate) struct Sample {
     pub id: u64,
     pub operation: &'static str,
@@ -82,6 +137,7 @@ pub(crate) struct Sample {
     pub publish_cpu: Option<Duration>,
     pub phases: Vec<(&'static str, Measurement)>,
     pub blocker: Option<(&'static str, u64)>,
+    pub execution: Option<Execution>,
 }
 impl Sample {
     pub fn new(operation: &'static str) -> Box<Self> {
@@ -102,7 +158,13 @@ impl Sample {
             publish_cpu: None,
             phases: Vec::new(),
             blocker: None,
+            execution: None,
         })
+    }
+    pub(crate) fn incident(&self, world: Option<i32>) {
+        if self.execution.is_some() && self.total() > Duration::from_millis(50) {
+            tracing::warn!(pid=std::process::id(), world, clock="CLOCK_MONOTONIC", sample=%self.snapshot(), "latency incident");
+        }
     }
     fn total(&self) -> Duration {
         self.stages.iter().sum()
@@ -119,7 +181,7 @@ impl Sample {
             })
             .collect();
         let stages: BTreeMap<_, _> = STAGES.into_iter().zip(self.stages.map(micros)).collect();
-        json!({"id":self.id,"operation":self.operation,"kind":self.kind,"tick":self.tick,"stages_us":stages,"total_us":micros(self.total()),"work_cpu_us":self.cpu.map(micros),"publish_cpu_us":self.publish_cpu.map(micros),"phases":phases,"observed_owner":self.blocker.map(|(operation,id)|json!({"operation":operation,"id":id}))})
+        json!({"id":self.id,"operation":self.operation,"kind":self.kind,"tick":self.tick,"stages_us":stages,"total_us":micros(self.total()),"work_cpu_us":self.cpu.map(micros),"publish_cpu_us":self.publish_cpu.map(micros),"phases":phases,"execution":self.execution,"execution_scope":"work_publish_reply","observed_owner":self.blocker.map(|(operation,id)|json!({"operation":operation,"id":id}))})
     }
 }
 
@@ -317,6 +379,24 @@ mod tests {
         assert_eq!(v["counts"][BOUNDS_US.len() - 1], 1);
         assert!(Histogram::default().snapshot()["p99_upper_us"].is_null());
     }
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn execution_span_uses_native_tid_and_perf_monotonic_clock() {
+        let before = Execution::now();
+        let span = Execution::start().unwrap().finish();
+        let after = Execution::now();
+        assert_eq!(span.tid, unsafe { libc::gettid() });
+        assert!(before <= span.start_ns && span.start_ns <= span.end_ns && span.end_ns <= after);
+        let parent = span.tid;
+        let child = std::thread::spawn(|| Execution::start().unwrap().finish())
+            .join()
+            .unwrap();
+        assert_ne!(parent, child.tid);
+        let mut sample = Sample::new("tick");
+        sample.execution = Some(span);
+        assert_eq!(sample.snapshot()["execution"]["tid"], parent);
+    }
+
     #[test]
     fn tick_capture_keeps_same_tick_cpu_and_nested_phase_totals() {
         let mut window = crate::performance::Window::default();
