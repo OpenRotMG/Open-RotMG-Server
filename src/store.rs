@@ -1064,11 +1064,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let existing: Option<(String, i32)> = tx.query_row(
                 "SELECT guid,accounts.id FROM accounts JOIN shore_bots ON accounts.id=shore_bots.account WHERE shore_bots.name=?1",
                 [&identity], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            let taken = accounts::human_name_taken(&tx, &name, 0)?;
+            ensure!(!taken, anyhow::anyhow!(Rejected("persona name is already in use")).context(format!("persona {identity} already belongs to another account")));
             let (guid, account) = match existing {
                 Some(found) => found,
                 None => {
-                    let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE name=?1 COLLATE NOCASE AND NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=accounts.id))", [&name], |r| r.get(0))?;
-                    ensure!(!taken, anyhow::anyhow!(Rejected("persona name is already in use")).context(format!("persona {identity} already belongs to another account")));
                     let guid = format!("persona-{:032x}", rand::random::<u128>());
                     tx.execute("INSERT INTO accounts(guid,name,character_slots,vault_mask) VALUES(?1,?2,14,?3)", params![guid, name, (1 << vault.len()) - 1])?;
                     let account = i32::try_from(tx.last_insert_rowid())?;
@@ -1124,6 +1124,14 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         );
         let index = pick % account.characters.len();
         Ok(account.characters.swap_remove(index))
+    }
+    pub(crate) async fn persona_name_available(&self, account: i32, name: String) -> Result<()> {
+        self.call(move |db| {
+            let taken = accounts::human_name_taken(db, &name, account)?;
+            ensure!(!taken, Rejected("persona name is already in use"));
+            Ok(())
+        })
+        .await
     }
     pub(crate) async fn retire_persona(&self, identity: String, account: i32) -> Result<()> {
         ensure!(

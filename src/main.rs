@@ -183,6 +183,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),
+        name_claims: Arc::default(),
         bots: Arc::default(),
         #[cfg(test)]
         quarantined: Arc::default(),

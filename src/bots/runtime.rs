@@ -549,6 +549,11 @@ pub(super) async fn launch(
     mut owner: server::Owner,
     done: Option<mpsc::Sender<director::Departure>>,
 ) -> Result<()> {
+    let _names = app.name_claims.lock().await;
+    app.store
+        .persona_name_available(character.account, character.name.clone())
+        .await?;
+    let (mut cancel, completion) = owner.control(true)?;
     let (world, position) = location;
     owner.admit_controller(app)?;
     let mut drain = lifecycle::drain::stopping(app);
@@ -602,13 +607,14 @@ pub(super) async fn launch(
                 )
         });
         let mut retired = false;
-        let result: Result<()> = async {
+        let mut result: Result<()> = async {
                 loop {
-                    if *shutdown.borrow() || drain.has_changed()? || !lifecycle::drain::open(&app) { break; }
+                    if *cancel.borrow() || *shutdown.borrow() || drain.has_changed()? || !lifecycle::drain::open(&app) { break; }
                     tokio::select! {
                         _=tokio::time::sleep(Duration::from_millis(50))=>{},
                         _=shutdown.changed()=>break,
                         _=drain.changed()=>break,
+                        _=cancel.changed()=>break,
                     }
                     if app.world.clock.paused() { continue; }
                     #[cfg(test)]
@@ -691,9 +697,11 @@ pub(super) async fn launch(
                             retired = true;
                             return Ok(());
                         }
+                        if *cancel.borrow() { return Ok(()); }
                         tokio::select! {
                             _=tokio::time::sleep(Duration::from_secs(3))=>{},
                             _=shutdown.changed()=>return Ok(()),
+                            _=cancel.changed()=>return Ok(()),
                         }
                         (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Replacement { previous: view.session.character }).await?;
                         deferred_market = None;
@@ -937,7 +945,17 @@ pub(super) async fn launch(
                 .directory(move |d| d.cancel_admission(account, key))
                 .await
         {
-            tracing::error!(account,%error,"failed controller admission cancellation failed");
+            let message = format!("controller admission cancellation failed: {error:#}");
+            result = Err(match result {
+                Ok(()) => error.context(message),
+                Err(prior) => prior.context(message),
+            });
+        }
+        if *cancel.borrow()
+            && let Err(error) = &result
+            && let Some(owner) = &owner
+        {
+            owner.failed(format!("persona name relinquishment failed: {error:#}"));
         }
         // A replacement may register as soon as finalization releases this generation.
         app.society
@@ -966,6 +984,7 @@ pub(super) async fn launch(
             if let Err(error) = saved {
                 finalized = false;
                 tracing::error!(player=id,account,%error,"autonomous finalization failed; account remains fenced");
+                result = Err(error);
             }
         }
         if finalized {
@@ -974,7 +993,7 @@ pub(super) async fn launch(
         dialogue::cancel(&mut pending);
         dialogue::end_agreement(&app, &mut brain, "controller stopped").await;
         let retire = retired && finalized && result.is_ok() && !*shutdown.borrow();
-        if let Err(error) = result {
+        if let Err(error) = &result {
             tracing::error!(player=id,name=profile.name,%error,"autonomous controller stopped");
         }
         if let Some(done) = done
@@ -990,6 +1009,7 @@ pub(super) async fn launch(
         {
             tracing::error!(account, "population director stopped receiving departures");
         }
+        completion.complete(result);
     });
     Ok(())
 }

@@ -1,6 +1,9 @@
 mod bot_view;
 mod input;
+mod name_claims;
 
+#[cfg(test)]
+mod name_claims_tests;
 #[cfg(test)]
 mod password_tests;
 mod pictures;
@@ -118,6 +121,7 @@ pub struct App {
     pub authentication: Arc<tokio::sync::RwLock<()>>,
     pub guild_actions: Arc<tokio::sync::Mutex<()>>,
     pub gold_updates: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) name_claims: Arc<tokio::sync::Mutex<()>>,
     pub bots: Arc<Mutex<BTreeMap<i32, Owner>>>,
     #[cfg(test)]
     pub quarantined: Arc<Mutex<Vec<Owner>>>,
@@ -359,8 +363,18 @@ async fn account_request(
                 let _claim = a.claim(id)?;
                 let name = form.get("name").context("name required")?.clone();
                 lifecycle::account(&a, vec![id], "choose_name", move |a| async move {
+                    let _names = a.name_claims.lock().await;
+                    let stopped = name_claims::prepare(&a, id, name.clone(), false)
+                        .await?
+                        .map_err(crate::store::Rejected)?;
+                    let _gold = a.gold_updates.lock().await;
                     lifecycle::stage(Stage::Store);
-                    a.store.choose_name(id, name).await
+                    match a.store.claim_name_choice(id, name, false, stopped).await? {
+                        crate::store::NameChoice::Committed { .. } => Ok(()),
+                        crate::store::NameChoice::Rejected(reason) => {
+                            Err(crate::store::Rejected(reason).into())
+                        }
+                    }
                 })
                 .await?;
                 id
@@ -1967,7 +1981,7 @@ async fn handle_inner(
                 .as_ref()
                 .ok_or_else(|| lifecycle::protocol("name before HELLO"))?
                 .id;
-            let _gold = a.gold_updates.lock().await;
+            let _names = a.name_claims.lock().await;
             lifecycle::stage(Stage::Reservation);
             let reservation = if let Some(id) = *player {
                 match a
@@ -1989,11 +2003,19 @@ async fn handle_inner(
             } else {
                 None
             };
+            let preparation =
+                name_claims::prepare(a, account, name.clone(), reservation.is_some()).await;
+            let _gold = a.gold_updates.lock().await;
             lifecycle::stage(Stage::Store);
-            let result = a
-                .store
-                .name_choice(account, name.clone(), reservation.is_some())
-                .await;
+            let result = match preparation {
+                Ok(Ok(stopped)) => {
+                    a.store
+                        .claim_name_choice(account, name.clone(), reservation.is_some(), stopped)
+                        .await
+                }
+                Ok(Err(reason)) => Ok(crate::store::NameChoice::Rejected(reason)),
+                Err(error) => Err(error),
+            };
             lifecycle::stage(Stage::Publication);
             let rejection = if let Some((id, plan)) = reservation {
                 a.world

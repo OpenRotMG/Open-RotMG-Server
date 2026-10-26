@@ -58,6 +58,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),
+        name_claims: Arc::default(),
         bots: Arc::default(),
         quarantined: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
