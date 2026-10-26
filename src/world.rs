@@ -403,6 +403,7 @@ pub struct Player {
     last_move: i32,
     last_move_at: u64,
     motion: ObservedMotion,
+    white_demon_aim_history: [Pos; 2],
     goto_acks: VecDeque<(bool, Instant)>,
     discarded_attack: Option<(i32, i32)>,
     tick: i32,
@@ -3505,6 +3506,7 @@ impl World {
                     velocity: Pos { x: 0., y: 0. },
                     at: self.now,
                 },
+                white_demon_aim_history: [pos; 2],
                 goto_acks: VecDeque::new(),
                 discarded_attack: None,
                 tick: 0,
@@ -6258,6 +6260,11 @@ impl World {
             return packets;
         }
         self.beach_notice();
+        // Kithio's next-slot history index makes TryGetHistory(100) read the previous 50 ms sample.
+        for p in self.players.values_mut() {
+            p.white_demon_aim_history.rotate_left(1);
+            p.white_demon_aim_history[1] = p.pos;
+        }
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
         let audience: Vec<_> = self
@@ -6608,7 +6615,14 @@ impl World {
                     }
                     Motion::Follow { idle, .. } => {
                         if let Some(target) = self.follow_goal(id, target, motion, delta) {
-                            Some(target)
+                            Some(if kind == 0x651 && self.name != "Abyss of Demons" {
+                                Pos {
+                                    x: target.x - self.rng.gen_range(-2..2) as f32 / 2.,
+                                    y: target.y - self.rng.gen_range(-2..2) as f32 / 2.,
+                                }
+                            } else {
+                                target
+                            })
                         } else if idle == 0. {
                             speed = 0.;
                             Some(pos)

@@ -133,6 +133,9 @@ impl World {
             }
             return Ok(Some(schedule));
         }
+        if e.kind == 0x651 {
+            return Ok(Some(crate::encounter::white_demon_schedule(elapsed)));
+        }
         if matches!(
             e.kind,
             crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
@@ -335,7 +338,14 @@ impl World {
             let heading = match attack.aim {
                 Aim::Fixed(angle) => angle,
                 Aim::Target => {
-                    let Some(target) = target.filter(|p| pos.distance(*p) <= attack.range) else {
+                    let Some(target) = target.filter(|p| {
+                        let distance = pos.distance(*p);
+                        if self.entities[&id].kind == 0x651 && self.name != "Abyss of Demons" {
+                            distance < attack.range
+                        } else {
+                            distance <= attack.range
+                        }
+                    }) else {
                         continue;
                     };
                     (target.y - pos.y).atan2(target.x - pos.x)
