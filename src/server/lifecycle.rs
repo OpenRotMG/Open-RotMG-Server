@@ -151,10 +151,67 @@ struct LeaseCleanup {
 }
 
 #[derive(Clone)]
-struct SessionControl {
+pub(crate) struct SessionControl {
+    autonomous: bool,
+    account: i32,
+    generation: Arc<()>,
+    registry: std::sync::Weak<Mutex<BTreeMap<i32, Claim>>>,
     pub(super) cancel: tokio::sync::watch::Sender<bool>,
     pub(super) done: tokio::sync::watch::Receiver<Completion>,
     completion: tokio::sync::watch::Sender<Completion>,
+}
+
+impl SessionControl {
+    pub(crate) fn complete(self, result: Result<()>) {
+        if !self.autonomous {
+            self.publish(result);
+            return;
+        }
+        let Some(registry) = self.registry.upgrade() else {
+            self.publish(Err(anyhow::anyhow!(
+                "controller completion lost ownership registry"
+            )));
+            report_failure(
+                "controller completion lost ownership registry",
+                "autonomous completion failed",
+            );
+            return;
+        };
+        let mut owners = registry.lock().expect("ownership registry poisoned");
+        let Some(claim) = owners
+            .get_mut(&self.account)
+            .filter(|c| Arc::ptr_eq(&c.generation, &self.generation))
+        else {
+            let error = format!(
+                "account={} stale autonomous completion generation",
+                self.account
+            );
+            report_failure(&error, "autonomous completion failed");
+            self.publish(Err(anyhow::Error::msg(error)));
+            return;
+        };
+        if let Err(error) = &result {
+            let message = fence(
+                claim,
+                self.account,
+                "autonomous_completion",
+                Stage::Retirement,
+                format!("{error:#}"),
+            );
+            report_failure(&message, "autonomous completion failed");
+        }
+        self.publish(result);
+        finish(&mut owners, self.account);
+    }
+    fn publish(&self, result: Result<()>) {
+        self.completion.send_if_modified(|current| {
+            if current.is_some() {
+                return false;
+            }
+            *current = Some(result.map_err(|error| format!("{error:#}")));
+            true
+        });
+    }
 }
 
 pub struct Claim {
@@ -195,19 +252,52 @@ fn finish(owners: &mut BTreeMap<i32, Claim>, id: i32) {
         && !claim.pending
         && claim.avatar.is_none()
         && claim.failure.is_none()
+        && claim.control.as_ref().is_none_or(|control| {
+            !control.autonomous || matches!(*control.done.borrow(), Some(Ok(())))
+        })
         && claim
             .finalization
             .as_ref()
             .is_none_or(|f| matches!(*f.done.borrow(), Some(Ok(()))))
     {
         let claim = owners.remove(&id).expect("checked claim");
-        if let Some(control) = claim.control {
-            control.completion.send_replace(Some(Ok(())));
+        if let Some(control) = claim.control
+            && !control.autonomous
+        {
+            control.complete(Ok(()));
         }
     }
 }
 
 impl Owner {
+    pub(crate) fn control(
+        &mut self,
+        autonomous: bool,
+    ) -> Result<(tokio::sync::watch::Receiver<bool>, SessionControl)> {
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        let (completion, done) = tokio::sync::watch::channel(None);
+        let mut owners = self.registry.lock().expect("ownership registry poisoned");
+        let claim = owners
+            .get_mut(&self.id)
+            .context("controller has no account claim")?;
+        ensure!(
+            Arc::ptr_eq(&claim.generation, &self.generation),
+            "stale controller generation"
+        );
+        ensure!(claim.control.is_none(), "controller already registered");
+        let control = SessionControl {
+            autonomous,
+            account: self.id,
+            generation: self.generation.clone(),
+            registry: Arc::downgrade(&self.registry),
+            cancel,
+            done,
+            completion,
+        };
+        claim.control = Some(control.clone());
+        self.cancel = Some(receiver.clone());
+        Ok((receiver, control))
+    }
     pub(crate) fn admit_controller(&self, a: &App) -> Result<()> {
         if let Err(error) = drain::controller_admission(a, self.admitted) {
             stage(Stage::Settled);
@@ -514,20 +604,48 @@ impl App {
     }
     pub(super) fn claim_session(&self, id: i32) -> Result<Owner> {
         let mut owner = self.claim(id)?;
-        let (cancel, receiver) = tokio::sync::watch::channel(false);
-        let (completion, done) = tokio::sync::watch::channel(None);
-        self.owners
-            .lock()
-            .expect("ownership registry poisoned")
-            .get_mut(&id)
-            .expect("new claim")
-            .control = Some(SessionControl {
-            cancel,
-            done,
-            completion,
-        });
-        owner.cancel = Some(receiver);
+        owner.control(false)?;
         Ok(owner)
+    }
+    pub(crate) async fn stop_persona(&self, account: i32) -> Result<()> {
+        self.world.supervisor.check_account(account)?;
+        let control = {
+            let mut owners = self.owners.lock().expect("ownership registry poisoned");
+            match owners.get_mut(&account) {
+                None => return Ok(()),
+                Some(claim) => {
+                    ensure!(
+                        claim.failure.is_none(),
+                        "persona account is fenced: {:?}",
+                        claim.failure
+                    );
+                    let control = claim.control.clone().ok_or(crate::store::Rejected(
+                        "Persona admission is busy; retry name choice shortly",
+                    ))?;
+                    ensure!(
+                        control.autonomous,
+                        "name collision is not an autonomous session"
+                    );
+                    if control.cancel.is_closed() {
+                        let message = fence(
+                            claim,
+                            account,
+                            "persona_completion",
+                            Stage::Retirement,
+                            "controller completion is unavailable; operator inspection required"
+                                .into(),
+                        );
+                        report_failure(&message, "name claim refused");
+                        return Err(crate::store::Rejected("Persona controller completion is unavailable; name was not claimed. Operator inspection required.").into());
+                    }
+                    control.cancel.send_replace(true);
+                    control
+                }
+            }
+        };
+        wait_control(control).await?;
+        self.world.supervisor.check_account(account)?;
+        Ok(())
     }
     pub(super) async fn kick(&self, account: i32) -> Result<bool> {
         let control = self
@@ -539,28 +657,35 @@ impl App {
         let Some((control, avatar)) = control else {
             return Ok(false);
         };
-        let mut control =
+        let control =
             control.context("Account is busy outside a game connection; retry shortly")?;
-        if let Some(avatar) = avatar {
+        if !control.autonomous
+            && let Some(avatar) = avatar
+        {
             finalize(self, avatar, CloseReason::Controller)?;
         }
         control.cancel.send_replace(true);
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                if let Some(result) = control.done.borrow().clone() {
-                    result.map_err(anyhow::Error::msg)?;
-                    return Ok(true);
-                }
-                control
-                    .done
-                    .changed()
-                    .await
-                    .context("Session closed without a save acknowledgement")?;
-            }
-        })
-        .await
-        .context("Disconnect save is still pending; no successful kick was confirmed")?
+        wait_control(control).await?;
+        Ok(true)
     }
+}
+
+async fn wait_control(mut control: SessionControl) -> Result<()> {
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            if let Some(result) = control.done.borrow().clone() {
+                result.map_err(anyhow::Error::msg)?;
+                return Ok(());
+            }
+            control
+                .done
+                .changed()
+                .await
+                .context("Session closed without a save acknowledgement")?;
+        }
+    })
+    .await
+    .context("Disconnect save is still pending; no successful stop was confirmed")?
 }
 
 tokio::task_local! { static FINALIZING: (); }
@@ -994,6 +1119,9 @@ pub(super) fn preserve_uncertain(
         .filter(|(_, claim)| {
             claim.pending
                 || claim.failure.is_some()
+                || claim.control.as_ref().is_some_and(|control| {
+                    control.autonomous && !matches!(*control.done.borrow(), Some(Ok(())))
+                })
                 || claim
                     .finalization
                     .as_ref()

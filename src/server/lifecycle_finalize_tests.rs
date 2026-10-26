@@ -54,6 +54,9 @@ impl NativeSocket {
         self.io.write_all(&frame).await.unwrap();
     }
     pub(super) async fn receive(&mut self, expected: u8) -> Packet {
+        self.receive_one_of(&[expected]).await
+    }
+    pub(super) async fn receive_one_of(&mut self, expected: &[u8]) -> Packet {
         use tokio::io::AsyncReadExt;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -61,7 +64,7 @@ impl NativeSocket {
                     if self.forbid_reconnect {
                         assert_ne!(packet.id, 39, "failed transfer published RECONNECT");
                     }
-                    if packet.id == expected {
+                    if expected.contains(&packet.id) {
                         return packet;
                     }
                 }

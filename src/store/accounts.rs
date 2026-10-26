@@ -89,41 +89,127 @@ fn guest(db: &Connection, guid: &str, create: bool, authentication: bool) -> Res
     )?;
     Ok(id)
 }
+pub(super) fn human_name_taken(db: &Connection, name: &str, except: i32) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM accounts WHERE id!=?2 AND name=?1 COLLATE NOCASE AND (NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=accounts.id) OR EXISTS(SELECT 1 FROM credentials WHERE account=accounts.id)))",
+        params![name, except], |r| r.get(0),
+    )?)
+}
+
+pub(super) fn named_account(db: &Connection, name: &str) -> Result<Option<i32>> {
+    // Historical persona rows keep their names after a human claims the active name.
+    let (humans, human, oldest): (i32, Option<i32>, Option<i32>) = db.query_row(
+        "WITH matching AS (
+            SELECT id,NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=accounts.id)
+                OR EXISTS(SELECT 1 FROM credentials WHERE account=accounts.id) AS human
+            FROM accounts WHERE name=?1 COLLATE NOCASE
+        ) SELECT count(*) FILTER(WHERE human),min(id) FILTER(WHERE human),min(id) FROM matching",
+        [name],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    ensure!(
+        humans <= 1,
+        Rejected("Ambiguous human name ownership; contact the server operator.")
+    );
+    Ok(if humans == 1 { human } else { oldest })
+}
+
+type NameChoiceReady = (i32, i32, Vec<i32>);
+
+fn name_choice_check(
+    db: &Connection,
+    account: i32,
+    name: &str,
+    allow_paid: bool,
+) -> Result<std::result::Result<NameChoiceReady, &'static str>> {
+    if !(3..=10).contains(&name.len()) || !name.bytes().all(|c| c.is_ascii_alphabetic()) {
+        return Ok(Err("names must be 3–10 letters"));
+    }
+    let (current, registered, balance): (String, bool, i32) = db.query_row(
+        "SELECT name,EXISTS(SELECT 1 FROM credentials WHERE account=accounts.id),credits FROM accounts WHERE id=?1",
+        [account], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    ensure!(balance >= 0, "invalid account Gold balance");
+    if !registered {
+        return Ok(Err("register before choosing a name"));
+    }
+    let price = if name_chosen(account, &current) {
+        1000
+    } else {
+        0
+    };
+    if price > 0 && !allow_paid {
+        return Ok(Err("Paid name changes must be made in game."));
+    }
+    if human_name_taken(db, name, 0)? {
+        return Ok(Err("name already taken"));
+    }
+    if balance < price {
+        return Ok(Err("Not enough Gold."));
+    }
+    let bots = db
+        .prepare("SELECT id FROM accounts WHERE name=?1 COLLATE NOCASE ORDER BY id")?
+        .query_map([name], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(Ok((price, balance, bots)))
+}
+
 impl Store {
+    #[cfg(test)]
     pub async fn choose_name(&self, account: i32, name: String) -> Result<()> {
-        match self.name_choice(account, name, false).await? {
+        match self.claim_name_choice(account, name, false, vec![]).await? {
             NameChoice::Committed { .. } => Ok(()),
             NameChoice::Rejected(reason) => Err(Rejected(reason).into()),
         }
     }
-    pub(crate) async fn name_choice(
+    pub(crate) async fn prepare_name_choice(
         &self,
         account: i32,
         name: String,
         allow_paid: bool,
+    ) -> Result<std::result::Result<Vec<i32>, &'static str>> {
+        self.call(move |db| {
+            Ok(name_choice_check(db, account, &name, allow_paid)?.map(|(_, _, bots)| bots))
+        })
+        .await
+    }
+    pub(crate) async fn claim_name_choice(
+        &self,
+        account: i32,
+        name: String,
+        allow_paid: bool,
+        stopped: Vec<i32>,
     ) -> Result<NameChoice> {
-        if !(3..=10).contains(&name.len()) || !name.bytes().all(|c| c.is_ascii_alphabetic()) {
-            return Ok(NameChoice::Rejected("names must be 3–10 letters"));
-        }
         self.call(move |db| {
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            let (current, registered, balance): (String, bool, i32) = tx.query_row(
-                "SELECT name,EXISTS(SELECT 1 FROM credentials WHERE account=accounts.id),credits FROM accounts WHERE id=?1",
-                [account], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?;
-            ensure!(balance >= 0, "invalid account Gold balance");
-            if !registered { return Ok(NameChoice::Rejected("register before choosing a name")); }
-            let price = if name_chosen(account, &current) { 1000 } else { 0 };
-            if price > 0 && !allow_paid { return Ok(NameChoice::Rejected("Paid name changes must be made in game.")); }
-            let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE name=?1 COLLATE NOCASE)", [&name], |r| r.get(0))?;
-            if taken { return Ok(NameChoice::Rejected("name already taken")); }
-            if balance < price { return Ok(NameChoice::Rejected("Not enough Gold.")); }
+            let (price, balance, bots) = match name_choice_check(&tx, account, &name, allow_paid)? {
+                Ok(ready) => ready,
+                Err(reason) => return Ok(NameChoice::Rejected(reason)),
+            };
+            // Store-only callers cannot publish over a controller they have not settled.
+            if bots.iter().any(|id| !stopped.contains(id)) {
+                return Ok(NameChoice::Rejected("name already taken"));
+            }
             let balance = balance - price;
-            ensure!(tx.execute("UPDATE accounts SET name=?2,credits=?3 WHERE id=?1", params![account,name,balance])? == 1, "name choice account missing");
+            ensure!(
+                tx.execute(
+                    "UPDATE accounts SET name=?2,credits=?3 WHERE id=?1",
+                    params![account, name, balance]
+                )? == 1,
+                "name choice account missing"
+            );
             tx.commit()?;
-            tracing::info!(account, name, price, balance, "account name choice committed");
+            tracing::info!(
+                account,
+                name,
+                price,
+                balance,
+                ?stopped,
+                "account name choice committed"
+            );
             Ok(NameChoice::Committed { balance })
-        }).await
+        })
+        .await
     }
     pub(super) async fn guest(&self, guid: String, create: bool) -> Result<i32> {
         self.call(move |db| {
