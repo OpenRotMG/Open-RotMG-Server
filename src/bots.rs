@@ -31,6 +31,8 @@ pub(crate) mod pursuits;
 #[cfg(test)]
 mod quest_tests;
 mod realms;
+#[cfg(test)]
+mod snake_routing_tests;
 mod social;
 
 /// Who a bot is: identity, temperament and skill. Built from `persona::PERSONAS`.
@@ -1111,7 +1113,11 @@ impl Brain {
             {
                 choices.push((110., Goal::Hunt(enemy.id), enemy.position));
             }
-            if v.quest == Some(enemy.id) && !protected && (v.character.level >= 3 || d <= 48.) {
+            // Stheno's shield cannot prevent approaching the quest that wakes her encounter.
+            if v.quest == Some(enemy.id)
+                && (!protected || v.map.name == "Snake Pit")
+                && (v.character.level >= 3 || d <= 48.)
+            {
                 choices.push((
                     if v.map.name == "Snake Pit" || events::shared(&v.map.name) {
                         97.

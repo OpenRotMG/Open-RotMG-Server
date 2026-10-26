@@ -392,7 +392,6 @@ pub(super) fn clear_cover(
             o.blocks
                 && o.hp > 0
                 && content.objects[&o.kind].destructible
-                && v.position.distance(o.position) < range
                 && sight(v, grid, o.position, passes_cover, Some(o.id))
         })
         .min_by(|a, b| {
@@ -400,10 +399,25 @@ pub(super) fn clear_cover(
                 .distance(destination)
                 .total_cmp(&b.position.distance(destination))
         })?;
+    // Fully discovered rooms have no walkable frontier until their tunnel cover is broken.
+    let movement = if v.position.distance(wall.position) < range {
+        None
+    } else {
+        let (x, y) = tile(wall.position);
+        Some(
+            [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+                .into_iter()
+                .filter_map(|point| grid.next(v.position, center(point)))
+                .min_by(|a, b| {
+                    a.distance(wall.position)
+                        .total_cmp(&b.distance(wall.position))
+                })?,
+        )
+    };
     Some(Decision {
         goal: Goal::Break(wall.id),
-        movement: None,
-        aim: Some(angle(v.position, wall.position)),
+        movement,
+        aim: movement.is_none().then(|| angle(v.position, wall.position)),
         item: None,
         journey: None,
         chat: None,
