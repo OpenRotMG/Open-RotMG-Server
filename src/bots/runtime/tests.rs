@@ -1178,7 +1178,7 @@ async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
         let view = app.world.player_view(id).await.unwrap();
         let own = view.session.account;
         let other = app.world.player_view(peer).await.unwrap().session.account;
-        let request = brain
+        let mut request = brain
             .adventure_request(
                 adventures::Plan::Invite {
                     peer: adventures::Member {
@@ -1224,7 +1224,10 @@ async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
                             w.players.get_mut(&id).unwrap().known.remove(&peer);
                         }
                         "ignore" => {
-                            w.sync_account_lists(peer, Some([vec![], vec![own]]))?;
+                            w.sync_account_lists(
+                                peer,
+                                Some([Default::default(), [own].into_iter().collect()]),
+                            )?;
                         }
                         "peer_dead" => w.players.get_mut(&peer).unwrap().character.hp = 0,
                         "peer_departing" => w.players.get_mut(&peer).unwrap().departing = true,
@@ -1247,8 +1250,8 @@ async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
             .unwrap_err();
         assert_eq!(error.to_string(), "dialogue intention not requested");
         assert!(!error.is::<dialogue::Obsolete>());
-        let mut unauthorized = request.clone();
-        unauthorized.plan = Some(adventures::Plan::Answer(adventures::Offer {
+        let authorized = request.plan.take();
+        request.plan = Some(adventures::Plan::Answer(adventures::Offer {
             from: adventures::Member {
                 account: other,
                 name: "Peer".into(),
@@ -1262,10 +1265,11 @@ async fn dialogue_world_publication_keeps_intent_owner_and_chat_errors_fatal() {
             text: "want gear?".into(),
             answer_started: true,
         }));
-        let error = dialogue::publish(&app, &mut brain, &unauthorized, &reply, &view)
+        let error = dialogue::publish(&app, &mut brain, &request, &reply, &view)
             .await
             .unwrap_err();
         assert!(!error.is::<dialogue::Obsolete>(), "{drift}: {error:#}");
+        request.plan = authorized;
         if drift == "text" {
             reply.reply = "Peer, want \0gear?".into();
         }

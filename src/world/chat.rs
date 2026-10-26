@@ -548,7 +548,7 @@ mod tests {
             Some(DialoguePeerUnavailable::NotKnown)
         );
         w.players.get_mut(&id).unwrap().known.insert(peer);
-        w.players.get_mut(&peer).unwrap().account_lists[1].push(account);
+        w.players.get_mut(&peer).unwrap().account_lists[1].insert(account);
         assert_eq!(
             w.dialogue_participants(id, peer).unwrap(),
             Some(DialoguePeerUnavailable::Ignored)
