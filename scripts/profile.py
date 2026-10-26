@@ -10,6 +10,7 @@ import re
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import time
 
@@ -38,6 +39,31 @@ def retire(root, pattern, keep):
             if path.is_symlink() or any(p.is_symlink() and not p.resolve().is_relative_to(path) for p in path.rglob('*')):
                 raise RuntimeError(f'External symlink in profile cache: {path}')
             shutil.rmtree(path)
+
+
+def storage_bytes(root):
+    total, vanished = 0, 0
+    seen, pending = set(), [root]
+    while pending:
+        path = pending.pop()
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            # perf unlinks old segments independently of the recorder's storage check.
+            if (re.fullmatch(r'session-\d+-\d+', path.parent.name)
+                    and re.fullmatch(r'perf\.data(?:\.\d+)?', path.name)):
+                vanished += 1
+                continue
+            raise
+        identity = (info.st_dev, info.st_ino)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        total += info.st_size
+        if stat.S_ISDIR(info.st_mode):
+            with os.scandir(path) as entries:
+                pending.extend(Path(entry.path) for entry in entries)
+    return total, vanished
 
 
 def incident(line, pid):
@@ -191,7 +217,9 @@ def run(service, root):
                                 emit('profiling_incident_saved', directory=str(capture), **pending)
                                 pending = None
                                 retire(root, 'incident-*', 8)
-                            size = int(subprocess.check_output(['du', '-sb', str(root)], text=True).split()[0])
+                            size, vanished = storage_bytes(root)
+                            if vanished:
+                                emit('profiling_rotation_during_storage_check', vanished_segments=vanished)
                             if size > 2 * 1024**3:
                                 raise RuntimeError(f'Profile storage exceeds 2 GiB; inspect retained evidence: {root}')
                         else:
