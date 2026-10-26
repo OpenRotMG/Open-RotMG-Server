@@ -117,6 +117,7 @@ impl Task {
             if tick {
                 world.performance.get_mut().begin_capture();
             }
+            let execution = crate::performance::attribution::Execution::start();
             let work = crate::performance::Measure::start();
             let reply = (job.body)(world);
             let work = work.finish();
@@ -135,6 +136,8 @@ impl Task {
             let dispatch = std::time::Instant::now();
             reply();
             job.sample.stages[6] = dispatch.elapsed();
+            job.sample.execution =
+                execution.map(crate::performance::attribution::Execution::finish);
             self.slot.record_attribution(job.sample);
             let _ = self
                 .finished

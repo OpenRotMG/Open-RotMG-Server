@@ -738,7 +738,7 @@ pub(super) async fn launch(
                             // A rate-limited correction must still invalidate the older promise.
                             dialogue::supersede(&mut pending, &request);
                             if pending.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
-                                dialogue::failed(&app, &request, "busy", "busy").await;
+                                dialogue::skipped(&request, None, "interaction_busy");
                             } else {
                                 last_dialogue = Some(std::time::Instant::now());
                                 pending = Some(dialogue::Pending::start(Some(service.clone()), request, profile));
@@ -767,7 +767,7 @@ pub(super) async fn launch(
                             Ok(result) => result,
                             Err(error) => {
                                 tracing::error!(request=%completed.id,%error,"bot dialogue worker failed");
-                                Err(dialogue::Failure("worker_failed"))
+                                Err(dialogue::Failure::Error("worker_failed"))
                             }
                         };
                         match result {
@@ -793,7 +793,8 @@ pub(super) async fn launch(
                                     }
                                 }
                             }
-                            Err(error) => dialogue::failed(&app, &completed.request, &completed.id, error.0).await,
+                            Err(dialogue::Failure::LocalCapacity) => dialogue::skipped(&completed.request, Some(&completed.id), "local_capacity"),
+                            Err(dialogue::Failure::Error(reason)) => dialogue::failed(&app, &completed.request, &completed.id, reason).await,
                         }
                     }
                     brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));

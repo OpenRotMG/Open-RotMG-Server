@@ -264,6 +264,7 @@ impl Slot {
         Ok(())
     }
     fn record_attribution(&self, sample: Box<crate::performance::attribution::Sample>) {
+        sample.incident(Some(self.id));
         let report = {
             let mut attribution = self.attribution.lock().expect("world attribution poisoned");
             attribution.record(sample);
