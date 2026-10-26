@@ -9,7 +9,7 @@ fn profile() -> Profile {
     profile.companions = 6.;
     profile
 }
-async fn actor(
+pub(in crate::bots) async fn actor(
     app: &App,
     guid: &str,
     name: &str,
@@ -44,7 +44,7 @@ async fn actor(
     let (id, output, _, brain) = enter(app, profile(), ch, -2, None).await.unwrap();
     (owner, id, output, brain)
 }
-async fn nearby(app: &App, bot: i32, peer: i32) {
+pub(in crate::bots) async fn nearby(app: &App, bot: i32, peer: i32) {
     app.world
         .directory(move |d| {
             let w = d.worlds.get_mut(&-2).unwrap();
@@ -606,5 +606,154 @@ async fn runtime_coordinator_rebind_resumes_paid_installments_only_through_fresh
         .wait()
         .await
         .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[derive(Clone, Default)]
+struct DialogueLogs(Arc<Mutex<Vec<u8>>>);
+impl std::io::Write for DialogueLogs {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl DialogueLogs {
+    fn records(&self) -> Vec<serde_json::Value> {
+        String::from_utf8(self.0.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+    async fn wait(&self, message: &str, player: i32) -> serde_json::Value {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(row) = self
+                    .records()
+                    .into_iter()
+                    .find(|r| r["fields"]["message"] == message && r["fields"]["player"] == player)
+                {
+                    return row;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("missing {message}: {:?}", self.records()))
+    }
+}
+
+#[tokio::test]
+async fn society_runtime_cancels_same_pending_request_without_chat_application_or_failure() {
+    let logs = DialogueLogs::default();
+    let sink = logs.clone();
+    let _subscriber = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .json()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish(),
+    );
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (peer_owner, peer, mut peer_output, _) =
+        actor(&app, "runtime-outing-peer", "Peer", [-1; 8]).await;
+    let peer_view = app.world.player_view(peer).await.unwrap();
+    app.society
+        .lock()
+        .unwrap()
+        .register(peer_view.session.account, Default::default());
+    let account = app
+        .store
+        .list("runtime-outing-bot".into())
+        .await
+        .unwrap()
+        .id;
+    let mut character = app
+        .store
+        .create(account, app.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    character.base[0] = 500;
+    character.hp = 500;
+    let owner = app.claim(account).unwrap();
+    let selected = character.id;
+    start_selected(&app, profile(), character, -2, peer_view.position, owner)
+        .await
+        .unwrap();
+    let id = app
+        .world
+        .directory(move |d| {
+            Ok(d.worlds[&-2]
+                .players
+                .iter()
+                .find(|(_, p)| p.character.id == selected)
+                .unwrap()
+                .0
+                .to_owned())
+        })
+        .await
+        .unwrap();
+    while peer_output.try_recv().is_ok() {}
+    app.world.clock.set_paused(false);
+    let scheduled = logs.wait("bot dialogue publication scheduled", id).await;
+    let request = scheduled["fields"]["request"].as_str().unwrap();
+    {
+        let mut state = app.society.lock().unwrap();
+        for peer in 100..105 {
+            state.apply(
+                adventures::Member {
+                    account,
+                    name: "Trader".into(),
+                },
+                adventures::Plan::Answer(adventures::Offer {
+                    from: adventures::Member {
+                        account,
+                        name: "Trader".into(),
+                    },
+                    to: adventures::Member {
+                        account: peer,
+                        name: format!("Member{peer}"),
+                    },
+                    purpose: adventures::Purpose::Equipment,
+                    until: 60000,
+                    text: "want to hunt?".into(),
+                    answer_started: true,
+                }),
+                true,
+                "yes".into(),
+                0,
+            );
+        }
+        assert_eq!(state.group(account, 0).unwrap().members.len(), 6);
+    }
+    let canceled = logs
+        .wait("bot dialogue canceled; pending intention not published", id)
+        .await;
+    assert_eq!(canceled["fields"]["request"], request);
+    assert_eq!(canceled["level"], "INFO");
+    for row in logs
+        .records()
+        .into_iter()
+        .filter(|r| r["fields"]["request"] == request)
+    {
+        assert_ne!(row["level"], "ERROR");
+        assert_ne!(row["fields"]["message"], "bot dialogue intention applied");
+        assert_ne!(row["fields"]["message"], "bot dialogue provider succeeded");
+    }
+    assert!(!std::iter::from_fn(|| peer_output.try_recv().ok()).any(|p| p.id == wire::TEXT));
+    assert!(app.society.lock().unwrap().outgoing(account, 0).is_none());
+    lifecycle::finalize(&app, peer, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop(peer_owner);
+    app.shutdown.send_replace(true);
+    lifecycle::drain::terminate(&app).await.unwrap();
+    drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
