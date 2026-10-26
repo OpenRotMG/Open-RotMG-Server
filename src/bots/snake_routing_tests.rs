@@ -146,3 +146,46 @@ fn snake_navigation_does_not_invent_quests_or_break_immutable_cover() {
         );
     }
 }
+
+#[test]
+fn clear_cover_orders_only_actionable_walls() {
+    let (content, mut view) = quest_tests::fixture();
+    view.position = Pos { x: 1.5, y: 1.5 };
+    view.objects = [(2, Pos { x: 4.5, y: 1.5 }), (3, Pos { x: 6.5, y: 6.5 })]
+        .into_iter()
+        .map(|(id, position)| crate::world::view::VisibleObject {
+            id,
+            account: None,
+            kind: 0x172,
+            name: String::new(),
+            position,
+            hp: 100,
+            max_hp: 100,
+            level: None,
+            equipped: vec![],
+            contents: vec![],
+            blocks: true,
+            usable: false,
+            condition_mask: Some(0),
+        })
+        .collect();
+    let mut grid = Grid::terrain(&view);
+    for point in [(4, 1), (6, 6), (5, 6), (7, 6), (6, 5), (6, 7)] {
+        grid.walkable.remove(&point);
+    }
+    for wall in &view.objects {
+        assert!(sight(&view, &grid, wall.position, false, Some(wall.id)));
+    }
+    for point in [(5, 6), (7, 6), (6, 5), (6, 7)] {
+        assert!(grid.next(view.position, center(point)).is_none());
+    }
+    let destination = Pos { x: 9.5, y: 9.5 };
+    view.objects[0].hp = 0;
+    assert!(progression::clear_cover(&view, &content, &grid, destination, 4., false).is_none());
+    view.objects[0].hp = 100;
+    let decision = progression::clear_cover(&view, &content, &grid, destination, 4., false)
+        .expect("unapproachable distant wall must not suppress shootable cover");
+    assert_eq!(decision.goal, Goal::Break(2));
+    assert_eq!(decision.aim, Some(0.));
+    assert!(decision.movement.is_none());
+}
