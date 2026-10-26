@@ -85,7 +85,7 @@ mod updates;
 use account_actions::{
     discord_announce, discord_gold, discord_kick, discord_recover, reset_password,
 };
-use hiscores::{collection, discord_link, hiscores};
+use hiscores::{collection, discord_link, graveyard, hiscores};
 #[derive(Clone)]
 pub struct App {
     pub started: std::time::Instant,
@@ -3118,6 +3118,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         )
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))
+        .route("/api/graveyard", get(graveyard))
         .route("/internal/discord/announce", post(discord_announce))
         .route("/internal/discord/link", post(discord_link))
         .route("/internal/discord/link/start", post(browser_link::issue))
