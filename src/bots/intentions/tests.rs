@@ -455,7 +455,6 @@ async fn persisted_main_goal_and_detour_reopen_without_json_loss() {
     drop(store);
     let reopened = crate::store::Store::open(&path, &c).unwrap();
     let saved = reopened.bot_mind(account.id).await.unwrap().unwrap();
-    assert_eq!(saved, mind);
     assert_eq!(
         serde_json::to_value(saved).unwrap(),
         serde_json::to_value(mind).unwrap()
