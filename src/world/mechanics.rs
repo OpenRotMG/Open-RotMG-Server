@@ -191,8 +191,8 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         let count = self
-            .actors()
-            .filter(|e| e.parent == Some(parent) && e.kind == kind)
+            .summoned_children(parent, kind)
+            .filter(|e| self.actor_ids.contains(&e.id))
             .count();
         let missing = maximum.saturating_sub(count);
         if missing == 0 {
