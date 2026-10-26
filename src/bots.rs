@@ -304,6 +304,7 @@ impl Brain {
             pickup_clearance: profile.pickup_clearance,
         };
         mind.market.name = profile.name.into();
+        mind.market.trader = profile.role == persona::Role::Trader;
         mind.events.knows_blue = profile.knows_blue;
         Self {
             profile,

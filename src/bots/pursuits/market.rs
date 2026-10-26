@@ -108,7 +108,7 @@ pub(crate) struct Market {
     #[serde(skip)]
     pub(in crate::bots) name: String,
     #[serde(skip)]
-    pub(in crate::bots) guild: bool,
+    pub(in crate::bots) trader: bool,
     #[serde(skip)]
     pub(in crate::bots) next_message_ms: u64,
     #[serde(skip)]
@@ -369,14 +369,16 @@ impl Market {
         future: Option<u16>,
         minimum_tier: u8,
     ) -> Result<Option<i32>> {
+        let mut wants = Vec::new();
         for item in c.objects.values().filter(|o| {
             o.class == "Equipment" && !o.consumable && o.tier.is_some_and(|t| t >= minimum_tier)
         }) {
             if self.wanted(v, c, future, i32::from(item.kind))? > 0 {
-                return Ok(Some(i32::from(item.kind)));
+                wants.push(i32::from(item.kind));
             }
         }
-        Ok(None)
+        // Period markets span many upgrades, not the first XML item: https://realmpriceguid.blogspot.com/
+        Ok((!wants.is_empty()).then(|| wants[style(&self.name) as usize % wants.len()]))
     }
     fn quote(
         &self,
@@ -429,7 +431,8 @@ impl Market {
         {
             return Ok(Some(pair(LIFE, 1, kind, 1)));
         }
-        if let Some(g) = stock.into_iter().find(|g| {
+        let mut sales = Vec::new();
+        for g in stock.into_iter().filter(|g| {
             !matches!(g.kind, SPEED | DEFENSE | LIFE)
                 && c.objects[&(g.kind as u16)].tier.is_some_and(|t| t >= 3)
                 && !c.objects[&(g.kind as u16)].consumable
@@ -444,9 +447,9 @@ impl Market {
                 DEFENSE
             };
             if self.wanted(v, c, future, payment)? == 0 {
-                return Ok(None);
+                continue;
             }
-            return Ok(Some(pair(
+            sales.push(pair(
                 g.kind,
                 1,
                 payment,
@@ -455,9 +458,9 @@ impl Market {
                 } else {
                     (1 + style(&self.name) % 2) as u8
                 },
-            )));
+            ));
         }
-        Ok(None)
+        Ok((!sales.is_empty()).then(|| sales[style(&self.name) as usize % sales.len()].clone()))
     }
     pub(in crate::bots) fn message_current(
         &self,
@@ -980,11 +983,11 @@ impl Market {
         self.quote = Some(quote.clone());
         if self.session.is_none() {
             self.session_used = true;
-            let admitted = self.preparing || rng.gen_ratio(1, 5);
+            let admitted = self.preparing || self.trader || rng.gen_ratio(1, 5);
             tracing::info!(
                 account = v.session.account,
                 admitted,
-                probability = 0.2,
+                probability = if self.trader { 1.0 } else { 0.2 },
                 reason = if admitted {
                     "visit_admitted"
                 } else {
@@ -1083,14 +1086,7 @@ impl Market {
                 parse_quote(&ad, c).as_ref() == Some(&quote),
                 "unresolvable market quote: {ad}"
             );
-            self.queue(
-                ad,
-                if self.guild {
-                    Channel::Guild
-                } else {
-                    Channel::Local
-                },
-            );
+            self.queue(ad, Channel::Local);
             self.next_ad = v.elapsed_ms + 6_000 + u64::from(style(&self.name) % 7) * 1_000;
         }
         Ok(Some(d))

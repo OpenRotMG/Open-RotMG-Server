@@ -173,7 +173,6 @@ async fn enter_admitted(
     let (lost, _) = watch::channel(None);
     let presentation = app.store.presentation(character.account).await?;
     let own_name = character.name.clone();
-    let own_guild = presentation.guild.is_some();
     let bind = server::lifecycle::binding(app, character.account)?;
     let id = app
         .world
@@ -236,7 +235,7 @@ async fn enter_admitted(
         brain.mind = mind;
     }
     brain.mind.market.name = own_name;
-    brain.mind.market.guild = own_guild;
+    brain.mind.market.trader = profile.role == persona::Role::Trader;
     brain.mind.market.observe(&view);
     if let Some(b) = &brain.mind.market.bargain {
         let receipts = app
