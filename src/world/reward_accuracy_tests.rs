@@ -1,6 +1,6 @@
 use super::*;
 
-async fn reward_world() -> (World, Vec<(i32, i32)>) {
+async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
@@ -28,7 +28,7 @@ async fn reward_world() -> (World, Vec<(i32, i32)>) {
         .values()
         .map(|p| (p.character.account, p.character.id))
         .collect();
-    (w, owners)
+    (w, store, owners)
 }
 
 fn clear_bags(w: &mut World) {
@@ -69,7 +69,7 @@ fn white_demon_gear(content: &Content, seed: u64) -> Vec<i32> {
 
 #[tokio::test]
 async fn god_gear_death_roll_is_once_per_candidate_and_contributor_group_only() {
-    let (mut w, owners) = reward_world().await;
+    let (mut w, _store, owners) = reward_world().await;
     let mut seeds = vec![0, 1, 2, 3];
     let multiple = (0..32768)
         .find(|seed| {
@@ -122,7 +122,7 @@ async fn god_gear_death_roll_is_once_per_candidate_and_contributor_group_only() 
 
 #[tokio::test]
 async fn septavius_doom_fraction_qualifies_at_fifteen_percent_without_raising_other_gates() {
-    let (mut w, owners) = reward_world().await;
+    let (mut w, _store, owners) = reward_world().await;
     assert_eq!(w.content.objects[&0xd90].hp, 8000);
     let seed = (0..32768)
         .find(|seed| {
@@ -175,4 +175,99 @@ async fn septavius_doom_fraction_qualifies_at_fifteen_percent_without_raising_ot
             expected
         );
     }
+}
+
+#[tokio::test]
+async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collection_once() {
+    let (mut w, store, owners) = reward_world().await;
+    let contributors: Vec<_> = owners[..5]
+        .iter()
+        .map(|(account, _)| (*account, 1))
+        .collect();
+    let loot = crate::loot::god_loot(
+        &w.content,
+        0x651,
+        &contributors,
+        &mut rand::rngs::mock::StepRng::new(0, 1),
+    );
+    let expected: BTreeSet<_> = loot.shared.iter().copied().map(i32::from).collect();
+    assert!(expected.len() > 8);
+    w.god_loot_bags(Pos { x: 1.5, y: 1.5 }, loot).unwrap();
+    assert_eq!(w.bag_expiry.len(), expected.len().div_ceil(8));
+    assert!(w.bag_expiry.len() <= 128);
+    let actual: Vec<_> = w
+        .bag_expiry
+        .keys()
+        .flat_map(|id| {
+            let bag = &w.entities[id];
+            assert_eq!(bag.items.len(), 8);
+            assert!(bag.published);
+            assert_eq!(w.bag_expiry[id], w.now + 60_000);
+            for (account, _) in &owners[..5] {
+                assert!(bag.accessible(*account));
+            }
+            assert!(!bag.accessible(owners[5].0));
+            bag.items.iter().copied().filter(|item| *item >= 0)
+        })
+        .collect();
+    assert_eq!(actual.iter().copied().collect::<BTreeSet<_>>(), expected);
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "no cap or duplication during packaging"
+    );
+    let bag = *w.bag_expiry.keys().next().unwrap();
+    let item = w.entities[&bag].items[0];
+    let player = |account| {
+        w.players
+            .iter()
+            .find(|(_, p)| p.character.account == account)
+            .map(|(id, _)| *id)
+            .unwrap()
+    };
+    let winner = player(owners[0].0);
+    let peer = player(owners[1].0);
+    let outsider = player(owners[5].0);
+    let from = Slot {
+        object: bag,
+        slot: 0,
+        kind: item,
+    };
+    let to = |id| Slot {
+        object: id,
+        slot: 4,
+        kind: -1,
+    };
+    assert!(!w.visible(outsider).contains(&bag));
+    assert!(w.visible(winner).contains(&bag));
+    assert!(w.swap(outsider, from, to(outsider)).is_err());
+    let plan = w.swap(winner, from, to(winner)).unwrap();
+    assert_eq!(plan.collected, Some(item as u16));
+    assert!(
+        w.swap(peer, from, to(peer)).is_err(),
+        "reserved shared slot cannot race"
+    );
+    let revision = store
+        .exchange_collected(
+            vec![crate::store::InventoryWrite {
+                id: plan.character,
+                account: plan.account,
+                revision: plan.revision,
+                items: plan.items.clone(),
+            }],
+            plan.vaults.clone(),
+            plan.collected,
+        )
+        .await
+        .unwrap()[0];
+    w.finish_inventory(plan, Ok(revision)).unwrap();
+    assert_eq!(w.entities[&bag].items[0], -1);
+    assert!(!w.entities[&bag].drop_slots.contains(&0));
+    assert!(
+        w.swap(peer, from, to(peer)).is_err(),
+        "committed item cannot be collected twice"
+    );
+    let saved = store.load(owners[0].0, owners[0].1).await.unwrap();
+    assert_eq!(saved.items[4], item);
+    assert_eq!(saved.revision, revision);
 }

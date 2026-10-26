@@ -158,6 +158,7 @@ pub struct EntityData {
     #[serde(skip)]
     drop_slots: BTreeSet<usize>,
     pub extra_stats: Vec<(u8, i32)>,
+    bag_owners: Vec<i32>,
     pub reserved: bool,
     published: bool,
     damage: BTreeMap<i32, i32>,
@@ -213,6 +214,7 @@ impl std::fmt::Debug for Entity {
         out.field("items", &self.items);
         out.field("drop_slots", &self.drop_slots);
         out.field("extra_stats", &self.extra_stats);
+        out.field("bag_owners", &self.bag_owners);
         out.field("reserved", &self.reserved);
         out.field("published", &self.published);
         out.field("damage", &self.damage);
@@ -248,7 +250,7 @@ impl Serialize for Entity {
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut out = serializer.serialize_struct("Entity", 30)?;
+        let mut out = serializer.serialize_struct("Entity", 31)?;
         out.serialize_field("id", &self.id)?;
         out.serialize_field("kind", &self.kind)?;
         out.serialize_field("name", &self.name)?;
@@ -259,6 +261,7 @@ impl Serialize for Entity {
         out.serialize_field("statuses", &self.statuses)?;
         out.serialize_field("items", &self.items)?;
         out.serialize_field("extra_stats", &self.extra_stats)?;
+        out.serialize_field("bag_owners", &self.bag_owners)?;
         out.serialize_field("reserved", &self.reserved)?;
         out.serialize_field("published", &self.published)?;
         out.serialize_field("damage", &self.damage)?;
@@ -289,6 +292,9 @@ impl Entity {
     fn accessible(&self, account: i32) -> bool {
         if !self.published {
             return false;
+        }
+        if !self.bag_owners.is_empty() {
+            return self.bag_owners.contains(&account);
         }
         match self.extra_stats.iter().find(|(stat, _)| *stat == 54) {
             Some((_, owner)) if *owner >= 0 => *owner == account,
@@ -2820,6 +2826,7 @@ impl World {
                             } else {
                                 vec![]
                             },
+                            bag_owners: Vec::new(),
                             reserved: false,
                             published: true,
                             damage: BTreeMap::new(),
@@ -3175,6 +3182,7 @@ impl World {
                     items,
                     drop_slots: BTreeSet::new(),
                     extra_stats,
+                    bag_owners: Vec::new(),
                     reserved: false,
                     published: true,
                     damage: BTreeMap::new(),
@@ -5630,6 +5638,24 @@ impl World {
         }
         Ok(())
     }
+    fn god_loot_bags(&mut self, pos: Pos, loot: crate::loot::GodLoot) -> Result<()> {
+        for (owner, items) in loot.private {
+            let items: Vec<_> = items.into_iter().map(i32::from).collect();
+            self.loot_bags(pos, Some(owner), &items)?;
+        }
+        if !loot.shared_owners.is_empty() {
+            for chunk in loot.shared.chunks(8) {
+                let bag =
+                    self.loot_bag(pos, None, chunk.iter().copied().map(i32::from).collect())?;
+                let entity = self.entities.get_mut(&bag).unwrap();
+                // Native stat 54 is scalar; group visibility and collection are enforced server-side.
+                entity.bag_owners = loot.shared_owners.clone();
+                entity.drop_slots = (0..chunk.len()).collect();
+                tracing::info!(entity = bag, owners = ?loot.shared_owners, "contributor-group loot allocated");
+            }
+        }
+        Ok(())
+    }
     fn defeat_entity(&mut self, id: i32) -> Result<()> {
         self.defeat_entity_with_killer(id, None)
     }
@@ -5905,6 +5931,11 @@ impl World {
             // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
             return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
+        if crate::loot::potion_damage(defeated.kind).is_some() {
+            let loot =
+                crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
+            return self.god_loot_bags(defeated.pos, loot);
+        }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
         // The older Tomb loot engine shares two rolls instead of guaranteeing Life to every raider.
         let attempts = if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
@@ -5935,11 +5966,12 @@ impl World {
                 rewards.push(0xaea);
             }
             for item in rewards {
-                let potion = self.content.objects[&item].slot_type == 10;
-                if potion
-                    && crate::loot::potion_damage(defeated.kind)
-                        .is_some_and(|required| eligible[i % eligible.len()].1 < required)
-                {
+                if !crate::loot::item_qualified(
+                    defeated.kind,
+                    item,
+                    eligible[i % eligible.len()].1,
+                    self.content.objects[&defeated.kind].hp,
+                ) {
                     continue;
                 }
                 let owner = if private {
@@ -7394,9 +7426,9 @@ mod hermit_loot_tests;
 #[cfg(test)]
 mod period_loot_tests;
 #[cfg(test)]
-mod reward_accuracy_tests;
-#[cfg(test)]
 mod pirate_generation_tests;
+#[cfg(test)]
+mod reward_accuracy_tests;
 #[cfg(test)]
 mod spectator_tests;
 #[cfg(test)]
