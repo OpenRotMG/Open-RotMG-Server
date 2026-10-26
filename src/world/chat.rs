@@ -112,6 +112,10 @@ impl World {
                 .is_some_and(|tx| tx.lost.borrow().is_none() && !tx.packets.is_closed()),
             "dialogue controller output unavailable"
         );
+        ensure!(
+            sender.pos.x.is_finite() && sender.pos.y.is_finite(),
+            "dialogue controller position is not finite"
+        );
         let Some(peer) = self.players.get(&speaker) else {
             return Ok(Some(DialoguePeerUnavailable::LeftWorld));
         };
