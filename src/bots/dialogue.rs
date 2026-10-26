@@ -755,6 +755,9 @@ impl Brain {
                 .contains(&serde_json::to_value(reply.intent)?),
             "dialogue intention not requested"
         );
+        if let Some(plan) = &request.plan {
+            plan.validate_owner(v.session.account)?;
+        }
         ensure!(
             self.session == request.session
                 && (v.session.world, v.session.player, v.session.character) == request.session,

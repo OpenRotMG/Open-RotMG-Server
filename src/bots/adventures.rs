@@ -87,6 +87,24 @@ pub(super) enum Plan {
     Invite { peer: Member, purpose: Purpose },
     Answer(Offer),
 }
+impl Plan {
+    pub(super) fn validate_owner(&self, owner: i32) -> Result<()> {
+        match self {
+            Self::Invite { peer, .. } => ensure!(
+                owner > 0 && peer.account > 0 && owner != peer.account,
+                "invalid invitation owner or recipient"
+            ),
+            Self::Answer(offer) => ensure!(
+                offer.from.account > 0
+                    && offer.to.account > 0
+                    && offer.from.account != offer.to.account
+                    && (owner == offer.from.account || owner == offer.to.account),
+                "invitation does not belong to controller"
+            ),
+        }
+        Ok(())
+    }
+}
 #[derive(Default)]
 pub(crate) struct Society {
     actors: BTreeSet<i32>,
@@ -267,6 +285,7 @@ impl Society {
         })
     }
     pub(super) fn validate(&self, owner: i32, plan: &Plan, now: u64) -> Result<()> {
+        plan.validate_owner(owner)?;
         let purpose = match plan {
             Plan::Invite { purpose, .. } => *purpose,
             Plan::Answer(o) => o.purpose,
@@ -280,17 +299,16 @@ impl Society {
                 .iter()
                 .find(|t| t.members.iter().any(|m| m.account == organizer))
                 .is_none_or(|t| !t.finished && t.members.len() < 6 && t.purpose == purpose),
-            "outing no longer recruiting for this purpose"
+            dialogue::Obsolete("outing_no_longer_recruiting")
         );
         match plan {
             Plan::Invite { peer, .. } => ensure!(
-                owner != peer.account
-                    && !self.occupied(peer.account)
+                !self.occupied(peer.account)
                     && !self.offers.iter().any(|o| o.until > now
                         && [o.from.account, o.to.account]
                             .iter()
                             .any(|a| *a == owner || *a == peer.account)),
-                "invitation no longer available"
+                dialogue::Obsolete("invitation_no_longer_available")
             ),
             Plan::Answer(offer) => ensure!(
                 self.offers
@@ -299,10 +317,9 @@ impl Society {
                         && o.to.account == offer.to.account
                         && o.until == offer.until
                         && o.purpose == offer.purpose
-                        && (owner == o.from.account || owner == o.to.account)
                         && o.until > now)
                     && !self.occupied(offer.to.account),
-                "invitation expired or participants committed elsewhere"
+                dialogue::Obsolete("invitation_expired_or_committed_elsewhere")
             ),
         }
         Ok(())
@@ -482,3 +499,6 @@ impl Brain {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
