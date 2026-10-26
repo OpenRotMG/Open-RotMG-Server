@@ -326,7 +326,17 @@ impl Intentions {
                 goal = self.main.as_ref().map(|m| m.id),
                 "autonomous main goal completed by observed character progress"
             );
+            // Progress can finish a milestone mid-dungeon; it cannot erase that excursion's exit budget.
+            let excursion = self.detour.take().filter(|detour| {
+                matches!(
+                    detour.opportunity,
+                    Opportunity::Dungeon { entered: true, .. }
+                )
+            });
+            let returning = self.return_to_main;
             self.end("main goal completed by observed character progress");
+            self.detour = excursion;
+            self.return_to_main = returning;
         }
         if self.main.is_none() {
             let cap = c.classes[&v.character.class].caps[4];

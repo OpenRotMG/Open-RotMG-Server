@@ -187,6 +187,56 @@ fn bounded_dungeon_survives_same_runtime_travel_but_exits_on_budget() {
 }
 
 #[test]
+fn completing_a_goal_inside_optional_dungeon_preserves_its_bounded_return() {
+    for elapsed in [1000, DETOUR_MS] {
+        let (c, mut v) = fixture();
+        v.character.level = 19;
+        let mut i = Intentions::default();
+        i.bind(&v, 7);
+        i.observe(&v, &c).unwrap();
+        let old = i.main.as_ref().unwrap().id;
+        let mut portal = bag(3, -1, 11.5);
+        portal.kind = 0x719;
+        v.objects.push(portal);
+        i.selected(&v, &c, &Goal::Portal(3), false, None).unwrap();
+        v.map.name = crate::dungeon::DUNGEONS
+            .iter()
+            .find(|(kind, _, _, _)| *kind == 0x719)
+            .unwrap()
+            .2
+            .into();
+        v.session.world = 40;
+        i.bind(&v, 7);
+        i.observe(&v, &c).unwrap();
+        v.character.level = 20;
+        advance(&mut v, elapsed);
+        i.observe(&v, &c).unwrap();
+        assert!(i.main.as_ref().unwrap().id > old);
+        assert_eq!(i.main.as_ref().unwrap().objective, Objective::Speed);
+        if elapsed < DETOUR_MS {
+            assert_eq!(
+                i.detour
+                    .as_ref()
+                    .expect("goal rollover must retain the current excursion deadline")
+                    .remaining_ms,
+                DETOUR_MS - elapsed
+            );
+        } else {
+            assert!(
+                i.expired(),
+                "goal rollover must not erase the deadline's required return"
+            );
+            let mut brain = Brain::new(ARCHETYPES[0], &v);
+            brain.mind.intentions = Some(i);
+            assert!(matches!(
+                brain.decide(&v, &c).unwrap().journey,
+                Some(Journey::Nexus)
+            ));
+        }
+    }
+}
+
+#[test]
 fn company_detour_ends_on_observed_arrival_and_clock_bookkeeping_is_not_progress() {
     let (c, mut v) = fixture();
     v.character.level = 20;
