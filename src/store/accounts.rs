@@ -153,8 +153,9 @@ fn name_choice_check(
 }
 
 impl Store {
+    #[cfg(test)]
     pub async fn choose_name(&self, account: i32, name: String) -> Result<()> {
-        match self.name_choice(account, name, false).await? {
+        match self.claim_name_choice(account, name, false, vec![]).await? {
             NameChoice::Committed { .. } => Ok(()),
             NameChoice::Rejected(reason) => Err(Rejected(reason).into()),
         }
@@ -169,15 +170,6 @@ impl Store {
             Ok(name_choice_check(db, account, &name, allow_paid)?.map(|(_, _, bots)| bots))
         })
         .await
-    }
-    pub(crate) async fn name_choice(
-        &self,
-        account: i32,
-        name: String,
-        allow_paid: bool,
-    ) -> Result<NameChoice> {
-        self.claim_name_choice(account, name, allow_paid, vec![])
-            .await
     }
     pub(crate) async fn claim_name_choice(
         &self,
