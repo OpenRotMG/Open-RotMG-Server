@@ -230,6 +230,57 @@ fn spectator_preserves_public_merchant_and_connection_stats_without_promoting_pl
 }
 
 #[test]
+fn perspective_visibility_is_read_only_and_rejects_human_stale_unknown_or_departing_actors() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
+    let mut w = World::new(content.clone(), map).unwrap();
+    let mut actors = Vec::new();
+    for account in 1..=2 {
+        let mut ch = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+        ch.id = account;
+        ch.account = account;
+        ch.name = format!("Player{account}");
+        let id = w.enter(ch, None).unwrap();
+        w.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+        actors.push(id);
+    }
+    let (source, target) = ((actors[0], 1), (actors[1], 2));
+    w.updates(source.0, true).unwrap();
+    let before: Vec<_> = w
+        .players
+        .values()
+        .map(|p| serde_json::to_value(&p.character).unwrap())
+        .collect();
+    assert!(w.perspective_visible(source, target));
+    assert!(!w.perspective_visible((source.0, 99), target));
+    assert!(!w.perspective_visible(source, (target.0, 99)));
+    assert!(!w.perspective_visible(source, source));
+    w.players.get_mut(&target.0).unwrap().controller = Controller::Human;
+    assert!(!w.perspective_visible(source, target));
+    w.players.get_mut(&target.0).unwrap().controller = Controller::Autonomous;
+    w.players.get_mut(&target.0).unwrap().departing = true;
+    assert!(!w.perspective_visible(source, target));
+    w.players.get_mut(&target.0).unwrap().departing = false;
+    w.players
+        .get_mut(&source.0)
+        .unwrap()
+        .known
+        .remove(&target.0);
+    assert!(!w.perspective_visible(source, target));
+    w.players.get_mut(&source.0).unwrap().known.insert(target.0);
+    assert!(w.perspective_visible(source, target));
+    assert_eq!(
+        before,
+        w.players
+            .values()
+            .map(|p| serde_json::to_value(&p.character).unwrap())
+            .collect::<Vec<_>>()
+    );
+    w.players.remove(&target.0);
+    assert!(!w.perspective_visible(source, target));
+}
+
+#[test]
 fn spectator_snapshot_subscription_has_no_avatar_and_is_bounded_and_closed_on_retirement() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());

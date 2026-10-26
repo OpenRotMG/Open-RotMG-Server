@@ -37,12 +37,19 @@ enum Opportunity {
         entered: bool,
     },
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq)]
 struct Detour {
     runtime: u64,
     world: i32,
     remaining_ms: u64,
     opportunity: Opportunity,
+}
+impl PartialEq for Detour {
+    fn eq(&self, other: &Self) -> bool {
+        self.runtime == other.runtime
+            && self.world == other.world
+            && self.opportunity == other.opportunity
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Intentions {
@@ -67,7 +74,7 @@ impl PartialEq for Intentions {
         self.next_id == other.next_id
             && self.main == other.main
             && self.detour == other.detour
-            && self.main_remaining_ms == other.main_remaining_ms
+            && (self.main_remaining_ms == 0) == (other.main_remaining_ms == 0)
             && self.needs_progress == other.needs_progress
             && self.return_to_main == other.return_to_main
             && self.checkpoint == other.checkpoint
@@ -314,8 +321,12 @@ impl Intentions {
             Objective::Speed => v.character.base_stats[4] >= m.target,
             Objective::Fame => v.character.fame >= m.target,
         }) {
-            self.main = None;
-            self.transition = "main goal completed by observed character progress".into();
+            tracing::info!(
+                character = v.session.character,
+                goal = self.main.as_ref().map(|m| m.id),
+                "autonomous main goal completed by observed character progress"
+            );
+            self.end("main goal completed by observed character progress");
         }
         if self.main.is_none() {
             let cap = c.classes[&v.character.class].caps[4];
@@ -365,10 +376,11 @@ impl Intentions {
     fn available(&self, v: &PlayerView) -> bool {
         self.main_remaining_ms == 0
             && (!self.needs_progress
-                || progress(v)
-                    .iter()
-                    .zip(self.checkpoint)
-                    .any(|(now, before)| *now > before))
+                || self.main.as_ref().is_some_and(|main| match main.objective {
+                    Objective::Reach20 => v.character.experience > self.checkpoint[0],
+                    Objective::Speed => v.character.base_stats[4] > self.checkpoint[1],
+                    Objective::Fame => v.character.fame > self.checkpoint[2],
+                }))
     }
     fn optional(&self, v: &PlayerView, goal: &Goal, committed: bool) -> bool {
         if committed {

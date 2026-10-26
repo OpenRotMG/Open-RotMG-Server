@@ -24,6 +24,7 @@ pub(crate) struct Cctv(Mutex<Registry>);
 struct Registry {
     feeds: BTreeMap<&'static str, Feed>,
     ips: HashMap<(IpAddr, bool), usize>,
+    perspective_reads: HashMap<IpAddr, (Instant, u8)>,
 }
 struct Feed {
     updated: Instant,
@@ -91,6 +92,38 @@ impl Cctv {
     }
     pub(crate) fn binding(&self, name: &str) -> Option<(i32, i32)> {
         self.lock().feeds.get(name).and_then(|f| f.session)
+    }
+    pub(crate) fn perspective(
+        &self,
+        name: &str,
+        source: i32,
+        target: i32,
+    ) -> Option<(&'static str, i32, i32)> {
+        let registry = self.lock();
+        let (player, source_account) = registry.feeds.get(name)?.session?;
+        if player != source || source == target {
+            return None;
+        }
+        registry.feeds.iter().find_map(|(name, feed)| {
+            let (player, account) = feed.session?;
+            (player == target).then_some((*name, source_account, account))
+        })
+    }
+    pub(crate) fn allow_perspective(&self, ip: IpAddr) -> bool {
+        let mut registry = self.lock();
+        registry
+            .perspective_reads
+            .retain(|_, (start, _)| start.elapsed() < Duration::from_secs(1));
+        if registry.perspective_reads.len() >= 1024 && !registry.perspective_reads.contains_key(&ip)
+        {
+            return false;
+        }
+        let (_, count) = registry
+            .perspective_reads
+            .entry(ip)
+            .or_insert((Instant::now(), 0));
+        *count = count.saturating_add(1);
+        *count <= 8
     }
     pub(super) fn decided(
         &self,
@@ -367,6 +400,48 @@ mod tests {
         drop(viewer);
         assert!(cctv.lock().ips.is_empty());
         assert_eq!(cctv.lock().feeds["Triceps"].viewers, 0);
+    }
+
+    #[test]
+    fn perspective_resolution_requires_current_bindings_and_has_an_independent_bounded_budget() {
+        let cctv = Arc::new(Cctv::default());
+        cctv.entered("Triceps", 7, 1);
+        cctv.entered("Biceps", 8, 2);
+        assert_eq!(cctv.perspective("Triceps", 7, 8), Some(("Biceps", 1, 2)));
+        for (name, source, target) in [
+            ("Missing", 7, 8),
+            ("Triceps", 6, 8),
+            ("Triceps", 7, 7),
+            ("Triceps", 7, 9),
+        ] {
+            assert!(cctv.perspective(name, source, target).is_none());
+        }
+        cctv.departed("Biceps", 8, 2);
+        assert!(cctv.perspective("Triceps", 7, 8).is_none());
+        cctv.entered("Biceps", 9, 2);
+        assert!(cctv.perspective("Triceps", 7, 8).is_none());
+        assert_eq!(cctv.perspective("Triceps", 7, 9), Some(("Biceps", 1, 2)));
+        let ip = IpAddr::from([192, 0, 2, 1]);
+        let leases = [0, 1].map(|_| Viewer::join(&cctv, "Triceps", ip, true).unwrap());
+        for _ in 0..8 {
+            assert!(cctv.allow_perspective(ip));
+        }
+        assert!(!cctv.allow_perspective(ip));
+        cctv.lock()
+            .perspective_reads
+            .insert(ip, (Instant::now() - Duration::from_secs(2), 8));
+        assert!(cctv.allow_perspective(ip));
+        assert_eq!(cctv.lock().feeds["Triceps"].viewers, 2);
+        drop(leases);
+        let mut registry = cctv.lock();
+        registry.perspective_reads.clear();
+        for n in 0..1024u32 {
+            registry
+                .perspective_reads
+                .insert(IpAddr::V4(n.into()), (Instant::now(), 0));
+        }
+        drop(registry);
+        assert!(!cctv.allow_perspective(ip));
     }
 
     #[test]

@@ -303,6 +303,43 @@ fn death_and_replacement_cannot_inherit_character_goal_or_detour() {
 }
 
 #[test]
+fn ticking_detour_and_cooldown_do_not_dirty_mind_and_unrelated_xp_does_not_rearm_speed() {
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    let mut i = Intentions::default();
+    i.observe(&v, &c).unwrap();
+    v.objects.push(bag(3, 0xa1f, 11.5));
+    i.selected(&v, &c, &Goal::Loot(3), false, None).unwrap();
+    let before = i.clone();
+    advance(&mut v, 500);
+    i.observe(&v, &c).unwrap();
+    assert!(i.detour.as_ref().unwrap().remaining_ms < before.detour.as_ref().unwrap().remaining_ms);
+    assert_eq!(
+        i, before,
+        "ticking a detour must not trigger another Store write"
+    );
+    i.finish_detour(&v, "test abort");
+    i.progressing = true;
+    let before = i.clone();
+    advance(&mut v, 500);
+    i.observe(&v, &c).unwrap();
+    assert!(i.main_remaining_ms < before.main_remaining_ms);
+    assert_eq!(
+        i, before,
+        "ticking a cooldown must not trigger another Store write"
+    );
+    i.main_remaining_ms = 0;
+    v.character.experience += 100;
+    assert!(!i.available(&v), "XP is not permanent Speed progress");
+    v.character.base_stats[4] += 1;
+    assert!(i.available(&v));
+    v.character.base_stats[4] = c.classes[&v.character.class].caps[4];
+    i.observe(&v, &c).unwrap();
+    assert!(i.detour.is_none() && !i.needs_progress && i.main_remaining_ms == 0);
+    assert_eq!(i.main.as_ref().unwrap().objective, Objective::Fame);
+}
+
+#[test]
 fn legacy_mind_explicitly_upgrades_but_malformed_new_state_is_rejected() {
     let (c, v) = fixture();
     let mut legacy = serde_json::to_value(pursuits::Mind::new(v.session.account)).unwrap();
