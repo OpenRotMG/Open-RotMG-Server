@@ -113,9 +113,10 @@ impl World {
                     self.remove_entity(id);
                 }
                 let cell = &mut Arc::make_mut(&mut self.map).cells[index];
+                // Keep the southern portal approach shallow: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/common/resources/worlds/SP_Hermit.jm
                 cell.ground = if matches!(cell.ground, 0x72 | 0x73) {
                     cell.ground
-                } else if radius < 4.5 {
+                } else if radius < 4.5 && (x, y) != (16, 18) {
                     0xbc
                 } else if radius < 10. {
                     0x73
