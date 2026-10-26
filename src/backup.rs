@@ -824,7 +824,11 @@ mod tests {
             assert!(known_fields(&original, &saved));
             let mut opaque = original;
             opaque["intentions"]["credential"] = serde_json::json!("must-not-export");
-            assert!(!known_fields(&opaque, &saved));
+            if opaque["schema"] == 1 {
+                assert!(serde_json::from_value::<crate::bots::pursuits::Mind>(opaque).is_err());
+            } else {
+                assert!(!known_fields(&opaque, &saved));
+            }
         }
     }
 

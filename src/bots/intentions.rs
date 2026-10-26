@@ -61,6 +61,7 @@ pub(crate) struct Intentions {
     #[serde(skip)]
     progressing: bool,
 }
+// Clock bookkeeping must not trigger a durable Store write on every decision.
 impl PartialEq for Intentions {
     fn eq(&self, other: &Self) -> bool {
         self.next_id == other.next_id
@@ -112,7 +113,12 @@ impl Intentions {
                 && self.next_id <= SAFE_ID
                 && self.main_remaining_ms <= MAIN_MS
                 && self.checkpoint.iter().all(|n| *n >= 0)
-                && self.transition.len() <= 128,
+                && self.transition.len() <= 128
+                && (self.main.is_some()
+                    || (self.detour.is_none()
+                        && self.main_remaining_ms == 0
+                        && !self.needs_progress
+                        && !self.return_to_main)),
             "invalid main intention bounds"
         );
         if let Some(m) = &self.main {
@@ -163,6 +169,13 @@ impl Intentions {
         self.runtime = runtime;
         self.observed = None;
         self.progressing = false;
+        if self
+            .main
+            .as_ref()
+            .is_some_and(|m| m.character != v.session.character)
+        {
+            self.end("character changed; old goal and steps invalidated");
+        }
         if let Some(d) = &mut self.detour {
             if d.runtime == runtime
                 && self
@@ -205,10 +218,13 @@ impl Intentions {
         );
     }
     pub(super) fn observe(&mut self, v: &PlayerView, c: &Content) -> Result<()> {
-        let elapsed = self
-            .observed
-            .replace(v.elapsed_ms)
-            .map_or(0, |last| v.elapsed_ms.saturating_sub(last));
+        let elapsed = match self.observed.replace(v.elapsed_ms) {
+            Some(last) => v
+                .elapsed_ms
+                .checked_sub(last)
+                .context("main intention observation clock regressed")?,
+            None => 0,
+        };
         if self.progressing {
             self.main_remaining_ms = self.main_remaining_ms.saturating_sub(elapsed);
         }
@@ -363,7 +379,7 @@ impl Intentions {
                 !o.contents
                     .iter()
                     .filter(|k| **k >= 0)
-                    .all(|k| matches!(*k, 0xa22 | 0xa23) || self.speed() && *k == 0xa21)
+                    .all(|k| matches!(*k, 0xa22..=0xa23) || self.speed() && *k == 0xa21)
             }),
             Goal::Follow(_) => self.speed(),
             Goal::Portal(id) if v.map.name == "Realm" => {
@@ -416,7 +432,7 @@ impl Intentions {
                     Goal::Portal(id)
                         if v.objects.iter().any(|p| p.id == *id && p.kind == 0x718) =>
                     {
-                        20.
+                        10.
                     }
                     Goal::Loot(id)
                         if v.objects.iter().any(|b| {
@@ -425,7 +441,7 @@ impl Intentions {
                                 && b.contents
                                     .iter()
                                     .filter(|k| **k >= 0)
-                                    .all(|k| matches!(*k, 0xa21 | 0xa22 | 0xa23))
+                                    .all(|k| matches!(*k, 0xa21..=0xa23))
                         }) =>
                     {
                         30.
@@ -442,6 +458,7 @@ impl Intentions {
         c: &Content,
         goal: &Goal,
         committed: bool,
+        future: Option<u16>,
     ) -> Result<()> {
         if self.detour.is_none() && self.optional(v, goal, committed) {
             ensure!(
@@ -455,8 +472,7 @@ impl Intentions {
                         .iter()
                         .find(|o| o.id == *id)
                         .context("optional bag missing")?;
-                    let Some(Action::Swap { from, .. }) =
-                        progression::pickup(v, c, bag, Some(v.character.class))?
+                    let Some(Action::Swap { from, .. }) = progression::pickup(v, c, bag, future)?
                     else {
                         anyhow::bail!("optional bag has no collectible item");
                     };
@@ -498,7 +514,7 @@ impl Intentions {
         }
         Ok(())
     }
-    pub(super) fn expired(&self, _v: &PlayerView) -> bool {
+    pub(super) fn expired(&self) -> bool {
         self.return_to_main
     }
     pub(super) fn payload(
@@ -525,6 +541,37 @@ impl Intentions {
             ) && !(activity == Activity::Social && optional))
             || matches!(d.goal, Goal::Recover | Goal::Dodge | Goal::Remedy(_));
         let optional = !necessary && optional;
+        let reason = if necessary {
+            match activity {
+                Activity::Survive => {
+                    "Observed danger or health requires a safety reflex before continuing"
+                }
+                Activity::Busy => "Wait for pending ordinary work before another action",
+                Activity::Trade => {
+                    "Maintain the existing market exchange using real stock and receipts"
+                }
+                Activity::Equip => "Assess or equip observed own gear before continuing",
+                Activity::Supply => "Restore the carried health reserve from observed supplies",
+                Activity::Consume => "Use a carried stat potion before continuing",
+                Activity::Bank => "Organize own retained holdings through normal Vault transfers",
+                Activity::Call => "Respond to the existing observed call",
+                _ => "Honor existing company or social coordination before resuming",
+            }
+        } else if optional {
+            match &self.detour.as_ref().expect("matching detour").opportunity {
+                Opportunity::Loot { .. } => {
+                    "Collect useful observed loot within one bounded detour"
+                }
+                Opportunity::Company { .. } => {
+                    "Briefly meet visible company before resuming main progression"
+                }
+                Opportunity::Dungeon { .. } => "Try the observed dungeon within one bounded detour",
+            }
+        } else if self.detour.is_some() {
+            "Main progression currently outranks the pending opportunity"
+        } else {
+            &self.transition
+        };
         let mode = if necessary {
             "necessary"
         } else if optional {
@@ -534,7 +581,7 @@ impl Intentions {
         };
         self.progressing = mode == "progress";
         serde_json::json!({"goal":goal,"plan":plan,"step":step,"mode":mode,
-            "reason":if necessary { step.as_str() } else { self.transition.as_str() },
+            "reason":reason,
             "resume":if mode == "progress" { None } else { Some(plan) }})
     }
 }

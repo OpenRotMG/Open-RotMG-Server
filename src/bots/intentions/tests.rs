@@ -124,7 +124,7 @@ fn optional_missing_object_aborts_and_cannot_be_replaced_by_a_new_opportunity() 
     let mut i = Intentions::default();
     i.observe(&v, &c).unwrap();
     v.objects.push(bag(3, 0xa1f, 11.5));
-    i.selected(&v, &c, &Goal::Loot(3), false).unwrap();
+    i.selected(&v, &c, &Goal::Loot(3), false, None).unwrap();
     v.objects = vec![bag(4, 0xa1f, 11.5)];
     advance(&mut v, 500);
     i.observe(&v, &c).unwrap();
@@ -138,7 +138,7 @@ fn one_detour_only_and_accepted_agreements_are_not_suppressed() {
     let mut i = Intentions::default();
     i.observe(&v, &c).unwrap();
     v.objects = vec![bag(3, 0xa1f, 11.5), bag(4, 0xa1f, 12.5)];
-    i.selected(&v, &c, &Goal::Loot(3), false).unwrap();
+    i.selected(&v, &c, &Goal::Loot(3), false, None).unwrap();
     assert!(i.eligible(&v, &Goal::Loot(3), false));
     assert!(!i.eligible(&v, &Goal::Loot(4), false));
     assert!(i.eligible(&v, &Goal::Loot(4), true));
@@ -158,7 +158,7 @@ fn bounded_dungeon_survives_same_runtime_travel_but_exits_on_budget() {
     let mut portal = bag(3, -1, 11.5);
     portal.kind = 0x890;
     v.objects.push(portal);
-    i.selected(&v, &c, &Goal::Portal(3), false).unwrap();
+    i.selected(&v, &c, &Goal::Portal(3), false, None).unwrap();
     v.map.name = "Mad Lab".into();
     v.session.world = 40;
     v.session.player = 10;
@@ -170,7 +170,7 @@ fn bounded_dungeon_survives_same_runtime_travel_but_exits_on_budget() {
     ));
     advance(&mut v, DETOUR_MS);
     i.observe(&v, &c).unwrap();
-    assert!(i.expired(&v));
+    assert!(i.expired());
     i.validate().unwrap();
     let mut b = Brain::new(ARCHETYPES[0], &v);
     b.mind.intentions = Some(i);
@@ -187,6 +187,33 @@ fn bounded_dungeon_survives_same_runtime_travel_but_exits_on_budget() {
 }
 
 #[test]
+fn company_detour_ends_on_observed_arrival_and_clock_bookkeeping_is_not_progress() {
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    let mut i = Intentions::default();
+    i.observe(&v, &c).unwrap();
+    let before = i.clone();
+    advance(&mut v, 500);
+    i.observe(&v, &c).unwrap();
+    assert_eq!(
+        before, i,
+        "clock-only observation must not cause a durable write"
+    );
+    let mut peer = bag(3, -1, 18.5);
+    peer.kind = v.character.class;
+    peer.hp = 500;
+    v.objects.push(peer);
+    i.selected(&v, &c, &Goal::Follow(3), false, None).unwrap();
+    v.objects[0].position = v.position;
+    advance(&mut v, 500);
+    i.observe(&v, &c).unwrap();
+    assert!(i.detour.is_none());
+    assert!(i.transition.contains("reached company"));
+    v.elapsed_ms -= 1;
+    assert!(i.observe(&v, &c).is_err());
+}
+
+#[test]
 fn restart_aborts_object_handles_preserves_goal_and_cooldown() {
     let (c, mut v) = fixture();
     let mut mind = pursuits::Mind::new(v.session.account);
@@ -195,7 +222,7 @@ fn restart_aborts_object_handles_preserves_goal_and_cooldown() {
     i.observe(&v, &c).unwrap();
     let token = i.main.clone();
     v.objects.push(bag(3, 0xa1f, 11.5));
-    i.selected(&v, &c, &Goal::Loot(3), false).unwrap();
+    i.selected(&v, &c, &Goal::Loot(3), false, None).unwrap();
     let raw = serde_json::to_string(&mind).unwrap();
     let mut loaded: pursuits::Mind = serde_json::from_str(&raw).unwrap();
     loaded.validate().unwrap();
@@ -267,6 +294,12 @@ fn death_and_replacement_cannot_inherit_character_goal_or_detour() {
     let new = mind.intentions.as_ref().unwrap().main.clone().unwrap();
     assert_ne!(old.character, new.character);
     assert!(new.id > old.id);
+    v.session.character += 1;
+    mind.bind(&v, 9).unwrap();
+    assert!(
+        mind.intentions.as_ref().unwrap().main.is_none(),
+        "bind must invalidate before persisting a replacement"
+    );
 }
 
 #[test]
@@ -329,7 +362,7 @@ async fn persisted_main_goal_and_detour_reopen_without_json_loss() {
     mind.intentions
         .as_mut()
         .unwrap()
-        .selected(&v, &c, &Goal::Loot(3), false)
+        .selected(&v, &c, &Goal::Loot(3), false, None)
         .unwrap();
     mind.revision = store.save_bot_mind(mind.clone()).await.unwrap();
     drop(store);

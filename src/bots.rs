@@ -782,9 +782,9 @@ impl Brain {
             && self
                 .mind
                 .intentions
-                .as_mut()
+                .as_ref()
                 .expect("observed intentions")
-                .expired(v)
+                .expired()
         {
             decision.journey = Some(Journey::Nexus);
             return Ok((Activity::Adventure, decision));
@@ -868,7 +868,7 @@ impl Brain {
                     .intentions
                     .as_mut()
                     .expect("observed intentions")
-                    .selected(v, content, &social.goal, committed)?;
+                    .selected(v, content, &social.goal, committed, self.mind.future_class)?;
                 return Ok((Activity::Social, social));
             }
         }
@@ -1382,7 +1382,13 @@ impl Brain {
                         .intentions
                         .as_mut()
                         .expect("observed intentions")
-                        .selected(v, content, &Goal::Follow(marker.id), committed)?;
+                        .selected(
+                            v,
+                            content,
+                            &Goal::Follow(marker.id),
+                            committed,
+                            self.mind.future_class,
+                        )?;
                     self.next_teleport = v.time_ms + 10000;
                     decision.goal = Goal::Follow(marker.id);
                     decision.journey = Some(Journey::Regroup(marker.id));
@@ -1621,7 +1627,7 @@ impl Brain {
                 .intentions
                 .as_mut()
                 .expect("observed intentions")
-                .selected(v, content, &goal, committed)?;
+                .selected(v, content, &goal, committed, self.mind.future_class)?;
             decision.goal = goal;
             decision.movement = movement;
             if (self.agreement.is_some()
