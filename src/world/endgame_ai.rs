@@ -9,6 +9,13 @@ pub(super) struct Actors {
 }
 
 impl World {
+    fn summoned_children(&self, parent: i32, kind: u16) -> impl Iterator<Item = &Entity> {
+        // Parent assignments enter timed_ids; scenery cannot contribute to a summon wave.
+        self.timed_ids
+            .iter()
+            .map(|id| &self.entities[id])
+            .filter(move |e| e.parent == Some(parent) && e.kind == kind)
+    }
     fn hero_reinforcements(&mut self, id: i32, initial: bool) -> Result<()> {
         let waves = finale::summons(self.entities[&id].kind);
         ensure!(!waves.is_empty(), "hero reinforcement roster missing");
@@ -21,11 +28,7 @@ impl World {
             if selected.is_some_and(|choice| choice != index) {
                 continue;
             }
-            let current = self
-                .entities
-                .values()
-                .filter(|e| e.parent == Some(id) && e.kind == wave.kind)
-                .count();
+            let current = self.summoned_children(id, wave.kind).count();
             let count = (current + self.rng.gen_range(1..=3)).min(wave.count);
             self.finale_wave(id, finale::Wave { count, ..*wave })?;
         }
@@ -66,10 +69,13 @@ impl World {
             "endgame wave requires a bounded lifetime"
         );
         self.spawn_children(parent, wave.kind, wave.count, wave.radius)?;
-        for e in self.entities.matching_mut(|e| {
-            e.parent == Some(parent) && e.kind == wave.kind && e.expires.is_none()
-        }) {
-            let id = e.id;
+        let children: Vec<_> = self
+            .summoned_children(parent, wave.kind)
+            .filter(|e| e.expires.is_none())
+            .map(|e| e.id)
+            .collect();
+        for id in children {
+            let e = self.entities.get_mut(&id).expect("summoned child missing");
             e.expires
                 .set(Some(self.now + wave.lifetime), id, &mut self.timed_ids);
             e.activated.get_or_insert(self.now);
@@ -602,3 +608,7 @@ impl World {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "reinforcement_tests.rs"]
+mod reinforcement_tests;
