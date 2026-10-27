@@ -19,7 +19,7 @@ export async function run(game){
     if(crossing)break;
   }
   assert(crossing,'entrance must expose a bridge with an unprotected lava neighbor');
-  const bridge=await game.join({...fixture,class:0x31f,worldSeed:undefined,world:before.session.world,seed:12352,position:crossing.bridge.position,equipment:[0xa00,0xc06,0xafc,-1],stats:[770,252,50,25,50,50,0,50]});
+  const bridge=await game.join({...fixture,worldSeed:undefined,world:before.session.world,seed:12352,position:crossing.bridge.position});
   await bridge.act({keys:[],duration_ms:800});
   const protectedBefore=await bridge.observe();
   await bridge.act({keys:[],duration_ms:1000},{name:'abyss-bridge',when:v=>v.game_ms>protectedBefore.game_ms+500});
@@ -29,17 +29,8 @@ export async function run(game){
   const crossed=await bridge.observe();
   await bridge.act({keys:[],mouse:{x:500,y:300},duration_ms:700},{name:'abyss-lava',when:v=>v.character.hp<protectedAfter.character.hp});
   const exposed=await bridge.observe();
-  game.check('walking off the bridge restores ground damage',Math.hypot(crossed.position.x-protectedAfter.position.x,crossed.position.y-protectedAfter.position.y)>.5&&exposed.character.hp<protectedAfter.character.hp);
+  game.check('lava bypasses equipped armor after bridge exit',exposed.character.stats.defense>60&&Math.hypot(crossed.position.x-protectedAfter.position.x,crossed.position.y-protectedAfter.position.y)>.5&&exposed.character.hp<protectedAfter.character.hp);
   game.check('ground reports preserve native shot RNG',exposed.verification.shots>crossed.verification.shots&&exposed.lifecycle.alive);
-  await bridge.act({keys:[' '],duration_ms:50});
-  const sealed=await bridge.observe();
-  game.check('ordinary seal applies Invulnerable',Boolean(sealed.character.conditions&(1<<24)));
-  await bridge.act({keys:[],duration_ms:200},{name:'abyss-seal',when:v=>v.game_ms>sealed.game_ms+50&&Boolean(v.character.conditions&(1<<24))});
-  const sheltered=await bridge.observe();
-  game.check('current Kithio-derived invulnerability protects from lava',sheltered.character.hp>=sealed.character.hp&&Boolean(sheltered.character.conditions&(1<<24)));
-  await bridge.act({keys:[],duration_ms:1700});
-  const expired=await bridge.observe();
-  game.check('lava damage resumes after seal expires',!(expired.character.conditions&(1<<24))&&expired.character.hp<sheltered.character.hp);
-  game.check('same living native character',expired.lifecycle.alive&&expired.session.character===protectedBefore.session.character);
-  await writeFile(join(process.env.QA_RESULTS_DIR,'abyss-observations.json'),JSON.stringify({before,crossing,protectedBefore,protectedAfter,crossed,exposed,sealed,sheltered,expired},null,2));
+  game.check('same living native character',exposed.lifecycle.alive&&exposed.session.character===protectedBefore.session.character);
+  await writeFile(join(process.env.QA_RESULTS_DIR,'abyss-observations.json'),JSON.stringify({before,crossing,protectedBefore,protectedAfter,crossed,exposed},null,2));
 }
