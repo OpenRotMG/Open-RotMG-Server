@@ -64,7 +64,7 @@ async fn death_record_survives_replacement_restart_and_rejected_replays() {
     let stamp = text("CreatedOn").parse::<u64>().unwrap();
     assert!(stamp > 0);
     let paid = store.presentation(account).await.unwrap();
-    assert_eq!(text("TotalFame").parse::<i64>().unwrap(), paid.fame);
+    assert_eq!(text("TotalFame").parse::<i32>().unwrap(), paid.fame);
     assert!(store.load(account, ch.id).await.is_err());
     assert!(store.fame(other, ch.id).await.is_err());
     assert!(store.death(ch.clone(), "replayed".into()).await.is_err());
