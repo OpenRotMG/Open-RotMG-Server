@@ -32,14 +32,16 @@ async fn incoming_rechecks_cached_quote_before_native_inspection() {
             quantity: 5,
         },
     ];
-    let mut market = Market::default();
-    market.incoming = Some(Incoming::outbound(
-        &view,
-        peer_id,
-        account,
-        "Buyer".into(),
-        quote,
-    ));
+    let mut market = Market {
+        incoming: Some(Incoming::outbound(
+            &view,
+            peer_id,
+            account,
+            "Buyer".into(),
+            quote,
+        )),
+        ..Market::default()
+    };
     assert!(matches!(
         market.incoming_action(&view, &app.content, None).unwrap(),
         Some(crate::world::TradeAction::Cancel)

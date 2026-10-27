@@ -454,7 +454,7 @@ impl Intentions {
         }
         if self.main.is_none() {
             let cap = c.classes[&v.character.class].caps[4];
-            let seeks_item = persona::seed(identity) % 3 == 0;
+            let seeks_item = persona::seed(identity).is_multiple_of(3);
             let upgrade = if seeks_item {
                 item_upgrade(v, c, identity)?
             } else {

@@ -550,18 +550,6 @@ impl Market {
     pub(in crate::bots) fn reserves_stock(&self) -> bool {
         self.locked() || self.preparing || (self.session.is_some() && self.quote.is_some())
     }
-    pub(crate) fn wants_speed(&self, v: &PlayerView) -> bool {
-        self.quote.as_ref().is_some_and(|q| {
-            let batch = if q[1].kind == SPEED {
-                Some(q[1].quantity)
-            } else if q[0].kind == SPEED && q[1].kind == DEFENSE {
-                Some(q[0].quantity)
-            } else {
-                None
-            };
-            batch.is_some_and(|n| self.count(v, SPEED) < usize::from(n))
-        })
-    }
     fn gear_want(
         &self,
         v: &PlayerView,
