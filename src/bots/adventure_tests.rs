@@ -43,6 +43,45 @@ fn constructed_combat_travel_keeps_a_direction_instead_of_reversing() {
     }
 }
 
+#[test]
+fn constructed_recovery_bypasses_retained_combat_steering() {
+    let (content, mut view) = quest_tests::fixture();
+    view.character.level = 20;
+    view.character.mp = 0;
+    view.position = Pos { x: 60.5, y: 60.5 };
+    view.objects[0].position = Pos { x: 64.5, y: 60.5 };
+    view.character.hp = (view.character.stats[0] as f32 * ARCHETYPES[0].recovery * 0.75) as i32;
+    let mut decisions = Vec::new();
+    for heading in [0., std::f32::consts::PI] {
+        let mut brain = Brain::new(ARCHETYPES[0], &view);
+        brain.steering = Some((2, heading));
+        let decision = brain.decide(&view, &content).unwrap();
+        assert_eq!(decision.goal, Goal::Recover);
+        assert!(decision.journey.is_none());
+        assert!(brain.steering.is_none());
+        decisions.push(decision.movement.expect("ordinary safe recovery backstep"));
+    }
+    assert!(decisions[0].distance(decisions[1]) < 0.001);
+    assert!(decisions[0].distance(view.objects[0].position) > view.position.distance(view.objects[0].position));
+}
+
+#[test]
+fn constructed_held_steering_respects_walls_and_paralysis() {
+    let (_, mut view) = quest_tests::fixture();
+    view.position = Pos { x: 60.5, y: 60.5 };
+    view.objects[0].position = Pos { x: 64.5, y: 60.5 };
+    let mut grid = Grid::terrain(&view);
+    for y in 58..=62 { grid.walkable.remove(&(61, y)); }
+    let perception = combat::Perception::attend(&view, &pursuits::Cognition::default(), false);
+    let steering = Some(combat::Steering { heading: 0., distance: 2.5, clearance: 0.7 });
+    let next = combat::movement(&view, &grid, &[&view.objects[0]], Some((view.objects[0].position, 5.)), false, &perception, steering).expect("safe direction along the wall");
+    assert!(grid.segment(view.position, next));
+    assert!(next.x < 61.);
+    view.character.conditions |= crate::content::PARALYZED;
+    assert!(combat::movement(&view, &grid, &[&view.objects[0]], Some((view.objects[0].position, 5.)), false, &perception, steering).is_none());
+    assert_eq!(combat::speed(&view), 0.);
+}
+
 fn scene(level: i32) -> (Content, PlayerView) {
     let (c, mut v) = quest_tests::fixture();
     v.character.level = level;

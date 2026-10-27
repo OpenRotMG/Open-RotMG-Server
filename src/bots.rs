@@ -260,6 +260,7 @@ struct Brain {
     goal: Goal,
     rng: rand::rngs::StdRng,
     heading: f32,
+    steering: Option<(i32, f32)>,
     previous: Pos,
     stationary: u64,
     destination: Option<Pos>,
@@ -326,6 +327,7 @@ impl Brain {
             goal: Goal::Wait,
             rng,
             heading,
+            steering: None,
             previous: view.position,
             stationary: view.tick,
             destination: None,
@@ -588,6 +590,9 @@ impl Brain {
         } else {
             self.arbitrate(v, content, decision)?
         };
+        if activity != Activity::Adventure {
+            self.steering = None;
+        }
         self.set_activity(v, activity);
         let committed = self.committed(v);
         self.intent = self
@@ -1030,7 +1035,7 @@ impl Brain {
                     range
                 };
                 decision.movement =
-                    combat::movement(v, grid, enemies, focus, spacing, retreat, perception);
+                    combat::movement(v, grid, enemies, focus.map(|p| (p, spacing)), retreat, perception, None);
             }
             let held_heal = v
                 .character
@@ -1136,6 +1141,7 @@ impl Brain {
         mut decision: Decision,
         banking: bool,
     ) -> Result<Decision> {
+        let steering = self.steering.take();
         let (enemies, grid, perception) = (&s.enemies, &s.grid, &s.perception);
         let (nearest, quarry, range, inspecting, health) =
             (s.nearest, s.quarry, s.range, s.inspecting, s.health);
@@ -1556,19 +1562,26 @@ impl Brain {
                     decision.journey = Some(Journey::Portal(id));
                     None
                 }
-                Goal::Fight(_) | Goal::Hunt(_)
+                Goal::Fight(target) | Goal::Hunt(target)
                     if v.position.distance(destination) < range
                         && shot_clear(v, grid, destination, s.passes_cover) =>
                 {
-                    combat::movement(
-                        v,
-                        grid,
-                        enemies,
-                        Some(destination),
-                        range,
-                        false,
-                        perception,
-                    )
+                    let heading = steering.filter(|(id, _)| *id == target).map_or_else(
+                        || (v.position.y - destination.y).atan2(v.position.x - destination.x)
+                            + std::f32::consts::FRAC_PI_2
+                                * if v.session.account % 2 == 0 { 1. } else { -1. },
+                        |(_, heading)| heading,
+                    );
+                    let movement = combat::movement(
+                        v, grid, enemies, Some((destination, range)), false, perception,
+                        Some(combat::Steering {
+                            heading,
+                            distance: (combat::speed(v) * self.profile.reaction as f32 * 0.05 + 0.5).max(1.25),
+                            clearance: self.mind.cognition.pickup_clearance,
+                        }),
+                    );
+                    self.steering = movement.map(|p| (target, (p.y - v.position.y).atan2(p.x - v.position.x)));
+                    movement
                 }
                 Goal::Follow(_) if v.position.distance(destination) < 4.5 => None,
                 Goal::Loot(id) if v.position.distance(destination) < 1.4 => {
