@@ -96,7 +96,14 @@ impl World {
                 },
                 8.,
             ),
-            0x60a => protect(6., 8.),
+            // Archer orbit is distinct from Sorcerer protection: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Lowland.cs#L449-L458
+            0x60a => (
+                Motion::Orbit {
+                    anchor: Anchor::CampLeader,
+                    radius: 3.25,
+                },
+                8.,
+            ),
             0x60c => protect(6., 12.),
             0x616 | 0x619 if e.pos.distance(leader.pos) > 6. => protect(6., 11.),
             0x615 | 0x618 if e.pos.distance(leader.pos) > 6. => protect(6., 12.),
@@ -136,14 +143,15 @@ impl World {
                 },
                 8.,
             ),
-            0x605 => (
+            // An omitted Orbit target means player, not protectee: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Orbit.cs#L29-L57
+            0x605 | 0x607 if target.is_some_and(|p| e.pos.distance(p) < 10.) => (
                 Motion::Orbit {
-                    anchor: Anchor::CampLeader,
-                    radius: 6.,
+                    anchor: Anchor::Player,
+                    radius: 3.,
                 },
                 5.,
             ),
-            0x607 => protect(6., 6.),
+            0x605 | 0x607 => protect(10., 12.),
             0x606 if target.is_some_and(|p| e.pos.distance(p) < 3.) => (
                 Motion::Chase {
                     sight: 3.,

@@ -414,10 +414,29 @@ impl BonusKind {
         }
     }
     pub fn description(self) -> &'static str {
-        if self == Self::WellEquipped {
-            "Bonus for equipment"
-        } else {
-            self.id()
+        // The client renders @desc verbatim; explain the conditions from https://web.archive.org/web/20120607014226id_/http://forums.wildshadow.com/wiki/realm-mad-god/fame-bonuses
+        match self {
+            Self::Ancestor => "First death on this account",
+            Self::LegacyBuilder => "New class level record (once per class, requires level 2)",
+            Self::Pacifist => "Never hit an enemy with a projectile (requires level 20)",
+            Self::Thirsty => "Never drank a potion from inventory (requires level 20)",
+            Self::Mundane => "Never used an ability (requires level 20)",
+            Self::BootsOnTheGround => "Never teleported (requires level 20)",
+            Self::TunnelRat => "Completed every required dungeon through its Realm Portal",
+            Self::EnemyOfTheGods => "More than 10% of kills were gods (requires level 20)",
+            Self::SlayerOfTheGods => "More than 50% of kills were gods (requires level 20)",
+            Self::OryxSlayer => "Dealt the killing blow to Oryx",
+            Self::Accurate => "Better than 25% accuracy (requires level 20)",
+            Self::Sharpshooter => "Better than 50% accuracy (requires level 20)",
+            Self::Sniper => "Better than 75% accuracy (requires level 20)",
+            Self::Explorer => "Uncovered more than 1,000,000 tiles",
+            Self::Cartographer => "Uncovered more than 4,000,000 tiles",
+            Self::TeamPlayer => "Helped party members gain more than 100 levels",
+            Self::LeaderOfMen => "Helped party members gain more than 1,000 levels",
+            Self::DoerOfDeeds => "Completed more than 1,000 quests",
+            Self::FriendOfTheCubes => "Never killed a cube (requires level 20)",
+            Self::WellEquipped => "Bonus for equipment",
+            Self::FirstBorn => "Beat the Fame total of every previous character",
         }
     }
 }

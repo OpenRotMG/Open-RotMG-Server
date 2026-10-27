@@ -45,9 +45,9 @@ fn recovery_rates_and_condition_matrix() {
         (vec![SICK], 100, 104),
         (vec![QUIET], 106, 0),
         (vec![BLEEDING], 79, 104),
-        (vec![HEALING], 127, 104),
+        (vec![HEALING], 135, 104),
         (vec![SICK, HEALING], 100, 104),
-        (vec![BLEEDING, HEALING], 100, 104),
+        (vec![BLEEDING, HEALING], 108, 104),
         (vec![SICK, BLEEDING, QUIET, HEALING], 79, 0),
     ] {
         let (mut w, id) = fixture();

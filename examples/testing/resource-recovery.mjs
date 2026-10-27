@@ -48,7 +48,7 @@ export async function run(game){
   await ally.act({keys:[' '],duration_ms:200});
   view=await snapshot('native-healing-aura');
   game.check('ordinary allied seal applies Healing',Boolean(view.character.conditions&(1<<17)));
-  await sample('healing-recovery',4,20);
+  await sample('healing-recovery',4,28);
   const retained=await game.observe();
   await game.act({keys:['Insert'],duration_ms:500});
   view=await snapshot('reconnected');

@@ -25,7 +25,6 @@ async fn every_selected_class_requires_all_lifetime_level_records_after_restart(
     assert_eq!(content.classes.len(), tree.len());
     for (kind, requires) in tree {
         assert_eq!(content.classes[&kind].requires, requires);
-        // Pin the old tree: modified 7.0 adds Ninja; selected 123.5.1 does not: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
         for short in 0..=requires.len() {
             let guid = format!("class-{kind}-{short}");
             let account = store.list(guid.clone()).await.unwrap();
@@ -35,7 +34,19 @@ async fn every_selected_class_requires_all_lifetime_level_records_after_restart(
                 content.unlocked(kind, &account.best_levels).unwrap(),
                 requires.is_empty()
             );
+            let mut retired = Vec::new();
             if !requires.is_empty() {
+                // Selected isAvailable checks every prerequisite even with target ClassStats: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
+                let prior = store
+                    .create_prepared(account.id, content.get(kind).unwrap(), None)
+                    .await
+                    .unwrap();
+                store.delete_character(account.id, prior.id).await.unwrap();
+                retired.push(prior.id);
+                assert_eq!(
+                    store.list(guid.clone()).await.unwrap().best_levels[&kind],
+                    1
+                );
                 assert_eq!(
                     store
                         .create(account.id, content.get(kind).unwrap())
@@ -47,7 +58,6 @@ async fn every_selected_class_requires_all_lifetime_level_records_after_restart(
                     "class is locked"
                 );
             }
-            let mut retired = Vec::new();
             for (index, &(parent, level)) in requires.iter().enumerate() {
                 let mut ch = store
                     .create_prepared(account.id, content.get(parent).unwrap(), None)

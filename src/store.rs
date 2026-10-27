@@ -1685,7 +1685,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     }
     pub async fn fame(&self, account: i32, id: i32) -> Result<String> {
         let legacy_base = self.legacy_base;
-        // The legacy field is called CreatedOn, but the client labels it as the death date.
+        // CreatedOn is the death date in Unix seconds, not character creation: selected 123.5.1 Fame request Yp::Hp, https://github.com/OpenRotMG/Open-RotMG-Client/blob/39acbfbf3bf545c397d6ac94f0a9430d6d660ac2/client.swf
         self.call(move|db|{let (snapshot,killer,died_at,paid):(String,String,u64,String)=db.query_row("SELECT snapshot,killed_by,died_at,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;let receipt=death_awards::decode_receipt(&paid)?;let c = receipt.character(&snapshot,legacy_base)?;ensure!(receipt.base==c.fame,"receipt base disagreement");ensure!(c.id==id && c.account==account && !c.alive && c.hp==0 && c.items.len()==12,"invalid archived death snapshot");let total=receipt.total;
         let [shots,hits,tiles,kills,gods,oryx,quests,assists]=match receipt.policy {
             death_awards::ReceiptPolicy::Historical=>{let l=&c.lifetime;[l.shots,l.projectile_hits,l.tiles,l.kills,l.god_kills,l.oryx_kills,l.qualified_quests,l.level_assists]},
@@ -1931,6 +1931,10 @@ fn class_stars_use_inclusive_class_bests_and_the_greater_current_goal() {
 mod class_unlock_tests;
 #[cfg(test)]
 mod community_schema_tests;
+#[cfg(test)]
+mod death_record_tests;
+#[cfg(test)]
+mod level_tests;
 #[cfg(test)]
 mod living_fame_tests;
 #[cfg(all(test, unix))]
