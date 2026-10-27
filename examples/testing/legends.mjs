@@ -46,18 +46,19 @@ export async function run(game){
   const {withAgentTab}=await import(pathToFileURL(join(process.env.PI_BROWSER_TOOLS,'script-tab.mjs')).href);
   const browser=JSON.parse(await readFile(join(out,'result.json'),'utf8')).browser;
   await withAgentTab(browser.port,browser.owner,async page=>{
-    const requests=[];
-    page.on('response',response=>{if(['/legacy-api/fame/list','/legacy-api/char/fame'].includes(new URL(response.url()).pathname))requests.push(response);});
+    const requests=[],network=[];
+    page.on('response',response=>{network.push({url:response.url(),status:response.status()});if(['/legacy-api/fame/list','/legacy-api/char/fame'].includes(new URL(response.url()).pathname))requests.push(response);});
     const cdp=await page.createCDPSession();await cdp.send('Emulation.setFocusEmulationEnabled',{enabled:true});
     await page.goto(config.origin);
     try{await page.waitForFunction(()=>document.querySelector('ruffle-player')?.ruffle().isPlaying===true);}
     catch(error){await page.screenshot({path:join(out,'legends-loading-failure.png')});await writeFile(join(out,'legends-loading-failure.json'),JSON.stringify({url:page.url(),state:await page.evaluate(()=>({visibility:document.visibilityState,playing:document.querySelector('ruffle-player')?.ruffle().isPlaying}))}));throw error;}
     await page.evaluate(()=>{const m=document.querySelector('ruffle-player').shadowRoot.querySelector('#hardware-acceleration-modal');if(m&&!m.classList.contains('hidden'))m.querySelector('.close-modal').click();});
     const rect=await page.evaluate(()=>{const p=document.querySelector('ruffle-player');p.focus({preventScroll:true});const r=p.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};});assert.equal(rect.width,800);assert.equal(rect.height,600);
-    async function click(x,y){const p={x:rect.x+x,y:rect.y+y,button:'left',clickCount:1};await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',...p});try{await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}}
+    const frames=()=>page.evaluate(()=>new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok))));
+    async function click(x,y){const p={x:rect.x+x,y:rect.y+y,button:'left',clickCount:1};await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:0,...p});await frames();try{await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}await frames();}
     async function capture(name){await wait(700);await page.screenshot({path:join(out,name+'.png'),clip:{x:rect.x,y:rect.y,width:800,height:600}});}
-    async function response(path,count){const end=Date.now()+15000;while(requests.filter(r=>new URL(r.url()).pathname===path).length<count){assert(Date.now()<end,'Missing native response: '+path);await wait(100);}const r=requests.filter(r=>new URL(r.url()).pathname===path)[count-1];assert.equal(r.status(),200);return await r.text();}
-    await capture('title');await click(580,545);
+    async function response(path,count){const end=Date.now()+15000;while(requests.filter(r=>new URL(r.url()).pathname===path).length<count){if(Date.now()>=end){await capture('menu-response-failure');await writeFile(join(out,'menu-response-failure.json'),JSON.stringify({rect,network,state:await page.evaluate(()=>({visibility:document.visibilityState,playing:document.querySelector('ruffle-player').ruffle().isPlaying}))}));assert.fail('Missing native response: '+path);}await wait(100);}const r=requests.filter(r=>new URL(r.url()).pathname===path)[count-1];assert.equal(r.status(),200);return await r.text();}
+    await capture('title');await click(580,545);await capture('menu-click');
     for(const [i,span,x] of [[0,'week',35],[1,'month',125],[2,'all',235]]){
       if(i)await click(x,85);
       const body=await response('/legacy-api/fame/list',i+1);
