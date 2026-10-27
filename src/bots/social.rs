@@ -3,6 +3,9 @@ use crate::content::PRIEST;
 use crate::world::view::VisibleObject;
 mod incoming;
 mod life;
+// Production dispatch waits for the receipt-bound equipment-gift consumer.
+#[cfg(test)]
+mod equipment;
 pub(crate) use life::Life;
 pub(super) use life::{cancel_gift as interrupt_gift, life, receive_life};
 
