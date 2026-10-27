@@ -84,7 +84,7 @@ async fn merchant_reservations_freeze_quotes_and_settle_once_atomically() {
         .await
         .unwrap();
     let ch = store
-        .create(account, world.content.get(0x300).unwrap())
+        .create(account, world.content.get(0x30e).unwrap())
         .await
         .unwrap();
     let original = ch.clone();
