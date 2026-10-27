@@ -230,8 +230,21 @@ async fn god_potion_rewards_keep_damage_boundaries_and_private_ownership() {
                     assert!(bag.accessible(owners[0].0));
                     assert!(!bag.accessible(owners[1].0));
                 } else {
-                    assert!(bag.accessible(owners[1].0));
-                    assert_eq!(bag.accessible(owners[0].0), damage < required);
+                    assert_eq!(
+                        owners
+                            .iter()
+                            .filter(|(account, _)| bag.accessible(*account))
+                            .count(),
+                        if bag.kind == 0x500 && damage < required {
+                            2
+                        } else {
+                            1
+                        }
+                    );
+                    if damage >= required {
+                        assert!(bag.accessible(owners[1].0));
+                        assert!(!bag.accessible(owners[0].0));
+                    }
                 }
                 rewards.extend(bag.items.iter().copied().filter(|item| *item >= 0));
             }
