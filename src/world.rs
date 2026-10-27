@@ -787,6 +787,7 @@ pub struct World {
     finale: endgame_ai::Actors,
     cells: cell_index::CellIndex,
     fountains: Vec<(i32, Pos)>,
+    merchants: BTreeMap<i32, shop::Offer>,
     next_fountain_heal: u64,
     rng: rand::rngs::StdRng,
     pub now: u64,
@@ -2695,6 +2696,7 @@ impl World {
         let mut actor_ids = BTreeSet::new();
         let mut quests_by_level: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         let mut fountains = Vec::new();
+        let mut merchants = BTreeMap::new();
         let mut cells = cell_index::CellIndex::new(map.width as usize, map.height as usize);
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
             for (x, c) in row.iter().enumerate() {
@@ -2801,7 +2803,7 @@ impl World {
                         }
                     }
                     if o.class == "Merchant" {
-                        shop::configure(&mut e, &content)?;
+                        merchants.insert(id, shop::configure(&mut e, &content)?);
                     }
                     if o.name == "White Fountain" {
                         fountains.push((id, pos));
@@ -2878,6 +2880,7 @@ impl World {
             finale: endgame_ai::Actors::default(),
             cells,
             fountains,
+            merchants,
             next_fountain_heal: 0,
             rng: rand::rngs::StdRng::from_entropy(),
             now: 0,
@@ -3221,6 +3224,7 @@ impl World {
         self.non_population_ids.remove(&id);
         self.god_reproduction.remove(&id);
         self.ability_state.objects.remove(&id);
+        self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
         let definition = &self.content.objects[&entity.kind];
         if definition.quest {
@@ -6979,6 +6983,7 @@ impl World {
         self.now += 50;
         self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
+        self.merchant_step();
         self.lab_step();
         self.expire_consumable_boosts();
         self.companion_step()
@@ -7417,6 +7422,9 @@ impl World {
 fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }
+
+#[cfg(test)]
+mod shop_tests;
 
 #[cfg(test)]
 mod movement_tests;
