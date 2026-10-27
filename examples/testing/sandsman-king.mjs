@@ -53,7 +53,7 @@ export async function run(game){
   });
   await writeFile(join(process.env.QA_RESULTS_DIR,'orbit.json'),JSON.stringify(orbit));
   const position=(await game.observe()).position;
-  await game.act({keys:['d','s'],duration_ms:350});
+  await game.act({keys:['a','s'],duration_ms:200});
   game.check('native movement enters the escort group',Math.hypot((await game.observe()).position.x-position.x,(await game.observe()).position.y-position.y)>.5);
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
@@ -62,10 +62,16 @@ export async function run(game){
     game.check(id+': native staff defeats target and earns XP',!s.diagnostic.entities.some(e=>e.id===id)&&s.view.character.experience>xp);
   }
   for(const kind of [0x60a,0x60c]){
-    const before=await save('before-defeat-'+kind),p=before.view.position;
-    const k=family(before).find(e=>e.id===king.id);assert(k,'King must be alive before escort targeting');
-    const safe=e=>{const dx=e.pos.x-p.x,dy=e.pos.y-p.y,t=((k.pos.x-p.x)*dx+(k.pos.y-p.y)*dy)/(dx*dx+dy*dy);return t<0||t>1||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>1.5;};
-    const victim=family(before).filter(e=>e.kind===kind&&safe(e)&&before.view.objects.some(o=>o.id===e.id&&o.hp>0)).sort((a,b)=>Math.hypot(a.pos.x-p.x,a.pos.y-p.y)-Math.hypot(b.pos.x-p.x,b.pos.y-p.y))[0];assert(victim,'No visible escort with a clear firing line away from the King');
+    let before,victim;
+    for(let n=0;n<12;n++){
+      before=await game.inspect();const p=before.view.position,k=family(before).find(e=>e.id===king.id);assert(k,'King must be alive before escort targeting');
+      const safe=e=>{const dx=e.pos.x-p.x,dy=e.pos.y-p.y,t=((k.pos.x-p.x)*dx+(k.pos.y-p.y)*dy)/(dx*dx+dy*dy);return t<0||t>1||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>1.5;};
+      victim=family(before).filter(e=>e.kind===kind&&safe(e)&&before.view.objects.some(o=>o.id===e.id&&o.hp>0)).sort((a,b)=>Math.hypot(a.pos.x-p.x,a.pos.y-p.y)-Math.hypot(b.pos.x-p.x,b.pos.y-p.y))[0];
+      if(victim)break;
+      await game.act({keys:[],duration_ms:400});
+    }
+    assert(victim,'No visible escort with a clear firing line away from the King');
+    await save('before-defeat-'+kind);
     const ids=new Set(family(before).map(e=>e.id));await defeat(victim.id);
     for(let n=0;n<12&&!family(await game.inspect()).some(e=>e.kind===kind&&!ids.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
     const after=await save('replenished-'+kind);
