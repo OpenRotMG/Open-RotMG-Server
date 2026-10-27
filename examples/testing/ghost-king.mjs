@@ -7,7 +7,10 @@ const spec={class:0x31d,level:20,seed:794,world:1,equipment:[0xb0b,0xb29,0xa7b,-
 let roots;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1});
-  roots=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x928&&f.layout===world.realm_layout);
+  const events=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
+  const end=events.findLastIndex(f=>f.message==='Realm simulation populated'&&f.layout===world.realm_layout);assert(end>=0,'Completed Realm initialization required');
+  const start=events.slice(0,end).findLastIndex(f=>f.message==='Realm simulation populated');
+  roots=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x928&&f.layout===world.realm_layout);
   assert(roots.length>=3,'Three ordinarily placed Ghost Kings required');
   const index=['SmallGroup','Mob','HugeMob'].indexOf(process.env.GHOST_BRANCH);assert(index>=0,'Set GHOST_BRANCH to SmallGroup, Mob or HugeMob');
   await writeFile(join(out,'roots.json'),JSON.stringify({world,roots,branch:process.env.GHOST_BRANCH}));
