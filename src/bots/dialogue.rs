@@ -597,7 +597,7 @@ pub(super) async fn publish(
     let society = app.society.clone();
     let owner = adventures::Member {
         account: v.session.account,
-        name: brain.profile.name.into(),
+        name: brain.mind.market.name.as_str().into(),
     };
     let reply_intent = reply.intent;
     let joined = reply.intent == Intent::Join;
@@ -696,7 +696,7 @@ impl Brain {
             || speaker == v.session.player
             || !recipient.is_empty()
             || elsewhere
-            || (!first.eq_ignore_ascii_case(self.profile.name) && offered.is_none())
+            || (!first.eq_ignore_ascii_case(self.mind.market.name.as_str()) && offered.is_none())
         {
             return Ok(None);
         }
@@ -727,7 +727,7 @@ impl Brain {
             .map(|id| content.objects[&(*id as u16)].name.as_str())
             .collect();
         let agreement=self.agreement.as_ref().filter(|_|v.time_ms<self.invitation_until).map(|a|json!({"partner":a.partner,"waiting":a.waiting.is_some(),"seconds_remaining":(self.invitation_until-v.time_ms)/1000}));
-        let mut payload = json!({"bot":{"name":self.profile.name,"world":v.map.name,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"level":v.character.level,"equipment":equipment,"priorities":{"recovery":self.profile.recovery,"resources":self.profile.resources,"companions":self.profile.companions}},"speaker":{"name":peer.name,"hp":peer.hp,"max_hp":peer.max_hp,"level":peer.level},"crew":crew,"agreement":agreement,"allowed_intents":allowed,"message":text});
+        let mut payload = json!({"bot":{"name":self.mind.market.name.as_str(),"world":v.map.name,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"level":v.character.level,"equipment":equipment,"priorities":{"recovery":self.profile.recovery,"resources":self.profile.resources,"companions":self.profile.companions}},"speaker":{"name":peer.name,"hp":peer.hp,"max_hp":peer.max_hp,"level":peer.level},"crew":crew,"agreement":agreement,"allowed_intents":allowed,"message":text});
         if let Some(o) = offered {
             payload["outgoing_invitation"] = json!({"objective":o.purpose,"invitation":o.text,"instruction":"Interpret the player's answer: join accepts your adventure, decline ends the invitation, talk only answers a question."});
         }

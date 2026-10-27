@@ -22,7 +22,7 @@ const VIEWERS_PER_IP: usize = 2;
 pub(crate) struct Cctv(Mutex<Registry>);
 #[derive(Default)]
 struct Registry {
-    feeds: BTreeMap<&'static str, Feed>,
+    feeds: BTreeMap<String, Feed>,
     ips: HashMap<(IpAddr, bool), usize>,
     perspective_reads: HashMap<IpAddr, (Instant, u8)>,
 }
@@ -36,8 +36,8 @@ struct Feed {
     viewers: usize,
 }
 impl Registry {
-    fn feed(&mut self, name: &'static str) -> &mut Feed {
-        self.feeds.entry(name).or_insert_with(|| Feed {
+    fn feed(&mut self, name: &str) -> &mut Feed {
+        self.feeds.entry(name.to_owned()).or_insert_with(|| Feed {
             updated: Instant::now(),
             frame: Value::Null,
             session: None,
@@ -66,7 +66,7 @@ impl Cctv {
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
         self.0.lock().expect("bot CCTV registry poisoned")
     }
-    pub(super) fn entered(&self, name: &'static str, player: i32, account: i32) {
+    pub(super) fn entered(&self, name: &str, player: i32, account: i32) {
         let mut registry = self.lock();
         let feed = registry.feed(name);
         feed.session = Some((player, account));
@@ -74,7 +74,7 @@ impl Cctv {
         feed.frame = Value::Null;
         feed.updated = Instant::now();
     }
-    pub(super) fn departed(&self, name: &'static str, player: i32, account: i32) {
+    pub(super) fn departed(&self, name: &str, player: i32, account: i32) {
         let mut registry = self.lock();
         if let Some(feed) = registry.feeds.get_mut(name)
             && feed.session == Some((player, account))
@@ -93,10 +93,10 @@ impl Cctv {
     pub(crate) fn binding(&self, name: &str) -> Option<(i32, i32)> {
         self.lock().feeds.get(name).and_then(|f| f.session)
     }
-    pub(crate) fn account_session(&self, account: i32) -> Option<(&'static str, i32)> {
+    pub(crate) fn account_session(&self, account: i32) -> Option<(String, i32)> {
         self.lock().feeds.iter().find_map(|(name, feed)| {
             let (player, owner) = feed.session?;
-            (owner == account).then_some((*name, player))
+            (owner == account).then_some((name.clone(), player))
         })
     }
     pub(crate) fn perspective(
@@ -104,7 +104,7 @@ impl Cctv {
         name: &str,
         source: i32,
         target: i32,
-    ) -> Option<(&'static str, i32, i32)> {
+    ) -> Option<(String, i32, i32)> {
         let registry = self.lock();
         let (player, source_account) = registry.feeds.get(name)?.session?;
         if player != source || source == target {
@@ -112,7 +112,7 @@ impl Cctv {
         }
         registry.feeds.iter().find_map(|(name, feed)| {
             let (player, account) = feed.session?;
-            (player == target).then_some((*name, source_account, account))
+            (player == target).then_some((name.clone(), source_account, account))
         })
     }
     pub(crate) fn allow_perspective(&self, ip: IpAddr) -> bool {
@@ -133,7 +133,7 @@ impl Cctv {
     }
     pub(super) fn decided(
         &self,
-        name: &'static str,
+        name: &str,
         v: &PlayerView,
         d: &Decision,
         reason: String,
@@ -161,7 +161,7 @@ impl Cctv {
         feed.reason = reason;
         feed.updated = Instant::now();
     }
-    pub(super) fn inputs(&self, name: &'static str, v: &PlayerView) {
+    pub(super) fn inputs(&self, name: &str, v: &PlayerView) {
         let mut registry = self.lock();
         let feed = registry.feed(name);
         if feed.session == Some((v.session.player, v.session.account)) && !feed.frame.is_null() {
@@ -173,7 +173,7 @@ impl Cctv {
             feed.frame["aim"] = json!(actual_aim(v));
         }
     }
-    pub(super) fn heard(&self, name: &'static str, own: i32, packet: &Packet) -> Result<()> {
+    pub(super) fn heard(&self, name: &str, own: i32, packet: &Packet) -> Result<()> {
         if packet.id != wire::TEXT {
             return Ok(());
         }
@@ -190,7 +190,7 @@ impl Cctv {
         }
         Ok(())
     }
-    fn update(&self, name: &'static str, seen: u64) -> (String, u64) {
+    fn update(&self, name: &str, seen: u64) -> (String, u64) {
         let registry = self.lock();
         let feed = &registry.feeds[name];
         let thoughts: Vec<_> = feed
@@ -264,7 +264,7 @@ pub(super) fn reason(
 
 pub(crate) struct Viewer {
     cctv: Arc<Cctv>,
-    name: &'static str,
+    name: String,
     ip: IpAddr,
     native: bool,
 }
@@ -276,13 +276,14 @@ impl Viewer {
         native: bool,
     ) -> Result<Self, (StatusCode, String)> {
         let mut registry = cctv.lock();
-        let Some((&name, _)) = registry
+        let Some((name, _)) = registry
             .feeds
             .get_key_value(name)
             .filter(|(_, f)| f.session.is_some())
         else {
             return Err((StatusCode::NOT_FOUND, format!("no live bot named {name}")));
         };
+        let name = name.clone();
         if registry
             .ips
             .iter()
@@ -304,7 +305,7 @@ impl Viewer {
             ));
         }
         *mine += 1;
-        registry.feed(name).viewers += 1;
+        registry.feed(&name).viewers += 1;
         Ok(Self {
             cctv: cctv.clone(),
             name,
@@ -316,7 +317,7 @@ impl Viewer {
 impl Drop for Viewer {
     fn drop(&mut self) {
         let mut registry = self.cctv.lock();
-        registry.feed(self.name).viewers -= 1;
+        registry.feed(&self.name).viewers -= 1;
         let mine = registry
             .ips
             .get_mut(&(self.ip, self.native))
@@ -366,8 +367,8 @@ pub(crate) async fn stream(
                 _ = ticks.tick() => {},
                 _ = shutdown.wait_for(|stop| *stop) => return None,
             }
-            viewer.cctv.binding(viewer.name)?;
-            let (event, seen) = viewer.cctv.update(viewer.name, seen);
+            viewer.cctv.binding(&viewer.name)?;
+            let (event, seen) = viewer.cctv.update(&viewer.name, seen);
             let event = sse::Event::default().data(event);
             Some((
                 Ok::<_, std::convert::Infallible>(event),

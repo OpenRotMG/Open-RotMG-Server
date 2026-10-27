@@ -45,7 +45,7 @@ async fn decide_before_social(
         )?
     };
     app.cctv.decided(
-        brain.profile.name,
+        brain.mind.market.name.as_str(),
         view,
         &decision,
         cctv::reason(brain.activity, &decision, view, &app.content),
@@ -113,7 +113,7 @@ async fn decide_before_social(
     let mut timings = brain.performance.lock().expect("bot timings poisoned");
     timings.record("decision", deciding.elapsed());
     if let Some(report) = timings.report() {
-        tracing::info!(name=brain.profile.name,world=%view.map.name,world_id=view.session.world,player=view.session.player,
+        tracing::info!(name=brain.mind.market.name.as_str(),world=%view.map.name,world_id=view.session.world,player=view.session.player,
             known_tiles=view.tiles.len(),cover_tiles=brain.cover.len(),visited_tiles=brain.visits.len(),
             blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),crowd_contacts=brain.crowd.len(),
             navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
@@ -251,7 +251,7 @@ async fn enter_admitted(
     } else {
         None
     };
-    tracing::info!(name = profile.name, saved = %serde_json::to_string(&character)?,
+    tracing::info!(name = character.name, saved = %serde_json::to_string(&character)?,
         "autonomous saved character loaded");
     // Concurrent novas and hit receipts must fit between bounded perception updates.
     let (packets, output) = mpsc::channel(OUTPUT_CAPACITY);
@@ -301,10 +301,10 @@ async fn enter_admitted(
         .await?;
     let view = app.world.player_view(id).await?;
     app.cctv
-        .entered(profile.name, view.session.player, view.session.account);
+        .entered(&own_name, view.session.player, view.session.account);
     tracing::info!(
         player = id,
-        name = profile.name,
+        name = own_name,
         class = view.character.class,
         level = view.character.level,
         character = view.session.character,
@@ -502,6 +502,15 @@ async fn reenter(
 }
 
 pub(super) async fn persona_character(app: &App, profile: Profile) -> Result<Character> {
+    if profile.identity.starts_with("guest:v1:") {
+        return app
+            .store
+            .guest_persona_character(
+                profile.identity.into(),
+                app.content.get(crate::content::WIZARD)?,
+            )
+            .await;
+    }
     let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
     let (roster, vault) = persona::life(&profile, &app.content, &mut rng)?;
     app.store
@@ -631,6 +640,7 @@ pub(super) async fn launch(
     mut owner: server::Owner,
     done: Option<mpsc::Sender<director::Departure>>,
 ) -> Result<()> {
+    let name = character.name.clone();
     let _names = app.name_claims.lock().await;
     app.store
         .persona_name_available(character.account, character.name.clone())
@@ -702,7 +712,7 @@ pub(super) async fn launch(
                     let _entry = match lifecycle::drain::entry(&app) {
                         Ok(entry) => entry,
                         Err(error) if error.is::<lifecycle::drain::UnadmittedEntry>() => {
-                            tracing::info!(player=id,name=profile.name,"autonomous controller stopped before admission");
+                            tracing::info!(player=id,name=name.as_str(),"autonomous controller stopped before admission");
                             break;
                         }
                         Err(error) => return Err(error),
@@ -733,7 +743,7 @@ pub(super) async fn launch(
                         }).await?;
                     }
                     ensure!(view.session.account == account, "autonomous account binding changed");
-                    app.cctv.inputs(profile.name, &view);
+                    app.cctv.inputs(name.as_str(), &view);
                     if let Some(blocked) = view.inputs.as_ref().and_then(|input| input.blocked) {
                         let tile = tile(blocked);
                         if brain.blocked.get(&tile).is_none_or(|until| *until <= view.tick) {
@@ -810,12 +820,12 @@ pub(super) async fn launch(
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
                             continue;
                         }
-                        app.cctv.heard(profile.name, id, &packet)?;
+                        app.cctv.heard(name.as_str(), id, &packet)?;
                         let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.player_view(id).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
                         brain.crowd.receive(&packet, social_view, &app.content)?;
                         let event_before = brain.mind.events.clone();
-                        brain.mind.events.receive(&packet, social_view, profile.name)?;
+                        brain.mind.events.receive(&packet, social_view, name.as_str())?;
                         if brain.mind.events != event_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
                         let social_before = brain.mind.social.clone();
                         let socially_handled = social::receive_life(&app, &mut brain, &packet, social_view).await?;
@@ -913,8 +923,8 @@ pub(super) async fn launch(
                     if ending && director::may_finish(&app, &mut brain, &view) && decision.journey.is_none() {
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
-                        tracing::info!(account,name=profile.name,"session finished; returning to Nexus before logout");
-                        app.cctv.decided(profile.name, &view, &decision, "session finished; returning to Nexus before logout".into(), &serde_json::json!({"goal":null,"plan":"End this session","step":"Return to Nexus before logout","mode":"necessary","reason":"session deadline reached","resume":null}), &app.content);
+                        tracing::info!(account,name=name.as_str(),"session finished; returning to Nexus before logout");
+                        app.cctv.decided(name.as_str(), &view, &decision, "session finished; returning to Nexus before logout".into(), &serde_json::json!({"goal":null,"plan":"End this session","step":"Return to Nexus before logout","mode":"necessary","reason":"session deadline reached","resume":null}), &app.content);
                     }
                     if events::shared(&view.map.name) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
@@ -940,7 +950,7 @@ pub(super) async fn launch(
                         }
                     }
                     if !brain.decision_logged || decision.goal != brain.goal {
-                        tracing::info!(account,character=view.session.character,world=view.session.world,player=id,name=profile.name,tick=view.tick,hp=view.character.hp,
+                        tracing::info!(account,character=view.session.character,world=view.session.world,player=id,name=name.as_str(),tick=view.tick,hp=view.character.hp,
                             experience=view.character.experience,x=view.position.x,y=view.position.y,
                             aim=?decision.aim,movement=?decision.movement,
                             goal=?decision.goal,"autonomous decision");
@@ -1086,13 +1096,13 @@ pub(super) async fn launch(
             result = Err(error);
         }
         if finalized {
-            app.cctv.departed(profile.name, id, account);
+            app.cctv.departed(name.as_str(), id, account);
         }
         dialogue::cancel(&mut pending);
         dialogue::end_agreement(&app, &mut brain, "controller stopped").await;
         let retire = retired && finalized && result.is_ok() && !*shutdown.borrow();
         if let Err(error) = &result {
-            tracing::error!(player=id,name=profile.name,%error,"autonomous controller stopped");
+            tracing::error!(player=id,name=name.as_str(),%error,"autonomous controller stopped");
         }
         if let Some(done) = done
             && !*shutdown.borrow()
@@ -1158,3 +1168,6 @@ fn close_controller(
 mod input_tests;
 #[cfg(test)]
 pub(super) mod tests;
+
+#[cfg(test)]
+mod guest_tests;
