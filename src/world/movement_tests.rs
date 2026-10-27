@@ -56,6 +56,29 @@ fn native(
 }
 
 #[test]
+fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
+    let (mut world, player) = fixture(0x18, false);
+    let mage = world
+        .spawn_entity(0x617, Pos { x: 20.5, y: 8.5 }, vec![])
+        .unwrap();
+    world.npc_step();
+    assert!(world.entities[&mage].activated.is_none());
+    world.players.get_mut(&player).unwrap().pos.x = 9.;
+    world.npc_step();
+    assert!(world.entities[&mage].activated.is_some());
+    for (age, index) in [(0, 0), (400, 1), (800, 2), (1200, 0)] {
+        let shots = crate::encounter::fauna::schedule(0x617, 200, age)
+            .unwrap()
+            .snapshot(1.);
+        assert_eq!(shots.len(), 15);
+        for (i, (projectile, angle)) in shots.into_iter().enumerate() {
+            assert_eq!(projectile, index);
+            assert!((angle.to_degrees() - (i as f32 * 24. + index as f32 * 8.)).abs() < 0.001);
+        }
+    }
+}
+
+#[test]
 fn swarm_directed_shots_use_constant_angular_prediction_and_cooldown() {
     let (mut world, player) = fixture(0x18, false);
     let target = world.players[&player].pos;
