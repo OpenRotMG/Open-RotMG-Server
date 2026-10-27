@@ -247,17 +247,14 @@ mod tests {
         for bad in invalid.split('|').take(2) {
             assert!(validated_template(bad, Intent::MarketAdvertise).is_err());
         }
-        assert!(
-            validated_template("s>{give} ({want}) @{name}!", Intent::MarketAdvertise).unwrap()
-        );
-        let mixed_refusal = "WTB {want} for {give} | s>{give} ({want}) | buying {want}, need {give}";
+        assert!(validated_template("s>{give} ({want}) @{name}!", Intent::MarketAdvertise).unwrap());
+        let mixed_refusal =
+            "WTB {want} for {give} | s>{give} ({want}) | buying {want}, need {give}";
         assert!(repertoire(mixed_refusal, Intent::MarketAdvertise).is_err());
         for ad in mixed_refusal.split('|').take(2) {
             assert!(validated_template(ad.trim(), Intent::MarketAdvertise).unwrap());
         }
-        assert!(
-            validated_template("buying {want}, need {give}", Intent::MarketAdvertise).is_err()
-        );
+        assert!(validated_template("buying {want}, need {give}", Intent::MarketAdvertise).is_err());
     }
 
     fn content() -> Content {
