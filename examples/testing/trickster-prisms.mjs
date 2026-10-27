@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x324,level:20,seed:774,world:-2,position:'spawn',equipment:[0xa14,0xae3,-1,-1],backpack:[0xb23,0xc0d,0xc2a,-1,-1,-1,-1,-1],stats:[720,252,65,25,30,75,40,0]};
+export const fixture={class:0x324,level:20,seed:774,world:-2,position:'spawn',equipment:[0xa14,0xae3,-1,-1],backpack:[0xb23,0xc0d,0xc2a,-1,-1,-1,-1,-1],stats:[720,252,65,25,12,75,40,0]};
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
@@ -46,7 +46,7 @@ export async function run(game){
   game.check('T6 decoy expires',!(await entities(0x715)).length);
   await equip(1,0xc0d);
   const swords=await cast('dancing-swords',85,0x715,false);
-  game.check('Dancing Swords equip bonuses apply',swords.after.character.stats.max_hp===760&&swords.after.character.stats.attack===69&&swords.after.character.stats.speed===34);
+  game.check('Dancing Swords equip bonuses apply',swords.after.character.stats.max_hp===760&&swords.after.character.stats.attack===69&&swords.after.character.stats.speed===16);
   await game.act({keys:[],duration_ms:800});
   const moving=await entities(0x715);
   game.check('Dancing Swords decoys move',moving.some(e=>distance(e.pos,swords.before.position)>0.5));
