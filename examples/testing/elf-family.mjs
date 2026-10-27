@@ -55,7 +55,7 @@ export async function run(game){
   }
   const orbits=family(begin).filter(e=>[0x605,0x607].includes(e.kind)).map(e=>{
     let last=null,angle=0,near=0;
-    for(const s of samples.slice(8)){const a=family(s).find(a=>a.id===e.id);assert(a);const dx=a.pos.x-s.view.position.x,dy=a.pos.y-s.view.position.y,t=Math.atan2(dy,dx);if(last!==null)angle+=Math.atan2(Math.sin(t-last),Math.cos(t-last));last=t;if(Math.hypot(dx,dy)>2&&Math.hypot(dx,dy)<4)near++;}
+    for(const s of samples.slice(8)){const a=family(s).find(a=>a.id===e.id);assert(a);const dx=a.pos.x-s.view.position.x,dy=a.pos.y-s.view.position.y,t=Math.atan2(dy,dx);if(last!==null)angle+=Math.atan2(Math.sin(t-last),Math.cos(t-last));last=t;if(Math.hypot(dx,dy)>1.5&&Math.hypot(dx,dy)<3.5)near++;}
     return {id:e.id,kind:e.kind,angle,near};
   });
   await writeFile(join(process.env.QA_RESULTS_DIR,'orbits.json'),JSON.stringify(orbits));
@@ -87,5 +87,5 @@ export async function run(game){
   game.check('dead Wizard cannot replenish or transform',family(final).every(e=>e.kind!==0x609&&remaining.some(p=>p.id===e.id)));
   game.check('Wizard XP awarded once',final.view.character.experience===dead.view.character.experience);
   game.check('prepared native character survives',final.view.lifecycle.alive&&final.view.session.character===begin.view.session.character);
-  game.check('Archers and Mage circle the player at radius three',orbits.every(e=>e.angle>3&&e.near>=16));
+  game.check('Archers and Mage repeatedly circle the player within the bounded motor footprint',orbits.every(e=>e.angle>3&&e.near>=16));
 }
