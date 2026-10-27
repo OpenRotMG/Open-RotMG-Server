@@ -48,8 +48,10 @@ export async function run(game){
   await withAgentTab(browser.port,browser.owner,async page=>{
     const requests=[];
     page.on('response',response=>{if(['/legacy-api/fame/list','/legacy-api/char/fame'].includes(new URL(response.url()).pathname))requests.push(response);});
-    await page.goto(config.origin);await page.waitForFunction(()=>document.querySelector('ruffle-player')?.ruffle().isPlaying===true);
     const cdp=await page.createCDPSession();await cdp.send('Emulation.setFocusEmulationEnabled',{enabled:true});
+    await page.goto(config.origin);
+    try{await page.waitForFunction(()=>document.querySelector('ruffle-player')?.ruffle().isPlaying===true);}
+    catch(error){await page.screenshot({path:join(out,'legends-loading-failure.png')});await writeFile(join(out,'legends-loading-failure.json'),JSON.stringify({url:page.url(),state:await page.evaluate(()=>({visibility:document.visibilityState,playing:document.querySelector('ruffle-player')?.ruffle().isPlaying}))}));throw error;}
     await page.evaluate(()=>{const m=document.querySelector('ruffle-player').shadowRoot.querySelector('#hardware-acceleration-modal');if(m&&!m.classList.contains('hidden'))m.querySelector('.close-modal').click();});
     const rect=await page.evaluate(()=>{const p=document.querySelector('ruffle-player');p.focus({preventScroll:true});const r=p.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};});assert.equal(rect.width,800);assert.equal(rect.height,600);
     async function click(x,y){const p={x:rect.x+x,y:rect.y+y,button:'left',clickCount:1};await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',...p});try{await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}}
