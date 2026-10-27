@@ -14,6 +14,74 @@ async fn character(store: &crate::store::Store, d: &Directory, name: &str) -> Ch
 }
 
 #[tokio::test]
+async fn dungeon_portals_expire_at_their_full_published_lifetime() {
+    for (kind, key, lifetime) in [
+        (0x717, None, 1200),
+        (0x70c, None, 300),
+        (0x717, Some(0x705), 1200),
+    ] {
+        let mut d = directory();
+        let store =
+            crate::store::Store::open(std::path::Path::new(":memory:"), &d.content).unwrap();
+        let mut ch = character(&store, &d, "portal-timer").await;
+        if let Some(key) = key {
+            ch.items[4] = key;
+        }
+        let player = d.worlds.get_mut(&-3).unwrap().enter(ch, None).unwrap();
+        let pos = d.worlds[&-3].players[&player].pos;
+        d.tick = 1234;
+        let portal = if let Some(key) = key {
+            let w = d.worlds.get_mut(&-3).unwrap();
+            let plan = w
+                .use_item(
+                    player,
+                    Slot {
+                        object: player,
+                        slot: 4,
+                        kind: key,
+                    },
+                    pos,
+                )
+                .unwrap()
+                .unwrap();
+            let portal = plan.unlock.unwrap().opened;
+            let plan = d.stage_unlock(plan).unwrap();
+            assert!(!d.worlds[&-3].entities[&portal].published);
+            d.tick += 100;
+            let revision = plan.revision + 1;
+            d.finish_inventory(plan, Ok(revision)).unwrap();
+            assert_eq!(d.worlds[&-3].players[&player].character.items[4], -1);
+            portal
+        } else {
+            d.drop_dungeon_portal(-3, kind, pos).unwrap()
+        };
+        let born = d.tick;
+        let destination = d.portals[&portal].destination.unwrap();
+        assert_eq!(d.portals[&portal].expires, born + lifetime);
+        d.worlds
+            .get_mut(&-3)
+            .unwrap()
+            .players
+            .get_mut(&player)
+            .unwrap()
+            .pos = d.worlds[&-3].entities[&portal].pos;
+        for age in [lifetime / 2, lifetime - 1] {
+            d.tick = born + age;
+            d.coordinate(&[]);
+            assert!(d.worlds[&-3].entities[&portal].published);
+            assert_eq!(d.destination(player, Some(portal)).unwrap().2, destination);
+        }
+        d.tick = born + lifetime;
+        assert!(d.destination(player, Some(portal)).is_err());
+        d.coordinate(&[]);
+        assert!(!d.portals.contains_key(&portal));
+        assert!(!d.worlds[&-3].entities.contains_key(&portal));
+        assert!(d.destination(player, Some(portal)).is_err());
+        assert!(d.worlds.contains_key(&destination));
+    }
+}
+
+#[tokio::test]
 async fn god_defeats_publish_dungeons_past_twelve_worlds_and_preserve_vaults() {
     let mut d = directory();
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &d.content).unwrap();

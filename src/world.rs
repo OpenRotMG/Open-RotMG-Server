@@ -689,6 +689,9 @@ pub struct Slot {
     pub slot: usize,
     pub kind: i32,
 }
+// Ordinary entrances last a minute in the June 2012 guide; keys share that window: https://web.archive.org/web/20120609023836/http://forums.wildshadow.com/wiki/realm-mad-god/dungeons
+const DUNGEON_PORTAL_TICKS: u64 = 60_000 / 50;
+
 #[derive(Clone, Copy)]
 pub struct PortalPlan {
     locked: Option<i32>,
@@ -696,8 +699,11 @@ pub struct PortalPlan {
 }
 impl PortalPlan {
     fn lifetime(self) -> u64 {
-        // Trapped's Create uses 20 seconds; preserve the existing Cellar's 120-second policy.
-        if self.locked.is_some() { 2400 } else { 400 }
+        if self.locked.is_some() {
+            2400
+        } else {
+            DUNGEON_PORTAL_TICKS
+        }
     }
 }
 #[derive(Clone)]
@@ -2139,7 +2145,12 @@ impl Directory {
                 origin,
                 destination: Some(destination),
                 // The May 2012 Sprite World guide specifies 15 seconds, unlike newer references.
-                expires: self.tick + if kind == 0x70c { 300 } else { 600 },
+                expires: self.tick
+                    + if kind == 0x70c {
+                        300
+                    } else {
+                        DUNGEON_PORTAL_TICKS
+                    },
             },
         );
         tracing::info!(
@@ -2152,6 +2163,7 @@ impl Directory {
             requested_x = pos.x,
             requested_y = pos.y,
             displacement = pos.distance(self.worlds[&origin].entities[&id].pos),
+            expires_tick = self.portals[&id].expires,
             "earned dungeon portal dropped"
         );
         Ok(id)
