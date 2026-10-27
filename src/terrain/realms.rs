@@ -58,7 +58,8 @@ pub(crate) struct Site {
     pub(crate) kind: u16,
     pub(crate) bounds: [i32; 4],
     pub(crate) spawn: [i32; 2],
-    pub(crate) scenery: usize,
+    pub(crate) support: usize,
+    pub(crate) chest: Option<[i32; 2]>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

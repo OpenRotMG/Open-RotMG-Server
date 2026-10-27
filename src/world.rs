@@ -1294,7 +1294,7 @@ impl Directory {
                 if beach_bum {
                     world.populate_beach_bum()?;
                 }
-                world.populate_realm_heroes()?;
+                world.populate_realm_heroes(&sites)?;
                 world.populate_named_quests(&sites)?;
                 world.populate_realm_events()?;
                 world.populate_hermit()?;
