@@ -136,6 +136,7 @@ fn only_real_carried_slots_not_equipped_cached_vault_or_observed_chest_are_candi
     chest.id = 4;
     chest.account = None;
     chest.kind = 0x504;
+    chest.name = c.get(chest.kind).unwrap().name.clone();
     chest.contents = vec![LONG_SWORD; 8];
     chest.equipped.clear();
     v.objects.push(chest);
@@ -148,6 +149,12 @@ fn only_real_carried_slots_not_equipped_cached_vault_or_observed_chest_are_candi
     assert!(select(&v, &c, &market, &policy).unwrap().is_none());
     v.character.items[8] = LONG_SWORD;
     v.character.inventory_revision += 1;
+    assert_eq!(
+        market
+            .spendable_surplus(&v, &c, policy.future_class, LONG_SWORD)
+            .unwrap(),
+        1
+    );
     let candidate = select(&v, &c, &market, &policy).unwrap().unwrap();
     assert_eq!(
         (candidate.slot, candidate.kind, candidate.inventory_revision),
