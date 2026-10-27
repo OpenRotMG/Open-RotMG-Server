@@ -6504,7 +6504,7 @@ impl World {
                         continue;
                     }
                 }
-            } else if current.quest.is_some() {
+            } else if current.quest.is_some() && !crate::endgame::HEROES.contains(&kind) {
                 self.quest_movement(id, target, elapsed)
             } else if crate::encounter::fauna::ROSTER.contains(&kind) {
                 match self.fauna_movement(id, target, elapsed) {
