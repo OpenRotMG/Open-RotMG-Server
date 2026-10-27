@@ -25,8 +25,11 @@ export async function run(game) {
       const p=(await game.observe()).position,dx=x-p.x,dy=y-p.y;
       if(Math.hypot(dx,dy)<0.4)return;
       const sx=dx*Math.cos(camera)+dy*Math.sin(camera),sy=-dx*Math.sin(camera)+dy*Math.cos(camera);
-      const horizontal=Math.abs(sx)>Math.abs(sy),d=horizontal?sx:sy;
-      await act({keys:[horizontal?(d>0?'d':'a'):(d>0?'s':'w')],duration_ms:Math.max(50,Math.min(400,Math.round(Math.abs(d)/7.733*1000)))});
+      const keys=[];
+      if(Math.abs(sx)>0.15)keys.push(sx>0?'d':'a');
+      if(Math.abs(sy)>0.15)keys.push(sy>0?'s':'w');
+      const distance=keys.length===2?Math.min(Math.abs(sx),Math.abs(sy))*Math.SQRT2:Math.max(Math.abs(sx),Math.abs(sy));
+      await act({keys,duration_ms:Math.max(50,Math.min(400,Math.round(distance/7.733*1000)))});
     }
     throw Error('Native walk did not reach '+x+','+y);
   }
@@ -50,8 +53,11 @@ export async function run(game) {
     await go(x,y);
     if(x===56.5)await go(60.5,y);
     await defeat(0x188a,'Tesla Coil');
+    await go(x,y);
   }
-  await go(56.5,20.5);
+  await go(56.5,22.5);
+  await go(60.5,22.5);
+  await go(60.5,20.5);
   await go(64.5,12.5);
   await save('all-coils-before-boss');
   game.check('coils alone leave emergency walls sealed',(await entities()).some(e=>e.kind===0x18c2));
@@ -61,6 +67,8 @@ export async function run(game) {
   await go(60.5,12.5);
   for(let n=0;n<200&&(await entities()).find(e=>e.kind===0x5e1c).stage!==4;n++)await act({keys:[],duration_ms:100});
   game.check('ordinary native distance triggers the center blast phase',(await entities()).find(e=>e.kind===0x5e1c).stage===4);
+  await go(64.5,11.5);
+  await go(69.5,11.5);
   await go(75.5,12.5);
   await save('creation-open');
   const creation=async()=> (await entities()).find(e=>e.kind===0x5e1c);
