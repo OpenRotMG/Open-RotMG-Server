@@ -1841,8 +1841,9 @@ impl Account {
             let fame = self.best_fame.get(class).copied().unwrap_or(0);
             format!("<ClassStats objectType=\"{class}\"><BestLevel>{level}</BestLevel><BestFame>{fame}</BestFame></ClassStats>")
         }).collect();
+        // DNS is the legacy socket-proxy key, not the display name: https://github.com/OpenRotMG/Open-RotMG-Client/blob/5f55930a2743250e1e3f52e755c157361b0bb710/launcher.js#L30
         format!(
-            "<Chars nextCharId=\"{}\" maxNumChars=\"{}\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>{}</Credits><NextCharSlotPrice>{}</NextCharSlotPrice>{guild}</Account><Servers><Server><Name>Local development</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>{usage}</Usage></Server></Servers><News>{news}</News></Chars>",
+            "<Chars nextCharId=\"{}\" maxNumChars=\"{}\">{chars}<Account><AccountId>{}</AccountId><Name>{}</Name>{chosen}<Stats><Fame>{}</Fame><TotalFame>{}</TotalFame>{records}</Stats><Credits>{}</Credits><NextCharSlotPrice>{}</NextCharSlotPrice>{guild}</Account><Servers><Server><Name>Open RotMG</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>{usage}</Usage></Server></Servers><News>{news}</News></Chars>",
             self.next_id,
             self.character_slots,
             self.id,
@@ -1853,6 +1854,27 @@ impl Account {
             self.next_slot_price
         )
     }
+}
+
+#[cfg(test)]
+#[test]
+fn character_list_advertises_product_name_without_changing_transport() {
+    let account = Account {
+        id: 1,
+        name: "Guest1".into(),
+        next_id: 1,
+        character_slots: 1,
+        next_slot_price: 600,
+        guild: None,
+        credits: 0,
+        fame: 0,
+        earned_fame: 0,
+        best_levels: BTreeMap::new(),
+        best_fame: BTreeMap::new(),
+        characters: Vec::new(),
+    };
+    let xml = account.xml("", 0.25);
+    assert!(xml.contains("<Servers><Server><Name>Open RotMG</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0.25</Usage></Server></Servers>"));
 }
 
 #[cfg(test)]
