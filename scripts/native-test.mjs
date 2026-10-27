@@ -14,6 +14,12 @@ import {connect} from './record-demo.mjs';
 
 const exec = promisify(execFile), root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let activeCase=false;
+export function nativeClientArguments({client,clientManifest}) {
+  assert(client===undefined||clientManifest===undefined,'--client and --client-manifest are mutually exclusive');
+  if(client!==undefined){assert(isAbsolute(client),'--client must be an absolute checkout path');return ['--client',client];}
+  if(clientManifest!==undefined){assert(isAbsolute(clientManifest),'--client-manifest must be an absolute manifest path');return ['--client-manifest',clientManifest];}
+  return [];
+}
 export function browserDiagnostic(line, closing=false) {
   const m=/^\[\d+:\d+:\d+\/\d+\.\d+:ERROR:([^\]]+):\d+\] (.*)$/.exec(line);
   // Push registration is outside this local game's protocol; retain its diagnostics without inventing game failures.
@@ -147,13 +153,13 @@ export async function closedArchive(options) {
   return Object.freeze({state,profile,actor:previous.actor,account:previous.account,sourceHead,ownerRun,port,deadline:held.deadline});
 }
 export async function runCase(scenario, options) {
+  let clientArgs=nativeClientArguments(options);
   const archive=Object.hasOwn(options,'archive')?await closedArchive(options.archive):null;
   assert(options.runDir && isAbsolute(options.runDir)&&resolve(options.runDir)===options.runDir,'A canonical absolute new --run-dir is required');
   assert(options.runDir!==root&&!options.runDir.startsWith(root+'/'),'Keep generated runs outside the source checkout');
   assert(options.browserTools && isAbsolute(options.browserTools),'Set PI_BROWSER_TOOLS to the installed managed-browser directory');
   assert(options.chrome && isAbsolute(options.chrome),'Set PI_NATIVE_TEST_CHROME to the Chrome executable');
   assert(Array.isArray(options.chromeArgs) && options.chromeArgs.every(x=>typeof x==='string'),'Chrome arguments must be an explicit JSON array');
-  if(options.client!==undefined)assert(isAbsolute(options.client),'--client must be an absolute checkout path');
   const timeout=options.timeoutMs;assert(Number.isInteger(timeout)&&timeout>=180000&&timeout<=3600000,'Timeout must be 180000–3600000ms, including 120 seconds for cleanup');
   assert(!activeCase,'Only one native case may own this process');
   const out=options.runDir,state=archive?archive.state:join(out,'state');assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
@@ -217,9 +223,12 @@ export async function runCase(scenario, options) {
     guardian=startChild(process.execPath,[join(root,'scripts/native-test-process.mjs'),out],{stdio:['ignore','ignore',await log('guardian.log')]},controller.signal);
     guardian.closed.then(value=>{if(!closing)fail(Error('Cleanup guardian exited early: '+JSON.stringify(value)));});
     report.guardian=guardian.child.pid;await guardian.started;
-    report.inputs={};for(const [name,path] of [['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]]){
+    const inputs=[['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]];
+    if(options.clientManifest!==undefined)inputs.push(['clientManifest',options.clientManifest]);
+    report.inputs={};for(const [name,path] of inputs){
       const bytes=await readFile(path);report.inputs[name]=createHash('sha256').update(bytes).digest('hex');
       if(name==='case')await writeFile(join(out,'case.mjs'),bytes,{mode:0o600});
+      if(name==='clientManifest'){const snapshot=join(out,'client-selection-input.json');await writeFile(snapshot,bytes,{mode:0o600});clientArgs=['--client-manifest',snapshot];}
     }
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);if(archive)assert(typeof fixtureModule.readArchive==='function'&&!Object.hasOwn(fixtureModule,'prepare')&&!Object.hasOwn(fixtureModule,'enter')&&!Object.hasOwn(fixtureModule,'fixture')&&!Object.hasOwn(fixtureModule,'run'),'Archive requires readArchive only: no fixture/prepare/enter/run');else assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');hasNativeEntry(fixtureModule);
     let spec=archive?null:fixtureModule.prepare===undefined?await prepareFixture(fixtureModule,api,controller.signal):null;
@@ -228,7 +237,7 @@ export async function runCase(scenario, options) {
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
     await bounded('prepareBuildStart',async()=>{
       const began=performance.now();let buildStart,buildEnd,ready;
-      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots','--release'];if(archive)args.push('--dev-control');if(options.client)args.push('--client',options.client);
+      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots','--release'];if(archive)args.push('--dev-control');args.push(...clientArgs);
       const server=launch('server',join(root,'run.sh'),args,['ignore','pipe','pipe'],{...process.env,CARGO_TERM_COLOR:'never'});
       for(const [stream,name] of [[server.child.stdout,'server.log'],[server.child.stderr,'build.log']]){
         const fd=await log(name);let pending='';
@@ -245,7 +254,7 @@ export async function runCase(scenario, options) {
       await server.started;await waitFor(()=>ready,'Server did not become ready',timeout-125000);
       assert(buildStart&&buildEnd&&buildStart<=buildEnd&&buildEnd<=ready,'Missing or inconsistent launcher/Cargo timing boundaries');
       report.phases.clientPreparation=Math.round(buildStart-began);report.phases.build=Math.round(buildEnd-buildStart);report.phases.serverStart=Math.round(ready-buildEnd);
-      report.client=options.client?{mode:'local',path:options.client,lock:JSON.parse(await readFile(join(options.client,'ruffle/lock.json'),'utf8'))}:{mode:'deployed',selection:JSON.parse(await readFile(join(state,'client-selection.json'),'utf8'))};
+      report.client=options.client?{mode:'local',path:options.client,lock:JSON.parse(await readFile(join(options.client,'ruffle/lock.json'),'utf8'))}:{mode:options.clientManifest===undefined?'deployed':'manifest',selection:JSON.parse(await readFile(join(state,'client-selection.json'),'utf8')),...(options.clientManifest===undefined?{}:{manifest:join(out,'client-selection-input.json')})};
     });
     delete report.phases.prepareBuildStart;
     if(!archive&&fixtureModule.prepare!==undefined)spec=await bounded('fixturePreparation',()=>prepareFixture(fixtureModule,api,AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])));
@@ -387,11 +396,11 @@ export async function runCase(scenario, options) {
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){
-    console.log('Usage: node scripts/native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY\nLinux: Node22.15+, Xvfb, xauth, Openbox and managed browser helpers.\nSet PI_BROWSER_TOOLS and PI_NATIVE_TEST_CHROME, or --browser-tools and --chrome.\nOptional --chrome-args JSON, --client ABSOLUTE_CHECKOUT, --timeout-ms (default900000; includes120000 cleanup reserve).\nFresh prepared fixtures only. Existing directories are refused; state/logs are preserved.');
+    console.log('Usage: node scripts/native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY\nLinux: Node22.15+, Xvfb, xauth, Openbox and managed browser helpers.\nSet PI_BROWSER_TOOLS and PI_NATIVE_TEST_CHROME, or --browser-tools and --chrome.\nOptional --chrome-args JSON, --client ABSOLUTE_CHECKOUT or --client-manifest ABSOLUTE_MANIFEST, --timeout-ms (default900000; includes120000 cleanup reserve).\nFresh prepared fixtures only. Existing directories are refused; state/logs are preserved.');
   }else try {
-    const {values,positionals}=parseArgs({allowPositionals:true,options:{'run-dir':{type:'string'},'browser-tools':{type:'string'},chrome:{type:'string'},'chrome-args':{type:'string'},client:{type:'string'},'timeout-ms':{type:'string',default:'900000'}}});
+    const {values,positionals}=parseArgs({allowPositionals:true,options:{'run-dir':{type:'string'},'browser-tools':{type:'string'},chrome:{type:'string'},'chrome-args':{type:'string'},client:{type:'string'},'client-manifest':{type:'string'},'timeout-ms':{type:'string',default:'900000'}}});
     assert.equal(positionals.length,1,'Usage: native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY');
-    const result=await runCase(positionals[0],{runDir:values['run-dir'],browserTools:values['browser-tools']??process.env.PI_BROWSER_TOOLS,chrome:values.chrome??process.env.PI_NATIVE_TEST_CHROME,chromeArgs:JSON.parse(values['chrome-args']??process.env.PI_NATIVE_TEST_CHROME_ARGS??'[]'),client:values.client,timeoutMs:Number(values['timeout-ms'])});
+    const result=await runCase(positionals[0],{runDir:values['run-dir'],browserTools:values['browser-tools']??process.env.PI_BROWSER_TOOLS,chrome:values.chrome??process.env.PI_NATIVE_TEST_CHROME,chromeArgs:JSON.parse(values['chrome-args']??process.env.PI_NATIVE_TEST_CHROME_ARGS??'[]'),client:values.client,clientManifest:values['client-manifest'],timeoutMs:Number(values['timeout-ms'])});
     console.log(JSON.stringify({status:result.status,assertions:result.assertions,phases:result.phases,wallMs:result.wallMs,browserDiagnostics:result.browserDiagnostics,report:result.report}));
   }catch(error){console.error(String(error));process.exitCode=1;}
 }

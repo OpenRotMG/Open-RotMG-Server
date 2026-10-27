@@ -46,7 +46,7 @@ async fn resolve(
     name: &str,
     source: i32,
     target: i32,
-) -> Result<&'static str, (StatusCode, String)> {
+) -> Result<String, (StatusCode, String)> {
     let origin = a.bot_view_origin.as_deref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "native bot viewing is not configured".into(),
@@ -101,7 +101,7 @@ async fn resolve(
             "perspective inspection failed".into(),
         )
     })?;
-    if !visible || a.cctv.perspective(name, source, target) != Some(binding) {
+    if !visible || a.cctv.perspective(name, source, target) != Some(binding.clone()) {
         return Err(missing());
     }
     Ok(binding.0)

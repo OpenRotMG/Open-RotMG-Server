@@ -959,6 +959,17 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         };
         self.list_id(id).await
     }
+    pub(crate) async fn account_stars(&self, account: i32) -> Result<i32> {
+        let legacy_base = self.legacy_base;
+        let classes = self.classes.clone();
+        // Census reads must not award class-quest Gold through presentation().
+        self.call(move |db| {
+            Ok(read_presentation(db, account, legacy_base, &classes)?
+                .0
+                .stars())
+        })
+        .await
+    }
     pub async fn presentation(&self, account: i32) -> Result<AccountPresentation> {
         let legacy_base = self.legacy_base;
         let classes = self.classes.clone();
@@ -1144,9 +1155,16 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     }
     pub(crate) async fn retire_persona(&self, identity: String, account: i32) -> Result<()> {
         ensure!(
-            identity.starts_with("persona:v1:") && !identity.starts_with("persona:v1:retired:"),
+            ["persona:v1:", "guest:v1:"].iter().any(|prefix| identity
+                .strip_prefix(prefix)
+                .is_some_and(|suffix| !suffix.starts_with("retired:"))),
             "not an active preset identity"
         );
+        let namespace = identity
+            .split_once(":v1:")
+            .context("preset namespace missing")?
+            .0
+            .to_owned();
         self.call(move |db| {
             // Keep all characters, resources and receipts for rollback; only the active registry binding changes.
             let changed = db.execute(
@@ -1154,7 +1172,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 params![
                     identity,
                     account,
-                    format!("persona:v1:retired:{account}:{identity}")
+                    format!("{namespace}:v1:retired:{account}:{identity}")
                 ],
             )?;
             ensure!(changed == 1, "persona retirement binding changed");
