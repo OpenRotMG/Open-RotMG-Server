@@ -525,12 +525,14 @@ pub(crate) struct GiftAcceptance {
     pub peer_player: i32,
     pub peer_name: String,
     pub giving: bool,
+    pub kind: i32,
     pub writes_hash: [u8; 32],
 }
 impl GiftAcceptance {
-    pub(crate) fn payload_hash(giving: bool, writes: &str) -> [u8; 32] {
+    pub(crate) fn payload_hash(kind: i32, giving: bool, writes: &str) -> [u8; 32] {
         use sha2::Digest;
         let mut hash = sha2::Sha256::new();
+        hash.update(kind.to_be_bytes());
         hash.update([u8::from(giving)]);
         hash.update(writes.as_bytes());
         hash.finalize().into()
@@ -1367,6 +1369,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 && acceptance.session[1] > 0
                 && acceptance.session[2] == acceptance.own.character
                 && acceptance.peer_player > 0
+                && (0..=65535).contains(&acceptance.kind)
                 && acceptance.own.account != acceptance.peer.account
                 && [acceptance.own, acceptance.peer]
                     .iter()
@@ -1403,8 +1406,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                         .iter()
                         .zip(revisions)
                         .all(|(w, revision)| w.revision.checked_add(1) == Some(revision))
-                    && GiftAcceptance::payload_hash(acceptance.giving, &raw_writes)
-                        == acceptance.writes_hash,
+                    && GiftAcceptance::payload_hash(
+                        acceptance.kind,
+                        acceptance.giving,
+                        &raw_writes
+                    ) == acceptance.writes_hash,
                 "gift committed transaction payload/participants mismatch: {}",
                 acceptance.transaction
             );

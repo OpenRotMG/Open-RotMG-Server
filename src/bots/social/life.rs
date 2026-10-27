@@ -41,6 +41,7 @@ impl Gift {
             && acceptance.peer_player == self.player
             && acceptance.peer_name == self.name
             && acceptance.giving == self.giving
+            && acceptance.kind == HEALTH
     }
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -839,7 +840,15 @@ pub(in crate::bots) async fn life(
                 d.worlds
                     .get_mut(&session[0])
                     .context("gift world missing")?
-                    .autonomous_gift(id, session, g.player, (g.account, g.name), g.giving, action)
+                    .autonomous_gift(
+                        id,
+                        session,
+                        g.player,
+                        (g.account, g.name),
+                        g.giving,
+                        HEALTH,
+                        action,
+                    )
             })
             .await;
         match result {
@@ -882,4 +891,133 @@ pub(in crate::bots) async fn life(
         }
     }
     Ok(brain.mind.social.gift.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bots::runtime::tests::actor;
+    use crate::world::TradeAction;
+
+    #[tokio::test]
+    async fn gift_kind_health_history_requires_commit_and_applies_once() {
+        let (dir, app) = crate::server::test_app();
+        let (_owner, id, _output, mut brain) = actor(
+            &app,
+            "gift-health",
+            "Donor",
+            [HEALTH, -1, -1, -1, -1, -1, -1, -1],
+        )
+        .await;
+        let (_peer_owner, peer, _peer_output, _) =
+            actor(&app, "gift-health-peer", "Recipient", [-1; 8]).await;
+        let view = app.world.player_view(id).await.unwrap();
+        let recipient = app.world.player_view(peer).await.unwrap();
+        let session = [view.session.world, id, view.session.character];
+        let binding = (recipient.session.account, "Recipient".to_owned());
+        let mut mine = [false; 12];
+        mine[4] = true;
+        let theirs = [false; 12];
+        let setup_binding = binding.clone();
+        app.world
+            .directory(move |d| {
+                let w = d.worlds.get_mut(&session[0]).unwrap();
+                w.updates(id, true)?;
+                w.request_trade(peer, w.players[&id].character.name.clone())?;
+                w.autonomous_gift(
+                    id,
+                    session,
+                    peer,
+                    setup_binding.clone(),
+                    true,
+                    HEALTH,
+                    TradeAction::Request {
+                        name: setup_binding.1.clone(),
+                    },
+                )?;
+                w.autonomous_gift(
+                    id,
+                    session,
+                    peer,
+                    setup_binding,
+                    true,
+                    HEALTH,
+                    TradeAction::Change { offer: mine },
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(3050)).await;
+        let witness = app
+            .world
+            .directory(move |d| {
+                Ok(d.worlds
+                    .get_mut(&session[0])
+                    .unwrap()
+                    .autonomous_gift(
+                        id,
+                        session,
+                        peer,
+                        binding,
+                        true,
+                        HEALTH,
+                        TradeAction::Accept { mine, theirs },
+                    )?
+                    .acceptance
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        let gift = Gift {
+            account: recipient.session.account,
+            player: peer,
+            name: witness.peer_name.clone(),
+            giving: true,
+            until: view.time_ms + 30000,
+            session,
+            requested: true,
+            consent: true,
+            acceptance: Some(witness.clone()),
+            cancelled: false,
+        };
+        let mut other_kind = witness;
+        other_kind.kind = 0xa97;
+        assert!(!gift.matches(&other_kind, &view));
+        brain.mind.social.gift = Some(gift);
+        assert!(recover_gift_receipt(&app, &mut brain, &view).await.unwrap());
+        assert!(brain.mind.social.episodes.is_empty());
+        let plan = app
+            .world
+            .directory(move |d| {
+                Ok(d.worlds
+                    .get_mut(&session[0])
+                    .unwrap()
+                    .accept_trade(peer, theirs, mine)?
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        crate::server::persist_trade(&app, plan).await.unwrap();
+        let settled = app.world.player_view(id).await.unwrap();
+        assert!(
+            !recover_gift_receipt(&app, &mut brain, &settled)
+                .await
+                .unwrap()
+        );
+        assert!(brain.mind.social.gift.is_none());
+        assert_eq!(brain.mind.social.episodes.len(), 1);
+        assert_eq!(
+            brain.mind.social.episodes[0].interaction,
+            Interaction::GaveHealth
+        );
+        assert!(
+            !recover_gift_receipt(&app, &mut brain, &settled)
+                .await
+                .unwrap()
+        );
+        assert_eq!(brain.mind.social.episodes.len(), 1);
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
