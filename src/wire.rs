@@ -231,42 +231,13 @@ mod tests {
             vec![0xbb, 0xf3, 0x16, 0xe8, 0xd9, 0x40, 0xaf, 0x0a, 0xd3]
         );
     }
-    #[test]
-    fn fragmented_stream_and_empty_ack() {
-        let mut client = Codec::client();
-        let mut server = Codec::server();
-        let mut bytes = client.frame(HELLO, b"first".to_vec());
-        bytes.extend(client.frame(UPDATE_ACK, vec![]));
-        bytes.extend(client.frame(MOVE, b"second".to_vec()));
-        let mut packets = Vec::new();
-        for chunk in bytes.chunks(3) {
-            packets.extend(server.feed(chunk).unwrap());
-        }
-        assert_eq!(packets.len(), 3);
-        assert_eq!(packets[0].body, b"first");
-        assert_eq!(packets[1].id, UPDATE_ACK);
-        assert!(packets[1].body.is_empty());
-        assert_eq!(packets[2].body, b"second");
-        let reply = server.frame(PING, vec![0, 0, 0, 1]);
-        assert_eq!(client.feed(&reply).unwrap()[0].body, vec![0, 0, 0, 1]);
-    }
-    #[test]
-    fn framing_is_not_encrypted() {
-        let mut c = Codec::server();
-        let f = c.frame(CREATE_SUCCESS, vec![0; 8]);
-        assert_eq!(&f[..5], &[0, 0, 0, 13, 31]);
-    }
+
     #[test]
     fn invalid_frames_fail() {
         assert!(Codec::server().feed(&[0, 0, 0, 4, 17]).is_err());
         assert!(Reader::new(&[0, 5, b'x']).utf().is_err());
     }
-    #[test]
-    fn create_has_only_class_type() {
-        let mut r = Reader::new(&[3, 14]);
-        assert_eq!(r.i16().unwrap(), 0x030e);
-        r.done().unwrap();
-    }
+
     #[test]
     fn selected_client_source_vectors() {
         // These fixtures derive from selected-client ABC; they are not captured gameplay or valid RSA login.

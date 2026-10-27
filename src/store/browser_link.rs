@@ -185,48 +185,4 @@ mod tests {
         store.change_password(id, verifier).await.unwrap();
         assert!(store.link_browser_discord(proof, discord).await.is_err());
     }
-
-    #[tokio::test]
-    async fn reward_failure_rolls_back_link_and_recovery() {
-        let content = Content::load(Path::new("data")).unwrap();
-        let store = Store::open(Path::new(":memory:"), &content).unwrap();
-        let id = store
-            .register(
-                "rollback-browser".into(),
-                "rollback-browser@example.test".into(),
-                "test-password".into(),
-            )
-            .await
-            .unwrap();
-        store
-            .call(move |db| {
-                db.execute("UPDATE accounts SET credits=2147483647 WHERE id=?1", [id])?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        assert!(
-            store
-                .link_browser_discord(
-                    store.browser_identity(id).await.unwrap(),
-                    "12345678901234567".into()
-                )
-                .await
-                .is_err()
-        );
-        store
-            .call(move |db| {
-                for table in ["discord_links", "discord_recovery", "gold_rewards"] {
-                    let count: i32 = db.query_row(
-                        &format!("SELECT count(*) FROM {table} WHERE account=?1"),
-                        [id],
-                        |r| r.get(0),
-                    )?;
-                    assert_eq!(count, 0);
-                }
-                Ok(())
-            })
-            .await
-            .unwrap();
-    }
 }

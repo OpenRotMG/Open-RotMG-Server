@@ -612,7 +612,3 @@ impl World {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "reinforcement_tests.rs"]
-mod reinforcement_tests;

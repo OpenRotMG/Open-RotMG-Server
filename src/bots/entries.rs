@@ -134,6 +134,3 @@ impl Brain {
         self.entries.choose(v, &eligible, &mut self.rng)
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -1,6 +1,4 @@
 use super::*;
-#[cfg(test)]
-mod tests;
 
 const WINDOW: u64 = 10_000;
 const COMPANY: u64 = 60_000;

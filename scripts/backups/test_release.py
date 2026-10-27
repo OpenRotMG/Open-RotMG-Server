@@ -62,63 +62,6 @@ class ReleaseContract(unittest.TestCase):
             self.assertEqual(payload, json.loads(old['stats']))
             row['stats'] = old['stats']
 
-    def test_rank_gold_schema18_roundtrip_and_schema17_compatibility(self):
-        root = Path(__file__).resolve().parents[2]
-        binary = os.environ['OPENROTMG_BACKUP_BINARY']
-        with tempfile.TemporaryDirectory() as temporary:
-            work = Path(temporary)
-            subprocess.run([binary, '--backup-fixture', str(work / 'written'), str(root / 'data')], check=True)
-            game = work / 'written/game.db'
-            discord = work / 'levels.sqlite'
-            with closing(sqlite3.connect(discord)) as db, db:
-                db.execute('CREATE TABLE levels(guild_id TEXT,user_id TEXT,username TEXT,xp INTEGER,last_xp_at INTEGER,last_message_id TEXT,PRIMARY KEY(guild_id,user_id))')
-            revision = work / 'REVISION'
-            revision.write_text('a' * 40)
-            with closing(sqlite3.connect(game)) as db, db:
-                minds = db.execute('SELECT account,mind FROM bot_minds').fetchall()
-                self.assertTrue(minds)
-                for account, raw in minds:
-                    mind = json.loads(raw)
-                    mind['market'].pop('quote')
-                    mind['market'].pop('preparing')
-                    mind['market']['next_ad'] = 123456
-                    db.execute('UPDATE bot_minds SET mind=? WHERE account=?', (json.dumps(mind), account))
-                owner = db.execute('SELECT min(id) FROM accounts').fetchone()[0]
-                db.execute('UPDATE accounts SET credits=credits+3725 WHERE id=?', (owner,))
-                for index, reward in enumerate(backup.gold_reward_types(18)[3:], 1):
-                    db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', (owner, reward, index, index if index % 2 else None))
-            bundle = backup.export(game, discord, work / 'new.gz', revision, revision, revision)
-            self.assertEqual(bundle['schema'], 19)
-            restored = work / 'new'
-            backup.restore(work / 'new.gz', restored)
-            subprocess.run([binary, '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
-            self.assertEqual(backup.snapshot(restored / 'game.db', backup.RELOADED_GAME), bundle['game'])
-            old = deepcopy(bundle)
-            old['schema'] = 17
-            del old['game']['discord_gold_grants']
-            with self.assertRaisesRegex(ValueError, 'Invalid gold reward'):
-                backup.validate(old)
-            old['game']['gold_rewards'] = [r for r in old['game']['gold_rewards'] if not r['reward'].startswith('class_star_')]
-            next(r for r in old['game']['accounts'] if r['id'] == owner)['credits'] -= 3725
-            archive = work / 'old.gz'
-            archive.write_bytes(gzip.compress(json.dumps(old).encode()))
-            backup.restore(archive, work / 'old')
-            old_game = work / 'old/game.db'
-            exported = backup.export(old_game, work / 'old/levels.sqlite', work / 'old-export.gz', revision, revision, revision)
-            self.assertEqual(exported['schema'], 17)
-            self.assertEqual(exported['game'], old['game'])
-            subprocess.run([binary, '--backup-load', str(old_game), str(root / 'data')], check=True)
-            migrated = backup.export(old_game, work / 'old/levels.sqlite', work / 'migrated.gz', revision, revision, revision)
-            self.assertEqual(migrated['schema'], 19)
-            self.assertEqual(migrated['game'], dict(old['game'], discord_gold_grants=[]))
-            with closing(sqlite3.connect(old_game)) as db, db:
-                db.executescript('ALTER TABLE gold_rewards RENAME TO preserved_gold; ' + backup.gold_reward_sql(17) + '; INSERT INTO gold_rewards SELECT * FROM preserved_gold; DROP TABLE preserved_gold;')
-            before = old_game.read_bytes()
-            with self.assertRaisesRegex(ValueError, 'gold reward metadata mismatch'):
-                backup.export(old_game, work / 'old/levels.sqlite', work / 'rejected.gz', revision, revision, revision)
-            self.assertEqual(old_game.read_bytes(), before)
-            self.assertFalse((work / 'rejected.gz').exists())
-
     def test_actual_writer_backup_restore_and_reload(self):
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as temporary:

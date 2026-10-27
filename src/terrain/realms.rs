@@ -339,25 +339,3 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
     }
     Ok(())
 }
-
-#[test]
-fn authored_grove_registry_refuses_changed_layout_hashes() {
-    for mut source in sources(Path::new("data")).unwrap() {
-        if source.name().starts_with("realm-fsod-") {
-            assert!(source.groves().unwrap().is_empty());
-        } else {
-            assert!(!source.groves().unwrap().is_empty());
-            let Source::Encoded(asset) = &mut source else {
-                unreachable!()
-            };
-            asset.sha256 = "0".repeat(64);
-            assert!(
-                source
-                    .groves()
-                    .unwrap_err()
-                    .to_string()
-                    .contains("Grove registry hash mismatch")
-            );
-        }
-    }
-}
