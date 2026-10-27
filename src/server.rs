@@ -820,10 +820,36 @@ pub(crate) async fn inventory(
     id: i32,
     prepare: impl FnOnce(&mut World) -> Result<Option<InventoryPlan>> + Send + 'static,
 ) -> Result<Result<bool>> {
+    inventory_prepared(a, id, move |a| async move {
+        a.world.for_player(id).call(move |w| Ok(prepare(w))).await
+    })
+    .await
+}
+
+pub(crate) async fn guarded_inventory(
+    a: &App,
+    id: i32,
+    prepare: impl FnOnce(&mut World, crate::world::view::PlayerView) -> Result<Option<InventoryPlan>>
+    + Send
+    + 'static,
+) -> Result<Result<bool>> {
+    inventory_prepared(a, id, move |a| async move {
+        a.world
+            .for_player(id)
+            .with_player_view(id, move |w, v| Ok(prepare(w, v)))
+            .await
+    })
+    .await
+}
+
+async fn inventory_prepared<F, Fut>(a: &App, id: i32, prepare: F) -> Result<Result<bool>>
+where
+    F: FnOnce(App) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<Result<Option<InventoryPlan>>>> + Send,
+{
     lifecycle::player(a, id, "inventory", move |a| async move {
         lifecycle::stage(Stage::Reservation);
-        let prepared = a.world.for_player(id).call(move |w| Ok(prepare(w))).await?;
-        match prepared {
+        match prepare(a.clone()).await? {
             Ok(Some(plan)) => {
                 persist(&a, plan).await?;
                 Ok(Ok(true))

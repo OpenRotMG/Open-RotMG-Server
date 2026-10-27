@@ -3,6 +3,7 @@ use crate::content::{Ability, Content, Object, STATS};
 use crate::world::view::{OutputState, PlayerView};
 use anyhow::{Result, ensure};
 
+#[derive(Clone)]
 pub(in crate::bots) struct Policy {
     pub future_class: Option<u16>,
     pub current_goal: Option<i32>,
@@ -11,13 +12,13 @@ pub(in crate::bots) struct Policy {
     pub available: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bots) enum Reason {
     MissingEquipment { equipped_slot: usize },
     PublicUpgrade { equipped_slot: usize, previous: i32 },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bots) struct Candidate {
     pub world: i32,
     pub own_account: i32,

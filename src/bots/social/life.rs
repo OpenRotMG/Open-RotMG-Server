@@ -7,6 +7,8 @@ pub(crate) enum Interaction {
     HealedBy,
     ReceivedHealth,
     GaveHealth,
+    ReceivedEquipment,
+    GaveEquipment,
     Refused,
     Recognized,
 }
@@ -24,6 +26,9 @@ struct Gift {
     player: i32,
     name: String,
     giving: bool,
+    kind: i32,
+    item_name: String,
+    equipment: Option<equipment::Candidate>,
     until: u64,
     session: [i32; 3],
     requested: bool,
@@ -41,7 +46,7 @@ impl Gift {
             && acceptance.peer_player == self.player
             && acceptance.peer_name == self.name
             && acceptance.giving == self.giving
-            && acceptance.kind == HEALTH
+            && acceptance.kind == self.kind
     }
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -49,6 +54,8 @@ pub(crate) struct Life {
     pub episodes: VecDeque<Episode>,
     #[serde(skip)]
     gift: Option<Gift>,
+    #[serde(skip)]
+    drop: Option<equipment::Candidate>,
     #[serde(skip)]
     pub(in crate::bots) outgoing: Option<String>,
     #[serde(skip)]
@@ -77,6 +84,64 @@ fn health(v: &PlayerView) -> usize {
         .count()
 }
 impl Life {
+    pub(super) fn equipment_due(&self, v: &PlayerView) -> bool {
+        !self.gift_active() && self.outgoing.is_none() && v.elapsed_ms >= self.next_request
+    }
+    pub(super) fn offer_equipment(
+        &mut self,
+        v: &PlayerView,
+        c: &Content,
+        candidate: equipment::Candidate,
+        drop: bool,
+    ) -> Result<()> {
+        ensure!(
+            self.equipment_due(v),
+            "equipment generosity already occupied"
+        );
+        self.next_request = v.elapsed_ms + 60000;
+        tracing::info!(
+            account = v.session.account,
+            ?candidate,
+            drop,
+            "equipment generosity initial opportunity; not delivery"
+        );
+        if drop {
+            self.drop = Some(candidate);
+            return Ok(());
+        }
+        let item_name = c.get(u16::try_from(candidate.kind)?)?.name.clone();
+        let reason = match candidate.reason {
+            equipment::Reason::MissingEquipment { equipped_slot } => {
+                format!(
+                    "missing {}",
+                    ["weapon", "ability", "armor", "ring"][equipped_slot]
+                )
+            }
+            equipment::Reason::PublicUpgrade { previous, .. } => {
+                c.get(u16::try_from(previous)?)?.name.clone()
+            }
+        };
+        self.outgoing = Some(format!(
+            "{}, spare {} for your {}; want it?",
+            candidate.recipient_name, item_name, reason
+        ));
+        self.gift = Some(Gift {
+            account: candidate.recipient_account,
+            player: candidate.recipient_player,
+            name: candidate.recipient_name.clone(),
+            giving: true,
+            kind: candidate.kind,
+            item_name,
+            equipment: Some(candidate),
+            until: v.elapsed_ms + 15000,
+            session: [v.session.world, v.session.player, v.session.character],
+            requested: false,
+            consent: false,
+            acceptance: None,
+            cancelled: false,
+        });
+        Ok(())
+    }
     pub(in crate::bots) fn cancel_composition(&mut self) {
         self.outgoing = None;
         if let Some(gift) = &mut self.gift {
@@ -84,10 +149,11 @@ impl Life {
         }
     }
     pub(in crate::bots) fn gift_active(&self) -> bool {
-        self.gift.is_some()
+        self.gift.is_some() || self.drop.is_some()
     }
     pub(in crate::bots) fn bind(&mut self) {
         self.gift = None;
+        self.drop = None;
         self.outgoing = None;
         self.heal_notice = 0;
         self.heal_tick = 0;
@@ -146,7 +212,11 @@ impl Life {
             e.account == account
                 && matches!(
                     e.interaction,
-                    Interaction::HealedBy | Interaction::ReceivedHealth | Interaction::GaveHealth
+                    Interaction::HealedBy
+                        | Interaction::ReceivedHealth
+                        | Interaction::GaveHealth
+                        | Interaction::ReceivedEquipment
+                        | Interaction::GaveEquipment
                 )
         })
     }
@@ -292,6 +362,9 @@ impl Life {
                         player: actor,
                         name: name.clone(),
                         giving: true,
+                        kind: HEALTH,
+                        item_name: "health".into(),
+                        equipment: None,
                         consent: false,
                         acceptance: None,
                         cancelled: false,
@@ -315,6 +388,9 @@ impl Life {
                         player: actor,
                         name: name.clone(),
                         giving: false,
+                        kind: HEALTH,
+                        item_name: "health".into(),
+                        equipment: None,
                         consent: true,
                         acceptance: None,
                         cancelled: false,
@@ -329,11 +405,15 @@ impl Life {
                 }
             }
             "yes health" => {
-                if let Some(g) = self
-                    .gift
-                    .as_mut()
-                    .filter(|g| g.giving && g.account == account && g.player == actor)
-                {
+                if let Some(g) = self.gift.as_mut().filter(|g| {
+                    g.giving
+                        && g.kind == HEALTH
+                        && g.account == account
+                        && g.player == actor
+                        && g.name == name
+                        && v.elapsed_ms < g.until
+                        && !g.cancelled
+                }) {
                     g.consent = true;
                 }
             }
@@ -348,7 +428,23 @@ impl Life {
                 }
                 self.next_request = v.elapsed_ms + 60000;
             }
-            _ => return Ok(false),
+            _ => {
+                if let Some(g) = self.gift.as_mut().filter(|g| {
+                    g.giving
+                        && g.kind != HEALTH
+                        && g.account == account
+                        && g.player == actor
+                        && g.name == name
+                        && !g.cancelled
+                        && v.elapsed_ms < g.until
+                        && g.session == [v.session.world, v.session.player, v.session.character]
+                }) && body == format!("yes {}", g.item_name)
+                {
+                    g.consent = true;
+                } else {
+                    return Ok(false);
+                }
+            }
         }
         Ok(true)
     }
@@ -561,15 +657,17 @@ async fn recover_gift_receipt(
                     &settled,
                     g.account,
                     g.name.clone(),
-                    if g.giving {
-                        Interaction::GaveHealth
-                    } else {
-                        Interaction::ReceivedHealth
+                    match (g.kind == HEALTH, g.giving) {
+                        (true, true) => Interaction::GaveHealth,
+                        (true, false) => Interaction::ReceivedHealth,
+                        (false, true) => Interaction::GaveEquipment,
+                        (false, false) => Interaction::ReceivedEquipment,
                     },
                     1,
                 );
                 if !g.giving {
-                    brain.mind.social.outgoing = Some(format!("{}, thanks for the health", g.name));
+                    brain.mind.social.outgoing =
+                        Some(format!("{}, thanks for the {}", g.name, g.item_name));
                 }
                 tracing::info!(account=settled.session.account,peer=g.account,transaction=%acceptance.transaction,"gift exact transaction receipt applied once");
                 return Ok(false);
@@ -630,10 +728,14 @@ pub(in crate::bots) async fn cancel_gift(
     brain: &mut Brain,
     v: &PlayerView,
 ) -> Result<bool> {
+    brain.mind.social.drop = None;
     let Some(g) = brain.mind.social.gift.as_mut() else {
         return Ok(false);
     };
     g.cancelled = true;
+    if g.kind != HEALTH {
+        brain.mind.social.next_request = v.elapsed_ms + 60000;
+    }
     // A mutual native accept may already own the commit; keep its receipt binding until completion.
     if !super::revoke_native_market(app, brain).await? {
         return Ok(true);
@@ -664,6 +766,13 @@ pub(in crate::bots) async fn life(
                 .is_none_or(|g| g.session == binding),
         "gift action belongs to a replaced session"
     );
+    if recover_gift_receipt(app, brain, v).await? {
+        return Ok(true);
+    }
+    if let Some(candidate) = brain.mind.social.drop.take() {
+        generosity::drop_equipment(app, brain, v, candidate).await?;
+        return Ok(true);
+    }
     if brain.mind.social.gift.as_ref().is_some_and(|g| g.cancelled) {
         return cancel_gift(app, brain, v).await;
     }
@@ -678,6 +787,8 @@ pub(in crate::bots) async fn life(
         let gift = brain.mind.social.gift.clone();
         let social = brain.mind.social.clone();
         let generosity = brain.profile.companions;
+        let check = brain.equipment_check(v, gift.as_ref().and_then(|g| g.equipment.as_ref()));
+        let content = app.content.clone();
         let recipient = if matches!(
             text.as_str(),
             "Realm is full, looking for a Vault" | "Realm is full, waiting here"
@@ -710,6 +821,12 @@ pub(in crate::bots) async fn life(
                     );
                 }
                 if let Some(g) = gift {
+                    if let Some(candidate) = &g.equipment {
+                        ensure!(
+                            check.current(candidate, &current, &content)?,
+                            "equipment speech candidate expired"
+                        );
+                    }
                     let peer = current.objects.iter().find(|p| {
                         p.id == g.player
                             && p.account == Some(g.account)
@@ -721,7 +838,8 @@ pub(in crate::bots) async fn life(
                             && current.elapsed_ms < g.until
                             && peer.is_some_and(|p| current.position.distance(p.position) < 2.
                                 && if g.giving {
-                                    social.generous(&current, p, generosity)
+                                    g.equipment.is_some()
+                                        || social.generous(&current, p, generosity)
                                 } else {
                                     Life::wants_health(&current)
                                 }),
@@ -758,17 +876,28 @@ pub(in crate::bots) async fn life(
         && peer.is_some_and(|p| {
             v.position.distance(p.position) < 2.
                 && if g.giving {
-                    brain.mind.social.generous(v, p, brain.profile.companions)
+                    g.equipment.is_some()
+                        || brain.mind.social.generous(v, p, brain.profile.companions)
                 } else {
                     Life::wants_health(v)
                 }
         });
-    if !allowed {
+    if !allowed
+        || g.equipment
+            .as_ref()
+            .is_some_and(|candidate| candidate.kind != g.kind)
+    {
+        return cancel_gift(app, brain, v).await;
+    }
+    let check = brain.equipment_check(v, g.equipment.as_ref());
+    if let Some(candidate) = &g.equipment
+        && !check.current(candidate, v, &app.content)?
+    {
         return cancel_gift(app, brain, v).await;
     }
     use crate::world::TradeAction;
     let action = if let Some(t) = &mut brain.mind.market.trade {
-        if t.peer != g.name {
+        if t.peer != g.name || !g.consent {
             Some(TradeAction::Cancel)
         } else {
             let donor = usize::from(!g.giving);
@@ -777,7 +906,12 @@ pub(in crate::bots) async fn life(
                 .iter()
                 .enumerate()
                 .skip(4)
-                .find(|(_, k)| **k == HEALTH)
+                .find(|(slot, k)| {
+                    **k == g.kind
+                        && g.equipment
+                            .as_ref()
+                            .is_none_or(|candidate| candidate.slot == *slot)
+                })
                 .map(|(i, _)| i)
             {
                 offer[slot] = true;
@@ -820,10 +954,19 @@ pub(in crate::bots) async fn life(
         let changed = matches!(action, TradeAction::Change { .. });
         let id = v.session.player;
         let session = [v.session.world, id, v.session.character];
+        let content = app.content.clone();
         let result = app
             .world
             .directory(move |d| {
                 ensure!(d.location(id)? == session[0], "gift action world changed");
+                if let Some(candidate) = &g.equipment {
+                    ensure!(
+                        g.consent
+                            && !g.cancelled
+                            && check.current(candidate, &d.player_view(id)?, &content)?,
+                        "equipment action candidate expired"
+                    );
+                }
                 d.worlds
                     .get_mut(&session[0])
                     .context("gift world missing")?
@@ -833,7 +976,7 @@ pub(in crate::bots) async fn life(
                         g.player,
                         (g.account, g.name),
                         g.giving,
-                        HEALTH,
+                        g.kind,
                         action,
                     )
             })
@@ -961,6 +1104,9 @@ mod tests {
             player: peer,
             name: witness.peer_name.clone(),
             giving: true,
+            kind: HEALTH,
+            item_name: "health".into(),
+            equipment: None,
             until: view.time_ms + 30000,
             session,
             requested: true,
@@ -1008,3 +1154,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "life/equipment_tests.rs"]
+mod equipment_tests;

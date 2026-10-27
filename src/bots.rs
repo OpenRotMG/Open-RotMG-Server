@@ -981,6 +981,9 @@ impl Brain {
             decision.journey = Some(Journey::Regroup(target));
             return Ok((Activity::Call, decision));
         }
+        if decision.item.is_none() && !banking && self.equipment_opportunity(v, content)? {
+            return Ok((Activity::Social, decision));
+        }
         Ok((
             Activity::Adventure,
             self.adventure(v, content, &s, decision, banking)?,

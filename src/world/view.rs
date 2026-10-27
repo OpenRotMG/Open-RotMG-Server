@@ -199,6 +199,22 @@ impl Directory {
     }
 }
 impl super::Handle {
+    pub(crate) async fn with_player_view<T: Send + 'static>(
+        &self,
+        id: i32,
+        prepare: impl FnOnce(&mut World, PlayerView) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let routing = self.routing.clone();
+        self.call_scoped(move |world, scope| {
+            let view = world.player_view(
+                scope,
+                id,
+                routing.tick.load(std::sync::atomic::Ordering::Acquire) * 50,
+            )?;
+            prepare(world, view)
+        })
+        .await
+    }
     pub async fn player_view(&self, id: i32) -> Result<PlayerView> {
         let routing = self.routing.clone();
         self.for_player(id)
