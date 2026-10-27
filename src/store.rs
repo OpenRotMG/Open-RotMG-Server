@@ -1914,6 +1914,8 @@ mod class_unlock_tests;
 #[cfg(test)]
 mod community_schema_tests;
 #[cfg(test)]
+mod level_tests;
+#[cfg(test)]
 mod living_fame_tests;
 #[cfg(all(test, unix))]
 mod restart_tests;
