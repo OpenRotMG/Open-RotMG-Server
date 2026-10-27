@@ -62,7 +62,7 @@ export async function run(game){
   const safe=(s,pos)=>{
     const p=s.view.position,k=family(s).find(e=>e.id===wizard.id);assert(k,'Wizard must remain alive during escort targeting');
     const dx=pos.x-p.x,dy=pos.y-p.y,t=((k.pos.x-p.x)*dx+(k.pos.y-p.y)*dy)/(dx*dx+dy*dy);
-    return t<0||t>1||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>3;
+    return t<0||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>3;
   };
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
