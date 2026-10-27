@@ -3,8 +3,9 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {inflateSync} from 'node:zlib';
 
-const layout=process.env.REALM_LAYOUT;
+const layout=process.env.REALM_LAYOUT,coast=Number(process.env.REALM_ARRIVAL);
 assert(['02','03'].includes(layout),'Set REALM_LAYOUT to 02 or 03');
+assert(/^[0-3]$/.test(process.env.REALM_ARRIVAL),'Set REALM_ARRIVAL to 0, 1, 2 or 3');
 const spec={class:0x307,level:20,seed:785,world:1,position:'spawn',equipment:[0xc02,-1,-1,-1],backpack:Array(8).fill(-1),stats:[700,252,50,25,50,50,40,50]};
 let world,worldId;
 const arrival=i=>({x:world.spawn_points[i][0],y:world.spawn_points[i][1]});
@@ -15,7 +16,7 @@ export async function prepare(api){
   assert(selected,`World ${layout} is absent from this startup's random Realm selection`);
   world=selected.info;worldId=selected.id;
   assert.equal(world.spawn_points.length,4);
-  return {...spec,world:worldId,position:arrival(0)};
+  return {...spec,world:worldId,position:arrival(coast)};
 }
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(root,'native/native.json'),'utf8'));
@@ -24,7 +25,7 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:'route-'+(++serial),command}),signal:AbortSignal.timeout(10000)});
     const result=await response.json();assert(response.ok&&result.status!=='failed',JSON.stringify(result));return result;
   };
-  const peer=await game.join({...spec,seed:786,world:worldId,position:arrival(0)});
+  const peer=await game.join({...spec,seed:786,world:worldId,position:arrival(coast)});
   const first=await game.observe();
   const response=await fetch(config.origin+'/dev/map?player='+first.session.player,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(30000)});
   assert(response.ok);const map=await response.json();
@@ -34,10 +35,9 @@ export async function run(game){
   for(const [x,y] of map.blocked)blocked[y*width+x]=1;
   const ground=i=>dictionary[indices.readUInt16LE(i*2)].ground;
   const routes=[];let protectionUntil=0;
-  const save=()=>writeFile(join(root,'routes.json'),JSON.stringify({world,worldId,prepared:'level 20, maxed stats, Doom Bow, full-map routing, invincibility; teleports only between arrival trials',routes},null,2));
-  for(let coast=0;coast<4;coast++){
+  const save=()=>writeFile(join(root,'routes.json'),JSON.stringify({world,worldId,prepared:'level 20, maxed stats, Doom Bow, full-map routing, invincibility; no teleports',routes},null,2));
+  {
     const start=arrival(coast);
-    if(coast)for(const client of [game,peer])await api({op:'cheat',actor:client.actor,change:{kind:'teleport',position:start}});
     const parent=new Int32Array(total).fill(-1),queue=new Int32Array(total),origin=Math.floor(start.y)*width+Math.floor(start.x);
     parent[origin]=origin;queue[0]=origin;let head=0,tail=1,target;
     // These are current reconstructions, not recovered geography: https://github.com/OpenRotMG/Open-RotMG-Server/issues/785#issuecomment-6454565800
@@ -67,6 +67,10 @@ export async function run(game){
       const after=await game.observe();route.observations.push({position:after.position,game_ms:after.game_ms,hp:after.character.hp,nearby:after.nearby});await save();
       assert(Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y)>.02,`Blocked at coast ${coast}: ${JSON.stringify({point,before:before.position,after:after.position})}`);
       assert(after.lifecycle.alive,'Prepared route walker died');
+      if(route.observations.length===1){
+        const observed=(await peer.inspect()).view.objects.find(o=>o.id===after.session.player);
+        game.check(`coast ${coast}: observer receives native departure`,!!observed&&Math.hypot(observed.position.x-after.position.x,observed.position.y-after.position.y)<.2);
+      }
     }
     await game.act({keys:[],duration_ms:500},{name:`world-${layout}-road-${coast}`,when:()=>true});
     const end=await game.inspect(),observer=await peer.observe();route.end=end;route.observer=observer;await save();
