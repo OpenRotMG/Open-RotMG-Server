@@ -97,7 +97,8 @@ export async function run(game) {
   game.check('native movement crosses the opened emergency doorway',(await game.observe()).position.x>69);
   await save('creation-open');
   const creation=async()=> (await entities()).find(e=>e.kind===0x5e1c);
-  const original=await creation(),seen=new Set(),shots=new Set(),captured=new Set(),trace=[];
+  const original=await creation(),seen=new Set(),shots=new Set(),trace=[];
+  let captured=false;
   function record(state) {
     const c=state.diagnostic.entities.find(e=>e.id===original.id);
     if(!c)throw Error('Creation disappeared during attack observation');
@@ -110,9 +111,9 @@ export async function run(game) {
     for(let n=0;n<40;n++) {
       const state=await game.inspect(),c=state.diagnostic.entities.find(e=>e.id===original.id);
       record(state);
-      if([4,6,7].includes(c.stage)&&!captured.has(c.stage)) {
-        await act({keys:[],duration_ms:500},{name:'creation-phase-'+c.stage,when:()=>true});
-        captured.add(c.stage);
+      if(c.stage===4&&!captured) {
+        await act({keys:[],duration_ms:2000},{name:'creation-blast',when:view=>view.projectiles.some(p=>p.owner===original.id&&p.speed===85&&p.lifetime_ms===1000)});
+        captured=true;
       }
       if([4,6,7].every(s=>seen.has(s))&&['85:1000','50:400','55:3000'].every(s=>shots.has(s)))break;
       await wait();

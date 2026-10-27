@@ -80,9 +80,12 @@ fn creation_attacks_and_pool_cycle_preserve_identity_and_damage() {
         );
     }
     for _ in 0..3 {
-        w.entities.get_mut(&id).unwrap().pos = Pos { x: 71.5, y: 12.5 };
+        let e = w.entities.get_mut(&id).unwrap();
+        e.pos = Pos { x: 71.5, y: 12.5 };
+        e.goal = Some(e.pos);
         w.lab_mechanics(id, Some(home), 0).unwrap();
         assert_eq!(w.entities[&id].stage, Some(2));
+        assert_eq!(w.entities[&id].goal, None);
         assert_eq!(
             w.entities[&id].condition & condition::bit(condition::INVINCIBLE),
             0
@@ -105,7 +108,9 @@ fn creation_attacks_and_pool_cycle_preserve_identity_and_damage() {
         shots(&w, 1, 3);
         w.entities.get_mut(&id).unwrap().pos = home;
         w.lab_mechanics(id, Some(home), 0).unwrap();
-        assert_eq!(w.entities[&id].stage, Some(1));
+        assert_eq!(w.entities[&id].stage, Some(4));
+        shots(&w, 6, 1);
+        w.entities.get_mut(&id).unwrap().stage = Some(1);
     }
     assert_eq!(w.entities.len(), before);
     assert_eq!(w.entities[&id].hp, hp);

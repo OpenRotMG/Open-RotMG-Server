@@ -288,9 +288,7 @@ impl World {
                 Some(1 | 5) if inside(lab::HEXXER) => self.lab_stage(id, 2),
                 Some(2) if elapsed >= 10000 && inside(lab::DEHEXXER) => self.lab_stage(id, 8),
                 Some(1) if elapsed >= 10000 || target.is_none() => self.lab_stage(id, 3),
-                Some(3 | 8) if pos.distance(home) < 0.5 => {
-                    self.lab_stage(id, if stage == Some(3) { 4 } else { 1 });
-                }
+                Some(3 | 8) if pos.distance(home) < 0.5 => self.lab_stage(id, 4),
                 Some(4) if elapsed >= 16000 => self.lab_stage(id, 5),
                 Some(5) if elapsed >= 10000 || target.is_some_and(|p| pos.distance(p) < 1.5) => {
                     self.lab_stage(id, 6);
@@ -303,6 +301,7 @@ impl World {
             if current != stage {
                 let pet = current == Some(2);
                 let e = self.entities.get_mut(&id).unwrap();
+                e.goal = None;
                 if pet {
                     e.condition &= !condition::bit(condition::INVINCIBLE);
                 } else {
