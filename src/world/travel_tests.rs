@@ -36,6 +36,7 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
         .get_mut(&id)
         .unwrap()
         .pos = pos;
+    let before = d.worlds[&dungeon].players[&id].character.clone();
     assert_eq!(d.destination(id, Some(exit)).unwrap(), (1, 1, -3));
     d.worlds
         .get_mut(&dungeon)
@@ -71,7 +72,7 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
     rejects(d.issue(1, 1, -3), "Realm is closed");
     assert_eq!(d.destination(id, None).unwrap(), (1, 1, -2));
     let source = &d.worlds[&dungeon].players[&id].character;
-    assert_eq!(source, &ch);
+    assert_eq!(source, &before);
     assert!(d.grants.is_empty());
     assert!(d.worlds[&-3].admissions.is_empty());
     d.worlds.get_mut(&-3).unwrap().admission_open = true;
