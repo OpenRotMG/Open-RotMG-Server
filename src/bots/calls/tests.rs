@@ -10,6 +10,7 @@ fn fixture(account: i32) -> (Content, PlayerView, Brain) {
         crate::navigation::Tiles::new(geometry, (0..32).flat_map(|x| (0..32).map(move |y| (x, y))));
     let stats = [500, 200, 35, 10, 25, 30, 30, 25];
     let v = PlayerView {
+        inputs: None,
         session: Session {
             world: -2,
             player: 1,

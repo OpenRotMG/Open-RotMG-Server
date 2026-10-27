@@ -14,6 +14,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
     );
     let stats = [500, 200, 35, 10, 25, 30, 30, 25];
     let view = PlayerView {
+        inputs: None,
         session: Session {
             world: -3,
             player: 1,

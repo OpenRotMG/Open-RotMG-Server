@@ -17,6 +17,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 mod abilities;
+pub(crate) mod bot_inputs;
 pub(crate) mod spectator;
 
 mod cell_index;
@@ -390,6 +391,7 @@ pub struct Player {
     pub(crate) progress_started: bool,
     pub death_pending: bool,
     persistence_failure: Option<String>,
+    pub(crate) inputs: Option<bot_inputs::Inputs>,
     pub bot_goal: Option<Pos>,
     pub bot_aim: Option<f32>,
     pub next_bullet: u8,
@@ -3494,6 +3496,7 @@ impl World {
                 progress_started: false,
                 death_pending: false,
                 persistence_failure: None,
+                inputs: None,
                 bot_goal: None,
                 bot_aim: None,
                 next_bullet: 1,
@@ -5199,6 +5202,7 @@ impl World {
                 let p = self.players.get_mut(&id).context("player missing")?;
                 p.bot_goal = None;
                 p.bot_aim = None;
+                p.inputs = None;
                 Ok(None)
             }
             Action::Use { slot, x, y } => {
@@ -7069,6 +7073,7 @@ impl World {
         self.expire_native_projectiles();
         let ids: Vec<_> = self.players.keys().copied().collect();
         for id in &ids {
+            self.step_bot_inputs(*id);
             let p = &self.players[id];
             if !p.active() {
                 continue;

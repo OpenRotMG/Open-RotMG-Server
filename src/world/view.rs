@@ -88,6 +88,7 @@ pub struct ObservedDungeonEntry {
 
 #[derive(Serialize)]
 pub struct PlayerView {
+    pub inputs: Option<super::bot_inputs::Inputs>,
     pub session: Session,
     pub tick: u64,
     pub time_ms: u64,
@@ -310,6 +311,7 @@ impl World {
             })
             .collect();
         let view = PlayerView {
+            inputs: p.inputs.clone().filter(|_| p.active() && !p.pending),
             session: Session {
                 world: scope,
                 player: id,

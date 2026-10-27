@@ -188,7 +188,7 @@ enum Journey {
 struct Decision {
     goal: Goal,
     movement: Option<Pos>,
-    aim: Option<f32>,
+    aim: Option<Pos>,
     item: Option<Action>,
     journey: Option<Journey>,
     chat: Option<&'static str>,
@@ -853,7 +853,10 @@ impl Brain {
             self.next_bank = v.time_ms + 300000;
             if matches!(banking.journey, Some(Journey::Nexus)) && self.mind.social.trying_loadout(v)
             {
-                decision.aim = Some(self.heading);
+                decision.aim = Some(Pos {
+                    x: v.position.x + self.heading.cos() * 6.,
+                    y: v.position.y + self.heading.sin() * 6.,
+                });
                 return Ok((Activity::Bank, decision));
             }
             return Ok((Activity::Bank, banking));

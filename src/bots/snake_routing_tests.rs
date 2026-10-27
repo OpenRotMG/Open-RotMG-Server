@@ -69,7 +69,8 @@ fn dormant_snake_quest_approaches_and_digs_observed_tunnel() {
             )
             .unwrap();
         }
-        if let Some(angle) = decision.aim {
+        if let Some(point) = decision.aim {
+            let angle = angle(w.players[&player].pos, point);
             assert!(matches!(decision.goal, Goal::Break(id) if w.entities[&id].kind == 0x172));
             w.autonomous_action(player, Action::Shoot { angle })
                 .unwrap();
@@ -186,6 +187,6 @@ fn clear_cover_orders_only_actionable_walls() {
     let decision = progression::clear_cover(&view, &content, &grid, destination, 4., false)
         .expect("unapproachable distant wall must not suppress shootable cover");
     assert_eq!(decision.goal, Goal::Break(2));
-    assert_eq!(decision.aim, Some(0.));
+    assert_eq!(angle(view.position, decision.aim.unwrap()), 0.);
     assert!(decision.movement.is_none());
 }

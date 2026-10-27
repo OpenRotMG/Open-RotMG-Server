@@ -1,4 +1,21 @@
 use super::spectator::*;
+
+#[test]
+fn native_cursor_tick_gate_rejects_duplicates_stale_and_ambiguous_wrap() {
+    let packet=|tick:u32| {
+        let mut out=Writer::new();
+        out.i32(1).i32(2).i32(tick as i32).f32(3.).f32(4.).u8(1);
+        Packet{id:250,body:out.0}
+    };
+    let mut last=None;
+    assert!(advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
+    assert!(!advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
+    assert!(advance_cursor(&mut last,&packet(0)).unwrap());
+    assert!(!advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
+    assert!(!advance_cursor(&mut last,&packet(1<<31)).unwrap());
+    assert_eq!(last,Some(0));
+    assert!(advance_cursor(&mut last,&Packet{id:250,body:vec![]}).is_err());
+}
 use super::*;
 use crate::wire::Reader;
 
@@ -306,7 +323,7 @@ fn spectator_snapshot_subscription_has_no_avatar_and_is_bounded_and_closed_on_re
         .tick_stats
         .encode(player, full);
     let before = serde_json::to_value(&w.players[&player].character).unwrap();
-    let mut attached = w.attach_spectator(player).unwrap();
+    let mut attached = w.attach_spectator(player, -1).unwrap();
     assert_eq!(w.players.len(), 1);
     assert_eq!(
         serde_json::to_value(&w.players[&player].character).unwrap(),
@@ -360,7 +377,7 @@ fn spectator_snapshot_subscription_has_no_avatar_and_is_bounded_and_closed_on_re
     w.updates(player, false).unwrap();
     assert!(w.players[&player].known.contains(&other));
     w.players.remove(&other);
-    drop(w.attach_spectator(player).unwrap());
+    drop(w.attach_spectator(player, -1).unwrap());
     while let Ok(packet) = attached.receiver.try_recv() {
         projection.packet(packet, &content).unwrap();
     }

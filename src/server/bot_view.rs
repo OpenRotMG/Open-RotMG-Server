@@ -4,7 +4,7 @@ use crate::{
     bots::cctv::Viewer,
     world::spectator::{Attachment, Projection},
 };
-use axum::extract::{Path, ws::CloseFrame};
+use axum::extract::{Path, RawQuery, ws::CloseFrame};
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
@@ -15,8 +15,13 @@ pub(super) async fn socket(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
+    RawQuery(query): RawQuery,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let cursor = match cursor_capability(query.as_deref()) {
+        Ok(cursor) => cursor,
+        Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    };
     let Some(origin) = &a.bot_view_origin else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -48,7 +53,7 @@ pub(super) async fn socket(
         .on_upgrade(move |socket| async move {
             let _viewer = viewer;
             let mut stream = Stream::new(socket, a.shutdown.subscribe());
-            let result = stream.watch(&a, &name).await;
+            let result = stream.watch(&a, &name, cursor).await;
             if let Err(error) = result {
                 tracing::warn!(bot=name, error=%error, "native bot view ended with error");
                 let reason = error.to_string().chars().take(110).collect::<String>();
@@ -67,6 +72,60 @@ pub(super) async fn socket(
                 "native bot viewer left"
             );
         })
+}
+
+fn cursor_capability(query: Option<&str>) -> Result<bool> {
+    match query {
+        None => Ok(false),
+        Some("cursor=1") => Ok(true),
+        Some(_) => bail!("native bot viewer query must be exactly cursor=1 or absent"),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn cursor_negotiation_is_explicit_and_strict() {
+    assert!(!cursor_capability(None).unwrap());
+    assert!(cursor_capability(Some("cursor=1")).unwrap());
+    for query in [
+        "",
+        "cursor=0",
+        "cursor=2",
+        "cursor=true",
+        "cursor=1&cursor=1",
+        "other=1",
+        "cursor=1&other=1",
+    ] {
+        assert!(cursor_capability(Some(query)).is_err(), "{query}");
+    }
+}
+
+fn attachment_changed(current: Option<(i32,i32)>, player:i32, account:i32) -> bool {
+    current != Some((player,account))
+}
+fn reconnect_packet() -> Packet {
+    let mut reconnect=Writer::new();
+    reconnect.utf("Bot CCTV").utf("").i32(2050).i32(-2).i32(0).i16(0);
+    Packet { id:39, body:reconnect.0 }
+}
+
+#[cfg(test)]
+#[test]
+fn attachment_transition_uses_normal_native_reconnect_packet() {
+    assert!(!attachment_changed(Some((7,1)),7,1));
+    for binding in [None,Some((8,1)),Some((7,2))] {
+        assert!(attachment_changed(binding,7,1));
+        let packet=reconnect_packet();
+        assert_eq!(packet.id,39);
+        let mut r=Reader::new(&packet.body);
+        assert_eq!(r.utf().unwrap(),"Bot CCTV");
+        assert_eq!(r.utf().unwrap(),"");
+        assert_eq!(r.i32().unwrap(),2050);
+        assert_eq!(r.i32().unwrap(),-2);
+        assert_eq!(r.i32().unwrap(),0);
+        assert_eq!(r.i16().unwrap(),0);
+        r.done().unwrap();
+    }
 }
 
 struct Stream {
@@ -97,6 +156,10 @@ impl Stream {
             sent = tokio::time::timeout(Duration::from_secs(2), self.socket.send(Message::Binary(frame.into()))) => sent.context("native bot viewer is too slow")??,
         }
         Ok(())
+    }
+    async fn reconnect(&mut self) -> Result<()> {
+        let packet = reconnect_packet();
+        self.output(packet.id,packet.body).await
     }
     async fn input(&mut self) -> Result<Option<Packet>> {
         loop {
@@ -132,7 +195,7 @@ impl Stream {
         .await
         .context("bot has no living session; it may be replacing a dead character or offline")?
     }
-    async fn watch(&mut self, a: &App, name: &str) -> Result<()> {
+    async fn watch(&mut self, a: &App, name: &str, cursor: bool) -> Result<()> {
         let hello = tokio::time::timeout(Duration::from_secs(10), self.input())
             .await??
             .context("viewer closed before HELLO")?;
@@ -168,10 +231,24 @@ impl Stream {
             character = attached.character,
             "native bot viewer attached"
         );
+        let mut last_cursor_tick = None;
         let mut stop = self.shutdown.clone();
+        let mut cursor_ticks = tokio::time::interval(Duration::from_millis(50));
+        cursor_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 _ = async { let _ = stop.wait_for(|stop| *stop).await; } => break,
+                _ = cursor_ticks.tick(), if cursor => {
+                    if attachment_changed(a.cctv.binding(name), attached.player, attached.account) {
+                        self.reconnect().await?;
+                        break;
+                    }
+                    if let Some(packet) = a.world.spectator_cursor(attached.world, attached.player, attached.account, attached.character).await? {
+                        if crate::world::spectator::advance_cursor(&mut last_cursor_tick, &packet)? {
+                            self.output(packet.id, packet.body).await?;
+                        }
+                    }
+                },
                 packet = self.input() => {
                     let Some(packet)=packet? else { break; };
                     // The recovered engine still reports collision/ACK packets; none belong to a gameplay session here.
@@ -183,8 +260,7 @@ impl Stream {
                 packet = attached.receiver.recv() => match packet {
                     Ok(packet) => if let Some(packet)=projection.packet(packet,&a.content)? { self.output(packet.id,packet.body).await?; },
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        let mut reconnect=Writer::new();reconnect.utf("Bot CCTV").utf("").i32(2050).i32(-2).i32(0).i16(0);
-                        self.output(39,reconnect.0).await?;
+                        self.reconnect().await?;
                         break;
                     },
                     Err(error) => return Err(error).context("native bot view overflowed; reconnect for a fresh snapshot"),

@@ -154,12 +154,24 @@ impl Cctv {
         }
         feed.frame = json!({"class":content.objects[&v.character.class].name,"level":v.character.level,
             "hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"max_mp":v.character.stats[1],
-            "world":v.map.name,"x":v.position.x,"y":v.position.y,"aim":d.aim,"fired":fired,
+            "world":v.map.name,"x":v.position.x,"y":v.position.y,"aim":actual_aim(v),"fired":fired,"inputs":v.inputs,"tick":v.tick,
             "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason,"intent":intent});
         feed.session = Some((v.session.player, v.session.account));
         feed.shots = shots;
         feed.reason = reason;
         feed.updated = Instant::now();
+    }
+    pub(super) fn inputs(&self, name: &'static str, v: &PlayerView) {
+        let mut registry = self.lock();
+        let feed = registry.feed(name);
+        if feed.session == Some((v.session.player, v.session.account)) && !feed.frame.is_null() {
+            feed.frame["inputs"] =
+                serde_json::to_value(&v.inputs).expect("finite virtual input state");
+            feed.frame["tick"] = json!(v.tick);
+            feed.frame["x"] = json!(v.position.x);
+            feed.frame["y"] = json!(v.position.y);
+            feed.frame["aim"] = json!(actual_aim(v));
+        }
     }
     pub(super) fn heard(&self, name: &'static str, own: i32, packet: &Packet) -> Result<()> {
         if packet.id != wire::TEXT {
@@ -194,6 +206,11 @@ impl Cctv {
             feed.thoughts.back().map_or(seen, |t| t.0),
         )
     }
+}
+
+fn actual_aim(v: &PlayerView) -> Option<f32> {
+    let input = v.inputs.as_ref()?;
+    input.cursor.filter(|_| input.fire).map(|p| angle(v.position,p))
 }
 
 // Unnamed objects show their type name, as the native client does.
@@ -361,6 +378,31 @@ pub(crate) async fn stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn telemetry_aim_and_position_describe_actual_input_not_desired_decision() {
+        let (content,mut view)=super::super::quest_tests::fixture();
+        let mut inputs=crate::world::bot_inputs::Inputs::default();
+        inputs.cursor=Some(Pos{x:view.position.x+1.,y:view.position.y+2.});
+        inputs.fire=true;
+        view.inputs=Some(inputs);
+        let decision=Decision{goal:Goal::Wait,movement:None,aim:Some(Pos{x:0.,y:0.}),item:None,journey:None,chat:None};
+        let cctv=Cctv::default();
+        cctv.entered("Triceps",view.session.player,view.session.account);
+        cctv.decided("Triceps",&view,&decision,"testing".into(),&Value::Null,&content);
+        assert_eq!(cctv.live_bots()[0]["frame"]["aim"],json!(actual_aim(&view)));
+        view.position.x+=3.; view.position.y-=2.; view.tick+=1;
+        cctv.inputs("Triceps",&view);
+        let frame=&cctv.live_bots()[0]["frame"];
+        assert_eq!(frame["x"],json!(view.position.x));
+        assert_eq!(frame["y"],json!(view.position.y));
+        assert_eq!(frame["tick"],json!(view.tick));
+        assert_eq!(frame["aim"],json!(actual_aim(&view)));
+        assert!(frame["inputs"].get("desired").is_none());
+        view.inputs.as_mut().unwrap().fire=false;
+        cctv.inputs("Triceps",&view);
+        assert!(cctv.live_bots()[0]["frame"]["aim"].is_null());
+    }
 
     #[test]
     fn viewers_are_bounded_and_released() {
