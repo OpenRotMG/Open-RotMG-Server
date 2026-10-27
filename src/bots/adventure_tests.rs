@@ -1,6 +1,48 @@
 use super::*;
 use crate::world::view::{PlayerMarker, VisibleObject};
 
+#[test]
+fn constructed_combat_travel_keeps_a_direction_instead_of_reversing() {
+    for profile in ARCHETYPES {
+        let (content, mut view) = quest_tests::fixture();
+        view.character.level = 20;
+        view.character.mp = 0;
+        view.position = Pos { x: 60.5, y: 60.5 };
+        let projectile = &content.objects[&(view.character.items[0] as u16)].projectiles[&0];
+        let range = projectile.speed * projectile.lifetime / 10000.;
+        view.objects[0].position = Pos { x: view.position.x + range * 0.8, y: view.position.y };
+        let mut brain = Brain::new(profile, &view);
+        let mut previous = None;
+        let mut reversals = 0;
+        let mut travelled = 0.;
+        for _ in 0..60 {
+            let decision = brain.decide(&view, &content).unwrap();
+            assert!(matches!(decision.goal, Goal::Fight(2) | Goal::Hunt(2)), "{}: {:?}", profile.name, decision.goal);
+            assert!(decision.journey.is_none());
+            let target = decision.movement.expect("ordinary combat movement");
+            let length = view.position.distance(target);
+            assert!(length > 0.);
+            let direction = Pos { x: (target.x - view.position.x) / length, y: (target.y - view.position.y) / length };
+            if let Some(prior) = previous {
+                let prior: Pos = prior;
+                reversals += usize::from(prior.x * direction.x + prior.y * direction.y < -0.5);
+            }
+            previous = Some(direction);
+            let step = length.min(combat::speed(&view) * profile.reaction as f32 * 0.05);
+            view.position.x += direction.x * step;
+            view.position.y += direction.y * step;
+            travelled += step;
+            brain.goal = decision.goal;
+            brain.destination = decision.movement;
+            view.tick += profile.reaction;
+            view.time_ms += profile.reaction * 50;
+            view.elapsed_ms += profile.reaction * 50;
+        }
+        assert!(travelled > 20.);
+        assert!(reversals <= 1, "{} reversed {reversals} times during unthreatened constructed travel", profile.name);
+    }
+}
+
 fn scene(level: i32) -> (Content, PlayerView) {
     let (c, mut v) = quest_tests::fixture();
     v.character.level = level;
