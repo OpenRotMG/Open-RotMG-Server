@@ -1,6 +1,7 @@
 use super::*;
 use crate::bots::pursuits::market::{
-    Advertisement, Goods, Message, counter_body, goods_text, parse_advertisement, parse_goods, parse_quote,
+    Advertisement, Goods, Message, counter_body, goods_text, parse_advertisement, parse_goods,
+    parse_quote,
 };
 
 type Repertoire = [String; 3];
@@ -25,11 +26,22 @@ const REFUSAL_SHAPES: [&str; 8] = [
     "sry nty need {want}",
 ];
 const COUNTER_SHAPES: [&str; 8] = [
-    "nty {give} for {want}", "nah {give} for {want}", "can do {give} for {want}",
-    "nty {give}={want}", "nah {give}={want}", "can do {give}={want}",
-    "no thx {give} for {want}", "sry {give} for {want}",
+    "nty {give} for {want}",
+    "nah {give} for {want}",
+    "can do {give} for {want}",
+    "nty {give}={want}",
+    "nah {give}={want}",
+    "can do {give}={want}",
+    "no thx {give} for {want}",
+    "sry {give} for {want}",
 ];
-const BANK_SHAPES: [&str; 5] = ["full inv", "inv full", "need room", "making room", "lemme make room"];
+const BANK_SHAPES: [&str; 5] = [
+    "full inv",
+    "inv full",
+    "need room",
+    "making room",
+    "lemme make room",
+];
 const THANKS_SHAPES: [&str; 5] = ["ty", "thx", "thanks", "tyvm", "cheers"];
 pub(super) struct Wording {
     created: Instant,
@@ -103,8 +115,10 @@ fn validated_template(template: &str, intent: Intent) -> std::result::Result<boo
                 let refusal = lower.strip_suffix(" need {want}").unwrap_or(&lower);
                 matches!(refusal, "nty" | "nah" | "no thx" | "sry nty")
             }
-            Intent::MarketCounter => matches!(counter_body(&template.to_ascii_lowercase()),
-                Some("{give} for {want}" | "{give}={want}")),
+            Intent::MarketCounter => matches!(
+                counter_body(&template.to_ascii_lowercase()),
+                Some("{give} for {want}" | "{give}={want}")
+            ),
             Intent::MarketBank => BANK_SHAPES.contains(&template.to_ascii_lowercase().as_str()),
             Intent::MarketThanks => THANKS_SHAPES.contains(&template.to_ascii_lowercase().as_str()),
             _ => false,
@@ -149,10 +163,14 @@ fn render(
         .replace("@{name}", &format!("@{name}"));
     crate::world::chat::validate(&text).map_err(|_| Failure::Error("invalid_market_wording"))?;
     if intent == Intent::MarketCounter {
-        let lower=text.to_ascii_lowercase();
-        let actual=counter_body(&lower).and_then(|s| parse_quote(s,c));
-        let expected=parse_goods(&give.to_ascii_lowercase(),c).zip(parse_goods(&want.to_ascii_lowercase(),c)).map(|(g,w)| [g,w]);
-        if actual.is_none() || actual!=expected { return Err(Failure::Error("invalid_market_wording")); }
+        let lower = text.to_ascii_lowercase();
+        let actual = counter_body(&lower).and_then(|s| parse_quote(s, c));
+        let expected = parse_goods(&give.to_ascii_lowercase(), c)
+            .zip(parse_goods(&want.to_ascii_lowercase(), c))
+            .map(|(g, w)| [g, w]);
+        if actual.is_none() || actual != expected {
+            return Err(Failure::Error("invalid_market_wording"));
+        }
     }
     if intent == Intent::MarketAdvertise {
         let give = parse_goods(&give.to_ascii_lowercase(), c);
@@ -178,11 +196,19 @@ impl Service {
         c: &Content,
         personality: Value,
     ) -> Result<Option<String>> {
-        let (intent, give, want) = if let Some(q) = message.text.strip_prefix("nty ").and_then(|s| parse_quote(s,c)) {
-            (Intent::MarketCounter, goods_text(&q[0],c)?, goods_text(&q[1],c)?)
-        } else if message.text=="full inv" {
+        let (intent, give, want) = if let Some(q) = message
+            .text
+            .strip_prefix("nty ")
+            .and_then(|s| parse_quote(s, c))
+        {
+            (
+                Intent::MarketCounter,
+                goods_text(&q[0], c)?,
+                goods_text(&q[1], c)?,
+            )
+        } else if message.text == "full inv" {
             (Intent::MarketBank, String::new(), String::new())
-        } else if message.text=="ty" {
+        } else if message.text == "ty" {
             (Intent::MarketThanks, String::new(), String::new())
         } else if let Some(q) = parse_quote(&message.text, c) {
             (
@@ -308,57 +334,123 @@ mod tests {
 
     #[test]
     fn market_interaction_examples_never_claim_other_intents_or_unbound_facts() {
-        for intent in [Intent::MarketCounter,Intent::MarketBank,Intent::MarketThanks] {
+        for intent in [
+            Intent::MarketCounter,
+            Intent::MarketBank,
+            Intent::MarketThanks,
+        ] {
             for seed in 0..24 {
-                let v=voice(seed,intent);
-                assert_eq!(v["name_signature"],false);
-                assert!(v["syntax_examples"].as_array().unwrap().iter().all(|s| validated_template(s.as_str().unwrap(),intent).is_ok()));
+                let v = voice(seed, intent);
+                assert_eq!(v["name_signature"], false);
+                assert!(
+                    v["syntax_examples"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|s| validated_template(s.as_str().unwrap(), intent).is_ok())
+                );
             }
         }
-        for (intent,bad) in [
-            (Intent::MarketCounter,"nty {want} for {give}"),
-            (Intent::MarketCounter,"nty {give}"),
-            (Intent::MarketCounter,"nty {give} for {want} @{name}"),
-            (Intent::MarketCounter,"deal {give} for {want}"),
-            (Intent::MarketBank,"full inv got {give}"),
-            (Intent::MarketBank,"brb will trade later"),
-            (Intent::MarketThanks,"thanks for {give}"),
-            (Intent::MarketThanks,"trade accepted"),
-            (Intent::MarketThanks,"\"thanks\""),
-        ] { assert!(validated_template(bad,intent).is_err(),"{intent:?}: {bad}"); }
+        for (intent, bad) in [
+            (Intent::MarketCounter, "nty {want} for {give}"),
+            (Intent::MarketCounter, "nty {give}"),
+            (Intent::MarketCounter, "nty {give} for {want} @{name}"),
+            (Intent::MarketCounter, "deal {give} for {want}"),
+            (Intent::MarketBank, "full inv got {give}"),
+            (Intent::MarketBank, "brb will trade later"),
+            (Intent::MarketThanks, "thanks for {give}"),
+            (Intent::MarketThanks, "trade accepted"),
+            (Intent::MarketThanks, "\"thanks\""),
+        ] {
+            assert!(
+                validated_template(bad, intent).is_err(),
+                "{intent:?}: {bad}"
+            );
+        }
     }
 
     #[test]
     fn market_counter_templates_reject_advertisement_only_syntax() {
-        for bad in ["nty s>{give} ({want})!","nty selling {give} for {want}","nty {give}={want}!","nty ({give})={want}","nty {give}  for  {want}"] {
-            assert!(validated_template(bad,Intent::MarketCounter).is_err(),"{bad}");
-            assert!(repertoire(&format!("{bad}|nah {{give}} for {{want}}|can do {{give}}={{want}}"),Intent::MarketCounter).is_err(),"{bad}");
+        for bad in [
+            "nty s>{give} ({want})!",
+            "nty selling {give} for {want}",
+            "nty {give}={want}!",
+            "nty ({give})={want}",
+            "nty {give}  for  {want}",
+        ] {
+            assert!(
+                validated_template(bad, Intent::MarketCounter).is_err(),
+                "{bad}"
+            );
+            assert!(
+                repertoire(
+                    &format!("{bad}|nah {{give}} for {{want}}|can do {{give}}={{want}}"),
+                    Intent::MarketCounter
+                )
+                .is_err(),
+                "{bad}"
+            );
         }
-        assert!(repertoire("nty {give} for {want}|nah {give}={want}|can do {give} for {want}",Intent::MarketCounter).is_ok());
+        assert!(
+            repertoire(
+                "nty {give} for {want}|nah {give}={want}|can do {give} for {want}",
+                Intent::MarketCounter
+            )
+            .is_ok()
+        );
     }
 
     #[tokio::test]
     async fn market_interaction_cache_repeats_favorites_and_renders_only_current_slots() {
-        let c=content();
-        let service=Arc::new(Service::new("unused","http://127.0.0.1:1",Duration::from_secs(1)).unwrap());
-        for (intent,canonical,words) in [
-            (Intent::MarketCounter,"nty wts 5 spd for 1 def","nty {give} for {want}|nah {give}={want}|can do {give} for {want}"),
-            (Intent::MarketBank,"full inv","full inv|need room|lemme make room"),
-            (Intent::MarketThanks,"ty","thx|thanks|tyvm"),
+        let c = content();
+        let service =
+            Arc::new(Service::new("unused", "http://127.0.0.1:1", Duration::from_secs(1)).unwrap());
+        for (intent, canonical, words) in [
+            (
+                Intent::MarketCounter,
+                "nty wts 5 spd for 1 def",
+                "nty {give} for {want}|nah {give}={want}|can do {give} for {want}",
+            ),
+            (
+                Intent::MarketBank,
+                "full inv",
+                "full inv|need room|lemme make room",
+            ),
+            (Intent::MarketThanks, "ty", "thx|thanks|tyvm"),
         ] {
-            let words=repertoire(words,intent).unwrap();
-            service.wordings.lock().unwrap().insert(format!("Trader:{intent:?}"),Wording {
-                created:Instant::now(),next:0,result:Arc::new(Mutex::new(Some(Ok(words.clone())))),
-            });
-            let message=Message { text:canonical.into(),channel:Channel::Tell("Guest1".into()) };
-            for i in [0,0,1,0,0,2] {
-                assert_eq!(service.market_wording("Trader",&message,&c,json!({})).unwrap(),
-                    Some(render(&words[i],intent,"5 spd","1 def","Trader",&c).unwrap()));
+            let words = repertoire(words, intent).unwrap();
+            service.wordings.lock().unwrap().insert(
+                format!("Trader:{intent:?}"),
+                Wording {
+                    created: Instant::now(),
+                    next: 0,
+                    result: Arc::new(Mutex::new(Some(Ok(words.clone())))),
+                },
+            );
+            let message = Message {
+                text: canonical.into(),
+                channel: Channel::Tell("Guest1".into()),
+            };
+            for i in [0, 0, 1, 0, 0, 2] {
+                assert_eq!(
+                    service
+                        .market_wording("Trader", &message, &c, json!({}))
+                        .unwrap(),
+                    Some(render(&words[i], intent, "5 spd", "1 def", "Trader", &c).unwrap())
+                );
             }
         }
-        let changed=Message { text:"nty wts 3 spd for 1 def".into(),channel:Channel::Tell("Guest1".into()) };
-        assert_eq!(service.market_wording("Trader",&changed,&c,json!({})).unwrap(),Some("nty 3 spd for 1 def".into()));
-        assert_eq!(service.health()["daily_requests"],0);
+        let changed = Message {
+            text: "nty wts 3 spd for 1 def".into(),
+            channel: Channel::Tell("Guest1".into()),
+        };
+        assert_eq!(
+            service
+                .market_wording("Trader", &changed, &c, json!({}))
+                .unwrap(),
+            Some("nty 3 spd for 1 def".into())
+        );
+        assert_eq!(service.health()["daily_requests"], 0);
     }
 
     #[test]

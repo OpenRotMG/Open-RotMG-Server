@@ -576,12 +576,15 @@ impl Market {
         let body = text
             .strip_prefix(&format!("{}, ", self.name))
             .unwrap_or(&text);
-        let ad=if let Some(counter)=counter_body(&body.trim().to_ascii_lowercase()) {
-            parse_advertisement(counter,|s| parse_goods(s,c)).filter(|ad| matches!(ad,Advertisement::Quote(_)))
+        let ad = if let Some(counter) = counter_body(&body.trim().to_ascii_lowercase()) {
+            parse_advertisement(counter, |s| parse_goods(s, c))
+                .filter(|ad| matches!(ad, Advertisement::Quote(_)))
         } else {
-            parse_advertisement(body,|s| parse_goods(s,c))
+            parse_advertisement(body, |s| parse_goods(s, c))
         };
-        let Some(ad)=ad else { return Ok(false); };
+        let Some(ad) = ad else {
+            return Ok(false);
+        };
         if v.map.name != "Nexus"
             || self.incoming.is_some()
             || self.trade.is_some()
@@ -992,10 +995,11 @@ impl Market {
         if !self.preparing && self.session.is_none() && self.session_used {
             return Ok(None);
         }
-        if !self.preparing && self
-            .session
-            .as_ref()
-            .is_some_and(|s| v.elapsed_ms >= s.until)
+        if !self.preparing
+            && self
+                .session
+                .as_ref()
+                .is_some_and(|s| v.elapsed_ms >= s.until)
         {
             self.end_session(v, "elapsed");
             return Ok(None);
@@ -1075,9 +1079,11 @@ impl Market {
             return Ok(None);
         }
         self.preparing = false;
-        let Some(s) = self.session.as_mut() else { return Ok(None); };
+        let Some(s) = self.session.as_mut() else {
+            return Ok(None);
+        };
         if v.elapsed_ms >= s.until {
-            self.end_session(v,"elapsed");
+            self.end_session(v, "elapsed");
             return Ok(None);
         }
         if v.position.distance(center(s.anchor)) > 1.5 {
@@ -1275,7 +1281,9 @@ pub(in crate::bots) fn parse_goods(s: &str, c: &Content) -> Option<Goods> {
 }
 
 pub(in crate::bots) fn counter_body(text: &str) -> Option<&str> {
-    ["nty ", "nah ", "can do ", "no thx ", "sry "].into_iter().find_map(|p| text.strip_prefix(p))
+    ["nty ", "nah ", "can do ", "no thx ", "sry "]
+        .into_iter()
+        .find_map(|p| text.strip_prefix(p))
 }
 
 // Templates and human chat share the same shapes; the caller supplies literal slots or real goods.

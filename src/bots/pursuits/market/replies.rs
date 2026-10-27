@@ -132,11 +132,21 @@ impl Market {
         }
         let revision_current = if let ReplyKind::Thanks(witness) = &r.kind {
             witness.validate()?;
-            let own=witness.writes.iter().find(|w| w.account==r.account && w.id==r.session[2])
+            let own = witness
+                .writes
+                .iter()
+                .find(|w| w.account == r.account && w.id == r.session[2])
                 .context("market thanks receipt belongs to another character")?;
-            ensure!(witness.writes.iter().any(|w| w.account==r.peer.1),"market thanks receipt belongs to another peer");
+            ensure!(
+                witness.writes.iter().any(|w| w.account == r.peer.1),
+                "market thanks receipt belongs to another peer"
+            );
             // A settled exchange remains true after ordinary consumption of the received item.
-            v.character.inventory_revision >= own.revision.checked_add(1).context("invalid market receipt revision")?
+            v.character.inventory_revision
+                >= own
+                    .revision
+                    .checked_add(1)
+                    .context("invalid market receipt revision")?
         } else {
             v.character.inventory_revision == r.revision
         };
