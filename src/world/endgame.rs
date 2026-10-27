@@ -1199,6 +1199,22 @@ async fn realm_death_credit_survives_portal_reward_failure() {
         .expect("normal replacement construction completed");
     let replacement = record.replacement.unwrap();
     assert!(!directory.worlds[&replacement].admission_open);
+    assert!(directory.forced_transfer(player).unwrap().is_none());
+    let (owner, progress) = directory
+        .worlds
+        .get_mut(&-3)
+        .unwrap()
+        .pending_progress_where(|id, _| id == player)
+        .pop()
+        .expect("final Hermit XP must settle before transfer");
+    store.progress(progress.clone()).await.unwrap();
+    directory
+        .worlds
+        .get_mut(&-3)
+        .unwrap()
+        .finish_progress(owner, progress)
+        .unwrap();
+    let character = directory.worlds[&-3].players[&player].character.clone();
     let transfer = directory.forced_transfer(player).unwrap().unwrap();
     assert_eq!(transfer.destination, Some(castle));
     assert_eq!(transfer.name, "Oryx's Castle");
