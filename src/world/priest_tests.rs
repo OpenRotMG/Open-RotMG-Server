@@ -74,6 +74,7 @@ async fn priest_unlock_requires_wizard_five_and_keeps_dead_characters_dead() {
         assert_eq!(wizard.level, level);
         store.progress(wizard.clone()).await.unwrap();
         wizard.hp = 0;
+        wizard.alive = false;
         store
             .death(wizard.clone(), "prepared unlock test".into())
             .await
@@ -143,12 +144,13 @@ fn priest_purification_heals_before_cleansing_and_preserves_positive_effects() {
             .to_string()
             .contains("Quiet")
     );
-    assert_eq!(w.players[&caster].character.mp, 300);
+    assert_eq!(w.players[&caster].character.mp, 0);
     w.players
         .get_mut(&caster)
         .unwrap()
         .statuses
         .remove(&condition::QUIET);
+    w.players.get_mut(&caster).unwrap().character.mp = 300;
     cast(&mut w, caster).unwrap();
     for target in [caster, ally] {
         assert_eq!(w.players[&target].character.hp, 100);
