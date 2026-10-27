@@ -189,6 +189,52 @@ fn native_movement_sentinel_immobilization_and_goto_keep_authority() {
 }
 
 #[test]
+fn native_movement_accepts_collision_sliding_without_crossing_obstacles() {
+    for (kind, from, to) in [
+        (
+            0x100,
+            Pos { x: 10., y: 8.80855 },
+            Pos {
+                x: 9.33475,
+                y: 9.47379,
+            },
+        ),
+        (0x100, Pos { x: 8.99, y: 8.1 }, Pos { x: 9.2, y: 7.99 }),
+        (0x1c5, Pos { x: 8.4, y: 7.6 }, Pos { x: 8.6, y: 7.5 }),
+    ] {
+        let (mut world, id) = fixture(0x18, false);
+        world
+            .spawn_entity(kind, Pos { x: 9.5, y: 8.5 }, vec![])
+            .unwrap();
+        world.players.get_mut(&id).unwrap().pos = from;
+        native(&mut world, id, to.x, to.y, 1100, 1100).unwrap();
+        assert_eq!(world.players[&id].pos.x, to.x);
+        assert!(native(&mut world, id, 9.5, 8.5, 1200, 1200).is_err());
+    }
+}
+
+#[test]
+fn native_collision_slide_charges_the_traversed_distance() {
+    let (mut world, id) = fixture(0x18, false);
+    world
+        .spawn_entity(0x1c5, Pos { x: 9.5, y: 8.5 }, vec![])
+        .unwrap();
+    let p = world.players.get_mut(&id).unwrap();
+    p.pos = Pos { x: 8.4, y: 7.6 };
+    p.movement_credit = 0.;
+    let before = p.pos;
+    let error = native(&mut world, id, 8.6, 7.5, 1100, 1024).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("collision slide exceeds movement budget")
+    );
+    assert_eq!(world.players[&id].pos.x, before.x);
+    assert_eq!(world.players[&id].pos.y, before.y);
+    assert_eq!(world.players[&id].movement_credit, 0.);
+}
+
+#[test]
 fn native_movement_preserves_half_cell_corner_and_rejects_void_crossing() {
     let (mut world, id) = fixture(0x18, false);
     Arc::make_mut(&mut world.map).cells[9 * 32 + 9].ground = 255;
