@@ -45,9 +45,9 @@ with sqlite3.connect(sys.argv[1]) as db:
 export async function run(game){
   try{
     await game.act({keys:[],duration_ms:1800});
-    const start=(await game.observe()).time_ms;
+    const start=(await game.observe()).game_ms;
     // Nonpositive goals intentionally omit the denominator: selected 123.5.1 StatusBar, https://github.com/OpenRotMG/Open-RotMG-Client/blob/39acbfbf3bf545c397d6ac94f0a9430d6d660ac2/client.swf
-    await game.act({keys:[],duration_ms:1000,mouse:{x:700,y:240}},{name:'terminal-fame-hover',when:view=>view.time_ms>=start+500});
+    await game.act({keys:[],duration_ms:1800,mouse:{x:700,y:240}},{name:'terminal-fame-hover',when:view=>view.game_ms>=start+500});
     const before=await game.inspect();
     game.check('prepared terminal character loaded through native client',before.view.character.level===20&&before.view.character.fame===2000);
     await page.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:rect.x+300,y:rect.y+300});
