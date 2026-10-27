@@ -5,9 +5,14 @@ use tokio::sync::broadcast;
 const BUFFER: usize = 256;
 
 pub(crate) fn advance_cursor(last: &mut Option<u32>, packet: &Packet) -> Result<bool> {
-    ensure!(packet.id == 250 && packet.body.len() == 21, "invalid native cursor packet");
+    ensure!(
+        packet.id == 250 && packet.body.len() == 21,
+        "invalid native cursor packet"
+    );
     let tick = u32::from_be_bytes(packet.body[8..12].try_into()?);
-    if last.is_some_and(|prior| tick.wrapping_sub(prior) == 0 || tick.wrapping_sub(prior) >= 1 << 31) {
+    if last
+        .is_some_and(|prior| tick.wrapping_sub(prior) == 0 || tick.wrapping_sub(prior) >= 1 << 31)
+    {
         return Ok(false);
     }
     *last = Some(tick);

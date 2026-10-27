@@ -100,30 +100,39 @@ fn cursor_negotiation_is_explicit_and_strict() {
     }
 }
 
-fn attachment_changed(current: Option<(i32,i32)>, player:i32, account:i32) -> bool {
-    current != Some((player,account))
+fn attachment_changed(current: Option<(i32, i32)>, player: i32, account: i32) -> bool {
+    current != Some((player, account))
 }
 fn reconnect_packet() -> Packet {
-    let mut reconnect=Writer::new();
-    reconnect.utf("Bot CCTV").utf("").i32(2050).i32(-2).i32(0).i16(0);
-    Packet { id:39, body:reconnect.0 }
+    let mut reconnect = Writer::new();
+    reconnect
+        .utf("Bot CCTV")
+        .utf("")
+        .i32(2050)
+        .i32(-2)
+        .i32(0)
+        .i16(0);
+    Packet {
+        id: 39,
+        body: reconnect.0,
+    }
 }
 
 #[cfg(test)]
 #[test]
 fn attachment_transition_uses_normal_native_reconnect_packet() {
-    assert!(!attachment_changed(Some((7,1)),7,1));
-    for binding in [None,Some((8,1)),Some((7,2))] {
-        assert!(attachment_changed(binding,7,1));
-        let packet=reconnect_packet();
-        assert_eq!(packet.id,39);
-        let mut r=Reader::new(&packet.body);
-        assert_eq!(r.utf().unwrap(),"Bot CCTV");
-        assert_eq!(r.utf().unwrap(),"");
-        assert_eq!(r.i32().unwrap(),2050);
-        assert_eq!(r.i32().unwrap(),-2);
-        assert_eq!(r.i32().unwrap(),0);
-        assert_eq!(r.i16().unwrap(),0);
+    assert!(!attachment_changed(Some((7, 1)), 7, 1));
+    for binding in [None, Some((8, 1)), Some((7, 2))] {
+        assert!(attachment_changed(binding, 7, 1));
+        let packet = reconnect_packet();
+        assert_eq!(packet.id, 39);
+        let mut r = Reader::new(&packet.body);
+        assert_eq!(r.utf().unwrap(), "Bot CCTV");
+        assert_eq!(r.utf().unwrap(), "");
+        assert_eq!(r.i32().unwrap(), 2050);
+        assert_eq!(r.i32().unwrap(), -2);
+        assert_eq!(r.i32().unwrap(), 0);
+        assert_eq!(r.i16().unwrap(), 0);
         r.done().unwrap();
     }
 }
@@ -159,7 +168,7 @@ impl Stream {
     }
     async fn reconnect(&mut self) -> Result<()> {
         let packet = reconnect_packet();
-        self.output(packet.id,packet.body).await
+        self.output(packet.id, packet.body).await
     }
     async fn input(&mut self) -> Result<Option<Packet>> {
         loop {
@@ -243,10 +252,10 @@ impl Stream {
                         self.reconnect().await?;
                         break;
                     }
-                    if let Some(packet) = a.world.spectator_cursor(attached.world, attached.player, attached.account, attached.character).await? {
-                        if crate::world::spectator::advance_cursor(&mut last_cursor_tick, &packet)? {
-                            self.output(packet.id, packet.body).await?;
-                        }
+                    if let Some(packet) = a.world.spectator_cursor(attached.world, attached.player, attached.account, attached.character).await?
+                        && crate::world::spectator::advance_cursor(&mut last_cursor_tick, &packet)?
+                    {
+                        self.output(packet.id, packet.body).await?;
                     }
                 },
                 packet = self.input() => {

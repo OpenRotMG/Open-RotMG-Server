@@ -3,19 +3,31 @@ use super::*;
 #[test]
 fn native_cursor_tick_gate_rejects_duplicates_stale_and_ambiguous_wrap() {
     use crate::world::spectator::advance_cursor;
-    let packet=|tick:u32| {
-        let mut out=Writer::new();
+    let packet = |tick: u32| {
+        let mut out = Writer::new();
         out.i32(1).i32(2).i32(tick as i32).f32(3.).f32(4.).u8(1);
-        Packet{id:250,body:out.0}
+        Packet {
+            id: 250,
+            body: out.0,
+        }
     };
-    let mut last=None;
-    assert!(advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
-    assert!(!advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
-    assert!(advance_cursor(&mut last,&packet(0)).unwrap());
-    assert!(!advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
-    assert!(!advance_cursor(&mut last,&packet(1<<31)).unwrap());
-    assert_eq!(last,Some(0));
-    assert!(advance_cursor(&mut last,&Packet{id:250,body:vec![]}).is_err());
+    let mut last = None;
+    assert!(advance_cursor(&mut last, &packet(u32::MAX)).unwrap());
+    assert!(!advance_cursor(&mut last, &packet(u32::MAX)).unwrap());
+    assert!(advance_cursor(&mut last, &packet(0)).unwrap());
+    assert!(!advance_cursor(&mut last, &packet(u32::MAX)).unwrap());
+    assert!(!advance_cursor(&mut last, &packet(1 << 31)).unwrap());
+    assert_eq!(last, Some(0));
+    assert!(
+        advance_cursor(
+            &mut last,
+            &Packet {
+                id: 250,
+                body: vec![]
+            }
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -106,43 +118,58 @@ fn lifecycle_clears_inputs_without_replaying_on_ready_or_replacement() {
 
 #[test]
 fn held_pointer_translates_with_the_virtual_view_without_involuntary_rotation() {
-    let start = Pos { x:10., y:10. };
+    let start = Pos { x: 10., y: 10. };
     let mut input = Inputs::default();
-    input.observe(start,None,Some(Pos{x:15.,y:12.}),4);
-    for _ in 0..100 { input.track(); }
+    input.observe(start, None, Some(Pos { x: 15., y: 12. }), 4);
+    for _ in 0..100 {
+        input.track();
+    }
     let before = input.cursor.unwrap();
-    let moved = Pos { x:12.,y:7. };
+    let moved = Pos { x: 12., y: 7. };
     input.translate(moved);
     input.track();
     let after = input.cursor.unwrap();
-    assert!((after.x-moved.x-(before.x-start.x)).abs()<1e-5);
-    assert!((after.y-moved.y-(before.y-start.y)).abs()<1e-5);
+    assert!((after.x - moved.x - (before.x - start.x)).abs() < 1e-5);
+    assert!((after.y - moved.y - (before.y - start.y)).abs() < 1e-5);
 }
 
 #[test]
 fn blocked_held_step_publishes_waypoint_feedback_and_releases_keys() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
-    let mut w = World::new(content.clone(),map).unwrap();
+    let mut w = World::new(content.clone(), map).unwrap();
     let mut ch = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
-    ch.id=1; ch.account=2;
-    let id=w.enter(ch,None).unwrap();
-    w.players.get_mut(&id).unwrap().controller=Controller::Autonomous;
-    let (start,target) = (1..w.map.height-1).flat_map(|y| (1..w.map.width-1).map(move|x| (x,y)))
-        .find_map(|(x,y)| {
-            let start=Pos{x:x as f32+0.5,y:y as f32+0.5};
-            let target=Pos{x:start.x+1.,y:start.y};
-            (w.player_position_valid(None,start) && !w.player_position_valid(None,target)).then_some((start,target))
-        }).expect("tutorial walkable/blocked boundary");
-    w.players.get_mut(&id).unwrap().pos=start;
-    w.bot_inputs((id,2,1),Some(target),None,4).unwrap();
-    for _ in 0..10 { w.now+=50; w.step_bot_inputs(id); }
-    let input=w.players[&id].inputs.as_ref().unwrap();
-    assert_eq!(input.keys,[0,0]);
+    ch.id = 1;
+    ch.account = 2;
+    let id = w.enter(ch, None).unwrap();
+    w.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+    let (start, target) = (1..w.map.height - 1)
+        .flat_map(|y| (1..w.map.width - 1).map(move |x| (x, y)))
+        .find_map(|(x, y)| {
+            let start = Pos {
+                x: x as f32 + 0.5,
+                y: y as f32 + 0.5,
+            };
+            let target = Pos {
+                x: start.x + 1.,
+                y: start.y,
+            };
+            (w.player_position_valid(None, start) && !w.player_position_valid(None, target))
+                .then_some((start, target))
+        })
+        .expect("tutorial walkable/blocked boundary");
+    w.players.get_mut(&id).unwrap().pos = start;
+    w.bot_inputs((id, 2, 1), Some(target), None, 4).unwrap();
+    for _ in 0..10 {
+        w.now += 50;
+        w.step_bot_inputs(id);
+    }
+    let input = w.players[&id].inputs.as_ref().unwrap();
+    assert_eq!(input.keys, [0, 0]);
     let attempted = input.blocked.unwrap();
     assert!(attempted.x > start.x && attempted.x <= target.x);
-    assert_eq!(attempted.y,start.y);
-    assert!(w.player_position_valid(None,w.players[&id].pos));
+    assert_eq!(attempted.y, start.y);
+    assert!(w.player_position_valid(None, w.players[&id].pos));
 }
 
 #[test]

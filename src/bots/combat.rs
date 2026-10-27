@@ -361,7 +361,8 @@ pub(super) fn movement(
         } else {
             index as f32 * std::f32::consts::TAU / perception.directions as f32
         };
-        let direction = (direction / std::f32::consts::FRAC_PI_4).round() * std::f32::consts::FRAC_PI_4;
+        let direction =
+            (direction / std::f32::consts::FRAC_PI_4).round() * std::f32::consts::FRAC_PI_4;
         let point = Pos {
             x: v.position.x + direction.cos() * distance,
             y: v.position.y + direction.sin() * distance,

@@ -124,11 +124,24 @@ async fn decide_before_social(
 
 fn held_movement(grid: &Grid, from: Pos, goal: Pos, distance: f32) -> Option<Pos> {
     let length = from.distance(goal).min(distance);
-    (0..8).map(|index| {
-        let heading = index as f32 * std::f32::consts::FRAC_PI_4;
-        Pos { x:from.x + heading.cos()*length, y:from.y + heading.sin()*length }
-    }).filter(|point| point.distance(goal) < from.distance(goal) && grid.segment(from,*point))
-        .min_by(|a,b| a.distance(goal).total_cmp(&b.distance(goal)))
+    // Short key holds fit corners where no full reaction-length octant fits.
+    (0..4)
+        .flat_map(|scale| {
+            (0..8).map(move |index| {
+                let heading = index as f32 * std::f32::consts::FRAC_PI_4;
+                let length = length / (1 << scale) as f32;
+                Pos {
+                    x: from.x + heading.cos() * length,
+                    y: from.y + heading.sin() * length,
+                }
+            })
+        })
+        .filter(|point| {
+            from.distance(*point) > 0.1
+                && point.distance(goal) < from.distance(goal)
+                && grid.segment(from, *point)
+        })
+        .min_by(|a, b| a.distance(goal).total_cmp(&b.distance(goal)))
 }
 
 fn execute_inputs(
@@ -144,15 +157,36 @@ fn execute_inputs(
         use crate::content::Ability;
         let p = &w.players[&session.0];
         let ability = w.content.get(p.character.items[1] as u16)?;
-        let aimed = ability.abilities.iter().any(|a| !matches!(a,
-            Ability::Heal { .. } | Ability::Condition { .. } | Ability::Clear { .. }
-            | Ability::Cleanse { .. } | Ability::SpiritBomb));
+        let aimed = ability.abilities.iter().any(|a| {
+            !matches!(
+                a,
+                Ability::Heal { .. }
+                    | Ability::Condition { .. }
+                    | Ability::Clear { .. }
+                    | Ability::Cleanse { .. }
+                    | Ability::SpiritBomb
+            )
+        });
         let point = if aimed {
-            let p = w.players.get_mut(&session.0).expect("virtual ability player missing");
-            p.inputs.as_mut().expect("virtual inputs admitted").aim(p.pos, Pos { x, y })
-        } else { Pos { x, y } };
-        Some(Action::Use { slot: 1, x: point.x, y: point.y })
-    } else { item };
+            let p = w
+                .players
+                .get_mut(&session.0)
+                .expect("virtual ability player missing");
+            p.inputs
+                .as_mut()
+                .expect("virtual inputs admitted")
+                .aim(p.pos, Pos { x, y })
+        } else {
+            Pos { x, y }
+        };
+        Some(Action::Use {
+            slot: 1,
+            x: point.x,
+            y: point.y,
+        })
+    } else {
+        item
+    };
     item.map(|action| w.autonomous_action(session.0, action))
         .transpose()
         .map(Option::flatten)

@@ -210,7 +210,10 @@ impl Cctv {
 
 fn actual_aim(v: &PlayerView) -> Option<f32> {
     let input = v.inputs.as_ref()?;
-    input.cursor.filter(|_| input.fire).map(|p| angle(v.position,p))
+    input
+        .cursor
+        .filter(|_| input.fire)
+        .map(|p| angle(v.position, p))
 }
 
 // Unnamed objects show their type name, as the native client does.
@@ -381,26 +384,48 @@ mod tests {
 
     #[test]
     fn telemetry_aim_and_position_describe_actual_input_not_desired_decision() {
-        let (content,mut view)=super::super::quest_tests::fixture();
-        let mut inputs=crate::world::bot_inputs::Inputs::default();
-        inputs.cursor=Some(Pos{x:view.position.x+1.,y:view.position.y+2.});
-        inputs.fire=true;
-        view.inputs=Some(inputs);
-        let decision=Decision{goal:Goal::Wait,movement:None,aim:Some(Pos{x:0.,y:0.}),item:None,journey:None,chat:None};
-        let cctv=Cctv::default();
-        cctv.entered("Triceps",view.session.player,view.session.account);
-        cctv.decided("Triceps",&view,&decision,"testing".into(),&Value::Null,&content);
-        assert_eq!(cctv.live_bots()[0]["frame"]["aim"],json!(actual_aim(&view)));
-        view.position.x+=3.; view.position.y-=2.; view.tick+=1;
-        cctv.inputs("Triceps",&view);
-        let frame=&cctv.live_bots()[0]["frame"];
-        assert_eq!(frame["x"],json!(view.position.x));
-        assert_eq!(frame["y"],json!(view.position.y));
-        assert_eq!(frame["tick"],json!(view.tick));
-        assert_eq!(frame["aim"],json!(actual_aim(&view)));
+        let (content, mut view) = super::super::quest_tests::fixture();
+        let mut inputs = crate::world::bot_inputs::Inputs::default();
+        inputs.cursor = Some(Pos {
+            x: view.position.x + 1.,
+            y: view.position.y + 2.,
+        });
+        inputs.fire = true;
+        view.inputs = Some(inputs);
+        let decision = Decision {
+            goal: Goal::Wait,
+            movement: None,
+            aim: Some(Pos { x: 0., y: 0. }),
+            item: None,
+            journey: None,
+            chat: None,
+        };
+        let cctv = Cctv::default();
+        cctv.entered("Triceps", view.session.player, view.session.account);
+        cctv.decided(
+            "Triceps",
+            &view,
+            &decision,
+            "testing".into(),
+            &Value::Null,
+            &content,
+        );
+        assert_eq!(
+            cctv.live_bots()[0]["frame"]["aim"],
+            json!(actual_aim(&view))
+        );
+        view.position.x += 3.;
+        view.position.y -= 2.;
+        view.tick += 1;
+        cctv.inputs("Triceps", &view);
+        let frame = &cctv.live_bots()[0]["frame"];
+        assert_eq!(frame["x"], json!(view.position.x));
+        assert_eq!(frame["y"], json!(view.position.y));
+        assert_eq!(frame["tick"], json!(view.tick));
+        assert_eq!(frame["aim"], json!(actual_aim(&view)));
         assert!(frame["inputs"].get("desired").is_none());
-        view.inputs.as_mut().unwrap().fire=false;
-        cctv.inputs("Triceps",&view);
+        view.inputs.as_mut().unwrap().fire = false;
+        cctv.inputs("Triceps", &view);
         assert!(cctv.live_bots()[0]["frame"]["aim"].is_null());
     }
 }
