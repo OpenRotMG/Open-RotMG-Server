@@ -40,7 +40,10 @@ impl Market {
         &mut self, v: &PlayerView, peer: (i32, i32, String), kind: ReplyKind, c: &Content,
     ) -> Result<()> {
         let message = Message { text: Self::reply_text(&kind, c)?, channel: Channel::Tell(peer.2.clone()) };
-        tracing::info!(account=v.session.account,session=?v.session,revision=v.character.inventory_revision,?peer,?kind,capacity=v.character.items.iter().skip(4).filter(|k| **k<0).count(),"market state-bound reply queued");
+        let reply_kind=match &kind { ReplyKind::Counter(_)=>"counter", ReplyKind::Bank(_)=>"bank", ReplyKind::Thanks(_)=>"thanks" };
+        let quote=match &kind { ReplyKind::Counter(q)|ReplyKind::Bank(q)=>Some(q), ReplyKind::Thanks(_)=>None };
+        let transaction=match &kind { ReplyKind::Thanks(w)=>Some(w.transaction.as_str()), _=>None };
+        tracing::info!(account=v.session.account,session=?v.session,revision=v.character.inventory_revision,?peer,reply_kind,transaction,?quote,capacity=v.character.items.iter().skip(4).filter(|k| **k<0).count(),"market state-bound reply queued");
         self.reply = Some(BoundReply { message: message.clone(), kind,
             session: [v.session.world,v.session.player,v.session.character],account:v.session.account,
             revision:v.character.inventory_revision,peer,until:v.elapsed_ms+20_000 });
