@@ -280,13 +280,10 @@ async fn reenter(
     profile: Profile,
     account: i32,
     owner: &mut Option<Owner>,
+    entry: lifecycle::drain::Entry,
     request: Reentry,
 ) -> Result<Entry> {
-    owner
-        .as_ref()
-        .context("autonomous reentry lost account custody")?
-        .admit_controller(app)?;
-    let entry = lifecycle::drain::entry(app)?;
+    // Drain must await already accepted work, not reject it mid-transfer: https://tokio.rs/tokio/topics/shutdown
     let mut owned = owner
         .take()
         .context("autonomous reentry lost account custody")?;
@@ -637,7 +634,7 @@ pub(super) async fn launch(
                         let Some(destination) = transfer.destination else { return Ok(()); };
                         admission = Some(transfer.key.clone());
                         let character_id = brain.session.2;
-                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Collective { destination, time: transfer.key_time, key: transfer.key, character: character_id }).await?;
+                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Collective { destination, time: transfer.key_time, key: transfer.key, character: character_id }).await?;
                         admission = None;
                         tracing::info!(player=id,account,character=character_id,destination,"autonomous collective transfer completed");
                         continue;
@@ -702,7 +699,7 @@ pub(super) async fn launch(
                             _=shutdown.changed()=>return Ok(()),
                             _=cancel.changed()=>return Ok(()),
                         }
-                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Replacement { previous: view.session.character }).await?;
+                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Replacement { previous: view.session.character }).await?;
                         deferred_market = None;
                         continue;
                     }
@@ -917,7 +914,7 @@ pub(super) async fn launch(
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
-                                (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
+                                (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
                                 let current_character = brain.session.2;
                                 let destination = if current_character != previous { -2 } else { destination };
                                 if current_character != previous {
