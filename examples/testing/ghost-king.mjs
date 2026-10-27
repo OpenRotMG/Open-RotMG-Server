@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {setTimeout as delay} from 'node:timers/promises';
-import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
 const spec={class:0x31d,level:20,seed:794,world:1,equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 let roots;
@@ -13,21 +11,6 @@ export async function prepare(api){
   assert(roots.length>=3,'Three ordinarily placed Ghost Kings required');
   await writeFile(join(out,'roots.json'),JSON.stringify({world,roots}));
   return {...spec,position:{x:roots[0].x,y:roots[0].y}};
-}
-export async function enter({browser,signal}){
-  const target=(await (await fetch(`http://127.0.0.1:${browser.port}/json/list`,{signal})).json()).find(p=>p.id===browser.target);assert(target);
-  const page=await connect({...browser,url:target.url,helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
-  try{
-    await page.eval('(()=>{const m=document.querySelector("ruffle-player").shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();})()');
-    await page.call('Emulation.setFocusEmulationEnabled',{enabled:true});
-    for(let n=0;n<2;n++){
-      await delay(1000,undefined,{signal});
-      const shot=await page.call('Page.captureScreenshot',{format:'png'});await writeFile(join(out,'menu-'+browser.port+'-'+n+'.png'),Buffer.from(shot.data,'base64'));
-      const r=await page.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};})()');assert(r.width===800&&r.height===600);
-      const p={x:r.x+400,y:r.y+550,button:'left',clickCount:1};
-      try{await page.call('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await page.call('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}
-    }
-  }finally{page.close();}
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
