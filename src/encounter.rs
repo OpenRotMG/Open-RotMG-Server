@@ -7,6 +7,7 @@ pub(crate) mod jungle;
 pub(crate) mod landmarks;
 mod minotaur;
 pub(crate) mod tomb;
+pub(crate) mod tutorial;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
@@ -92,6 +93,9 @@ pub(crate) fn nr_speed(rate: f32) -> f32 {
     (5.55 * rate + 0.74) * 1.5
 }
 pub fn profile(kind: u16) -> Option<Profile> {
+    if tutorial::ROSTER.contains(&kind) {
+        return Some(tutorial::profile(kind));
+    }
     if crate::dungeon::lab::ROSTER.contains(&kind) {
         return Some(crate::dungeon::lab::profile(kind));
     }

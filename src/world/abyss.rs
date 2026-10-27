@@ -177,20 +177,6 @@ impl World {
         }
     }
 
-    fn abyss_flash(&self, id: i32, color: u32, period: f32, duration: f32) {
-        let mut out = Writer::new();
-        out.u8(15)
-            .i32(id)
-            .f32(period)
-            .f32((duration / period).round())
-            .f32(0.)
-            .f32(0.)
-            .u32(color);
-        for p in self.players.values().filter(|p| p.known.contains(&id)) {
-            send(p, wire::SHOW_EFFECT, out.0.clone());
-        }
-    }
-
     pub(super) fn abyss_mechanics(
         &mut self,
         id: i32,
@@ -210,7 +196,7 @@ impl World {
                 e.stage = Some(1);
                 e.next_aux = self.now + 600;
                 e.expires.set(Some(self.now + 650), id, &mut self.timed_ids);
-                self.abyss_flash(id, 0xffffffff, 0.1, 0.6);
+                self.npc_flash(id, 0xffffffff, 0.1, 0.6);
             }
             return Ok(());
         }
@@ -493,7 +479,7 @@ impl World {
         } else if e.hp <= 200 && terminal.is_none() {
             *terminal = Some(self.now + 300);
             e.goal = None;
-            self.abyss_flash(id, 0xffff0000, 0.3, 0.3);
+            self.npc_flash(id, 0xffff0000, 0.3, 0.3);
             tracing::info!(entity=id, parent=?self.entities[&id].parent, deadline=self.now+300, ?attacker, hp=self.entities[&id].hp, "Abyss Flamer terminal armed");
         }
         Ok(())
@@ -842,7 +828,7 @@ impl World {
         }
         if changed {
             match phase {
-                1 | 4 => self.abyss_flash(id, 0xff00ff00, 0.25, 2.5),
+                1 | 4 => self.npc_flash(id, 0xff00ff00, 0.25, 2.5),
                 5 => self.abyss_throw_flamers(id)?,
                 6 => {
                     let children: Vec<_> = self
@@ -857,7 +843,7 @@ impl World {
                             self.remove_entity(child);
                         }
                     }
-                    self.abyss_flash(id, 0xff484848, 0.6, 3.2);
+                    self.npc_flash(id, 0xff484848, 0.6, 3.2);
                 }
                 _ => {}
             }
