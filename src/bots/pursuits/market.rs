@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 mod incoming;
 mod replies;
 use incoming::Incoming;
-use replies::{BoundReply, ReplyKind};
 pub(in crate::bots) use replies::PendingTrade;
+use replies::{BoundReply, ReplyKind};
 
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
@@ -589,18 +589,36 @@ impl Market {
         {
             return Ok(true);
         }
-        let Some(objective) = self.quote(v, c, future)? else { return Ok(true); };
+        let Some(objective) = self.quote(v, c, future)? else {
+            return Ok(true);
+        };
         let related = match &ad {
-            Advertisement::Quote(q) => objective[0].kind == q[1].kind && objective[1].kind == q[0].kind,
+            Advertisement::Quote(q) => {
+                objective[0].kind == q[1].kind && objective[1].kind == q[0].kind
+            }
             Advertisement::Buying(g) => g.kind == objective[0].kind,
             Advertisement::Selling(g) => g.kind == objective[1].kind,
         };
         // Interest alone supplies neither a peer price nor permission to open a trade.
         let Advertisement::Quote(q) = ad else {
-            if related && self.outgoing.is_none() && v.elapsed_ms >= self.next_message_ms
+            if related
+                && self.outgoing.is_none()
+                && v.elapsed_ms >= self.next_message_ms
                 && let Some(account) = peer.account
-                && v.character.items.iter().skip(4).filter(|k| **k==objective[0].kind).count() >= usize::from(objective[0].quantity) {
-                self.respond(v,(peer.id,account,name),ReplyKind::Counter(objective),c)?;
+                && v.character
+                    .items
+                    .iter()
+                    .skip(4)
+                    .filter(|k| **k == objective[0].kind)
+                    .count()
+                    >= usize::from(objective[0].quantity)
+            {
+                self.respond(
+                    v,
+                    (peer.id, account, name),
+                    ReplyKind::Counter(objective),
+                    c,
+                )?;
             }
             return Ok(true);
         };
@@ -622,10 +640,24 @@ impl Market {
                 name,
                 [q[1].clone(), q[0].clone()],
             ));
-        } else if related && self.outgoing.is_none() && v.elapsed_ms >= self.next_message_ms
+        } else if related
+            && self.outgoing.is_none()
+            && v.elapsed_ms >= self.next_message_ms
             && let Some(account) = peer.account
-            && v.character.items.iter().skip(4).filter(|k| **k==objective[0].kind).count() >= usize::from(objective[0].quantity) {
-            self.respond(v,(peer.id,account,name),ReplyKind::Counter(objective),c)?;
+            && v.character
+                .items
+                .iter()
+                .skip(4)
+                .filter(|k| **k == objective[0].kind)
+                .count()
+                >= usize::from(objective[0].quantity)
+        {
+            self.respond(
+                v,
+                (peer.id, account, name),
+                ReplyKind::Counter(objective),
+                c,
+            )?;
         }
         let _ = channel;
         Ok(true)

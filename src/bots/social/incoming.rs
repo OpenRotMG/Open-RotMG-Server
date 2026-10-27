@@ -48,20 +48,22 @@ pub(super) async fn incoming(
         match result {
             Ok(outcome) => {
                 if let Some(witness) = outcome.witness {
-                    brain.mind.market.pending_trade = Some(pursuits::market::PendingTrade { contact, witness });
+                    brain.mind.market.pending_trade =
+                        Some(pursuits::market::PendingTrade { contact, witness });
                 }
                 if let Some(plan) = outcome.plan {
                     crate::server::persist_trade(app, plan).await?;
                 } else {
-                if changed && let Some(trade) = brain.mind.market.trade.as_mut() {
-                    trade.ready_at = app.world.clock.now() + std::time::Duration::from_millis(3000);
-                }
-                if opening {
-                    tracing::info!(
-                        account = v.session.account,
-                        "market native exchange opened; WINDOW offers remain authoritative"
-                    );
-                }
+                    if changed && let Some(trade) = brain.mind.market.trade.as_mut() {
+                        trade.ready_at =
+                            app.world.clock.now() + std::time::Duration::from_millis(3000);
+                    }
+                    if opening {
+                        tracing::info!(
+                            account = v.session.account,
+                            "market native exchange opened; WINDOW offers remain authoritative"
+                        );
+                    }
                 }
             }
             Err(error) => {

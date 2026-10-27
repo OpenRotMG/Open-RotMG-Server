@@ -102,7 +102,7 @@ impl Market {
             self.quote = Some(q.clone());
             self.preparing = true;
             self.respond(v, peer, ReplyKind::Bank(q), c)?;
-            tracing::info!(account=v.session.account,"market capacity preparation");
+            tracing::info!(account = v.session.account, "market capacity preparation");
             return Ok(Some(TradeAction::Cancel));
         }
         if peer.unwrap().position.distance(v.position) >= 2. {

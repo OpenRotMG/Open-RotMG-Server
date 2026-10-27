@@ -415,12 +415,25 @@ impl World {
                 let inventories = exchanged_items(&t.items, &t.offers)?;
                 let witness = crate::store::TradeWitness {
                     transaction: t.transaction.clone(),
-                    writes: t.players.iter().enumerate().map(|(i,id)| {
-                        let ch=&self.players[id].character;
-                        InventoryWrite { id:ch.id, account:ch.account, revision:ch.revision, items:inventories[i].clone() }
-                    }).collect(),
+                    writes: t
+                        .players
+                        .iter()
+                        .enumerate()
+                        .map(|(i, id)| {
+                            let ch = &self.players[id].character;
+                            InventoryWrite {
+                                id: ch.id,
+                                account: ch.account,
+                                revision: ch.revision,
+                                items: inventories[i].clone(),
+                            }
+                        })
+                        .collect(),
                 };
-                return Ok(IncomingTradeOutcome { plan:self.accept_trade(id,mine,theirs)?, witness:Some(witness) });
+                return Ok(IncomingTradeOutcome {
+                    plan: self.accept_trade(id, mine, theirs)?,
+                    witness: Some(witness),
+                });
             }
             TradeAction::Cancel => unreachable!(),
         }
@@ -975,10 +988,22 @@ mod community_tests {
                 .is_err()
             );
         }
-        let accepted = w.autonomous_incoming_trade(ids[1],session,ids[0],binding,TradeAction::Accept { mine,theirs },quote).unwrap();
+        let accepted = w
+            .autonomous_incoming_trade(
+                ids[1],
+                session,
+                ids[0],
+                binding,
+                TradeAction::Accept { mine, theirs },
+                quote,
+            )
+            .unwrap();
         assert!(accepted.plan.is_none());
-        let witness=accepted.witness.unwrap();
-        assert!(!store.trade_committed(witness.clone()).await.unwrap(), "native acceptance is not settlement");
+        let witness = accepted.witness.unwrap();
+        assert!(
+            !store.trade_committed(witness.clone()).await.unwrap(),
+            "native acceptance is not settlement"
+        );
         let plan = w.accept_trade(ids[0], theirs, mine).unwrap().unwrap();
         let transaction = plan.transaction.clone();
         let writes = writes(&plan);
@@ -995,9 +1020,12 @@ mod community_tests {
             "durable transaction receipt makes duplicate settlement idempotent"
         );
         assert!(store.trade_committed(witness.clone()).await.unwrap());
-        let mut wrong=witness;
-        wrong.writes[0].items[4]=0xa22;
-        assert!(store.trade_committed(wrong).await.is_err(), "another payload under the same receipt cannot authorize thanks");
+        let mut wrong = witness;
+        wrong.writes[0].items[4] = 0xa22;
+        assert!(
+            store.trade_committed(wrong).await.is_err(),
+            "another payload under the same receipt cannot authorize thanks"
+        );
         w.finish_trade(plan, Ok(revisions)).unwrap();
         assert_eq!(w.players[&ids[1]].character.items[4], 0xa20);
         assert_eq!(
