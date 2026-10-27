@@ -6,7 +6,7 @@ const BUFFER: usize = 256;
 
 pub(crate) fn advance_cursor(last: &mut Option<u32>, packet: &Packet) -> Result<bool> {
     ensure!(
-        packet.id == 250 && packet.body.len() == 21,
+        packet.id == 250 && matches!(packet.body.len(), 21 | 29),
         "invalid native cursor packet"
     );
     let tick = u32::from_be_bytes(packet.body[8..12].try_into()?);
@@ -70,6 +70,7 @@ impl Handle {
         )
         .await
     }
+    #[cfg(test)]
     pub(crate) async fn spectator_cursor(
         &self,
         world: i32,
@@ -77,6 +78,20 @@ impl Handle {
         account: i32,
         character: i32,
     ) -> Result<Option<Packet>> {
+        Ok(self
+            .spectator_inputs(world, player, account, character, 1)
+            .await?
+            .map(|mut packets| packets.remove(0)))
+    }
+    pub(crate) async fn spectator_inputs(
+        &self,
+        world: i32,
+        player: i32,
+        account: i32,
+        character: i32,
+        version: u8,
+    ) -> Result<Option<Vec<Packet>>> {
+        ensure!(matches!(version, 1 | 2), "invalid spectator input version");
         let Some(slot) = self.routing.player(player)? else {
             return Ok(None);
         };
@@ -96,7 +111,6 @@ impl Handle {
                     || p.character.id != character
                     || p.controller != Controller::Autonomous
                     || !p.active()
-                    || p.pending
                 {
                     return Ok(None);
                 }
@@ -107,7 +121,10 @@ impl Handle {
                     return Ok(None);
                 };
                 ensure!(
-                    cursor.x.is_finite() && cursor.y.is_finite(),
+                    cursor.x.is_finite()
+                        && cursor.y.is_finite()
+                        && p.pos.x.is_finite()
+                        && p.pos.y.is_finite(),
                     "nonfinite spectator cursor"
                 );
                 let mut out = Writer::new();
@@ -116,11 +133,39 @@ impl Handle {
                     .i32(w.tick as u32 as i32)
                     .f32(cursor.x)
                     .f32(cursor.y)
-                    .u8(u8::from(inputs.fire));
-                Ok(Some(Packet {
+                    .u8(u8::from(inputs.fire && !p.pending));
+                if version == 2 {
+                    out.f32(p.pos.x).f32(p.pos.y);
+                }
+                let mut packets = vec![Packet {
                     id: 250,
                     body: out.0,
-                }))
+                }];
+                if version == 2 {
+                    let draft = &inputs.composition;
+                    let (phase, text) = if p.pending {
+                        (0, "")
+                    } else {
+                        (draft.phase, draft.text.as_str())
+                    };
+                    ensure!(
+                        phase <= 2
+                            && (phase != 0 || text.is_empty())
+                            && text.encode_utf16().count() <= 128,
+                        "invalid spectator composition"
+                    );
+                    let mut out = Writer::new();
+                    out.i32(player)
+                        .i32(character)
+                        .i32(w.tick as u32 as i32)
+                        .u8(phase)
+                        .utf(text);
+                    packets.push(Packet {
+                        id: 251,
+                        body: out.0,
+                    });
+                }
+                Ok(Some(packets))
             },
         )
         .await

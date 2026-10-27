@@ -212,22 +212,49 @@ pub(super) async fn market(
             .message_current(&message, v, &app.content, brain.mind.future_class)?
         {
             brain.mind.market.outgoing = None;
+            if brain.composing(composer::Source::Market).is_some() {
+                brain.close_composition(app, false).await?;
+            }
             tracing::info!(
                 account = v.session.account,
                 "market speech discarded: intent or held goods changed"
             );
         } else if let Some(service) = &app.dialogue {
-            match service.market_wording(
-                &brain.mind.market.name,
-                &message,
-                &app.content,
-                serde_json::json!({"sociability":brain.profile.companions,
-                    "patience":brain.profile.reaction,"resources":brain.profile.resources}),
-            ) {
+            if brain
+                .market_words
+                .as_ref()
+                .is_some_and(|(original, _)| original != &message)
+            {
+                brain.market_words = None;
+                if brain.composing(composer::Source::Market).is_some() {
+                    brain.close_composition(app, false).await?;
+                }
+            }
+            let words = if let Some((_, words)) = &brain.market_words {
+                Ok(Some(words.clone()))
+            } else {
+                service.market_wording(
+                    &brain.mind.market.name,
+                    &message,
+                    &app.content,
+                    serde_json::json!({"sociability":brain.profile.companions,
+                        "patience":brain.profile.reaction,"resources":brain.profile.resources}),
+                )
+            };
+            match words {
                 Ok(Some(words)) => {
+                    brain.market_words = Some((message.clone(), words.clone()));
                     let mut generated = message.clone();
                     generated.text = words;
                     let text = generated.chat();
+                    let public = matches!(message.channel, pursuits::market::Channel::Local);
+                    if public
+                        && !brain
+                            .compose(app, v, composer::Source::Market, &text)
+                            .await?
+                    {
+                        return Ok(brain.composing(composer::Source::Market).is_some());
+                    }
                     let id = v.session.player;
                     let session = [v.session.world, id, v.session.character];
                     let revision = v.character.inventory_revision;
@@ -246,9 +273,17 @@ pub(super) async fn market(
                                         .message_current(&message, &current, &content, future)?,
                                 "market speech state changed before publication"
                             );
-                            d.chat(id, text, received)
+                            if public {
+                                d.submit_bot_chat(id, text, received)
+                            } else {
+                                d.chat(id, text, received)
+                            }
                         })
                         .await;
+                    if public {
+                        brain.close_composition(app, published.is_ok()).await?;
+                    }
+                    brain.market_words = None;
                     match published {
                         Ok(()) => {
                             brain.mind.market.outgoing = None;

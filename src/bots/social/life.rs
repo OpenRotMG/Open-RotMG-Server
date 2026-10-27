@@ -49,7 +49,7 @@ pub(crate) struct Life {
     #[serde(skip)]
     gift: Option<Gift>,
     #[serde(skip)]
-    outgoing: Option<String>,
+    pub(in crate::bots) outgoing: Option<String>,
     #[serde(skip)]
     heal_notice: i32,
     #[serde(skip)]
@@ -76,6 +76,12 @@ fn health(v: &PlayerView) -> usize {
         .count()
 }
 impl Life {
+    pub(in crate::bots) fn cancel_composition(&mut self) {
+        self.outgoing = None;
+        if let Some(gift) = &mut self.gift {
+            gift.cancelled = true;
+        }
+    }
     pub(in crate::bots) fn gift_active(&self) -> bool {
         self.gift.is_some()
     }
@@ -674,15 +680,72 @@ pub(in crate::bots) async fn life(
         return cancel_gift(app, brain, v).await;
     }
     if v.elapsed_ms >= brain.mind.market.next_message_ms
-        && let Some(text) = brain.mind.social.outgoing.take()
+        && let Some(text) = brain.mind.social.outgoing.clone()
     {
+        if !brain.compose(app, v, composer::Source::Gift, &text).await? {
+            return Ok(brain.composing(composer::Source::Gift).is_some());
+        }
         let id = v.session.player;
+        let revision = v.character.inventory_revision;
+        let gift = brain.mind.social.gift.clone();
+        let social = brain.mind.social.clone();
+        let generosity = brain.profile.companions;
+        let recipient = if matches!(
+            text.as_str(),
+            "Realm is full, looking for a Vault" | "Realm is full, waiting here"
+        ) {
+            None
+        } else {
+            text.split_once(',').map(|(name, _)| name.to_owned())
+        };
         let received = app.world.clock.now();
-        match app
+        let published = app
             .world
-            .directory(move |d| d.chat(id, text, received))
-            .await
-        {
+            .directory(move |d| {
+                let current = d.player_view(id)?;
+                ensure!(
+                    [current.session.world, id, current.session.character] == binding
+                        && current.character.inventory_revision == revision,
+                    "gift speech session or stock changed"
+                );
+                ensure!(
+                    recipient.as_ref().is_none_or(|name| current
+                        .objects
+                        .iter()
+                        .any(|p| &p.name == name && p.hp > 0)),
+                    "gift speech recipient left"
+                );
+                if text.starts_with("Realm is full, ") {
+                    ensure!(
+                        current.objects.iter().any(|p| p.kind == 0x712 && !p.usable),
+                        "full entrance speech intention expired"
+                    );
+                }
+                if let Some(g) = gift {
+                    let peer = current.objects.iter().find(|p| {
+                        p.id == g.player
+                            && p.account == Some(g.account)
+                            && p.name == g.name
+                            && p.hp > 0
+                    });
+                    ensure!(
+                        !g.cancelled
+                            && current.elapsed_ms < g.until
+                            && peer.is_some_and(|p| current.position.distance(p.position) < 2.
+                                && if g.giving {
+                                    social.generous(&current, p, generosity)
+                                } else {
+                                    Life::wants_health(&current)
+                                }),
+                        "gift speech intention expired"
+                    );
+                }
+                d.submit_bot_chat(id, text, received)
+            })
+            .await;
+        brain.close_composition(app, published.is_ok()).await?;
+        brain.mind.social.outgoing = None;
+        match published {
             Ok(()) => {
                 tracing::info!(
                     account = v.session.account,

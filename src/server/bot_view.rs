@@ -74,23 +74,25 @@ pub(super) async fn socket(
         })
 }
 
-fn cursor_capability(query: Option<&str>) -> Result<bool> {
+fn cursor_capability(query: Option<&str>) -> Result<u8> {
     match query {
-        None => Ok(false),
-        Some("cursor=1") => Ok(true),
-        Some(_) => bail!("native bot viewer query must be exactly cursor=1 or absent"),
+        None => Ok(0),
+        Some("cursor=1") => Ok(1),
+        Some("cursor=2") => Ok(2),
+        Some(_) => bail!("native bot viewer query must be exactly cursor=1, cursor=2 or absent"),
     }
 }
 
 #[cfg(test)]
 #[test]
 fn cursor_negotiation_is_explicit_and_strict() {
-    assert!(!cursor_capability(None).unwrap());
-    assert!(cursor_capability(Some("cursor=1")).unwrap());
+    assert_eq!(cursor_capability(None).unwrap(), 0);
+    assert_eq!(cursor_capability(Some("cursor=1")).unwrap(), 1);
+    assert_eq!(cursor_capability(Some("cursor=2")).unwrap(), 2);
     for query in [
         "",
         "cursor=0",
-        "cursor=2",
+        "cursor=3",
         "cursor=true",
         "cursor=1&cursor=1",
         "other=1",
@@ -204,7 +206,7 @@ impl Stream {
         .await
         .context("bot has no living session; it may be replacing a dead character or offline")?
     }
-    async fn watch(&mut self, a: &App, name: &str, cursor: bool) -> Result<()> {
+    async fn watch(&mut self, a: &App, name: &str, cursor: u8) -> Result<()> {
         let hello = tokio::time::timeout(Duration::from_secs(10), self.input())
             .await??
             .context("viewer closed before HELLO")?;
@@ -247,15 +249,15 @@ impl Stream {
         loop {
             tokio::select! {
                 _ = async { let _ = stop.wait_for(|stop| *stop).await; } => break,
-                _ = cursor_ticks.tick(), if cursor => {
+                _ = cursor_ticks.tick(), if cursor != 0 => {
                     if attachment_changed(a.cctv.binding(name), attached.player, attached.account) {
                         self.reconnect().await?;
                         break;
                     }
-                    if let Some(packet) = a.world.spectator_cursor(attached.world, attached.player, attached.account, attached.character).await?
-                        && crate::world::spectator::advance_cursor(&mut last_cursor_tick, &packet)?
+                    if let Some(packets) = a.world.spectator_inputs(attached.world, attached.player, attached.account, attached.character, cursor).await?
+                        && crate::world::spectator::advance_cursor(&mut last_cursor_tick, &packets[0])?
                     {
-                        self.output(packet.id, packet.body).await?;
+                        for packet in packets { self.output(packet.id, packet.body).await?; }
                     }
                 },
                 packet = self.input() => {

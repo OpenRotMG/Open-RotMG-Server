@@ -53,6 +53,9 @@ async fn decide_before_social(
         &app.content,
     );
     let surviving = brain.activity == Activity::Survive;
+    if surviving {
+        brain.close_composition(app, false).await?;
+    }
     if surviving
         && (brain.mind.social.gift_active()
             || brain.mind.market.trade.is_some()
@@ -153,6 +156,12 @@ fn execute_inputs(
     reaction: u64,
 ) -> Result<Option<crate::world::InventoryPlan>> {
     w.bot_inputs(session, movement, aim, reaction)?;
+    let item = item.filter(|_| {
+        w.players[&session.0]
+            .inputs
+            .as_ref()
+            .is_none_or(|i| i.composition.phase == 0)
+    });
     let item = if let Some(Action::Use { slot: 1, x, y }) = item {
         use crate::content::Ability;
         let p = &w.players[&session.0];
@@ -172,6 +181,10 @@ fn execute_inputs(
                 .players
                 .get_mut(&session.0)
                 .expect("virtual ability player missing");
+            ensure!(
+                x.is_finite() && y.is_finite() && p.pos.distance(Pos { x, y }).is_finite(),
+                "nonfinite virtual ability point"
+            );
             p.inputs
                 .as_mut()
                 .expect("virtual inputs admitted")
@@ -192,6 +205,116 @@ fn execute_inputs(
         .map(Option::flatten)
 }
 
+async fn public_call(
+    app: &App,
+    brain: &mut Brain,
+    view: &PlayerView,
+    decision: &Decision,
+) -> Result<()> {
+    let id = view.session.player;
+    if let Some(text) = decision.chat
+        && brain.draft.is_none()
+    {
+        let _ = brain
+            .compose(app, view, composer::Source::Call, text)
+            .await?;
+        brain.call_goal = matches!(decision.goal, Goal::Portal(_) | Goal::Follow(_))
+            .then(|| decision.goal.clone());
+    }
+    if brain.composing(composer::Source::Call).is_some()
+        && brain
+            .call_goal
+            .as_ref()
+            .is_some_and(|goal| *goal != decision.goal)
+    {
+        tracing::info!(
+            player = id,
+            "bot public call canceled: current intent changed"
+        );
+        brain.close_composition(app, false).await?;
+    }
+    if let Some(text) = brain.composing(composer::Source::Call).map(str::to_owned)
+        && brain
+            .compose(app, view, composer::Source::Call, &text)
+            .await?
+    {
+        let received = app.world.clock.now();
+        let session = brain.session;
+        let companion = brain.companion;
+        let call_goal = brain.call_goal.clone();
+        let until = brain.invitation_until;
+        let text_log = text.clone();
+        let sent = app
+            .world
+            .directory(move |d| {
+                let current = d.player_view(id)?;
+                ensure!(
+                    (current.session.world, id, current.session.character) == session,
+                    "public call session changed"
+                );
+                if text == "omw" {
+                    ensure!(
+                        current.time_ms < until
+                            && companion.is_some_and(|peer| current
+                                .objects
+                                .iter()
+                                .any(|p| p.id == peer && p.hp > 0)),
+                        "acknowledgement contact expired"
+                    );
+                }
+                if let Some(Goal::Portal(portal)) = call_goal {
+                    ensure!(
+                        current.objects.iter().any(|p| p.id == portal),
+                        "public call target left view"
+                    );
+                }
+                if let Some(Goal::Follow(peer)) = call_goal {
+                    ensure!(
+                        current.objects.iter().any(|p| p.id == peer && p.hp > 0),
+                        "public call companion left view"
+                    );
+                }
+                if text.starts_with("hexed;") {
+                    ensure!(
+                        current.map.name == "Mad Lab"
+                            && current.character.conditions
+                                & crate::condition::bit(crate::condition::HEXED)
+                                != 0,
+                        "public call status ended"
+                    );
+                }
+                if text == "blue water clears the green pool" {
+                    ensure!(current.map.name == "Mad Lab", "public call context changed");
+                }
+                let portal = match text.as_str() {
+                    "pc here" => Some(0x717),
+                    "snake here" => Some(0x718),
+                    "lab here" => Some(0x890),
+                    _ => None,
+                };
+                ensure!(
+                    portal.is_none_or(|kind| current.map.name == "Realm"
+                        && current.objects.iter().any(|p| p.kind == kind)),
+                    "public call portal left view"
+                );
+                d.submit_bot_chat(id, text, received)
+            })
+            .await;
+        brain.close_composition(app, sent.is_ok()).await?;
+        match sent {
+            Ok(()) => tracing::info!(
+                player = id,
+                text = text_log,
+                "autonomous public call delivered"
+            ),
+            Err(error) => {
+                tracing::warn!(player=id,text=text_log,%error,"autonomous public call rejected")
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn stop_inputs(app: &App, id: i32) -> Result<()> {
     app.world
         .for_player(id)
@@ -200,7 +323,9 @@ async fn stop_inputs(app: &App, id: i32) -> Result<()> {
                 .players
                 .get_mut(&id)
                 .context("stopping virtual inputs player missing")?;
-            p.inputs = None;
+            if let Some(input) = &mut p.inputs {
+                input.release();
+            }
             p.bot_goal = None;
             p.bot_aim = None;
             Ok(())
@@ -677,6 +802,7 @@ pub(super) async fn launch(
 
         let mut next_bank = app.world.clock.now();
         let mut pending: Option<dialogue::Pending> = None;
+        let mut ready_reply: Option<(dialogue::Request, dialogue::Reply, String)> = None;
         let mut deferred_market: Option<(Packet, Arc<PlayerView>)> = None;
         let mut admission: Option<Vec<u8>> = None;
         let mut last_dialogue: Option<std::time::Instant> = None;
@@ -709,6 +835,7 @@ pub(super) async fn launch(
                     };
                     if let Some(transfer) = server::automatic_transfer(&app, id).await? {
                         dialogue::cancel(&mut pending);
+                        ready_reply = None;
                         dialogue::end_agreement(&app, &mut brain, "world changed").await;
                         ensure!(transfer.player == id && transfer.output.packets.same_channel(&sender), "collective transfer does not belong to autonomous output");
                         while output.try_recv().is_ok() {}
@@ -733,6 +860,9 @@ pub(super) async fn launch(
                         }).await?;
                     }
                     ensure!(view.session.account == account, "autonomous account binding changed");
+                    let composing = brain.draft.is_some();
+                    brain.advance_composition(&app, &view).await?;
+                    if composing && brain.draft.is_none() { ready_reply = None; }
                     app.cctv.inputs(profile.name, &view);
                     if let Some(blocked) = view.inputs.as_ref().and_then(|input| input.blocked) {
                         let tile = tile(blocked);
@@ -773,6 +903,7 @@ pub(super) async fn launch(
                     if !view.lifecycle.alive {
                         app.society.lock().expect("adventure registry poisoned").leave(account);
                         dialogue::cancel(&mut pending);
+                        ready_reply = None;
                         dialogue::end_agreement(&app, &mut brain, "character died").await;
                         brain.mind.end(&view, "character_died_steps_invalidated");
                         brain.mind.market.finish("character_died_remaining_balance_unenforced");
@@ -831,7 +962,12 @@ pub(super) async fn launch(
                         {
                             // A rate-limited correction must still invalidate the older promise.
                             dialogue::supersede(&mut pending, &request);
-                            if pending.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
+                            if let Some((old, _, _)) = &ready_reply
+                                && old.speaker == request.speaker {
+                                ready_reply = None;
+                                if brain.composing(composer::Source::Dialogue).is_some() { brain.close_composition(&app, false).await?; }
+                            }
+                            if pending.is_some() || ready_reply.is_some() || last_dialogue.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
                                 dialogue::skipped(&request, None, "interaction_busy");
                             } else {
                                 last_dialogue = Some(std::time::Instant::now());
@@ -840,9 +976,9 @@ pub(super) async fn launch(
                             continue;
                         }
                         if brain.receive(packet, &view, app.dialogue.is_none(), &app.content)? {
-                            let received = app.world.clock.now();
-                            if let Err(error) = app.world.directory(move |d| d.chat(id, "omw".into(), received)).await {
-                                tracing::warn!(player=id,%error,"invitation acknowledgement rejected");
+                            if brain.draft.is_none() {
+                                let _ = brain.compose(&app, &view, composer::Source::Call, "omw").await?;
+                                brain.call_goal = brain.companion.map(Goal::Follow);
                             }
                             tracing::info!(player=id, companion=brain.companion, "visible invitation accepted");
                         }
@@ -851,7 +987,7 @@ pub(super) async fn launch(
                         stop_inputs(&app, id).await?;
                         continue;
                     }
-                    if pending.is_none() && brain.mind.market.outgoing.is_none() && brain.mind.market.bargain.as_ref().is_none_or(|b|b.resolution.is_some()) && app.dialogue.as_ref().is_none_or(|service|service.automatic_available()) {
+                    if pending.is_none() && ready_reply.is_none() && brain.mind.market.outgoing.is_none() && brain.mind.market.bargain.as_ref().is_none_or(|b|b.resolution.is_some()) && app.dialogue.as_ref().is_none_or(|service|service.automatic_available()) {
                         let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
                         if let Some(plan)=plan {
                             let request=brain.adventure_request(plan,&view,&app.content)?;
@@ -869,34 +1005,16 @@ pub(super) async fn launch(
                         };
                         match result {
                             Ok(reply) => {
-                                let validation = dialogue::publish(&app,&mut brain,&completed.request,&reply,&view).await;
-                                match validation {
-                                    Ok(true) => {
-                                        tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,intent=?reply.intent,"bot dialogue intention applied");
-                                    }
-                                    Ok(false) => {}
-                                    Err(error) => {
-                                        if let Some(obsolete) = error.downcast_ref::<dialogue::Obsolete>() {
-                                            tracing::info!(request=%completed.id,player=id,speaker=completed.request.speaker,
-                                                reason=obsolete.0,hp=view.character.hp,mp=view.character.mp,
-                                                "bot dialogue canceled; pending intention not published");
-                                        } else {
-                                            tracing::error!(request=%completed.id,player=id,%error,busy=view.lifecycle.busy,
-                                                alive=view.lifecycle.alive,death_pending=view.lifecycle.death_pending,
-                                                departing=view.lifecycle.departing,quarantined=view.lifecycle.quarantined,
-                                                output_live=matches!(view.lifecycle.output,OutputState::Live),"bot dialogue intention rejected");
-                                            dialogue::failed(&app, &completed.request, &completed.id, "rejected").await;
-                                        }
-                                    }
-                                }
+                                ready_reply = Some((completed.request.clone(), reply, completed.id.clone()));
                             }
                             Err(dialogue::Failure::LocalCapacity) => dialogue::skipped(&completed.request, Some(&completed.id), "local_capacity"),
                             Err(dialogue::Failure::Error(reason)) => dialogue::failed(&app, &completed.request, &completed.id, reason).await,
                         }
                     }
-                    brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})));
+                    brain.proposing=pending.as_ref().is_some_and(|p|matches!(p.request.plan,Some(adventures::Plan::Invite{..})))
+                        || ready_reply.as_ref().is_some_and(|(r,_,_)|matches!(r.plan,Some(adventures::Plan::Invite{..})));
                     let ending = until.is_some_and(|deadline| app.world.clock.now() >= deadline)
-                        && pending.is_none() && director::may_finish(&app, &mut brain, &view);
+                        && pending.is_none() && ready_reply.is_none() && brain.draft.is_none() && director::may_finish(&app, &mut brain, &view);
                     if ending && view.map.name == "Nexus" {
                         retired = true;
                         break;
@@ -907,9 +1025,34 @@ pub(super) async fn launch(
                     let now = app.world.clock.now();
                     brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
                     let Some(mut decision) = decide_before_social(&app, &mut brain, &view).await? else {
+                        if brain.activity == Activity::Survive { ready_reply = None; }
                         stop_inputs(&app, id).await?;
                         continue;
                     };
+                    if brain.activity == Activity::Survive { ready_reply = None; decision.chat = None; }
+                    if let Some((request, reply, request_id)) = ready_reply.take() {
+                        let validation = brain.validate_dialogue(&request, &reply, &view);
+                        if validation.is_ok() && !brain.compose(&app, &view, composer::Source::Dialogue, &reply.reply).await? {
+                            if brain.draft.is_some() { ready_reply = Some((request, reply, request_id)); }
+                        } else {
+                            let result = match validation {
+                                Ok(()) => dialogue::publish(&app, &mut brain, &request, &reply, &view).await,
+                                Err(error) => Err(error),
+                            };
+                            if brain.composing(composer::Source::Dialogue).is_some() {
+                                brain.close_composition(&app, matches!(result, Ok(true))).await?;
+                            }
+                            match result {
+                                Ok(true) => tracing::info!(request=%request_id,player=id,intent=?reply.intent,"bot dialogue intention applied"),
+                                Ok(false) => {},
+                                Err(error) if error.is::<dialogue::Obsolete>() => tracing::info!(request=%request_id,player=id,%error,"bot dialogue canceled; pending intention not published"),
+                                Err(error) => {
+                                    tracing::error!(request=%request_id,player=id,%error,"bot dialogue intention rejected");
+                                    dialogue::failed(&app, &request, &request_id, "rejected").await;
+                                }
+                            }
+                        }
+                    }
                     if ending && director::may_finish(&app, &mut brain, &view) && decision.journey.is_none() {
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
@@ -932,12 +1075,9 @@ pub(super) async fn launch(
                         Some(hash)
                     } else { None };
                     next_bank = now.checked_add(Duration::from_millis(brain.next_bank.saturating_sub(view.time_ms))).context("autonomous bank cooldown overflow")?;
-                    if let Some(text) = decision.chat {
-                        let received = app.world.clock.now();
-                        match app.world.directory(move |d| d.chat(id, text.into(), received)).await {
-                            Ok(()) => tracing::info!(player=id,text,"autonomous public call delivered"),
-                            Err(error) => tracing::warn!(player=id,text,%error,"autonomous public call rejected"),
-                        }
+                    public_call(&app, &mut brain, &view, &decision).await?;
+                    if brain.draft.is_some() {
+                        decision.movement = None; decision.aim = None; decision.item = None; decision.journey = None;
                     }
                     if !brain.decision_logged || decision.goal != brain.goal {
                         tracing::info!(account,character=view.session.character,world=view.session.world,player=id,name=profile.name,tick=view.tick,hp=view.character.hp,
@@ -1005,6 +1145,7 @@ pub(super) async fn launch(
                                 };
                                 admission = Some(key.clone());
                                 dialogue::cancel(&mut pending);
+                                ready_reply = None;
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
@@ -1155,6 +1296,10 @@ fn close_controller(
 }
 
 #[cfg(test)]
+mod composer_tests;
+#[cfg(test)]
 mod input_tests;
+#[cfg(test)]
+mod review_tests;
 #[cfg(test)]
 pub(super) mod tests;
