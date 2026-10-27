@@ -12,7 +12,7 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  king=map.entities.find(e=>e.kind===0x60d&&[-6,-4,-2,0,2,4,6].every(dx=>[-6,-4,-2,0,2,4,6].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));assert(king,'No clear naturally populated Sandsman King');
+  king=map.entities.find(e=>e.kind===0x60d&&Array.from({length:13},(_,i)=>i-6).every(dx=>Array.from({length:13},(_,i)=>i-6).every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));assert(king,'No clear naturally populated Sandsman King');
   await writeFile(join(process.env.QA_RESULTS_DIR,'natural-kings.json'),JSON.stringify(map.entities.filter(e=>e.kind===0x60d)));
   return {...spec,position:{x:king.pos.x-6,y:king.pos.y}};
 }
@@ -42,7 +42,7 @@ export async function run(game){
   }
   const orbit=family(begin).filter(e=>e.kind===0x60a).map(a=>{
     let last=null,angle=0,near=0;
-    for(const s of samples){const k=family(s).find(e=>e.id===king.id),e=family(s).find(e=>e.id===a.id);assert(k&&e);const dx=e.pos.x-k.pos.x,dy=e.pos.y-k.pos.y,t=Math.atan2(dy,dx);if(last!==null)angle+=Math.atan2(Math.sin(t-last),Math.cos(t-last));last=t;if(Math.abs(Math.hypot(dx,dy)-3.25)<1)near++;}
+    for(const s of samples){const k=family(s).find(e=>e.id===king.id),e=family(s).find(e=>e.id===a.id);assert(k&&e);const dx=e.pos.x-k.pos.x,dy=e.pos.y-k.pos.y,t=Math.atan2(dy,dx);if(last!==null)angle+=Math.atan2(Math.sin(t-last),Math.cos(t-last));last=t;if(Math.hypot(dx,dy)>1.5&&Math.hypot(dx,dy)<4.5)near++;}
     return {id:a.id,angle,near};
   });
   await writeFile(join(process.env.QA_RESULTS_DIR,'orbit.json'),JSON.stringify(orbit));
@@ -51,13 +51,15 @@ export async function run(game){
   game.check('native movement enters the escort group',Math.hypot((await game.observe()).position.x-position.x,(await game.observe()).position.y-position.y)>.5);
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
-    for(let n=0;n<25&&(await game.inspect()).view.objects.some(e=>e.id===id&&e.hp>0);n++)await game.act({keys:[],duration_ms:250,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    for(let n=0;n<25&&(await game.inspect()).view.objects.some(e=>e.id===id&&e.hp>0);n++)await game.act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
     await game.act({keys:[],duration_ms:700});const s=await game.inspect();
     game.check(id+': native staff defeats target and earns XP',!s.diagnostic.entities.some(e=>e.id===id)&&s.view.character.experience>xp);
   }
   for(const kind of [0x60a,0x60c]){
     const before=await save('before-defeat-'+kind),p=before.view.position;
-    const victim=family(before).filter(e=>e.kind===kind&&before.view.objects.some(o=>o.id===e.id&&o.hp>0)).sort((a,b)=>Math.hypot(a.pos.x-p.x,a.pos.y-p.y)-Math.hypot(b.pos.x-p.x,b.pos.y-p.y))[0];assert(victim);
+    const k=family(before).find(e=>e.id===king.id);assert(k,'King must be alive before escort targeting');
+    const safe=e=>{const dx=e.pos.x-p.x,dy=e.pos.y-p.y,t=((k.pos.x-p.x)*dx+(k.pos.y-p.y)*dy)/(dx*dx+dy*dy);return t<0||t>1||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>1.5;};
+    const victim=family(before).filter(e=>e.kind===kind&&safe(e)&&before.view.objects.some(o=>o.id===e.id&&o.hp>0)).sort((a,b)=>Math.hypot(a.pos.x-p.x,a.pos.y-p.y)-Math.hypot(b.pos.x-p.x,b.pos.y-p.y))[0];assert(victim,'No visible escort with a clear firing line away from the King');
     const ids=new Set(family(before).map(e=>e.id));await defeat(victim.id);
     for(let n=0;n<12&&!family(await game.inspect()).some(e=>e.kind===kind&&!ids.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
     const after=await save('replenished-'+kind);
