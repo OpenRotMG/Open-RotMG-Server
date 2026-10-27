@@ -17,21 +17,21 @@ export async function run(game){
   const save=()=>writeFile(join(root,'archer-observations.json'),JSON.stringify(observations,null,2));
   const target=state=>state.diagnostic.entities.find(e=>e.kind===0xd90);
   const shot={entity:boss.id,camera_angle:-Math.PI/4,fire:false};
-  const vulnerable=async()=>{
+  const vulnerable=async cost=>{
     for(let attempt=0;attempt<16;attempt++){
       const state=await game.inspect(),enemy=target(state);assert(enemy&&Number.isInteger(enemy.activated));
       const phase=(state.view.time_ms-enemy.activated)%13000;
-      if(phase>=3500&&phase<10000)return state;
+      if(phase>=3500&&phase<10000&&state.view.character.mp>=cost)return state;
       await game.act({keys:[],duration_ms:500});
     }
-    throw Error('No bounded Septavius vulnerability window observed');
+    throw Error('No bounded affordable Septavius vulnerability window observed');
   };
   await game.act({keys:[],duration_ms:3500});
   await game.act({keys:[],duration_ms:350,drag:{from:{x:678,y:472},to:{x:722,y:384}}});
   const armored=await game.observe();
   game.check('native leather armor equips and grants defense',armored.character.items[2]===0xa0d&&armored.character.stats.defense===31);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:722,y:472},to:{x:634,y:384}}});
-  const bow=await vulnerable();
+  const bow=await vulnerable(0);
   game.check('native Archer equips a bow',bow.view.character.items[0]===0xa1a);
   await game.act({keys:[],target:{...shot,fire:true},duration_ms:700});
   const fired=await game.inspect();observations.push({bow,fired});await save();
@@ -43,7 +43,6 @@ export async function run(game){
       await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot*44,y:428},to:{x:678,y:384}}});
       game.check(`native equip ${item.toString(16)}`,(await game.observe()).character.items[1]===item);
     }
-    if(item===0xade)await game.act({keys:[],duration_ms:1000});
     if(item===0xc07){
       const empty=await game.observe();
       game.check('Thunder lacks mana after tiered casts',empty.character.mp<100&&empty.character.ability_ready_ms<=empty.game_ms);
@@ -58,7 +57,7 @@ export async function run(game){
       const restored=await game.observe();
       game.check(`ordinary potion ${key} restores mana and is consumed`,restored.character.mp>depleted.character.mp&&restored.character.items[slot]===-1);
     }
-    const before=await vulnerable(),enemy=target(before);assert(enemy);
+    const before=await vulnerable(cost),enemy=target(before);assert(enemy);
     game.check(`quiver ${item.toString(16)} equip stats`,before.view.character.stats[5]===dex&&before.view.character.stats[2]===(item===0xc07?80:75));
     if(item===0xb28)game.check('T6 defense and speed bonuses',before.view.character.stats[3]===33&&before.view.character.stats[4]===52);
     await game.act({keys:[' '],target:shot,duration_ms:700},item===0xc07?{name:'archer-thunder',when:view=>view.game_ms>=before.view.time_ms+250&&view.character.mp<before.view.character.mp-50}:undefined);
@@ -71,13 +70,14 @@ export async function run(game){
     game.check(`quiver ${item.toString(16)} damages target`,hit.hp<enemy.hp);
     if(item===0xc07){
       // Thunder is the cooldown outlier: https://github.com/OpenRotMG/Open-RotMG-Server/blob/03d3dfbff20751a1c94bdf24990c718b9ef46614/data/objects.xml#L5697-L5727
-      await game.act({keys:['4'],duration_ms:300});
-      const ready=await game.observe();
-      game.check('cooldown check has full mana and an unexpired deadline',ready.character.mp===100&&ready.character.items[7]===-1&&ready.character.ability_ready_ms-ready.game_ms>=1500);
-      await game.act({keys:[' '],target:shot,duration_ms:300});
-      const denied=await game.observe();
+      const retry=await game.act([
+        {actor:game.actor,input:{keys:['4'],duration_ms:300}},
+        {actor:game.actor,input:{keys:[' '],target:shot,duration_ms:300}},
+      ]);
+      const ready=retry.steps[0],denied=retry.state;
       observations.push({cooldown:{ready,denied}});
-      game.check('Thunder cooldown prevents a second mana debit',denied.character.mp>=ready.character.mp);
+      game.check('cooldown check had full mana and an unexpired deadline',ready.character.mp===100&&ready.character.items[7]===-1&&ready.character.ability_ready_ms-ready.game_ms>=1500);
+      game.check('Thunder cooldown prevents a second mana debit',denied.character.mp===ready.character.mp);
       game.check('Thunder cooldown deadline remains unchanged',Math.abs(denied.character.ability_ready_ms-Math.max(ready.character.ability_ready_ms,denied.game_ms))<=100);
     }
     game.check('same living Archer',after.view.lifecycle.alive&&after.view.session.character===before.view.session.character);
