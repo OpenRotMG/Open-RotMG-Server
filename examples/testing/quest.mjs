@@ -42,16 +42,19 @@ export async function run(game){
   await game.act({keys:[],duration_ms:1500},{name:'quest-initial-delay',when:()=>true});
   await game.act({keys:[],duration_ms:4500});
   await game.act({keys:[],duration_ms:500},{name:'quest-distant',when:()=>true});
-  await prepare({kind:'teleport',position:{x:target.position.x+4,y:target.position.y}});
+  const distant=game,distantPackets=clients[0].packets.length;
+  game=await game.join({...fixture,position:target.position});
+  await prepare({kind:'protection',condition:'invulnerable',duration_ms:60000});
+  await game.act({keys:['s'],duration_ms:1000});
   await game.act({keys:[],duration_ms:500},{name:'quest-near',when:()=>true});
   const near=await save('quest-near'),boss=near.diagnostic.entities.find(o=>o.id===target.id);
   game.check('approaching quest activates the ordinary enemy',!!boss&&boss.activated!==null);
-  const packetStart=clients[0].packets.length;
+  const packetStart=clients[1].packets.length;
   for(let n=0;n<16;n++){
     if(!(await game.inspect()).diagnostic.entities.some(o=>o.id===target.id))break;
     await game.act({keys:[],duration_ms:500,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
   }
-  const defeated=await save('quest-defeated'),events=clients[0].packets.slice(packetStart);
+  const defeated=await save('quest-defeated'),events=clients[1].packets.slice(packetStart);
   game.check('native shooting defeats the assigned quest and awards XP',!defeated.diagnostic.entities.some(o=>o.id===target.id)&&defeated.view.character.experience>near.view.character.experience);
   game.check('completion notification occurs exactly once',events.filter(p=>p.id===63&&p.text==='Quest Complete!').length===1);
   const completion=events.findIndex(p=>p.id===63&&p.text==='Quest Complete!'),reselection=events.findIndex(p=>p.id===34&&p.target!==target.id);
@@ -60,9 +63,11 @@ export async function run(game){
   await game.act({keys:[],duration_ms:8000});
   await game.act({keys:[],duration_ms:8000});
   await game.act({keys:[],duration_ms:500},{name:'quest-next',when:()=>true});
-  game.check('same living character retains its inventory',defeated.view.lifecycle.alive&&defeated.view.session.character===start.view.session.character&&JSON.stringify(defeated.view.character.items)===JSON.stringify(start.view.character.items));
-  await prepare({kind:'teleport',position:start.view.position});
-  for(const level of [1,20]){
+  game.check('same living combat character retains its inventory',defeated.view.lifecycle.alive&&defeated.view.session.account===near.view.session.account&&defeated.view.session.character===near.view.session.character&&JSON.stringify(defeated.view.character.items)===JSON.stringify(near.view.character.items));
+  const remote=await distant.inspect();
+  await writeFile(join(process.env.QA_RESULTS_DIR,'quest-remote-after.json'),JSON.stringify(remote,null,2));
+  game.check('distant observer loses defeated target without XP or completion feedback',remote.view.quest!==target.id&&remote.view.character.experience===start.view.character.experience&&!clients[0].packets.slice(distantPackets).some(p=>p.id===63&&p.text==='Quest Complete!'));
+  for(const level of [20]){
     game=await game.join({...fixture,level,equipment:[-1,-1,-1,-1]});
     await prepare({kind:'protection',condition:'invulnerable',duration_ms:60000});
     const state=await save('quest-level-'+level),quest=state.view.objects.find(o=>o.id===state.view.quest);
