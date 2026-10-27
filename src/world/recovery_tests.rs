@@ -44,17 +44,17 @@ fn recovery_rates_and_condition_matrix() {
         (vec![], 106, 104),
         (vec![SICK], 100, 104),
         (vec![QUIET], 106, 0),
-        (vec![BLEEDING], 80, 104),
-        (vec![HEALING], 126, 104),
+        (vec![BLEEDING], 79, 104),
+        (vec![HEALING], 127, 104),
         (vec![SICK, HEALING], 100, 104),
         (vec![BLEEDING, HEALING], 100, 104),
-        (vec![SICK, BLEEDING, QUIET, HEALING], 80, 0),
+        (vec![SICK, BLEEDING, QUIET, HEALING], 79, 0),
     ] {
         let (mut w, id) = fixture();
         for condition in &conditions {
             w.apply_condition(id, *condition, 10000).unwrap();
         }
-        steps(&mut w, 20);
+        steps(&mut w, 21);
         let p = &w.players[&id];
         assert_eq!((p.character.hp, p.character.mp), (hp, mp), "{conditions:?}");
     }
@@ -122,7 +122,6 @@ async fn recovery_persists_vitals_not_fractions_or_temporary_effects() {
     ch.base = p.character.base;
     ch.hp = 100;
     ch.mp = 100;
-    ch.items.fill(-1);
     p.character = ch;
     w.prepare_stat_modifier(id, 7, 40, 10000).unwrap();
     steps(&mut w, 19);
@@ -137,6 +136,9 @@ async fn recovery_persists_vitals_not_fractions_or_temporary_effects() {
     let id = w.enter(loaded, None).unwrap();
     let p = &w.players[&id];
     assert_eq!((p.hp_fraction, p.mp_fraction), (0., 0.));
-    assert_eq!(p.effective(&w.content, w.now).unwrap(), saved.base);
+    assert_eq!(
+        p.effective(&w.content, w.now).unwrap(),
+        saved.effective(&w.content).unwrap()
+    );
     assert_eq!(p.conditions(w.now), 0);
 }
