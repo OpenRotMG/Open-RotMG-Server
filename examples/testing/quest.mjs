@@ -37,7 +37,7 @@ export async function run(game){
   }
   await prepare({kind:'protection',condition:'invulnerable',duration_ms:60000});
   const start=await save('quest-initial'),target=start.view.objects.find(o=>o.id===start.view.quest);
-  game.check('level-five character has a published level-five quest',!!target&&target.level===5);
+  game.check('level-five character receives the selected Swarm quest',target?.kind===0x955);
   game.check('quest object is retained outside local view',Math.hypot(target.position.x-start.view.position.x,target.position.y-start.view.position.y)>20);
   await game.act({keys:[],duration_ms:1500},{name:'quest-initial-delay',when:()=>true});
   await game.act({keys:[],duration_ms:4500});
@@ -66,7 +66,7 @@ export async function run(game){
     game=await game.join({...fixture,level,equipment:[-1,-1,-1,-1]});
     await prepare({kind:'protection',condition:'invulnerable',duration_ms:60000});
     const state=await save('quest-level-'+level),quest=state.view.objects.find(o=>o.id===state.view.quest);
-    game.check('level '+level+' receives an eligible published quest',!!quest&&(level===1?quest.level===1:quest.level>=14));
+    game.check('level '+level+' receives an eligible published quest',!!quest&&(level===1?quest.kind===0x604:[0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37].includes(quest.kind)));
     await game.act({keys:[],duration_ms:6000});
     await game.act({keys:[],duration_ms:500},{name:'quest-level-'+level,when:()=>true});
   }
