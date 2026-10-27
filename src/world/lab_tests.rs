@@ -85,7 +85,7 @@ fn creation_attacks_and_pool_cycle_preserve_identity_and_damage() {
         e.goal = Some(e.pos);
         w.lab_mechanics(id, Some(home), 0).unwrap();
         assert_eq!(w.entities[&id].stage, Some(2));
-        assert_eq!(w.entities[&id].goal, None);
+        assert!(w.entities[&id].goal.is_none());
         assert_eq!(
             w.entities[&id].condition & condition::bit(condition::INVINCIBLE),
             0
