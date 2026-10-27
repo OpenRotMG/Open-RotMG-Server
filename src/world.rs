@@ -1273,11 +1273,11 @@ impl Directory {
             world.prepared_seed = Some(seed);
         }
         world.name = name.into();
-        // Preserve the blue Nexus/Vault backdrop, not dungeon void: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/worlds/Vault.cs
-        world.background = if matches!(template, "nexus" | "vault") {
-            2
-        } else {
-            0
+        // Select the client's existing starfield, not dungeon void: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_H_Z_/Background.as
+        world.background = match template {
+            "sprite-world" => 1,
+            "nexus" | "vault" => 2,
+            _ => 0,
         };
         world.safe = safe;
         world.owner = owner;

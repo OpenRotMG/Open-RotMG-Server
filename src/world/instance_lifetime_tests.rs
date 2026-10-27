@@ -5,6 +5,28 @@ fn directory() -> Directory {
     Directory::test_with_seed(std::path::Path::new("data"), content, 20, 423).unwrap()
 }
 
+#[test]
+fn map_info_selects_stars_only_for_sprite_world() {
+    let mut d = directory();
+    for (template, owner, background) in [
+        ("sprite-world", None, 1),
+        ("snake-pit", None, 0),
+        ("vault", Some(1), 2),
+        ("nexus", None, 2),
+    ] {
+        let id = d
+            .instance(template, owner, Some(DungeonReturn::Random))
+            .unwrap();
+        let bytes = d.worlds[&id].map_info();
+        let mut packet = wire::Reader::new(&bytes);
+        packet.i32().unwrap();
+        packet.i32().unwrap();
+        packet.utf().unwrap();
+        packet.i32().unwrap();
+        assert_eq!(packet.i32().unwrap(), background, "{template}");
+    }
+}
+
 async fn character(store: &crate::store::Store, d: &Directory, name: &str) -> Character {
     let account = store.list(name.into()).await.unwrap();
     store
