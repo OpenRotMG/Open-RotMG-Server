@@ -39,8 +39,8 @@ export async function run(game){
   const start=await save('quest-initial'),target=start.view.objects.find(o=>o.id===start.view.quest);
   game.check('level-five character receives the selected Swarm quest',target?.kind===0x955);
   game.check('quest object is retained outside local view',Math.hypot(target.position.x-start.view.position.x,target.position.y-start.view.position.y)>20);
-  await game.act({keys:[],duration_ms:1500},{name:'quest-initial-delay',when:()=>true});
-  await game.act({keys:[],duration_ms:4500});
+  await game.act({keys:[],duration_ms:3500},{name:'quest-initial-delay',when:view=>view.game_ms>=2500});
+  await game.act({keys:[],duration_ms:2500});
   await game.act({keys:[],duration_ms:500},{name:'quest-distant',when:()=>true});
   const distant=game,distantPackets=clients[0].packets.length;
   game=await game.join({...fixture,position:target.position});
