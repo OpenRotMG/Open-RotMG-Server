@@ -458,7 +458,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         // Ents drop a tincture, Saplings nothing: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.EntAncient.cs#L219-L244
         0x921 => &[(0.02, Item(0xb0c))],
         0x922 => &[],
-        0x65f | 0x660 | 0x661 => &[(0.02, Item(0xa23))],
+        0x65f..=0x661 => &[(0.02, Item(0xa23))],
         0x91d | 0x91e | 0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
         0x6c1 => &[(0.0001, Item(crate::endgame::INCANTATION))],
         0x920 => &[
