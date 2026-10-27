@@ -59,11 +59,12 @@ async fn class_stars_retain_live_deleted_and_committed_death_bests_not_wallets()
         .await
         .unwrap();
     lower.fame = 19;
-    store.progress(lower).await.unwrap();
+    store.progress(lower.clone()).await.unwrap();
     assert_eq!(
         store.presentation(ch.account).await.unwrap().best_fame[&WIZARD],
         20
     );
+    store.delete_character(ch.account, lower.id).await.unwrap();
 
     let class = *content
         .classes
