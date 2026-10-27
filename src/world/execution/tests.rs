@@ -161,47 +161,55 @@ async fn due_realm_maintenance_releases_healthy_world_before_waiting_for_another
             }
         }
     }
-    let handle = super::super::Handle::spawn(directory());
-    handle.clock.set_paused(true);
-    handle.in_world(1).call(|_| Ok(())).await.unwrap();
-    handle
-        .directory(|d| {
-            d.tick = crate::world::endgame::REMAINING_TAUNT_MS / 50;
-            Ok(())
+    for transferring in [false, true] {
+        let handle = super::super::Handle::spawn(directory());
+        handle.clock.set_paused(true);
+        handle.in_world(1).call(|_| Ok(())).await.unwrap();
+        handle
+            .directory(move |d| {
+                d.tick = crate::world::endgame::REMAINING_TAUNT_MS / 50;
+                if transferring {
+                    d.endgame.realms.get_mut(&-3).unwrap().cycle.stage =
+                        crate::endgame::RealmStage::Sealed {
+                            deadline: d.tick * 50,
+                        };
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let slot = handle.routing.resolve(Target::World(1)).unwrap();
+        let held = Held {
+            world: Some(slot.try_work(&mut None).unwrap().unwrap()),
+            slot: slot.clone(),
+        };
+        let healthy = handle.in_world(-3);
+        let before = healthy.call(|w| Ok(w.tick)).await.unwrap();
+        handle.clock.set_paused(false);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if slot.state.lock().unwrap().directory_waiting {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
         })
         .await
         .unwrap();
-    let slot = handle.routing.resolve(Target::World(1)).unwrap();
-    let held = Held {
-        world: Some(slot.try_work(&mut None).unwrap().unwrap()),
-        slot: slot.clone(),
-    };
-    let healthy = handle.in_world(-3);
-    let before = healthy.call(|w| Ok(w.tick)).await.unwrap();
-    handle.clock.set_paused(false);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if slot.state.lock().unwrap().directory_waiting {
-                break;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if healthy.call(|w| Ok(w.tick)).await.unwrap() >= before + 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if healthy.call(|w| Ok(w.tick)).await.unwrap() >= before + 2 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
-    drop(held);
-    handle.directory(|_| Ok(())).await.unwrap();
-    handle.supervisor.ensure_running().unwrap();
+        })
+        .await
+        .unwrap();
+        drop(held);
+        handle.directory(|_| Ok(())).await.unwrap();
+        handle.supervisor.ensure_running().unwrap();
+    }
 }
 #[tokio::test]
 async fn cpu_panic_keeps_world_context_and_unblocks_directory() {
