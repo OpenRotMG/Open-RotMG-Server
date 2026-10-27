@@ -173,27 +173,55 @@ mod tests {
     #[tokio::test]
     async fn collection_ownership_counts_all_competitors_once_and_excludes_bots_and_outsiders() {
         let content = Content::load(Path::new("data")).unwrap();
-        let path = std::env::temp_dir().join(format!("collection-owners-{}.db", rand::random::<u64>()));
+        let path =
+            std::env::temp_dir().join(format!("collection-owners-{}.db", rand::random::<u64>()));
         let store = Store::open(&path, &content).unwrap();
         let mut owners = Vec::new();
         for name in ["Player", "Empty", "Shorebot", "Outsider"] {
-            let id = store.register(format!("ownership-{name}"), format!("{name}@example.invalid"), "fixture-password".into()).await.unwrap();
-            if name != "Outsider" { store.compete(id).await.unwrap(); }
+            let id = store
+                .register(
+                    format!("ownership-{name}"),
+                    format!("{name}@example.invalid"),
+                    "fixture-password".into(),
+                )
+                .await
+                .unwrap();
+            if name != "Outsider" {
+                store.compete(id).await.unwrap();
+            }
             owners.push(id);
         }
         let ids = owners.clone();
-        store.call(move |db| {
-            db.execute("INSERT INTO shore_bots(name,account) VALUES('fixture',?1)", [ids[2]])?;
-            for id in [ids[0], ids[2], ids[3]] {
-                db.execute("INSERT INTO collections(account,item,found_at) VALUES(?1,2594,123)", [id])?;
-            }
-            db.execute("INSERT INTO collections(account,item,found_at) VALUES(?1,2595,456)", [ids[0]])?;
-            Ok(())
-        }).await.unwrap();
+        store
+            .call(move |db| {
+                db.execute(
+                    "INSERT INTO shore_bots(name,account) VALUES('fixture',?1)",
+                    [ids[2]],
+                )?;
+                for id in [ids[0], ids[2], ids[3]] {
+                    db.execute(
+                        "INSERT INTO collections(account,item,found_at) VALUES(?1,2594,123)",
+                        [id],
+                    )?;
+                }
+                db.execute(
+                    "INSERT INTO collections(account,item,found_at) VALUES(?1,2595,456)",
+                    [ids[0]],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         let collection = store.collection(owners[0]).await.unwrap();
         assert_eq!(collection["items"][0]["found_at"], 123);
-        assert_eq!(collection["ownership"], serde_json::json!({"players":2,"items":[{"item":2594,"owners":1},{"item":2595,"owners":1}]}));
-        assert_eq!(store.collection(owners[1]).await.unwrap()["ownership"], collection["ownership"]);
+        assert_eq!(
+            collection["ownership"],
+            serde_json::json!({"players":2,"items":[{"item":2594,"owners":1},{"item":2595,"owners":1}]})
+        );
+        assert_eq!(
+            store.collection(owners[1]).await.unwrap()["ownership"],
+            collection["ownership"]
+        );
         assert!(store.collection(owners[2]).await.is_err());
         assert!(store.collection(owners[3]).await.is_err());
     }
