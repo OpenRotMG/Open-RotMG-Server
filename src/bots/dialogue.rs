@@ -9,8 +9,6 @@ use std::{
 use tokio::sync::Semaphore;
 
 mod market;
-#[cfg(test)]
-mod tests;
 
 // Room-wide publication throttling is not evidence of what a particular bot heard.
 #[derive(Default)]

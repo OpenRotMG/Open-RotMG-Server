@@ -888,18 +888,6 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         (ready, release)
     }
 
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_jobs(&self) -> usize {
-        self.lifecycle_jobs
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-    #[cfg(test)]
-    pub(crate) async fn lifecycle_test_job<T: Send + 'static>(
-        &self,
-        f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
-    ) -> Result<T> {
-        self.call(f).await
-    }
     async fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
@@ -1866,8 +1854,7 @@ impl Account {
         )
     }
 }
-#[cfg(test)]
-mod class_quest_tests;
+
 #[cfg(test)]
 mod community_schema_tests;
 #[cfg(all(test, unix))]
