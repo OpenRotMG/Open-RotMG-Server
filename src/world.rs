@@ -5883,6 +5883,8 @@ impl World {
                 let kind = if matches!(
                     defeated.kind,
                     0x927
+                        // Septavius's completion exit returns to the Realm, not Nexus: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
+                        | 0xd90
                         | crate::dungeon::abyss::MALPHAS
                         | crate::dungeon::snake::BOSS
                         | crate::dungeon::jungle::BOSS
