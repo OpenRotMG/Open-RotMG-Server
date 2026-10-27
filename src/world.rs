@@ -7116,7 +7116,8 @@ impl World {
                 1. + values[6] as f32 / 8.
             } + if flags & crate::condition::bit(crate::condition::HEALING) != 0
             {
-                20.
+                // Period seals add 28 HP/s, not 20: https://web.archive.org/web/20120418103926id_/http://forums.wildshadow.com/wiki/realm-mad-god/class-guide-paladin
+                28.
             } else {
                 0.
             };
@@ -7535,6 +7536,8 @@ mod lab_tests;
 #[cfg(test)]
 mod reward_accuracy_tests;
 
+#[cfg(test)]
+mod paladin_tests;
 #[cfg(test)]
 mod wizard_tests;
 
