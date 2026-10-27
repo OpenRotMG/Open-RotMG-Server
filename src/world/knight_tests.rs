@@ -184,6 +184,8 @@ fn knight_piercing_shield_hits_each_target_once_and_respects_condition_gates() {
         assert_eq!(w.entities[&target].damage[&1], expected);
     }
     assert!(w.bullets.is_empty());
+    assert_eq!(w.players[&id].character.lifetime.shots, 1);
+    assert_eq!(w.players[&id].character.lifetime.projectile_hits, 1);
     for flag in [
         0,
         12,
