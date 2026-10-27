@@ -147,6 +147,7 @@ impl Brain {
             1
         };
         let text = draft.buffer.clone();
+        let revision = Some(draft.revision);
         let session = (v.session.player, v.session.account, v.session.character);
         let retained = app
             .world
@@ -154,14 +155,18 @@ impl Brain {
             .call(move |w| {
                 w.compose_bot_inputs(
                     session,
-                    crate::world::bot_inputs::Composition { phase, text },
+                    crate::world::bot_inputs::Composition {
+                        phase,
+                        text,
+                        revision,
+                    },
                 )
             })
             .await?;
         if !retained {
             tracing::info!(
                 player = session.0,
-                "bot composition canceled at unavailable source boundary"
+                "bot composition canceled at changed source boundary"
             );
             self.close_composition(app, false).await?;
         }

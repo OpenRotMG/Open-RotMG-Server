@@ -205,6 +205,116 @@ fn execute_inputs(
         .map(Option::flatten)
 }
 
+async fn public_call(
+    app: &App,
+    brain: &mut Brain,
+    view: &PlayerView,
+    decision: &Decision,
+) -> Result<()> {
+    let id = view.session.player;
+    if let Some(text) = decision.chat
+        && brain.draft.is_none()
+    {
+        let _ = brain
+            .compose(app, view, composer::Source::Call, text)
+            .await?;
+        brain.call_goal = matches!(decision.goal, Goal::Portal(_) | Goal::Follow(_))
+            .then(|| decision.goal.clone());
+    }
+    if brain.composing(composer::Source::Call).is_some()
+        && brain
+            .call_goal
+            .as_ref()
+            .is_some_and(|goal| *goal != decision.goal)
+    {
+        tracing::info!(
+            player = id,
+            "bot public call canceled: current intent changed"
+        );
+        brain.close_composition(app, false).await?;
+    }
+    if let Some(text) = brain.composing(composer::Source::Call).map(str::to_owned)
+        && brain
+            .compose(app, view, composer::Source::Call, &text)
+            .await?
+    {
+        let received = app.world.clock.now();
+        let session = brain.session;
+        let companion = brain.companion;
+        let call_goal = brain.call_goal.clone();
+        let until = brain.invitation_until;
+        let text_log = text.clone();
+        let sent = app
+            .world
+            .directory(move |d| {
+                let current = d.player_view(id)?;
+                ensure!(
+                    (current.session.world, id, current.session.character) == session,
+                    "public call session changed"
+                );
+                if text == "omw" {
+                    ensure!(
+                        current.time_ms < until
+                            && companion.is_some_and(|peer| current
+                                .objects
+                                .iter()
+                                .any(|p| p.id == peer && p.hp > 0)),
+                        "acknowledgement contact expired"
+                    );
+                }
+                if let Some(Goal::Portal(portal)) = call_goal {
+                    ensure!(
+                        current.objects.iter().any(|p| p.id == portal),
+                        "public call target left view"
+                    );
+                }
+                if let Some(Goal::Follow(peer)) = call_goal {
+                    ensure!(
+                        current.objects.iter().any(|p| p.id == peer && p.hp > 0),
+                        "public call companion left view"
+                    );
+                }
+                if text.starts_with("hexed;") {
+                    ensure!(
+                        current.map.name == "Mad Lab"
+                            && current.character.conditions
+                                & crate::condition::bit(crate::condition::HEXED)
+                                != 0,
+                        "public call status ended"
+                    );
+                }
+                if text == "blue water clears the green pool" {
+                    ensure!(current.map.name == "Mad Lab", "public call context changed");
+                }
+                let portal = match text.as_str() {
+                    "pc here" => Some(0x717),
+                    "snake here" => Some(0x718),
+                    "lab here" => Some(0x890),
+                    _ => None,
+                };
+                ensure!(
+                    portal.is_none_or(|kind| current.map.name == "Realm"
+                        && current.objects.iter().any(|p| p.kind == kind)),
+                    "public call portal left view"
+                );
+                d.submit_bot_chat(id, text, received)
+            })
+            .await;
+        brain.close_composition(app, sent.is_ok()).await?;
+        match sent {
+            Ok(()) => tracing::info!(
+                player = id,
+                text = text_log,
+                "autonomous public call delivered"
+            ),
+            Err(error) => {
+                tracing::warn!(player=id,text=text_log,%error,"autonomous public call rejected")
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn stop_inputs(app: &App, id: i32) -> Result<()> {
     app.world
         .for_player(id)
@@ -965,38 +1075,7 @@ pub(super) async fn launch(
                         Some(hash)
                     } else { None };
                     next_bank = now.checked_add(Duration::from_millis(brain.next_bank.saturating_sub(view.time_ms))).context("autonomous bank cooldown overflow")?;
-                    if let Some(text) = decision.chat && brain.draft.is_none() {
-                        let _ = brain.compose(&app, &view, composer::Source::Call, text).await?;
-                        brain.call_goal = Some(decision.goal.clone());
-                    }
-                    if brain.composing(composer::Source::Call).is_some() && brain.call_goal != Some(decision.goal.clone()) {
-                        tracing::info!(player=id,"bot public call canceled: current intent changed");
-                        brain.close_composition(&app, false).await?;
-                    }
-                    if let Some(text) = brain.composing(composer::Source::Call).map(str::to_owned)
-                        && brain.compose(&app, &view, composer::Source::Call, &text).await? {
-                        let received = app.world.clock.now();
-                        let session = brain.session;
-                        let companion = brain.companion;
-                        let call_goal = brain.call_goal.clone();
-                        let until = brain.invitation_until;
-                        let text_log = text.clone();
-                        let sent = app.world.directory(move |d| {
-                            let current = d.player_view(id)?;
-                            ensure!((current.session.world,id,current.session.character) == session, "public call session changed");
-                            if text == "omw" { ensure!(current.time_ms < until && companion.is_some_and(|peer|current.objects.iter().any(|p|p.id==peer && p.hp>0)), "acknowledgement contact expired"); }
-                            if let Some(Goal::Portal(portal)) = call_goal { ensure!(current.objects.iter().any(|p|p.id == portal), "public call target left view"); }
-                            if let Some(Goal::Follow(peer)) = call_goal { ensure!(current.objects.iter().any(|p|p.id == peer && p.hp > 0), "public call companion left view"); }
-                            let portal = match text.as_str() { "pc here" => Some(0x717), "snake here" => Some(0x718), "lab here" => Some(0x890), _ => None };
-                            ensure!(portal.is_none_or(|kind| current.map.name == "Realm" && current.objects.iter().any(|p|p.kind == kind)), "public call portal left view");
-                            d.submit_bot_chat(id, text, received)
-                        }).await;
-                        brain.close_composition(&app, sent.is_ok()).await?;
-                        match sent {
-                            Ok(()) => tracing::info!(player=id,text=text_log,"autonomous public call delivered"),
-                            Err(error) => tracing::warn!(player=id,text=text_log,%error,"autonomous public call rejected"),
-                        }
-                    }
+                    public_call(&app, &mut brain, &view, &decision).await?;
                     if brain.draft.is_some() {
                         decision.movement = None; decision.aim = None; decision.item = None; decision.journey = None;
                     }
@@ -1220,5 +1299,7 @@ fn close_controller(
 mod composer_tests;
 #[cfg(test)]
 mod input_tests;
+#[cfg(test)]
+mod review_tests;
 #[cfg(test)]
 pub(super) mod tests;

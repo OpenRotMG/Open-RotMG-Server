@@ -669,7 +669,14 @@ pub(super) async fn publish(
             }
             Ok(true)
         })
-        .await?;
+        .await
+        .map_err(|error| {
+            if error.is::<crate::world::bot_inputs::CompositionChanged>() {
+                error.context(Obsolete("composition_inventory_changed"))
+            } else {
+                error
+            }
+        })?;
     if published && request.plan.is_none() {
         brain.apply_dialogue(request, reply, v);
     }

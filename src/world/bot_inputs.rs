@@ -7,7 +7,25 @@ mod tests;
 pub(crate) struct Composition {
     pub phase: u8,
     pub text: String,
+    #[serde(skip)]
+    pub revision: Option<i32>,
 }
+
+#[derive(Debug)]
+pub(crate) struct CompositionChanged {
+    expected: i32,
+    current: i32,
+}
+impl std::fmt::Display for CompositionChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "bot composition inventory changed: expected {}, current {}",
+            self.expected, self.current
+        )
+    }
+}
+impl std::error::Error for CompositionChanged {}
 
 #[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct Inputs {
@@ -118,6 +136,20 @@ impl Directory {
                         && input.composition.text == text),
             "bot Enter does not match its public composition"
         );
+        let revision = p
+            .inputs
+            .as_ref()
+            .expect("admitted chat inputs")
+            .composition
+            .revision
+            .context("bot composition has no admitted inventory revision")?;
+        ensure!(
+            revision == p.character.revision,
+            CompositionChanged {
+                expected: revision,
+                current: p.character.revision
+            }
+        );
         self.chat(id, text, now)?;
         self.worlds
             .get_mut(&world)
@@ -147,7 +179,10 @@ impl World {
             (p.character.account, p.character.id) == (session.1, session.2),
             "composition owner replaced"
         );
-        if !p.active() || p.pending {
+        let revision = composition
+            .revision
+            .context("composition has no admitted inventory revision")?;
+        if !p.active() || p.pending || revision != p.character.revision {
             return Ok(false);
         }
         self.bot_inputs(session, None, None, 1)?;

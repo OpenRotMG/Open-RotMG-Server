@@ -111,7 +111,6 @@ impl Handle {
                     || p.character.id != character
                     || p.controller != Controller::Autonomous
                     || !p.active()
-                    || p.pending
                 {
                     return Ok(None);
                 }
@@ -134,7 +133,7 @@ impl Handle {
                     .i32(w.tick as u32 as i32)
                     .f32(cursor.x)
                     .f32(cursor.y)
-                    .u8(u8::from(inputs.fire));
+                    .u8(u8::from(inputs.fire && !p.pending));
                 if version == 2 {
                     out.f32(p.pos.x).f32(p.pos.y);
                 }
@@ -144,18 +143,23 @@ impl Handle {
                 }];
                 if version == 2 {
                     let draft = &inputs.composition;
+                    let (phase, text) = if p.pending {
+                        (0, "")
+                    } else {
+                        (draft.phase, draft.text.as_str())
+                    };
                     ensure!(
-                        draft.phase <= 2
-                            && (draft.phase != 0 || draft.text.is_empty())
-                            && draft.text.encode_utf16().count() <= 128,
+                        phase <= 2
+                            && (phase != 0 || text.is_empty())
+                            && text.encode_utf16().count() <= 128,
                         "invalid spectator composition"
                     );
                     let mut out = Writer::new();
                     out.i32(player)
                         .i32(character)
                         .i32(w.tick as u32 as i32)
-                        .u8(draft.phase)
-                        .utf(&draft.text);
+                        .u8(phase)
+                        .utf(text);
                     packets.push(Packet {
                         id: 251,
                         body: out.0,
