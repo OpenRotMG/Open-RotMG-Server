@@ -30,15 +30,21 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def retire_path(path):
+    if not (path / 'complete.json').is_file() or (path / 'retain').exists():
+        return False
+    if not re.fullmatch(r'(session-\d+-\d+|incident-\d+)', path.name):
+        raise RuntimeError(f'Unrecognized profile cache entry: {path}')
+    if path.is_symlink() or any(p.is_symlink() and not p.resolve().is_relative_to(path) for p in path.rglob('*')):
+        raise RuntimeError(f'External symlink in profile cache: {path}')
+    shutil.rmtree(path)
+    return True
+
+
 def retire(root, pattern, keep):
     paths = sorted((p for p in root.glob(pattern) if p.is_dir()), key=lambda p: p.name)
     for path in paths[:-keep]:
-        if (path / 'complete.json').is_file() and not (path / 'retain').exists():
-            if not re.fullmatch(r'(session-\d+-\d+|incident-\d+)', path.name):
-                raise RuntimeError(f'Unrecognized profile cache entry: {path}')
-            if path.is_symlink() or any(p.is_symlink() and not p.resolve().is_relative_to(path) for p in path.rglob('*')):
-                raise RuntimeError(f'External symlink in profile cache: {path}')
-            shutil.rmtree(path)
+        retire_path(path)
 
 
 def storage_bytes(root):
@@ -64,6 +70,24 @@ def storage_bytes(root):
             with os.scandir(path) as entries:
                 pending.extend(Path(entry.path) for entry in entries)
     return total, vanished
+
+
+def enforce_storage_limit(root, limit=2 * 1024**3):
+    size, vanished = storage_bytes(root)
+    for path in sorted(root.glob('incident-*')):
+        if size <= limit:
+            break
+        if path.is_dir() and retire_path(path):
+            before = size
+            size, raced = storage_bytes(root)
+            vanished += raced
+            emit('profiling_incident_retired', directory=str(path), reason='byte_budget',
+                 bytes_before=before, bytes_after=size, limit_bytes=limit)
+    if vanished:
+        emit('profiling_rotation_during_storage_check', vanished_segments=vanished)
+    if size > limit:
+        raise RuntimeError(f'Profile storage {size} exceeds limit {limit} bytes; inspect pinned or active evidence: {root}')
+    return size
 
 
 def incident(line, pid):
@@ -213,15 +237,11 @@ def run(service, root):
                                 write(capture / 'identity.json', metadata)
                                 write(capture / 'incident.json', pending)
                                 cache_binary(capture)
-                                write(capture / 'complete.json', {'retention': 'latest eight incidents; add retain file to pin'})
+                                write(capture / 'complete.json', {'retention': 'up to eight incidents within byte budget; add retain file to pin'})
                                 emit('profiling_incident_saved', directory=str(capture), **pending)
                                 pending = None
                                 retire(root, 'incident-*', 8)
-                            size, vanished = storage_bytes(root)
-                            if vanished:
-                                emit('profiling_rotation_during_storage_check', vanished_segments=vanished)
-                            if size > 2 * 1024**3:
-                                raise RuntimeError(f'Profile storage exceeds 2 GiB; inspect retained evidence: {root}')
+                            enforce_storage_limit(root)
                         else:
                             event = incident(line, pid)
                             if event is not None and not stopped:
