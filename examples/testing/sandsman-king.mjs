@@ -79,7 +79,8 @@ export async function run(game){
     game.check(kind+': observed camp respects current role caps',[[0x60a,2],[0x60c,3]].every(([k,n])=>family(after).filter(e=>e.kind===k).length<=n));
   }
   await defeat(king.id);const dead=await save('king-defeated'),remaining=family(dead);
-  await game.act({keys:[],duration_ms:11000},{name:'sandsman-defeated',when:()=>true});const final=await save('after-parent-death');
+  await game.act({keys:[],duration_ms:10000});
+  await game.act({keys:[],duration_ms:1000},{name:'sandsman-defeated',when:()=>true});const final=await save('after-parent-death');
   game.check('dead King cannot replenish or transform',family(final).every(e=>e.kind!==0x60d&&remaining.some(p=>p.id===e.id)));
   game.check('King XP cannot be awarded twice',final.view.character.experience===dead.view.character.experience);
   game.check('same prepared native Wizard survives',final.view.lifecycle.alive&&final.view.session.character===begin.view.session.character);
