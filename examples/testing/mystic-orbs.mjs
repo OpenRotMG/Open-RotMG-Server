@@ -13,7 +13,7 @@ export async function run(game){
   const response=await fetch(config.origin+'/dev/map?player='+initial.diagnostic.player,{headers,signal:AbortSignal.timeout(10000)});assert(response.ok);
   const map=await response.json(),snake=map.entities.find(e=>e.kind===0x228);assert(snake,'ordinary Greater Pit Snake exists');
   const {worldSeed,...mystic}=fixture;
-  game=await game.join({...mystic,world:initial.view.session.world,position:{x:snake.pos.x-2,y:snake.pos.y}});
+  game=await game.join({...mystic,world:initial.view.session.world,position:snake.pos});
   async function cheat(change){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change}}),signal:AbortSignal.timeout(10000)});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
@@ -27,7 +27,8 @@ export async function run(game){
     await cheat({kind:'vitals',hp:670,mp:385});
     await game.act({keys:[],duration_ms:600});
     const before=await save(name+'-before');assert(target(before));
-    await game.act({keys:[' '],duration_ms:150,target:{entity:snake.id,camera_angle:-Math.PI/4,fire:false}},{name,when:v=>v.character.mp<before.view.character.mp-cost/2});
+    await game.act({keys:[' '],duration_ms:150,target:{entity:snake.id,camera_angle:-Math.PI/4,fire:false}});
+    await game.act({keys:[],duration_ms:600},{name,when:()=>true});
     const hit=await save(name);
     game.check(name+' spends one mana cost',hit.view.character.mp>=before.view.character.mp-cost&&hit.view.character.mp<before.view.character.mp-cost+10);
     const timer=target(hit).statuses['22'];
