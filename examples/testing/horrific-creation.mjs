@@ -7,14 +7,15 @@ export const fixture = {
   stats:[670,385,75,25,50,75,40,60],
 };
 export async function run(game) {
-  let expires=0,serial=0,camera=0;
+  let serial=0,camera=0;
+  const protections=new Map([[game.actor,0]]);
   async function act(input,capture) {
     const now=(await game.observe()).game_ms;
-    if(now>=expires) {
+    for(const [actor,expires] of protections)if(now>=expires) {
       const request=join(process.env.QA_RESULTS_DIR,'protection-request-'+serial+'.json');
-      await writeFile(request,JSON.stringify({id:'explicit-native-protection-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}));
+      await writeFile(request,JSON.stringify({id:'explicit-native-protection-'+serial++,command:{op:'cheat',actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}));
       execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(process.env.QA_RESULTS_DIR,'native/native.json'),request]);
-      expires=now+60000;
+      protections.set(actor,now+60000);
     }
     return game.act(input,capture);
   }
@@ -87,6 +88,10 @@ export async function run(game) {
   await writeFile(join(process.env.QA_RESULTS_DIR,'attack-cycle.json'),JSON.stringify({trace,seen:[...seen],shots:[...shots]}));
   game.check('native client observes blast, shockwave and energy projectiles',['85:1000','50:400','55:3000'].every(s=>shots.has(s)));
   game.check('native encounter enters blast, shockwave and energy phases',[4,6,7].every(s=>seen.has(s)));
+  const partner=await game.join({...fixture,world:(await game.observe()).session.world,position:{x:70.5,y:13.5},equipment:[-1,-1,-1,-1]});
+  protections.set(partner.actor,0);
+  await act({keys:[],duration_ms:100});
+  game.check('second native client shares the secret room',(await partner.observe()).session.world===(await game.observe()).session.world);
   await go(70.5,12.5);
   for(let n=0;n<500&&(await creation()).stage!==2;n++)await act({keys:[],duration_ms:100});
   const pet=await creation();
@@ -94,12 +99,12 @@ export async function run(game) {
   game.check('native player is Hexed in the green pool',((await game.observe()).character.conditions&(1<<27))!==0);
   await act({keys:[],duration_ms:500},{name:'creation-pet',when:()=>true});
   await go(75.5,12.5);
-  game.check('native blue pool removes player Hexed',((await game.observe()).character.conditions&(1<<27))===0);
+  game.check("native blue pool removes only that player's Hexed",((await game.observe()).character.conditions&(1<<27))===0&&((await partner.observe()).character.conditions&(1<<27))!==0);
   await act({keys:[],duration_ms:500,target:{entity:pet.id,camera_angle:camera,fire:true}});
   game.check('ordinary native shots damage the same pet',(await creation()).hp<pet.hp);
   for(let n=0;n<250&&(await creation()).stage===2;n++)await act({keys:[],duration_ms:100});
   const restored=await creation();
   game.check('DeHexxer restores invincibility without replacing the boss',restored.id===original.id&&restored.stage!==2&&(restored.condition&(1<<23))!==0);
   await save('creation-restored');
-  game.check('native player survives the encounter',(await game.observe()).lifecycle.alive);
+  game.check('both native players survive the encounter',(await game.observe()).lifecycle.alive&&(await partner.observe()).lifecycle.alive);
 }
