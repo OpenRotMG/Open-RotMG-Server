@@ -348,19 +348,6 @@ fn equipment_percent(ch: &Character, content: &Content) -> Result<u64> {
     Ok(percent)
 }
 
-#[cfg(test)]
-pub(super) fn equipment(ch: &Character, content: &Content) -> Result<i32> {
-    let percent = equipment_percent(ch, content)?;
-    // The May2012 calculator applies the combined percent once to the running death subtotal.
-    let bonus = u64::try_from(ch.fame)?
-        .checked_mul(percent)
-        .context("equipment fame overflow")?
-        / 100;
-    let bonus = i32::try_from(bonus).context("equipment fame exceeds wire range")?;
-    total(ch, bonus)?;
-    Ok(bonus)
-}
-
 pub(super) fn total(ch: &Character, equipment: i32) -> Result<i32> {
     ensure!(
         ch.fame >= 0 && equipment >= 0,

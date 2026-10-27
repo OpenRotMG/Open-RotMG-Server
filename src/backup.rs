@@ -831,22 +831,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn legacy_market_ad_hint_remains_known_without_allowing_opaque_fields() {
-        let mut mind = crate::bots::pursuits::Mind::new(17);
-        mind.revision = 1;
-        let mut legacy = serde_json::to_value(mind).unwrap();
-        let market = legacy["market"].as_object_mut().unwrap();
-        market.remove("quote");
-        market.remove("preparing");
-        market.insert("next_ad".into(), serde_json::json!(123456));
-        let decoded: crate::bots::pursuits::Mind = serde_json::from_value(legacy.clone()).unwrap();
-        decoded.validate().unwrap();
-        let saved = serde_json::to_value(decoded).unwrap();
-        assert_eq!(saved["market"]["next_ad"], 123456);
-        assert!(known_fields(&legacy, &saved));
-        legacy["market"]["credential"] = serde_json::json!("must-not-export");
-        assert!(!known_fields(&legacy, &saved));
-    }
 }

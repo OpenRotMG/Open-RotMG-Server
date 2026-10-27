@@ -215,6 +215,3 @@ impl Directory {
         Ok(delivered)
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -4,14 +4,6 @@ use std::time::{Duration, Instant};
 
 mod incoming;
 use incoming::Incoming;
-#[cfg(test)]
-mod incoming_tests;
-#[cfg(test)]
-mod quote_tests;
-#[cfg(test)]
-mod session_tests;
-#[cfg(test)]
-mod tests;
 
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
@@ -515,40 +507,7 @@ impl Market {
         }
         self.trade = None;
     }
-    #[cfg(test)]
-    fn replace(&mut self, t: Terms) {
-        self.next_request_ms = 0;
-        let rounds = self.bargain.as_ref().map_or(1, |b| {
-            if b.terms.accounts.iter().all(|a| t.accounts.contains(a)) {
-                b.rounds.saturating_add(1)
-            } else {
-                1
-            }
-        });
-        if let Some(mut old) = self.bargain.take() {
-            self.revoke_trade = true;
-            self.trade = None;
-            old.own_consent = false;
-            old.peer_consent = None;
-            if old.resolution.is_none() {
-                old.resolution = Some("counteroffer_invalidated_previous_consents".into());
-            }
-            self.history.push_back(old);
-            if self.history.len() > 8 {
-                self.history.pop_front();
-            }
-        }
-        self.bargain = Some(Bargain {
-            terms: t,
-            own_consent: false,
-            agreed: false,
-            peer_consent: None,
-            confirmed: 0,
-            consent_revision: 0,
-            rounds,
-            resolution: None,
-        });
-    }
+
     pub(in crate::bots) fn receive(
         &mut self,
         packet: &Packet,

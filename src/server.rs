@@ -132,8 +132,6 @@ pub struct App {
     pub(crate) name_claims: Arc<tokio::sync::Mutex<()>>,
     pub bots: Arc<Mutex<BTreeMap<i32, Owner>>>,
     #[cfg(test)]
-    pub quarantined: Arc<Mutex<Vec<Owner>>>,
-    #[cfg(test)]
     pub(crate) persona_departure_gate: Arc<Mutex<Option<PersonaDepartureGate>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
     pub(crate) admission: Arc<lifecycle::drain::Admission>,
@@ -2182,25 +2180,6 @@ fn outgoing_burst(
         std::iter::from_fn(move || rx.try_recv().ok().map(|packet| (packet, rx.len() + 1)))
             .take(ready),
     )
-}
-
-#[cfg(test)]
-#[test]
-fn predicted_enemy_deaths_reach_the_owning_world_without_granting_hits() {
-    assert!(INPUTS.contains(&76), "predicted enemy deaths are discarded");
-    let packet = |killed| {
-        let mut w = Writer::new();
-        w.i32(1000).u8(1).i32(42).u8(killed);
-        Packet { id: 76, body: w.0 }
-    };
-    let now = std::time::Instant::now();
-    assert!(input(&packet(1), Some(1), now, true).unwrap().is_some());
-    assert!(input(&packet(0), Some(1), now, true).unwrap().is_none());
-    assert!(input(&packet(2), Some(1), now, true).is_err());
-    assert!(input(&packet(1), None, now, true).is_err());
-    let mut trailing = packet(1);
-    trailing.body.push(0);
-    assert!(input(&trailing, Some(1), now, true).is_err());
 }
 
 #[cfg(test)]

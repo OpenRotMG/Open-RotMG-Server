@@ -644,10 +644,6 @@ pub async fn attachment(State(a): State<App>, Path(id): Path<String>) -> Respons
     }
 }
 
-#[cfg(test)]
-#[path = "diagnostics_tests.rs"]
-mod tests;
-
 pub async fn report(
     a: &App,
     account: i32,

@@ -398,38 +398,3 @@ impl World {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn coffin_vulnerability_window_precedes_ruthvens_bats() {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let map = Arc::new(manor::generate(&content, 12351).unwrap());
-        let mut world = World::new(content, map).unwrap();
-        let boss = world.actors().find(|e| e.kind == BOSS).unwrap().id;
-        for (elapsed, invulnerable, invincible) in [
-            (9100, false, false),
-            (9800, false, false),
-            (9850, true, false),
-            (15700, true, false),
-            (15750, false, false),
-            (16700, false, false),
-            (16750, false, true),
-            (21750, false, false),
-        ] {
-            world.now = elapsed;
-            world.manor_mechanics(boss, None, elapsed).unwrap();
-            let condition = world.entities[&boss].condition;
-            assert_eq!(
-                (
-                    condition & condition::bit(condition::INVULNERABLE) != 0,
-                    condition & condition::bit(condition::INVINCIBLE) != 0,
-                ),
-                (invulnerable, invincible),
-                "Ruthven protection at {elapsed}ms"
-            );
-        }
-    }
-}

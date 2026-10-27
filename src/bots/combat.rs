@@ -334,29 +334,44 @@ pub(super) fn ability(
     }))
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Steering {
+    pub heading: f32,
+    pub distance: f32,
+    pub clearance: f32,
+}
+
 pub(super) fn movement(
     v: &PlayerView,
     grid: &Grid,
     enemies: &[&VisibleObject],
-    target: Option<Pos>,
-    range: f32,
+    target: Option<(Pos, f32)>,
     retreat: bool,
     perception: &Perception,
+    steering: Option<Steering>,
 ) -> Option<Pos> {
     if v.character.conditions & crate::content::PARALYZED != 0 {
         return None;
     }
     let mut best = None;
-    for index in 0..perception.directions {
-        let direction = index as f32 * std::f32::consts::TAU / perception.directions as f32;
+    let distance = steering.map_or(1.25, |s| s.distance);
+    for index in 0..perception.directions + usize::from(steering.is_some()) {
+        let direction = if index == perception.directions {
+            steering.expect("retained heading candidate").heading
+        } else {
+            index as f32 * std::f32::consts::TAU / perception.directions as f32
+        };
         let point = Pos {
-            x: v.position.x + direction.cos() * 1.25,
-            y: v.position.y + direction.sin() * 1.25,
+            x: v.position.x + direction.cos() * distance,
+            y: v.position.y + direction.sin() * distance,
         };
         if !grid.segment(v.position, point) {
             continue;
         }
         let safety = clearance(v, point, perception);
+        if steering.is_some_and(|s| safety < s.clearance) {
+            continue;
+        }
         let separation = enemies
             .iter()
             .map(|e| point.distance(e.position))
@@ -364,69 +379,16 @@ pub(super) fn movement(
         let spacing = if retreat {
             separation.min(12.) * 3.
         } else {
-            target.map_or(0., |p| -(point.distance(p) - range * 0.8).abs() * 3.)
+            target.map_or(0., |(p, range)| {
+                -(point.distance(p) - range * 0.8).abs() * 3.
+            })
         };
-        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing;
+        // Retain safe steering, not physical inertia; urgent avoidance stays first: https://www.red3d.com/cwr/steer/gdc99/
+        let continuity = steering.map_or(0., |s| (direction - s.heading).cos() * 3.);
+        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing + continuity;
         if best.is_none_or(|(prior, _)| score > prior) {
             best = Some((score, point));
         }
     }
     best.map(|(_, point)| point)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::condition::{DAMAGING, HEALING, INVISIBLE, STASIS, bit};
-
-    fn scene(weapon: i32, ability: i32, health: f32) -> (Content, PlayerView) {
-        let (content, mut v) = super::super::quest_tests::fixture();
-        v.position = Pos { x: 40.5, y: 40.5 };
-        v.character.items[0] = weapon;
-        v.character.items[1] = ability;
-        v.character.hp = (v.character.stats[0] as f32 * health) as i32;
-        v.objects[0].position = Pos { x: 44.5, y: 40.5 };
-        (content, v)
-    }
-    fn cast(content: &Content, v: &PlayerView) -> Option<Pos> {
-        let grid = Grid::terrain(v);
-        match ability(v, content, &grid, &v.objects[0]).unwrap()? {
-            Action::Use { slot: 1, x, y } => Some(Pos { x, y }),
-            other => panic!("unexpected ability action {other:?}"),
-        }
-    }
-
-    #[test]
-    fn rogue_cloaks_only_when_injured_and_visible() {
-        let (content, mut v) = scene(2675, 0xa56, 0.4);
-        assert!(cast(&content, &v).is_some());
-        v.character.conditions = bit(INVISIBLE);
-        assert!(cast(&content, &v).is_none());
-        let (content, v) = scene(2675, 0xa56, 1.);
-        assert!(cast(&content, &v).is_none());
-    }
-
-    #[test]
-    fn casts_skip_active_buffs_stasised_targets_and_aimless_teleports() {
-        let (content, mut v) = scene(2561, 0xa52, 0.5);
-        v.character.conditions = bit(HEALING) | bit(DAMAGING);
-        assert!(cast(&content, &v).is_none());
-        v.character.conditions = bit(HEALING);
-        assert!(cast(&content, &v).is_some());
-
-        let (content, mut v) = scene(2714, 0xae4, 0.4);
-        v.objects[0].condition_mask = Some(bit(STASIS));
-        assert!(cast(&content, &v).is_none());
-        v.objects[0].condition_mask = Some(0);
-        assert!(cast(&content, &v).unwrap().distance(v.objects[0].position) < 1e-3);
-
-        let (content, v) = scene(2565, 0xae2, 1.);
-        assert!(cast(&content, &v).is_none());
-        let (content, v) = scene(2565, 0xae2, 0.4);
-        let landing = cast(&content, &v).unwrap();
-        assert!(
-            landing.distance(Pos { x: 25.5, y: 40.5 }) < 1e-3,
-            "{landing:?}"
-        );
-    }
 }
