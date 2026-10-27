@@ -4,6 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {nativeClock} from './native-clock.mjs';
+import {validateNativeChat,guardNativeInput,dispatchNativeChat} from './native-chat.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 
 const help=`Usage: node scripts/game.mjs CONFIG.json REQUEST.json
@@ -14,7 +15,7 @@ Reuse the same id only to retrieve the same command's result, never to retry unc
 Read operations: capabilities; catalog {search,limit}; world_info {world}; observe {actor}; inspect {actor}; native_state {actors}; result {request}; trace {request,offset,limit}.
 Spawn: {op:"spawn",spec:{guid,class,level,seed,equipment:[weapon,ability,armor,ring],backpack:[eight explicit slots],world,position:{x,y},controller:"direct"|"native"|"game_bot",profile:null|"Pixl",stats:null|[eight explicit stats]}}. Empty slot is -1. IDs and names come from catalog. A dead prepared actor may be replaced on the same account; a living actor is never implicitly reset. Spawn never chooses class, level, gear or a world for you. game_bot also requires an exact advertised profile; other controllers require no profile.
 Direct act: {op:"act",actor,action:{command:...},duration_ms,pauseAfter:true} uses ordinary server actions. run {actor,goal,max_game_ms,pauseAfter:true} delegates only advertised goals to the actual gameplay bot; unsupported classes/goals fail.
-Native CONFIG also requires browserTools:"/absolute/managed/direct-cdp.mjs" and native:[{port,target,actor}] for EVERY connected native actor. Native act uses input:{keys:["d"],duration_ms:600,mouse:{x:450,y:300}}; mouse is optional left firing in the unclipped 800x600 client. Keys and durations are bounded. Native inventory drag uses input:{keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}}. expect:{world,items:{slot:item},inventory_revision} asserts outcomes; require:{world,inventory_revision} checks starting state. No desktop activation.
+Native CONFIG also requires browserTools:"/absolute/managed/direct-cdp.mjs" and native:[{port,target,actor}] for EVERY connected native actor. Native act uses input:{keys:["d"],duration_ms:600,mouse:{x:450,y:300}}; mouse is optional left firing in the unclipped 800x600 client. Keys and durations are bounded. Native inventory drag uses input:{keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}}. expect:{world,items:{slot:item},inventory_revision} asserts outcomes; require:{world,inventory_revision} checks starting state. Native ordinary local chat uses input:{keys:[],duration_ms:1000,chat:"snake here"}, exclusively of keys/mouse/drag/target; 1–120 nonblank printable ASCII characters, no slash or controls. input_complete confirms dispatch only, not accepted/broadcast/rendered chat; capture and check the native outcome separately. No desktop activation.
 pauseAfter defaults to true: the whole isolated session does not progress while you inspect and think. Native pause requires Ruffle suspension, pause-adjusted page clocks and server pause; simulation-only pause is not native acceptance. Initialize while Ruffle is playing; an earlier untracked pause requires normal reconnection of the same living character. Native operations cannot return unpaused: capture during a bounded action. A lost controller's 1500ms lease stops the prepared simulation and closes native connections; expiry makes that session terminal.
 Starting context only: prepare_realm_capacity {limit} lowers only the active Realm once, before any enrollment/ownership claims, with the prepared clock paused and 1 <= limit < global capacity. Normal portal publication and guarded admission remain authoritative; capabilities returns the prepared receipt. Other worlds/global capacity are unchanged.
 Explicit paused mutations: world {template}; cheat {actor,change:{kind:"stats",values}|{kind:"item",slot,item}|{kind:"teleport",position}|{kind:"stat_modifier",index,amount,duration_ms}|{kind:"protection",condition,duration_ms}|{kind:"guild",name,members:[actorIds]}|{kind:"pause",paused:boolean}}. Protection permits invincible, stasis or invulnerable for 1–60000ms, with no overlapping active protection. Stat modifiers require panel index2–7, nonzero amount -100–100, duration1–60000ms and no active prepared modifier; base stats and inventory are unchanged. Guild setup creates a real, unearned relation for the selected founder and listed registered actors without changing wallets or stars; normal guild eligibility is unchanged. Guild client publication is deferred until the next ordinary unpaused tick (for native clients, use a normal bounded native action); paused success confirms the persisted/server relation, not rendered client state. Actor pause requires a direct actor and a changed desired state; it invokes ordinary /pause safety policy, without advancing time or changing guild membership. Actor pause status publication also waits for the next ordinary unpaused tick; the immediate ordinary chat reply is not client status proof. These are recorded cheats, never earned gameplay.
@@ -97,12 +98,7 @@ async function connect(spec) {
   };
   ws.onclose=()=>{const error=new Error('Native target connection closed');if(!closing){leaseError=error;holdState?.abort(error);}for(const item of pending.values()){clearTimeout(item.timer);item.reject(error);}pending.clear();};
   send = (method, params) => new Promise((resolve,reject) => {
-    if(method.startsWith('Input.')&&['keyDown','mousePressed'].includes(params.type)){
-      if(leaseError){holdState?.abort(leaseError);reject(leaseError);return;}
-      if(!holdState){reject(new Error('Native DOWN outside its bounded input'));return;}
-      if(holdState.started&&Date.now()-holdState.started>=holdState.ms){reject(new Error('Native DOWN missed its release deadline'));return;}
-      if(!holdState.started)holdState.start();
-    }
+    try{guardNativeInput(method,params,holdState,leaseError);}catch(error){reject(error);return;}
     const n=++serial, timer=setTimeout(() => {pending.delete(n);reject(new Error(`CDP deadline: ${method}`));},10000);
     pending.set(n,{resolve,reject,timer}); ws.send(JSON.stringify({id:n,method,params}));
   });
@@ -112,16 +108,16 @@ async function connect(spec) {
     return r.result.value;
   };
   const clock=paused=>evaluate(`(${nativeClock.toString()})(${JSON.stringify(paused)})`);
-  async function hold(keys,mouse,ms,dragTo){
+  async function hold(keys,mouse,ms,dragTo,chat){
     if(holdState)throw Error('Concurrent native hold is forbidden');
     const key=(type,k)=>call('Input.dispatchKeyEvent',{type,key:k,code:bindings[k][0],windowsVirtualKeyCode:bindings[k][1]});
     let resolveRelease,rejectRelease,timer,dragTimer,releasedAt;
     const released=new Promise((ok,bad)=>{resolveRelease=ok;rejectRelease=bad;});
-    const release=async()=>{releasedAt=Date.now();const results=await Promise.allSettled([...keys.map(k=>key('keyUp',k)),...(mouse?[call('Input.dispatchMouseEvent',{type:'mouseReleased',...(dragTo??mouse),button:'left',buttons:0,clickCount:1})]:[])]);const errors=results.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(errors.length)throw Error(errors.join('; '));};
+    const release=async()=>{holdState.stopped=true;releasedAt=Date.now();const results=await Promise.allSettled([...keys.map(k=>key('keyUp',k)),...(chat===undefined?[]:[call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13})]),...(mouse?[call('Input.dispatchMouseEvent',{type:'mouseReleased',...(dragTo??mouse),button:'left',buttons:0,clickCount:1})]:[])]);const errors=results.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(errors.length)throw Error(errors.join('; '));};
     holdState={ms,started:0,abort(error){clearTimeout(timer);clearTimeout(dragTimer);release().then(()=>rejectRelease(error),failure=>rejectRelease(Error(String(error)+'; input release unconfirmed: '+failure)));},start(){this.started=Date.now();timer=setTimeout(()=>release().then(resolveRelease,rejectRelease),ms);if(dragTo)dragTimer=setTimeout(()=>call('Input.dispatchMouseEvent',{type:'mouseMoved',...dragTo,button:'left',buttons:1}).catch(error=>this.abort(error)),ms/2);}};
     // Ruffle's map click establishes Flash focus before movement keys are delivered.
-    const down=(async()=>{const results=mouse?await Promise.allSettled([call('Input.dispatchMouseEvent',{type:'mousePressed',...mouse,button:'left',buttons:1,clickCount:1})]):[];if(results.every(r=>r.status==='fulfilled'))results.push(...await Promise.allSettled(keys.map(k=>key('keyDown',k))));return results;})();
-    if(!keys.length&&!mouse)holdState.start();
+    const down=chat!==undefined?Promise.allSettled([dispatchNativeChat(call,chat).catch(error=>{holdState?.abort(error);throw error;})]):(async()=>{const results=mouse?await Promise.allSettled([call('Input.dispatchMouseEvent',{type:'mousePressed',...mouse,button:'left',buttons:1,clickCount:1})]):[];if(results.every(r=>r.status==='fulfilled'))results.push(...await Promise.allSettled(keys.map(k=>key('keyDown',k))));return results;})();
+    if(!keys.length&&!mouse&&chat===undefined)holdState.start();
     const noDispatch=setTimeout(()=>{if(!holdState.started)rejectRelease(Error('Native DOWN was not dispatched before its deadline'));},10000);
     try{await released;return {down,started:holdState.started,released:releasedAt};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);holdState=null;}
   }
@@ -234,10 +230,11 @@ const bindings = {
 function nativeStep(actor,input){
   const client=clients.find(c=>c.actor===actor);
   if(!client)throw Error('Native act requires the configured owned target for this actor');
-  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['duration_ms','keys','mouse','drag','target'].includes(k)))throw Error('Native input supports only duration_ms, keys and optional mouse or drag');
+  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['duration_ms','keys','mouse','drag','target','chat'].includes(k)))throw Error('Native input supports only duration_ms, keys and optional mouse, drag, target or local chat');
   if(!Number.isInteger(input.duration_ms)||input.duration_ms<1||input.duration_ms>10000)throw Error('Native duration_ms must be 1–10000');
   const keys=input.keys;
   if(!Array.isArray(keys)||new Set(keys).size!==keys.length||keys.some(k=>!Object.hasOwn(bindings,k)))throw Error('Native keys must be a unique array of supported keys');
+  validateNativeChat(input);
   if(input.mouse&&(Object.keys(input.mouse).some(k=>!['x','y'].includes(k))||!Number.isFinite(input.mouse.x)||!Number.isFinite(input.mouse.y)||input.mouse.x<0||input.mouse.y<0||input.mouse.x>=800||input.mouse.y>=600))throw Error('Native mouse must be inside the 800×600 client');
   if(input.target&&(input.mouse||input.drag||!Number.isInteger(input.target.entity)||!Number.isFinite(input.target.camera_angle)||typeof input.target.fire!=='boolean'||Object.keys(input.target).some(k=>!['entity','camera_angle','fire'].includes(k))))throw Error('Native target requires entity, camera_angle and explicit fire, without mouse/drag');
   if(input.drag&&(input.mouse||keys.length||input.duration_ms<100||Object.keys(input.drag).some(k=>!['from','to'].includes(k))||['from','to'].some(k=>!input.drag[k]||Object.keys(input.drag[k]).some(v=>!['x','y'].includes(v))||!Number.isFinite(input.drag[k].x)||!Number.isFinite(input.drag[k].y)||input.drag[k].x<0||input.drag[k].y<0||input.drag[k].x>=800||input.drag[k].y>=600)))throw Error('Native drag requires only bounded from/to canvas points, no keys/mouse, and at least 100ms');
@@ -286,7 +283,7 @@ async function nativeAct(value) {
       await client.call('Input.dispatchMouseEvent',{type:'mouseMoved',...mouse});
     }
     return async()=>{
-    const press=await client.hold(keys,input.target?.fire===false?undefined:mouse,input.duration_ms,dragTo);
+    const press=await client.hold(keys,input.target?.fire===false?undefined:mouse,input.duration_ms,dragTo,input.chat);
     for(const result of await press.down)if(result.status==='rejected')throw result.reason;
     await client.evaluate('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
     await states(true);
