@@ -26,11 +26,13 @@ export async function run(game){
     const after=await save(name+'-after'),otherAfter=await ally.observe();
     const target=after.diagnostic.entities.find(e=>e.id===boss.id);
     game.check(name+' native cast damages boss',!!target&&target.hp<boss.hp);
-    const damage=boss.hp-target.hp;
+    const remaining=new Map(after.diagnostic.entities.map(e=>[e.id,e.hp]));
+    const damage=before.diagnostic.entities.reduce((sum,e)=>sum+Math.max(0,e.hp-(remaining.has(e.id)?remaining.get(e.id):0)),0);
+    observations.push({name,damage,before,after,otherBefore,otherAfter});
+    await writeFile(join(root,'drain-observations.json'),JSON.stringify({preparedVitals:true,observations},null,2));
     game.check(name+' spends one mana cost',after.view.character.mp>=before.view.character.mp-cost&&after.view.character.mp<before.view.character.mp-cost+15);
     game.check(name+' heals caster by observed damage',after.view.character.hp>=before.view.character.hp+damage-10&&after.view.character.hp<before.view.character.hp+damage+15);
     game.check(name+' heals nearby native ally by observed damage',otherAfter.character.hp>=otherBefore.character.hp+damage-10&&otherAfter.character.hp<otherBefore.character.hp+damage+15);
-    observations.push({name,damage,before,after,otherBefore,otherAfter});
   }
   await cast('necrotic',40);
   async function equip(slot,item,to={x:678,y:385}){
@@ -46,7 +48,7 @@ export async function run(game){
   const boss=poor.diagnostic.entities.find(e=>e.kind===0x926);
   game.check('insufficient mana does not drain',denied.diagnostic.entities.find(e=>e.id===boss.id).hp===boss.hp&&denied.view.character.hp<poor.view.character.hp+15);
   await equip(2,0xb05,{x:722,y:385});const robed=await game.observe();
-  game.check('robe adds selected defense and MP',robed.character.items[2]===0xb05&&robed.character.stats[1]===440&&robed.character.stats[3]===38);
+  game.check('robe adds selected defense and MP',robed.character.items[2]===0xb05&&robed.character.stats.max_mp===440&&robed.character.stats.defense===38);
   await game.act({keys:[],duration_ms:400,drag:{from:{x:766,y:428},to:{x:634,y:385}}});
   game.check('Necromancer rejects wand and retains inventory',JSON.stringify((await game.observe()).character.items)===JSON.stringify(robed.character.items));
   game.check('same living Necromancer retained',(await game.observe()).session.character===initial.view.session.character&&(await game.observe()).lifecycle.alive);
