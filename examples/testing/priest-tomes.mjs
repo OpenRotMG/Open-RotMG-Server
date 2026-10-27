@@ -13,7 +13,7 @@ export async function run(game){
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
   const initial=await game.observe();
-  const ally=await game.join({...fixture,class:0x30e,world:initial.session.world,position:initial.position,equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,50,0,50,50,40,60]});
+  const ally=await game.join({...fixture,class:0x30e,world:initial.session.world,position:{x:initial.position.x+2,y:initial.position.y},equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,50,0,50,50,40,60]});
   async function cast(name,amount,cost){
     await vitals(game.actor,100,300);await vitals(ally.actor,100,300);
     await game.act({keys:[],duration_ms:600});
