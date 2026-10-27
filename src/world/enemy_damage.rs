@@ -137,8 +137,11 @@ impl World {
             .u8(u8::from(kill))
             .u8(bullet.unwrap_or(0))
             .i32(if bullet.is_some() { owner } else { 0 });
-        for p in self.players.values() {
-            if p.known.contains(&target) {
+        // The shooter already predicts enemy projectile damage: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L121-L129
+        for (id, p) in &self.players {
+            if p.known.contains(&target)
+                && (*id != owner || bullet.is_none() || !self.content.objects[&kind].enemy)
+            {
                 send(p, 47, o.0.clone());
             }
         }
@@ -182,6 +185,76 @@ impl World {
 mod tests {
     use super::*;
     use crate::condition::{self, INVINCIBLE, INVULNERABLE, STASIS, STUNNED};
+
+    #[test]
+    fn projectile_damage_is_not_echoed_to_its_predicting_owner() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let map = Arc::new(Map::load(std::path::Path::new("data/nexus.wmap"), &content).unwrap());
+        let mut world = World::new(content.clone(), map).unwrap();
+        let character = |id| {
+            serde_json::from_value(serde_json::json!({
+                "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+                "class":0x310,"base":content.classes[&0x310].caps,
+                "id":id,"account":id,"name":"Wand","level":20,"exp":0,
+                "fame":0,"hp":670,"mp":385,"revision":0,"alive":true,
+                "items":[0xa04,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+            }))
+            .unwrap()
+        };
+        let owner = world.enter(character(1), None).unwrap();
+        let observer = world.enter(character(2), None).unwrap();
+        let pos = world.players[&owner].pos;
+        let (tx, mut rx) = mpsc::channel(32);
+        let (other, mut other_rx) = mpsc::channel(32);
+        let (lost, _) = watch::channel(None);
+        world.players.get_mut(&owner).unwrap().tx = Some(Output {
+            packets: tx,
+            lost: lost.clone(),
+        });
+        world.players.get_mut(&observer).unwrap().tx = Some(Output {
+            packets: other,
+            lost,
+        });
+        for kind in [0x1806, 0x172, 0x1837] {
+            let target = world.spawn_entity(kind, pos, vec![]).unwrap();
+            let initial_hp = world.entities[&target].hp;
+            for p in world.players.values_mut() {
+                p.known.insert(target);
+            }
+            for bullet in [Some(0), Some(1), None] {
+                let hp = world.entities[&target].hp;
+                assert_eq!(
+                    world
+                        .damage_enemy(owner, target, 10, true, &[], bullet)
+                        .unwrap(),
+                    10
+                );
+                assert_eq!(world.entities[&target].hp, hp - 10);
+                assert_eq!(
+                    world.entities[&target].damage[&1],
+                    initial_hp - world.entities[&target].hp,
+                    "credit is committed once"
+                );
+                let packet = other_rx.try_recv().expect("observer sees damage");
+                assert_eq!(packet.id, 47);
+                if kind != 0x1837 && bullet.is_some() {
+                    assert!(
+                        rx.try_recv().is_err(),
+                        "owner already predicts projectile damage"
+                    );
+                } else {
+                    assert_eq!(
+                        rx.try_recv()
+                            .expect("unpredicted damage must reach owner")
+                            .body,
+                        packet.body
+                    );
+                }
+                assert!(other_rx.try_recv().is_err());
+            }
+            world.remove_entity(target);
+        }
+    }
 
     #[test]
     fn shield_stuns_invulnerable_bosses_without_damage_or_credit() {
