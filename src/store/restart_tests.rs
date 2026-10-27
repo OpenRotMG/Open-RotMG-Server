@@ -214,7 +214,16 @@ async fn killed_mutations_recover_without_duplicates_or_account_lockouts() {
                     |r| r.get::<_, i32>(0)
                 )
                 .unwrap(),
-                7
+                29
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM legacy_claims WHERE account=1",
+                    [],
+                    |r| r.get::<_, i32>(0)
+                )
+                .unwrap(),
+                1
             );
             assert!(expected_store.load(1, 1).await.is_err());
         }
