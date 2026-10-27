@@ -210,7 +210,18 @@ async fn committed_persona_deaths_reopen_as_normal_starters_without_reseeding_we
     app.store.save_bot_mind(mind).await.unwrap();
     let mut vault = app.store.vault(original.account, 0).await.unwrap();
     vault.items.fill(-1);
-    app.store.exchange(vec![], vec![vault]).await.unwrap();
+    app.store
+        .exchange(
+            vec![crate::store::InventoryWrite {
+                id: original.id,
+                account: original.account,
+                revision: original.revision,
+                items: original.items.clone(),
+            }],
+            vec![vault],
+        )
+        .await
+        .unwrap();
     let guid = app.store.account_guid(original.account).await.unwrap();
     for _ in 0..2 {
         let living = app.store.list(guid.clone()).await.unwrap().characters;
