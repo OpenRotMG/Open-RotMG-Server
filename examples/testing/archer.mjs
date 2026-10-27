@@ -63,7 +63,7 @@ export async function run(game){
     if(item===0xb28)game.check('T6 defense and speed bonuses',before.view.character.stats[3]===33&&before.view.character.stats[4]===52);
     const mouse=aim(before);
     assert(mouse.x>=0&&mouse.x<600&&mouse.y>=0&&mouse.y<600,'target remains on screen');
-    await game.act({keys:[' '],mouse,duration_ms:700},item===0xc07?{name:'archer-thunder',when:view=>view.game_ms>=before.view.time_ms+250}:undefined);
+    await game.act({keys:[' '],mouse,duration_ms:700},item===0xc07?{name:'archer-thunder',when:view=>view.game_ms>=before.view.time_ms+250&&view.character.mp<before.view.character.mp-50}:undefined);
     const after=await game.inspect(),hit=target(after);assert(hit);
     observations.push({item,before,after});await save();
     game.check(`quiver ${item.toString(16)} spends mana`,after.view.character.mp<=before.view.character.mp-cost+20);
