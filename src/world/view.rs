@@ -443,7 +443,7 @@ mod tests {
             x: origin.x + 4.,
             y: origin.y,
         };
-        w.apply_condition(peer, SICK, 10.).unwrap();
+        w.apply_condition(peer, SICK, 10000).unwrap();
         w.players.get_mut(&peer).unwrap().paused = true;
         assert!(
             w.player_view(1, caster, 0)
