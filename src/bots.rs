@@ -789,7 +789,11 @@ impl Brain {
             remedy,
         };
         if self.reflex(v, content, &s, &mut decision)? {
+            self.crowd.release(v, "safety");
             return Ok((Activity::Survive, decision));
+        }
+        if self.committed(v) {
+            self.crowd.release(v, "explicit_commitment");
         }
         // Reflexes can escape a deal, but only durable receipts can settle it.
         if reserved {
@@ -1436,12 +1440,12 @@ impl Brain {
         let recent_company = self
             .crowd
             .cooperator(v, |position| !self.blocked.contains_key(&tile(position)));
-        let cooperative_goal = if self.agreement.is_none()
-            && self.companion.is_none()
+        let cooperative_goal = if !committed
             && crowds::cooperative_available(&choices, v.position, range, |position| {
                 !self.blocked.contains_key(&tile(position))
             })
             && let Some(peer) = &recent_company
+            && crowds::can_approach(v.session.account, peer.account)
             && peer.position.distance(v.position) > 7.
         {
             choices.push((
@@ -1453,8 +1457,7 @@ impl Brain {
         } else {
             None
         };
-        if self.agreement.is_none()
-            && self.companion.is_none()
+        if !committed
             && recent_company.is_none()
             && !choices
                 .iter()
@@ -1504,7 +1507,7 @@ impl Brain {
                         account = v.session.account,
                         target = marker.id,
                         world = v.session.world,
-                        reason = "seek_shared_xp",
+                        reason = "seek_nearby_activity",
                         "autonomous attended crowd travel"
                     );
                     let peer = marker.id;
@@ -1735,8 +1738,7 @@ impl Brain {
                 decision.journey = Some(Journey::Regroup(id));
                 self.next_teleport = v.time_ms + 10000;
             }
-            if self.agreement.is_none()
-                && self.companion.is_none()
+            if !committed
                 && let Goal::Follow(id) = goal
                 && cooperative_goal != Some(id)
             {
@@ -1745,14 +1747,31 @@ impl Brain {
                         account = v.session.account,
                         target = id,
                         reason = if self.crowd.keeping_company(id) {
-                            "keep_shared_xp_company"
+                            "continue_temporary_outing"
                         } else {
-                            "seek_shared_xp"
+                            "seek_nearby_activity"
                         },
                         "autonomous crowd approach selected"
                     );
                 }
                 self.crowd.approach_selected(id);
+            }
+            if self.goal != goal
+                && let Some(peer) = &recent_company
+                && (matches!(goal, Goal::Loot(_))
+                    || cooperative_goal == Some(peer.id) && goal == Goal::Follow(peer.id))
+            {
+                tracing::info!(
+                    account = v.session.account,
+                    target = peer.id,
+                    peer = peer.account,
+                    reason = if matches!(goal, Goal::Loot(_)) {
+                        "useful_loot_pause"
+                    } else {
+                        "visible_catch_up"
+                    },
+                    "autonomous temporary company activity changed"
+                );
             }
             self.mind
                 .intentions

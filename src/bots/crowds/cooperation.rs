@@ -2,6 +2,8 @@ use super::*;
 
 const WINDOW: u64 = 10_000;
 const COMPANY: u64 = 60_000;
+const SEPARATION: u64 = 6_000;
+const INDEPENDENCE: u64 = 30_000;
 type Peer = (i32, i32);
 
 #[derive(Default)]
@@ -9,6 +11,8 @@ pub(super) struct Cooperation {
     binding: Option<[i32; 4]>,
     enemies: BTreeMap<i32, Enemy>,
     recent: Option<(Peer, u64)>,
+    unseen_since: Option<u64>,
+    cooldown_until: u64,
 }
 struct Enemy {
     kind: u16,
@@ -25,7 +29,8 @@ impl Cooperation {
         enemies: impl Iterator<Item = (i32, u16)>,
     ) {
         if self.binding != Some(binding) {
-            self.release("session_changed");
+            self.release(now, "session_changed");
+            self.cooldown_until = 0;
             self.enemies.clear();
             self.binding = Some(binding);
         }
@@ -35,7 +40,7 @@ impl Cooperation {
             self.seen(id, kind, now);
         }
         if self.recent.is_some_and(|(_, until)| now >= until) {
-            self.release("expired");
+            self.release(now, "expired");
         }
     }
     fn seen(&mut self, id: i32, kind: u16, now: u64) {
@@ -122,36 +127,40 @@ impl Cooperation {
                 && now.saturating_sub(*at) < WINDOW
                 && peer(*id) == Some(*account)
         });
-        if let Some((own_hit_ms, (who, peer_hit_ms))) = together {
+        if let Some((own_hit_ms, (who, peer_hit_ms))) = together
+            && self.recent.is_none()
+            && now >= self.cooldown_until
+        {
             let until = now
                 .checked_add(COMPANY)
                 .context("cooperative company deadline overflow")?;
-            let accepted = self.recent.is_none_or(|(current, _)| current != who);
+            // Shared hits sustain the activity, not an indefinitely renewable social obligation.
             self.recent = Some((who, until));
-            if accepted {
-                tracing::info!(
-                    account = binding[1],
-                    character = binding[2],
-                    world = binding[0],
-                    enemy = target,
-                    peer = who.1,
-                    object = who.0,
-                    own_hit_ms,
-                    peer_hit_ms,
-                    shooter,
-                    bullet,
-                    damage,
-                    killed,
-                    until,
-                    accepted,
-                    "autonomous observed shared damage company"
-                );
-            }
+            self.unseen_since = None;
+            tracing::info!(
+                account = binding[1],
+                character = binding[2],
+                world = binding[0],
+                enemy = target,
+                peer = who.1,
+                object = who.0,
+                own_hit_ms,
+                peer_hit_ms,
+                shooter,
+                bullet,
+                damage,
+                killed,
+                until,
+                "autonomous observed shared damage company"
+            );
         }
         if killed {
             self.enemies.remove(&target);
         }
         Ok(())
+    }
+    pub fn passive_available(&self, now: u64) -> bool {
+        self.recent.is_none() && now >= self.cooldown_until
     }
     pub fn company(
         &mut self,
@@ -172,15 +181,42 @@ impl Cooperation {
             })
         };
         match result {
-            Ok(position) => Some((peer, position)),
+            Ok(position) => {
+                if self.unseen_since.take().is_some() {
+                    tracing::info!(
+                        account = self.binding.map(|b| b[1]),
+                        peer = peer.1,
+                        target = peer.0,
+                        "autonomous cooperative company visible again"
+                    );
+                }
+                Some((peer, position))
+            }
+            Err("lost_public_visibility") => {
+                let since = *self.unseen_since.get_or_insert_with(|| {
+                    tracing::info!(
+                        account = self.binding.map(|b| b[1]),
+                        peer = peer.1,
+                        target = peer.0,
+                        "autonomous cooperative company briefly out of sight"
+                    );
+                    now
+                });
+                if now.saturating_sub(since) >= SEPARATION {
+                    self.release(now, "lost_public_visibility");
+                }
+                None
+            }
             Err(reason) => {
-                self.release(reason);
+                self.release(now, reason);
                 None
             }
         }
     }
-    fn release(&mut self, reason: &'static str) {
+    pub fn release(&mut self, now: u64, reason: &'static str) {
+        self.unseen_since = None;
         if let Some((peer, until)) = self.recent.take() {
+            self.cooldown_until = now.saturating_add(INDEPENDENCE);
             tracing::info!(
                 account = self.binding.map(|b| b[1]),
                 peer = peer.1,
@@ -215,6 +251,12 @@ pub(super) fn visible(
     }
     if p.hp <= 0 {
         return Err("peer_dead");
+    }
+    if p.position.distance(v.position) > 36. {
+        return Err("separated");
+    }
+    if !survivable(v, p.position) {
+        return Err("unsafe_target");
     }
     Ok(p.position)
 }
