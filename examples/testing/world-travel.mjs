@@ -37,6 +37,7 @@ export async function run(game){
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1000});
   const denied=await save('full-return-denied');
   game.check('full origin refuses entry without replacing the character or inventory',denied.session.world===first.session.world&&denied.session.character===initial.session.character&&denied.lifecycle.alive&&JSON.stringify(denied.character.items)===JSON.stringify(again.character.items)&&denied.character.inventory_revision===again.character.inventory_revision);
+  await game.act({keys:[],duration_ms:700},{name:'full-origin-denied',when:v=>v.session.world===first.session.world&&v.lifecycle.alive});
   await game.act({keys:['w'],duration_ms:300});
   const moved=await save('denied-source-usable');
   game.check('denied transfer leaves usable movement in the source',Math.hypot(moved.position.x-denied.position.x,moved.position.y-denied.position.y)>0.1);
