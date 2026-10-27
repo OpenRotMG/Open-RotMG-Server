@@ -132,7 +132,7 @@ fn only_real_carried_slots_not_equipped_cached_vault_or_observed_chest_are_candi
     let mut saved = serde_json::to_value(&market).unwrap();
     saved["vault"] = serde_json::json!([LONG_SWORD, -1, -1, -1, -1, -1, -1, -1]);
     market = serde_json::from_value(saved).unwrap();
-    let mut chest: VisibleObject = v.objects[0].clone();
+    let mut chest: VisibleObject = fixture().1.objects.remove(0);
     chest.id = 4;
     chest.account = None;
     chest.kind = 0x504;
@@ -255,7 +255,7 @@ fn unsafe_dead_self_ambiguous_and_unsettled_targets_produce_no_claim() {
     v.objects[0].account = None;
     assert!(select(&v, &c, &market, &policy).unwrap().is_none());
     v.objects[0].account = Some(2);
-    v.objects.push(v.objects[0].clone());
+    v.objects.push(fixture().1.objects.remove(0));
     assert!(select(&v, &c, &market, &policy).unwrap().is_none());
     v.objects.pop();
     v.objects[0].position.x = 100.;
