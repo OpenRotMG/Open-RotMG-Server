@@ -7510,6 +7510,8 @@ mod movement_tests;
 
 #[cfg(test)]
 mod death_chat_tests;
+#[cfg(test)]
+mod lab_tests;
 
 #[cfg(test)]
 mod reward_accuracy_tests;

@@ -72,7 +72,7 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
     );
     let indices: &[u8] = match kind {
         HEXXER | DEHEXXER | BUBBLE | TESLA => &[],
-        CREATION => &[1],
+        CREATION => &[1, 4, 5, 6],
         0x980 | 0x1e24 => &[0, 1, 2],
         0x982 => &[0, 1],
         0x983 => &[0, 1, 2, 3],
