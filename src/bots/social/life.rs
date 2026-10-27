@@ -76,6 +76,12 @@ fn health(v: &PlayerView) -> usize {
         .count()
 }
 impl Life {
+    pub(in crate::bots) fn cancel_composition(&mut self) {
+        self.outgoing = None;
+        if let Some(gift) = &mut self.gift {
+            gift.cancelled = true;
+        }
+    }
     pub(in crate::bots) fn gift_active(&self) -> bool {
         self.gift.is_some()
     }

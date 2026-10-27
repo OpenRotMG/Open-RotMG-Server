@@ -965,9 +965,9 @@ pub(super) async fn launch(
                     next_bank = now.checked_add(Duration::from_millis(brain.next_bank.saturating_sub(view.time_ms))).context("autonomous bank cooldown overflow")?;
                     if let Some(text) = decision.chat && brain.draft.is_none() {
                         let _ = brain.compose(&app, &view, composer::Source::Call, text).await?;
-                        brain.call_goal = Some(decision.goal);
+                        brain.call_goal = Some(decision.goal.clone());
                     }
-                    if brain.composing(composer::Source::Call).is_some() && brain.call_goal != Some(decision.goal) {
+                    if brain.composing(composer::Source::Call).is_some() && brain.call_goal != Some(decision.goal.clone()) {
                         tracing::info!(player=id,"bot public call canceled: current intent changed");
                         brain.close_composition(&app, false).await?;
                     }
@@ -976,7 +976,7 @@ pub(super) async fn launch(
                         let received = app.world.clock.now();
                         let session = brain.session;
                         let companion = brain.companion;
-                        let call_goal = brain.call_goal;
+                        let call_goal = brain.call_goal.clone();
                         let until = brain.invitation_until;
                         let text_log = text.clone();
                         let sent = app.world.directory(move |d| {

@@ -79,7 +79,7 @@ impl Brain {
             self.market_words = None;
         }
         if !sent && draft.source == Source::Gift {
-            self.mind.social.outgoing = None;
+            self.mind.social.cancel_composition();
         }
         let id = self.session.1;
         app.world
