@@ -989,10 +989,10 @@ impl Market {
         if self.trade.is_some() {
             return Ok(Some(d));
         }
-        if self.session.is_none() && self.session_used {
+        if !self.preparing && self.session.is_none() && self.session_used {
             return Ok(None);
         }
-        if self
+        if !self.preparing && self
             .session
             .as_ref()
             .is_some_and(|s| v.elapsed_ms >= s.until)
@@ -1005,9 +1005,9 @@ impl Market {
             return Ok(None);
         };
         self.quote = Some(quote.clone());
-        if self.session.is_none() {
+        if self.session.is_none() && !self.preparing {
             self.session_used = true;
-            let admitted = self.preparing || self.trader || rng.gen_ratio(1, 5);
+            let admitted = self.trader || rng.gen_ratio(1, 5);
             tracing::info!(
                 account = v.session.account,
                 admitted,
@@ -1075,10 +1075,11 @@ impl Market {
             return Ok(None);
         }
         self.preparing = false;
-        let s = self
-            .session
-            .as_mut()
-            .expect("market session just initialized");
+        let Some(s) = self.session.as_mut() else { return Ok(None); };
+        if v.elapsed_ms >= s.until {
+            self.end_session(v,"elapsed");
+            return Ok(None);
+        }
         if v.position.distance(center(s.anchor)) > 1.5 {
             d.movement = grid.towards(v.position, center(s.anchor));
             return Ok(Some(d));

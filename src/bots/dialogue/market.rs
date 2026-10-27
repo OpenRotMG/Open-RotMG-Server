@@ -103,10 +103,8 @@ fn validated_template(template: &str, intent: Intent) -> std::result::Result<boo
                 let refusal = lower.strip_suffix(" need {want}").unwrap_or(&lower);
                 matches!(refusal, "nty" | "nah" | "no thx" | "sry nty")
             }
-            Intent::MarketCounter => !template.contains('@') && counter_body(&template.to_ascii_lowercase())
-                .and_then(|body| parse_advertisement(body, |s| match s {
-                    "{give}" => Some(give.clone()), "{want}" => Some(want.clone()), _ => None,
-                })) == Some(Advertisement::Quote([give,want])),
+            Intent::MarketCounter => matches!(counter_body(&template.to_ascii_lowercase()),
+                Some("{give} for {want}" | "{give}={want}")),
             Intent::MarketBank => BANK_SHAPES.contains(&template.to_ascii_lowercase().as_str()),
             Intent::MarketThanks => THANKS_SHAPES.contains(&template.to_ascii_lowercase().as_str()),
             _ => false,
