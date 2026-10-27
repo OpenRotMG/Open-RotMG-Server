@@ -31,21 +31,23 @@ export async function run(game) {
   game.check('ordinary guest starts level one with its actual default name',ordinary.diagnostic.character.name===name&&ordinary.view.character.level===1&&ordinary.view.character.hp===100);
   await api({op:'cheat',actor,change:{kind:'vitals',hp:1,mp:ordinary.view.character.mp}});
   await writeFile(join(root,'prepared-death-context.json'),JSON.stringify({created,ordinary,observer_protection:'invincible60s',bot_prepared_hp:1,actual_damaging_ground:before.position},null,2));
-  let seen;
+  // Pinned observation rejects the transfer gap, so capture only after native reentry.
   await game.act([
     {actor:game.actor,input:{keys:[],duration_ms:500}},
     {actor:game.actor,input:{keys:['Insert'],duration_ms:8000}},
-  ],{name:'guest-replacement',when:view=>{
-    if(view.world!=='Nexus'||view.game_ms<before.game_ms+1500)return false;
-    const peer=view.nearby.find(p=>p.name===name);
-    if(peer){seen={peer,view};return true;}
-    return false;
-  }});
+  ]);
   const after=await game.observe();
   game.check('native observer ordinarily escapes the actual hazard world',after.world==='Nexus'&&after.lifecycle.alive&&after.session.character===before.session.character&&after.session.player!==before.session.player);
   const feeds=await (await fetch(origin+'/api/bots')).json();
   const replacement=feeds.bots.find(bot=>bot.name===name);
   game.check('guest retains its actual account-visible name across a committed replacement',Boolean(replacement)&&replacement.frame.character!==actor&&replacement.frame.class==='Wizard'&&replacement.frame.level===1&&replacement.frame.hp>0);
+  let seen;
+  await game.act({keys:[],duration_ms:8000},{name:'guest-replacement',when:view=>{
+    if(view.world!=='Nexus'||view.game_ms<after.game_ms+1000)return false;
+    const peer=view.nearby.find(p=>p.name===name);
+    if(peer){seen={peer,view};return true;}
+    return false;
+  }});
   game.check('native observer sees the actual ordinary guest replacement',Boolean(seen)&&seen.peer.kind===0x30e);
   await writeFile(join(root,'guest-replacement.json'),JSON.stringify({created,replacement,seen,observer:after},null,2));
   connection.close();
