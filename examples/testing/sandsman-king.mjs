@@ -6,15 +6,20 @@ const spec={class:0x30e,level:20,seed:808,world:1,equipment:[0xa9f,0xa2e,0xb05,0
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
 let king;
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
-  const scout=await api({op:'spawn',spec:{...spec,guid:'sandsman-scout',position:{x,y},controller:'direct',profile:null}});
-  const state=await api({op:'inspect',actor:scout.result.actor}),report=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
+  const report=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
-  const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
-  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  king=map.entities.find(e=>e.kind===0x60d&&Array.from({length:13},(_,i)=>i-6).every(dx=>Array.from({length:13},(_,i)=>i-6).every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));assert(king,'No clear naturally populated Sandsman King');
-  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-kings.json'),JSON.stringify(map.entities.filter(e=>e.kind===0x60d)));
-  return {...spec,position:{x:king.pos.x-6,y:king.pos.y}};
+  for(const id of [1,2]){
+    const world=await api({op:'world_info',world:id}),[x,y]=world.spawn_points[0];
+    const scout=await api({op:'spawn',spec:{...spec,world:id,guid:'sandsman-scout-'+id,position:{x,y},controller:'direct',profile:null}});
+    const state=await api({op:'inspect',actor:scout.result.actor});
+    const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
+    const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
+    await writeFile(join(process.env.QA_RESULTS_DIR,'natural-kings-'+id+'.json'),JSON.stringify(map.entities.filter(e=>e.kind===0x60d)));
+    const clear=(e,dx,dy)=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(','));
+    king=map.entities.find(e=>e.kind===0x60d&&clear(e,-6,0)&&Array.from({length:9},(_,i)=>i-6).every(dx=>Array.from({length:9},(_,i)=>i-4).every(dy=>Math.hypot(dx+2,dy)>4||clear(e,dx,dy))));
+    if(king)return {...spec,world:id,position:{x:king.pos.x-6,y:king.pos.y}};
+  }
+  throw Error('Neither ordinary Realm has a King with clear orbit space');
 }
 export async function run(game){
   let serial=0;
