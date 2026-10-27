@@ -20,16 +20,16 @@
   {
     "kind": "reconstruction",
     "recipe": "world02.json",
-    "sha256": "c84108db3bd749c3595a1e021c8cf2e7b9fc6b640ddbad487949bf9170e99b6c"
+    "sha256": "1cc447e6f410ef163653a9f625e3ad15dfa129fc1c8f498fd702c85d59e7c496"
   },
   {
     "kind": "reconstruction",
     "recipe": "world03.json",
-    "sha256": "45ed968a32b2b7df7a590db1e4eb8a9903f205b657d1e8ac6f9db18d48816992"
+    "sha256": "9d36ad4757e5fd0d9a2b04e3597f8d463d761bee2b1f91d2820485cd436e4cd1"
   },
   {
     "kind": "reconstruction",
     "recipe": "world01.json",
-    "sha256": "3f4127c3d096af0caf4667603aa4b3b87025ada5509451ef3265447e3497edc9"
+    "sha256": "7c1e09fc74a3fbbdcebcb04e1664b18818373a302c5debafd78c12c24d5e8489"
   }
 ]
