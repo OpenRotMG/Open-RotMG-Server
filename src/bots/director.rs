@@ -118,6 +118,7 @@ async fn fill(
             }
         };
         let account = character.account;
+        let name = character.name.clone();
         let band = rank_band(
             profile.identity,
             app.store.account_stars(account).await?,
@@ -170,7 +171,8 @@ async fn fill(
         counts[band] += 1;
         tracing::info!(
             account,
-            name = profile.name,
+            name,
+            profile = profile.identity,
             band,
             ?counts,
             ?targets,
@@ -223,7 +225,7 @@ async fn maintain(
                         app.world.clock.now() + Duration::from_secs(20 * 60),
                     );
                     tracing::info!(
-                        name = exit.profile.name,
+                        profile = exit.profile.identity,
                         account = exit.account,
                         retired = exit.retire,
                         online = online.len(),
