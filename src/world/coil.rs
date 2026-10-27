@@ -24,8 +24,8 @@ impl World {
         Ok(())
     }
 
-    // The older queue hatches surviving eggs after five seconds, unlike later TransformOnDeath forks.
-    // https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.ForbiddenJungle.cs
+    // The 122.3.2 guide supports surviving-egg hatches after five seconds, unlike Kithio's death transforms.
+    // https://web.archive.org/web/20120419234213id_/http://forums.wildshadow.com/wiki/realm-mad-god/great-coil-snake
     pub(super) fn coil_mechanics(&mut self, id: i32, elapsed: u64) -> Result<()> {
         let e = self.entities.get_mut(&id).unwrap();
         if e.stage.is_none() {
