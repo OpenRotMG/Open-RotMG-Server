@@ -40,7 +40,71 @@ fn value(e: &Entity, stat: u8) -> Result<i32> {
         .with_context(|| format!("merchant {} missing stat {stat}", e.id))
 }
 
-pub(super) fn configure(e: &mut Entity, content: &Content) -> Result<()> {
+pub(super) struct Offer {
+    deadline: Option<u64>,
+    new: bool,
+    price: Option<i32>,
+    discount: i32,
+    window: u64,
+}
+
+fn put(e: &mut Entity, stat: u8, value: i32) -> bool {
+    if let Some((_, old)) = e.extra_stats.iter_mut().find(|(id, _)| *id == stat) {
+        let changed = *old != value;
+        *old = value;
+        changed
+    } else {
+        e.extra_stats.push((stat, value));
+        true
+    }
+}
+
+impl Offer {
+    fn expired(&self, now: u64) -> bool {
+        self.deadline.is_some_and(|deadline| now >= deadline)
+    }
+
+    fn update(&self, e: &mut Entity, now: u64) {
+        if e.reserved {
+            return;
+        }
+        let left = self.deadline.map(|deadline| deadline.saturating_sub(now));
+        let minutes = match left {
+            Some(0) => 0,
+            Some(left) => ((left - 1) / 60_000) as i32,
+            None if self.new && now < 60_000 => i32::MAX,
+            None => -1,
+        };
+        let discount = if left.is_some_and(|left| left > 0 && left <= self.window) {
+            self.discount
+        } else {
+            0
+        };
+        let mut changed = put(e, 43, minutes) | put(e, 44, discount);
+        let price = self
+            .price
+            .map(|price| ((i64::from(price) * i64::from(100 - discount) + 99) / 100) as i32);
+        if let Some(price) = price {
+            changed |= put(e, 36, price);
+        }
+        if self.expired(now) {
+            changed |= put(e, 42, 0) | e.published;
+            e.published = false;
+        }
+        if changed {
+            tracing::info!(
+                merchant = e.id,
+                minutes,
+                discount,
+                ?price,
+                expired = self.expired(now),
+                "merchant offer updated"
+            );
+        }
+    }
+}
+
+pub(super) fn configure(e: &mut Entity, content: &Content) -> Result<Offer> {
     let item = content.get(u16::try_from(value(e, 34)?)?)?;
     ensure!(
         matches!(item.class.as_str(), "Equipment" | "Dye"),
@@ -53,13 +117,39 @@ pub(super) fn configure(e: &mut Entity, content: &Content) -> Result<()> {
     } else {
         tracing::warn!(merchant=e.id, item=item.kind, name=%item.name, "merchant unavailable: no sourced shop price configured");
     }
-    // The static stock does not rotate; don't advertise the recovered snapshot's expired countdown.
-    e.extra_stats.retain(|(id, _)| *id != 43);
-    e.extra_stats.push((43, -1));
-    if !e.extra_stats.iter().any(|(id, _)| *id == 45) {
-        e.extra_stats.push((45, 0));
-    }
-    Ok(())
+    let minutes = value(e, 43)?;
+    ensure!(minutes >= -1, "invalid merchant remaining minutes");
+    put(
+        e,
+        45,
+        if matches!(item.kind, 0xa50 | 0xa51) {
+            7
+        } else {
+            0
+        },
+    );
+    // Preserved discounts/ranks: https://wikiwiki.jp/rmd/アイテム売り場; snapshot expiry is resumed, not an invented restock schedule.
+    let (discount, window) = if item.class == "Dye" {
+        (25, 360_000)
+    } else if matches!(item.kind, 0x1513 | 0x151b | 0x151e)
+        || price(item).is_some_and(|(_, currency)| currency == 1 && item.kind != 0xb3e)
+    {
+        (10, 300_000)
+    } else {
+        (0, 0)
+    };
+    let offer = Offer {
+        deadline: match minutes {
+            -1 | i32::MAX => None,
+            minutes => Some((minutes as u64 + 1) * 60_000),
+        },
+        new: minutes == i32::MAX,
+        price: price(item).map(|(price, _)| price),
+        discount,
+        window,
+    };
+    offer.update(e, 0);
+    Ok(offer)
 }
 
 pub(crate) fn reply(success: bool, message: &str) -> Packet {
@@ -79,6 +169,13 @@ pub(crate) struct VaultPurchase {
 }
 
 impl World {
+    pub(super) fn merchant_step(&mut self) {
+        for (id, offer) in &self.merchants {
+            let e = self.entities.get_mut(id).expect("indexed merchant missing");
+            offer.update(e, self.now);
+        }
+    }
+
     pub fn buy(&mut self, id: i32, merchant: i32) -> Result<InventoryPlan> {
         let p = self.players.get(&id).context("purchase owner missing")?;
         ensure!(
@@ -97,8 +194,19 @@ impl World {
             .get(&merchant)
             .ok_or_else(|| controller("Merchant no longer exists."))?;
         ensure!(
-            self.content.get(e.kind)?.class == "Merchant"
-                && e.accessible(p.character.account)
+            self.content.get(e.kind)?.class == "Merchant",
+            controller("This object is not a merchant.")
+        );
+        ensure!(
+            !self
+                .merchants
+                .get(&merchant)
+                .context("merchant offer missing")?
+                .expired(self.now),
+            controller("This merchant offer has expired.")
+        );
+        ensure!(
+            e.accessible(p.character.account)
                 && p.known.contains(&merchant)
                 && p.pos.distance(e.pos) < 1.5,
             controller("Move closer to the merchant.")
