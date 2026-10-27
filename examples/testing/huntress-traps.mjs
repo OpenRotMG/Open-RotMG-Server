@@ -18,6 +18,7 @@ export async function run(game){
     const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));
   }
   await cheat({kind:'protection',condition:'invincible',duration_ms:60000});
+  await game.act({keys:[],duration_ms:2000});
   await game.act({keys:[],duration_ms:600},{name:'huntress-before',when:()=>true});
   const start=await game.observe();
   for(const [index,item,effect,duration,cost] of [[-1,0xab1,4,3000,40],[0,0xab6,4,5500,140],[1,0xb2c,4,6000,140],[2,0xc1c,14,3500,130]]){
@@ -29,7 +30,7 @@ export async function run(game){
     await game.act({keys:[' '],duration_ms:100,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:false}});
     const thrown=await game.inspect();
     game.check(item+' spends one mana cost',thrown.view.character.mp>=before.view.character.mp-cost&&thrown.view.character.mp<before.view.character.mp-cost+10);
-    await game.act({keys:[],duration_ms:2100},{name:'trap-'+item,when:view=>view.game_ms>=thrown.view.game_ms+1700});
+    await game.act({keys:[],duration_ms:2100},{name:'trap-'+item,when:view=>view.game_ms>=thrown.view.time_ms+1700});
     const hit=await game.inspect(),target=hit.diagnostic.entities.find(e=>e.id===boss.id),status=target?.statuses[String(effect)];
     game.check(item+' applies the selected condition and exact duration',status&&status[1]-status[0]===duration&&status[1]>hit.view.time_ms);
     game.check(item+' detonates and removes its placed trap',!hit.diagnostic.entities.some(e=>e.kind===0x711));
