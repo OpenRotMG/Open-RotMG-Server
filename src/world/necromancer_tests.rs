@@ -113,8 +113,8 @@ fn necromancer_skulls_drain_actual_damage_and_heal_around_caster() {
             id
         })
         .collect();
-        let defense = content.objects[&0x655].defense;
-        let dealt = crate::condition::damage(damage, defense, 0, false);
+        assert_eq!(content.objects[&0x655].defense, 18);
+        let dealt = (damage - 18).max(damage * 15 / 100);
         let item = content.get(kind as u16).unwrap();
         let slot = Slot {
             object: caster,
