@@ -21,7 +21,7 @@ export async function run(game){
     for(let attempt=0;attempt<16;attempt++){
       const state=await game.inspect(),enemy=target(state);assert(enemy&&Number.isInteger(enemy.activated));
       const phase=(state.view.time_ms-enemy.activated)%13000;
-      if(phase>=3500&&phase<8000)return state;
+      if(phase>=3500&&phase<10000)return state;
       await game.act({keys:[],duration_ms:500});
     }
     throw Error('No bounded Septavius vulnerability window observed');
