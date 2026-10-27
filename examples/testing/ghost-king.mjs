@@ -72,7 +72,8 @@ export async function run(game){
       while((await game.observe()).game_ms-waitStart<139000)await idle(Math.min(10000,139000-((await game.observe()).game_ms-waitStart)));
       state=await save('timeout-before');
       game.check('King and undamaged Master survive before the 140-second Wait timeout',!!king(state,root.entity)&&king(state,master.id)?.hp===100000);
-      await idle(1500);state=await save('timeout-after');
+      await game.act({keys:[],duration_ms:500},{name:'timeout-shielded',when:()=>true});
+      await game.act({keys:[],duration_ms:1500},{name:'timeout-released',when:view=>view.objects.some(e=>e.kind===0x92d)});state=await save('timeout-after');
       game.check('timeout releases Actual King and removes nearby owned ghosts without XP',!king(state,root.entity)&&family(state,quest).length===0&&state.diagnostic.entities.some(e=>e.quest===quest&&e.kind===0x92d)&&state.view.character.experience===experience);
     }else{
       for(let n=0;n<60&&king(await game.inspect(),root.entity);n++)await fire(game,master.id);
@@ -103,6 +104,9 @@ export async function run(game){
     const bags=views.flatMap(s=>s.diagnostic.entities).filter(e=>e.extra_stats.some(([stat,account])=>stat===54&&account>=0)&&e.items?.some(i=>i!==-1));
     const bag=bags.find(e=>e.extra_stats.some(([stat,account])=>stat===54&&account===views[1].view.session.account));assert(bag,'This observed roll must contain a contributor bag for the pickup check');
     game.check('noncontributor cannot see either private reward',!views[2].diagnostic.entities.some(e=>bags.some(b=>b.id===e.id)));
+    await outsider.act({keys:[],duration_ms:700},{name:'ineligible-no-bag',when:()=>true});
+    await outsider.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+    game.check('noncontributor native drag cannot acquire the private reward',(await outsider.observe()).character.inventory_revision===views[2].view.character.inventory_revision&&(await contributor.inspect()).diagnostic.entities.find(e=>e.id===bag.id)?.items[0]===bag.items[0]);
     await cheat(contributor,{kind:'teleport',position:bag.pos});
     await contributor.act({keys:[],duration_ms:700},{name:'eligible-private-bag',when:()=>true});
     const item=bag.items[0],inventory=(await contributor.observe()).character;assert(item!==-1);
