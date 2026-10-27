@@ -72,6 +72,7 @@ pub(crate) fn period_surface(kind: u16) -> bool {
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        0x6af..=0x6b1 | 0x6b3 => &[],
         0x6b2 => &[(1., Item(0xab0))],
         0x6b4 => &[(0.1, Item(0xab0)), (0.1, Item(0xadd))],
         crate::encounter::tutorial::CHEF => &[(1., Item(0xab0)), (1., Item(0xadd))],
