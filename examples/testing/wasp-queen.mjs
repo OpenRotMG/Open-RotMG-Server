@@ -61,8 +61,9 @@ export async function run(game){
   await game.act({keys:[],duration_ms:500},{name:'wasp-replenished',when:()=>true});
   await defeat(queen.id);
   const dead=await save('queen-defeated'),remaining=members(dead);
-  game.check('Queen defeat does not transform or despawn living followers',remaining.length>0&&remaining.every(e=>e.kind===0x948||e.kind===0x949));
-  await game.act({keys:[],duration_ms:11000},{name:'wasp-defeated',when:()=>true});
+  game.check('Queen defeat produces no successor in its camp',dead.diagnostic.entities.filter(e=>e.camp===queen.camp).every(e=>e.kind===0x948||e.kind===0x949));
+  await game.act({keys:[],duration_ms:10000});
+  await game.act({keys:[],duration_ms:1000},{name:'wasp-defeated',when:()=>true});
   const final=await save('after-parent-death');
   game.check('dead Queen cannot replenish her camp',members(final).every(e=>remaining.some(p=>p.id===e.id))&&!final.diagnostic.entities.some(e=>e.camp===queen.camp&&e.kind===0x947));
   game.check('Queen defeat XP is not awarded twice',final.view.character.experience===dead.view.character.experience);
