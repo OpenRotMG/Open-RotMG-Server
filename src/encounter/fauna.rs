@@ -221,11 +221,11 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
             let triple = phase >= 900;
             state = elapsed / 2900 * 2 + u64::from(triple);
             age = if triple { phase - 900 } else { phase };
-            // A 100-second triple cooldown means one volley, not repeated bursts: https://web.archive.org/web/20120602014200id_/http://forums.wildshadow.com/wiki/realm-mad-god/horned-drake
+            // Kithio's 100s cooldown permits one triple; +50ms preserves Shoot's pre-decrement timer: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Shoot.cs#L79-L123
             vec![if triple {
-                fan(0, 3, 40., 100000, 8.).delay(800).once().predict(0.1)
+                fan(0, 3, 40., 100000, 8.).delay(850).once().predict(0.1)
             } else {
-                fan(0, 1, 0., 800, 8.).predict(0.1)
+                fan(0, 1, 0., 850, 8.).predict(0.1)
             }]
         }
         _ => panic!("unknown fauna attack {kind:#x}"),
@@ -258,7 +258,7 @@ mod tests {
         }
         assert_eq!(
             fired,
-            [(0, 1), (800, 1), (1700, 3), (2900, 1), (3700, 1), (4600, 3)]
+            [(0, 1), (850, 1), (1750, 3), (2900, 1), (3750, 1), (4650, 3)]
         );
     }
 }
