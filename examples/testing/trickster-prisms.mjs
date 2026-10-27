@@ -21,7 +21,9 @@ export async function run(game){
   }
   async function cast(name,cost,kind,teleport){
     await mana(200);const before=await game.observe();
-    await game.act({keys:[' '],mouse:{x:500,y:300},duration_ms:250},{name,when:view=>view.character.mp<before.character.mp-cost/2});
+    const input={keys:[' '],mouse:{x:500,y:300},duration_ms:name==='t0-decoy'?50:250};
+    const action=await game.act(name==='t0-decoy'?[{actor:game.actor,input},{actor:game.actor,input:{keys:[' '],duration_ms:50}}]:input,{name,when:view=>view.character.mp<before.character.mp-cost/2});
+    if(name==='t0-decoy')game.check('two native attempts fit within the cooldown',action.steps.length===2&&action.steps[1].input_started_wall_ms-action.steps[0].input_started_wall_ms<500);
     const after=await game.observe(),objects=await entities(kind);
     observations.push({name,before,after,objects});
     game.check(name+' spends one mana cost',after.character.mp>=before.character.mp-cost&&after.character.mp<before.character.mp-cost+5);
@@ -31,8 +33,6 @@ export async function run(game){
   }
   const initial=await game.observe();
   const t0=await cast('t0-decoy',60,0x715,true);
-  await game.act({keys:[' '],duration_ms:100});
-  game.check('cooldown denies immediate recast',(await entities(0x715)).length===1&&(await game.observe()).character.mp>t0.after.character.mp-5);
   await game.act({keys:['a'],duration_ms:300});
   game.check('native movement resumes after teleport ACK',distance((await game.observe()).position,t0.after.position)>0.5);
   await game.act({keys:[],duration_ms:3000});
