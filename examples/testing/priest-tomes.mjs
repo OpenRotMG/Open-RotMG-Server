@@ -28,7 +28,7 @@ export async function run(game){
   }
   await cast('t0-heal',100,60);
   async function equip(backpackSlot,item){
-    await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(backpackSlot%4),y:528+44*Math.floor(backpackSlot/4)},to:{x:678,y:428}}});
+    await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(backpackSlot%4),y:428+44*Math.floor(backpackSlot/4)},to:{x:678,y:385}}});
     game.check('native inventory equipped '+item,(await game.observe()).character.items[1]===item);
   }
   await equip(0,0xb25);await cast('t6-heal',300,85);
