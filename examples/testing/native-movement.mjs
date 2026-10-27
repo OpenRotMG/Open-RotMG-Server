@@ -22,7 +22,7 @@ export async function run(game) {
   game.check('second native player moves',Math.hypot(peerMoved.position.x-peerBefore.position.x,peerMoved.position.y-peerBefore.position.y)>1);
   game.check('first client sees the second player',watching.nearby.some(o=>o.id===peerMoved.session.player));
   game.check('second client sees the first player',peerMoved.nearby.some(o=>o.id===watching.session.player));
-  await peer.act({keys:[' '],mouse:{x:450,y:300},duration_ms:250});
+  await peer.act({keys:[' '],mouse:{x:500,y:300},duration_ms:250});
   const teleported=await peer.observe();
   game.check('ordinary prism teleports and spends mana',Math.hypot(teleported.position.x-peerMoved.position.x,teleported.position.y-peerMoved.position.y)>3&&teleported.character.mp<peerMoved.character.mp);
   await peer.act({keys:['a'],duration_ms:600},{name:'teleport-movement',when:v=>v.lifecycle.alive&&Math.hypot(v.position.x-teleported.position.x,v.position.y-teleported.position.y)>1});
