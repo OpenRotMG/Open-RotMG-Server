@@ -14,10 +14,8 @@ fn map_info_selects_stars_only_for_sprite_world() {
         ("vault", Some(1), 2),
         ("nexus", None, 2),
     ] {
-        let id = d
-            .instance(template, owner, Some(DungeonReturn::Random))
-            .unwrap();
-        let bytes = d.worlds[&id].map_info();
+        let world = d.make(template, template, false, owner).unwrap();
+        let bytes = world.map_info();
         let mut packet = wire::Reader::new(&bytes);
         packet.i32().unwrap();
         packet.i32().unwrap();
