@@ -699,6 +699,9 @@ impl World {
         }
         let target = target.into();
         let e = &self.entities[&id];
+        if e.kind == 0x91f && matches!(e.stage, Some(3..=6)) {
+            return (Motion::Stationary, 0.);
+        }
         let leash = match e.kind {
             0x91f | 0x920 => 6.,
             0x91b | 0x91c | 0x91d | 0x6c1 => 5.,
@@ -1257,7 +1260,7 @@ fn ent_sprite_orders_use_strict_owned_radii() {
 
 #[cfg(test)]
 #[test]
-fn ent_evaluation_wander_uses_primary_nominal_rates() {
+fn ent_movement_uses_primary_nominal_components() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Map {
         width: 32,
@@ -1288,15 +1291,27 @@ fn ent_evaluation_wander_uses_primary_nominal_rates() {
     .unwrap();
     world.enter(character, None).unwrap();
     let home = Pos { x: 12.5, y: 12.5 };
-    for (kind, stage, nominal) in [
-        (0x91f, 0, 1.295_f32),
-        (0x91f, 1, 1.85),
-        (0x91f, 2, 2.405),
-        (0x91f, 3, 2.96),
-        (0x920, 0, 1.85),
+    for (kind, stage, offset, nominal) in [
+        (0x91f, 0, 0., 1.295_f32),
+        (0x91f, 1, 0., 1.85),
+        (0x91f, 2, 0., 2.405),
+        (0x91f, 3, 0., 0.),
+        (0x91f, 3, 10., 0.),
+        (0x91f, 4, 0., 0.),
+        (0x91f, 4, 10., 0.),
+        (0x91f, 5, 0., 0.),
+        (0x91f, 5, 10., 0.),
+        (0x91f, 6, 0., 0.),
+        (0x91f, 6, 10., 0.),
+        (0x920, 0, 0., 1.85),
     ] {
         world.now += 50;
         let id = world.spawn_entity(kind, home, vec![]).unwrap();
+        let position = Pos {
+            x: home.x + offset,
+            y: home.y,
+        };
+        world.position_entity(id, position).unwrap();
         let e = world.entities.get_mut(&id).unwrap();
         e.quest.set(Some(id), id, &mut world.quest_ids);
         e.stage = Some(stage);
@@ -1304,23 +1319,23 @@ fn ent_evaluation_wander_uses_primary_nominal_rates() {
         e.next_shot = u64::MAX;
         e.motion = Some(crate::encounter::Motion::Wander);
         e.goal = Some(Pos {
-            x: home.x + 1.,
-            y: home.y,
+            x: position.x + 1.,
+            y: position.y,
         });
         let hp = e.hp;
         let rng = rand::RngCore::next_u64(&mut world.rng.clone());
         world.npc_step();
         let e = &world.entities[&id];
         let distance = nominal * 0.05;
-        let tolerance = 2. * f32::EPSILON * home.x;
+        let tolerance = 2. * f32::EPSILON * position.x;
         assert!(
-            (e.pos.x - home.x - distance).abs() <= tolerance,
-            "kind={kind:#x}, stage={stage}: displacement {} != {distance}",
-            e.pos.x - home.x
+            (e.pos.x - position.x - distance).abs() <= tolerance,
+            "kind={kind:#x}, stage={stage}, offset={offset}: displacement {} != {distance}",
+            e.pos.x - position.x
         );
         assert_eq!(
             (e.pos.y, e.home.x, e.home.y, *e.quest, e.hp),
-            (home.y, home.x, home.y, Some(id), hp)
+            (position.y, home.x, home.y, Some(id), hp)
         );
         assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
         assert!(world.critical_deaths.is_empty());
