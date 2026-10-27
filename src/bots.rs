@@ -54,6 +54,11 @@ struct Profile {
     stars: i32,
     role: persona::Role,
 }
+impl Profile {
+    fn is_guest(&self) -> bool {
+        self.identity.starts_with("guest:v1:")
+    }
+}
 #[cfg(test)]
 const ARCHETYPES: [Profile; 6] = [
     Profile {
@@ -1881,7 +1886,11 @@ fn selected_profile(name: &str) -> Result<Profile> {
         .context("unknown actual gameplay profile")
 }
 pub fn validate_test_profile(profile: &str) -> Result<()> {
-    selected_profile(profile).map(|_| ())
+    ensure!(
+        !selected_profile(profile)?.is_guest(),
+        "guest profiles cannot use generic prepared Spawn; use Persona starting context"
+    );
+    Ok(())
 }
 pub async fn start_test_persona(
     app: &crate::server::App,
