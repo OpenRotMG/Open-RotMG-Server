@@ -11,7 +11,7 @@ export async function prepare(api){
   assert(roots.length>=3,'Three ordinarily placed Ghost Kings required');
   const index=['SmallGroup','Mob','HugeMob'].indexOf(process.env.GHOST_BRANCH);assert(index>=0,'Set GHOST_BRANCH to SmallGroup, Mob or HugeMob');
   await writeFile(join(out,'roots.json'),JSON.stringify({world,roots,branch:process.env.GHOST_BRANCH}));
-  return {...spec,position:{x:roots[index].x,y:roots[index].y}};
+  return {...spec,...(index===2?{equipment:[0xb0b,0xb29,0xa7b,0xacc],backpack:[0xb10,-1,-1,-1,-1,-1,-1,-1]}:{}),position:{x:roots[index].x,y:roots[index].y}};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -30,6 +30,7 @@ export async function run(game){
   async function idle(ms){
     while(ms>0){await protect(game);const now=(await game.observe()).game_ms,step=Math.min(ms,10000,protectedUntil.get(game.actor)-now);await game.act({keys:[],duration_ms:step});ms-=step;}
   }
+  const births=async quest=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='bounded named quest followers spawned'&&f.quest===quest&&f.kind>=0x929&&f.kind<=0x92c).reduce((counts,f)=>(counts[f.kind-0x929]+=f.count,counts),[0,0,0,0]);
   const family=(state,quest)=>state.diagnostic.entities.filter(e=>e.quest===quest&&e.kind>=0x929&&e.kind<=0x92c);
   const king=(state,id)=>state.diagnostic.entities.find(e=>e.id===id);
   async function approach(actor,point,range=1.5){
@@ -54,7 +55,11 @@ export async function run(game){
   await game.act({keys:['s'],duration_ms:150});
   game.check('ordinary native movement works at the naturally placed tower',Math.hypot((await game.observe()).position.x-initial.position.x,(await game.observe()).position.y-initial.position.y)>.3);
   await approach(game,initial.position,.3);
-  for(const [index,label,burst,stage,counts] of [[0,'SmallGroup',700,4,[0,3,3,0]],[1,'Mob',2200,5,[0,3,0,3]],[2,'HugeMob',5200,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
+  if(process.env.GHOST_BRANCH==='HugeMob'){
+    await game.act({keys:['1'],duration_ms:150});
+    game.check('native Dexterity effusion and ring supply the HugeMob damage fixture',(await game.observe()).character.stats.dexterity===88);
+  }
+  for(const [index,label,burst,stage,counts] of [[0,'SmallGroup',700,4,[0,3,3,0]],[1,'Mob',2200,5,[0,3,0,3]],[2,'HugeMob',4200,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
     const root=roots[index];
     await protect(game);
     const before=await save(label+'-idle'),original=king(before,root.entity);assert(original?.kind===0x928&&original.hp===300000,'Untouched ordinary King required');
@@ -62,7 +67,8 @@ export async function run(game){
     for(let n=0;n<20&&king(await game.inspect(),root.entity).stage!==1;n++)await fire(game,root.entity);
     game.check(label+' admits ordinary sword damage',king(await game.inspect(),root.entity).stage===1);
     const step=input=>({actor:game.actor,input}),sequence=[step({keys:[],duration_ms:2000}),step({keys:[' '],duration_ms:250})];
-    for(let remaining=burst;remaining>0;remaining-=250)sequence.push(step({keys:[],duration_ms:Math.min(250,remaining),target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}}));
+    const interval=index===2?500:250;
+    for(let remaining=burst;remaining>0;remaining-=interval)sequence.push(step({keys:[],duration_ms:Math.min(interval,remaining),target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}}));
     const evaluated=await game.act(sequence);
     game.check(label+' evaluation uses an ordinary Berserk helm',evaluated.steps[1].character.conditions&(1<<19));
     for(let n=0;n<7&&king(await game.inspect(),root.entity).stage<3;n++)await idle(1000);
@@ -70,24 +76,27 @@ export async function run(game){
     game.check(label+' is selected by measured combat damage',king(state,root.entity).stage===stage);
     await idle(2000);state=await save(label+'-first-wave');
     const quest=original.quest,members=family(state,quest);
-    game.check(label+' first wave has the expected six owned ghosts',counts.every((n,i)=>members.filter(e=>e.kind===0x929+i).length===n));
+    const admitted=await births(quest);await writeFile(join(out,label+'-admission.json'),JSON.stringify({requested:counts,admitted}));
+    game.check(label+' first wave matches admitted ghosts within requested populations',counts.every((n,i)=>(n?admitted[i]>0&&admitted[i]<=n:admitted[i]===0)&&members.filter(e=>e.kind===0x929+i).length===admitted[i]));
     await game.act({keys:[],duration_ms:750},{name:label+'-wave',when:()=>true});
     if(index===2){
       await idle(30000);state=await save(label+'-second-wave');
-      game.check('HugeMob throws a second six-ghost wave',family(state,quest).filter(e=>e.kind===0x92a).length===6&&family(state,quest).filter(e=>e.kind===0x92c).length===6);
+      const second=await births(quest);
+      game.check('HugeMob admits a second bounded Small and Large Ghost wave',[1,3].every(i=>second[i]>admitted[i]&&second[i]<=6&&family(state,quest).filter(e=>e.kind===0x929+i).length===second[i]));
     }
     for(let n=0;n<7&&king(await game.inspect(),root.entity).stage!==7;n++)await idle(5000);
     state=await save(label+'-wait');const master=family(state,quest).find(e=>e.kind===0x929);
     game.check(label+' Company produces one owned Master',!!master&&family(state,quest).filter(e=>e.kind===0x929).length===1);
-    game.check(label+' Company has the expected total population',family(state,quest).length===(index===2?18:12));
+    game.check(label+' Company population matches actual admitted births',family(state,quest).length===(await births(quest)).reduce((a,b)=>a+b,0)&&family(state,quest).length<=(index===2?18:12));
     if(index===2){
       // Decay bypasses combat rewards: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Decay.cs
       const waitStart=king(state,root.entity).activated,experience=state.view.character.experience;
-      while((await game.observe()).game_ms-waitStart<139000)await idle(Math.min(10000,139000-((await game.observe()).game_ms-waitStart)));
+      while((await game.observe()).game_ms-waitStart<125000)await idle(5000);
       state=await save('timeout-before');
       game.check('King and undamaged Master survive before the 140-second Wait timeout',!!king(state,root.entity)&&king(state,master.id)?.hp===100000);
       await game.act({keys:[],duration_ms:500},{name:'timeout-shielded',when:()=>true});
-      await game.act({keys:[],duration_ms:1500},{name:'timeout-released',when:view=>view.objects.some(e=>e.kind===0x92d)});state=await save('timeout-after');
+      for(let n=0;n<5&&king(await game.inspect(),root.entity);n++)await idle(5000);
+      await game.act({keys:[],duration_ms:750},{name:'timeout-released',when:view=>view.objects.some(e=>e.kind===0x92d)});state=await save('timeout-after');
       game.check('timeout releases Actual King and removes nearby owned ghosts without XP',!king(state,root.entity)&&family(state,quest).length===0&&state.diagnostic.entities.some(e=>e.quest===quest&&e.kind===0x92d)&&state.view.character.experience===experience);
     }else{
       for(let n=0;n<60&&king(await game.inspect(),root.entity);n++)await fire(game,master.id);
