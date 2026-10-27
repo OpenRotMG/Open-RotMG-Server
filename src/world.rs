@@ -7517,6 +7517,8 @@ mod hermit_loot_tests;
 #[cfg(test)]
 mod instance_lifetime_tests;
 #[cfg(test)]
+mod lab_tests;
+#[cfg(test)]
 mod period_loot_tests;
 #[cfg(test)]
 mod pirate_generation_tests;

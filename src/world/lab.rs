@@ -261,7 +261,7 @@ impl World {
             e.stage = Some(stage);
             e.size = [150, 150, 175, 200][stage as usize];
         } else if kind == lab::CREATION {
-            let (stage, pos) = (e.stage, e.pos);
+            let (stage, pos, home) = (e.stage, e.pos, e.home);
             let inside = |pool| {
                 self.actors().any(|p| {
                     p.kind == pool
@@ -284,21 +284,36 @@ impl World {
                     tracing::info!(walls = walls.len(), "Mad Lab secret room opened");
                     self.lab_stage(id, 1);
                 }
-                // Invincible until the Hexxer turns it into a random pet; a DeHexxer reverts it: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation
-                Some(1) if inside(lab::HEXXER) => {
-                    let pet = self.rng.gen_range(2..=7);
-                    self.entities.get_mut(&id).unwrap().condition &=
-                        !condition::bit(condition::INVINCIBLE);
-                    self.landmark_texture(id, pet);
-                    self.lab_stage(id, 2);
+                // Attack/pool shapes: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation; cycle order and 10/16/1 s windows are reconstruction, not recovered AI or HP thresholds.
+                Some(1 | 5) if inside(lab::HEXXER) => self.lab_stage(id, 2),
+                Some(2) if inside(lab::DEHEXXER) => self.lab_stage(id, 8),
+                Some(1) if elapsed >= 10000 || target.is_none() => self.lab_stage(id, 3),
+                Some(3 | 8) if pos.distance(home) < 0.5 => {
+                    self.lab_stage(id, if stage == Some(3) { 4 } else { 1 });
                 }
-                Some(2) if inside(lab::DEHEXXER) => {
-                    self.entities.get_mut(&id).unwrap().condition |=
-                        condition::bit(condition::INVINCIBLE);
-                    self.landmark_texture(id, 0);
-                    self.lab_stage(id, 1);
+                Some(4) if elapsed >= 16000 => self.lab_stage(id, 5),
+                Some(5) if elapsed >= 10000 || target.is_some_and(|p| pos.distance(p) < 1.5) => {
+                    self.lab_stage(id, 6);
                 }
+                Some(6) if elapsed >= 1000 => self.lab_stage(id, 7),
+                Some(7) if elapsed >= 1000 => self.lab_stage(id, 1),
                 _ => {}
+            }
+            let current = self.entities[&id].stage;
+            if current != stage {
+                let pet = current == Some(2);
+                let e = self.entities.get_mut(&id).unwrap();
+                if pet {
+                    e.condition &= !condition::bit(condition::INVINCIBLE);
+                } else {
+                    e.condition |= condition::bit(condition::INVINCIBLE);
+                }
+                let texture = if pet {
+                    self.rng.gen_range(2..=7)
+                } else {
+                    i32::from(matches!(current, Some(4 | 7)))
+                };
+                self.landmark_texture(id, texture);
             }
         }
         Ok(())
@@ -326,6 +341,29 @@ impl World {
                 },
                 nr_speed(0.5),
             )
+        } else if e.kind == lab::CREATION {
+            match e.stage {
+                None | Some(4 | 6 | 7) => (Motion::Stationary, 0.),
+                Some(3 | 8) => (
+                    Motion::Protect {
+                        anchor: Anchor::Home,
+                        distance: 0.1,
+                    },
+                    nr_speed(0.5),
+                ),
+                Some(5) => (
+                    Motion::Chase {
+                        sight: 11.25,
+                        stop: 0.5,
+                    },
+                    nr_speed(1.),
+                ),
+                Some(1 | 2) => {
+                    let p = lab::profile(e.kind);
+                    (p.motion, p.speed)
+                }
+                Some(stage) => panic!("invalid Creation phase {stage}"),
+            }
         } else {
             let p = lab::profile(e.kind);
             (p.motion, p.speed)
@@ -352,8 +390,13 @@ impl World {
             0x978 => vec![],
             0x993..=0x996 if e.stage != Some(1) => vec![],
             0x993..=0x996 => fan(0, 20, 18., 22.5f32.to_radians() + 171f32.to_radians()),
-            // Phase 1 fires 3 H Creation Waves at the player: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation; the 20° gap is reconstruction.
-            lab::CREATION if e.stage == Some(1) => fan(1, 3, 20., heading),
+            lab::CREATION => match e.stage {
+                Some(1 | 8) => fan(1, 3, 20., heading),
+                Some(4) => fan(6, 1, 0., heading),
+                Some(6) => fan(5, 8, 45., heading),
+                Some(7) => fan(4, 8, 45., heading),
+                _ => vec![],
+            },
             0x990 => vec![(0, 0.)],
             0x991 => vec![(0, std::f32::consts::PI)],
             0x979 | 0x1e25 | 0x12aa => fan(0, 2, 20., heading),
