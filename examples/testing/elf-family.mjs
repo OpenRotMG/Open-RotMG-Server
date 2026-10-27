@@ -37,6 +37,13 @@ export async function run(game){
     await writeFile(path,JSON.stringify({id:'elf-protection-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);protectedUntil=now+60000;
   }
+  const act=async(input,capture)=>{
+    await protect();
+    while(protectedUntil-(await game.observe()).game_ms<input.duration_ms+500){
+      await game.act({keys:[],duration_ms:100});await protect();
+    }
+    return game.act(input,capture);
+  };
   const begin=await save('arrival'),hp=begin.view.character.hp;
   game.check('ordinary LowForest camp has Wizard and 2/4/1 escorts',[[0x609,1],[0x605,2],[0x606,4],[0x607,1]].every(([k,n])=>family(begin).filter(e=>e.kind===k).length===n));
   game.check('selected Wizard has 200 HP',family(begin).some(e=>e.id===wizard.id&&e.hp===200));
@@ -45,9 +52,9 @@ export async function run(game){
   game.check('native character receives encounter damage',(await game.observe()).character.hp<hp);
   await protect();
   const samples=[];
-  for(let n=0;n<30;n++){await game.act({keys:[],duration_ms:500});samples.push(await game.inspect());}
+  for(let n=0;n<30;n++){await act({keys:[],duration_ms:500});samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'movement-and-attacks.json'),JSON.stringify(samples));
-  await game.act({keys:[],duration_ms:800},{name:'elf-orbits',when:()=>true});
+  await act({keys:[],duration_ms:800},{name:'elf-orbits',when:()=>true});
   game.check('Wizard activates and moves',samples.some(s=>family(s).some(e=>e.id===wizard.id&&e.activated!==null&&Math.hypot(e.pos.x-wizard.pos.x,e.pos.y-wizard.pos.y)>.2)));
   for(const [kind,speed,lifetime] of [[0x609,70,2000],[0x605,65,2000],[0x606,100,400],[0x607,65,1500]]){
     const ids=new Set(family(begin).filter(e=>e.kind===kind).map(e=>e.id));
@@ -68,10 +75,10 @@ export async function run(game){
     const xp=(await game.observe()).character.experience;
     for(let n=0;n<35;n++){
       const s=await game.inspect(),e=s.view.objects.find(e=>e.id===id&&e.hp>0);if(!e)break;
-      if(id===wizard.id||safe(s,e.position))await game.act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
-      await game.act({keys:[],duration_ms:500});
+      if(id===wizard.id||safe(s,e.position))await act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+      await act({keys:[],duration_ms:500});
     }
-    await game.act({keys:[],duration_ms:500});const s=await game.inspect();
+    await act({keys:[],duration_ms:500});const s=await game.inspect();
     game.check(id+': native staff defeats target and earns XP',!s.diagnostic.entities.some(e=>e.id===id)&&s.view.character.experience>xp);
   }
   for(const kind of [0x605,0x606,0x607]){
@@ -80,17 +87,17 @@ export async function run(game){
     for(let n=0;n<30;n++){
       before=await game.inspect();
       victim=family(before).find(e=>e.kind===kind&&safe(before,e.pos)&&before.view.objects.some(o=>o.id===e.id&&o.hp>0));if(victim)break;
-      await game.act({keys:[],duration_ms:400});
+      await act({keys:[],duration_ms:400});
     }
     assert(victim,'No visible escort with safe firing line');
     const ids=new Set(family(before).map(e=>e.id));await defeat(victim.id);
-    for(let n=0;n<18&&!family(await game.inspect()).some(e=>e.kind===kind&&!ids.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
+    for(let n=0;n<18&&!family(await game.inspect()).some(e=>e.kind===kind&&!ids.has(e.id));n++)await act({keys:[],duration_ms:1000});
     const after=await save('replenished-'+kind);
     game.check(kind+': current reconstruction replenishes escort',family(after).some(e=>e.kind===kind&&!ids.has(e.id)));
     game.check(kind+': current role caps hold',[[0x605,2],[0x606,4],[0x607,1]].every(([k,n])=>family(after).filter(e=>e.kind===k).length<=n));
   }
   await defeat(wizard.id);const dead=await save('wizard-defeated'),remaining=family(dead);
-  await game.act({keys:[],duration_ms:10000});await game.act({keys:[],duration_ms:6000});
+  for(let n=0;n<16;n++)await act({keys:[],duration_ms:1000});
   const final=await save('after-parent-death');
   game.check('dead Wizard cannot replenish or transform',family(final).every(e=>e.kind!==0x609&&remaining.some(p=>p.id===e.id)));
   game.check('Wizard XP awarded once',final.view.character.experience===dead.view.character.experience);
