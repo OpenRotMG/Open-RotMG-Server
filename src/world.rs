@@ -7541,4 +7541,7 @@ mod priest_tests;
 mod knight_tests;
 
 #[cfg(test)]
+mod assassin_tests;
+
+#[cfg(test)]
 impl World {}

@@ -246,7 +246,7 @@ impl World {
             .iter()
             .any(|a| matches!(a, Ability::Decoy { .. }))
         {
-            // A stationary caster has no recent movement heading; legacy decoys choose a random direction.
+            // Legacy decoys follow recent movement, or pick a random heading: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Decoy.cs#L34-L47
             Some(match self.players[&id].last_motion {
                 Some((angle, at)) if self.now - at <= 100 => angle,
                 _ => self.rng.gen_range(0. ..std::f32::consts::TAU),
@@ -674,6 +674,7 @@ impl World {
                         },
                         0xffddff00,
                     );
+                    // Snapshot landing targets and subtract defense once per dose: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.UseItem.cs#L164-L196
                     let targets = self
                         .ability_enemies(thrown.position, radius)
                         .into_iter()
@@ -767,6 +768,7 @@ impl World {
                     effect,
                     duration,
                 } => {
+                    // The smaller ring triggers a full-radius blast, not one hit: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Trap.cs#L49-L76
                     let triggered = !self.ability_enemies(pos, radius / 2.).is_empty();
                     if triggered || expired {
                         self.ability_effect(
@@ -865,6 +867,10 @@ impl World {
 }
 
 #[cfg(test)]
+#[path = "huntress_tests.rs"]
+mod huntress_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -914,6 +920,134 @@ mod tests {
         let decoy = *world.ability_state.objects.keys().next().unwrap();
         assert_eq!(world.ability_state.objects[&decoy].owner, owner);
         (world, owner, decoy)
+    }
+
+    #[tokio::test]
+    async fn trickster_unlock_requires_both_level_twenty_records_after_death() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for levels in [[19, 20], [20, 19], [20, 20]] {
+            let store =
+                crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+            let account = store.list("trickster-unlock".into()).await.unwrap();
+            let class = content.get(0x324).unwrap();
+            assert!(store.create(account.id, class).await.is_err());
+            for (kind, level) in [0x320, 0x31f].into_iter().zip(levels) {
+                let mut ch = store
+                    .create_prepared(account.id, content.get(kind).unwrap(), None)
+                    .await
+                    .unwrap();
+                ch.gain_experience(
+                    &content,
+                    crate::store::level_start(level).unwrap(),
+                    &mut rand::thread_rng(),
+                )
+                .unwrap();
+                store.progress(ch.clone()).await.unwrap();
+                ch.hp = 0;
+                ch.alive = false;
+                store
+                    .death(ch, "prepared prerequisite".into())
+                    .await
+                    .unwrap();
+            }
+            let result = store.create(account.id, class).await;
+            if levels == [20, 20] {
+                let ch = result.unwrap();
+                assert_eq!(ch.items[..4], [0xa14, 0xae3, -1, -1]);
+                assert_eq!(ch.base, [150, 100, 10, 0, 12, 15, 12, 12]);
+                assert_eq!(
+                    store
+                        .list("trickster-unlock".into())
+                        .await
+                        .unwrap()
+                        .characters
+                        .len(),
+                    1
+                );
+            } else {
+                assert!(result.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn trickster_teleport_rejects_blocked_destination_before_spending_or_deploying() {
+        let origin = Pos { x: 4.5, y: 4.5 };
+        let (mut world, owner, _) = decoy_world(origin, 0., Some((6, 4)));
+        world.players.get_mut(&owner).unwrap().ability_ready_ms = 0;
+        let before = world.players[&owner].character.mp;
+        let objects = world.ability_state.objects.len();
+        let slot = Slot {
+            object: owner,
+            slot: 1,
+            kind: 0xae3,
+        };
+        assert!(world.use_item(owner, slot, Pos { x: 6.5, y: 4.5 }).is_err());
+        assert_eq!(world.players[&owner].character.mp, before);
+        assert_eq!(world.ability_state.objects.len(), objects);
+        assert_eq!(world.players[&owner].pos.distance(origin), 0.);
+        world.use_item(owner, slot, Pos { x: 8.5, y: 4.5 }).unwrap();
+        assert_eq!(world.players[&owner].character.mp, before - 60);
+        assert_eq!(world.players[&owner].pos.x, 8.5);
+    }
+
+    #[test]
+    fn trickster_decoy_distracts_a_nearer_follower_then_releases_it() {
+        let (mut world, owner, decoy) = decoy_world(Pos { x: 10.5, y: 10.5 }, 0., None);
+        world.players.get_mut(&owner).unwrap().pos = Pos { x: 20.5, y: 10.5 };
+        world.safe = false;
+        world.encounter = true;
+        let enemy = world
+            .spawn_entity(0x6b4, Pos { x: 12.5, y: 10.5 }, vec![])
+            .unwrap();
+        world.step();
+        let distracted = world.entities[&enemy].pos.x;
+        assert!(distracted < 12.5);
+        world.remove_entity(decoy);
+        world.step();
+        assert!(world.entities[&enemy].pos.x > distracted);
+    }
+
+    #[test]
+    fn trickster_spirit_bomb_reconstruction_damages_once_after_three_seconds() {
+        let origin = Pos { x: 10.5, y: 10.5 };
+        let (mut world, owner, decoy) = decoy_world(origin, 0., None);
+        world.remove_entity(decoy);
+        let p = world.players.get_mut(&owner).unwrap();
+        p.character.items[1] = 0xc2a;
+        p.character.mp = 252;
+        p.ability_ready_ms = 0;
+        let target = world
+            .spawn_entity(0x678, Pos { x: 13.5, y: 10.5 }, vec![])
+            .unwrap();
+        let hp = world.entities[&target].hp;
+        world
+            .use_item(
+                owner,
+                Slot {
+                    object: owner,
+                    slot: 1,
+                    kind: 0xc2a,
+                },
+                Pos { x: 20.5, y: 10.5 },
+            )
+            .unwrap();
+        assert_eq!(world.players[&owner].character.mp, 162);
+        assert_eq!(world.decoy_positions().count(), 0);
+        for _ in 0..59 {
+            world.step();
+        }
+        assert_eq!(world.entities[&target].hp, hp);
+        assert_eq!(world.ability_state.objects.len(), 1);
+        world.step();
+        let after = world.entities[&target].hp;
+        assert_eq!(
+            hp - after,
+            (300 - world.content.objects[&0x678].defense).max(45)
+        );
+        assert!(world.ability_state.objects.is_empty());
+        world.step();
+        assert_eq!(world.entities[&target].hp, after);
     }
 
     #[test]
