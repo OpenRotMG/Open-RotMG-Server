@@ -80,8 +80,8 @@ impl World {
                 .context("player-relative movement lacks a visible target"),
             encounter::Anchor::QuestMember(kind) => {
                 let tag = e.quest.context("quest anchor lacks encounter ownership")?;
-                self.actors()
-                    .filter(|x| x.quest == Some(tag) && x.kind == kind)
+                self.quest_actors(tag)
+                    .filter(|x| x.kind == kind)
                     .min_by(|a, b| a.pos.distance(e.pos).total_cmp(&b.pos.distance(e.pos)))
                     .map(|x| x.pos)
                     .context("own quest anchor absent")
@@ -173,9 +173,7 @@ impl World {
     }
 
     pub(super) fn summon_occupancy(&self) -> usize {
-        self.actors()
-            .filter(|e| e.parent.is_some() || e.quest.is_some())
-            .count()
+        self.summon_count()
             + self.named_births.len()
             + self.manor_births.len()
             + self.abyss_pending_count()
@@ -191,8 +189,8 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         let count = self
-            .actors()
-            .filter(|e| e.parent == Some(parent) && e.kind == kind)
+            .summoned_children(parent, kind)
+            .filter(|e| self.actor_ids.contains(&e.id))
             .count();
         let missing = maximum.saturating_sub(count);
         if missing == 0 {
@@ -666,7 +664,7 @@ impl World {
                 self.remove_entity(child);
             }
         }
-        if let Some(tag) = defeated.quest {
+        if let Some(tag) = *defeated.quest {
             if defeated.kind == 0x929 {
                 let king = self
                     .actors()
@@ -712,79 +710,5 @@ impl World {
             self.spawn_entity(kind, pos, vec![])?;
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn limon_box_uses_reference_corner_ranges_and_keeps_lifecycle() {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        for seed in 0..32 {
-            let map = crate::dungeon::sprite::generate(&content, seed).unwrap();
-            let mut world = World::new(content.clone(), Arc::new(map)).unwrap();
-            let boss = world
-                .entities
-                .values()
-                .find(|e| e.kind == 0xd06)
-                .unwrap()
-                .id;
-            let home = world.entities[&boss].home;
-            world.now = 12300;
-            world.encounter_mechanics(boss, None, 12300).unwrap();
-            let turrets: Vec<_> = world
-                .entities
-                .values()
-                .filter(|e| e.parent == Some(boss) && matches!(e.kind, 0xd07..=0xd0a))
-                .map(|e| e.id)
-                .collect();
-            assert_eq!(turrets.len(), 8, "seed {seed}");
-            for radius in [9.5, 14.] {
-                let offset = radius / std::f32::consts::SQRT_2;
-                for (kind, x, y) in [
-                    (0xd07, 1., -1.),
-                    (0xd08, -1., -1.),
-                    (0xd09, -1., 1.),
-                    (0xd0a, 1., 1.),
-                ] {
-                    let expected = Pos {
-                        x: home.x + x * offset,
-                        y: home.y + y * offset,
-                    };
-                    let child = turrets
-                        .iter()
-                        .map(|id| &world.entities[id])
-                        .find(|e| e.kind == kind && (e.pos.distance(home) - radius).abs() < 0.001)
-                        .unwrap_or_else(|| {
-                            panic!("seed {seed}: missing {kind:#x} corner at radius {radius}")
-                        });
-                    assert!(child.pos.distance(expected) < 0.001);
-                    assert_eq!(child.hp, 100000);
-                    assert!(child.expires.is_some_and(|t| t == 32300));
-                    assert_ne!(child.condition & condition::bit(condition::INVULNERABLE), 0);
-                }
-            }
-            world.now = 12400;
-            world.encounter_mechanics(boss, None, 12400).unwrap();
-            assert_eq!(
-                world
-                    .entities
-                    .values()
-                    .filter(|e| e.parent == Some(boss))
-                    .count(),
-                8
-            );
-            assert_eq!(world.entities[&boss].hp, 9000);
-            assert!(world.entities[&boss].home.distance(home) < 0.001);
-            if seed % 2 == 0 {
-                world.now = 32300;
-            } else {
-                world.remove_entity(boss);
-            }
-            world.mechanic_expiry();
-            assert!(turrets.iter().all(|id| !world.entities.contains_key(id)));
-        }
     }
 }

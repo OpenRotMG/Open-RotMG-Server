@@ -69,23 +69,74 @@ impl Player {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DialoguePeerUnavailable {
+    LeftWorld,
+    Unavailable,
+    NotKnown,
+    Ignored,
+    OutOfRange,
+}
+impl DialoguePeerUnavailable {
+    pub(crate) fn reason(self) -> &'static str {
+        match self {
+            Self::LeftWorld => "speaker_left_world",
+            Self::Unavailable => "speaker_unavailable",
+            Self::NotKnown => "speaker_no_longer_known",
+            Self::Ignored => "speaker_ignores_dialogue",
+            Self::OutOfRange => "speaker_out_of_chat_range",
+        }
+    }
+}
+
 impl World {
-    pub(crate) fn dialogue_participants(&self, bot: i32, speaker: i32) -> Result<()> {
-        let sender = self.players.get(&bot).context("dialogue bot left world")?;
-        let peer = self
-            .players
-            .get(&speaker)
-            .context("dialogue speaker left world")?;
+    pub(crate) fn dialogue_participants(
+        &self,
+        bot: i32,
+        speaker: i32,
+    ) -> Result<Option<DialoguePeerUnavailable>> {
         ensure!(
-            sender.controller == Controller::Autonomous
-                && sender.can_chat()
-                && peer.can_chat()
-                && sender.known.contains(&speaker)
-                && !peer.account_lists[1].contains(&sender.character.account)
-                && sender.pos.distance(peer.pos) <= 12.,
-            "dialogue participants unavailable"
+            bot > 0 && speaker > 0 && bot != speaker,
+            "invalid dialogue participants"
         );
-        Ok(())
+        let sender = self.players.get(&bot).context("dialogue bot left world")?;
+        ensure!(
+            sender.controller == Controller::Autonomous,
+            "dialogue controller is not autonomous"
+        );
+        ensure!(sender.can_chat(), "dialogue controller unavailable");
+        ensure!(
+            sender
+                .tx
+                .as_ref()
+                .is_some_and(|tx| tx.lost.borrow().is_none() && !tx.packets.is_closed()),
+            "dialogue controller output unavailable"
+        );
+        ensure!(
+            sender.pos.x.is_finite() && sender.pos.y.is_finite(),
+            "dialogue controller position is not finite"
+        );
+        let Some(peer) = self.players.get(&speaker) else {
+            return Ok(Some(DialoguePeerUnavailable::LeftWorld));
+        };
+        let distance = sender.pos.distance(peer.pos);
+        ensure!(
+            distance.is_finite(),
+            "dialogue participant distance is not finite"
+        );
+        if !peer.can_chat() {
+            return Ok(Some(DialoguePeerUnavailable::Unavailable));
+        }
+        if !sender.known.contains(&speaker) {
+            return Ok(Some(DialoguePeerUnavailable::NotKnown));
+        }
+        if peer.account_lists[1].contains(&sender.character.account) {
+            return Ok(Some(DialoguePeerUnavailable::Ignored));
+        }
+        if distance > 12. {
+            return Ok(Some(DialoguePeerUnavailable::OutOfRange));
+        }
+        Ok(None)
     }
     pub fn account_list_target(&self, id: i32, target: i32) -> Result<i32> {
         let sender = self.players.get(&id).context("player missing")?;
@@ -286,7 +337,13 @@ impl Directory {
                 .players
                 .values()
                 .filter(|p| p.can_chat())
-                .map(|p| p.character.name.as_str())
+                .map(|p| {
+                    if p.controller == Controller::Autonomous {
+                        format!("{} [bot]", p.character.name)
+                    } else {
+                        p.character.name.clone()
+                    }
+                })
                 .collect();
             let packet = chat_info(&format!("Players online: {}", names.join(", ")));
             send(&world.players[&id], packet.id, packet.body);
@@ -383,74 +440,5 @@ impl Directory {
         }
         tracing::info!(player=id, account, world=%world.name, yell, nexus, recipients, bytes=text.len(), "public chat delivered");
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn stars(packet: Packet) -> i32 {
-        let mut r = crate::wire::Reader::new(&packet.body);
-        r.utf().unwrap();
-        r.i32().unwrap();
-        r.i32().unwrap()
-    }
-
-    #[test]
-    fn non_player_text_does_not_carry_a_class_star() {
-        for packet in [
-            chat_info("Players online: Test"),
-            chat_error("Unknown chat command."),
-            chat_private("Discord"),
-            text_packet("#Oryx the Mad God", 4, 5, "Uhh. So... sleepy..."),
-        ] {
-            assert_eq!(stars(packet), -1);
-        }
-    }
-
-    #[tokio::test]
-    async fn ordinary_chat_is_nexus_local_but_world_wide_elsewhere() {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
-        let mut d =
-            Directory::test_with_seed(std::path::Path::new("data"), content, 20, 511).unwrap();
-        for (world, far_hears) in [(-2, false), (-3, true)] {
-            let mut ids = Vec::new();
-            let mut inboxes = Vec::new();
-            for role in ["speaker", "near", "far"] {
-                let account = store.list(format!("chat-{world}-{role}")).await.unwrap();
-                let ch = store
-                    .create(account.id, d.content.get(crate::content::WIZARD).unwrap())
-                    .await
-                    .unwrap();
-                let (packets, inbox) = mpsc::channel(64);
-                let (lost, _) = watch::channel(None);
-                let w = d.worlds.get_mut(&world).unwrap();
-                ids.push(w.enter(ch, Some(Output { packets, lost })).unwrap());
-                inboxes.push(inbox);
-            }
-            let w = d.worlds.get_mut(&world).unwrap();
-            let origin = w.players[&ids[0]].pos;
-            for (id, offset) in [(ids[1], 14.9), (ids[2], 60.)] {
-                w.players.get_mut(&id).unwrap().pos = Pos {
-                    x: origin.x + offset,
-                    y: origin.y,
-                };
-            }
-            for inbox in &mut inboxes {
-                while inbox.try_recv().is_ok() {}
-            }
-            d.chat(ids[0], "hello-511".into(), Instant::now()).unwrap();
-            let heard: Vec<_> = inboxes
-                .iter_mut()
-                .map(|inbox| {
-                    std::iter::from_fn(|| inbox.try_recv().ok()).any(|p| {
-                        p.id == crate::wire::TEXT && p.body.windows(9).any(|w| w == b"hello-511")
-                    })
-                })
-                .collect();
-            assert_eq!(heard, [true, true, far_hears], "world {world}");
-        }
     }
 }

@@ -74,6 +74,7 @@ mod realm_portal;
 mod realm_quests;
 
 mod realm_setpieces;
+mod sight;
 mod skull_erosion;
 
 mod spider;
@@ -158,6 +159,7 @@ pub struct EntityData {
     #[serde(skip)]
     drop_slots: BTreeSet<usize>,
     pub extra_stats: Vec<(u8, i32)>,
+    bag_owners: Vec<i32>,
     pub reserved: bool,
     published: bool,
     damage: BTreeMap<i32, i32>,
@@ -192,7 +194,7 @@ pub struct EntityData {
     camp: Option<usize>,
     #[serde(skip)]
     population_slot: Option<usize>,
-    quest: Option<i32>,
+    quest: tracked::Tracked<i32>,
     expires: tracked::Tracked<u64>,
     next_aux: u64,
     blocked_since: Option<u64>,
@@ -213,6 +215,7 @@ impl std::fmt::Debug for Entity {
         out.field("items", &self.items);
         out.field("drop_slots", &self.drop_slots);
         out.field("extra_stats", &self.extra_stats);
+        out.field("bag_owners", &self.bag_owners);
         out.field("reserved", &self.reserved);
         out.field("published", &self.published);
         out.field("damage", &self.damage);
@@ -233,7 +236,7 @@ impl std::fmt::Debug for Entity {
         out.field("parent", &self.parent);
         out.field("camp", &self.camp);
         out.field("population_slot", &self.population_slot);
-        out.field("quest", &self.quest);
+        out.field("quest", &*self.quest);
         out.field("expires", &self.expires);
         out.field("next_aux", &self.next_aux);
         out.field("blocked_since", &self.blocked_since);
@@ -248,7 +251,7 @@ impl Serialize for Entity {
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut out = serializer.serialize_struct("Entity", 30)?;
+        let mut out = serializer.serialize_struct("Entity", 31)?;
         out.serialize_field("id", &self.id)?;
         out.serialize_field("kind", &self.kind)?;
         out.serialize_field("name", &self.name)?;
@@ -259,6 +262,7 @@ impl Serialize for Entity {
         out.serialize_field("statuses", &self.statuses)?;
         out.serialize_field("items", &self.items)?;
         out.serialize_field("extra_stats", &self.extra_stats)?;
+        out.serialize_field("bag_owners", &self.bag_owners)?;
         out.serialize_field("reserved", &self.reserved)?;
         out.serialize_field("published", &self.published)?;
         out.serialize_field("damage", &self.damage)?;
@@ -289,6 +293,9 @@ impl Entity {
     fn accessible(&self, account: i32) -> bool {
         if !self.published {
             return false;
+        }
+        if !self.bag_owners.is_empty() {
+            return self.bag_owners.contains(&account);
         }
         match self.extra_stats.iter().find(|(stat, _)| *stat == 54) {
             Some((_, owner)) if *owner >= 0 => *owner == account,
@@ -361,6 +368,7 @@ pub struct Player {
     tiles: BTreeSet<(i16, i16)>,
     tile_updates: Vec<(i16, i16, u8)>,
     tile_scan: Option<(i32, i32)>,
+    sight_tiles: Option<BTreeSet<(i16, i16)>>,
     view_tiles: std::cell::RefCell<view::Terrain>,
     pub death_started: bool,
     death_lifetime: Option<crate::store::FameLifetime>,
@@ -391,6 +399,7 @@ pub struct Player {
     last_move: i32,
     last_move_at: u64,
     motion: ObservedMotion,
+    white_demon_aim_history: [Pos; 2],
     goto_acks: VecDeque<(bool, Instant)>,
     discarded_attack: Option<(i32, i32)>,
     tick: i32,
@@ -676,6 +685,9 @@ pub struct Slot {
     pub slot: usize,
     pub kind: i32,
 }
+// Ordinary entrances last a minute in the June 2012 guide; keys share that window: https://web.archive.org/web/20120609023836/http://forums.wildshadow.com/wiki/realm-mad-god/dungeons
+const DUNGEON_PORTAL_TICKS: u64 = 60_000 / 50;
+
 #[derive(Clone, Copy)]
 pub struct PortalPlan {
     locked: Option<i32>,
@@ -683,8 +695,11 @@ pub struct PortalPlan {
 }
 impl PortalPlan {
     fn lifetime(self) -> u64 {
-        // Trapped's Create uses 20 seconds; preserve the existing Cellar's 120-second policy.
-        if self.locked.is_some() { 2400 } else { 400 }
+        if self.locked.is_some() {
+            2400
+        } else {
+            DUNGEON_PORTAL_TICKS
+        }
     }
 }
 #[derive(Clone)]
@@ -745,6 +760,8 @@ pub struct World {
     world_effect_ids: BTreeSet<i32>,
     // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
     timed_ids: BTreeSet<i32>,
+    // Quest roots can have neither a parent nor an expiry, so timed_ids cannot cover membership.
+    quest_ids: BTreeSet<i32>,
     gun_ids: BTreeSet<i32>,
     pentaract_ids: BTreeSet<i32>,
     // Terminal deadlines run in every world, including Realms without any Flamers.
@@ -793,6 +810,7 @@ pub struct World {
     population_regions: [population_density::Region; 13],
     population_counts: [usize; 13],
     population_next: u64,
+    god_reproduction: BTreeMap<i32, u64>,
     setpieces: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
     portal_requests: Vec<(u16, Pos)>,
@@ -914,7 +932,7 @@ pub struct Directory {
     pub clock: crate::clock::Clock,
     pub worlds: execution::Worlds,
     templates: BTreeMap<String, Arc<Map>>,
-    realms: Vec<crate::terrain::realms::Source>,
+    realms: Vec<Arc<crate::terrain::realms::Source>>,
     realm_rng: rand::rngs::StdRng,
     content: Arc<Content>,
     ids: Arc<AtomicI32>,
@@ -1098,7 +1116,7 @@ impl Directory {
             clock: crate::clock::Clock::default(),
             worlds: execution::Worlds::new(),
             templates,
-            realms,
+            realms: realms.into_iter().map(Arc::new).collect(),
             realm_rng: rand::rngs::StdRng::seed_from_u64(seed),
             content,
             ids: Arc::new(AtomicI32::new(1000)),
@@ -1155,197 +1173,191 @@ impl Directory {
         safe: bool,
         owner: Option<i32>,
     ) -> Result<World> {
-        let layout =
-            (template == "realm-shore").then(|| self.realm_rng.gen_range(0..self.realms.len()));
-        let mut world = World::with_ids(
-            self.content.clone(),
-            if let Some(index) = layout {
-                self.realms[index].open(&self.content)?
-            } else if template == "pirate-cave" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::pirate::generate(&self.content, seed)?)
-            } else if template == "abyss-of-demons" {
-                let seed = match self.prepared_seed {
-                    Some(seed) => seed ^ self.next_world as u64,
-                    None => rand::random(),
-                };
-                Arc::new(crate::dungeon::abyss::generate(&self.content, seed)?)
-            } else if template == "manor-of-the-immortals" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::manor::generate(&self.content, seed)?)
-            } else if template == "beachzone" {
-                Arc::new(crate::dungeon::beach::generate(&self.content)?)
-            } else if template == "ocean-trench" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
-            } else if template == "forbidden-jungle" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::jungle::generate(&self.content, seed)?)
-            } else if template == "spider-den" {
-                let seed = match self.prepared_seed {
-                    Some(seed) => seed ^ self.next_world as u64,
-                    None => rand::random(),
-                };
-                Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
-            } else if template == "mad-lab" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::lab::generate(&self.content, seed)?)
-            } else if template == "tomb-of-the-ancients" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::tomb::generate(&self.content, seed)?)
-            } else if template == "snake-pit" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::snake_pit(&self.content, seed)?)
-            } else if template == "sprite-world" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
-            } else if template == crate::dungeon::davy::TEMPLATE {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::davy::generate(&self.content, seed)?)
-            } else if template == "undead-lair" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::undead::generate(&self.content, seed)?)
-            } else {
-                self.templates
-                    .get(template)
-                    .context("world template missing")?
-                    .clone()
-            },
-            self.ids.clone(),
-        )?;
-        world.realm_layout = layout.map(|index| self.realms[index].name().to_owned());
-        world.clock = self.clock.clone();
-        world.attack_epoch = self.clock.now();
-        world.new_tick_at = self.clock.now();
+        self.construction(template, name, safe, owner)()
+    }
+    fn construction(
+        &mut self,
+        template: &str,
+        name: &str,
+        safe: bool,
+        owner: Option<i32>,
+    ) -> impl FnOnce() -> Result<World> + Send + use<> {
+        let source = (template == "realm-shore")
+            .then(|| self.realms[self.realm_rng.gen_range(0..self.realms.len())].clone());
         #[cfg(test)]
-        if layout.is_some_and(|index| {
-            matches!(
-                &self.realms[index],
-                crate::terrain::realms::Source::Fixture(_)
-            )
-        }) {
-            // Reproduce fixture populations without granting prepared-world authority or consuming layout RNG.
-            let seed = self.realm_rng.clone().r#gen::<u64>();
-            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
-            tracing::debug!(seed, "test Realm population seeded");
-        }
-        if let Some(seed) = self.prepared_seed {
-            let seed = seed ^ self.next_world as u64;
-            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
-            world.prepared_seed = Some(seed);
-        }
-        world.name = name.into();
-        // Preserve the blue Nexus/Vault backdrop, not dungeon void: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/worlds/Vault.cs
-        world.background = if matches!(template, "nexus" | "vault") {
-            2
-        } else {
-            0
-        };
-        world.safe = safe;
-        world.owner = owner;
-        world.max_players = self.max_players;
-        world.encounter = template == "realm-shore"
-            || template == crate::endgame::CASTLE
-            || crate::dungeon::DUNGEONS
-                .iter()
-                .chain(crate::endgame::DUNGEONS)
-                .any(|(_, name, _, _)| *name == template);
-        if template == "realm-shore" {
-            let started = Instant::now();
-            let groves = self.realms[layout.context("Realm layout selection missing")?].groves()?;
-            world.populate_authored_groves(&groves)?;
-            // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
-            let beach_bum = world.rng.gen_ratio(1, 200);
-            world.populate_tomb_entry()?;
-            world.populate_coil_snakes()?;
-            if beach_bum {
-                world.populate_beach_bum()?;
+        let fixture_seed = source.as_ref().and_then(|source| {
+            matches!(&**source, crate::terrain::realms::Source::Fixture(_))
+                .then(|| self.realm_rng.clone().r#gen::<u64>())
+        });
+        let (content, ids, clock) = (self.content.clone(), self.ids.clone(), self.clock.clone());
+        let (prepared_seed, next_world, max_players) =
+            (self.prepared_seed, self.next_world, self.max_players);
+        let (map, template, name) = (
+            self.templates.get(template).cloned(),
+            template.to_owned(),
+            name.to_owned(),
+        );
+        move || {
+            let mut world = World::with_ids(
+                content.clone(),
+                if let Some(source) = &source {
+                    source.open(&content)?
+                } else if template == "pirate-cave" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::pirate::generate(&content, seed)?)
+                } else if template == "abyss-of-demons" {
+                    let seed = match prepared_seed {
+                        Some(seed) => seed ^ next_world as u64,
+                        None => rand::random(),
+                    };
+                    Arc::new(crate::dungeon::abyss::generate(&content, seed)?)
+                } else if template == "manor-of-the-immortals" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::manor::generate(&content, seed)?)
+                } else if template == "beachzone" {
+                    Arc::new(crate::dungeon::beach::generate(&content)?)
+                } else if template == "ocean-trench" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::trench::generate(&content, seed)?)
+                } else if template == "forbidden-jungle" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::jungle::generate(&content, seed)?)
+                } else if template == "spider-den" {
+                    let seed = match prepared_seed {
+                        Some(seed) => seed ^ next_world as u64,
+                        None => rand::random(),
+                    };
+                    Arc::new(crate::dungeon::spider::generate(&content, seed)?)
+                } else if template == "mad-lab" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::lab::generate(&content, seed)?)
+                } else if template == "tomb-of-the-ancients" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::tomb::generate(&content, seed)?)
+                } else if template == "snake-pit" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::snake_pit(&content, seed)?)
+                } else if template == "sprite-world" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::sprite::generate(&content, seed)?)
+                } else if template == crate::dungeon::davy::TEMPLATE {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::davy::generate(&content, seed)?)
+                } else if template == "undead-lair" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::undead::generate(&content, seed)?)
+                } else {
+                    map.context("world template missing")?
+                },
+                ids.clone(),
+            )?;
+            world.realm_layout = source.as_ref().map(|source| source.name().to_owned());
+            world.clock = clock.clone();
+            world.attack_epoch = clock.now();
+            world.new_tick_at = clock.now();
+            #[cfg(test)]
+            if let Some(seed) = fixture_seed {
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
+                tracing::debug!(seed, "test Realm population seeded");
             }
-            world.populate_realm_heroes()?;
-            world.populate_named_quests(!groves.is_empty())?;
-            world.populate_realm_events()?;
-            world.populate_hermit()?;
-            world.populate_manor_entry()?;
-            world.populate_ghost_ship()?;
-            world.populate_lost_lands()?;
-            world.populate_realm_population()?;
-            // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
-            let crystal = world.place_named_setpiece(0x935, &[1])?;
-            world.spawn_entity(0x935, crystal, vec![])?;
-            world.reserve_realm_events()?;
-            tracing::info!(
-                layout = world.realm_layout,
-                entities = world.entities.len(),
-                actors = world.actor_ids.len(),
-                elapsed_ms = started.elapsed().as_millis(),
-                "Realm simulation populated"
-            );
-        }
-        world.prepare_endgame()?;
-        if template == crate::dungeon::davy::TEMPLATE {
-            world.prepare_locker()?;
-        }
-        if template == "sprite-world" {
-            let exits: Vec<_> = world
-                .entities
-                .values()
-                .filter(|e| e.kind == 0x70e)
-                .map(|e| e.id)
-                .collect();
-            ensure!(
-                exits.len() == 1,
-                "Sprite World requires one authored completion exit"
-            );
-            world.entities.get_mut(&exits[0]).unwrap().published = false;
-            world.clear_exit = Some(exits[0]);
-        }
-        if world.encounter {
-            let kinds: BTreeSet<_> = world
-                .entities
-                .values()
-                .filter(|e| {
-                    let object = &world.content.objects[&e.kind];
-                    object.enemy && (object.class != "Wall" || object.passive_destructible())
-                })
-                .map(|e| e.kind)
-                .collect();
-            for kind in kinds {
-                if !world.content.objects[&kind].passive_destructible() {
-                    crate::encounter::validate(&world.content, kind)?;
+            if let Some(seed) = prepared_seed {
+                let seed = seed ^ next_world as u64;
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
+                world.prepared_seed = Some(seed);
+            }
+            world.name = name;
+            // Select the client's existing starfield, not dungeon void: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_H_Z_/Background.as
+            world.background = match template.as_str() {
+                "sprite-world" => 1,
+                "nexus" | "vault" => 2,
+                _ => 0,
+            };
+            world.safe = safe;
+            world.owner = owner;
+            world.max_players = max_players;
+            world.encounter = template == "realm-shore"
+                || template == crate::endgame::CASTLE
+                || crate::dungeon::DUNGEONS
+                    .iter()
+                    .chain(crate::endgame::DUNGEONS)
+                    .any(|(_, name, _, _)| *name == template);
+            if template == "realm-shore" {
+                let started = Instant::now();
+                let groves = source.as_ref().context("Realm source missing")?.groves()?;
+                world.populate_authored_groves(&groves)?;
+                // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
+                let beach_bum = world.rng.gen_ratio(1, 200);
+                world.populate_tomb_entry()?;
+                world.populate_coil_snakes()?;
+                if beach_bum {
+                    world.populate_beach_bum()?;
                 }
+                world.populate_realm_heroes()?;
+                world.populate_named_quests(!groves.is_empty())?;
+                world.populate_realm_events()?;
+                world.populate_hermit()?;
+                world.populate_manor_entry()?;
+                world.populate_ghost_ship()?;
+                world.populate_lost_lands()?;
+                world.populate_realm_population()?;
+                // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+                let crystal = world.place_named_setpiece(0x935, &[1])?;
+                world.spawn_entity(0x935, crystal, vec![])?;
+                world.reserve_realm_events()?;
+                tracing::info!(
+                    layout = world.realm_layout,
+                    entities = world.entities.len(),
+                    actors = world.actor_ids.len(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "Realm simulation populated"
+                );
+            }
+            world.prepare_endgame()?;
+            if template == crate::dungeon::davy::TEMPLATE {
+                world.prepare_locker()?;
+            }
+            if template == "sprite-world" {
+                let exits: Vec<_> = world
+                    .entities
+                    .values()
+                    .filter(|e| e.kind == 0x70e)
+                    .map(|e| e.id)
+                    .collect();
+                ensure!(
+                    exits.len() == 1,
+                    "Sprite World requires one authored completion exit"
+                );
+                world.entities.get_mut(&exits[0]).unwrap().published = false;
+                world.clear_exit = Some(exits[0]);
+            }
+            if world.encounter {
+                let kinds: BTreeSet<_> = world
+                    .entities
+                    .values()
+                    .filter(|e| {
+                        let object = &world.content.objects[&e.kind];
+                        object.enemy && (object.class != "Wall" || object.passive_destructible())
+                    })
+                    .map(|e| e.kind)
+                    .collect();
+                for kind in kinds {
+                    if !world.content.objects[&kind].passive_destructible() {
+                        crate::encounter::validate(&world.content, kind)?;
+                    }
+                    crate::loot::validate(&world.content, kind)?;
+                }
+            }
+            for kind in [
+                0x173, 0x653, 0x918, 0x919, 0xd07, 0xd08, 0xd09, 0xd0a, 0xdaa, 0xdab, 0xdac, 0xdad,
+                0xdae, 0xdaf, 0xdb0, 0xdb1, 0xdb2,
+            ] {
+                crate::encounter::validate(&world.content, kind)?;
                 crate::loot::validate(&world.content, kind)?;
             }
+            Ok(world)
         }
-        for kind in [
-            0x173, 0x653, 0x918, 0x919, 0xd07, 0xd08, 0xd09, 0xd0a, 0xdaa, 0xdab, 0xdac, 0xdad,
-            0xdae, 0xdaf, 0xdb0, 0xdb1, 0xdb2,
-        ] {
-            crate::encounter::validate(&world.content, kind)?;
-            crate::loot::validate(&world.content, kind)?;
-        }
-        Ok(world)
     }
     fn resolve(&mut self, target: Target) -> Result<&mut World> {
         match target {
@@ -1425,7 +1437,6 @@ impl Directory {
         if template != crate::endgame::CASTLE {
             return self.instance(template, None, Some(DungeonReturn::Random));
         }
-        self.reserve_worlds(1, &[])?;
         let world = self.make(template, "Oryx's Castle", false, None)?;
         let id = self.next_world;
         self.next_world = id
@@ -1455,44 +1466,6 @@ impl Directory {
                 .portals
                 .values()
                 .any(|p| p.origin == id || p.destination == Some(id))
-    }
-    fn reserve_worlds(&mut self, slots: usize, keep: &[i32]) -> Result<()> {
-        let needed = (self.worlds.len() + slots).saturating_sub(12);
-        if needed == 0 {
-            return Ok(());
-        }
-        // Empty caches must not deny entry, but live portals and transfers still own their worlds.
-        let retired: Vec<_> = self
-            .worlds
-            .keys()
-            .copied()
-            .filter(|id| !keep.contains(id) && self.reclaimable_world(*id))
-            .take(needed)
-            .collect();
-        ensure!(
-            retired.len() == needed,
-            "world instance limit reached: {} worlds, {slots} requested, {} reclaimable",
-            self.worlds.len(),
-            retired.len()
-        );
-        for id in retired {
-            self.worlds
-                .get(&id)
-                .expect("selected reclaimable world missing");
-            ensure!(
-                self.reclaimable_world(id),
-                "world {id} changed before capacity reclamation"
-            );
-            let world = self.worlds.remove(&id).unwrap();
-            self.idle.remove(&id);
-            tracing::info!(
-                world = id,
-                name = world.name,
-                owner = world.owner,
-                "empty world reclaimed for capacity"
-            );
-        }
-        Ok(())
     }
     pub(crate) fn instance(
         &mut self,
@@ -1525,7 +1498,6 @@ impl Directory {
         {
             return Ok(*id);
         }
-        self.reserve_worlds(1, &[])?;
         let mut world = self.make(
             template,
             if template == "vault" {
@@ -2163,7 +2135,12 @@ impl Directory {
                 origin,
                 destination: Some(destination),
                 // The May 2012 Sprite World guide specifies 15 seconds, unlike newer references.
-                expires: self.tick + if kind == 0x70c { 300 } else { 600 },
+                expires: self.tick
+                    + if kind == 0x70c {
+                        300
+                    } else {
+                        DUNGEON_PORTAL_TICKS
+                    },
             },
         );
         tracing::info!(
@@ -2176,6 +2153,7 @@ impl Directory {
             requested_x = pos.x,
             requested_y = pos.y,
             displacement = pos.distance(self.worlds[&origin].entities[&id].pos),
+            expires_tick = self.portals[&id].expires,
             "earned dungeon portal dropped"
         );
         Ok(id)
@@ -2208,33 +2186,7 @@ impl Directory {
             }
         }
     }
-    #[cfg(test)]
-    fn step(&mut self) {
-        self.step_using(|worlds, tick| {
-            for (id, world) in worlds {
-                let _context = crate::supervision::world(*id, tick);
-                world.step();
-                world.report_performance(*id);
-            }
-        });
-    }
-    #[cfg(test)]
-    fn step_using(&mut self, simulate: impl FnOnce(&mut execution::Worlds, u64)) {
-        self.tick += 1;
-        self.retire_transfer_grants();
-        simulate(&mut self.worlds, self.tick);
-        for (id, world) in &mut self.worlds {
-            if *id > 0 && !self.endgame.realms.contains_key(id) {
-                if world.players.is_empty() {
-                    self.idle.entry(*id).or_insert(self.tick);
-                } else {
-                    self.idle.remove(id);
-                }
-            }
-        }
-        let ready: Vec<_> = self.worlds.keys().copied().collect();
-        self.coordinate(&ready);
-    }
+
     fn coordinator_step(&mut self) {
         self.tick += 1;
         self.retire_grants(|worlds, id| worlds.release_world(&id));
@@ -2511,34 +2463,6 @@ impl Handle {
             clock: self.clock.clone(),
             supervisor: self.supervisor.clone(),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_pause_job(
-        &self,
-        call: usize,
-        before: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        self.lifecycle_test_gate(call, before, false)
-    }
-    #[cfg(test)]
-    fn lifecycle_test_gate(
-        &self,
-        call: usize,
-        before: bool,
-        request_only: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        assert!(call > 0);
-        let (entered, ready) = oneshot::channel();
-        let (release, wait) = std::sync::mpsc::channel();
-        assert!(
-            self.lifecycle_job_gate
-                .lock()
-                .unwrap()
-                .replace((call, before, request_only, entered, wait))
-                .is_none()
-        );
-        (ready, release)
     }
 
     pub async fn directory<T: Send + 'static>(
@@ -2828,6 +2752,7 @@ impl World {
                             } else {
                                 vec![]
                             },
+                            bag_owners: Vec::new(),
                             reserved: false,
                             published: true,
                             damage: BTreeMap::new(),
@@ -2838,7 +2763,7 @@ impl World {
                             parent: Default::default(),
                             camp: None,
                             population_slot: None,
-                            quest: None,
+                            quest: Default::default(),
                             expires: Default::default(),
                             next_aux: 0,
                             blocked_since: None,
@@ -2915,6 +2840,7 @@ impl World {
             navigation_geometry: Box::default(),
             realm_layout: None,
             timed_ids: BTreeSet::new(),
+            quest_ids: BTreeSet::new(),
             gun_ids,
             abyss_flamer_ids: actor_ids
                 .iter()
@@ -2976,6 +2902,7 @@ impl World {
             population_regions: std::array::from_fn(|_| population_density::Region::default()),
             population_counts: [0; 13],
             population_next: 10000,
+            god_reproduction: BTreeMap::new(),
             setpieces: vec![],
             event_sites: vec![],
             portal_requests: vec![],
@@ -3189,6 +3116,7 @@ impl World {
                     items,
                     drop_slots: BTreeSet::new(),
                     extra_stats,
+                    bag_owners: Vec::new(),
                     reserved: false,
                     published: true,
                     damage: BTreeMap::new(),
@@ -3199,7 +3127,7 @@ impl World {
                     parent: Default::default(),
                     camp: None,
                     population_slot: None,
-                    quest: None,
+                    quest: Default::default(),
                     expires: Default::default(),
                     next_aux: 0,
                     blocked_since: None,
@@ -3209,6 +3137,9 @@ impl World {
             },
         );
         self.index_actor(id);
+        if self.content.objects[&kind].blocks_sight {
+            self.invalidate_sight();
+        }
         Ok(id)
     }
     fn index_actor(&mut self, id: i32) {
@@ -3220,6 +3151,9 @@ impl World {
         self.cells.insert(cell, id, actor);
         if e.parent.is_some() || e.expires.is_some() {
             self.timed_ids.insert(id);
+        }
+        if e.quest.is_some() {
+            self.quest_ids.insert(id);
         }
         if !actor {
             return;
@@ -3279,11 +3213,13 @@ impl World {
         self.actor_ids.remove(&id);
         self.world_effect_ids.remove(&id);
         self.timed_ids.remove(&id);
+        self.quest_ids.remove(&id);
         self.gun_ids.remove(&id);
         self.pentaract_ids.remove(&id);
         self.abyss_flamer_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
+        self.god_reproduction.remove(&id);
         self.ability_state.objects.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
         let definition = &self.content.objects[&entity.kind];
@@ -3326,6 +3262,9 @@ impl World {
             self.cells.remove(cell, id),
             "entity absent from spatial index"
         );
+        if self.content.objects[&entity.kind].blocks_sight {
+            self.invalidate_sight();
+        }
         entity
     }
     pub fn map_info(&self) -> Vec<u8> {
@@ -3479,6 +3418,7 @@ impl World {
                 tiles: BTreeSet::new(),
                 tile_updates: vec![],
                 tile_scan: None,
+                sight_tiles: None,
                 view_tiles: std::cell::RefCell::default(),
                 death_started: false,
                 death_lifetime: None,
@@ -3514,6 +3454,7 @@ impl World {
                     velocity: Pos { x: 0., y: 0. },
                     at: self.now,
                 },
+                white_demon_aim_history: [pos; 2],
                 goto_acks: VecDeque::new(),
                 discarded_attack: None,
                 tick: 0,
@@ -3799,9 +3740,16 @@ impl World {
         self.visible_with(id, self.quest_target(id))
     }
     fn visible_with(&self, id: i32, quest: Option<i32>) -> BTreeSet<i32> {
-        let pos = self.players[&id].pos;
+        let player = &self.players[&id];
+        let pos = player.pos;
         self.entities_near(pos, 20.)
-            .filter(|e| e.accessible(self.players[&id].character.account))
+            .filter(|e| e.accessible(player.character.account))
+            .filter(|e| {
+                player
+                    .sight_tiles
+                    .as_ref()
+                    .is_none_or(|sight| sight.contains(&(e.pos.x as i16, e.pos.y as i16)))
+            })
             .map(|e| e.id)
             .chain(quest)
             .chain(
@@ -3820,6 +3768,20 @@ impl World {
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
         let started = crate::performance::Measure::start();
+        let pos = self.players[&id].pos;
+        let center = (pos.x as i32, pos.y as i32);
+        let rescan = initial || self.players[&id].tile_scan != Some(center);
+        if rescan {
+            let sight = (self.name == "Snake Pit").then(|| self.room_sight(center));
+            if let Some(sight) = &sight {
+                tracing::debug!(
+                    player = id,
+                    tiles = sight.len(),
+                    "Snake Pit sight recalculated"
+                );
+            }
+            self.players.get_mut(&id).unwrap().sight_tiles = sight;
+        }
         // Nothing below changes quest eligibility, so one evaluation serves visibility and the quest arrow.
         let quest = self.quest_target(id);
         let mut visible = self.visible_with(id, quest);
@@ -3830,11 +3792,7 @@ impl World {
         // Private-container owner stats dereference the native map's self player.
         added.sort_by_key(|entity| (*entity != id, *entity));
         let dropped: Vec<i32> = previous.difference(&visible).copied().collect();
-        let pos = self.players[&id].pos;
         let mut tiles = Vec::new();
-        let center = (pos.x as i32, pos.y as i32);
-        // Discovered tiles only grow, so rescanning the same centre cannot find anything new.
-        let rescan = initial || self.players[&id].tile_scan != Some(center);
         for y in ((pos.y as i32 - 20).max(0))..=(pos.y as i32 + 20).min(self.map.height - 1) {
             for x in ((pos.x as i32 - 20).max(0))..=(pos.x as i32 + 20).min(self.map.width - 1) {
                 let dx = x - pos.x as i32;
@@ -3842,6 +3800,10 @@ impl World {
                 if rescan
                     && dx * dx + dy * dy <= 20 * 20
                     && !self.players[&id].tiles.contains(&(x as i16, y as i16))
+                    && self.players[&id]
+                        .sight_tiles
+                        .as_ref()
+                        .is_none_or(|sight| sight.contains(&(x as i16, y as i16)))
                 {
                     tiles.push((
                         x as i16,
@@ -3936,14 +3898,14 @@ impl World {
     fn validate_move_at(&self, id: i32, pos: Pos, time: i32, received: u64) -> Result<f32> {
         ensure!(
             pos.x.is_finite() && pos.y.is_finite(),
-            "non-finite movement"
+            controller("non-finite movement")
         );
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             p.active(),
-            "dead, departing or quarantined player cannot move"
+            controller("dead, departing or quarantined player cannot move")
         );
-        ensure!(time >= 0, "negative movement time");
+        ensure!(time >= 0, controller("negative movement time"));
         let elapsed = if p.last_move == 0 {
             100.
         } else {
@@ -3951,15 +3913,21 @@ impl World {
         };
         ensure!(
             elapsed >= 0.,
-            "movement time reversed: client_time={time} previous_client_time={}",
-            p.last_move
+            controller("movement time reversed").context(format!(
+                "movement time reversed: client_time={time} previous_client_time={}",
+                p.last_move
+            ))
         );
         let cell = self
             .map
             .cell(p.pos.x, p.pos.y)
             .context("player outside map")?;
         let speed = p.speed(&self.content, self.now)? * self.content.grounds[&cell.ground];
-        let push = self.content.pushes[&cell.ground];
+        let push = if p.paused || p.conditions(self.now) & PARALYZED != 0 {
+            (0., 0.)
+        } else {
+            self.content.pushes[&cell.ground]
+        };
         let distance = p.pos.distance(pos);
         let input_distance = |delta| {
             p.pos.distance(Pos {
@@ -3969,16 +3937,14 @@ impl World {
         };
         ensure!(
             p.conditions(self.now) & PARALYZED == 0 || distance <= 0.001,
-            "paralyzed movement"
+            controller("paralyzed movement")
         );
         ensure!(
             input_distance(elapsed) <= speed * elapsed + 0.3,
-            "movement exceeds speed: from=({}, {}) to=({}, {}) distance={distance} allowed={} speed={speed} client_elapsed_ms={elapsed}",
-            p.pos.x,
-            p.pos.y,
-            pos.x,
-            pos.y,
-            speed * elapsed + 0.3
+            controller("movement exceeds speed").context(format!(
+                "movement exceeds speed: from=({}, {}) to=({}, {}) distance={distance} allowed={} speed={speed} client_elapsed_ms={elapsed}",
+                p.pos.x, p.pos.y, pos.x, pos.y, speed * elapsed + 0.3
+            ))
         );
         let server_elapsed = received
             .checked_sub(p.last_move_at)
@@ -4004,8 +3970,10 @@ impl World {
         );
         ensure!(
             charged <= credit + 0.001,
-            "movement exceeds server time budget: distance={distance} credit={credit} server_elapsed_ms={server_elapsed} client_elapsed_ms={elapsed} previous_credit={}",
-            p.movement_credit
+            controller("movement exceeds server time budget").context(format!(
+                "movement exceeds server time budget: distance={distance} credit={credit} server_elapsed_ms={server_elapsed} client_elapsed_ms={elapsed} previous_credit={}",
+                p.movement_credit
+            ))
         );
         let samples = (distance / 0.1).ceil().max(1.) as usize;
         ensure!(
@@ -4019,7 +3987,7 @@ impl World {
                     },
                 )
             }),
-            "movement across a blocked tile"
+            controller("movement across a blocked tile")
         );
         Ok(credit - charged)
     }
@@ -4047,26 +4015,7 @@ impl World {
         if self.discard_correcting_move(id, pos, time)? {
             return Ok(NativeInput::DiscardedUntilGotoAck);
         }
-        let sentinel = pos.x == -1. && pos.y == -1.;
-        if !sentinel {
-            self.validate_native_position(id, pos, time)?;
-        }
-        let p = self.players.get_mut(&id).context("native player missing")?;
-        ensure!(
-            time >= p.last_move,
-            controller("native movement clock regressed")
-        );
-        ensure!(received >= p.last_move_at, "native ingress clock regressed");
-        let speed = p.speed(&self.content, self.now)? * 1000.;
-        p.record_motion(if sentinel { p.pos } else { pos }, time, self.now, speed);
-        if !sentinel {
-            if p.pos.distance(pos) > 0.001 {
-                p.last_motion = Some(((pos.y - p.pos.y).atan2(pos.x - p.pos.x), self.now));
-            }
-            p.pos = pos;
-        }
-        p.last_move = time;
-        p.last_move_at = received;
+        self.move_timed(id, pos, time, received)?;
         Ok(NativeInput::Applied)
     }
     pub fn move_to(&mut self, id: i32, pos: Pos, time: i32) -> Result<()> {
@@ -4076,9 +4025,9 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             p.last_move == 0 || i64::from(time) - i64::from(p.last_move) <= 1000,
-            "movement time jump"
+            controller("movement time jump")
         );
-        // MOVE precedes condition updates; accept either form across a toggle.
+        // MOVE precedes condition updates; accept either form across a toggle: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/GameServerConnection.as#L1182-L1194
         let sentinel = pos.x == -1. && pos.y == -1.;
         let immobile = p.paused || p.conditions(self.now) & PARALYZED != 0;
         let correct = immobile && !sentinel && p.pos.distance(pos) > 0.001;
@@ -4186,11 +4135,28 @@ impl World {
     fn world_effect_actors(&self) -> impl Iterator<Item = &Entity> {
         self.world_effect_ids.iter().map(|id| &self.entities[id])
     }
-    fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
-        self.non_population_ids
+    fn quest_entities(&self, tag: i32) -> impl Iterator<Item = &Entity> {
+        self.quest_ids
             .iter()
-            .map(|id| self.entities.get(id).expect("scripted actor missing"))
+            .map(|id| &self.entities[id])
+            .filter(move |e| e.quest == Some(tag))
     }
+    fn quest_actors(&self, tag: i32) -> impl Iterator<Item = &Entity> {
+        self.quest_entities(tag)
+            .filter(|e| self.actor_ids.contains(&e.id))
+    }
+    fn summon_entities(&self) -> impl Iterator<Item = &Entity> {
+        self.timed_ids
+            .union(&self.quest_ids)
+            .map(|id| &self.entities[id])
+            .filter(|e| e.parent.is_some() || e.quest.is_some())
+    }
+    fn summon_count(&self) -> usize {
+        self.summon_entities()
+            .filter(|e| self.actor_ids.contains(&e.id))
+            .count()
+    }
+
     fn entities_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
         self.near_entities(
             Pos {
@@ -4232,14 +4198,12 @@ impl World {
         let x1 = (a.x.max(b.x) as i32 + 1).min(self.map.width - 1);
         let y0 = (a.y.min(b.y) as i32 - 1).max(0);
         let y1 = (a.y.max(b.y) as i32 + 1).min(self.map.height - 1);
-        (y0..=y1).flat_map(move |y| {
-            (x0..=x1).flat_map(move |x| {
-                self.cells
-                    .ids((y * self.map.width + x) as usize)
-                    .iter()
-                    .map(|id| self.entities.get(id).expect("occupied cell missing entity"))
+        (y0..=y1)
+            .flat_map(move |y| {
+                (x0..=x1)
+                    .flat_map(move |x| self.cells.ids((y * self.map.width + x) as usize).iter())
             })
-        })
+            .map(move |id| self.entities.get(id).expect("occupied cell missing entity"))
     }
 
     pub fn native_shoot_received(
@@ -5501,11 +5465,7 @@ impl World {
         p.bot_aim = None;
         Ok(())
     }
-    #[cfg(test)]
-    pub(crate) fn credit_reservation_for_test(&self, id: i32) -> (Option<Character>, bool) {
-        let p = &self.players[&id];
-        (p.progress_snapshot.clone(), p.departure_snapshot.is_some())
-    }
+
     pub(crate) fn credit_recipients(&self, giver: i32) -> Vec<(i32, i32)> {
         self.players
             .iter()
@@ -5659,11 +5619,45 @@ impl World {
         }
         Ok(())
     }
+    fn god_loot_bags(&mut self, pos: Pos, loot: crate::loot::GodLoot) -> Result<()> {
+        for (owner, items) in loot.private {
+            let items: Vec<_> = items.into_iter().map(i32::from).collect();
+            self.loot_bags(pos, Some(owner), &items)?;
+        }
+        if !loot.shared_owners.is_empty() {
+            for chunk in loot.shared.chunks(8) {
+                let bag =
+                    self.loot_bag(pos, None, chunk.iter().copied().map(i32::from).collect())?;
+                let entity = self.entities.get_mut(&bag).unwrap();
+                // Period purple sacks were owner-only, unlike Kithio's shared gear: https://forums.anandtech.com/threads/realm-of-the-mad-god.2228194/post-33073282
+                let owner = (entity.kind != 0x500)
+                    .then(|| *loot.shared_owners.choose(&mut self.rng).unwrap());
+                if let Some(owner) = owner {
+                    entity.extra_stats.push((54, owner));
+                } else {
+                    entity.bag_owners = loot.shared_owners.clone();
+                }
+                entity.drop_slots = (0..chunk.len()).collect();
+                tracing::info!(entity = bag, ?owner, owners = ?entity.bag_owners, "god equipment bag allocated");
+            }
+        }
+        Ok(())
+    }
     fn defeat_entity(&mut self, id: i32) -> Result<()> {
         self.defeat_entity_with_killer(id, None)
     }
     fn defeat_entity_with_killer(&mut self, id: i32, killer: Option<i32>) -> Result<()> {
         let e = self.remove_entity(id);
+        // Death credit must survive reward errors; the reference also notifies the Realm before loot behaviors: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L54-L60
+        if self.encounter {
+            if crate::endgame::HEROES.contains(&e.kind) {
+                self.critical_deaths.push(e.id);
+            } else if (crate::quest::final_root(e.kind) || matches!(e.kind, 0x678 | 0xd50 | 0xd54))
+                && let Some(original) = *e.quest
+            {
+                self.critical_deaths.push(original);
+            }
+        }
         let definition = &self.content.objects[&e.kind];
         // Reference Reproduce suppresses follower XP; Pentaract Spawn explicitly allows eye XP.
         let reward = if e.kind == crate::dungeon::tomb::ANCHOR
@@ -5694,7 +5688,7 @@ impl World {
                 let assigned = p.quest == Some(e.id)
                     || (crate::quest::final_root(e.kind)
                         && e.quest.is_some()
-                        && p.qualified_quest == e.quest);
+                        && p.qualified_quest == *e.quest);
                 if assigned
                     && p.character.hp > 0
                     && e.damage
@@ -5771,14 +5765,6 @@ impl World {
         Ok(())
     }
     fn drop_loot(&mut self, defeated: &Entity) -> Result<()> {
-        if crate::endgame::HEROES.contains(&defeated.kind) {
-            self.critical_deaths.push(defeated.id);
-        } else if (crate::quest::final_root(defeated.kind)
-            || matches!(defeated.kind, 0x678 | 0xd50 | 0xd54))
-            && let Some(original) = defeated.quest
-        {
-            self.critical_deaths.push(original);
-        }
         if let Some(index) = crate::dungeon::DUNGEONS
             .iter()
             .position(|(_, _, name, boss)| *name == self.name && *boss == defeated.kind)
@@ -5934,6 +5920,11 @@ impl World {
             // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
             return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
+        if crate::loot::potion_damage(defeated.kind).is_some() {
+            let loot =
+                crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
+            return self.god_loot_bags(defeated.pos, loot);
+        }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
         // The older Tomb loot engine shares two rolls instead of guaranteeing Life to every raider.
         let attempts = if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
@@ -5964,11 +5955,12 @@ impl World {
                 rewards.push(0xaea);
             }
             for item in rewards {
-                let potion = self.content.objects[&item].slot_type == 10;
-                if potion
-                    && crate::loot::potion_damage(defeated.kind)
-                        .is_some_and(|required| eligible[i % eligible.len()].1 < required)
-                {
+                if !crate::loot::item_qualified(
+                    defeated.kind,
+                    item,
+                    eligible[i % eligible.len()].1,
+                    self.content.objects[&defeated.kind].hp,
+                ) {
                     continue;
                 }
                 let owner = if private {
@@ -6200,6 +6192,11 @@ impl World {
             return packets;
         }
         self.beach_notice();
+        // Kithio's next-slot history index makes TryGetHistory(100) read the previous 50 ms sample.
+        for p in self.players.values_mut() {
+            p.white_demon_aim_history.rotate_left(1);
+            p.white_demon_aim_history[1] = p.pos;
+        }
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
         let audience: Vec<_> = self
@@ -6331,6 +6328,10 @@ impl World {
                 && !manor_clock
             {
                 self.suspend_npc(id, delta);
+                continue;
+            }
+            if let Err(error) = self.reproduce_god(id, delta) {
+                tracing::error!(entity = id, kind, %error, "ordinary god reproduction refused");
                 continue;
             }
             let activated = *self
@@ -6546,7 +6547,14 @@ impl World {
                     }
                     Motion::Follow { idle, .. } => {
                         if let Some(target) = self.follow_goal(id, target, motion, delta) {
-                            Some(target)
+                            Some(if kind == 0x651 && self.name != "Abyss of Demons" {
+                                Pos {
+                                    x: target.x - self.rng.gen_range(-2..2) as f32 / 2.,
+                                    y: target.y - self.rng.gen_range(-2..2) as f32 / 2.,
+                                }
+                            } else {
+                                target
+                            })
                         } else if idle == 0. {
                             speed = 0.;
                             Some(pos)
@@ -7411,196 +7419,13 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 }
 
 #[cfg(test)]
-mod chase_tests;
+mod movement_tests;
+
 #[cfg(test)]
 mod death_chat_tests;
-#[cfg(test)]
-mod dungeon_return_tests;
-#[cfg(test)]
-mod hermit_leash_tests;
-#[cfg(test)]
-mod hermit_loot_tests;
-#[cfg(test)]
-mod period_loot_tests;
-#[cfg(test)]
-mod pirate_generation_tests;
-#[cfg(test)]
-mod spectator_tests;
-#[cfg(test)]
-mod sphinx_loot_tests;
-#[cfg(test)]
-mod sphinx_site_tests;
-#[cfg(test)]
-mod weapon_tests;
-#[cfg(test)]
-mod world_effect_tests;
 
 #[cfg(test)]
-impl World {
-    pub(crate) fn test_paused_script_heartbeats(&mut self, id: i32) -> Result<()> {
-        let p = self.players.get_mut(&id).unwrap();
-        assert!(p.active() && p.paused && p.controller != Controller::Human);
-        let position = p.pos;
-        let credit = p.movement_credit;
-        let character = serde_json::to_value(&p.character)?;
-        let fractions = (p.hp_fraction, p.mp_fraction);
-        // Nonzero residues detect accidentally entering even the full-HP/MP regeneration branch.
-        p.hp_fraction = 0.25;
-        p.mp_fraction = 0.5;
-        p.bot_goal = Some(Pos {
-            x: position.x + 1.,
-            y: position.y,
-        });
-        p.bot_aim = Some(0.);
-        let goal = p.bot_goal;
-        let next_bullet = p.next_bullet;
-        let mut moves = Vec::new();
-        for _ in 0..40 {
-            self.step();
-            let p = &self.players[&id];
-            moves.push((p.last_move, self.now as i32));
-            assert_eq!((p.pos.x, p.pos.y), (position.x, position.y));
-            assert_eq!(p.movement_credit, credit);
-            assert_eq!(serde_json::to_value(&p.character)?, character);
-            assert_eq!((p.hp_fraction, p.mp_fraction), (0.25, 0.5));
-            assert_eq!(p.bot_goal.map(|p| (p.x, p.y)), goal.map(|p| (p.x, p.y)));
-            assert_eq!(p.bot_aim, Some(0.));
-            assert_eq!(p.next_bullet, next_bullet);
-            assert!(!self.bullets.iter().any(|b| b.owner == id));
-        }
-        // Exercise the real guard before checking the recorded heartbeat times.
-        self.move_to(id, position, self.now as i32)?;
-        assert!(moves.iter().all(|(actual, expected)| actual == expected));
-        let p = self.players.get_mut(&id).unwrap();
-        p.hp_fraction = fractions.0;
-        p.mp_fraction = fractions.1;
-        p.bot_goal = None;
-        p.bot_aim = None;
-        Ok(())
-    }
-}
+mod reward_accuracy_tests;
 
 #[cfg(test)]
-#[test]
-fn native_map_effects_use_decimal_or_prefixed_hex_numbers() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-    assert!(!content.objects[&0x105].stasis_immune);
-    let map = |literal: &str| {
-        Arc::new(Map {
-            width: 1,
-            height: 1,
-            cells: vec![crate::content::Cell {
-                ground: 0x46,
-                object: Some(0x105),
-                config: format!("name:native;eff:{literal};size:137;conn:16"),
-                terrain: 0,
-                region: 0,
-            }],
-            spawns: vec![(0.5, 0.5)],
-        })
-    };
-    for (literal, expected) in [
-        ("16", 16),
-        ("0x10", 16),
-        ("+16", 16),
-        ("-16", -16),
-        ("0x80000000", i32::MIN),
-        ("0xffffffff", -1),
-    ] {
-        let world = World::new(content.clone(), map(literal)).unwrap();
-        let entity = world.entities.values().next().unwrap();
-        assert_eq!(entity.condition, expected, "eff:{literal}");
-        assert_eq!(entity.name, "native");
-        assert_eq!(entity.size, 137);
-        assert!(entity.extra_stats.contains(&(41, 16)));
-    }
-    for literal in ["0x0x10", "0x100000000", "2147483648", "garbage"] {
-        assert!(
-            World::new(content.clone(), map(literal)).is_err(),
-            "eff:{literal}"
-        );
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn fixture_population_seed_is_reproducible_without_prepared_authority() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    for seed in [12351, 423] {
-        let mut left = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
-        let right = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
-        let mut expected_layout_rng = rand::rngs::StdRng::seed_from_u64(seed);
-        for _ in 0..2 {
-            let _: usize = expected_layout_rng.gen_range(0..1);
-        }
-        assert_eq!(
-            left.realm_rng.clone().r#gen::<u64>(),
-            expected_layout_rng.r#gen::<u64>()
-        );
-        assert!(left.prepared_seed.is_none() && right.prepared_seed.is_none());
-        let mut streams = BTreeSet::new();
-        for (id, a) in left.worlds.iter().filter(|(_, w)| w.name == "Realm") {
-            let b = &right.worlds[id];
-            assert!(a.prepared_seed.is_none() && b.prepared_seed.is_none());
-            let next = (
-                a.rng.clone().r#gen::<u64>(),
-                a.event_rng.clone().r#gen::<u64>(),
-            );
-            assert_eq!(
-                next,
-                (
-                    b.rng.clone().r#gen::<u64>(),
-                    b.event_rng.clone().r#gen::<u64>()
-                )
-            );
-            assert!(streams.insert(next));
-            assert_eq!(
-                a.entities
-                    .values()
-                    .map(|e| (e.kind, e.pos.x, e.pos.y))
-                    .collect::<Vec<_>>(),
-                b.entities
-                    .values()
-                    .map(|e| (e.kind, e.pos.x, e.pos.y))
-                    .collect::<Vec<_>>()
-            );
-            assert!(a.map.cells.iter().zip(&b.map.cells).all(|(a, b)| (
-                a.ground, a.object, &a.config, a.terrain, a.region
-            ) == (
-                b.ground, b.object, &b.config, b.terrain, b.region
-            )));
-            assert_eq!(
-                a.entities
-                    .values()
-                    .filter(|e| e.kind == crate::dungeon::manor::KAGE)
-                    .count(),
-                2
-            );
-        }
-        assert_eq!(streams.len(), 2);
-        let worlds = left.worlds.len();
-        assert!(left.prepared_instance("realm-shore").is_err());
-        assert!(
-            left.prepared_instance_with_seed("realm-shore", 423)
-                .is_err()
-        );
-        assert_eq!(left.worlds.len(), worlds);
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn populated_realm_fixture_retains_graveyard_space() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    for seed in [730, 1093] {
-        let directory = Directory::fixture(data, content.clone(), 16, 12351, Some(seed))
-            .unwrap_or_else(|error| panic!("fixture population seed {seed}: {error:#}"));
-        for world in directory.worlds.values().filter(|w| w.name == "Realm") {
-            let count = |kind| world.entities.values().filter(|e| e.kind == kind).count();
-            assert_eq!(count(crate::dungeon::manor::KAGE), 2);
-            assert!((17..25).contains(&count(0x91f)));
-        }
-    }
-}
+impl World {}

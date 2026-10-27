@@ -602,6 +602,24 @@ impl Store {
             .context("Wizard class missing")?
             .base;
         let mut c = Connection::open(path)?;
+        let integrity: String = c
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .context("game database integrity_check could not run")?;
+        ensure!(
+            integrity == "ok",
+            "game database integrity_check failed: {integrity}"
+        );
+        let foreign_key: Option<(String, Option<i64>, String, i32)> = c
+            .query_row("PRAGMA foreign_key_check", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .optional()
+            .context("game database foreign_key_check could not run")?;
+        ensure!(
+            foreign_key.is_none(),
+            "game database foreign_key_check failed (table, rowid, parent, key): {foreign_key:?}"
+        );
+        tracing::info!(path=%path.display(), "account store integrity and foreign keys verified");
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
             matches!(
@@ -870,18 +888,6 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         (ready, release)
     }
 
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_jobs(&self) -> usize {
-        self.lifecycle_jobs
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-    #[cfg(test)]
-    pub(crate) async fn lifecycle_test_job<T: Send + 'static>(
-        &self,
-        f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
-    ) -> Result<T> {
-        self.call(f).await
-    }
     async fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
@@ -1064,11 +1070,11 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             let existing: Option<(String, i32)> = tx.query_row(
                 "SELECT guid,accounts.id FROM accounts JOIN shore_bots ON accounts.id=shore_bots.account WHERE shore_bots.name=?1",
                 [&identity], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            let taken = accounts::human_name_taken(&tx, &name, 0)?;
+            ensure!(!taken, anyhow::anyhow!(Rejected("persona name is already in use")).context(format!("persona {identity} already belongs to another account")));
             let (guid, account) = match existing {
                 Some(found) => found,
                 None => {
-                    let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE name=?1 COLLATE NOCASE AND NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=accounts.id))", [&name], |r| r.get(0))?;
-                    ensure!(!taken, anyhow::anyhow!(Rejected("persona name is already in use")).context(format!("persona {identity} already belongs to another account")));
                     let guid = format!("persona-{:032x}", rand::random::<u128>());
                     tx.execute("INSERT INTO accounts(guid,name,character_slots,vault_mask) VALUES(?1,?2,14,?3)", params![guid, name, (1 << vault.len()) - 1])?;
                     let account = i32::try_from(tx.last_insert_rowid())?;
@@ -1124,6 +1130,14 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         );
         let index = pick % account.characters.len();
         Ok(account.characters.swap_remove(index))
+    }
+    pub(crate) async fn persona_name_available(&self, account: i32, name: String) -> Result<()> {
+        self.call(move |db| {
+            let taken = accounts::human_name_taken(db, &name, account)?;
+            ensure!(!taken, Rejected("persona name is already in use"));
+            Ok(())
+        })
+        .await
     }
     pub(crate) async fn retire_persona(&self, identity: String, account: i32) -> Result<()> {
         ensure!(
@@ -1840,7 +1854,10 @@ impl Account {
         )
     }
 }
-#[cfg(test)]
-mod class_quest_tests;
+
 #[cfg(test)]
 mod community_schema_tests;
+#[cfg(all(test, unix))]
+mod restart_tests;
+#[cfg(test)]
+mod startup_tests;

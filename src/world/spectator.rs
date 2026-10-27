@@ -36,6 +36,23 @@ pub(super) fn publish(p: &Player, id: u8, body: &[u8]) {
 }
 
 impl Handle {
+    pub(crate) async fn perspective_visible(
+        &self,
+        source: (i32, i32),
+        target: (i32, i32),
+    ) -> Result<bool> {
+        let Some(slot) = self.routing.player(source.0)? else {
+            return Ok(false);
+        };
+        self.request(
+            &slot.mailbox,
+            "world",
+            "perspective",
+            |world| world.performance.get_mut(),
+            move |world| Ok(world.perspective_visible(source, target)),
+        )
+        .await
+    }
     pub(crate) async fn spectate(&self, player: i32, account: i32) -> Result<Option<Attachment>> {
         let Some(slot) = self.routing.player(player)? else {
             return Ok(None);
@@ -64,6 +81,24 @@ impl Handle {
 }
 
 impl World {
+    pub(super) fn perspective_visible(&self, source: (i32, i32), target: (i32, i32)) -> bool {
+        let (Some(own), Some(other)) = (self.players.get(&source.0), self.players.get(&target.0))
+        else {
+            return false;
+        };
+        let live_bot = |player: &Player, account| {
+            player.character.account == account
+                && player.controller == Controller::Autonomous
+                && player.character.alive
+                && !player.death_pending
+                && !player.departing
+                && player.persistence_failure.is_none()
+        };
+        source.0 != target.0
+            && live_bot(own, source.1)
+            && live_bot(other, target.1)
+            && own.known.contains(&target.0)
+    }
     pub(super) fn attach_spectator(&mut self, id: i32) -> Result<Attachment> {
         let p = self
             .players

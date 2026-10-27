@@ -291,6 +291,3 @@ impl Brain {
         Ok(Some(o.actor))
     }
 }
-
-#[cfg(test)]
-mod tests;

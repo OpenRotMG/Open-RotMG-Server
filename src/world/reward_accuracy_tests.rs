@@ -1,0 +1,122 @@
+use super::*;
+
+async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let mut w = World::new(content, map).unwrap();
+    for id in w.entities.keys().copied().collect::<Vec<_>>() {
+        w.remove_entity(id);
+    }
+    w.encounter = true;
+    let map = Arc::make_mut(&mut w.map);
+    map.spawns = vec![(1.5, 1.5)];
+    for cell in &mut map.cells {
+        cell.ground = 0x61;
+        cell.object = None;
+    }
+    for i in 0..6 {
+        let account = store.list(format!("reward-accuracy-{i}")).await.unwrap();
+        let character = store
+            .create(account.id, w.content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        w.enter(character, None).unwrap();
+    }
+    let owners = w
+        .players
+        .values()
+        .map(|p| (p.character.account, p.character.id))
+        .collect();
+    (w, store, owners)
+}
+
+fn clear_bags(w: &mut World) {
+    for id in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
+        w.remove_entity(id);
+    }
+}
+
+fn white_demon_gear(content: &Content, seed: u64) -> Vec<i32> {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut items = Vec::new();
+    for (chance, tier, slots) in [
+        (0.04, 6, crate::loot::WEAPONS),
+        (0.02, 7, crate::loot::WEAPONS),
+        (0.01, 8, crate::loot::WEAPONS),
+        (0.08, 6, crate::loot::ARMOR),
+        (0.04, 7, crate::loot::ARMOR),
+        (0.02, 8, crate::loot::ARMOR),
+        (0.01, 9, crate::loot::ARMOR),
+        (0.015, 3, crate::loot::RINGS),
+        (0.005, 4, crate::loot::RINGS),
+        (0.02, 4, crate::loot::ABILITIES),
+    ] {
+        let candidates: Vec<_> = content
+            .objects
+            .values()
+            .filter(|item| item.tier == Some(tier) && slots.contains(&item.slot_type))
+            .collect();
+        for item in &candidates {
+            if rng.gen_bool(chance / candidates.len() as f64) {
+                items.push(i32::from(item.kind));
+            }
+        }
+    }
+    items.sort_unstable();
+    items
+}
+
+#[tokio::test]
+async fn god_gear_death_roll_is_once_per_candidate_with_private_colored_bags() {
+    let (mut w, _store, owners) = reward_world().await;
+    let mut seeds = vec![0, 1, 2, 3];
+    let multiple = (0..32768)
+        .find(|seed| {
+            white_demon_gear(&w.content, *seed)
+                .iter()
+                .filter(|kind| {
+                    let item = &w.content.objects[&(**kind as u16)];
+                    item.tier == Some(6) && crate::loot::WEAPONS.contains(&item.slot_type)
+                })
+                .count()
+                > 1
+        })
+        .expect("terminating seeded search must exercise multiple successes in one tier");
+    seeds.push(multiple);
+    for contributors in [1, 2, 5] {
+        for seed in &seeds {
+            clear_bags(&mut w);
+            let root = w
+                .spawn_entity(0x651, Pos { x: 3.5, y: 3.5 }, vec![])
+                .unwrap();
+            w.entities.get_mut(&root).unwrap().damage = owners[..contributors]
+                .iter()
+                .map(|(_, character)| (*character, 1))
+                .collect();
+            w.rng = rand::rngs::StdRng::seed_from_u64(*seed);
+            w.defeat_entity(root).unwrap();
+            assert!(!w.entities.contains_key(&root));
+            let mut actual = Vec::new();
+            for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
+                assert_eq!(bag.items.len(), 8);
+                assert_eq!(
+                    owners[..contributors]
+                        .iter()
+                        .filter(|(account, _)| bag.accessible(*account))
+                        .count(),
+                    if bag.kind == 0x500 { contributors } else { 1 }
+                );
+                assert!(!bag.accessible(owners[5].0));
+                actual.extend(bag.items.iter().copied().filter(|item| *item >= 0));
+            }
+            actual.sort_unstable();
+            assert_eq!(
+                actual,
+                white_demon_gear(&w.content, *seed),
+                "contributors={contributors}, seed={seed}"
+            );
+            assert_eq!(actual.iter().collect::<BTreeSet<_>>().len(), actual.len());
+        }
+    }
+}

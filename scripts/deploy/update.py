@@ -27,11 +27,15 @@ ROOT = Path('/var/lib/openrotmg-deploy')
 BACKUPS = Path('/opt/openrotmg-backup')
 CONFIG = Path('/etc/openrotmg/config.json')
 ANNOUNCE_TOKEN = Path('/etc/openrotmg/discord-link-token')
-RESTART_NOTICE_SECONDS = 20
+# Give players time to finish safely before cutover: https://github.com/OpenRotMG/Open-RotMG-Server/issues/689
+RESTART_NOTICE_SECONDS = 90
 DRAIN_TIMEOUT = 20
 DRAIN_HTTP_TIMEOUT = 3
 LAST_BACKUP = Path('/var/lib/openrotmg-backup/last-success.json')
 LOCK = Path('/run/lock/openrotmg-deploy.lock')
+CADDY = Path('/etc/caddy/Caddyfile')
+HELPER = Path('/opt/openrotmg-deploy/update.py')
+PUBLIC_HEALTH = 'https://game.openrotmg.org/health'
 LIMIT = 64 * 1024 * 1024
 sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -642,6 +646,44 @@ def deploy(stage, work, metadata, config):
         raise RuntimeError(f'Post-stop backup_after_start failed: {error}; recovery: {work}') from error
 
 
+def install_caddy(source):
+    new = source.read_bytes()
+    old = CADDY.read_bytes()
+    if new == old:
+        return False
+    candidate = CADDY.with_name('Caddyfile.new')
+    candidate.write_bytes(new)
+    candidate.chmod(0o644)
+    run('caddy', 'validate', '--config', str(candidate), '--adapter', 'caddyfile')
+    previous = CADDY.with_name('Caddyfile.previous')
+    previous.write_bytes(old)
+    previous.chmod(0o644)
+    candidate.replace(CADDY)
+    try:
+        run('systemctl', 'reload', 'caddy')
+        with urllib.request.urlopen(PUBLIC_HEALTH, timeout=15) as response:
+            require(response.status == 200, 'Public health failed after Caddy reload')
+    except Exception:
+        shutil.copyfile(previous, CADDY)
+        run('systemctl', 'reload', 'caddy')
+        raise
+    print(json.dumps({'caddy': 'reloaded', 'sha256': hashlib.sha256(new).hexdigest()}), flush=True)
+    return True
+
+
+def install_helper(source):
+    new = source.read_bytes()
+    if new == HELPER.read_bytes():
+        return False
+    compile(new, str(source), 'exec')
+    candidate = HELPER.with_name('update.py.new')
+    candidate.write_bytes(new)
+    candidate.chmod(0o755)
+    candidate.replace(HELPER)
+    print(json.dumps({'deploy_helper': 'installed', 'sha256': hashlib.sha256(new).hexdigest()}), flush=True)
+    return True
+
+
 def main_revision():
     revision = subprocess.check_output(['git', 'ls-remote', '--exit-code', REPO + '.git', 'refs/heads/main'], text=True, timeout=30).split()[0]
     require(re.fullmatch('[0-9a-f]{40}', revision), 'Invalid main revision')
@@ -688,6 +730,9 @@ def main(desired, raw):
         status('rehearsing', desired)
         deploy(stage, work, metadata, config)
         outcome(work, 'success', stage)
+        install_caddy(LIVE / 'scripts/deploy/Caddyfile')
+        # The next release must run this release's reviewed helper, not a hand-installed copy.
+        install_helper(LIVE / 'scripts/deploy/update.py')
         retain_deployments()
         status('deployed', desired, recovery_directory=str(work), backup=json.loads(LAST_BACKUP.read_text()))
     except Exception as error:

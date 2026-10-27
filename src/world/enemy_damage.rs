@@ -59,7 +59,11 @@ impl World {
             return Ok(0);
         }
         let flags = e.conditions(self.now);
-        let affects = !crate::condition::protected(flags);
+        // Invulnerability blocks HP loss, not projectile conditions: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L93-L117
+        let affects = flags
+            & (crate::condition::bit(crate::condition::INVINCIBLE)
+                | crate::condition::bit(crate::condition::STASIS))
+            == 0;
         let damage =
             crate::condition::damage(raw, self.content.objects[&e.kind].defense, flags, piercing);
         // Evaluation shells select a fight; only the transformed boss can be defeated for rewards.
@@ -102,6 +106,7 @@ impl World {
         let lantern = lethal && e.kind == crate::dungeon::davy::UNLIT && self.locker.is_some();
         let kill = lethal && !transform && !lantern;
         let kind = e.kind;
+        let position = e.pos;
 
         let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
         if e.kind == 0x90b {
@@ -133,8 +138,13 @@ impl World {
             .u8(u8::from(kill))
             .u8(bullet.unwrap_or(0))
             .i32(if bullet.is_some() { owner } else { 0 });
-        for p in self.players.values() {
-            if p.known.contains(&target) {
+        // Quest arrows retain distant bosses, but damage plays audio without a range check: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Character.as
+        // The shooter already predicts enemy projectile damage: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L121-L129
+        for (id, p) in &self.players {
+            if p.known.contains(&target)
+                && p.pos.distance(position) < 20.
+                && (*id != owner || bullet.is_none() || !self.content.objects[&kind].enemy)
+            {
                 send(p, 47, o.0.clone());
             }
         }

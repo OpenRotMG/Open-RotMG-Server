@@ -16,13 +16,17 @@ pub(super) struct Script {
 impl World {
     pub(super) fn landmark_bind(&mut self, id: i32) -> Result<Option<i32>> {
         let e = &self.entities[&id];
-        if let Some(tag) = e.quest {
+        if let Some(tag) = *e.quest {
             return Ok(Some(tag));
         }
         let kind = e.kind;
         let root = landmarks::owner(kind);
         if landmarks::ROOTS.contains(&kind) {
-            self.entities.get_mut(&id).unwrap().quest = Some(id);
+            self.entities
+                .get_mut(&id)
+                .unwrap()
+                .quest
+                .set(Some(id), id, &mut self.quest_ids);
             return Ok(Some(id));
         }
         if matches!(kind, 0x65a..=0x65e) {
@@ -38,17 +42,21 @@ impl World {
             let tag = self
                 .landmark_bind(owner)?
                 .context("landmark root lacks ownership")?;
-            self.entities.get_mut(&id).unwrap().quest = Some(tag);
+            self.entities
+                .get_mut(&id)
+                .unwrap()
+                .quest
+                .set(Some(tag), id, &mut self.quest_ids);
             return Ok(Some(tag));
         }
         Ok(None)
     }
     pub(super) fn landmark_members(&self, id: i32, kind: u16) -> Vec<i32> {
-        let Some(tag) = self.entities[&id].quest else {
+        let Some(tag) = *self.entities[&id].quest else {
             return vec![];
         };
-        self.actors()
-            .filter(|e| e.quest == Some(tag) && e.kind == kind)
+        self.quest_actors(tag)
+            .filter(|e| e.kind == kind)
             .map(|e| e.id)
             .collect()
     }
@@ -361,12 +369,7 @@ impl World {
                     usize::from(spawned < 20)
                 };
                 ensure!(
-                    self.actors()
-                        .filter(|e| e.parent.is_some() || e.quest.is_some())
-                        .count()
-                        + self.named_births.len()
-                        + count
-                        <= 256,
+                    self.summon_count() + self.named_births.len() + count <= 256,
                     "Oasis group exceeds shared summon budget"
                 );
                 for _ in 0..count {

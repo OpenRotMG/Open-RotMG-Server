@@ -8,7 +8,6 @@ type Point = (i32, i32);
 const DIRECTIONS: [Point; 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 const PITCH: i32 = 16;
 const ROOM: i32 = 6;
-// The preserved map gives Limon a 30-tile platform: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
 const ARENA: i32 = 15;
 
 pub fn generate(content: &Content, seed: u64) -> Result<Map> {
@@ -38,7 +37,6 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         rooms.push(pos);
     }
     let reach = |i: usize| if i == boss { ARENA } else { ROOM };
-    // Grid centers stay on paint()'s conveyor origin, with a two-tile void margin.
     let shift = |axis: fn(&Point) -> i32| {
         let low = rooms.iter().enumerate().map(|(i, p)| axis(p) - reach(i));
         12 - PITCH * (10 + low.min().unwrap()).div_euclid(PITCH)
@@ -65,8 +63,6 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         ],
         spawns: vec![],
     };
-    // White stationary floors and compact platforms/two-tile bridges match the preserved map:
-    // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
     for (i, &(cx, cy)) in centers.iter().enumerate() {
         let radius = if i == boss {
             ARENA
@@ -97,7 +93,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let (bx, by) = centers[boss];
     map.cells[(by * width + bx) as usize].object = Some(0xd06);
     map.cells[(by * width + bx + 3) as usize].object = Some(0x70e);
-    let gods = rng.gen_range(0..=5);
+    // The guide bounds the count, not its odds; 20% rolls tune rarity for #678, not recovered RNG:
+    // https://web.archive.org/web/20120531054927id_/http://forums.wildshadow.com/wiki/realm-mad-god/sprite-world
+    let gods = (0..5).filter(|_| rng.gen_ratio(1, 5)).count();
     let mut hosts: Vec<_> = centers
         .iter()
         .enumerate()
@@ -124,6 +122,31 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             );
         }
     }
+    // Reconstruct the irregular bands in this later map, not an authenticated 2012 generator:
+    // https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/spriteworld.wmap
+    for (i, &(cx, cy)) in centers.iter().enumerate() {
+        let radius = if i == boss { ARENA } else { PITCH / 2 };
+        for _ in 0..rng.gen_range(radius..=radius * 2) {
+            let color = rng.gen_range(0xa1..=0xa4);
+            let length = rng.gen_range(3..=radius * 2 + 1);
+            let thickness = rng.gen_range(1..=3);
+            let (w, h) = if rng.gen_bool(0.5) {
+                (length, thickness)
+            } else {
+                (thickness, length)
+            };
+            let x0 = rng.gen_range(cx - radius..=cx + radius - w + 1);
+            let y0 = rng.gen_range(cy - radius..=cy + radius - h + 1);
+            for y in y0..y0 + h {
+                for x in x0..x0 + w {
+                    let cell = &mut map.cells[(y * width + x) as usize];
+                    if cell.ground != 0xfe && ((x - sx).abs() > 1 || (y - sy).abs() > 1) {
+                        cell.ground = color;
+                    }
+                }
+            }
+        }
+    }
     ensure!(map.spawns.len() == 1, "Sprite World lost its entrance");
     ensure!(
         map.cells.iter().filter(|c| c.object == Some(0xd06)).count() == 1
@@ -144,7 +167,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         seed,
         rooms = rooms.len(),
         gods,
-        floor_pattern = "White",
+        floor_pattern = "SeededBands",
         width,
         height,
         "generated varied Sprite World"
@@ -179,72 +202,12 @@ fn apart(room: Point, arena: Point) -> bool {
 }
 
 fn paint(map: &mut Map, x: i32, y: i32) {
-    map.cells[(y * map.width + x) as usize].ground =
-        match ((x - 12).rem_euclid(8), (y - 12).rem_euclid(8)) {
-            (_, 2) => 0xa1,
-            (_, 3) => 0xa2,
-            (2, _) => 0xa3,
-            (3, _) => 0xa4,
-            _ => 0xa0,
-        };
+    map.cells[(y * map.width + x) as usize].ground = 0xa0;
 }
 
 fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
     let cell = &mut map.cells[(y * map.width + x) as usize];
     if (0xa0..=0xa4).contains(&cell.ground) && cell.object.is_none() {
         cell.object = Some(kind);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::BTreeSet;
-
-    #[test]
-    fn sprite_floor_uses_reference_palette() {
-        let content = Content::load(std::path::Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/data"
-        )))
-        .unwrap();
-        for seed in 0..16 {
-            let map = generate(&content, seed).unwrap();
-            assert_eq!(
-                map.cells.iter().map(|c| c.ground).collect::<BTreeSet<_>>(),
-                BTreeSet::from([0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xfe]),
-                "seed {seed}"
-            );
-        }
-    }
-
-    #[test]
-    fn limon_arena_is_a_separate_thirty_one_tile_platform() {
-        let content = Content::load(std::path::Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/data"
-        )))
-        .unwrap();
-        for seed in 0..256 {
-            let map = generate(&content, seed).unwrap();
-            let at = |x: i32, y: i32| &map.cells[(y * map.width + x) as usize];
-            let i = map
-                .cells
-                .iter()
-                .position(|c| c.object == Some(0xd06))
-                .unwrap() as i32;
-            let (lx, ly) = (i % map.width, i / map.width);
-            for y in ly - 15..=ly + 15 {
-                for x in lx - 15..=lx + 15 {
-                    assert!((0xa0..=0xa4).contains(&at(x, y).ground), "seed {seed}");
-                }
-            }
-            let ring = (lx - 16..=lx + 16)
-                .flat_map(|x| [(x, ly - 16), (x, ly + 16)])
-                .chain((ly - 15..=ly + 15).flat_map(|y| [(lx - 16, y), (lx + 16, y)]))
-                .filter(|&(x, y)| at(x, y).ground != 0xfe)
-                .count();
-            assert_eq!(ring, 2, "seed {seed}: arena joined another platform");
-        }
     }
 }

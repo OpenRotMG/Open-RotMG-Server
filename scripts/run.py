@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -12,6 +13,7 @@ import subprocess
 import sys
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
+from cargo import locked
 
 ROOT = Path(__file__).resolve().parents[1]
 CLIENT_SELECTION_URL = "https://openrotmg.org/diagnostics-build.json"
@@ -38,9 +40,36 @@ def client_selection(manifest=None):
 
 def prepare_client(manifest=None):
     selection = client_selection(manifest)
+    LOG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cache = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'openrotmg/deployed-clients'
+    if not cache.is_absolute() or cache.resolve() != cache or cache.is_relative_to(ROOT):
+        raise RuntimeError('Shared client cache must be canonical, absolute and outside the checkout')
+    with locked(cache, marker_text='OpenRotMG verified deployed clients v1\n'):
+        client = cached_client(selection, cache)
+        vendor = client / 'vendor'
+        if not vendor.exists():
+            with LOG.open('a') as log:
+                code = run([sys.executable, str(client / 'scripts/run.py'), '--prepare-only'], client, log)
+            if code:
+                raise RuntimeError(f'Client preparation exited with status {code}. See {LOG}.')
+        bundle = client / f'.ruffle-{selection["runtime_version"]}.zip'
+        if bundle.is_symlink() or hashlib.sha256(bundle.read_bytes()).hexdigest() != selection['runtime_bundle_sha256']:
+            raise RuntimeError(f'Shared runtime archive changed: {bundle}')
+        with ZipFile(bundle) as archive:
+            names = archive.namelist()
+            if vendor.is_symlink() or len(names) != len(set(names)) or set(names) != {path.name for path in vendor.iterdir()}:
+                raise RuntimeError(f'Shared runtime contents changed: {vendor}')
+            for name in names:
+                path = vendor / name
+                if Path(name).name != name or path.is_symlink() or path.read_bytes() != archive.read(name):
+                    raise RuntimeError(f'Shared runtime asset changed: {path}')
+        return client
+
+
+def cached_client(selection, directory):
     revision, expected = selection['client'], selection['client_archive_sha256']
     url = f"https://codeload.github.com/OpenRotMG/Open-RotMG-Client/zip/{revision}"
-    cache = LOG.parent / f"client-{revision}.zip"
+    cache = directory / f"client-{revision}.zip"
     cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if cache.is_symlink():
         raise RuntimeError(f"Client archive cache must not be a symlink: {cache}")
@@ -87,7 +116,7 @@ def prepare_client(manifest=None):
     if not cache.exists():
         cache.write_bytes(data)
     receipt = json.dumps(selection, sort_keys=True)
-    (cache.parent / 'client-selection.json').write_text(receipt + '\n')
+    (LOG.parent / 'client-selection.json').write_text(receipt + '\n')
     print(f'Client selection: {receipt}', flush=True)
     with LOG.open('a') as log:
         log.write(f'Client selection: {receipt}\n')
@@ -161,10 +190,11 @@ def main():
             print(receipt, flush=True)
             log.write(receipt + "\n")
             log.flush()
-            print(f"Preparing local client. Logs: {LOG}", flush=True)
-            code = run([sys.executable, str(prepare), "--prepare-only"], client, log)
-            if code:
-                raise RuntimeError(f"Client preparation exited with status {code}. See the error above and {LOG}.")
+            if args.local_client is not None:
+                print(f"Preparing local client. Logs: {LOG}", flush=True)
+                code = run([sys.executable, str(prepare), "--prepare-only"], client, log)
+                if code:
+                    raise RuntimeError(f"Client preparation exited with status {code}. See the error above and {LOG}.")
             print(f"Building and starting your local game. Logs: {LOG}", flush=True)
             binary = state / 'server-build' / 'openrotmg'
             build = [sys.executable, guard, '--output', str(binary), 'build', '--locked']

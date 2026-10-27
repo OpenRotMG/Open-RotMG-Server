@@ -97,8 +97,9 @@ async fn serve(args: Vec<String>) -> Result<()> {
         testing.is_none() || !config.shore_bots,
         "prepared sessions require --no-shore-bots or shore_bots:false; spawn every controller explicitly"
     );
-    let supervisor = supervision::Supervisor::persisted(state.join("last-critical-incident.json"))?;
     let store = store::Store::open(&state.join("game.db"), &content)?;
+    let supervisor =
+        supervision::Supervisor::recovered(state.join("last-critical-incident.json"), &store)?;
     let directory = match &testing {
         Some(_) => world::Directory::prepared(
             &config.data,
@@ -183,9 +184,10 @@ async fn serve(args: Vec<String>) -> Result<()> {
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),
+        name_claims: Arc::default(),
         bots: Arc::default(),
         #[cfg(test)]
-        quarantined: Arc::default(),
+        persona_departure_gate: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
     };
     server::serve(app, config.bind, client).await

@@ -1,4 +1,5 @@
 use super::*;
+pub(super) mod perspective;
 use crate::{
     bots::cctv::Viewer,
     world::spectator::{Attachment, Projection},

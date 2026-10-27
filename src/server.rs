@@ -1,6 +1,9 @@
 mod bot_view;
 mod input;
+mod name_claims;
 
+#[cfg(test)]
+pub(crate) mod name_claims_tests;
 #[cfg(test)]
 mod password_tests;
 mod pictures;
@@ -34,6 +37,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+use tracing::instrument::WithSubscriber;
 pub(crate) mod lifecycle;
 pub use lifecycle::Owner;
 use lifecycle::{CloseReason, Stage};
@@ -85,7 +89,14 @@ mod updates;
 use account_actions::{
     discord_announce, discord_gold, discord_kick, discord_recover, reset_password,
 };
-use hiscores::{collection, discord_link, hiscores};
+use hiscores::{collection, discord_link, graveyard, hiscores};
+#[cfg(test)]
+pub(crate) type PersonaDepartureGate = (
+    i32,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+
 #[derive(Clone)]
 pub struct App {
     pub started: std::time::Instant,
@@ -118,9 +129,10 @@ pub struct App {
     pub authentication: Arc<tokio::sync::RwLock<()>>,
     pub guild_actions: Arc<tokio::sync::Mutex<()>>,
     pub gold_updates: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) name_claims: Arc<tokio::sync::Mutex<()>>,
     pub bots: Arc<Mutex<BTreeMap<i32, Owner>>>,
     #[cfg(test)]
-    pub quarantined: Arc<Mutex<Vec<Owner>>>,
+    pub(crate) persona_departure_gate: Arc<Mutex<Option<PersonaDepartureGate>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
     pub(crate) admission: Arc<lifecycle::drain::Admission>,
 }
@@ -349,6 +361,10 @@ async fn account_request(
                 a.store.authenticate(guid, password).await?
             }
             "setName" => {
+                ensure!(
+                    form.get("secret").is_none_or(|s| s.is_empty()),
+                    "external platform authentication is not implemented"
+                );
                 let id = a
                     .store
                     .authenticate(
@@ -359,8 +375,18 @@ async fn account_request(
                 let _claim = a.claim(id)?;
                 let name = form.get("name").context("name required")?.clone();
                 lifecycle::account(&a, vec![id], "choose_name", move |a| async move {
+                    let _names = a.name_claims.lock().await;
+                    let stopped = name_claims::prepare(&a, id, name.clone(), false)
+                        .await?
+                        .map_err(crate::store::Rejected)?;
+                    let _gold = a.gold_updates.lock().await;
                     lifecycle::stage(Stage::Store);
-                    a.store.choose_name(id, name).await
+                    match a.store.claim_name_choice(id, name, false, stopped).await? {
+                        crate::store::NameChoice::Committed { .. } => Ok(()),
+                        crate::store::NameChoice::Rejected(reason) => {
+                            Err(crate::store::Rejected(reason).into())
+                        }
+                    }
                 })
                 .await?;
                 id
@@ -1276,33 +1302,53 @@ async fn handle(
         .as_ref()
         .map(|owner| vec![owner.id])
         .unwrap_or_default();
-    let (app, completed_session, result) =
-        lifecycle::account(a, accounts, "native_packet", move |mut app| async move {
-            let result = if INPUTS.contains(&packets[0].0.id) {
-                entry
-                    .scope(handle_inputs(&app, packets, &owned_session))
-                    .await
-            } else {
-                let Ok([(packet, received)]) = <[_; 1]>::try_from(packets) else {
-                    unreachable!("only native input is batched")
-                };
-                entry
-                    .scope(handle_inner(
-                        &mut app,
-                        packet,
-                        &mut owned_session,
-                        &tx,
-                        &lost,
-                        received,
-                    ))
-                    .await
+    let naming = packets.len() == 1 && packets[0].0.id == 33;
+    if naming && let Some(owner) = &mut owned_session.account {
+        owner.arm_cleanup(a, tokio::runtime::Handle::current());
+    }
+    let work = move |mut app: App| async move {
+        let result = if INPUTS.contains(&packets[0].0.id) {
+            entry
+                .scope(handle_inputs(&app, packets, &owned_session))
+                .await
+        } else {
+            let Ok([(packet, received)]) = <[_; 1]>::try_from(packets) else {
+                unreachable!("only native input is batched")
             };
-            if let (Err(error), Some(owner)) = (&result, &owned_session.account) {
-                lifecycle::observe(&app, owner.id, "native_packet", error);
+            entry
+                .scope(handle_inner(
+                    &mut app,
+                    packet,
+                    &mut owned_session,
+                    &tx,
+                    &lost,
+                    received,
+                ))
+                .await
+        };
+        if let (Err(error), Some(owner)) = (&result, &owned_session.account) {
+            lifecycle::observe(&app, owner.id, "native_packet", error);
+        }
+        Ok((app, owned_session, result))
+    };
+    // A bot's terminal assist credits may need this claimant's ordinary progress reservation.
+    let (app, completed_session, result) = if naming {
+        let app = a.clone();
+        let request = crate::performance::REQUEST.try_with(Arc::clone).ok();
+        tokio::spawn(
+            async move {
+                match request {
+                    Some(request) => crate::performance::REQUEST.scope(request, work(app)).await,
+                    None => work(app).await,
+                }
             }
-            Ok((app, owned_session, result))
-        })
-        .await?;
+            .with_current_subscriber(),
+        )
+        .await
+        .context("owned native name task failed")??
+    } else {
+        lifecycle::account(a, accounts, "native_packet", work).await?
+    };
     *a = app;
     *session = completed_session;
     result?;
@@ -1967,53 +2013,7 @@ async fn handle_inner(
                 .as_ref()
                 .ok_or_else(|| lifecycle::protocol("name before HELLO"))?
                 .id;
-            let _gold = a.gold_updates.lock().await;
-            lifecycle::stage(Stage::Reservation);
-            let reservation = if let Some(id) = *player {
-                match a
-                    .world
-                    .for_player(id)
-                    .call(move |w| w.begin_name_choice(id, account))
-                    .await?
-                {
-                    Ok(plan) => Some((id, plan)),
-                    Err(reason) => {
-                        lifecycle::stage(Stage::Rejected);
-                        tracing::info!(account, reason, "name choice rejected before reservation");
-                        let mut o = Writer::new();
-                        o.u8(0).utf(reason);
-                        enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
-                        return Ok(());
-                    }
-                }
-            } else {
-                None
-            };
-            lifecycle::stage(Stage::Store);
-            let result = a
-                .store
-                .name_choice(account, name.clone(), reservation.is_some())
-                .await;
-            lifecycle::stage(Stage::Publication);
-            let rejection = if let Some((id, plan)) = reservation {
-                a.world
-                    .for_player(id)
-                    .call(move |w| w.finish_name_choice(plan, name, result))
-                    .await?
-            } else {
-                match result? {
-                    crate::store::NameChoice::Rejected(reason) => Some(reason),
-                    crate::store::NameChoice::Committed { .. } => None,
-                }
-            };
-            lifecycle::stage(Stage::Settled);
-            if let Some(reason) = rejection {
-                tracing::info!(account, reason, "name choice rejected without charge");
-            }
-            let mut o = Writer::new();
-            o.u8(u8::from(rejection.is_none()))
-                .utf(rejection.unwrap_or(""));
-            enqueue_reply(tx, Packet { id: 20, body: o.0 })?;
+            name_claims::native(a, account, *player, name, tx).await?;
         }
         42 | 3 => {
             let _guild = a.guild_actions.lock().await;
@@ -2180,25 +2180,6 @@ fn outgoing_burst(
         std::iter::from_fn(move || rx.try_recv().ok().map(|packet| (packet, rx.len() + 1)))
             .take(ready),
     )
-}
-
-#[cfg(test)]
-#[test]
-fn predicted_enemy_deaths_reach_the_owning_world_without_granting_hits() {
-    assert!(INPUTS.contains(&76), "predicted enemy deaths are discarded");
-    let packet = |killed| {
-        let mut w = Writer::new();
-        w.i32(1000).u8(1).i32(42).u8(killed);
-        Packet { id: 76, body: w.0 }
-    };
-    let now = std::time::Instant::now();
-    assert!(input(&packet(1), Some(1), now, true).unwrap().is_some());
-    assert!(input(&packet(0), Some(1), now, true).unwrap().is_none());
-    assert!(input(&packet(2), Some(1), now, true).is_err());
-    assert!(input(&packet(1), None, now, true).is_err());
-    let mut trailing = packet(1);
-    trailing.body.push(0);
-    assert!(input(&trailing, Some(1), now, true).is_err());
 }
 
 #[cfg(test)]
@@ -3118,6 +3099,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         )
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))
+        .route("/api/graveyard", get(graveyard))
         .route("/internal/discord/announce", post(discord_announce))
         .route("/internal/discord/link", post(discord_link))
         .route("/internal/discord/link/start", post(browser_link::issue))
@@ -3148,6 +3130,10 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/health", get(health))
         .route("/api/bots", get(crate::bots::cctv::list))
         .route("/api/bots/{name}/socket", get(bot_view::socket))
+        .route(
+            "/api/bots/{name}/perspective/{target}",
+            get(bot_view::perspective::get),
+        )
         .route_service(
             "/api/bots/{name}/view",
             tower_http::services::ServeFile::new(client.join("spectator.html")),

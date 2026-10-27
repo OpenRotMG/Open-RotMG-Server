@@ -490,7 +490,7 @@ impl Life {
             && let Some(p) = v.objects.iter().find(|p| {
                 p.hp > 0
                     && p.account.is_some_and(|a| self.known(a))
-                    && v.position.distance(p.position) > 4.
+                    && v.position.distance(p.position) > 7.
             })
         {
             let mut d = idle();

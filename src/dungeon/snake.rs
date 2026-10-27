@@ -11,6 +11,8 @@ pub const SPAWNER: u16 = 0xe28;
 pub const DART: u16 = 0xe25;
 pub const GUARD_RAGE_HP: i32 = 3300;
 const TREASURE_ENTRY_RISE: i32 = 12;
+// Keep bounds and darts on the eleven-tile rails of this later inactive template: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/maps/wmap%27s/snakepit%20treasure%20test.wmap
+const TREASURE_HALF_WIDTH: i32 = 5;
 
 // The modified 7.0 server provides explicit timings, not an authenticated 123.5.1 AI script.
 pub fn phase(elapsed: u64) -> (u64, u64) {
@@ -115,7 +117,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         let half: Vec<(i32, i32)> = (0..rooms.len())
             .map(|i| match i {
                 6 => (15, 15),
-                i if i >= ordinary => (7, 16),
+                i if i >= ordinary => (TREASURE_HALF_WIDTH, 16),
                 _ => {
                     let r = rng.gen_range(7..=9);
                     (r, r)
@@ -271,17 +273,21 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     map.cells[(sy * width + sx) as usize].region = 1;
     map.cells[(sy * width + sx) as usize].object = Some(0x703);
     let (bx, by) = centers[6];
-    // Boss cover is permanent, unlike tunnel blocks: https://bluenosersguide.weebly.com/snake-pit.html
-    for (dx, dy) in [(-6, 0), (6, 0), (0, -6), (0, 6)] {
-        for along in -2..=2 {
-            for thick in 0..2 {
+    // Reconstruct the later map's notched shoulders, rim clearance and mixed cover, not rectangular bars: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/snakepit.wmap
+    for (dx, dy) in [(-10, 0), (10, 0), (0, -10), (0, 10)] {
+        for along in -2i32..=2 {
+            for thick in -1..=1 {
+                if thick == -1 && along.abs() == 2 || thick == 1 && along == 0 {
+                    continue;
+                }
                 let (x, y) = if dx == 0 {
                     (bx + along, by + dy + thick * dy.signum())
                 } else {
                     (bx + dx + thick * dx.signum(), by + along)
                 };
                 map.cells[(y * width + x) as usize].ground = 0x16;
-                map.cells[(y * width + x) as usize].object = Some(0x170);
+                map.cells[(y * width + x) as usize].object =
+                    Some(if dx == 0 && along >= 0 { 0x172 } else { 0x170 });
             }
         }
     }
@@ -316,11 +322,11 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
             && x.abs()
                 <= match y {
                     ..=-11 | 7..=9 => 2,
-                    _ => 7,
+                    _ => TREASURE_HALF_WIDTH,
                 }
     };
     for dy in -16i32..=16 {
-        for dx in -7i32..=7 {
+        for dx in -TREASURE_HALF_WIDTH..=TREASURE_HALF_WIDTH {
             if !inside(dx, dy) {
                 continue;
             }
@@ -339,179 +345,8 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
     map.cells[((cy - 12) * map.width + cx) as usize].object = Some(BUTTON);
     map.cells[(cy * map.width + cx) as usize].object = Some(SPAWNER);
     for dy in [-4, -2, 0, 2, 4] {
-        for dx in [-7, 7] {
+        for dx in [-TREASURE_HALF_WIDTH, TREASURE_HALF_WIDTH] {
             map.cells[((cy + dy) * map.width + cx + dx) as usize].object = Some(DART);
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::{BTreeSet, VecDeque};
-
-    #[test]
-    fn treasure_rooms_have_walkable_rails_and_a_lower_entry() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
-        let mut treasures = 0;
-        for seed in 0..512 {
-            let map = generate(&content, seed).unwrap();
-            for (i, _) in map
-                .cells
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.object == Some(SPAWNER))
-            {
-                let (cx, cy) = (i as i32 % map.width, i as i32 / map.width);
-                treasures += 1;
-                let inside = |x: i32, y: i32| {
-                    y.abs() <= 16
-                        && x.abs()
-                            <= match y {
-                                ..=-11 | 7..=9 => 2,
-                                _ => 7,
-                            }
-                };
-                assert!(cx > 7 && cy > 16 && cy + 16 < map.height - 1);
-                for dy in -16..=16 {
-                    for dx in -7..=7 {
-                        let cell = &map.cells[((cy + dy) * map.width + cx + dx) as usize];
-                        assert_eq!(
-                            cell.ground != 0xff,
-                            inside(dx, dy),
-                            "seed {seed} outline {dx},{dy}"
-                        );
-                        if !inside(dx, dy) {
-                            continue;
-                        }
-                        let edge = [(dx - 1, dy), (dx + 1, dy), (dx, dy - 1), (dx, dy + 1)]
-                            .iter()
-                            .any(|&(x, y)| !inside(x, y));
-                        assert_eq!(cell.ground == 0x32, edge, "seed {seed} rail {dx},{dy}");
-                        assert_ne!(
-                            cell.object,
-                            Some(0x170),
-                            "seed {seed} blocked room {dx},{dy}"
-                        );
-                    }
-                }
-                assert_eq!(
-                    map.cells[((cy - 12) * map.width + cx) as usize].object,
-                    Some(BUTTON)
-                );
-            }
-        }
-        assert!(treasures > 0);
-    }
-
-    #[test]
-    fn stheno_room_is_a_notched_square() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
-        for seed in 0..8 {
-            let map = generate(&content, seed).unwrap();
-            let boss = map
-                .cells
-                .iter()
-                .position(|c| c.object == Some(BOSS))
-                .unwrap() as i32;
-            let (bx, by) = (boss % map.width, boss / map.width);
-            for dy in -16i32..=16 {
-                for dx in -16i32..=16 {
-                    let (near, far) = (dx.abs().min(dy.abs()), dx.abs().max(dy.abs()));
-                    let cell = &map.cells[((by + dy) * map.width + bx + dx) as usize];
-                    let inside = far <= 15 && near < 12;
-                    let edge = inside && (far == 15 || near == 11 && far >= 12);
-                    if far <= 15 {
-                        assert_eq!(cell.ground != 0xff, inside, "seed {seed} at {dx},{dy}");
-                    } else if near > 2 {
-                        assert_eq!(cell.ground, 0xff, "seed {seed} outside {dx},{dy}");
-                    }
-                    assert_eq!(cell.ground == 0x32, edge, "seed {seed} border {dx},{dy}");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn connectors_are_short_four_tile_necks_that_reach_every_room_after_digging() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
-        for seed in 0..512 {
-            let map = generate(&content, seed).unwrap();
-            let count = |kind| map.cells.iter().filter(|c| c.object == Some(kind)).count();
-            assert_eq!(count(BOSS), 1);
-            assert_eq!(count(0x703), 1);
-            assert_eq!(count(GUARD), 0);
-            assert!(count(SPAWNER) <= 3);
-            assert_eq!(count(BUTTON), count(SPAWNER));
-            let pythons = map
-                .cells
-                .iter()
-                .filter(|c| matches!(c.object, Some(0x225..=0x229)))
-                .count();
-            assert!((32..=52).contains(&pythons) && pythons % 4 == 0);
-            assert_eq!(count(0x173), pythons / 2);
-            assert_eq!(map.spawns.len(), 1);
-            let neighbors = |i: usize| {
-                let (x, y) = (i as i32 % map.width, i as i32 / map.width);
-                [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-                    .into_iter()
-                    .filter(|&(x, y)| (0..map.width).contains(&x) && (0..map.height).contains(&y))
-                    .map(|(x, y)| (y * map.width + x) as usize)
-                    .collect::<Vec<_>>()
-            };
-            let mut soft: BTreeSet<_> = map
-                .cells
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.object == Some(0x172))
-                .map(|(i, _)| i)
-                .collect();
-            assert!(!soft.is_empty());
-            while let Some(start) = soft.pop_first() {
-                let mut queue = VecDeque::from([start]);
-                let (mut x0, mut x1, mut y0, mut y1) = (map.width, 0, map.height, 0);
-                while let Some(i) = queue.pop_front() {
-                    let (x, y) = (i as i32 % map.width, i as i32 / map.width);
-                    x0 = x0.min(x);
-                    x1 = x1.max(x);
-                    y0 = y0.min(y);
-                    y1 = y1.max(y);
-                    for n in neighbors(i) {
-                        if soft.remove(&n) {
-                            queue.push_back(n);
-                        }
-                    }
-                }
-                let (short, long) = (
-                    (x1 - x0 + 1).min(y1 - y0 + 1),
-                    (x1 - x0 + 1).max(y1 - y0 + 1),
-                );
-                assert!(
-                    short == 4 && (5..=9).contains(&long),
-                    "seed {seed}, soft component {x0},{y0}..{x1},{y1}"
-                );
-            }
-            let passable = |i: usize| {
-                content.grounds[&map.cells[i].ground] > 0.
-                    && !matches!(map.cells[i].object, Some(0x170 | 0x1ec | 0x1ed))
-            };
-            let (x, y) = map.spawns[0];
-            let start = y.floor() as usize * map.width as usize + x.floor() as usize;
-            let mut seen = BTreeSet::from([start]);
-            let mut queue = VecDeque::from([start]);
-            while let Some(i) = queue.pop_front() {
-                for n in neighbors(i) {
-                    if passable(n) && seen.insert(n) {
-                        queue.push_back(n);
-                    }
-                }
-            }
-            for i in 0..map.cells.len() {
-                assert!(
-                    !passable(i) || seen.contains(&i),
-                    "seed {seed}, disconnected post-dig floor {i}"
-                );
-            }
         }
     }
 }

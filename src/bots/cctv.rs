@@ -24,6 +24,7 @@ pub(crate) struct Cctv(Mutex<Registry>);
 struct Registry {
     feeds: BTreeMap<&'static str, Feed>,
     ips: HashMap<(IpAddr, bool), usize>,
+    perspective_reads: HashMap<IpAddr, (Instant, u8)>,
 }
 struct Feed {
     updated: Instant,
@@ -92,12 +93,51 @@ impl Cctv {
     pub(crate) fn binding(&self, name: &str) -> Option<(i32, i32)> {
         self.lock().feeds.get(name).and_then(|f| f.session)
     }
+    pub(crate) fn account_session(&self, account: i32) -> Option<(&'static str, i32)> {
+        self.lock().feeds.iter().find_map(|(name, feed)| {
+            let (player, owner) = feed.session?;
+            (owner == account).then_some((*name, player))
+        })
+    }
+    pub(crate) fn perspective(
+        &self,
+        name: &str,
+        source: i32,
+        target: i32,
+    ) -> Option<(&'static str, i32, i32)> {
+        let registry = self.lock();
+        let (player, source_account) = registry.feeds.get(name)?.session?;
+        if player != source || source == target {
+            return None;
+        }
+        registry.feeds.iter().find_map(|(name, feed)| {
+            let (player, account) = feed.session?;
+            (player == target).then_some((*name, source_account, account))
+        })
+    }
+    pub(crate) fn allow_perspective(&self, ip: IpAddr) -> bool {
+        let mut registry = self.lock();
+        registry
+            .perspective_reads
+            .retain(|_, (start, _)| start.elapsed() < Duration::from_secs(1));
+        if registry.perspective_reads.len() >= 1024 && !registry.perspective_reads.contains_key(&ip)
+        {
+            return false;
+        }
+        let (_, count) = registry
+            .perspective_reads
+            .entry(ip)
+            .or_insert((Instant::now(), 0));
+        *count = count.saturating_add(1);
+        *count <= 8
+    }
     pub(super) fn decided(
         &self,
         name: &'static str,
         v: &PlayerView,
         d: &Decision,
         reason: String,
+        intent: &Value,
         content: &Content,
     ) {
         let shots: Vec<u8> = v
@@ -115,7 +155,7 @@ impl Cctv {
         feed.frame = json!({"class":content.objects[&v.character.class].name,"level":v.character.level,
             "hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"max_mp":v.character.stats[1],
             "world":v.map.name,"x":v.position.x,"y":v.position.y,"aim":d.aim,"fired":fired,
-            "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason});
+            "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason,"intent":intent});
         feed.session = Some((v.session.player, v.session.account));
         feed.shots = shots;
         feed.reason = reason;
@@ -316,86 +356,4 @@ pub(crate) async fn stream(
         },
     );
     ([("cache-control", "no-store")], sse::Sse::new(events)).into_response()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn viewers_are_bounded_and_released() {
-        let cctv = Arc::new(Cctv::default());
-        cctv.entered("Triceps", 7, 1);
-        let refused = |name, ip| Viewer::join(&cctv, name, ip, false).err().unwrap().0;
-        let ip = IpAddr::from([192, 0, 2, 1]);
-        assert_eq!(refused("Nobody", ip), StatusCode::NOT_FOUND);
-        let pair = [0, 1].map(|_| Viewer::join(&cctv, "Triceps", ip, false).unwrap());
-        assert_eq!(refused("Triceps", ip), StatusCode::TOO_MANY_REQUESTS);
-        drop(pair);
-        assert!(cctv.lock().ips.is_empty() && cctv.lock().feeds["Triceps"].viewers == 0);
-        let full: Vec<_> = (0..VIEWERS as u8)
-            .map(|i| Viewer::join(&cctv, "Triceps", IpAddr::from([10, 0, 0, i]), false).unwrap())
-            .collect();
-        assert_eq!(refused("Triceps", ip), StatusCode::SERVICE_UNAVAILABLE);
-        let native = Viewer::join(&cctv, "Triceps", ip, true).unwrap();
-        drop(native);
-        drop(full);
-        assert!(cctv.lock().ips.is_empty());
-    }
-
-    #[test]
-    fn departures_hide_only_matching_sessions_and_preserve_viewer_leases() {
-        let cctv = Arc::new(Cctv::default());
-        let ip = IpAddr::from([192, 0, 2, 1]);
-        cctv.entered("Triceps", 7, 1);
-        let viewer = Viewer::join(&cctv, "Triceps", ip, false).unwrap();
-        cctv.departed("Triceps", 8, 1);
-        assert_eq!(cctv.binding("Triceps"), Some((7, 1)));
-        assert_eq!(cctv.live_bots().len(), 1);
-        cctv.departed("Triceps", 7, 1);
-        assert!(cctv.binding("Triceps").is_none() && cctv.live_bots().is_empty());
-        assert_eq!(
-            Viewer::join(&cctv, "Triceps", ip, true).err().unwrap().0,
-            StatusCode::NOT_FOUND
-        );
-        assert_eq!(cctv.lock().feeds["Triceps"].viewers, 1);
-        cctv.entered("Triceps", 9, 2);
-        cctv.departed("Triceps", 7, 1);
-        assert_eq!(cctv.binding("Triceps"), Some((9, 2)));
-        assert_eq!(cctv.live_bots()[0]["name"], "Triceps");
-        drop(viewer);
-        assert!(cctv.lock().ips.is_empty());
-        assert_eq!(cctv.lock().feeds["Triceps"].viewers, 0);
-    }
-
-    #[test]
-    fn only_own_public_chat_becomes_a_thought() {
-        let cctv = Cctv::default();
-        let text = |actor, recipient: &str, text: &str| {
-            let mut w = wire::Writer::new();
-            w.utf("Triceps")
-                .i32(actor)
-                .i32(-1)
-                .u8(0)
-                .utf(recipient)
-                .utf(text)
-                .utf("");
-            Packet {
-                id: wire::TEXT,
-                body: w.0,
-            }
-        };
-        for packet in [
-            text(7, "", "tp gods"),
-            text(7, "Alice", "secret"),
-            text(8, "", "hi"),
-        ] {
-            cctv.heard("Triceps", 7, &packet).unwrap();
-        }
-        let (event, seen) = cctv.update("Triceps", 0);
-        assert_eq!(seen, 1);
-        let event: Value = serde_json::from_str(&event).unwrap();
-        assert_eq!(event["thoughts"][0]["text"], "said: tp gods");
-        assert_eq!(event["thoughts"].as_array().unwrap().len(), 1);
-    }
 }

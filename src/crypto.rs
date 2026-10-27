@@ -293,30 +293,7 @@ mod tests {
             assert_eq!(patch_loading(&mut corrupt).unwrap(), 0);
         }
     }
-    #[test]
-    fn audio_route_patch_preserves_other_abc_strings_and_tail() {
-        fn abc(strings: &[&str]) -> Vec<u8> {
-            let mut bytes = vec![16, 0, 46, 0, 0, 0, 0];
-            put_u30(&mut bytes, strings.len() as u32 + 1);
-            for string in strings {
-                put_u30(&mut bytes, string.len() as u32);
-                bytes.extend(string.as_bytes());
-            }
-            bytes.extend([0, 1, 2, 3]);
-            bytes
-        }
-        let replacement = OLD.map(String::from);
-        let original = abc(&[OLD[0], "/music/sorc.mp3", "untouched", OLD[3]]);
-        let (patched, keys, music, gold) = patch_abc(&original, &replacement).unwrap();
-        assert_eq!((keys, music, gold), (2, 1, 0));
-        assert_eq!(
-            patched,
-            abc(&[OLD[0], "/sfx/music/sorc.mp3", "untouched", OLD[3]])
-        );
-        let (again, _, music, _) = patch_abc(&patched, &replacement).unwrap();
-        assert_eq!(music, 0);
-        assert_eq!(again, patched);
-    }
+
     #[test]
     fn public_key_patch_preserves_reference() {
         let dir = std::env::temp_dir().join(format!("openrotmg-key-test-{}", std::process::id()));

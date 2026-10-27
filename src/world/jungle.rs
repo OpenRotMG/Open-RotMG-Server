@@ -26,8 +26,11 @@ impl World {
             .collect();
         for (id, owner, parent) in bindings {
             if owner == BOSS {
-                self.entities.get_mut(&id).unwrap().quest =
-                    Some(parent.context("Jungle boss totem has no encounter owner")?);
+                self.entities.get_mut(&id).unwrap().quest.set(
+                    Some(parent.context("Jungle boss totem has no encounter owner")?),
+                    id,
+                    &mut self.quest_ids,
+                );
             } else if let Some(parent) = parent {
                 self.entities.get_mut(&id).unwrap().parent.set(
                     Some(parent),

@@ -49,6 +49,7 @@ async fn decide_before_social(
         view,
         &decision,
         cctv::reason(brain.activity, &decision, view, &app.content),
+        &brain.intent,
         &app.content,
     );
     let surviving = brain.activity == Activity::Survive;
@@ -172,7 +173,6 @@ async fn enter_admitted(
     let (lost, _) = watch::channel(None);
     let presentation = app.store.presentation(character.account).await?;
     let own_name = character.name.clone();
-    let own_guild = presentation.guild.is_some();
     let bind = server::lifecycle::binding(app, character.account)?;
     let id = app
         .world
@@ -235,7 +235,7 @@ async fn enter_admitted(
         brain.mind = mind;
     }
     brain.mind.market.name = own_name;
-    brain.mind.market.guild = own_guild;
+    brain.mind.market.trader = profile.role == persona::Role::Trader;
     brain.mind.market.observe(&view);
     if let Some(b) = &brain.mind.market.bargain {
         let receipts = app
@@ -280,13 +280,10 @@ async fn reenter(
     profile: Profile,
     account: i32,
     owner: &mut Option<Owner>,
+    entry: lifecycle::drain::Entry,
     request: Reentry,
 ) -> Result<Entry> {
-    owner
-        .as_ref()
-        .context("autonomous reentry lost account custody")?
-        .admit_controller(app)?;
-    let entry = lifecycle::drain::entry(app)?;
+    // Drain must await already accepted work, not reject it mid-transfer: https://tokio.rs/tokio/topics/shutdown
     let mut owned = owner
         .take()
         .context("autonomous reentry lost account custody")?;
@@ -548,10 +545,15 @@ pub(super) async fn launch(
     mut owner: server::Owner,
     done: Option<mpsc::Sender<director::Departure>>,
 ) -> Result<()> {
+    let _names = app.name_claims.lock().await;
+    app.store
+        .persona_name_available(character.account, character.name.clone())
+        .await?;
     let (world, position) = location;
     owner.admit_controller(app)?;
     let mut drain = lifecycle::drain::stopping(app);
     let entry = lifecycle::drain::entry(app)?;
+    let (mut cancel, completion) = owner.control(true)?;
     let account = character.account;
     let mut completed = [character.pirate_caves, character.dungeons[0]];
     owner.arm_cleanup(app, tokio::runtime::Handle::current());
@@ -601,17 +603,16 @@ pub(super) async fn launch(
                 )
         });
         let mut retired = false;
-        let result: Result<()> = async {
+        let mut result: Result<()> = async {
                 loop {
-                    if *shutdown.borrow() || drain.has_changed()? || !lifecycle::drain::open(&app) { break; }
+                    if *cancel.borrow() || *shutdown.borrow() || drain.has_changed()? || !lifecycle::drain::open(&app) { break; }
                     tokio::select! {
                         _=tokio::time::sleep(Duration::from_millis(50))=>{},
                         _=shutdown.changed()=>break,
                         _=drain.changed()=>break,
+                        _=cancel.changed()=>break,
                     }
                     if app.world.clock.paused() { continue; }
-                    #[cfg(test)]
-                    tests::entry_boundary(&app, id, false).await?;
                     let _entry = match lifecycle::drain::entry(&app) {
                         Ok(entry) => entry,
                         Err(error) if error.is::<lifecycle::drain::UnadmittedEntry>() => {
@@ -620,8 +621,6 @@ pub(super) async fn launch(
                         }
                         Err(error) => return Err(error),
                     };
-                    #[cfg(test)]
-                    tests::entry_boundary(&app, id, true).await?;
                     if let Some(transfer) = server::automatic_transfer(&app, id).await? {
                         dialogue::cancel(&mut pending);
                         dialogue::end_agreement(&app, &mut brain, "world changed").await;
@@ -631,7 +630,7 @@ pub(super) async fn launch(
                         let Some(destination) = transfer.destination else { return Ok(()); };
                         admission = Some(transfer.key.clone());
                         let character_id = brain.session.2;
-                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Collective { destination, time: transfer.key_time, key: transfer.key, character: character_id }).await?;
+                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Collective { destination, time: transfer.key_time, key: transfer.key, character: character_id }).await?;
                         admission = None;
                         tracing::info!(player=id,account,character=character_id,destination,"autonomous collective transfer completed");
                         continue;
@@ -690,11 +689,13 @@ pub(super) async fn launch(
                             retired = true;
                             return Ok(());
                         }
+                        if *cancel.borrow() { return Ok(()); }
                         tokio::select! {
                             _=tokio::time::sleep(Duration::from_secs(3))=>{},
                             _=shutdown.changed()=>return Ok(()),
+                            _=cancel.changed()=>return Ok(()),
                         }
-                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Replacement { previous: view.session.character }).await?;
+                        (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Replacement { previous: view.session.character }).await?;
                         deferred_market = None;
                         continue;
                     }
@@ -813,7 +814,7 @@ pub(super) async fn launch(
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
                         tracing::info!(account,name=profile.name,"session finished; returning to Nexus before logout");
-                        app.cctv.decided(profile.name, &view, &decision, "session finished; returning to Nexus before logout".into(), &app.content);
+                        app.cctv.decided(profile.name, &view, &decision, "session finished; returning to Nexus before logout".into(), &serde_json::json!({"goal":null,"plan":"End this session","step":"Return to Nexus before logout","mode":"necessary","reason":"session deadline reached","resume":null}), &app.content);
                     }
                     if events::shared(&view.map.name) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
@@ -909,7 +910,7 @@ pub(super) async fn launch(
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
-                                (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
+                                (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
                                 let current_character = brain.session.2;
                                 let destination = if current_character != previous { -2 } else { destination };
                                 if current_character != previous {
@@ -936,7 +937,17 @@ pub(super) async fn launch(
                 .directory(move |d| d.cancel_admission(account, key))
                 .await
         {
-            tracing::error!(account,%error,"failed controller admission cancellation failed");
+            let message = format!("controller admission cancellation failed: {error:#}");
+            result = Err(match result {
+                Ok(()) => error.context(message),
+                Err(prior) => prior.context(message),
+            });
+        }
+        if *cancel.borrow()
+            && let Err(error) = &result
+            && let Some(owner) = &owner
+        {
+            owner.failed(format!("persona name relinquishment failed: {error:#}"));
         }
         // A replacement may register as soon as finalization releases this generation.
         app.society
@@ -965,7 +976,16 @@ pub(super) async fn launch(
             if let Err(error) = saved {
                 finalized = false;
                 tracing::error!(player=id,account,%error,"autonomous finalization failed; account remains fenced");
+                result = Err(error);
             }
+        }
+        #[cfg(test)]
+        if finalized
+            && let Err(error) =
+                crate::server::name_claims_tests::departure_gate(&app, account).await
+        {
+            finalized = false;
+            result = Err(error);
         }
         if finalized {
             app.cctv.departed(profile.name, id, account);
@@ -973,7 +993,7 @@ pub(super) async fn launch(
         dialogue::cancel(&mut pending);
         dialogue::end_agreement(&app, &mut brain, "controller stopped").await;
         let retire = retired && finalized && result.is_ok() && !*shutdown.borrow();
-        if let Err(error) = result {
+        if let Err(error) = &result {
             tracing::error!(player=id,name=profile.name,%error,"autonomous controller stopped");
         }
         if let Some(done) = done
@@ -989,6 +1009,7 @@ pub(super) async fn launch(
         {
             tracing::error!(account, "population director stopped receiving departures");
         }
+        completion.complete(result);
     });
     Ok(())
 }

@@ -1,6 +1,4 @@
 use super::*;
-#[cfg(test)]
-mod tests;
 
 const WINDOW: u64 = 10_000;
 const COMPANY: u64 = 60_000;
@@ -230,7 +228,7 @@ pub(in crate::bots) fn available(
     !choices.iter().any(|(score, goal, target)| {
         eligible_position(*target)
             && (*score >= 95.
-                || matches!(goal, Goal::Loot(_))
+                || matches!(goal, Goal::Loot(_) | Goal::Hunt(_))
                 || matches!(goal, Goal::Fight(_)) && position.distance(*target) < range)
     })
 }

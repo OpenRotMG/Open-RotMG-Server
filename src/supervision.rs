@@ -79,17 +79,22 @@ impl Default for Supervisor {
     }
 }
 impl Supervisor {
-    pub fn persisted(path: PathBuf) -> Result<Self> {
+    pub fn recovered(path: PathBuf, _store: &crate::store::Store) -> Result<Self> {
         let value = Self {
             path: Some(path),
             ..Self::default()
         };
-        if let Some(incident) = value.latest()? {
-            ensure!(
-                incident.fences_preserved,
-                "critical incident {} has incomplete account-fence preservation; operator inspection required",
-                incident.id
-            );
+        if let Some(mut incident) = value.latest()? {
+            // The old world is gone; SQLite recovers complete commits, not reservations: https://www.sqlite.org/wal.html#how_wal_works
+            let accounts = std::mem::take(&mut incident.fenced_accounts);
+            if !accounts.is_empty() {
+                value
+                    .save(&incident)
+                    .context("cannot release recovered account fences")?;
+                for account in accounts {
+                    tracing::info!(account, incident=%incident.id, "account fence released after database recovery");
+                }
+            }
         }
         Ok(value)
     }
@@ -121,7 +126,7 @@ impl Supervisor {
     pub fn check_account(&self, account: i32) -> Result<()> {
         ensure!(
             !self.account_fenced(account)?,
-            "account ownership is durably fenced; operator inspection required"
+            "account ownership is fenced until restart"
         );
         self.ensure_running()
     }
@@ -225,7 +230,7 @@ impl Supervisor {
             .duration_since(UNIX_EPOCH)
             .expect("system time before Unix epoch")
             .as_millis() as u64;
-        let mut incident = Incident {
+        let incident = Incident {
             id: format!("{}-{now}", std::process::id()),
             unix_ms: now,
             process: std::process::id(),
@@ -239,20 +244,15 @@ impl Supervisor {
         };
         tracing::error!(component, failure, error=%detail, incident=%incident.id, "critical worker terminated");
         self.fatal.send_if_modified(|current| {
-                if current.is_some() { return false; }
-                let mut save = || -> Result<()> {
-                    if let Some(previous) = self.latest()? {
-                        incident.fenced_accounts = previous.fenced_accounts;
-                    }
-                    self.save(&incident)
-                };
-                if let Err(error) = save() {
-                    tracing::error!(%error, "critical incident persistence failed; automatic restart forbidden");
-                    std::process::exit(78);
-                }
-                *current = Some(incident);
-                true
-            });
+            if current.is_some() {
+                return false;
+            }
+            if let Err(error) = self.save(&incident) {
+                tracing::error!(%error, "critical incident persistence failed; stopping service");
+            }
+            *current = Some(incident);
+            true
+        });
     }
     pub async fn failed(&self) -> Incident {
         let mut receiver = self.fatal.subscribe();

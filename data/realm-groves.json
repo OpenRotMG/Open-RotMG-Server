@@ -1,5 +1,5 @@
 [
-  {"layout":"classic-world-01-reconstruction","sha256":"91386e05ae2a99bbb05a3d7ccefdf68eaf60b3e107ca630d30974779e90aa06e","groves":[
+  {"layout":"classic-world-01-reconstruction","sha256":"3f4127c3d096af0caf4667603aa4b3b87025ada5509451ef3265447e3497edc9","groves":[
     {"bounds":[568,545,29,29],"spawn":[582,559],"trees":48},
     {"bounds":[1369,684,29,29],"spawn":[1383,698],"trees":44},
     {"bounds":[758,712,29,29],"spawn":[772,726],"trees":38},
@@ -20,7 +20,7 @@
     {"bounds":[1158,1339,29,29],"spawn":[1172,1353],"trees":41},
     {"bounds":[964,1437,29,29],"spawn":[978,1451],"trees":30}
   ]},
-  {"layout":"classic-world-02-reconstruction","sha256":"c409996bc3a4bbe46ae872998a69ff5491cfdd8371eb06d6324707119f0f846b","groves":[
+  {"layout":"classic-world-02-reconstruction","sha256":"c84108db3bd749c3595a1e021c8cf2e7b9fc6b640ddbad487949bf9170e99b6c","groves":[
     {"bounds":[1216,337,29,29],"spawn":[1230,351],"trees":52},
     {"bounds":[1303,423,29,29],"spawn":[1317,437],"trees":38},
     {"bounds":[1192,485,29,29],"spawn":[1206,499],"trees":45},
@@ -46,7 +46,7 @@
     {"bounds":[1268,1432,29,29],"spawn":[1282,1446],"trees":38},
     {"bounds":[1369,1452,29,29],"spawn":[1383,1466],"trees":34}
   ]},
-  {"layout":"classic-world-03-reconstruction","sha256":"a95371cbee6852c4b6f885a05418ba37db1b586ce866798a4fe11c656eed198f","groves":[
+  {"layout":"classic-world-03-reconstruction","sha256":"45ed968a32b2b7df7a590db1e4eb8a9903f205b657d1e8ac6f9db18d48816992","groves":[
     {"bounds":[1002,577,29,29],"spawn":[1016,591],"trees":52},
     {"bounds":[853,624,29,29],"spawn":[867,638],"trees":29},
     {"bounds":[814,692,29,29],"spawn":[828,706],"trees":32},

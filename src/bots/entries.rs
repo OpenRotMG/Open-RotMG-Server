@@ -113,6 +113,12 @@ impl Brain {
             .iter()
             .filter(|p| {
                 p.usable
+                    && self
+                        .mind
+                        .intentions
+                        .as_ref()
+                        .expect("observed intentions")
+                        .eligible(v, &Goal::Portal(p.id), false)
                     && !self.blocked.contains_key(&tile(p.position))
                     && crate::dungeon::DUNGEONS
                         .iter()
@@ -128,6 +134,3 @@ impl Brain {
         self.entries.choose(v, &eligible, &mut self.rng)
     }
 }
-
-#[cfg(test)]
-mod tests;

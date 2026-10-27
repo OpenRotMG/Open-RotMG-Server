@@ -16,7 +16,7 @@ impl World {
         e.home = old.home;
         e.camp = old.camp;
         e.parent.set(*old.parent, new, &mut self.timed_ids);
-        e.quest = old.quest;
+        e.quest.set(*old.quest, new, &mut self.quest_ids);
         e.damage = std::mem::take(&mut old.damage);
         e.expires.set(*old.expires, new, &mut self.timed_ids);
         e.activated = Some(self.now);
@@ -76,7 +76,7 @@ impl World {
                 e.home = dead.home;
                 e.camp = dead.camp;
                 e.parent.set(*dead.parent, id, &mut self.timed_ids);
-                e.quest = dead.quest;
+                e.quest.set(*dead.quest, id, &mut self.quest_ids);
                 e.expires.set(*dead.expires, id, &mut self.timed_ids);
                 e.activated = Some(self.now);
                 if let Some(slot) = slot {

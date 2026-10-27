@@ -9,8 +9,6 @@ use std::{
 use tokio::sync::Semaphore;
 
 mod market;
-#[cfg(test)]
-mod tests;
 
 // Room-wide publication throttling is not evidence of what a particular bot heard.
 #[derive(Default)]
@@ -603,6 +601,8 @@ pub(super) async fn publish(
     };
     let reply_intent = reply.intent;
     let joined = reply.intent == Intent::Join;
+    #[cfg(test)]
+    super::runtime::tests::dialogue_world_boundary(player).await;
     let published = app
         .world
         .directory(move |d| {
@@ -612,7 +612,9 @@ pub(super) async fn publish(
             );
             let now = d.tick * 50;
             let world = d.location(player)?;
-            d.worlds[&world].dialogue_participants(player, peer)?;
+            if let Some(unavailable) = d.worlds[&world].dialogue_participants(player, peer)? {
+                return Err(anyhow::anyhow!(Obsolete(unavailable.reason())));
+            }
             let mut state = society.lock().expect("adventure registry poisoned");
             if let Some(plan) = &plan {
                 state.validate(owner.account, plan, now)?;

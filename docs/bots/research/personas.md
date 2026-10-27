@@ -1,6 +1,8 @@
 # Persona presets
 
-`data/bot-personas.json`: names/rank bands observed in 2012 uploads; other account details synthetic—not actual accounts or people playing here. Missing history stays unknown. Selection-biased footage establishes no population/price/timing rates. Upload dates ≠ capture dates; blurry gear stays uncertain. Raw evidence stays private.
+`data/bot-personas.json`: original names/rank bands observed in 2012 uploads, plus community-requested names below; all prepared careers, exact stars, roles, gear and wealth are synthetic. They do not describe actual accounts or people playing here. Missing history stays unknown. Selection-biased footage establishes no population/price/timing rates. Upload dates ≠ capture dates; blurry gear stays uncertain. Raw evidence stays private.
+
+October 26 name additions: Discord messages 1564245738500657264, 1564268873514098799 and 1564279037323387033 in channel 1558662336439386185; BMJ appears once. These are requests, not authenticated spelling/history. Crunchy/Crunshy and Tecmec/Techmech remain unresolved and were not added as aliases. The starting-level mix is an engineering choice, not a measured historical population rate.
 
 Sources sampled October 25, 2026:
 

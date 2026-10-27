@@ -137,7 +137,9 @@ impl Market {
             t.ready_at = v.clock_at + Duration::from_millis(3000);
             return Ok(Some(TradeAction::Change { offer: mine }));
         }
-        if t.offers[1].iter().all(|b| !*b) {
+        let empty = t.offers[1].iter().all(|b| !*b);
+        // An empty window is time to inspect, not gift consent or a permanent movement lock.
+        if empty && v.clock_at < t.empty_offer_until {
             return Ok(None);
         }
         let compatible = t.offers[1]
@@ -146,6 +148,16 @@ impl Market {
             .all(|(i, b)| !*b || (i >= 4 && t.items[1][i] == q[1].kind))
             && t.offers[1].iter().filter(|b| **b).count() == usize::from(q[1].quantity);
         if !compatible && v.time_ms >= t.ready && v.clock_at >= t.ready_at {
+            tracing::info!(
+                account = v.session.account,
+                peer = g.account,
+                reason = if empty {
+                    "empty_offer_timeout"
+                } else {
+                    "incompatible_offer"
+                },
+                "market incoming exchange refused"
+            );
             self.queue(
                 format!("nty need {}", goods_text(&q[1], c)?),
                 Channel::Tell(g.name.clone()),

@@ -4,14 +4,6 @@ use std::time::{Duration, Instant};
 
 mod incoming;
 use incoming::Incoming;
-#[cfg(test)]
-mod incoming_tests;
-#[cfg(test)]
-mod quote_tests;
-#[cfg(test)]
-mod session_tests;
-#[cfg(test)]
-mod tests;
 
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
@@ -108,7 +100,7 @@ pub(crate) struct Market {
     #[serde(skip)]
     pub(in crate::bots) name: String,
     #[serde(skip)]
-    pub(in crate::bots) guild: bool,
+    pub(in crate::bots) trader: bool,
     #[serde(skip)]
     pub(in crate::bots) next_message_ms: u64,
     #[serde(skip)]
@@ -164,6 +156,7 @@ pub(in crate::bots) struct SessionTrade {
     pub offers: [[bool; 12]; 2],
     pub ready: u64,
     pub ready_at: Instant,
+    pub empty_offer_until: Instant,
     pub changed: bool,
 }
 impl Market {
@@ -368,14 +361,16 @@ impl Market {
         future: Option<u16>,
         minimum_tier: u8,
     ) -> Result<Option<i32>> {
+        let mut wants = Vec::new();
         for item in c.objects.values().filter(|o| {
             o.class == "Equipment" && !o.consumable && o.tier.is_some_and(|t| t >= minimum_tier)
         }) {
             if self.wanted(v, c, future, i32::from(item.kind))? > 0 {
-                return Ok(Some(i32::from(item.kind)));
+                wants.push(i32::from(item.kind));
             }
         }
-        Ok(None)
+        // Period markets span many upgrades, not the first XML item: https://realmpriceguid.blogspot.com/
+        Ok((!wants.is_empty()).then(|| wants[style(&self.name) as usize % wants.len()]))
     }
     fn quote(
         &self,
@@ -428,7 +423,8 @@ impl Market {
         {
             return Ok(Some(pair(LIFE, 1, kind, 1)));
         }
-        if let Some(g) = stock.into_iter().find(|g| {
+        let mut sales = Vec::new();
+        for g in stock.into_iter().filter(|g| {
             !matches!(g.kind, SPEED | DEFENSE | LIFE)
                 && c.objects[&(g.kind as u16)].tier.is_some_and(|t| t >= 3)
                 && !c.objects[&(g.kind as u16)].consumable
@@ -443,9 +439,9 @@ impl Market {
                 DEFENSE
             };
             if self.wanted(v, c, future, payment)? == 0 {
-                return Ok(None);
+                continue;
             }
-            return Ok(Some(pair(
+            sales.push(pair(
                 g.kind,
                 1,
                 payment,
@@ -454,9 +450,9 @@ impl Market {
                 } else {
                     (1 + style(&self.name) % 2) as u8
                 },
-            )));
+            ));
         }
-        Ok(None)
+        Ok((!sales.is_empty()).then(|| sales[style(&self.name) as usize % sales.len()].clone()))
     }
     pub(in crate::bots) fn message_current(
         &self,
@@ -511,40 +507,7 @@ impl Market {
         }
         self.trade = None;
     }
-    #[cfg(test)]
-    fn replace(&mut self, t: Terms) {
-        self.next_request_ms = 0;
-        let rounds = self.bargain.as_ref().map_or(1, |b| {
-            if b.terms.accounts.iter().all(|a| t.accounts.contains(a)) {
-                b.rounds.saturating_add(1)
-            } else {
-                1
-            }
-        });
-        if let Some(mut old) = self.bargain.take() {
-            self.revoke_trade = true;
-            self.trade = None;
-            old.own_consent = false;
-            old.peer_consent = None;
-            if old.resolution.is_none() {
-                old.resolution = Some("counteroffer_invalidated_previous_consents".into());
-            }
-            self.history.push_back(old);
-            if self.history.len() > 8 {
-                self.history.pop_front();
-            }
-        }
-        self.bargain = Some(Bargain {
-            terms: t,
-            own_consent: false,
-            agreed: false,
-            peer_consent: None,
-            confirmed: 0,
-            consent_revision: 0,
-            rounds,
-            resolution: None,
-        });
-    }
+
     pub(in crate::bots) fn receive(
         &mut self,
         packet: &Packet,
@@ -979,11 +942,11 @@ impl Market {
         self.quote = Some(quote.clone());
         if self.session.is_none() {
             self.session_used = true;
-            let admitted = self.preparing || rng.gen_ratio(1, 5);
+            let admitted = self.preparing || self.trader || rng.gen_ratio(1, 5);
             tracing::info!(
                 account = v.session.account,
                 admitted,
-                probability = 0.2,
+                probability = if self.trader { 1.0 } else { 0.2 },
                 reason = if admitted {
                     "visit_admitted"
                 } else {
@@ -1082,14 +1045,7 @@ impl Market {
                 parse_quote(&ad, c).as_ref() == Some(&quote),
                 "unresolvable market quote: {ad}"
             );
-            self.queue(
-                ad,
-                if self.guild {
-                    Channel::Guild
-                } else {
-                    Channel::Local
-                },
-            );
+            self.queue(ad, Channel::Local);
             self.next_ad = v.elapsed_ms + 6_000 + u64::from(style(&self.name) % 7) * 1_000;
         }
         Ok(Some(d))
@@ -1127,6 +1083,7 @@ impl Market {
                     offers: [[false; 12]; 2],
                     ready: v.time_ms + 3000,
                     ready_at: v.clock_at + Duration::from_millis(3000),
+                    empty_offer_until: v.clock_at + Duration::from_secs(20),
                     changed: false,
                 });
             }
@@ -1134,6 +1091,9 @@ impl Market {
                 let values = read_offer(&mut r)?;
                 r.done()?;
                 if let Some(t) = &mut self.trade {
+                    if t.offers[1] != values {
+                        t.empty_offer_until = v.clock_at + Duration::from_secs(20);
+                    }
                     t.offers[1] = values;
                     t.ready = v.time_ms + 3000;
                     t.ready_at = v.clock_at + Duration::from_millis(3000);

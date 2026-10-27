@@ -24,15 +24,7 @@ impl World {
             self.players.is_empty() && self.now == 0,
             "Hermit landmark requires an unentered Realm"
         );
-        let retain_authored_lava = matches!(
-            self.realm_layout.as_deref(),
-            Some(
-                "classic-world-01-reconstruction"
-                    | "classic-world-05-reconstruction"
-                    | "classic-world-09-reconstruction"
-                    | "classic-world-11-reconstruction"
-            )
-        );
+        let retain_authored_lava = self.retains_authored_lava();
         let protected: Vec<_> = self
             .population
             .iter()
@@ -113,9 +105,10 @@ impl World {
                     self.remove_entity(id);
                 }
                 let cell = &mut Arc::make_mut(&mut self.map).cells[index];
+                // Keep the southern portal approach shallow: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/common/resources/worlds/SP_Hermit.jm
                 cell.ground = if matches!(cell.ground, 0x72 | 0x73) {
                     cell.ground
-                } else if radius < 4.5 {
+                } else if radius < 4.5 && (x, y) != (16, 18) {
                     0xbc
                 } else if radius < 10. {
                     0x73
@@ -137,7 +130,7 @@ impl World {
             vec![],
         )?;
         let e = self.entities.get_mut(&root).unwrap();
-        e.quest = Some(root);
+        e.quest.set(Some(root), root, &mut self.quest_ids);
         e.stage = Some(0);
         e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
         e.extra_stats = vec![(61, 2)];
@@ -154,7 +147,7 @@ impl World {
                 .with_context(|| format!("Hermit spawner placement failed at offset {x},{y}"))?;
             let e = self.entities.get_mut(&id).unwrap();
             e.parent.set(Some(root), id, &mut self.timed_ids);
-            e.quest = Some(root);
+            e.quest.set(Some(root), id, &mut self.quest_ids);
             e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
         }
         for (x, y) in [(11, 7), (20, 7), (8, 13), (20, 19)] {

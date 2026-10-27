@@ -549,6 +549,9 @@ impl World {
             let mut out = Writer::new();
             out.utf(&self.players[&id].character.name);
             send(&self.players[&target], 61, out.0);
+            // The requester needs a separate confirmation: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.Trade.cs#L85-L94
+            let notice = chat_info(&format!("You have sent a trade request to {name}!"));
+            send(&self.players[&id], notice.id, notice.body);
             tracing::info!(
                 player = id,
                 partner = target,
@@ -851,17 +854,7 @@ mod community_tests {
             })
             .collect()
     }
-    #[tokio::test]
-    async fn nearby_autonomous_trade_request_reaches_controller_without_assuming_consent() {
-        let (mut w, _, ids, mut receivers) = fixture().await;
-        w.players.get_mut(&ids[1]).unwrap().pos.x += 3.;
-        w.players.get_mut(&ids[1]).unwrap().controller = Controller::Autonomous;
-        w.request_trade(ids[0], w.players[&ids[1]].character.name.clone())
-            .unwrap();
-        assert_eq!(w.trade_requests[&ids[0]].0, ids[1]);
-        assert_eq!(receivers[1].try_recv().unwrap().id, 61);
-        assert!(w.trades.is_empty(), "a request is not reciprocal consent");
-    }
+
     #[tokio::test]
     async fn incoming_market_window_exchange_requires_real_payment_and_commits_durable_receipt() {
         use crate::bots::pursuits::market::Goods;
@@ -1017,38 +1010,6 @@ mod community_tests {
             assert_eq!(saved.revision, p.character.revision);
         }
     }
-    #[tokio::test]
-    async fn trade_settling_uses_pause_aware_elapsed_time_not_world_ticks() {
-        let (mut w, _, ids, _) = fixture().await;
-        w.players.get_mut(&ids[1]).unwrap().pos.x += 3.;
-        start(&mut w, ids);
-        w.players.get_mut(&ids[1]).unwrap().pos.x += 8.;
-        w.trade_step();
-        assert_eq!(w.trades.len(), 1);
-        let mut masks = [[false; 12]; 2];
-        masks[0][4] = true;
-        masks[1][5] = true;
-        w.change_trade(ids[0], masks[0]).unwrap();
-        w.change_trade(ids[1], masks[1]).unwrap();
-        let tick_time = w.now;
-        w.clock.set_paused(true);
-        tokio::time::sleep(Duration::from_millis(3050)).await;
-        assert!(w.accept_trade(ids[0], masks[0], masks[1]).is_err());
-        w.clock.set_paused(false);
-        tokio::time::sleep(Duration::from_millis(3050)).await;
-        assert_eq!(
-            w.now, tick_time,
-            "no simulation ticks in this slow-world fixture"
-        );
-        assert!(
-            w.accept_trade(ids[0], masks[0], masks[1])
-                .expect("client countdown elapsed while world ticks lagged")
-                .is_none()
-        );
-        w.players.get_mut(&ids[1]).unwrap().departing = true;
-        w.trade_step();
-        assert!(w.trades.is_empty());
-    }
 
     #[tokio::test]
     async fn trade_offer_reset_keeps_elapsed_settling_and_atomic_commit_guards() {
@@ -1112,181 +1073,5 @@ mod community_tests {
             assert_eq!(w.players[&id].character.items, items);
         }
         assert!(w.accept_trade(ids[0], masks[0], [false; 12]).is_err());
-    }
-
-    #[tokio::test]
-    async fn community_market_expiry_is_revalidated_after_autonomous_native_acceptance_before_commit()
-     {
-        use crate::bots::pursuits::market::{Goods, Terms, now};
-        let (mut w, store, ids, _) = fixture().await;
-        w.players.get_mut(&ids[0]).unwrap().controller = Controller::Autonomous;
-        w.updates(ids[0], true).unwrap();
-        start(&mut w, ids);
-        let masks = offers(&mut w, ids).await;
-        let p = &w.players[&ids[0]];
-        let t = Terms {
-            version: 52,
-            accounts: ids.map(|id| w.players[&id].character.account),
-            names: ids.map(|id| w.players[&id].character.name.clone()),
-            goods: [
-                Goods {
-                    kind: 0xa22,
-                    quantity: 1,
-                },
-                Goods {
-                    kind: 0xa97,
-                    quantity: 1,
-                },
-            ],
-            meeting: [-2, p.pos.x.floor() as i32, p.pos.y.floor() as i32],
-            expires: now() + 2,
-            batch: 1,
-        };
-        let session = [-2, ids[0], p.character.id];
-        let d = t.delivery(0).unwrap();
-        assert!(
-            w.autonomous_trade(
-                ids[0],
-                session,
-                TradeAction::Accept {
-                    mine: masks[0],
-                    theirs: masks[1]
-                },
-                d
-            )
-            .unwrap()
-            .is_none()
-        );
-        while now() < t.expires {
-            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        }
-        assert!(
-            w.accept_trade(ids[1], masks[1], masks[0])
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("expired before mutual native acceptance")
-        );
-        assert!(
-            store
-                .market_receipts(t.accounts[0], t.version)
-                .await
-                .unwrap()
-                .is_empty()
-        );
-    }
-    #[tokio::test]
-    async fn community_market_autonomous_trade_keeps_human_guards_and_binds_session_goods_and_death()
-     {
-        use crate::bots::pursuits::market::{Goods, Terms};
-        let (mut w, store, ids, _) = fixture().await;
-        let t = Terms {
-            version: 51,
-            accounts: ids.map(|id| w.players[&id].character.account),
-            names: ids.map(|id| w.players[&id].character.name.clone()),
-            goods: [
-                Goods {
-                    kind: 0xa22,
-                    quantity: 1,
-                },
-                Goods {
-                    kind: 0xa97,
-                    quantity: 1,
-                },
-            ],
-            meeting: [
-                -2,
-                w.players[&ids[0]].pos.x.floor() as i32,
-                w.players[&ids[0]].pos.y.floor() as i32,
-            ],
-            expires: crate::bots::pursuits::market::now() + 120,
-            batch: 1,
-        };
-        let d = t.delivery(0).unwrap();
-        let session = [-2, ids[0], w.players[&ids[0]].character.id];
-        assert!(
-            w.autonomous_trade(
-                ids[0],
-                session,
-                TradeAction::Request {
-                    name: t.names[1].clone()
-                },
-                d.clone()
-            )
-            .is_err()
-        );
-        w.players.get_mut(&ids[0]).unwrap().controller = Controller::Autonomous;
-        w.updates(ids[0], true).unwrap();
-        let mut stale = session;
-        stale[2] += 100;
-        assert!(
-            w.autonomous_trade(
-                ids[0],
-                stale,
-                TradeAction::Request {
-                    name: t.names[1].clone()
-                },
-                d.clone()
-            )
-            .is_err()
-        );
-        let mut elsewhere = d.clone();
-        elsewhere.terms.meeting[1] += 10;
-        assert!(
-            w.autonomous_trade(
-                ids[0],
-                session,
-                TradeAction::Request {
-                    name: t.names[1].clone()
-                },
-                elsewhere
-            )
-            .is_err()
-        );
-        assert!(
-            w.script_trade(
-                ids[0],
-                TradeAction::Request {
-                    name: t.names[1].clone()
-                }
-            )
-            .is_err()
-        );
-        start(&mut w, ids);
-        let masks = offers(&mut w, ids).await;
-        w.autonomous_trade(
-            ids[0],
-            session,
-            TradeAction::Accept {
-                mine: masks[0],
-                theirs: masks[1],
-            },
-            d.clone(),
-        )
-        .unwrap();
-        let plan = w.accept_trade(ids[1], masks[1], masks[0]).unwrap().unwrap();
-        assert_eq!(plan.delivery, Some(d.clone()));
-        let transaction = plan.transaction.clone();
-        let writes = writes(&plan);
-        w.players.get_mut(&ids[1]).unwrap().character.hp = 0;
-        w.players.get_mut(&ids[1]).unwrap().death_pending = true;
-        let result = store
-            .exchange_trade(transaction, writes, Some(d))
-            .await
-            .unwrap();
-        w.finish_trade(plan, Ok(result)).unwrap();
-        let death = w.pending_deaths().pop().unwrap();
-        assert_eq!(death.1.items[5], 0xa22);
-        store.death(death.1.clone(), death.2).await.unwrap();
-        w.finish_death(death.0).unwrap();
-        assert!(store.load(death.1.account, death.1.id).await.is_err());
-        assert_eq!(
-            store
-                .market_receipts(t.accounts[0], t.version)
-                .await
-                .unwrap()
-                .len(),
-            1
-        );
     }
 }

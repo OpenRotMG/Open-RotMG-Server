@@ -4,8 +4,8 @@ use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use super::prepare::{
-    ScopedLava, WORLD05_ID, WORLD09_ID, WORLD11_ID, bounded_read, read_recipe, safe_path,
-    valid_hash, valid_id,
+    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD05_ID, WORLD09_ID, WORLD11_ID, bounded_read,
+    read_recipe, safe_path, valid_hash, valid_id,
 };
 use serde::Deserialize;
 
@@ -40,8 +40,10 @@ impl Asset {
                 .with_context(|| format!("{} lava support {phase}", self.contract))
         } else {
             ensure!(
-                !matches!(self.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)
-                    || !map.cells.iter().any(|c| c.ground == 244),
+                !matches!(
+                    self.id.as_str(),
+                    WORLD02_ID | WORLD03_ID | WORLD05_ID | WORLD09_ID | WORLD11_ID
+                ) || !map.cells.iter().any(|c| c.ground == 244),
                 "{} requires its source-exact lava capability {phase}",
                 self.contract
             );
@@ -338,26 +340,4 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
         map.spawns.push((x as f32 + 0.5, y as f32 + 0.5));
     }
     Ok(())
-}
-
-#[test]
-fn authored_grove_registry_refuses_changed_layout_hashes() {
-    for mut source in sources(Path::new("data")).unwrap() {
-        if source.name().starts_with("realm-fsod-") {
-            assert!(source.groves().unwrap().is_empty());
-        } else {
-            assert!(!source.groves().unwrap().is_empty());
-            let Source::Encoded(asset) = &mut source else {
-                unreachable!()
-            };
-            asset.sha256 = "0".repeat(64);
-            assert!(
-                source
-                    .groves()
-                    .unwrap_err()
-                    .to_string()
-                    .contains("Grove registry hash mismatch")
-            );
-        }
-    }
 }

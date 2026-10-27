@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from zipfile import ZipFile, ZipInfo
 
 spec = importlib.util.spec_from_file_location("launcher", Path(__file__).with_name("run.py"))
@@ -27,7 +27,7 @@ class LauncherTests(unittest.TestCase):
                                   'ruffle/lock.json': json.dumps(self.lock).encode()})
         self.selection = {'client': self.revision, 'client_archive_sha256': hashlib.sha256(self.data).hexdigest(),
                           'runtime_version': self.lock['version'], 'runtime_bundle_sha256': self.lock['bundleSha256']}
-        self.patch = patch.multiple(launcher, ROOT=self.root, LOG=self.root / ".local/server.log")
+        self.patch = patch.multiple(launcher, ROOT=self.root / 'source', LOG=self.root / ".local/server.log")
         self.patch.start()
         self.resolve = patch.object(launcher, 'client_selection', return_value=self.selection)
         self.resolve.start()
@@ -65,7 +65,7 @@ class LauncherTests(unittest.TestCase):
     def test_failed_build_never_starts_a_stale_retained_binary(self):
         (self.client / 'scripts').mkdir(parents=True)
         (self.client / 'scripts/run.py').touch()
-        with patch('sys.argv', ['run.py', '8081']), \
+        with patch('sys.argv', ['run.py', '8081', '--client', str(self.client)]), \
                 patch.object(launcher.shutil, 'which', return_value='/cargo'), \
                 patch.object(launcher, 'prepare_client', return_value=self.client), \
                 patch.object(launcher, 'run', side_effect=[0, 37]) as run:

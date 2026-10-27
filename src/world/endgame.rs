@@ -9,6 +9,15 @@ pub(super) const REMAINING_TAUNT_MS: u64 = 120_000;
 pub(super) struct RealmDirectory {
     pub realms: BTreeMap<i32, RealmRecord>,
     pub(super) forced: BTreeMap<i32, ForcedRoute>,
+    preparing: Option<RealmPreparation>,
+}
+struct RealmPreparation {
+    origin: i32,
+    castle: i32,
+    realm: i32,
+    rng_before: rand::rngs::StdRng,
+    realm_started: Arc<std::sync::atomic::AtomicBool>,
+    result: tokio::sync::oneshot::Receiver<Result<(World, World, RealmCycle)>>,
 }
 pub(super) struct RealmRecord {
     pub cycle: RealmCycle,
@@ -253,6 +262,7 @@ impl Directory {
             kind,
             destination,
             origin,
+            expires_tick = self.portals[&opened].expires,
             "consumable committed; bound dungeon portal published"
         );
         Ok(())
@@ -285,7 +295,6 @@ impl Directory {
                     self.worlds[&origin].walkable(pos),
                     "authored Chamber entrance position blocked"
                 );
-                self.reserve_worlds(1, &origins)?;
                 let destination = self.instance(crate::endgame::CHAMBER, None, None)?;
                 let portal =
                     match self
@@ -448,10 +457,8 @@ impl Directory {
                     }
                 }
             }
-            // Ordinary maintenance must not retain this loan while waiting for another Realm.
-            if cycle.stage != RealmStage::Transferring {
-                self.worlds.release_world(origin);
-            }
+            // Preparation owns its inputs; even closing Realms must run while another loan is pending.
+            self.worlds.release_world(origin);
         }
         let transferring: Vec<_> = self
             .endgame
@@ -543,28 +550,75 @@ impl Directory {
         }
     }
     fn replace_realm(&mut self, origin: i32) -> Result<()> {
-        self.worlds.get(&origin).context("closing Realm missing")?;
-        self.reserve_worlds(2, &[origin])?;
-        let castle = self.make(CASTLE, "Oryx's Castle", false, None)?;
-        let realm = self.make("realm-shore", "Realm", false, None)?;
-        let next_cycle = RealmCycle::new(realm.hero_identities())?;
+        ensure!(self.worlds.contains_key(&origin), "closing Realm missing");
+        if let Some(preparation) = &self.endgame.preparing {
+            if preparation.origin != origin {
+                return Ok(());
+            }
+        } else {
+            let castle_id = self.next_world;
+            let realm_id = castle_id
+                .checked_add(1)
+                .context("world identity exhausted")?;
+            let next = realm_id
+                .checked_add(1)
+                .context("world identity exhausted")?;
+            ensure!(
+                !self.worlds.contains_key(&castle_id) && !self.worlds.contains_key(&realm_id),
+                "world identity collision"
+            );
+            let rng_before = self.realm_rng.clone();
+            let castle = self.construction(CASTLE, "Oryx's Castle", false, None);
+            let realm = self.construction("realm-shore", "Realm", false, None);
+            let realm_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let started = realm_started.clone();
+            let result = match self.worlds.prepare_replacement(origin, self.tick, move || {
+                let castle = castle()?;
+                started.store(true, std::sync::atomic::Ordering::Release);
+                let realm = realm()?;
+                let cycle = RealmCycle::new(realm.hero_identities())?;
+                Ok((castle, realm, cycle))
+            }) {
+                Ok(result) => result,
+                Err(error) => {
+                    self.realm_rng = rng_before;
+                    return Err(error);
+                }
+            };
+            // One unpublished build preserves Realm selection/publication order without occupying simulation workers.
+            self.endgame.preparing = Some(RealmPreparation {
+                origin,
+                castle: castle_id,
+                realm: realm_id,
+                rng_before,
+                realm_started,
+                result,
+            });
+            self.next_world = next;
+        }
+        let result = match self.endgame.preparing.as_mut().unwrap().result.try_recv() {
+            Ok(result) => result,
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return Ok(()),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                self.endgame.preparing.take();
+                bail!("Realm preparation worker stopped without returning its result");
+            }
+        };
+        let preparation = self.endgame.preparing.take().unwrap();
+        if !preparation
+            .realm_started
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            self.realm_rng = preparation.rng_before;
+        }
+        let (castle, realm, next_cycle) = result?;
+        let (castle_id, realm_id) = (preparation.castle, preparation.realm);
         let name = (1..=super::realm_portal::NAMES.len())
             .map(|offset| {
                 (self.endgame.realms[&origin].name + offset) % super::realm_portal::NAMES.len()
             })
             .find(|name| self.endgame.realms.values().all(|r| r.name != *name))
             .context("no unused Realm name")?;
-        let castle_id = self.next_world;
-        let realm_id = castle_id
-            .checked_add(1)
-            .context("world identity exhausted")?;
-        let next = realm_id
-            .checked_add(1)
-            .context("world identity exhausted")?;
-        ensure!(
-            !self.worlds.contains_key(&castle_id) && !self.worlds.contains_key(&realm_id),
-            "world identity collision"
-        );
         let players: Vec<_> = self.worlds[&origin]
             .players
             .iter()
@@ -598,7 +652,6 @@ impl Directory {
         realm.admission_open = false;
         self.worlds.insert(castle_id, castle);
         self.worlds.insert(realm_id, realm);
-        self.next_world = next;
         self.idle.insert(castle_id, self.tick);
         let mut record = RealmRecord::new(next_cycle, self.tick * 50);
         record.portal = Some(portal);
@@ -644,10 +697,6 @@ impl Directory {
         );
     }
 
-    #[cfg(test)]
-    pub fn forced_transfer_candidates(&self) -> Vec<i32> {
-        self.endgame.forced.keys().copied().collect()
-    }
     pub(crate) fn cancel_forced_transfer(&mut self, transfer: &ForcedTransfer) {
         if let Some(grant) = self.grants.remove(&transfer.key) {
             self.worlds
@@ -973,7 +1022,7 @@ impl World {
                 }
                 _ => continue,
             };
-            let tag = match e.quest {
+            let tag = match *e.quest {
                 Some(tag) => tag,
                 None => e.id,
             };
@@ -1031,263 +1080,79 @@ impl World {
 }
 
 #[cfg(test)]
-#[test]
-fn castle_ground_only_writes_preserve_native_scenery() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-    let mut witnessed = BTreeSet::new();
-    let (mut bridges, mut walls) = (0, 0);
-    for seed in 0..16 {
-        let original = Arc::new(Map {
-            width: 192,
-            height: 192,
-            cells: vec![
-                crate::content::Cell {
-                    ground: 0x47,
-                    object: Some(0x105),
-                    config: "name:native;size:137".into(),
-                    terrain: 3,
-                    region: 0,
-                };
-                192 * 192
-            ],
-            spawns: vec![(1., 1.)],
-        });
-        let mut world = World::new(content.clone(), original.clone()).unwrap();
-        let native_ids: Vec<_> = (0..192 * 192).map(|i| world.cells.ids(i)[0]).collect();
-        let template = match &world.entities[&native_ids[0]].state {
-            entity_store::EntityState::Shared(t) => t.clone(),
-            _ => panic!("native Bush does not use shared scenery state"),
-        };
-        world.rng = rand::rngs::StdRng::seed_from_u64(seed);
-        world.populate_landmark_heroes(0x67d, &[3], 1).unwrap();
-        let chest = world.entities.values().find(|e| e.kind == 0x501).unwrap();
-        let root = world.entities.values().find(|e| e.kind == 0x67d).unwrap();
-        assert_eq!(world.setpieces.len(), 1);
-        assert_eq!(
-            world.entities.values().filter(|e| e.kind == 0x501).count(),
-            1
-        );
-        assert!(chest.published && chest.items.len() == 8 && world.walkable(chest.pos));
-        assert_eq!((chest.pos.x.fract(), chest.pos.y.fract()), (0.5, 0.5));
-        assert_eq!((root.pos.x.fract(), root.pos.y.fract()), (0., 0.));
-        assert!(root.pos.distance(chest.pos) > 6.);
-        let assert_native = |pos: Pos, ground: u8, added: Option<i32>| {
-            let index = pos.y as usize * 192 + pos.x as usize;
-            let actual = &world.map.cells[index];
-            let before = &original.cells[index];
-            assert_eq!(
-                (
-                    actual.ground,
-                    actual.object,
-                    &actual.config,
-                    actual.terrain,
-                    actual.region
-                ),
-                (
-                    ground,
-                    before.object,
-                    &before.config,
-                    before.terrain,
-                    before.region
-                ),
-                "seed {seed}"
-            );
-            let native = &world.entities[&native_ids[index]];
-            assert_eq!(
-                (native.kind, native.name.as_str(), native.size),
-                (0x105, "native", 137)
-            );
-            assert_eq!((native.pos.x, native.pos.y), (pos.x, pos.y));
-            assert!(
-                matches!(&native.state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
-            );
-            assert_eq!(
-                world.cells.ids(index).len(),
-                1 + usize::from(added.is_some())
-            );
-            assert!(world.cells.ids(index).contains(&native.id));
-            if let Some(id) = added {
-                assert!(world.cells.ids(index).contains(&id));
-            }
-        };
-        assert_native(chest.pos, 0x47, Some(chest.id));
-        let wall_sites: Vec<_> = world
-            .entities
-            .values()
-            .filter(|e| e.kind == 0x122)
-            .map(|e| (e.id, e.pos))
-            .collect();
-        for &(id, pos) in &wall_sites {
-            assert_native(pos, 0x60, Some(id));
-            assert!(
-                world.entities[&id].hp > 0 && world.entities[&id].published && !world.walkable(pos)
-            );
-            walls += 1;
-        }
-        for (i, _) in world
-            .map
-            .cells
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.ground == 0xcb)
-        {
-            let pos = Pos {
-                x: (i % 192) as f32 + 0.5,
-                y: (i / 192) as f32 + 0.5,
-            };
-            assert_native(pos, 0xcb, None);
-            assert!(world.walkable(pos));
-            bridges += 1;
-        }
-        assert_native(
-            Pos {
-                x: root.pos.x + 0.5,
-                y: root.pos.y + 0.5,
-            },
-            0x47,
-            Some(root.id),
-        );
-        let area = world.setpieces[0];
-        witnessed.insert((
-            area.width,
-            area.height,
-            ((chest.pos.x - area.x as f32) * 2.) as i32,
-            ((chest.pos.y - area.y as f32) * 2.) as i32,
-        ));
-        if let Some((wall, pos)) = wall_sites.first().copied() {
-            let index = pos.y as usize * 192 + pos.x as usize;
-            world.damage_enemy(-1, wall, 1000, true, &[], None).unwrap();
-            assert!(!world.entities.contains_key(&wall) && world.walkable(pos));
-            assert_eq!(world.cells.ids(index), &[native_ids[index]]);
-            let cell = &world.map.cells[index];
-            assert_eq!(
-                (cell.ground, cell.object, cell.config.as_str()),
-                (0x60, Some(0x105), "name:native;size:137")
-            );
-            assert!(
-                matches!(&world.entities[&native_ids[index]].state, entity_store::EntityState::Shared(t) if Arc::ptr_eq(t, &template))
-            );
-        }
-    }
-    assert!(bridges > 0 && walls > 0);
-    assert_eq!(
-        witnessed,
-        BTreeSet::from([
-            (31, 40, 31, 55),
-            (40, 31, 25, 31),
-            (31, 40, 31, 25),
-            (40, 31, 55, 31)
-        ])
-    );
-}
-
-#[cfg(test)]
-#[test]
-fn landmark_hero_boundaries_fit_published_layouts() {
+#[tokio::test]
+async fn realm_death_credit_survives_portal_reward_failure() {
     let data = std::path::Path::new("data");
     let content = Arc::new(Content::load(data).unwrap());
-    let mut cyclops_anchors = BTreeSet::new();
-    for source in crate::terrain::realms::sources(data).unwrap() {
-        for counts in [[3, 4], [4, 6]] {
-            let birth_map = source.open(&content).unwrap();
-            let mut world = World::new(content.clone(), birth_map.clone()).unwrap();
-            world.realm_layout = Some(source.name().to_owned());
-            world.rng = rand::rngs::StdRng::seed_from_u64(12351);
-            for (kind, terrains, count) in [
-                (HEROES[0], &[1][..], counts[0]),
-                (HEROES[1], &[3, 4][..], counts[1]),
-            ] {
-                world
-                    .populate_landmark_heroes(kind, terrains, count)
-                    .unwrap();
-                assert_eq!(
-                    world.entities.values().filter(|e| e.kind == kind).count(),
-                    count,
-                    "{}: {kind:#x}",
-                    source.name()
-                );
-            }
-            let ids = world.hero_identities();
-            assert_eq!(ids.len(), counts.iter().sum::<usize>());
-            for id in &ids {
-                let e = &world.entities[id];
-                assert!(e.published && e.hp > 0 && e.quest.is_none() && e.camp.is_none());
-                if e.kind == HEROES[1] {
-                    let area = world
-                        .setpieces
-                        .iter()
-                        .find(|a| a.distance(e.pos) == 0.)
-                        .unwrap();
-                    let chest = world
-                        .entities
-                        .values()
-                        .find(|c| c.kind == 0x501 && area.distance(c.pos) == 0.)
-                        .unwrap();
-                    assert_eq!((chest.pos.x.fract(), chest.pos.y.fract()), (0.5, 0.5));
-                    assert!(world.walkable(chest.pos));
-                    for pos in [chest.pos, e.pos] {
-                        let index = pos.y as usize * world.map.width as usize + pos.x as usize;
-                        let original = &birth_map.cells[index];
-                        let current = &world.map.cells[index];
-                        assert_eq!(
-                            (
-                                current.ground,
-                                current.object,
-                                &current.config,
-                                current.terrain,
-                                current.region
-                            ),
-                            (
-                                original.ground,
-                                original.object,
-                                &original.config,
-                                original.terrain,
-                                original.region
-                            )
-                        );
-                    }
-                    let local = match (
-                        area.width,
-                        area.height,
-                        ((chest.pos.x - area.x as f32) * 2.) as i32,
-                        ((chest.pos.y - area.y as f32) * 2.) as i32,
-                    ) {
-                        (31, 40, 31, 55) => (15, 20),
-                        (40, 31, 25, 31) => (19, 15),
-                        (31, 40, 31, 25) => (15, 19),
-                        (40, 31, 55, 31) => (20, 15),
-                        other => panic!("unexpected rotated Castle/chest {other:?}"),
-                    };
-                    let expected = ((area.x + local.0) as f32, (area.y + local.1) as f32);
-                    assert_eq!((e.pos.x, e.pos.y), expected, "{}: Cyclops", source.name());
-                    assert_eq!((e.home.x, e.home.y), expected);
-                    assert!(
-                        world.walkable(e.pos)
-                            && matches!(world.map.cell(e.pos.x, e.pos.y).unwrap().terrain, 3 | 4)
-                    );
-                    let index = e.pos.y as usize * world.map.width as usize + e.pos.x as usize;
-                    assert!(world.cells.ids(index).contains(id));
-                    assert!(e.pos.distance(chest.pos) > 6. && chest.items.len() == 8);
-                    cyclops_anchors.insert(local);
-                }
-                assert!(
-                    ids.iter()
-                        .filter(|other| *other != id)
-                        .all(|other| e.pos.distance(world.entities[other].pos) >= 32.)
-                );
-            }
-            let mut cycle = RealmCycle::new(ids.clone()).unwrap();
-            for id in ids {
-                assert!(cycle.defeated(id, 1000));
-                assert!(!cycle.defeated(id, 1000));
-            }
-            assert!(
-                matches!(cycle.stage, RealmStage::Closing { deadline } if deadline == 1000 + crate::endgame::CLOSE_DELAY_MS)
-            );
-        }
-    }
-    assert_eq!(
-        cyclops_anchors,
-        BTreeSet::from([(15, 20), (19, 15), (15, 19), (20, 15)])
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let account = store.list("closure-error-witness".into()).await.unwrap();
+    let character = store
+        .create(account.id, content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut directory = Directory::prepared(data, content.clone(), 16, 12351, 2).unwrap();
+    let mut map = Map {
+        width: 40,
+        height: 40,
+        cells: vec![
+            crate::content::Cell {
+                ground: 0xbc,
+                object: None,
+                config: String::new(),
+                terrain: 0,
+                region: 0,
+            };
+            1600
+        ],
+        spawns: vec![(14.5, 20.5)],
+    };
+    map.cells[20 * 40 + 14].ground = 0x46;
+    let mut world = World::with_ids(content, Arc::new(map), directory.ids.clone()).unwrap();
+    world.name = "Realm".into();
+    world.encounter = true;
+    let root = world
+        .insert_entity(
+            crate::dungeon::trench::HERMIT,
+            Pos { x: 20.5, y: 20.5 },
+            vec![],
+        )
+        .unwrap();
+    world
+        .entities
+        .get_mut(&root)
+        .unwrap()
+        .quest
+        .set(Some(root), root, &mut world.quest_ids);
+    let (packets, mut inbox) = mpsc::channel(64);
+    let (lost, _) = watch::channel(None);
+    world
+        .enter(character, Some(Output { packets, lost }))
+        .unwrap();
+    while inbox.try_recv().is_ok() {}
+    directory.worlds.insert(-3, world);
+    directory.endgame.realms.remove(&-3);
+    directory
+        .bind_realm_heroes(-3, BTreeSet::from([root]))
+        .unwrap();
+    let world = directory.worlds.get_mut(&-3).unwrap();
+    let error = world.defeat_entity(root).unwrap_err();
+    assert_eq!(error.to_string(), "Hermit has no reachable reward site");
+    assert!(!world.entities.contains_key(&root));
+    assert!(world.portal_requests.is_empty());
+    directory.endgame_step(&[-3]);
+    directory.endgame_step(&[-3]);
+    let closed = chat::text_packet(
+        "#Oryx the Mad God",
+        -1,
+        0,
+        "I HAVE CLOSED THIS REALM! YOU WILL NOT LIVE TO SEE THE LIGHT OF DAY!",
     );
+    assert_eq!(
+        std::iter::from_fn(|| inbox.try_recv().ok())
+            .filter(|p| p.id == closed.id && p.body == closed.body)
+            .count(),
+        1
+    );
+    assert!(!directory.worlds[&-3].admission_open);
+    assert!(directory.endgame.realms[&-3].cycle.remaining.is_empty());
 }

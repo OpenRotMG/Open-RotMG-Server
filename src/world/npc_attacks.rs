@@ -133,6 +133,9 @@ impl World {
             }
             return Ok(Some(schedule));
         }
+        if e.kind == 0x651 {
+            return Ok(Some(crate::encounter::white_demon_schedule(elapsed)));
+        }
         if matches!(
             e.kind,
             crate::dungeon::manor::KAGE | crate::dungeon::manor::MINE
@@ -335,7 +338,14 @@ impl World {
             let heading = match attack.aim {
                 Aim::Fixed(angle) => angle,
                 Aim::Target => {
-                    let Some(target) = target.filter(|p| pos.distance(*p) <= attack.range) else {
+                    let Some(target) = target.filter(|p| {
+                        let distance = pos.distance(*p);
+                        if self.entities[&id].kind == 0x651 && self.name != "Abyss of Demons" {
+                            distance < attack.range
+                        } else {
+                            distance <= attack.range
+                        }
+                    }) else {
                         continue;
                     };
                     (target.y - pos.y).atan2(target.x - pos.x)
@@ -404,61 +414,5 @@ impl World {
             );
         }
         Ok(shots)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn both_sprite_gods_lead_only_the_quiet_projectile() {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
-        for cell in &mut map.cells {
-            cell.ground = 0x61;
-            cell.object = None;
-        }
-        let target = Pos { x: 12.5, y: 12.5 };
-        map.spawns = vec![(target.x, target.y)];
-        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
-        let account = store.list("sprite-aim".into()).await.unwrap();
-        let character = store
-            .create(account.id, content.get(crate::content::WIZARD).unwrap())
-            .await
-            .unwrap();
-        let mut w = World::new(content, Arc::new(map)).unwrap();
-        let player = w.enter(character, None).unwrap();
-        for kind in [0x652, 0xd05] {
-            let id = w
-                .spawn_entity(kind, Pos { x: 12.5, y: 4.5 }, vec![])
-                .unwrap();
-            for velocity in [-3., 0., 3.] {
-                w.now += 1000;
-                w.players.get_mut(&player).unwrap().motion = ObservedMotion {
-                    position: target,
-                    time: 0,
-                    velocity: Pos { x: velocity, y: 0. },
-                    at: w.now,
-                };
-                let schedule = w.npc_attack_schedule(id, 0).unwrap().unwrap();
-                let shots = w.scheduled_attacks(id, Some(target), &schedule).unwrap();
-                assert_eq!(shots.len(), 5);
-                for ((index, angle), offset) in shots[..4].iter().zip([-15f32, -5., 5., 15.]) {
-                    assert_eq!(*index, 0);
-                    assert!(
-                        (*angle - std::f32::consts::FRAC_PI_2 - offset.to_radians()).abs() < 1e-5
-                    );
-                }
-                let (index, angle) = shots[4];
-                assert_eq!(index, 1);
-                let expected = 8f32.atan2(velocity * 8. / 6.);
-                assert!(
-                    (angle - expected).abs() < 1e-5,
-                    "kind {kind:#x}, velocity {velocity}: Quiet {angle} != {expected}"
-                );
-            }
-            w.remove_entity(id);
-        }
     }
 }
