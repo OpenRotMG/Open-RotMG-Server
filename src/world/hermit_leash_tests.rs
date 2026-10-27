@@ -31,6 +31,16 @@ fn hermit_attack_leash_fits_the_central_dark_water_pool() {
         .unwrap()
         .id;
     let home = world.entities[&id].home;
+    let portal = Pos {
+        x: home.x,
+        y: home.y + 5.,
+    };
+    assert!(
+        world.walkable(portal),
+        "southern reference portal tile must be shallow"
+    );
+    let reward = world.ocean_reward_position(&world.entities[&id]).unwrap();
+    assert_eq!((reward.x, reward.y), (portal.x, portal.y));
     let target = Pos {
         x: home.x,
         y: home.y + 7.,
@@ -100,4 +110,24 @@ fn hermit_attack_leash_fits_the_central_dark_water_pool() {
         assert!(world.ocean_walkable(kind, land));
         assert!(world.ocean_walkable(kind, home));
     }
+    let cell = portal.y as usize * world.map.width as usize + portal.x as usize;
+    Arc::make_mut(&mut world.map).cells[cell].ground = 0xbc;
+    assert_eq!(
+        world
+            .ocean_reward_position(&world.entities[&id])
+            .unwrap_err()
+            .to_string(),
+        "Hermit has no reachable reward site"
+    );
+    Arc::make_mut(&mut world.map).cells[cell].ground = 0x73;
+    world.name = "Realm".into();
+    world.defeat_entity(id).unwrap();
+    assert_eq!(world.portal_requests.len(), 1);
+    let (kind, requested) = world.portal_requests.pop().unwrap();
+    let portal = world.spawn_clear_portal(kind, requested, true).unwrap();
+    let placed = &world.entities[&portal];
+    assert_eq!(
+        (placed.kind, placed.pos.x, placed.pos.y),
+        (0x730, home.x, home.y + 5.)
+    );
 }
