@@ -86,6 +86,20 @@ impl World {
                     .map(|x| x.pos)
                     .context("own quest anchor absent")
             }
+            encounter::Anchor::QuestEntity(member) => {
+                let tag = e
+                    .quest
+                    .context("quest entity anchor lacks encounter ownership")?;
+                let member = self
+                    .entities
+                    .get(&member)
+                    .context("own quest entity anchor absent")?;
+                ensure!(
+                    *member.quest == Some(tag),
+                    "quest entity anchor ownership mismatch"
+                );
+                Ok(member.pos)
+            }
             encounter::Anchor::Home => Ok(e.home),
             encounter::Anchor::CampLeader => {
                 let camp = self

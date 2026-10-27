@@ -300,6 +300,23 @@ async fn public_call(
                 d.submit_bot_chat(id, text, received)
             })
             .await;
+        if sent.is_ok()
+            && let Some(Goal::Portal(portal)) = brain.call_goal
+            && brain.portal == Some((portal, u64::MAX))
+        {
+            let wait = brain.rng.gen_range(4000..=8000);
+            let until = view
+                .time_ms
+                .checked_add(wait)
+                .context("dungeon call wait deadline overflow")?;
+            brain.portal = Some((portal, until));
+            tracing::info!(
+                player = id,
+                portal,
+                wait_ms = wait,
+                "autonomous dungeon call waiting for company"
+            );
+        }
         brain.close_composition(app, sent.is_ok()).await?;
         match sent {
             Ok(()) => tracing::info!(

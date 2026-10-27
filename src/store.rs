@@ -64,6 +64,7 @@ pub struct AccountPresentation {
     pub best_fame: BTreeMap<u16, i32>,
 }
 impl AccountPresentation {
+    // Preserve the recovered client's inclusive quests, not the later base-only ranks: https://github.com/ViciousFate/rotmg-redis/blob/de251d3e0cfb59b30eb74572e2d8ed87f9e14afa/rotmg_cli_master/src/com/company/assembleegameclient/util/_Z_B_.as#L20-L55
     const THRESHOLDS: [i32; 5] = [20, 150, 400, 800, 2000];
 
     pub fn stars(&self) -> i32 {
@@ -1898,8 +1899,105 @@ fn character_list_advertises_product_name_without_changing_transport() {
 }
 
 #[cfg(test)]
+#[test]
+fn class_stars_use_inclusive_class_bests_and_the_greater_current_goal() {
+    let mut p = AccountPresentation {
+        guild: None,
+        credits: 0,
+        fame: 0,
+        best_fame: BTreeMap::new(),
+    };
+    assert_eq!(p.stars(), 0);
+    assert_eq!(p.next_quest(WIZARD, 0), 20);
+    for (index, threshold) in [20, 150, 400, 800, 2000].into_iter().enumerate() {
+        p.best_fame.insert(WIZARD, threshold - 1);
+        assert_eq!(p.stars(), index as i32);
+        assert_eq!(p.next_quest(WIZARD, 0), threshold);
+        p.best_fame.insert(WIZARD, threshold);
+        assert_eq!(p.stars(), index as i32 + 1);
+        let next = [150, 400, 800, 2000, -1][index];
+        assert_eq!(p.next_quest(WIZARD, 0), next);
+        p.best_fame.insert(WIZARD, 0);
+        assert_eq!(p.next_quest(WIZARD, threshold), next);
+    }
+    p.best_fame = BTreeMap::from([(WIZARD, 2000), (0x300, 150)]);
+    p.fame = 1_000_000;
+    assert_eq!(p.stars(), 7);
+    assert_eq!(p.next_quest(WIZARD, 1999), -1);
+    assert_eq!(p.next_quest(0x300, 800), 2000);
+}
+
+#[cfg(test)]
+mod class_unlock_tests;
+#[cfg(test)]
 mod community_schema_tests;
+#[cfg(test)]
+mod living_fame_tests;
 #[cfg(all(test, unix))]
 mod restart_tests;
 #[cfg(test)]
 mod startup_tests;
+
+#[cfg(test)]
+#[tokio::test]
+async fn warrior_unlock_requires_own_rogue_five_and_survives_deletion_and_restart() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let dir = std::env::temp_dir().join(format!("warrior-unlock-{}", rand::random::<u64>()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("game.db");
+    let store = Store::open(&path, &content).unwrap();
+    let account = store.list("warrior-owner".into()).await.unwrap().id;
+    let foreign = store.list("warrior-foreign".into()).await.unwrap().id;
+    let warrior = content.get(0x31d).unwrap();
+    assert_eq!(&warrior.slots[..4], &[1, 16, 7, 9]);
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let mut rogue = store
+        .create_prepared(account, content.get(0x300).unwrap(), None)
+        .await
+        .unwrap();
+    rogue.level = 4;
+    store.progress(rogue.clone()).await.unwrap();
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    rogue.level = 5;
+    store.progress(rogue.clone()).await.unwrap();
+    store.delete_character(account, rogue.id).await.unwrap();
+    drop(store);
+    let store = Store::open(&path, &content).unwrap();
+    assert!(
+        store
+            .create(foreign, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let created = store.create(account, warrior).await.unwrap();
+    assert_eq!(created.class, 0x31d);
+    assert_eq!(&created.items[..4], &[0xa00, 0xa66, -1, -1]);
+    let loaded = store.load(account, created.id).await.unwrap();
+    assert_eq!(loaded.items, created.items);
+    assert_eq!(
+        store
+            .list("warrior-owner".into())
+            .await
+            .unwrap()
+            .best_levels[&0x300],
+        5
+    );
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}

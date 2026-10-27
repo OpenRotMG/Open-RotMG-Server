@@ -251,6 +251,9 @@ pub(super) fn reason(
         (None, Goal::Loot(id)) => format!("looting {}", named(id)),
         (None, Goal::Follow(id)) => format!("following {}", named(id)),
         (None, Goal::Gather(_)) => "regrouping with nearby players".into(),
+        (None, Goal::Portal(id)) if v.map.name == "Realm" && d.movement.is_none() => {
+            format!("waiting at {} for company", named(id))
+        }
         (None, Goal::Portal(id)) => format!("walking to {}", named(id)),
         (None, Goal::Revisit(..)) => "returning to remembered loot".into(),
         (None, Goal::Survey(..)) => "heading to a realm event".into(),

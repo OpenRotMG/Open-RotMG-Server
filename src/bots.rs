@@ -1211,6 +1211,14 @@ impl Brain {
         if v.map.name == "Realm" && progression::ready(v, content, 0x718) && !self.inland_reached {
             choices.push((60. + self.profile.resources, Goal::Venture, inland));
         }
+        // Grated rooms cannot stay cleared; geared players push past snakes: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
+        let dungeon =
+            !matches!(v.map.name.as_str(), "Realm" | "Nexus" | "Vault") && v.quest.is_some();
+        let rushing = dungeon
+            && health >= 0.75
+            && v.character.level == 20
+            && v.character.stats[3] >= 20
+            && self.mind.cognition.directions >= 8;
         for enemy in enemies {
             if !progression::can_fight(v, content, enemy)
                 || events::shared(&v.map.name) && !progression::vulnerable(enemy)
@@ -1223,8 +1231,11 @@ impl Brain {
             }
             let protected = !progression::vulnerable(enemy);
             let score = 45. - d * 2.
-                + if d < range {
-                    // Nearby reachable mobs are shared XP; equipment does not make them invisible.
+                + if d < range
+                    && (!dungeon
+                        || !rushing && content.objects[&enemy.kind].xp_multiplier > 0.
+                        || v.quest == Some(enemy.id))
+                {
                     60. + (enemy.max_hp as f32).sqrt().min(20.)
                 } else {
                     0.
@@ -1568,13 +1579,41 @@ impl Brain {
         }
         choices.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (_, goal, destination) in choices {
-            if self.blocked.contains_key(&tile(destination)) {
+            let shortcut = if matches!(goal, Goal::Hunt(_))
+                && self.agreement.is_none()
+                && self.companion.is_none()
+                && health >= 0.75
+                && peaceful
+                && decision.item.is_none()
+                && v.time_ms >= self.next_teleport
+            {
+                self.crowd
+                    .shortcut(v, self.group.as_ref(), destination)
+                    .filter(|p| enemies.iter().all(|e| e.position.distance(p.position) > 3.))
+                    .map(|p| p.id)
+            } else {
+                None
+            };
+            if shortcut.is_none() && self.blocked.contains_key(&tile(destination)) {
                 if self.agreement.as_ref().is_some_and(|a| a.waiting.is_some()) {
                     return Ok(decision);
                 }
                 continue;
             }
             let movement = match goal {
+                Goal::Hunt(quest) if shortcut.is_some() => {
+                    let target = shortcut.expect("selected dungeon shortcut missing");
+                    self.next_teleport = v.time_ms + 10_000;
+                    decision.journey = Some(Journey::Regroup(target));
+                    tracing::info!(
+                        account = v.session.account,
+                        target,
+                        quest,
+                        world = v.session.world,
+                        "autonomous dungeon rusher shortcut"
+                    );
+                    None
+                }
                 Goal::Gather(_) if v.position.distance(destination) < 0.7 => None,
                 Goal::Survey(..) if v.position.distance(destination) <= 8. => None,
                 Goal::Portal(id) if v.position.distance(destination) <= 2. => {
@@ -1670,20 +1709,32 @@ impl Brain {
             };
             if let Goal::Portal(portal) = goal
                 && witnessed_portal != Some(portal)
-                && self.goal != goal
                 && v.map.name == "Realm"
+                && v.position.distance(destination) <= 2.
+                && self.portal.is_none_or(|(seen, _)| seen != portal)
             {
-                let portal = v
-                    .objects
-                    .iter()
-                    .find(|p| p.id == portal)
-                    .context("selected portal missing")?;
-                decision.chat = Some(match portal.kind {
-                    0x717 => "pc here",
-                    0x718 => "snake here",
-                    0x890 => "lab here",
-                    kind => anyhow::bail!("unsupported autonomous dungeon call {kind:#x}"),
-                });
+                self.portal = Some((portal, if self.rng.gen_bool(0.5) { u64::MAX } else { 0 }));
+            }
+            if let Goal::Portal(id) = goal
+                && let Some((called, until)) = self.portal
+                && called == id
+            {
+                if until == u64::MAX {
+                    let portal = v
+                        .objects
+                        .iter()
+                        .find(|p| p.id == id)
+                        .context("selected portal missing")?;
+                    decision.chat = Some(match portal.kind {
+                        0x717 => "pc here",
+                        0x718 => "snake here",
+                        0x890 => "lab here",
+                        kind => anyhow::bail!("unsupported autonomous dungeon call {kind:#x}"),
+                    });
+                }
+                if v.time_ms < until {
+                    decision.journey = None;
+                }
             }
             if let Goal::Follow(id) = goal
                 && cooperative_goal != Some(id)
@@ -1751,7 +1802,6 @@ impl Brain {
                     .copied()
                     .context("selected enemy missing")?;
                 let enemy = if matches!(decision.goal, Goal::Hunt(_))
-                    && v.map.name == "Snake Pit"
                     && v.position.distance(enemy.position) >= range
                 {
                     combat::target(v, content, grid, enemies, range, s.passes_cover)
