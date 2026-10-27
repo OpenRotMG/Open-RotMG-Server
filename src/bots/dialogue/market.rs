@@ -4,6 +4,16 @@ use crate::bots::pursuits::market::{
 };
 
 type Repertoire = [String; 3];
+const FAVORITE_SHAPES: [&str; 8] = [
+    "compact s> with equals",
+    "selling words with for",
+    "buying words with for",
+    "item-first equals",
+    "wtb with implicit price",
+    "trading words with for",
+    "s> with parenthesized price",
+    "compact b> with equals",
+];
 pub(super) struct Wording {
     created: Instant,
     next: usize,
@@ -174,9 +184,7 @@ impl Service {
         let name = name.to_owned();
         let seed = persona::seed(&name);
         let voice = json!({
-            "favorite_shape": (["compact s> with equals", "selling words with for", "buying words with for",
-                "item-first equals", "wtb with implicit price", "trading words with for",
-                "s> with parenthesized price", "compact b> with equals"][seed as usize % 8]),
+            "favorite_shape": FAVORITE_SHAPES[seed as usize % 8],
             "capitalization": (["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3]),
             "name_signature": (seed / 24).is_multiple_of(2),
         });
@@ -227,6 +235,21 @@ impl Service {
 mod tests {
     use super::*;
     use crate::bots::pursuits::market::Channel;
+
+    #[test]
+    fn market_favorite_shapes_are_priced_and_invalid_provider_repertoire_stays_rejected() {
+        for shape in FAVORITE_SHAPES {
+            assert!(validated_template(shape, Intent::MarketAdvertise).unwrap());
+        }
+        let invalid = "wtf {give} for {want} @{name}|trading words with for {give} = {want} @{name}|s>{give} ({want}) @{name}!";
+        assert!(repertoire(invalid, Intent::MarketAdvertise).is_err());
+        for bad in invalid.split('|').take(2) {
+            assert!(validated_template(bad, Intent::MarketAdvertise).is_err());
+        }
+        assert!(
+            validated_template("s>{give} ({want}) @{name}!", Intent::MarketAdvertise).unwrap()
+        );
+    }
 
     fn content() -> Content {
         Content::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data")).unwrap()
