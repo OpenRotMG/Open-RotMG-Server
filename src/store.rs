@@ -1880,6 +1880,60 @@ fn character_list_advertises_product_name_without_changing_transport() {
 }
 
 #[cfg(test)]
+#[tokio::test]
+async fn archer_requires_priest_five_and_retains_deleted_progress() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let store = Store::open(Path::new(":memory:"), &content).unwrap();
+    let account = store.list("archer-unlock".into()).await.unwrap().id;
+    let archer = content.get(0x307).unwrap();
+    assert!(!content.unlocked(0x307, &BTreeMap::new()).unwrap());
+    assert_eq!(
+        store
+            .create(account, archer)
+            .await
+            .unwrap_err()
+            .downcast_ref::<Rejected>()
+            .unwrap()
+            .0,
+        "class is locked"
+    );
+    let mut priest = store
+        .create_prepared(account, content.get(0x310).unwrap(), None)
+        .await
+        .unwrap();
+    for level in [4, 5] {
+        priest.level = level;
+        store.progress(priest.clone()).await.unwrap();
+        let records = store
+            .list("archer-unlock".into())
+            .await
+            .unwrap()
+            .best_levels;
+        assert_eq!(content.unlocked(0x307, &records).unwrap(), level == 5);
+        if level == 4 {
+            assert_eq!(
+                store
+                    .create(account, archer)
+                    .await
+                    .unwrap_err()
+                    .downcast_ref::<Rejected>()
+                    .unwrap()
+                    .0,
+                "class is locked"
+            );
+        }
+    }
+    store.delete_character(account, priest.id).await.unwrap();
+    let created = store.create(account, archer).await.unwrap();
+    assert_eq!(created.class, 0x307);
+    assert_eq!(&created.items[..4], &[0xa1a, 0xa61, -1, -1]);
+    assert_eq!(
+        store.load(account, created.id).await.unwrap().items,
+        created.items
+    );
+}
+
+#[cfg(test)]
 mod community_schema_tests;
 #[cfg(all(test, unix))]
 mod restart_tests;
