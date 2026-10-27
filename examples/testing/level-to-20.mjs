@@ -44,7 +44,7 @@ export async function run(game){
   const config=JSON.parse(await readFile(join(root(),'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),observations=[];
   async function protect(client){
-    const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:120000}}}),signal:AbortSignal.timeout(10000)});
+    const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
   async function snapshot(name,client=game){const state=await client.inspect();observations.push({name,state});await writeFile(join(root(),'level-observations.json'),JSON.stringify({preparedThresholdsAndGear:true,observations},null,2));return state;}
@@ -58,7 +58,8 @@ export async function run(game){
   }
   await protect(game);
   const start=await snapshot('prepared-19');
-  const peer=await game.join({...fixture,level:1,world:start.view.session.world,position:{x:start.view.position.x,y:start.view.position.y-1},equipment:[-1,0xa2e,-1,-1],stats:null});
+  const {worldSeed,...shared}=fixture;
+  const peer=await game.join({...shared,level:1,world:start.view.session.world,position:{x:start.view.position.x,y:start.view.position.y-1},equipment:[-1,0xa2e,-1,-1],stats:null});
   await protect(peer);
   await game.act({keys:[],duration_ms:1800},{name:'level-19-before',when:()=>true});
   const before=await snapshot('before-kill'),peerBefore=await snapshot('peer-before-kill',peer);
