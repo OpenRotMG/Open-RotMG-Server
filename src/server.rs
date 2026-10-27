@@ -1141,7 +1141,7 @@ fn input(
             r.done()?;
             let id = character("MOVE before character")?;
             Box::new(move |w| {
-                w.acknowledge_tick(id, tick)?;
+                w.acknowledge_tick(id, tick, received)?;
                 match w.native_move_received(id, pos, (time, received)) {
                     Ok(_) => Ok(()),
                     Err(e) if lifecycle::rule_rejection(&e) => {
