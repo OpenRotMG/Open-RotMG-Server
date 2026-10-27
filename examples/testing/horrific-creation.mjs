@@ -27,14 +27,17 @@ export async function run(game) {
   const wait=async()=>act({keys:[],duration_ms:protections.get(game.actor)-(await game.observe()).game_ms>5000?2000:100});
   async function go(x,y) {
     for(let n=0;n<80;n++) {
-      const p=(await game.observe()).position,dx=x-p.x,dy=y-p.y;
+      const view=await game.observe(),p=view.position,dx=x-p.x,dy=y-p.y;
       if(Math.hypot(dx,dy)<0.4)return;
       const sx=dx*Math.cos(camera)+dy*Math.sin(camera),sy=-dx*Math.sin(camera)+dy*Math.cos(camera),keys=[];
-      if(Math.abs(sx)>0.15)keys.push(sx>0?'d':'a');
-      if(Math.abs(sy)>0.15)keys.push(sy>0?'s':'w');
+      if(Math.abs(sx)>0.15&&Math.abs(sx)>=Math.abs(sy)*0.41421356)keys.push(sx>0?'d':'a');
+      if(Math.abs(sy)>0.15&&Math.abs(sy)>=Math.abs(sx)*0.41421356)keys.push(sy>0?'s':'w');
       const distance=keys.length===2?Math.min(Math.abs(sx),Math.abs(sy))*Math.SQRT2:Math.max(Math.abs(sx),Math.abs(sy));
-      await act({keys,duration_ms:Math.max(50,Math.min(400,Math.round(distance/7.733*1000)))});
+      const flags=view.character.conditions,speed=flags&(1<<3)?4:(4+5.6*view.character.stats.speed/75)*(flags&(1<<14)?1.5:1);
+      const inputKeys=flags&(1<<10)?keys.map(k=>({d:'w',a:'s',s:'a',w:'d'})[k]):keys;
+      await act({keys:inputKeys,duration_ms:Math.max(50,Math.min(400,Math.round(distance/speed*1000)))});
     }
+    await save('failed-walk-'+x+'-'+y);
     throw Error('Native walk did not reach '+x+','+y);
   }
   async function defeat(kind,name) {
