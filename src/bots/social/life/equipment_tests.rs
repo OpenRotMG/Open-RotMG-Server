@@ -174,8 +174,20 @@ impl Scene {
             .await
             .unwrap();
         self.pump().await;
+        assert!(
+            self.brain.mind.market.incoming.is_none(),
+            "gift native request must not become a market negotiation"
+        );
+        assert!(
+            self.brain.mind.market.trade.is_some(),
+            "reciprocal native request must open the window"
+        );
         let v = self.view().await;
         life(&self.app, &mut self.brain, &v).await.unwrap();
+        assert!(
+            self.brain.mind.social.gift.is_some(),
+            "gift must remain after ordinary native Change"
+        );
         self.pump().await;
         self.app
             .world
@@ -208,6 +220,8 @@ impl Scene {
 #[tokio::test]
 async fn equipment_consumer_types_actual_offer_and_requires_receipt_even_after_eligibility_changes()
 {
+    let _logs =
+        tracing::subscriber::set_default(tracing_subscriber::fmt().with_test_writer().finish());
     let mut s = Scene::new([-1; 8]).await;
     let candidate = s.offer(false).await;
     let item_name = s.app.content.get(RING as u16).unwrap().name.clone();

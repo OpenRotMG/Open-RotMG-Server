@@ -49,7 +49,18 @@ pub(in crate::bots) async fn actor_in(
     ch.base[4] = app.content.classes[&ch.class].caps[4];
     ch.hp = 500;
     let owner = app.claim(account).unwrap();
-    let (id, output, _, brain) = enter(app, profile(), ch, world, None).await.unwrap();
+    let position = if world == -3 {
+        let (x, y) = app
+            .world
+            .in_world(world)
+            .call(|w| Ok(w.map.spawns[0]))
+            .await
+            .unwrap();
+        Some(Pos { x, y })
+    } else {
+        None
+    };
+    let (id, output, _, brain) = enter(app, profile(), ch, world, position).await.unwrap();
     (owner, id, output, brain)
 }
 
