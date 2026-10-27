@@ -56,14 +56,21 @@ fn geared_rushers_pass_trash_but_inexperienced_or_unprepared_bots_clear() {
     v.character.stats[3] = 25;
     v.objects[0].kind = 0x917;
     v.objects[0].condition_mask = Some(crate::condition::bit(crate::condition::INVULNERABLE));
-    let mut snake = v.objects[0].clone();
-    snake.id = 3;
-    snake.kind = 0x225;
-    snake.position = Pos { x: 12.5, y: 10.5 };
-    snake.hp = c.objects[&snake.kind].hp;
-    snake.max_hp = snake.hp;
-    snake.condition_mask = Some(0);
-    v.objects.push(snake);
+    v.objects.push(VisibleObject {
+        id: 3,
+        account: None,
+        kind: 0x225,
+        name: String::new(),
+        position: Pos { x: 12.5, y: 10.5 },
+        hp: c.objects[&0x225].hp,
+        max_hp: c.objects[&0x225].hp,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    });
     let mut brain = Brain::new(ARCHETYPES[1], &v);
     brain.goal = Goal::Fight(3);
     assert_eq!(adventure(&mut brain, &v, &c).goal, Goal::Hunt(2));
