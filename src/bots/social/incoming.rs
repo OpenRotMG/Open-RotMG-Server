@@ -24,6 +24,7 @@ pub(super) async fn incoming(
         let changed = matches!(action, crate::world::TradeAction::Change { .. });
         let id = v.session.player;
         let session = g.session;
+        let contact = g.clone();
         let result = app
             .world
             .directory(move |d| {
@@ -45,8 +46,13 @@ pub(super) async fn incoming(
             })
             .await;
         match result {
-            Ok(Some(plan)) => crate::server::persist_trade(app, plan).await?,
-            Ok(None) => {
+            Ok(outcome) => {
+                if let Some(witness) = outcome.witness {
+                    brain.mind.market.pending_trade = Some(pursuits::market::PendingTrade { contact, witness });
+                }
+                if let Some(plan) = outcome.plan {
+                    crate::server::persist_trade(app, plan).await?;
+                } else {
                 if changed && let Some(trade) = brain.mind.market.trade.as_mut() {
                     trade.ready_at = app.world.clock.now() + std::time::Duration::from_millis(3000);
                 }
@@ -55,6 +61,7 @@ pub(super) async fn incoming(
                         account = v.session.account,
                         "market native exchange opened; WINDOW offers remain authoritative"
                     );
+                }
                 }
             }
             Err(error) => {

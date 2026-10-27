@@ -510,6 +510,11 @@ pub struct InventoryWrite {
     pub revision: i32,
     pub items: Vec<i32>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TradeWitness {
+    pub transaction: String,
+    pub writes: Vec<InventoryWrite>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GiftParticipant {
     pub account: i32,
@@ -1341,6 +1346,26 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         self.exchange_transaction(writes, vec![], None, Some((transaction, delivery)))
             .await
+    }
+    pub(crate) async fn trade_committed(&self, witness: TradeWitness) -> Result<bool> {
+        ensure!(witness.transaction.len()==32 && witness.transaction.bytes().all(|b| b.is_ascii_hexdigit())
+            && witness.writes.len()==2 && witness.writes[0].account!=witness.writes[1].account
+            && witness.writes.iter().all(|w| w.account>0 && w.id>0 && (0..i32::MAX).contains(&w.revision)
+                && w.items.len()==12 && w.items.iter().all(|k| (-1..=65535).contains(k))), "invalid trade receipt witness");
+        self.call(move |c| {
+            let row: Option<(String,String,String,Option<String>)> = c.query_row(
+                "SELECT owners,writes,revisions,delivery FROM trade_transactions WHERE id=?1",
+                [&witness.transaction], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+            let Some((owners,writes,revisions,delivery))=row else { return Ok(false); };
+            let owners: Vec<i32>=serde_json::from_str(&owners)?;
+            let writes: Vec<InventoryWrite>=serde_json::from_str(&writes)?;
+            let revisions: Vec<i32>=serde_json::from_str(&revisions)?;
+            ensure!(delivery.is_none() && writes==witness.writes
+                && owners==writes.iter().map(|w| w.account).collect::<Vec<_>>()
+                && revisions.len()==2 && writes.iter().zip(revisions).all(|(w,r)| w.revision.checked_add(1)==Some(r)),
+                "committed trade payload or participants differ from accepted window: {}",witness.transaction);
+            Ok(true)
+        }).await
     }
     pub(crate) async fn gift_committed(&self, acceptance: GiftAcceptance) -> Result<bool> {
         ensure!(

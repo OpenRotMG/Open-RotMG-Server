@@ -21,6 +21,11 @@ pub struct TradePlan {
     pub plans: [InventoryPlan; 2],
 }
 #[derive(Default)]
+pub(crate) struct IncomingTradeOutcome {
+    pub plan: Option<TradePlan>,
+    pub witness: Option<crate::store::TradeWitness>,
+}
+#[derive(Default)]
 pub(crate) struct GiftOutcome {
     pub plan: Option<TradePlan>,
     pub acceptance: Option<GiftAcceptance>,
@@ -331,7 +336,7 @@ impl World {
         binding: (i32, String),
         action: TradeAction,
         quote: Option<[crate::bots::pursuits::market::Goods; 2]>,
-    ) -> Result<Option<TradePlan>> {
+    ) -> Result<IncomingTradeOutcome> {
         let p = self.players.get(&id).context("incoming trader missing")?;
         ensure!(
             p.controller == Controller::Autonomous && session[1..] == [id, p.character.id],
@@ -339,7 +344,7 @@ impl World {
         );
         if matches!(action, TradeAction::Cancel) {
             self.cancel_trade(id, "Incoming exchange declined or contact changed.");
-            return Ok(None);
+            return Ok(IncomingTradeOutcome::default());
         }
         self.trade_ready(id)?;
         self.trade_ready(peer)?;
@@ -407,11 +412,19 @@ impl World {
                         && matches(&t.items[1 - side], &theirs, &quote[1]),
                     "window goods differ from inventory-bound market quote"
                 );
-                return self.accept_trade(id, mine, theirs);
+                let inventories = exchanged_items(&t.items, &t.offers)?;
+                let witness = crate::store::TradeWitness {
+                    transaction: t.transaction.clone(),
+                    writes: t.players.iter().enumerate().map(|(i,id)| {
+                        let ch=&self.players[id].character;
+                        InventoryWrite { id:ch.id, account:ch.account, revision:ch.revision, items:inventories[i].clone() }
+                    }).collect(),
+                };
+                return Ok(IncomingTradeOutcome { plan:self.accept_trade(id,mine,theirs)?, witness:Some(witness) });
             }
             TradeAction::Cancel => unreachable!(),
         }
-        Ok(None)
+        Ok(IncomingTradeOutcome::default())
     }
     pub fn script_trade(&mut self, id: i32, action: TradeAction) -> Result<Option<TradePlan>> {
         ensure!(
@@ -962,18 +975,10 @@ mod community_tests {
                 .is_err()
             );
         }
-        assert!(
-            w.autonomous_incoming_trade(
-                ids[1],
-                session,
-                ids[0],
-                binding,
-                TradeAction::Accept { mine, theirs },
-                quote
-            )
-            .unwrap()
-            .is_none()
-        );
+        let accepted = w.autonomous_incoming_trade(ids[1],session,ids[0],binding,TradeAction::Accept { mine,theirs },quote).unwrap();
+        assert!(accepted.plan.is_none());
+        let witness=accepted.witness.unwrap();
+        assert!(!store.trade_committed(witness.clone()).await.unwrap(), "native acceptance is not settlement");
         let plan = w.accept_trade(ids[0], theirs, mine).unwrap().unwrap();
         let transaction = plan.transaction.clone();
         let writes = writes(&plan);
@@ -989,6 +994,10 @@ mod community_tests {
             revisions,
             "durable transaction receipt makes duplicate settlement idempotent"
         );
+        assert!(store.trade_committed(witness.clone()).await.unwrap());
+        let mut wrong=witness;
+        wrong.writes[0].items[4]=0xa22;
+        assert!(store.trade_committed(wrong).await.is_err(), "another payload under the same receipt cannot authorize thanks");
         w.finish_trade(plan, Ok(revisions)).unwrap();
         assert_eq!(w.players[&ids[1]].character.items[4], 0xa20);
         assert_eq!(
