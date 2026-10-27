@@ -18,7 +18,7 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change}}),signal:AbortSignal.timeout(10000)});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
-  await cheat({kind:'protection',condition:'invincible',duration_ms:90000});
+  await cheat({kind:'protection',condition:'invincible',duration_ms:60000});
   await game.act({keys:[],duration_ms:600},{name:'mystic-before',when:()=>true});
   const start=await game.observe();
   const target=state=>state.diagnostic.entities.find(e=>e.id===snake.id);
