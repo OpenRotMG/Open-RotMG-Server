@@ -38,7 +38,6 @@ export async function run(game){
   const children=state=>state.diagnostic.entities.filter(e=>e.parent===boss.id&&family.includes(e.kind));
   game.check('all five dependent species spawn',family.every(k=>children(first).some(e=>e.kind===k)));
   const speeds=new Set(),stages=new Set(),trace=[];
-  // Comparator differences are research, not assertions of historical fidelity: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Cyclops.cs
   function record(state){
     for(const p of state.view.projectiles.filter(p=>p.owner===boss.id))speeds.add(p.speed);
     for(const e of children(state))stages.add(e.stage);
