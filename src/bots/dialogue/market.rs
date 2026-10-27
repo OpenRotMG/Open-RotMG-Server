@@ -5,14 +5,14 @@ use crate::bots::pursuits::market::{
 
 type Repertoire = [String; 3];
 const FAVORITE_SHAPES: [&str; 8] = [
-    "compact s> with equals",
-    "selling words with for",
-    "buying words with for",
-    "item-first equals",
-    "wtb with implicit price",
-    "trading words with for",
-    "s> with parenthesized price",
-    "compact b> with equals",
+    "s>{give}={want}",
+    "selling {give} for {want}",
+    "buying {want} for {give}",
+    "{give}={want}",
+    "wtb {want} {give}",
+    "trading {give} for {want}",
+    "s>{give} ({want})",
+    "b>{want}={give}",
 ];
 pub(super) struct Wording {
     created: Instant,
@@ -21,7 +21,7 @@ pub(super) struct Wording {
 }
 
 pub(super) const PROMPT: &str = r#"Write THREE reusable 2012 Realm trade-chat templates in ONE reply_to_player call with the sole allowed intent. Separate them with literal |. Total reply at most 128 characters.
-The tokens {give}, {want}, @{name} are LITERAL text. Never substitute items, numbers or real names. Follow the supplied voice across all three; first is the repeated favorite, the other two occasional alternatives. Use distinct shapes, not three capitalization variants.
+The tokens {give}, {want}, @{name} are LITERAL text. Never substitute items, numbers or real names. Follow the supplied voice across all three; first is the repeated favorite, the other two occasional alternatives. For market_advertise, favorite_shape supplies valid literal syntax for the first template, not descriptive words to print; adapt only its capitalization and optional name signature. Use distinct shapes, not three capitalization variants.
 For market_advertise the FIRST must be a priced exchange: seller opening wts, selling, sell, s>, trading, trade or t> with {give} then for, = or an implicit space-separated price then {want}; buyer opening wtb, buying, buy or b> with {want} then for, = or an implicit space-separated price then {give}. Spaces after > and around = are optional. Also allowed: {give} = {want}, or s>{give} ({want}).
 Alternatives may be priced exchanges or bare selling interest (selling {give}, s>{give}) or bare buying interest (wtb {want}, buying {want}, b>{want}). Bare interest omits the price and is NOT an agreed exchange. Each mentioned goods token exactly once. Optionally end an ad with literal @{name}, then optionally one ! at the very end.
 For market_refuse use short refusals: nty, nah, no thx, sry nty, or one of these followed by need {want}. No {give} or name in refusals.
