@@ -37,6 +37,21 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
         .unwrap()
         .pos = pos;
     assert_eq!(d.destination(id, Some(exit)).unwrap(), (1, 1, -3));
+    d.worlds
+        .get_mut(&dungeon)
+        .unwrap()
+        .players
+        .get_mut(&id)
+        .unwrap()
+        .death_pending = true;
+    rejects(d.destination(id, None), "character cannot transfer");
+    d.worlds
+        .get_mut(&dungeon)
+        .unwrap()
+        .players
+        .get_mut(&id)
+        .unwrap()
+        .death_pending = false;
     let vault = d.instance("vault", Some(2), None).unwrap();
     rejects(d.issue(1, 1, vault), "private destination");
     rejects(d.issue(1, 1, i32::MAX), "destination missing");
@@ -56,10 +71,7 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
     rejects(d.issue(1, 1, -3), "Realm is closed");
     assert_eq!(d.destination(id, None).unwrap(), (1, 1, -2));
     let source = &d.worlds[&dungeon].players[&id].character;
-    assert_eq!(
-        serde_json::to_value(source).unwrap(),
-        serde_json::to_value(&ch).unwrap()
-    );
+    assert_eq!(source, &ch);
     assert!(d.grants.is_empty());
     assert!(d.worlds[&-3].admissions.is_empty());
     d.worlds.get_mut(&-3).unwrap().admission_open = true;
