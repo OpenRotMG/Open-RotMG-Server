@@ -64,6 +64,7 @@ pub struct AccountPresentation {
     pub best_fame: BTreeMap<u16, i32>,
 }
 impl AccountPresentation {
+    // Preserve the recovered client's inclusive quests, not the later base-only ranks: https://github.com/ViciousFate/rotmg-redis/blob/de251d3e0cfb59b30eb74572e2d8ed87f9e14afa/rotmg_cli_master/src/com/company/assembleegameclient/util/_Z_B_.as#L20-L55
     const THRESHOLDS: [i32; 5] = [20, 150, 400, 800, 2000];
 
     pub fn stars(&self) -> i32 {
@@ -1877,6 +1878,35 @@ fn character_list_advertises_product_name_without_changing_transport() {
     };
     let xml = account.xml("", 0.25);
     assert!(xml.contains("<Servers><Server><Name>Open RotMG</Name><DNS>127.0.0.1</DNS><Lat>0</Lat><Long>0</Long><Usage>0.25</Usage></Server></Servers>"));
+}
+
+#[cfg(test)]
+#[test]
+fn class_stars_use_inclusive_class_bests_and_the_greater_current_goal() {
+    let mut p = AccountPresentation {
+        guild: None,
+        credits: 0,
+        fame: 0,
+        best_fame: BTreeMap::new(),
+    };
+    assert_eq!(p.stars(), 0);
+    assert_eq!(p.next_quest(WIZARD, 0), 20);
+    for (index, threshold) in [20, 150, 400, 800, 2000].into_iter().enumerate() {
+        p.best_fame.insert(WIZARD, threshold - 1);
+        assert_eq!(p.stars(), index as i32);
+        assert_eq!(p.next_quest(WIZARD, 0), threshold);
+        p.best_fame.insert(WIZARD, threshold);
+        assert_eq!(p.stars(), index as i32 + 1);
+        let next = [150, 400, 800, 2000, -1][index];
+        assert_eq!(p.next_quest(WIZARD, 0), next);
+        p.best_fame.insert(WIZARD, 0);
+        assert_eq!(p.next_quest(WIZARD, threshold), next);
+    }
+    p.best_fame = BTreeMap::from([(WIZARD, 2000), (0x300, 150)]);
+    p.fame = 1_000_000;
+    assert_eq!(p.stars(), 7);
+    assert_eq!(p.next_quest(WIZARD, 1999), -1);
+    assert_eq!(p.next_quest(0x300, 800), 2000);
 }
 
 #[cfg(test)]
