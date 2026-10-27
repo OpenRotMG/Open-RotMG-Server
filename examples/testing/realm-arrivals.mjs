@@ -11,11 +11,14 @@ export async function prepare(api){
 }
 export async function run(game){
   const initial=await game.inspect(),peer=await game.join({...spec,seed:786,position:arrival(0)});
-  const peerInitial=await peer.observe();
+  await game.act({keys:[],duration_ms:500});
+  const peerInitial=await peer.observe(),firstVisible=await game.observe();
+  await writeFile(join(process.env.QA_RESULTS_DIR,'shared-arrival.json'),JSON.stringify({first:firstVisible,peer:peerInitial}));
   game.check('prepared native players share the same Realm',initial.view.session.world===peerInitial.session.world);
   game.check('first arrival retains its registered coastal position',Math.hypot(initial.view.position.x-arrival(0).x,initial.view.position.y-arrival(0).y)<.1);
-  game.check('both clients see the other player',(await game.observe()).nearby.some(o=>o.id===peerInitial.session.player)&&peerInitial.nearby.some(o=>o.id===initial.view.session.player));
-  await game.act({keys:['d','w'],duration_ms:200},{name:'realm-coastal-arrival',when:()=>true});
+  game.check('both clients see the other player',firstVisible.nearby.some(o=>o.id===peerInitial.session.player)&&peerInitial.nearby.some(o=>o.id===initial.view.session.player));
+  await game.act({keys:['d','w'],duration_ms:200});
+  await game.act({keys:[],duration_ms:500},{name:'realm-coastal-arrival',when:()=>true});
   const moved=await game.observe(),watching=await peer.inspect();
   game.check('native input leaves the southern arrival inward',moved.position.y<initial.view.position.y-.5);
   const visible=watching.view.objects.find(o=>o.id===moved.session.player);
@@ -23,7 +26,8 @@ export async function run(game){
   const remote=await game.join({...spec,seed:787,position:arrival(2)});
   const remoteInitial=await remote.observe();
   game.check('opposite arrival enters the same living Realm',remoteInitial.session.world===initial.view.session.world&&Math.hypot(remoteInitial.position.x-arrival(2).x,remoteInitial.position.y-arrival(2).y)<.1);
-  await remote.act({keys:['a','s'],duration_ms:200},{name:'realm-opposite-arrival',when:()=>true});
+  await remote.act({keys:['a','s'],duration_ms:200});
+  await remote.act({keys:[],duration_ms:500},{name:'realm-opposite-arrival',when:()=>true});
   const remoteMoved=await remote.observe();
   game.check('native input leaves the northern arrival inward',remoteMoved.position.y>remoteInitial.position.y+.5);
   for(const client of [game,peer,remote])game.check('prepared coastal character remains alive',(await client.observe()).lifecycle.alive);
