@@ -367,7 +367,7 @@ fn passive_outings_are_directional_bounded_and_yield_to_safety_and_commitments()
 fn matched_pair() -> (Content, PlayerView, Brain) {
     let (c, mut v, mut b) = fixture();
     let edge = |a: i32| (a as u32 ^ v.session.account as u32).wrapping_mul(2654435761) % 9;
-    let account = (2..200)
+    let account = (2..1000)
         .find(|a| can_approach(v.session.world, v.session.account, *a) && edge(*a) == edge(200))
         .unwrap();
     let position = v.player_markers[0].position;
@@ -495,7 +495,7 @@ fn known_account_does_not_bypass_rank_routes_visibility_attention_or_cap() {
     assert_ne!(destination(&v, &b), Some(4));
     v.objects[2].hp = 500;
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
-    v.session.account = (2..200)
+    v.session.account = (2..1000)
         .find(|a| *a != known && !can_approach(v.session.world, *a, known))
         .unwrap();
     assert_ne!(destination(&v, &b), Some(4));
