@@ -52,6 +52,7 @@ mod ground;
 mod guilds;
 mod lab;
 
+mod deathmage;
 mod lair;
 mod landmark_ai;
 
@@ -6353,6 +6354,8 @@ impl World {
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
+                0x925 => 30.,
+                0x65a..=0x65d => 15.,
                 _ => 12.,
             };
             // Activated enemies keep the same sight radius; they do not keep
@@ -6387,14 +6390,14 @@ impl World {
                     && !p.paused
                     && pos.distance(p.pos) < simulation_radius
             });
-            let manor_clock =
-                crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
+            let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind) || kind == 0x925)
+                && entity.activated.is_some();
             if !burst
                 && !armed_abyss_missile
                 && !armed_abyss_flamer
                 && target.is_none()
                 && !nearby
-                && !manor_clock
+                && !persistent_clock
             {
                 self.suspend_npc(id, delta);
                 continue;

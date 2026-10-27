@@ -309,7 +309,10 @@ impl World {
         if matches!(kind, 0xd50..=0xd53) {
             return self.lost_lands_mechanics(id, target);
         }
-        if matches!(kind, 0x65a..=0x65e) {
+        if matches!(kind, 0x925 | 0x65a..=0x65d) {
+            return self.deathmage_mechanics(id, target);
+        }
+        if kind == 0x65e {
             if initial || self.now >= e.next_aux {
                 let choice = u64::from(self.rng.gen_bool(0.5));
                 let e = self.entities.get_mut(&id).unwrap();
@@ -385,19 +388,6 @@ impl World {
                 }
                 self.entities.get_mut(&id).unwrap().next_aux = self.now + 5000;
             }
-            0x925 => {
-                for (child, min, max) in [
-                    (0x65a, 3, 5),
-                    (0x65b, 2, 4),
-                    (0x65c, 1, 3),
-                    (0x65d, 1, 2),
-                    (0x65e, 1, 1),
-                ] {
-                    let count = self.rng.gen_range(min..=max);
-                    self.landmark_birth(id, child, max, count, 1.)?;
-                }
-                self.entities.get_mut(&id).unwrap().next_aux = self.now + 10000;
-            }
             _ => bail!("unsupported landmark mechanic {kind:#x}"),
         }
         self.entities.get_mut(&id).unwrap().stage = Some(0);
@@ -410,6 +400,9 @@ impl World {
         elapsed: u64,
     ) -> Result<(Motion, f32)> {
         let e = &self.entities[&id];
+        if matches!(e.kind, 0x925 | 0x65a..=0x65d) {
+            return self.deathmage_movement(id, target);
+        }
         if matches!(
             e.kind,
             0xe37 | 0xe38 | 0xe39 | 0xe3b | 0xe3c | 0xe3d | 0xe4f
@@ -515,7 +508,7 @@ impl World {
                 8.,
             ));
         }
-        if matches!(e.kind, 0x65a..=0x65e) {
+        if e.kind == 0x65e {
             if elapsed % 3000 >= 2500 {
                 return Ok(if target.is_some_and(|p| e.pos.distance(p) < 10.) {
                     (Motion::Retreat { distance: 10. }, 8.)
