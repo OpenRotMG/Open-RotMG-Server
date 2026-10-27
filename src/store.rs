@@ -1885,3 +1885,67 @@ mod community_schema_tests;
 mod restart_tests;
 #[cfg(test)]
 mod startup_tests;
+
+#[cfg(test)]
+#[tokio::test]
+async fn warrior_unlock_requires_own_rogue_five_and_survives_deletion_and_restart() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let dir = std::env::temp_dir().join(format!("warrior-unlock-{}", rand::random::<u64>()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("game.db");
+    let store = Store::open(&path, &content).unwrap();
+    let account = store.list("warrior-owner".into()).await.unwrap().id;
+    let foreign = store.list("warrior-foreign".into()).await.unwrap().id;
+    let warrior = content.get(0x31d).unwrap();
+    assert_eq!(&warrior.slots[..4], &[1, 16, 7, 9]);
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let mut rogue = store
+        .create_prepared(account, content.get(0x300).unwrap(), None)
+        .await
+        .unwrap();
+    rogue.level = 4;
+    store.progress(rogue.clone()).await.unwrap();
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    rogue.level = 5;
+    store.progress(rogue.clone()).await.unwrap();
+    store.delete_character(account, rogue.id).await.unwrap();
+    drop(store);
+    let store = Store::open(&path, &content).unwrap();
+    assert!(
+        store
+            .create(foreign, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let created = store.create(account, warrior).await.unwrap();
+    assert_eq!(created.class, 0x31d);
+    assert_eq!(&created.items[..4], &[0xa00, 0xa66, -1, -1]);
+    let loaded = store.load(account, created.id).await.unwrap();
+    assert_eq!(loaded.items, created.items);
+    assert_eq!(
+        store
+            .list("warrior-owner".into())
+            .await
+            .unwrap()
+            .best_levels[&0x300],
+        5
+    );
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}
