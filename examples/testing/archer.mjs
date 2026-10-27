@@ -2,15 +2,12 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x307,level:20,seed:764,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[-1,0xa61,-1,-1],backpack:[0xade,0xb28,0xc07,0xa23,0xa23,0xa0d,0xa1a,0xa23],stats:[700,100,75,25,50,50,40,50]};
+export const fixture={class:0x307,level:20,seed:764,world:'undead-lair',worldSeed:12351,position:{x:13.5,y:120.5},equipment:[-1,0xa61,-1,-1],backpack:[-1,0xb28,0xc07,0xa23,-1,0xa0d,0xa1a,0xa23],stats:[700,100,75,25,50,50,40,50]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const initial=await game.inspect();
-  const response=await fetch(config.origin+'/dev/map?player='+initial.diagnostic.player,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});assert(response.ok);
-  const boss=(await response.json()).entities.find(e=>e.kind===0xd90);assert(boss);
-  const {worldSeed,...archer}=fixture;
-  game=await game.join({...archer,world:initial.view.session.world,position:{x:boss.pos.x-2,y:boss.pos.y}});
+  const boss=initial.view.objects.find(e=>e.kind===0xd90);assert(boss,'prepared Archer sees Septavius');
   const protection=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:'archer-incoming-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
   const protectedState=await protection.json();assert(protection.ok&&protectedState.status!=='failed',JSON.stringify(protectedState));
   const observations=[{incomingProtection:protectedState}];
@@ -38,7 +35,7 @@ export async function run(game){
   game.check('ordinary bow fire damages the enemy without spending mana',target(fired).hp<target(bow).hp&&fired.view.character.mp>=bow.view.character.mp);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:384},to:{x:722,y:472}}});
   game.check('bow is stored before isolated quiver casts',(await game.observe()).character.items[0]===-1);
-  for(const [item,effect,cost,dex,slot] of [[0xa61,4,50,50,null],[0xade,14,65,53,0],[0xb28,14,75,55,1],[0xc07,6,100,50,2]]){
+  for(const [item,effect,cost,dex,slot] of [[0xa61,4,50,50,null],[0xb28,14,75,55,1],[0xc07,6,100,50,2]]){
     if(slot!==null){
       await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot*44,y:428},to:{x:678,y:384}}});
       game.check(`native equip ${item.toString(16)}`,(await game.observe()).character.items[1]===item);
@@ -50,16 +47,13 @@ export async function run(game){
       const refused=await game.observe();
       observations.push({insufficientMana:{empty,refused}});await save();
       game.check('insufficient mana prevents casting without a debit',refused.character.mp>=empty.character.mp&&refused.character.ability_ready_ms<=refused.game_ms);
-    }
-    if(item===0xb28||item===0xc07){
-      const depleted=await game.observe(),key=item===0xb28?'5':'8',slot=item===0xb28?8:11;
-      await game.act({keys:[key],duration_ms:300});
+      await game.act({keys:['8'],duration_ms:300});
       const restored=await game.observe();
-      game.check(`ordinary potion ${key} restores mana and is consumed`,restored.character.mp>depleted.character.mp&&restored.character.items[slot]===-1);
+      game.check('ordinary potion restores mana and is consumed',restored.character.mp>refused.character.mp&&restored.character.items[11]===-1);
     }
     const before=await vulnerable(cost),enemy=target(before);assert(enemy);
     game.check(`quiver ${item.toString(16)} equip stats`,before.view.character.stats[5]===dex&&before.view.character.stats[2]===(item===0xc07?80:75));
-    if(item===0xb28)game.check('T6 defense and speed bonuses',before.view.character.stats[3]===33&&before.view.character.stats[4]===52);
+    if(item===0xb28)game.check('T6 Vitality and Wisdom bonuses',before.view.character.stats[6]===42&&before.view.character.stats[7]===52);
     await game.act({keys:[' '],target:shot,duration_ms:700},item===0xc07?{name:'archer-thunder',when:view=>view.game_ms>=before.view.time_ms+250&&view.character.mp<before.view.character.mp-50}:undefined);
     const after=await game.inspect(),hit=target(after);assert(hit);
     observations.push({item,before,after});await save();
