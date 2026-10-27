@@ -1916,6 +1916,8 @@ mod community_schema_tests;
 #[cfg(test)]
 mod death_record_tests;
 #[cfg(test)]
+mod level_tests;
+#[cfg(test)]
 mod living_fame_tests;
 #[cfg(all(test, unix))]
 mod restart_tests;

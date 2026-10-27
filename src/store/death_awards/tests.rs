@@ -150,7 +150,7 @@ async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
     equip(
         &store,
         &mut ch,
-        vec![0xaa2, -1, -1, 0xabf, -1, -1, -1, -1, -1, -1, -1, -1],
+        vec![0xaa2, -1, -1, 0xabf, 0xb07, -1, -1, -1, -1, -1, -1, -1],
     )
     .await;
     let saved = ch.clone();
@@ -245,6 +245,10 @@ async fn all_death_fame_phase2_schema17_roundtrip_corruption() {
         .await
         .unwrap();
     let before = store.fame(ch.account, ch.id).await.unwrap();
+    assert!(
+        before.contains("<Bonus id=\"Ancestor\" desc=\"First death on this account\">30</Bonus>")
+    );
+    assert!(before.contains("<Bonus id=\"First Born\" desc=\"Beat the Fame total of every previous character\">13</Bonus>"));
     drop(store);
     let db = Connection::open(&path).unwrap();
     assert_eq!(

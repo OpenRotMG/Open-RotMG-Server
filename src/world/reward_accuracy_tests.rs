@@ -31,6 +31,46 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
     (w, store, owners)
 }
 
+#[tokio::test]
+async fn demon_minion_death_rolls_public_equipment_once_not_per_contributor() {
+    let (mut w, _store, owners) = reward_world().await;
+    let mut successes = 0;
+    for kind in 0x669..=0x66b {
+        for seed in 0..64 {
+            let expected = crate::loot::rewards(
+                &w.content,
+                kind,
+                &mut rand::rngs::StdRng::seed_from_u64(seed),
+            );
+            successes += expected.len();
+            for contributors in [1, 3] {
+                clear_bags(&mut w);
+                let id = w
+                    .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
+                    .unwrap();
+                w.entities.get_mut(&id).unwrap().damage = owners[..contributors]
+                    .iter()
+                    .map(|(_, character)| (*character, 1))
+                    .collect();
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.defeat_entity(id).unwrap();
+                let mut actual = Vec::new();
+                for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
+                    assert!(bag.bag_owners.is_empty());
+                    actual.extend(bag.items.iter().copied().filter(|item| *item >= 0));
+                }
+                assert_eq!(
+                    actual,
+                    expected.iter().map(|id| i32::from(*id)).collect::<Vec<_>>(),
+                    "kind={kind:#x}, seed={seed}, contributors={contributors}"
+                );
+                assert!(!w.entities.contains_key(&id));
+            }
+        }
+    }
+    assert!(successes > 0);
+}
+
 #[test]
 fn septavius_stages_a_realm_exit_until_clear_commit() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());

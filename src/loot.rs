@@ -66,7 +66,7 @@ pub(crate) fn period_surface(kind: u16) -> bool {
             | 0x614 | 0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
             | 0x624..=0x626 | 0x629..=0x62f | 0x631..=0x633
             | 0x63b | 0x63c | 0x63e..=0x640 | 0x642..=0x645 | 0x647..=0x64d
-            | 0x64f | 0x650 | 0x900..=0x902
+            | 0x64f | 0x650 | 0x669..=0x66b | 0x900..=0x902
     )
 }
 fn table(kind: u16) -> &'static [(f64, Pick)] {
@@ -639,7 +639,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0xdaa..=0xdaf => &[(0.25, Item(0xa22)), (0.25, Item(0xa23))],
         0x606 | 0x615 => &[(0.04, Item(0xa22)), (0.03, Item(0xa23))],
         0x61c | 0x61e | 0x63b | 0x64a..=0x64d => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
-        0x607 | 0x60a | 0x60c | 0x61d | 0x63c | 0x63f | 0x642..=0x644 => {
+        0x60a | 0x60c => &[(0.03, Item(0xa23))],
+        0x607 | 0x61d | 0x63c | 0x63f | 0x642..=0x644 => {
             &[(0.05, Item(0xa22)), (0.03, Item(0xa23))]
         }
         0x605
@@ -1346,6 +1347,41 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn sandsman_escorts_only_roll_magic_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in [0x60a, 0x60c] {
+            assert!(matches!(table(kind), [(chance, Pick::Item(0xa23))] if *chance == 0.03));
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                vec![0xa23]
+            );
+        }
+    }
+
+    #[test]
+    fn red_demon_minions_have_separate_public_equipment_rolls() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, expected) in [
+            (0x669, vec![(0.02, 0xa05), (0.02, 0xa9a), (0.02, 0xa1c)]),
+            (0x66a, vec![(0.03, 0xa1c)]),
+            (0x66b, vec![(0.03, 0xa17), (0.02, 0xa0a)]),
+        ] {
+            let actual: Vec<_> = table(kind)
+                .iter()
+                .map(|(p, pick)| (*p, candidates(&content, *pick)[0]))
+                .collect();
+            assert_eq!(actual, expected, "{kind:#x}");
+            assert!(!private(kind));
+            assert!(period_surface(kind), "one public attempt per death");
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                expected.iter().map(|(_, item)| *item).collect::<Vec<_>>()
+            );
+        }
+        assert!(private(0x668));
+    }
 
     #[test]
     fn ent_follower_rewards_do_not_use_generic_potions() {

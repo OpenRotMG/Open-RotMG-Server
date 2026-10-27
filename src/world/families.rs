@@ -96,7 +96,14 @@ impl World {
                 },
                 8.,
             ),
-            0x60a => protect(6., 8.),
+            // Archer orbit is distinct from Sorcerer protection: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Lowland.cs#L449-L458
+            0x60a => (
+                Motion::Orbit {
+                    anchor: Anchor::CampLeader,
+                    radius: 3.25,
+                },
+                8.,
+            ),
             0x60c => protect(6., 12.),
             0x616 | 0x619 if e.pos.distance(leader.pos) > 6. => protect(6., 11.),
             0x615 | 0x618 if e.pos.distance(leader.pos) > 6. => protect(6., 12.),
