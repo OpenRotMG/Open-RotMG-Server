@@ -31,8 +31,20 @@ pub(crate) fn profile(kind: u16) -> Profile {
             if kind == 0x67b { 400 } else { 1000 },
             10.,
         ),
-        0x925 => (Motion::WanderHome { radius: 3. }, 3., 1000, 10.),
-        0x65a..=0x65e => (
+        0x925 => (Motion::Wander, nr_speed(0.4), 50, 10.),
+        0x65a..=0x65d => (
+            Motion::Follow {
+                sight: 10.,
+                stop: if kind == 0x65d { 7. } else { 1. },
+                idle: nr_speed(0.4),
+                duration: 0,
+                cooldown: 0,
+            },
+            nr_speed(1.),
+            1050,
+            if kind == 0x65d { 10. } else { 3. },
+        ),
+        0x65e => (
             Motion::Chase {
                 sight: 10.,
                 stop: 2.,
@@ -152,8 +164,13 @@ pub(crate) fn schedule(kind: u16, _hp: i32, stage: u64, choice: u8, age: u64) ->
             }
             vec![a]
         }
-        0x925 => vec![fan(0, 3, 6., 1000, 10.)],
-        0x65a..=0x65e => vec![fan(0, 1, 0., 1000, 10.)],
+        0x925 => {
+            state = u64::from(matches!(stage, 2 | 3));
+            vec![fan(0, 3, 15., 1050, 10.).predict(1.).enabled(state == 1)]
+        }
+        0x65a..=0x65c => vec![fan(0, 1, 0., 1050, 3.)],
+        0x65d => vec![fan(0, 1, 0., 1050, 10.)],
+        0x65e => vec![fan(0, 1, 0., 1000, 10.)],
         0x935 => {
             state = stage;
             match stage {
