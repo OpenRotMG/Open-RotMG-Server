@@ -37,6 +37,22 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {'restart_warning': notice, 'seconds': 90, 'players': 2})
 
 
+    def test_helper_install_tracks_release_and_rejects_invalid_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed, source = Path(directory) / 'update.py', Path(directory) / 'source.py'
+            installed.write_text('old = 1\n')
+            source.write_text('old = 1\n')
+            with patch.object(update, 'HELPER', installed), contextlib.redirect_stdout(io.StringIO()):
+                self.assertFalse(update.install_helper(source))
+                source.write_text('new = 2\n')
+                self.assertTrue(update.install_helper(source))
+                self.assertEqual(installed.read_text(), 'new = 2\n')
+                self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+                source.write_text('def broken(:\n')
+                with self.assertRaises(SyntaxError):
+                    update.install_helper(source)
+                self.assertEqual(installed.read_text(), 'new = 2\n')
+
     def test_caddy_install_reloads_changes_and_restores_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             live, source = Path(directory) / 'Caddyfile', Path(directory) / 'source'

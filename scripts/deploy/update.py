@@ -34,6 +34,7 @@ DRAIN_HTTP_TIMEOUT = 3
 LAST_BACKUP = Path('/var/lib/openrotmg-backup/last-success.json')
 LOCK = Path('/run/lock/openrotmg-deploy.lock')
 CADDY = Path('/etc/caddy/Caddyfile')
+HELPER = Path('/opt/openrotmg-deploy/update.py')
 PUBLIC_HEALTH = 'https://game.openrotmg.org/health'
 LIMIT = 64 * 1024 * 1024
 sys.dont_write_bytecode = True
@@ -670,6 +671,19 @@ def install_caddy(source):
     return True
 
 
+def install_helper(source):
+    new = source.read_bytes()
+    if new == HELPER.read_bytes():
+        return False
+    compile(new, str(source), 'exec')
+    candidate = HELPER.with_name('update.py.new')
+    candidate.write_bytes(new)
+    candidate.chmod(0o755)
+    candidate.replace(HELPER)
+    print(json.dumps({'deploy_helper': 'installed', 'sha256': hashlib.sha256(new).hexdigest()}), flush=True)
+    return True
+
+
 def main_revision():
     revision = subprocess.check_output(['git', 'ls-remote', '--exit-code', REPO + '.git', 'refs/heads/main'], text=True, timeout=30).split()[0]
     require(re.fullmatch('[0-9a-f]{40}', revision), 'Invalid main revision')
@@ -717,6 +731,8 @@ def main(desired, raw):
         deploy(stage, work, metadata, config)
         outcome(work, 'success', stage)
         install_caddy(LIVE / 'scripts/deploy/Caddyfile')
+        # The next release must run this release's reviewed helper, not a hand-installed copy.
+        install_helper(LIVE / 'scripts/deploy/update.py')
         retain_deployments()
         status('deployed', desired, recovery_directory=str(work), backup=json.loads(LAST_BACKUP.read_text()))
     except Exception as error:
