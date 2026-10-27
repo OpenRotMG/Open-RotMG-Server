@@ -196,7 +196,7 @@ impl World {
         }
     }
 
-    pub fn acknowledge_tick(&mut self, id: i32, tick: i32) -> Result<()> {
+    pub fn acknowledge_tick(&mut self, id: i32, tick: i32, received: Instant) -> Result<()> {
         let p = self
             .players
             .get_mut(&id)
@@ -205,6 +205,7 @@ impl World {
             tick >= 0 && tick < p.tick,
             crate::server::lifecycle::protocol("unsolicited tick acknowledgement")
         );
+        p.native_lag.acknowledge(tick, received);
         // NEW_TICK queues MOVE before applying inventory; earlier SHOOTs still use the old weapon.
         p.weapon_ticks.retain(|(sent, _, _)| *sent >= tick);
         Ok(())

@@ -80,6 +80,7 @@ mod skull_erosion;
 
 mod spider;
 
+pub(crate) mod native_lag;
 mod tick_stats;
 mod tomb;
 mod tracked;
@@ -363,6 +364,7 @@ pub struct Player {
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32, i32)>,
+    native_lag: native_lag::Window,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
@@ -973,6 +975,7 @@ impl Directory {
             "character_id": p.character.id, "player_name": p.character.name, "class": p.character.class, "level": p.character.level,
             "position": {"x": p.pos.x, "y": p.pos.y}, "visible_entities": p.known.len(),
             "world_players": world.players.len(), "world_entities": world.entities.len(), "world_projectiles": world.bullets.len(),
+            "native_lag": p.native_lag.snapshot(Instant::now(), true),
             "native_acknowledgements": {"weapon_tick_records":p.weapon_ticks.len(),"goto":p.goto_acks.len(),"shoot":p.shoot_acks.len(),
                 "oldest_goto_ms":p.goto_acks.front().map(|(_,at)|at.elapsed().as_millis()),
                 "oldest_shoot_pause_excluding_ms":p.shoot_acks.front().map(|(at,_)|world.clock.now().duration_since(*at).as_millis())},
@@ -3398,6 +3401,7 @@ impl World {
                 spectators: None,
                 dungeon_entries: VecDeque::new(),
                 weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
+                native_lag: native_lag::Window::default(),
                 committed_lifetime: ch.lifetime.clone(),
                 character: ch,
                 pos,
@@ -5224,6 +5228,7 @@ impl World {
         let mut out = Writer::new();
         out.i32(id).f32(p.pos.x).f32(p.pos.y);
         reconciliation::goto(p, true, out.0);
+        p.native_lag.correct(reason);
         tracing::warn!(
             player = id,
             previous_time,
@@ -7482,6 +7487,7 @@ impl World {
         if let Some(timings) = self.performance.borrow_mut().report() {
             tracing::info!(world_id,world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
                 bullets=self.bullets.len(),compact_entities=self.entities.shared(),scenery_promotions=self.entities.promotions,spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
+                native_lag=%serde_json::json!(self.players.iter().filter(|(_,p)|p.controller==Controller::Human).map(|(id,p)|serde_json::json!({"player":id,"metrics":p.native_lag.snapshot(Instant::now(),false)})).collect::<Vec<_>>()),
                 pending_shoot_acks=self.players.values().map(|p|p.shoot_acks.len()).sum::<usize>(),
                 weapon_tick_records=self.players.values().map(|p|p.weapon_ticks.len()).sum::<usize>(),
                 humans=self.players.values().filter(|p| p.controller==Controller::Human).count(),
