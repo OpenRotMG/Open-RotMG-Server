@@ -56,7 +56,7 @@ export async function run(game){
   const bomb=await cast('ghostly-bomb',90,0x1409,true);
   game.check('Ghostly Prism creates no decoy',!(await entities(0x715)).length);
   game.check('Ghostly Prism bomb stays at caster origin',distance(bomb.objects[0].pos,bomb.before.position)<0.05);
-  game.check('Ghostly Prism wisdom bonus applies',bomb.after.character.stats.wisdom===3);
+  game.check('Ghostly Prism dexterity bonus applies',bomb.after.character.stats.dexterity===78);
   await game.act({keys:[],duration_ms:1000});
   game.check('bomb persists before detonation',(await entities(0x1409)).some(e=>e.id===bomb.objects[0].id));
   await game.act({keys:[],duration_ms:2200});
