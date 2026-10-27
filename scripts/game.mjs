@@ -4,7 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {nativeClock} from './native-clock.mjs';
-import {validateNativeChat,guardNativeInput,dispatchNativeChat} from './native-chat.mjs';
+import {validateNativeChat,guardNativeInput,holdNativeInput} from './native-chat.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 
 const help=`Usage: node scripts/game.mjs CONFIG.json REQUEST.json
@@ -87,7 +87,7 @@ async function connect(spec) {
   if (!page || new URL(page.url).origin !== origin.origin) throw new Error(`Native target ${spec.target} is missing or on the wrong origin`);
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve,reject) => {const timeout=setTimeout(()=>{ws.close();reject(new Error('CDP connection deadline'));},10000);ws.onopen=()=>{clearTimeout(timeout);resolve();};ws.onerror=e=>{clearTimeout(timeout);reject(e);};});
-  const pending = new Map(), frames=[]; let serial = 0, holdState, closing=false;
+  const pending = new Map(), frames=[], inputHold={current:null}; let serial = 0, closing=false;
   ws.onmessage = event => {
     const row=JSON.parse(event.data);
     if(row.method==='Network.webSocketFrameReceived'&&row.params.response.opcode===2){const frame=Buffer.from(row.params.response.payloadData,'base64');if(frame.length===9&&frame.readUInt32BE(0)===9&&frame[4]===6){frames.push(createHash('sha256').update(frame).digest('hex'));if(frames.length>128)frames.shift();}}
@@ -96,9 +96,9 @@ async function connect(spec) {
     pending.delete(row.id);clearTimeout(item.timer);
     if (row.error) item.reject(new Error(JSON.stringify(row.error))); else item.resolve(row.result);
   };
-  ws.onclose=()=>{const error=new Error('Native target connection closed');if(!closing){leaseError=error;holdState?.abort(error);}for(const item of pending.values()){clearTimeout(item.timer);item.reject(error);}pending.clear();};
+  ws.onclose=()=>{const error=new Error('Native target connection closed');if(!closing){leaseError=error;inputHold.current?.abort(error);}for(const item of pending.values()){clearTimeout(item.timer);item.reject(error);}pending.clear();};
   send = (method, params) => new Promise((resolve,reject) => {
-    try{guardNativeInput(method,params,holdState,leaseError);}catch(error){reject(error);return;}
+    try{guardNativeInput(method,params,inputHold.current,leaseError);}catch(error){reject(error);return;}
     const n=++serial, timer=setTimeout(() => {pending.delete(n);reject(new Error(`CDP deadline: ${method}`));},10000);
     pending.set(n,{resolve,reject,timer}); ws.send(JSON.stringify({id:n,method,params}));
   });
@@ -108,22 +108,10 @@ async function connect(spec) {
     return r.result.value;
   };
   const clock=paused=>evaluate(`(${nativeClock.toString()})(${JSON.stringify(paused)})`);
-  async function hold(keys,mouse,ms,dragTo,chat){
-    if(holdState)throw Error('Concurrent native hold is forbidden');
-    const key=(type,k)=>call('Input.dispatchKeyEvent',{type,key:k,code:bindings[k][0],windowsVirtualKeyCode:bindings[k][1]});
-    let resolveRelease,rejectRelease,timer,dragTimer,releasedAt;
-    const released=new Promise((ok,bad)=>{resolveRelease=ok;rejectRelease=bad;});
-    const release=async()=>{holdState.stopped=true;releasedAt=Date.now();const results=await Promise.allSettled([...keys.map(k=>key('keyUp',k)),...(chat===undefined?[]:[call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13})]),...(mouse?[call('Input.dispatchMouseEvent',{type:'mouseReleased',...(dragTo??mouse),button:'left',buttons:0,clickCount:1})]:[])]);const errors=results.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(errors.length)throw Error(errors.join('; '));};
-    holdState={ms,started:0,abort(error){clearTimeout(timer);clearTimeout(dragTimer);release().then(()=>rejectRelease(error),failure=>rejectRelease(Error(String(error)+'; input release unconfirmed: '+failure)));},start(){this.started=Date.now();timer=setTimeout(()=>release().then(resolveRelease,rejectRelease),ms);if(dragTo)dragTimer=setTimeout(()=>call('Input.dispatchMouseEvent',{type:'mouseMoved',...dragTo,button:'left',buttons:1}).catch(error=>this.abort(error)),ms/2);}};
-    // Ruffle's map click establishes Flash focus before movement keys are delivered.
-    const down=chat!==undefined?Promise.allSettled([dispatchNativeChat(call,chat).catch(error=>{holdState?.abort(error);throw error;})]):(async()=>{const results=mouse?await Promise.allSettled([call('Input.dispatchMouseEvent',{type:'mousePressed',...mouse,button:'left',buttons:1,clickCount:1})]):[];if(results.every(r=>r.status==='fulfilled'))results.push(...await Promise.allSettled(keys.map(k=>key('keyDown',k))));return results;})();
-    if(!keys.length&&!mouse&&chat===undefined)holdState.start();
-    const noDispatch=setTimeout(()=>{if(!holdState.started)rejectRelease(Error('Native DOWN was not dispatched before its deadline'));},10000);
-    try{await released;return {down,started:holdState.started,released:releasedAt};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);holdState=null;}
-  }
+  const hold=(...args)=>holdNativeInput(inputHold,call,bindings,...args);
   try { await call('Network.enable'); }
   catch(error) { closing=true;ws.close();throw error; }
-  return {...spec,call,evaluate,clock,frames,hold,abort:error=>holdState?.abort(error),close:()=>{closing=true;ws.close();}};
+  return {...spec,call,evaluate,clock,frames,hold,abort:error=>inputHold.current?.abort(error),close:()=>{closing=true;ws.close();}};
 }
 let leaseStarted=false, leaseTimer, leaseRenewal, leaseError;
 async function startLease(){

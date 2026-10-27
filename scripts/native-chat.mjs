@@ -20,3 +20,20 @@ export async function dispatchNativeChat(call,text) {
   await call('Input.insertText',{text});
   await enter();
 }
+
+export async function holdNativeInput(inputHold,call,bindings,keys,mouse,ms,dragTo,chat) {
+  if(inputHold.current)throw Error('Concurrent native hold is forbidden');
+  const key=(type,k)=>call('Input.dispatchKeyEvent',{type,key:k,code:bindings[k][0],windowsVirtualKeyCode:bindings[k][1]});
+  let resolveRelease,rejectRelease,timer,dragTimer,releasedAt,releasePromise,abortError;
+  const released=new Promise((ok,bad)=>{resolveRelease=ok;rejectRelease=bad;});
+  // A delayed drag rejection must reuse A's cleanup, never release a later hold's inputs.
+  const release=()=>releasePromise??=(async()=>{state.stopped=true;releasedAt=Date.now();const results=await Promise.allSettled([...keys.map(k=>key('keyUp',k)),...(chat===undefined?[]:[call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13})]),...(mouse?[call('Input.dispatchMouseEvent',{type:'mouseReleased',...(dragTo??mouse),button:'left',buttons:0,clickCount:1})]:[])]);const errors=results.filter(r=>r.status==='rejected').map(r=>String(r.reason));if(errors.length)throw Error(errors.join('; '));})();
+  const finish=()=>release().then(()=>abortError?rejectRelease(abortError):resolveRelease(),failure=>rejectRelease(abortError?Error(String(abortError)+'; input release unconfirmed: '+failure):failure));
+  const state={ms,started:0,abort(error){abortError??=error;clearTimeout(timer);clearTimeout(dragTimer);return finish();},start(){this.started=Date.now();timer=setTimeout(finish,ms);if(dragTo)dragTimer=setTimeout(()=>call('Input.dispatchMouseEvent',{type:'mouseMoved',...dragTo,button:'left',buttons:1}).catch(error=>state.abort(error)),ms/2);}};
+  inputHold.current=state;
+  // Ruffle's map click establishes Flash focus before movement keys are delivered.
+  const down=chat!==undefined?Promise.allSettled([dispatchNativeChat(call,chat).catch(async error=>{await state.abort(error);throw error;})]):(async()=>{const results=mouse?await Promise.allSettled([call('Input.dispatchMouseEvent',{type:'mousePressed',...mouse,button:'left',buttons:1,clickCount:1})]):[];if(results.every(r=>r.status==='fulfilled'))results.push(...await Promise.allSettled(keys.map(k=>key('keyDown',k))));return results;})();
+  if(!keys.length&&!mouse&&chat===undefined)state.start();
+  const noDispatch=setTimeout(()=>{if(!state.started)state.abort(Error('Native DOWN was not dispatched before its deadline'));},10000);
+  try{await released;return {down,started:state.started,released:releasedAt};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);if(inputHold.current===state)inputHold.current=null;}
+}
