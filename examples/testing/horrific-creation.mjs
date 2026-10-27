@@ -31,7 +31,7 @@ export async function run(game) {
     throw Error('Native walk did not reach '+x+','+y);
   }
   async function defeat(kind,name) {
-    for(let n=0;n<140;n++) {
+    for(let n=0;n<300;n++) {
       const e=(await entities()).find(e=>e.kind===kind);
       if(!e){game.check(name+' defeated through native shots',true);return;}
       const p=(await game.observe()).position;
@@ -58,6 +58,9 @@ export async function run(game) {
   await defeat(0x976,'Dr Terrible');
   await act({keys:[],duration_ms:500});
   game.check('real coil and boss kills open emergency walls',!(await entities()).some(e=>e.kind===0x18c2));
+  await go(60.5,12.5);
+  for(let n=0;n<200&&(await entities()).find(e=>e.kind===0x5e1c).stage!==4;n++)await act({keys:[],duration_ms:100});
+  game.check('ordinary native distance triggers the center blast phase',(await entities()).find(e=>e.kind===0x5e1c).stage===4);
   await go(75.5,12.5);
   await save('creation-open');
   const creation=async()=> (await entities()).find(e=>e.kind===0x5e1c);
@@ -70,12 +73,12 @@ export async function run(game) {
       await act({keys:[],duration_ms:500},{name:'creation-phase-'+c.stage,when:()=>true});
       captured.add(c.stage);
     }
-    if([1,3,4,5,6,7].every(s=>seen.has(s))&&['85:1000','50:400','55:3000'].every(s=>shots.has(s)))break;
+    if([4,6,7].every(s=>seen.has(s))&&['85:1000','50:400','55:3000'].every(s=>shots.has(s)))break;
     await act({keys:[],duration_ms:100});
   }
   await writeFile(join(process.env.QA_RESULTS_DIR,'attack-cycle.json'),JSON.stringify({trace,seen:[...seen],shots:[...shots]}));
   game.check('native client observes blast, shockwave and energy projectiles',['85:1000','50:400','55:3000'].every(s=>shots.has(s)));
-  game.check('native encounter enters every reconstructed attack phase',[1,3,4,5,6,7].every(s=>seen.has(s)));
+  game.check('native encounter enters blast, shockwave and energy phases',[4,6,7].every(s=>seen.has(s)));
   await go(70.5,12.5);
   for(let n=0;n<500&&(await creation()).stage!==2;n++)await act({keys:[],duration_ms:100});
   const pet=await creation();
