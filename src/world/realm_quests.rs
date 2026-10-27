@@ -699,7 +699,11 @@ impl World {
         }
         let target = target.into();
         let e = &self.entities[&id];
-        if matches!(e.kind, 0x91f | 0x928) && matches!(e.stage, Some(3..=6)) {
+        // Actual sprite armor setup has no inherited motor, including the shared home leash.
+        // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.EntAncient.cs#L263-L277
+        if (matches!(e.kind, 0x91f | 0x928) && matches!(e.stage, Some(3..=6)))
+            || (e.kind == 0x924 && elapsed < 1000)
+        {
             return (Motion::Stationary, 0.);
         }
         let leash = match e.kind {
@@ -933,6 +937,7 @@ impl World {
             }
             0x921 if t.is_multiple_of(600) => fan(0, 1, 0.),
             0x922 if t.is_multiple_of(1000) => fan(0, 1, 0.),
+            0x924 if t < 1000 => vec![],
             0x923 | 0x924 if t.is_multiple_of(1000) => fan(0, 4, 10.),
             0x929 if s == 3 && t == 2950 => ring(0, 8, 22.5f32.to_radians()),
             0x929
@@ -1354,6 +1359,75 @@ fn quest_preparation_motors_preserve_other_phases() {
             (position.y, home.x, home.y, Some(id), hp)
         );
         assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
+        assert!(world.critical_deaths.is_empty());
+        world.remove_entity(id);
+    }
+    for (kind, age, offset, moving, bullets) in [
+        (0x924, 0, 0., false, 0),
+        (0x924, 0, 12., false, 0),
+        (0x924, 999, 0., false, 0),
+        (0x924, 999, 12., false, 0),
+        (0x924, 1000, 0., true, 4),
+        (0x924, 1000, 12., true, 0),
+        (0x923, 0, 0., true, 4),
+    ] {
+        world.now += 50;
+        let id = world.spawn_entity(kind, home, vec![]).unwrap();
+        let position = Pos {
+            x: home.x + offset,
+            y: home.y,
+        };
+        world.position_entity(id, position).unwrap();
+        let e = world.entities.get_mut(&id).unwrap();
+        e.quest.set(Some(id), id, &mut world.quest_ids);
+        e.stage = (age > 0).then_some(0);
+        e.activated = Some(world.now - if age == 0 { 50 } else { age });
+        e.next_shot = if age == 0 { u64::MAX } else { world.now };
+        let hp = e.hp;
+        let rng = rand::RngCore::next_u64(&mut world.rng.clone());
+        world.npc_step();
+        let e = &world.entities[&id];
+        assert_eq!(
+            (e.pos.x, e.pos.y) != (position.x, position.y),
+            moving,
+            "kind={kind:#x}, age={age}, offset={offset}"
+        );
+        assert_eq!(
+            world.bullets.iter().filter(|b| b.owner == id).count(),
+            bullets,
+            "kind={kind:#x}, age={age}, offset={offset}"
+        );
+        assert_eq!(
+            (e.home.x, e.home.y, *e.quest, e.hp, e.stage, e.activated),
+            (home.x, home.y, Some(id), hp, Some(0), Some(world.now - age))
+        );
+        if offset == 0. {
+            assert_eq!(
+                e.next_shot,
+                world.now + crate::encounter::profile(kind).unwrap().interval
+            );
+        }
+        if moving {
+            assert_eq!(
+                e.motion,
+                Some(if offset == 0. {
+                    crate::encounter::Motion::Orbit {
+                        anchor: crate::encounter::Anchor::Player,
+                        radius: 4.,
+                    }
+                } else {
+                    crate::encounter::Motion::Protect {
+                        anchor: crate::encounter::Anchor::Home,
+                        distance: 1.,
+                    }
+                })
+            );
+        } else {
+            assert_eq!(e.motion, Some(crate::encounter::Motion::Stationary));
+            assert_eq!(e.bullet, 0);
+            assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
+        }
+        assert!(world.players.values().all(|p| p.character.alive));
         assert!(world.critical_deaths.is_empty());
         world.remove_entity(id);
     }
