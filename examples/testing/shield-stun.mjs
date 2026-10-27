@@ -14,7 +14,7 @@ export async function run(game){
   game=await game.join({...knight,world:initial.view.session.world,position:{x:boss.pos.x-2,y:boss.pos.y}});
   await game.act({keys:[],duration_ms:1000});
   const before=await game.inspect(),old=before.diagnostic.entities.find(e=>e.id===boss.id);assert(old.condition&(1<<24));
-  await game.act({keys:[' '],mouse:{x:450,y:300},duration_ms:300});
+  await game.act({keys:[' '],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:false},duration_ms:300});
   const hit=await game.inspect(),target=hit.diagnostic.entities.find(e=>e.id===boss.id);
   await game.act({keys:[],duration_ms:500},{name:'shield-stun',when:view=>view.game_ms>=before.view.time_ms+1500});
   const during=await game.inspect(),current=during.diagnostic.entities.find(e=>e.id===boss.id);

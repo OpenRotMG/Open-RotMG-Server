@@ -1,5 +1,5 @@
 [
-  {"layout":"classic-world-01-reconstruction","sha256":"3f4127c3d096af0caf4667603aa4b3b87025ada5509451ef3265447e3497edc9","sites":[
+  {"layout":"classic-world-01-reconstruction","sha256":"7c1e09fc74a3fbbdcebcb04e1664b18818373a302c5debafd78c12c24d5e8489","sites":[
     {"kind":2335,"bounds":[568,545,29,29],"spawn":[582,559],"support":48},
     {"kind":2335,"bounds":[1369,684,29,29],"spawn":[1383,698],"support":44},
     {"kind":2335,"bounds":[758,712,29,29],"spawn":[772,726],"support":38},
@@ -52,7 +52,7 @@
     {"kind":1640,"bounds":[1148,1136,36,39],"spawn":[1166,1155],"chest":[1166,1155],"support":126},
     {"kind":1640,"bounds":[1091,1086,38,32],"spawn":[1110,1102],"chest":[1110,1102],"support":111}
   ]},
-  {"layout":"classic-world-02-reconstruction","sha256":"c84108db3bd749c3595a1e021c8cf2e7b9fc6b640ddbad487949bf9170e99b6c","sites":[
+  {"layout":"classic-world-02-reconstruction","sha256":"1cc447e6f410ef163653a9f625e3ad15dfa129fc1c8f498fd702c85d59e7c496","sites":[
     {"kind":2335,"bounds":[1216,337,29,29],"spawn":[1230,351],"support":52},
     {"kind":2335,"bounds":[1303,423,29,29],"spawn":[1317,437],"support":38},
     {"kind":2335,"bounds":[1192,485,29,29],"spawn":[1206,499],"support":45},
@@ -93,7 +93,7 @@
     {"kind":1640,"bounds":[1218,1256,32,30],"spawn":[1234,1271],"chest":[1234,1271],"support":103},
     {"kind":1640,"bounds":[1323,1121,36,37],"spawn":[1341,1139],"chest":[1341,1139],"support":110}
   ]},
-  {"layout":"classic-world-03-reconstruction","sha256":"45ed968a32b2b7df7a590db1e4eb8a9903f205b657d1e8ac6f9db18d48816992","sites":[
+  {"layout":"classic-world-03-reconstruction","sha256":"9d36ad4757e5fd0d9a2b04e3597f8d463d761bee2b1f91d2820485cd436e4cd1","sites":[
     {"kind":2335,"bounds":[1002,577,29,29],"spawn":[1016,591],"support":52},
     {"kind":2335,"bounds":[853,624,29,29],"spawn":[867,638],"support":29},
     {"kind":2335,"bounds":[814,692,29,29],"spawn":[828,706],"support":32},

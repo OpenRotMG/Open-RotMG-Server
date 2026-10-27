@@ -10,9 +10,9 @@ pub fn root(kind: u16) -> bool {
 
 /// Character level windows of the quest monsters, as (kind, first level, last level).
 ///
-/// The RotMG quest-monster reference lists each quest monster's quest level and the
-/// character levels it is offered to; the pinned 2013 comparator carries the same windows.
-/// Quest monsters without a documented window stay available at every character level.
+/// The February 2012 guide documents wandering +/-5 windows, not every boss bound:
+/// https://web.archive.org/web/20120225084118id_/http://forums.wildshadow.com/wiki/realm-mad-god/quest-monsters
+/// Boss bounds follow the later wiki; the pinned community tables differ.
 pub const WINDOWS: &[(u16, u8, u8)] = &[
     // Wandering quest enemies: a quest level of five either side, as the reference states.
     (0x604, 1, 6),  // Scorpion Queen
