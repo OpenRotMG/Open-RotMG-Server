@@ -3,8 +3,8 @@ import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const spec={class:0x307,level:20,seed:798,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),boss=world.encounter_markers.find(e=>e.kind===0x67d);
-  if(!boss)throw Error('Realm has no naturally placed Cyclops God');
+  const world=await api({op:'world_info',world:1}),boss=world.encounter_markers.find(e=>e.kind===0x67d&&e.position.x===1002&&e.position.y===1264);
+  if(!boss)throw Error('World1 authored Castle has no Cyclops God at 1002,1264');
   await writeFile(join(process.env.QA_RESULTS_DIR,'site.json'),JSON.stringify({world,boss}));
   return {...spec,position:{x:boss.position.x+2,y:boss.position.y+2}};
 }
@@ -24,6 +24,7 @@ export async function run(game){
   }
   await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});
   await game.act({keys:[],duration_ms:3500});
+  await game.act({keys:[],duration_ms:500},{name:'cyclops-entry',when:()=>true});
   const first=await save('initial'),boss=first.diagnostic.entities.find(e=>e.kind===0x67d),family=[0x67e,0x67f,0x680,0x681,0x682];
   game.check('naturally placed Realm boss activates',!!boss&&boss.activated!==null);
   const children=state=>state.diagnostic.entities.filter(e=>e.parent===boss.id&&family.includes(e.kind));
