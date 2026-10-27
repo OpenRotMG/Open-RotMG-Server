@@ -7536,6 +7536,8 @@ mod reward_accuracy_tests;
 mod wizard_tests;
 
 #[cfg(test)]
+mod necromancer_tests;
+#[cfg(test)]
 mod priest_tests;
 
 #[cfg(test)]
