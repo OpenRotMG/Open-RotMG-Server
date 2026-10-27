@@ -1880,62 +1880,76 @@ fn character_list_advertises_product_name_without_changing_transport() {
 }
 
 #[cfg(test)]
-#[tokio::test]
-async fn archer_requires_priest_five_and_retains_deleted_progress() {
-    let content = Content::load(Path::new("data")).unwrap();
-    let store = Store::open(Path::new(":memory:"), &content).unwrap();
-    let account = store.list("archer-unlock".into()).await.unwrap().id;
-    let archer = content.get(0x307).unwrap();
-    assert!(!content.unlocked(0x307, &BTreeMap::new()).unwrap());
-    assert_eq!(
-        store
-            .create(account, archer)
-            .await
-            .unwrap_err()
-            .downcast_ref::<Rejected>()
-            .unwrap()
-            .0,
-        "class is locked"
-    );
-    let mut priest = store
-        .create_prepared(account, content.get(0x310).unwrap(), None)
-        .await
-        .unwrap();
-    for level in [4, 5] {
-        priest.level = level;
-        store.progress(priest.clone()).await.unwrap();
-        let records = store
-            .list("archer-unlock".into())
-            .await
-            .unwrap()
-            .best_levels;
-        assert_eq!(content.unlocked(0x307, &records).unwrap(), level == 5);
-        if level == 4 {
-            assert_eq!(
-                store
-                    .create(account, archer)
-                    .await
-                    .unwrap_err()
-                    .downcast_ref::<Rejected>()
-                    .unwrap()
-                    .0,
-                "class is locked"
-            );
-        }
-    }
-    store.delete_character(account, priest.id).await.unwrap();
-    let created = store.create(account, archer).await.unwrap();
-    assert_eq!(created.class, 0x307);
-    assert_eq!(&created.items[..4], &[0xa1a, 0xa61, -1, -1]);
-    assert_eq!(
-        store.load(account, created.id).await.unwrap().items,
-        created.items
-    );
-}
-
+mod class_unlock_tests;
 #[cfg(test)]
 mod community_schema_tests;
+#[cfg(test)]
+mod living_fame_tests;
 #[cfg(all(test, unix))]
 mod restart_tests;
 #[cfg(test)]
 mod startup_tests;
+
+#[cfg(test)]
+#[tokio::test]
+async fn warrior_unlock_requires_own_rogue_five_and_survives_deletion_and_restart() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let dir = std::env::temp_dir().join(format!("warrior-unlock-{}", rand::random::<u64>()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("game.db");
+    let store = Store::open(&path, &content).unwrap();
+    let account = store.list("warrior-owner".into()).await.unwrap().id;
+    let foreign = store.list("warrior-foreign".into()).await.unwrap().id;
+    let warrior = content.get(0x31d).unwrap();
+    assert_eq!(&warrior.slots[..4], &[1, 16, 7, 9]);
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let mut rogue = store
+        .create_prepared(account, content.get(0x300).unwrap(), None)
+        .await
+        .unwrap();
+    rogue.level = 4;
+    store.progress(rogue.clone()).await.unwrap();
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    rogue.level = 5;
+    store.progress(rogue.clone()).await.unwrap();
+    store.delete_character(account, rogue.id).await.unwrap();
+    drop(store);
+    let store = Store::open(&path, &content).unwrap();
+    assert!(
+        store
+            .create(foreign, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let created = store.create(account, warrior).await.unwrap();
+    assert_eq!(created.class, 0x31d);
+    assert_eq!(&created.items[..4], &[0xa00, 0xa66, -1, -1]);
+    let loaded = store.load(account, created.id).await.unwrap();
+    assert_eq!(loaded.items, created.items);
+    assert_eq!(
+        store
+            .list("warrior-owner".into())
+            .await
+            .unwrap()
+            .best_levels[&0x300],
+        5
+    );
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}

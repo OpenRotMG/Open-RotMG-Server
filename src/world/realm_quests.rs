@@ -739,9 +739,10 @@ impl World {
                 if let Some(bearer) = self.quest_members(id, &[0x91d]).first()
                     && e.pos.distance(self.entities[bearer].pos) > 2.
                 {
+                    // Reselecting by kind can change the gated bearer: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Protect.cs
                     (
                         Motion::Protect {
-                            anchor: Anchor::QuestMember(self.entities[bearer].kind),
+                            anchor: Anchor::QuestEntity(*bearer),
                             distance: 2.,
                         },
                         9.,
@@ -1354,6 +1355,120 @@ fn quest_preparation_motors_preserve_other_phases() {
         );
         assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
         assert!(world.critical_deaths.is_empty());
+        world.remove_entity(id);
+    }
+    for (offsets, distance) in [
+        (vec![4., 1.25], 0.28675_f32),
+        (vec![4., -2.5], 0.28675),
+        (vec![1.25, 4.], 0.17575),
+        (vec![], 0.17575),
+    ] {
+        world.now += 50;
+        let boss = world.spawn_entity(0x91c, home, vec![]).unwrap();
+        let mut members = vec![boss];
+        for &offset in &offsets {
+            members.push(
+                world
+                    .spawn_entity(
+                        0x91d,
+                        Pos {
+                            x: home.x + offset,
+                            y: home.y,
+                        },
+                        vec![],
+                    )
+                    .unwrap(),
+            );
+        }
+        for member in &members {
+            let e = world.entities.get_mut(member).unwrap();
+            e.quest.set(Some(boss), *member, &mut world.quest_ids);
+            e.stage = Some(0);
+            e.activated = Some(world.now);
+            e.next_shot = u64::MAX;
+        }
+        let e = world.entities.get_mut(&boss).unwrap();
+        e.motion = Some(crate::encounter::Motion::Wander);
+        e.goal = Some(Pos {
+            x: home.x + 1.,
+            y: home.y,
+        });
+        let hp = e.hp;
+        world.npc_step();
+        let e = &world.entities[&boss];
+        assert!(
+            (e.pos.x - home.x - distance).abs() <= 2. * f32::EPSILON * home.x,
+            "Actual Lich must retain its chosen bearer and moving controls: offsets={offsets:?}, position={:?}",
+            e.pos
+        );
+        assert_eq!(
+            (e.pos.y, e.home.x, e.home.y, *e.quest, e.hp),
+            (home.y, home.x, home.y, Some(boss), hp)
+        );
+        assert!(world.critical_deaths.is_empty());
+        for member in members {
+            world.remove_entity(member);
+        }
+    }
+    let boss = world.spawn_entity(0x91c, home, vec![]).unwrap();
+    let bearer = world.spawn_entity(0x91d, home, vec![]).unwrap();
+    let foreign_boss = world.spawn_entity(0x91c, home, vec![]).unwrap();
+    let foreign = world.spawn_entity(0x91d, home, vec![]).unwrap();
+    let unowned = world.spawn_entity(0x91c, home, vec![]).unwrap();
+    for (id, tag) in [
+        (boss, boss),
+        (bearer, boss),
+        (foreign_boss, foreign_boss),
+        (foreign, foreign_boss),
+    ] {
+        world
+            .entities
+            .get_mut(&id)
+            .unwrap()
+            .quest
+            .set(Some(tag), id, &mut world.quest_ids);
+    }
+    let anchor = |id| crate::encounter::Anchor::QuestEntity(id);
+    let position = world
+        .orbit_anchor(boss, anchor(bearer), None::<Pos>)
+        .unwrap();
+    assert_eq!((position.x, position.y), (home.x, home.y));
+    for (caller, target, error) in [
+        (boss, foreign, "quest entity anchor ownership mismatch"),
+        (
+            unowned,
+            bearer,
+            "quest entity anchor lacks encounter ownership",
+        ),
+        (boss, i32::MAX, "own quest entity anchor absent"),
+    ] {
+        assert!(
+            world
+                .orbit_anchor(caller, anchor(target), None::<Pos>)
+                .unwrap_err()
+                .to_string()
+                .contains(error)
+        );
+    }
+    assert!(
+        world
+            .orbit_anchor(
+                boss,
+                crate::encounter::Anchor::BoundEntity(bearer),
+                None::<Pos>
+            )
+            .is_err()
+    );
+    world.remove_entity(bearer);
+    assert!(
+        world
+            .orbit_anchor(boss, anchor(bearer), None::<Pos>)
+            .unwrap_err()
+            .to_string()
+            .contains("own quest entity anchor absent")
+    );
+    assert!(world.quest_members(boss, &[0x91d]).is_empty());
+    for id in [boss, foreign_boss, foreign, unowned] {
         world.remove_entity(id);
     }
 }

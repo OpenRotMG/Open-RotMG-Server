@@ -20,6 +20,7 @@ pub enum Anchor {
     CampEntity(i32),
     BoundEntity(i32),
     QuestMember(u16),
+    QuestEntity(i32),
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Motion {
