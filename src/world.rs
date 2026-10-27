@@ -5489,6 +5489,7 @@ impl World {
             .zip(self.content.classes[&p.character.class].caps)
             .filter(|(value, cap)| **value >= *cap)
             .count();
+        // Maxed graves last until reset, unlike later ten-minute rules: https://web.archive.org/web/20120606073802/http://forums.wildshadow.com/wiki/realm-mad-god/gravestones
         let (kind, lifetime) = match maxed {
             0 if p.character.level == 1 => (0x723, Some(30_000)),
             0 if p.character.level < 20 => (0x724, Some(60_000)),
