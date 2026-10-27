@@ -328,6 +328,82 @@ impl World {
 
 #[cfg(test)]
 #[test]
+fn populated_realms_keep_all_arrivals_connected() -> Result<()> {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path)?);
+    // Fixed geography is distinct from variable buildings: https://web.archive.org/web/20130522030032id_/https://forums.wildshadow.com/wiki/realm-mad-god/maps-builds-106-123
+    for source in crate::terrain::realms::sources(path)? {
+        let name = source.name().to_owned();
+        let directory =
+            Directory::configured(path, content.clone(), 16, 785, Some(785), vec![source], 2)?;
+        let world = &directory.worlds[&-3];
+        let width = world.map.width as usize;
+        let passable: Vec<_> = (0..world.map.cells.len())
+            .map(|i| {
+                world.walkable(Pos {
+                    x: (i % width) as f32 + 0.5,
+                    y: (i / width) as f32 + 0.5,
+                })
+            })
+            .collect();
+        assert_eq!(world.map.spawns.len(), 4, "{name}");
+        let index = |x: f32, y: f32| y as usize * width + x as usize;
+        let (x, y) = world.map.spawns[0];
+        let start = index(x, y);
+        let mut distance = vec![u32::MAX; passable.len()];
+        distance[start] = 0;
+        let mut queue = std::collections::VecDeque::from([start]);
+        while let Some(i) = queue.pop_front() {
+            for next in [
+                i.wrapping_sub(width),
+                i + width,
+                if i % width > 0 { i - 1 } else { usize::MAX },
+                if i % width + 1 < width {
+                    i + 1
+                } else {
+                    usize::MAX
+                },
+            ] {
+                if next < passable.len() && passable[next] && distance[next] == u32::MAX {
+                    distance[next] = distance[i] + 1;
+                    queue.push_back(next);
+                }
+            }
+        }
+        for &(x, y) in &world.map.spawns {
+            let i = index(x, y);
+            assert!(
+                passable[i] && distance[i] != u32::MAX,
+                "{name}: arrival {x},{y}"
+            );
+            assert_eq!(world.map.cells[i].terrain, 11, "{name}: arrival habitat");
+            assert!(
+                world
+                    .entities
+                    .values()
+                    .filter(|e| e.population_slot.is_some())
+                    .all(|e| e.pos.distance(Pos { x, y }) >= 12.),
+                "{name}: arrival population clearance"
+            );
+            println!("{name} arrival={x},{y} distance_from_south={}", distance[i]);
+        }
+        for (label, matches) in [("road", 0xd0), ("rock", 0x60)] {
+            assert!(
+                world
+                    .map
+                    .cells
+                    .iter()
+                    .enumerate()
+                    .any(|(i, c)| c.ground == matches && distance[i] != u32::MAX),
+                "{name}: unreachable {label}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
 fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
     let path = std::path::Path::new("data");
     let content = Arc::new(Content::load(path)?);
