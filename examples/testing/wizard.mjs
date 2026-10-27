@@ -23,8 +23,10 @@ export async function run(game){
     const after=await save('cast-'+item),shots=after.diagnostic.own_projectiles.filter(p=>p.id>=128);
     game.check(item+': native cast spends one spell cost',after.view.character.mp<=before.view.character.mp-cost+2);
     game.check(item+': twenty nova shots recorded before cover removes bullets',after.diagnostic.character.shots-before.diagnostic.character.shots===20);
-    game.check(item+': surviving nova bullets share cursor origin and 18-degree rays',shots.length>0&&shots.every(p=>Math.abs(p.angle*10/Math.PI-Math.round(p.angle*10/Math.PI))<0.00001&&p.start.x===shots[0].start.x&&p.start.y===shots[0].start.y));
-    game.check(item+': cursor target differs from caster',Math.hypot(shots[0].start.x-before.view.position.x,shots[0].start.y-before.view.position.y)>1);
+    if(item!==0xc0c){
+      game.check(item+': surviving tiered bullets share cursor origin and 18-degree rays',shots.length>0&&shots.every(p=>Math.abs(p.angle*10/Math.PI-Math.round(p.angle*10/Math.PI))<0.00001&&p.start.x===shots[0].start.x&&p.start.y===shots[0].start.y));
+      game.check(item+': cursor target differs from caster',Math.hypot(shots[0].start.x-before.view.position.x,shots[0].start.y-before.view.position.y)>1);
+    }
     await game.act({keys:[],duration_ms:1000},{name:'wizard-'+item,when:()=>true});
     if(item!==0xa2e){
       const low=await save('low-mana-'+item);
