@@ -18,7 +18,7 @@ export async function prepare(api){
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const records=[],protectedUntil=new Map();
+  const records=[],protectedUntil=new Map();let cofighter;
   async function cheat(actor,change){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:actor.actor,change}})});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
@@ -31,7 +31,7 @@ export async function run(game){
     if(now>=(protectedUntil.get(actor.actor)??0)){await cheat(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil.set(actor.actor,now+60000);}
   }
   async function idle(ms){
-    while(ms>0){await protect(game);const now=(await game.observe()).game_ms,step=Math.min(ms,10000,protectedUntil.get(game.actor)-now);await game.act({keys:[],duration_ms:step});ms-=step;}
+    while(ms>0){const actors=[game,cofighter].filter(Boolean);for(const actor of actors)await protect(actor);const now=(await game.observe()).game_ms,step=Math.min(ms,10000,...actors.map(actor=>protectedUntil.get(actor.actor)-now));await game.act({keys:[],duration_ms:step});ms-=step;}
   }
   const births=async quest=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='bounded named quest followers spawned'&&f.quest===quest&&f.kind>=0x929&&f.kind<=0x92c).reduce((counts,f)=>(counts[f.kind-0x929]+=f.count,counts),[0,0,0,0]);
   const family=(state,quest)=>state.diagnostic.entities.filter(e=>e.quest===quest&&e.kind>=0x929&&e.kind<=0x92c);
@@ -55,6 +55,11 @@ export async function run(game){
     await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
   const initial=await game.observe();await protect(game);
+  if(process.env.GHOST_BRANCH==='HugeMob'){
+    cofighter=await game.join({...spec,seed:795,position:initial.position,equipment:[0xb0b,0xb29,0xa7b,0xacc]});
+    await protect(cofighter);
+    await cheat(cofighter,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
+  }
   await game.act({keys:['s'],duration_ms:150});
   game.check('ordinary native movement works at the naturally placed tower',Math.hypot((await game.observe()).position.x-initial.position.x,(await game.observe()).position.y-initial.position.y)>.3);
   await approach(game,initial.position,.3);
@@ -62,7 +67,7 @@ export async function run(game){
     await game.act({keys:['1'],duration_ms:150});
     game.check('native Dexterity effusion and ring supply the HugeMob damage fixture',(await game.observe()).character.stats.dexterity===88);
   }
-  for(const [index,label,burst,stage,counts] of [[0,'SmallGroup',700,4,[0,3,3,0]],[1,'Mob',3000,5,[0,3,0,3]],[2,'HugeMob',4200,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
+  for(const [index,label,burst,stage,counts] of [[0,'SmallGroup',700,4,[0,3,3,0]],[1,'Mob',3000,5,[0,3,0,3]],[2,'HugeMob',3000,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
     const root=roots[index];
     await protect(game);
     const before=await save(label+'-idle'),original=king(before,root.entity);assert(original?.kind===0x928&&original.hp===300000,'Untouched ordinary King required');
@@ -71,7 +76,10 @@ export async function run(game){
     game.check(label+' admits ordinary sword damage',king(await game.inspect(),root.entity).stage===1);
     const step=input=>({actor:game.actor,input}),sequence=[step({keys:[],duration_ms:2000}),step({keys:[' '],duration_ms:250})];
     const interval=index===2?500:250;
-    for(let remaining=burst;remaining>0;remaining-=interval)sequence.push(step({keys:[],duration_ms:Math.min(interval,remaining),target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}}));
+    for(let remaining=burst;remaining>0;remaining-=interval){
+      const input={keys:[],duration_ms:Math.min(interval,remaining),target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}};
+      sequence.push(cofighter?[step(input),{actor:cofighter.actor,input}]:step(input));
+    }
     const evaluated=await game.act(sequence);
     game.check(label+' evaluation uses an ordinary Berserk helm',evaluated.steps[1].character.conditions&(1<<19));
     for(let n=0;n<7&&king(await game.inspect(),root.entity).stage<3;n++)await idle(1000);
@@ -114,14 +122,16 @@ export async function run(game){
       continue;
     }
     await approach(game,actual.pos);
-    const contributor=await game.join({...spec,seed:795,position:actual.pos}),outsider=await game.join({...spec,seed:796,position:actual.pos});
+    const contributor=cofighter,outsider=await game.join({...spec,seed:796,position:actual.pos});assert(contributor);
     await protect(contributor);await protect(outsider);
     const xp=await Promise.all([game.observe(),contributor.observe(),outsider.observe()]);
-    for(let n=0;n<8;n++){
-      if((king(await game.inspect(),actual.id).damage[contributor.actor]??0)>500)break;
-      await fire(contributor,actual.id,150);
+    for(const actor of [contributor,game]){
+      const beforeDamage=king(await game.inspect(),actual.id).damage[actor.actor]??0;
+      for(let n=0;n<8;n++){
+        if((king(await game.inspect(),actual.id).damage[actor.actor]??0)>beforeDamage+500)break;
+        await fire(actor,actual.id,150);
+      }
     }
-    await fire(game,actual.id,150);
     let damaged=await save('multiplayer-damage');
     game.check('two native players contribute above the private 500-damage threshold',damaged.diagnostic.entities.find(e=>e.id===actual.id).damage[game.actor]>500&&damaged.diagnostic.entities.find(e=>e.id===actual.id).damage[contributor.actor]>500);
     for(let n=0;n<30&&king(await game.inspect(),actual.id);n++)await fire(game,actual.id);
