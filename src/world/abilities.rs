@@ -254,6 +254,7 @@ impl World {
         } else {
             None
         };
+        // Preserve XML order: Purification heals before removing Sick (selected objects.xml, Tome of Purification 0xc09).
         for effect in &item.abilities {
             tracing::debug!(
                 player = id,
