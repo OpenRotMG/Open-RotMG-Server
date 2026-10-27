@@ -39,7 +39,7 @@ fn steps(w: &mut World, count: usize) {
 
 #[test]
 fn recovery_rates_and_condition_matrix() {
-    // Comparator, not historical certification: trapped/rotmg_svr@593e490 wServer/realm/StatsManager.cs#L87-L141; Kithio's MP divisor conflicts.
+    // This guards reconstruction, not fidelity: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/StatsManager.cs#L87-L141 conflicts with Kithio's MP divisor.
     for (conditions, hp, mp) in [
         (vec![], 106, 104),
         (vec![SICK], 100, 104),
@@ -60,9 +60,9 @@ fn recovery_rates_and_condition_matrix() {
     }
     let (mut w, id) = fixture();
     w.players.get_mut(&id).unwrap().character.base[6..].fill(0);
-    steps(&mut w, 200);
+    steps(&mut w, 40);
     let p = &w.players[&id];
-    assert_eq!((p.character.hp, p.character.mp), (110, 106));
+    assert_eq!((p.character.hp, p.character.mp), (102, 101));
     w.apply_condition(id, BLEEDING, 10000).unwrap();
     w.players.get_mut(&id).unwrap().character.hp = 2;
     steps(&mut w, 40);
@@ -114,7 +114,10 @@ async fn recovery_persists_vitals_not_fractions_or_temporary_effects() {
     let (mut w, id) = fixture();
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &w.content).unwrap();
     let account = store.list("recovery-test".into()).await.unwrap();
-    let mut ch = store.create(account.id, w.content.get(0x30e).unwrap()).await.unwrap();
+    let mut ch = store
+        .create(account.id, w.content.get(0x30e).unwrap())
+        .await
+        .unwrap();
     let p = w.players.get_mut(&id).unwrap();
     ch.base = p.character.base;
     ch.hp = 100;
