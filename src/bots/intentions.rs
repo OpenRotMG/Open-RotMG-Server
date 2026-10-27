@@ -279,6 +279,19 @@ impl Intentions {
         self.transition = reason.into();
         self.progressing = false;
     }
+    fn release_main(&mut self, reason: &str) {
+        // Completing or aborting a goal cannot erase an entered dungeon's exit budget.
+        let excursion = self.detour.take().filter(|detour| {
+            matches!(
+                detour.opportunity,
+                Opportunity::Dungeon { entered: true, .. }
+            )
+        });
+        let returning = self.return_to_main;
+        self.end(reason);
+        self.detour = excursion;
+        self.return_to_main = returning;
+    }
     fn finish_detour(&mut self, v: &PlayerView, reason: &str) {
         self.detour = None;
         self.main_remaining_ms = MAIN_MS;
@@ -411,6 +424,7 @@ impl Intentions {
                 }
             })
             .map(|m| (m.id, m.target));
+        let mut aborted_item = false;
         if let Some((id, target)) = completed {
             tracing::info!(
                 character = v.session.character,
@@ -419,17 +433,24 @@ impl Intentions {
                 objective = ?self.main.as_ref().map(|m| &m.objective),
                 "autonomous main goal completed by committed own character observation"
             );
-            // Progress can finish a milestone mid-dungeon; it cannot erase that excursion's exit budget.
-            let excursion = self.detour.take().filter(|detour| {
-                matches!(
-                    detour.opportunity,
-                    Opportunity::Dungeon { entered: true, .. }
-                )
-            });
-            let returning = self.return_to_main;
-            self.end("main goal completed by observed character progress");
-            self.detour = excursion;
-            self.return_to_main = returning;
+            self.release_main("main goal completed by observed character progress");
+        } else if let Some(target) = self.item_target()
+            && !v.character.items.contains(&target)
+        {
+            let item = c.get(target as u16)?;
+            let target_quality = progression::quality(v, c, target)?;
+            let mut obsolete = progression::priority(v, c, target, false, None)? != 140;
+            for held in v.character.items.iter().filter(|k| **k >= 0) {
+                if c.get(*held as u16)?.slot_type == item.slot_type
+                    && progression::quality(v, c, *held)? >= target_quality
+                {
+                    obsolete = true;
+                }
+            }
+            if obsolete {
+                self.release_main("item goal aborted: no longer improves current own gear");
+                aborted_item = true;
+            }
         }
         if self.main.is_none() {
             let cap = c.classes[&v.character.class].caps[4];
@@ -492,6 +513,10 @@ impl Intentions {
             self.transition = format!(
                 "goal {id} target {target} completed by committed own observation; next goal selected"
             );
+        }
+        if aborted_item {
+            self.transition =
+                "item goal aborted: no longer improves current own gear; selected next goal".into();
         }
         if let Some(m) = &self.main {
             ensure!(
@@ -625,6 +650,7 @@ impl Intentions {
         goal: &Goal,
         committed: bool,
         future: Option<u16>,
+        market: Option<&pursuits::market::Market>,
     ) -> Result<()> {
         if self.detour.is_none() && self.optional(v, goal, committed) {
             ensure!(
@@ -638,7 +664,8 @@ impl Intentions {
                         .iter()
                         .find(|o| o.id == *id)
                         .context("optional bag missing")?;
-                    let Some(Action::Swap { from, .. }) = progression::pickup(v, c, bag, future)?
+                    let Some(Action::Swap { from, .. }) =
+                        progression::pickup(v, c, bag, future, market)?
                     else {
                         anyhow::bail!("optional bag has no collectible item");
                     };

@@ -51,7 +51,12 @@ pub(super) fn mana(v: &PlayerView, content: &Content) -> Result<Option<Action>> 
     Ok(None)
 }
 
-pub(super) fn consume(v: &PlayerView, content: &Content) -> Result<Option<Action>> {
+pub(super) fn consume(
+    v: &PlayerView,
+    content: &Content,
+    market: &pursuits::market::Market,
+    future: Option<u16>,
+) -> Result<Option<Action>> {
     for (slot, kind) in v
         .character
         .items
@@ -62,6 +67,7 @@ pub(super) fn consume(v: &PlayerView, content: &Content) -> Result<Option<Action
     {
         if let Some(index) = potion_index(content, *kind)?
             && v.character.base_stats[index] < content.classes[&v.character.class].caps[index]
+            && market.can_use(v, content, future, *kind)?
         {
             return Ok(Some(Action::Use {
                 slot,
@@ -78,14 +84,27 @@ pub(super) fn pickup(
     content: &Content,
     bag: &crate::world::view::VisibleObject,
     future: Option<u16>,
+    market: Option<&pursuits::market::Market>,
 ) -> Result<Option<Action>> {
     let mut best = None;
     for (slot, kind) in bag.contents.iter().enumerate().filter(|(_, k)| **k >= 0) {
-        let value = priority(v, content, *kind, false, future)?;
+        let value = priority(v, content, *kind, false, future)?.max(
+            if market.is_some_and(|m| m.gathers(content, *kind)) {
+                80
+            } else {
+                0
+            },
+        );
         if value == 0 {
             continue;
         }
         for to in 4..v.character.items.len() {
+            if v.character.items[to] >= 0
+                && let Some(market) = market
+                && !market.can_use(v, content, future, v.character.items[to])?
+            {
+                continue;
+            }
             let held = priority(v, content, v.character.items[to], true, future)?;
             if value > held && best.as_ref().is_none_or(|(gain, _)| value - held > *gain) {
                 best = Some((

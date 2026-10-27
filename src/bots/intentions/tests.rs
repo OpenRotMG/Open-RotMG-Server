@@ -46,7 +46,7 @@ async fn persisted_main_goal_and_detour_reopen_without_json_loss() {
     mind.intentions
         .as_mut()
         .unwrap()
-        .selected(&v, &c, &Goal::Loot(3), false, None)
+        .selected(&v, &c, &Goal::Loot(3), false, None, None)
         .unwrap();
     mind.revision = store.save_bot_mind(mind.clone()).await.unwrap();
     drop(store);
@@ -149,7 +149,8 @@ fn item_identity_and_reason_survive_loot_company_combat_dungeon_and_same_charact
     i.observe(&v, &c, "Mossy").unwrap();
     let main = i.main.clone();
     v.objects.push(bag(3, 0xa1f, 11.5));
-    i.selected(&v, &c, &Goal::Loot(3), false, None).unwrap();
+    i.selected(&v, &c, &Goal::Loot(3), false, None, None)
+        .unwrap();
     v.character.items[4] = 0xa1f;
     v.character.inventory_revision += 1;
     i.observe(&v, &c, "Mossy").unwrap();
@@ -175,7 +176,7 @@ fn item_identity_and_reason_survive_loot_company_combat_dungeon_and_same_charact
             portal.kind = 0x717;
             v.objects.push(portal);
         }
-        i.selected(&v, &c, &goal, false, None).unwrap();
+        i.selected(&v, &c, &goal, false, None, None).unwrap();
         if goal == Goal::Follow(4) {
             v.objects.iter_mut().find(|o| o.id == 4).unwrap().position = v.position;
         } else {
@@ -230,7 +231,8 @@ fn item_completion_requires_committed_own_holdings_and_preserves_dungeon_exit_bu
         i.main_remaining_ms = MAIN_MS;
         assert!(i.eligible(&v, &Goal::Loot(8), false));
         assert_eq!(i.bonus(&v, &Goal::Loot(8)), 30.);
-        i.selected(&v, &c, &Goal::Loot(8), false, None).unwrap();
+        i.selected(&v, &c, &Goal::Loot(8), false, None, None)
+            .unwrap();
         assert!(
             i.detour.is_none(),
             "target loot is main progress, not another detour"
@@ -351,4 +353,43 @@ fn item_goal_is_invalidated_on_character_change_and_death_not_restored() {
     i.observe(&v, &c, "Mossy").unwrap();
     assert!(i.main.as_ref().unwrap().id > new);
     assert!(!v.character.items.contains(&i.item_target().unwrap()));
+}
+
+#[test]
+fn obsolete_item_abort_is_explicit_and_preserves_entered_dungeon_budget() {
+    let (c, mut v) = fixture();
+    let mut i = Intentions::default();
+    i.observe(&v, &c, "Mossy").unwrap();
+    let target = i.item_target().unwrap();
+    let slot_type = c.get(target as u16).unwrap().slot_type;
+    let stronger = c
+        .objects
+        .values()
+        .find(|item| {
+            !item.unsupported_equipment
+                && item.slot_type == slot_type
+                && item.class == "Equipment"
+                && progression::quality(&v, &c, i32::from(item.kind)).unwrap()
+                    > progression::quality(&v, &c, target).unwrap()
+        })
+        .unwrap();
+    v.character.items[4] = i32::from(stronger.kind);
+    v.character.inventory_revision += 1;
+    v.map.name = "Pirate Cave".into();
+    i.detour = Some(Detour {
+        runtime: 0,
+        world: v.session.world,
+        remaining_ms: DETOUR_MS,
+        opportunity: Opportunity::Dungeon {
+            portal: 5,
+            destination: "Pirate Cave".into(),
+            entered: true,
+        },
+    });
+    let excursion = i.detour.clone();
+    i.observe(&v, &c, "Mossy").unwrap();
+    assert_ne!(i.item_target(), Some(target));
+    assert!(i.transition.contains("aborted: no longer improves"));
+    assert_eq!(i.detour, excursion);
+    i.validate().unwrap();
 }

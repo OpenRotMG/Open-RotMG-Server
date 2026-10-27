@@ -222,6 +222,8 @@ impl Mind {
             .expect("validated intentions")
             .bind(v, runtime);
         self.market.bind();
+        self.market
+            .set_target(self.intentions.as_ref().and_then(|i| i.item_target()));
         self.social.bind();
         self.events.bind();
         self.binding = rand::random();

@@ -22,6 +22,9 @@ pub(crate) struct Acquisition {
 }
 
 impl Acquisition {
+    pub(super) fn release(&mut self) {
+        self.reserved.clear();
+    }
     pub(crate) fn reserved(&self, kind: i32) -> u8 {
         self.reserved.get(&kind).copied().unwrap_or(0)
     }
@@ -81,27 +84,20 @@ pub(crate) fn plan(c: &Content, target: i32, spares: &[Goods]) -> Result<Acquisi
             result.reserved.insert(g.kind, g.quantity);
         }
     }
-    let mut whole_terms = false;
+    let costs = currency_costs(c, target);
     let mut sales = Vec::new();
-    for kind in CURRENCIES {
-        if c.item_values.quote_range(kind).is_err() {
-            continue;
-        }
-        let Some(cost) = bounded_quote(&Goods { kind, quantity: 8 }, &want, c) else {
-            continue;
-        };
-        whole_terms = true;
+    for cost in &costs {
         // Never churn saved currency or the ambition itself to manufacture apparent progress.
         for give in &eligible {
             if give.kind != target
                 && !CURRENCIES.contains(&give.kind)
-                && let Some(sale) = bounded_quote(give, &cost[0], c)
+                && let Some(sale) = bounded_quote(give, cost, c)
             {
                 sales.push(sale);
             }
         }
     }
-    if whole_terms {
+    if !costs.is_empty() {
         let sale = sales.into_iter().min_by_key(quote_order);
         if let Some(q) = &sale {
             result.reserved.insert(q[0].kind, q[0].quantity);
@@ -109,6 +105,41 @@ pub(crate) fn plan(c: &Content, target: i32, spares: &[Goods]) -> Result<Acquisi
         result.state = AcquisitionState::Saving { sale };
     }
     Ok(result)
+}
+
+fn currency_costs(c: &Content, target: i32) -> Vec<Goods> {
+    CURRENCIES
+        .into_iter()
+        .filter_map(|kind| {
+            bounded_quote(
+                &Goods { kind, quantity: 8 },
+                &Goods {
+                    kind: target,
+                    quantity: 1,
+                },
+                c,
+            )
+            .map(|q| q[0].clone())
+        })
+        .collect()
+}
+
+pub(crate) fn helps_target(c: &Content, target: i32, kind: i32) -> bool {
+    let give = Goods { kind, quantity: 8 };
+    kind != target
+        && (bounded_quote(
+            &give,
+            &Goods {
+                kind: target,
+                quantity: 1,
+            },
+            c,
+        )
+        .is_some()
+            || !CURRENCIES.contains(&kind)
+                && currency_costs(c, target)
+                    .iter()
+                    .any(|cost| bounded_quote(&give, cost, c).is_some()))
 }
 
 // Fewest native supplied items wins; canonical kinds break ties independently of input order.
@@ -222,5 +253,17 @@ mod tests {
                 .to_string()
                 .contains("invalid acquisition target")
         );
+    }
+
+    #[test]
+    fn loot_only_consumer_can_release_unusable_cash_terms_without_retargeting() {
+        let c = Content::load(Path::new("data")).unwrap();
+        let mut p = plan(&c, 2794, &[goods(DEFENSE, 2)]).unwrap();
+        // Exercise the consumer's explicit choice even if every current eligible catalog target has cash terms.
+        p.state = AcquisitionState::NoWholeTerms;
+        p.release();
+        assert_eq!(p.state, AcquisitionState::NoWholeTerms);
+        assert_eq!(p.reserved(DEFENSE), 0);
+        assert_eq!(p.spendable(DEFENSE, 2), 2);
     }
 }

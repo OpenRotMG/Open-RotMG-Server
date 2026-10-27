@@ -588,6 +588,16 @@ impl Brain {
             .as_mut()
             .context("unmigrated account intentions")?
             .observe(v, content, self.profile.identity)?;
+        self.mind.market.observe_goal(
+            v,
+            content,
+            self.mind.future_class,
+            self.mind
+                .intentions
+                .as_ref()
+                .expect("observed intentions")
+                .item_target(),
+        )?;
         let (activity, decision) = if v.lifecycle.busy {
             (Activity::Busy, decision)
         } else {
@@ -610,6 +620,8 @@ impl Brain {
                 cctv::reason(activity, &decision, v, content),
                 committed,
             );
+        self.intent["acquisition"] = serde_json::json!({"resources":self.mind.market.resource_payload(),
+            "step":cctv::reason(activity, &decision, v, content),"selected_action":&decision.item});
         Ok(decision)
     }
     fn set_activity(&mut self, v: &PlayerView, activity: Activity) {
@@ -805,10 +817,15 @@ impl Brain {
         if (equipping && s.remedy.is_none()) || (v.map.name == "Vault" && s.inspecting) {
             return Ok((Activity::Equip, decision));
         }
-        if let Some(mut market) =
-            self.mind
-                .market
-                .decide(v, content, self.mind.future_class, &s.grid, &mut self.rng)?
+        if (matches!(v.map.name.as_str(), "Nexus" | "Vault")
+            || peaceful(&s.enemies, v.position) && !self.committed(v))
+            && let Some(mut market) = self.mind.market.decide(
+                v,
+                content,
+                self.mind.future_class,
+                &s.grid,
+                &mut self.rng,
+            )?
         {
             if market.item.is_none() {
                 market.item = decision.item;
@@ -833,7 +850,8 @@ impl Brain {
             && s.nearest
                 .is_none_or(|e| e.position.distance(v.position) > 5.)
         {
-            decision.item = progression::consume(v, content)?;
+            decision.item =
+                progression::consume(v, content, &self.mind.market, self.mind.future_class)?;
             if decision.item.is_some() {
                 return Ok((Activity::Consume, decision));
             }
@@ -885,7 +903,14 @@ impl Brain {
                     .intentions
                     .as_mut()
                     .expect("observed intentions")
-                    .selected(v, content, &social.goal, committed, self.mind.future_class)?;
+                    .selected(
+                        v,
+                        content,
+                        &social.goal,
+                        committed,
+                        self.mind.future_class,
+                        Some(&self.mind.market),
+                    )?;
                 return Ok((Activity::Social, social));
             }
         }
@@ -1266,7 +1291,15 @@ impl Brain {
                 .iter()
                 .filter(|o| content.objects[&o.kind].class == "Container")
             {
-                if progression::pickup(v, content, bag, self.mind.future_class)?.is_some() {
+                if progression::pickup(
+                    v,
+                    content,
+                    bag,
+                    self.mind.future_class,
+                    Some(&self.mind.market),
+                )?
+                .is_some()
+                {
                     // A distant objective must not outrank replenishing an exhausted ability.
                     let replenishing = needs_mana
                         && peaceful(enemies, v.position)
@@ -1461,6 +1494,7 @@ impl Brain {
                             &Goal::Follow(marker.id),
                             committed,
                             self.mind.future_class,
+                            Some(&self.mind.market),
                         )?;
                     self.next_teleport = v.time_ms + 10000;
                     decision.goal = Goal::Follow(marker.id);
@@ -1615,8 +1649,14 @@ impl Brain {
                         .context("selected bag missing")?;
                     if decision.item.is_none() {
                         decision.item = Some(
-                            progression::pickup(v, content, bag, self.mind.future_class)?
-                                .context("selected bag has no collectable item")?,
+                            progression::pickup(
+                                v,
+                                content,
+                                bag,
+                                self.mind.future_class,
+                                Some(&self.mind.market),
+                            )?
+                            .context("selected bag has no collectable item")?,
                         );
                     }
                     if let Some(action) = &decision.item {
@@ -1717,7 +1757,14 @@ impl Brain {
                 .intentions
                 .as_mut()
                 .expect("observed intentions")
-                .selected(v, content, &goal, committed, self.mind.future_class)?;
+                .selected(
+                    v,
+                    content,
+                    &goal,
+                    committed,
+                    self.mind.future_class,
+                    Some(&self.mind.market),
+                )?;
             decision.goal = goal;
             decision.movement = movement;
             if (self.agreement.is_some()

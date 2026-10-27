@@ -479,7 +479,7 @@ impl Events {
             .iter()
             .filter(|p| c.objects[&p.kind].class == "Container")
         {
-            loot_waiting |= progression::pickup(v, c, bag, None)?.is_some();
+            loot_waiting |= progression::pickup(v, c, bag, None, None)?.is_some();
         }
         if loot_waiting {
             return Ok(None);

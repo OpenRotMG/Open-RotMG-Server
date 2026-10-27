@@ -3,7 +3,9 @@ use crate::content::item_values::DEFENSE;
 use rand::seq::IteratorRandom;
 use std::time::{Duration, Instant};
 
+pub(crate) mod acquisition;
 mod incoming;
+use acquisition::{Acquisition, AcquisitionState};
 use incoming::Incoming;
 
 pub(crate) fn now() -> u64 {
@@ -96,6 +98,12 @@ struct MarketSession {
 pub(crate) struct Market {
     #[serde(skip)]
     session: Option<MarketSession>,
+    #[serde(skip)]
+    target: Option<i32>,
+    #[serde(skip)]
+    resource_observation: Option<serde_json::Value>,
+    #[serde(skip)]
+    vault_refreshed: bool,
     #[serde(skip)]
     session_used: bool,
     #[serde(skip)]
@@ -192,6 +200,9 @@ impl Market {
     }
     pub(in crate::bots) fn bind(&mut self) {
         self.session = None;
+        self.target = None;
+        self.resource_observation = None;
+        self.vault_refreshed = false;
         self.session_used = false;
         self.incoming = None;
         self.outgoing = None;
@@ -227,6 +238,7 @@ impl Market {
         if v.map.name != "Nexus" {
             if v.map.name != "Vault" {
                 self.preparing = false;
+                self.vault_refreshed = false;
             }
             self.end_session(v, "left_nexus");
             self.session_used = false;
@@ -255,6 +267,7 @@ impl Market {
                 tracing::info!(account=v.session.account,revision=v.character.inventory_revision,items=?v.character.items,vault=?chest.contents,"market own private stock observed");
             }
             self.vault = Some(chest.contents.clone());
+            self.vault_refreshed = true;
         }
     }
     fn count(&self, v: &PlayerView, kind: i32) -> usize {
@@ -297,8 +310,17 @@ impl Market {
         if item.soulbound || item.unsupported_equipment || item.class != "Equipment" {
             return Ok(0);
         }
-        let count = self.count(v, kind);
-        let keep = if matches!(kind, SPEED | DEFENSE | LIFE) {
+        Ok((if self.target.is_some() {
+            Self::verified_count(v, kind)
+        } else {
+            self.count(v, kind)
+        })
+        .saturating_sub(Self::keep(v, c, future, kind)?)
+        .min(16) as u8)
+    }
+    fn keep(v: &PlayerView, c: &Content, future: Option<u16>, kind: i32) -> Result<usize> {
+        let item = c.get(u16::try_from(kind)?)?;
+        Ok(if matches!(kind, SPEED | DEFENSE | LIFE) {
             0
         } else if let Some(index) = progression::potion_index(c, kind)? {
             (c.classes[&v.character.class].caps[index] - v.character.base_stats[index]).clamp(0, 16)
@@ -310,8 +332,178 @@ impl Market {
             1
         } else {
             0
+        })
+    }
+    fn live_vault(v: &PlayerView) -> Option<&[i32]> {
+        (v.map.name == "Vault")
+            .then(|| v.objects.iter().find(|o| o.kind == 0x504))
+            .flatten()
+            .map(|o| o.contents.as_slice())
+    }
+    fn verified_count(v: &PlayerView, kind: i32) -> usize {
+        v.character
+            .items
+            .iter()
+            .skip(4)
+            .chain(Self::live_vault(v).into_iter().flatten())
+            .filter(|k| **k == kind)
+            .count()
+    }
+    pub(in crate::bots) fn verified_surplus(
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+        kind: i32,
+    ) -> Result<u8> {
+        if !super::settled(v) {
+            return Ok(0);
+        }
+        let item = c.get(u16::try_from(kind)?)?;
+        if item.soulbound || item.unsupported_equipment || item.class != "Equipment" {
+            return Ok(0);
+        }
+        Ok(Self::verified_count(v, kind)
+            .saturating_sub(Self::keep(v, c, future, kind)?)
+            .min(16) as u8)
+    }
+    fn verified_stock(v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Vec<Goods>> {
+        let mut stock = Vec::new();
+        for kind in v
+            .character
+            .items
+            .iter()
+            .skip(4)
+            .chain(Self::live_vault(v).into_iter().flatten())
+            .filter(|k| **k >= 0)
+            .copied()
+            .collect::<BTreeSet<_>>()
+        {
+            let quantity = Self::verified_surplus(v, c, future, kind)?;
+            if quantity > 0 {
+                stock.push(Goods { kind, quantity });
+            }
+        }
+        Ok(stock)
+    }
+    pub(in crate::bots) fn resources(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+    ) -> Result<Option<Acquisition>> {
+        if !super::settled(v) || self.locked() {
+            return Ok(None);
+        }
+        self.target
+            .map(|target| {
+                let mut p = acquisition::plan(c, target, &Self::verified_stock(v, c, future)?)?;
+                // No native cash terms means loot-only, not an indefinite cash lock or market wait.
+                if matches!(p.state, AcquisitionState::NoWholeTerms) {
+                    p.release();
+                }
+                Ok(p)
+            })
+            .transpose()
+    }
+    pub(in crate::bots) fn spendable_surplus(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+        kind: i32,
+    ) -> Result<usize> {
+        let actual = usize::from(Self::verified_surplus(v, c, future, kind)?);
+        if self.locked() {
+            return Ok(0);
+        }
+        Ok(self
+            .resources(v, c, future)?
+            .map_or(actual, |p| p.spendable(kind, actual)))
+    }
+    pub(in crate::bots) fn can_use(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+        kind: i32,
+    ) -> Result<bool> {
+        if !super::settled(v) || self.locked() {
+            return Ok(false);
+        }
+        let surplus = usize::from(Self::verified_surplus(v, c, future, kind)?);
+        let reserved = surplus - self.spendable_surplus(v, c, future, kind)?;
+        // Personal keeps are not money. A use may consume one without consuming verified reserved surplus.
+        Ok(Self::verified_count(v, kind) > reserved)
+    }
+    pub(in crate::bots) fn gathers(&self, c: &Content, kind: i32) -> bool {
+        self.target
+            .is_some_and(|target| acquisition::helps_target(c, target, kind))
+    }
+    pub(in crate::bots) fn set_target(&mut self, target: Option<i32>) {
+        if self.target != target && !self.locked() {
+            self.quote = None;
+            self.preparing = false;
+        }
+        self.target = target;
+    }
+    pub(in crate::bots) fn observe_goal(
+        &mut self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+        target: Option<i32>,
+    ) -> Result<()> {
+        self.set_target(target);
+        let p = self.resources(v, c, future)?;
+        let (reason, quote) = match p.as_ref().map(|p| &p.state) {
+            Some(AcquisitionState::Funded { buy }) => ("buying_funded_exact_target", Some(buy)),
+            Some(AcquisitionState::Saving { sale: Some(q) }) => {
+                ("earning_fair_surplus_sale", Some(q))
+            }
+            Some(AcquisitionState::Saving { sale: None }) => ("saving_continue_hunt_loot", None),
+            Some(AcquisitionState::NoWholeTerms) => ("loot_only_no_whole_terms", None),
+            Some(AcquisitionState::Ineligible(_)) => ("blocked_ineligible_target", None),
+            None if !super::settled(v) => ("blocked_unsettled_own_stock", None),
+            None if self.locked() => ("blocked_active_exchange", self.quote.as_ref()),
+            None => ("no_item_ambition", None),
         };
-        Ok(count.saturating_sub(keep).min(16) as u8)
+        let stock = Self::verified_stock(v, c, future)?;
+        let reservations: Vec<_> = stock.iter().map(|g| serde_json::json!({"kind":g.kind,
+            "surplus":g.quantity,"reserved":p.as_ref().map_or(0, |p|p.reserved(g.kind)),
+            "spendable":if self.locked() {0} else {p.as_ref().map_or(usize::from(g.quantity), |p|p.spendable(g.kind, usize::from(g.quantity)))}})).collect();
+        let observation = serde_json::json!({"target":target,"reason":reason,"quote":quote,
+            "blocked":p.as_ref().and_then(|p| if let AcquisitionState::Ineligible(reason)=&p.state {Some(reason)} else {None}),
+            "carried":&v.character.items[4..],"live_vault":Self::live_vault(v),
+            "resources":reservations,"trade_locked":self.locked()});
+        if self.resource_observation.as_ref() != Some(&observation) {
+            tracing::info!(account=v.session.account, resource=%observation, "autonomous acquisition resource transition");
+            self.resource_observation = Some(observation);
+        }
+        Ok(())
+    }
+    pub(in crate::bots) fn resource_payload(&self) -> Option<&serde_json::Value> {
+        self.resource_observation.as_ref()
+    }
+    fn goal_quote(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+    ) -> Result<Option<[Goods; 2]>> {
+        if self.target.is_some_and(|target| {
+            v.character.items.contains(&target)
+                || Self::live_vault(v).is_some_and(|items| items.contains(&target))
+        }) {
+            return Ok(None);
+        }
+        Ok(self.resources(v, c, future)?.and_then(|p| match p.state {
+            AcquisitionState::Funded { buy } => Some(buy),
+            AcquisitionState::Saving { sale } => sale,
+            _ => None,
+        }))
+    }
+    fn locked(&self) -> bool {
+        self.reserved_bargain() || self.incoming.is_some() || self.trade.is_some()
     }
     fn stock(&self, v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Vec<Goods>> {
         let mut goods = Vec::new();
@@ -338,10 +530,7 @@ impl Market {
             .is_some_and(|b| b.resolution.is_none())
     }
     pub(in crate::bots) fn reserves_stock(&self) -> bool {
-        self.reserved_bargain()
-            || self.incoming.is_some()
-            || self.preparing
-            || (self.session.is_some() && self.quote.is_some())
+        self.locked() || self.preparing || (self.session.is_some() && self.quote.is_some())
     }
     pub(crate) fn wants_speed(&self, v: &PlayerView) -> bool {
         self.quote.as_ref().is_some_and(|q| {
@@ -379,6 +568,9 @@ impl Market {
         c: &Content,
         future: Option<u16>,
     ) -> Result<Option<[Goods; 2]>> {
+        if self.target.is_some() {
+            return self.goal_quote(v, c, future);
+        }
         if self.quote.as_ref().is_some_and(|q| q[1].kind == SPEED)
             && v.character.base_stats[4] < c.classes[&v.character.class].caps[4]
             && v.character.items.iter().skip(4).any(|k| *k == SPEED)
@@ -571,8 +763,9 @@ impl Market {
             && objective[1].kind == q[0].kind
             && q[1].quantity <= objective[0].quantity
             && q[0].quantity >= objective[1].quantity
-            && self.wanted(v, c, future, q[0].kind)? >= q[0].quantity
-            && self.spare(v, c, future, q[1].kind)? >= q[1].quantity
+            && (self.target != Some(q[0].kind) || q[0].quantity == 1)
+            && (self.target.is_some() || self.wanted(v, c, future, q[0].kind)? >= q[0].quantity)
+            && Self::verified_surplus(v, c, future, q[1].kind)? >= q[1].quantity
             && let Some(account) = peer.account
         {
             self.quote = Some(objective);
@@ -640,7 +833,9 @@ impl Market {
         rng: &mut impl Rng,
     ) -> Result<Option<Decision>> {
         self.observe(v);
-        if let Some(q) = &self.quote
+        if !self.locked()
+            && self.target.is_none()
+            && let Some(q) = &self.quote
             && self.wanted(v, c, future, q[1].kind)? == 0
             && !(q[1].kind == SPEED
                 && v.character.base_stats[4] < c.classes[&v.character.class].caps[4])
@@ -802,6 +997,63 @@ impl Market {
             }
             return Ok(Some(d));
         }
+        if self.trade.is_some() {
+            return Ok(Some(Decision {
+                goal: Goal::Wait,
+                movement: None,
+                aim: None,
+                item: None,
+                journey: None,
+                chat: None,
+            }));
+        }
+        if self.target.is_some() {
+            self.quote = self.goal_quote(v, c, future)?;
+            if self.quote.is_none() {
+                self.preparing = false;
+            }
+            if !matches!(v.map.name.as_str(), "Nexus" | "Vault") {
+                if matches!(
+                    self.resources(v, c, future)?.map(|p| p.state),
+                    Some(AcquisitionState::Funded { .. })
+                ) && !self.session_used
+                {
+                    return Ok(Some(Decision {
+                        goal: Goal::Wait,
+                        movement: None,
+                        aim: None,
+                        item: None,
+                        journey: Some(Journey::Nexus),
+                        chat: None,
+                    }));
+                }
+                return Ok(None);
+            }
+            // A memory can justify inspection, never a funded quote. At most one refresh per outing.
+            if v.map.name == "Nexus"
+                && self.quote.is_none()
+                && !self.vault_refreshed
+                && self
+                    .vault
+                    .as_ref()
+                    .is_some_and(|items| items.iter().any(|k| *k >= 0 && self.gathers(c, *k)))
+                && let Some(portal) = v.objects.iter().find(|p| p.kind == 0x720 && p.usable)
+            {
+                let near = v.position.distance(portal.position) < 1.4;
+                return Ok(Some(Decision {
+                    goal: Goal::Portal(portal.id),
+                    movement: if near {
+                        None
+                    } else {
+                        grid.towards(v.position, portal.position)
+                    },
+                    aim: None,
+                    item: None,
+                    journey: near.then_some(Journey::Portal(portal.id)),
+                    chat: None,
+                }));
+            }
+        }
         if v.map.name == "Vault"
             && let Some(q) = self.quote.clone()
         {
@@ -929,12 +1181,15 @@ impl Market {
         self.quote = Some(quote.clone());
         if self.session.is_none() {
             self.session_used = true;
-            let admitted = self.preparing || self.trader || rng.gen_ratio(1, 5);
+            let purposeful = self.target.is_some();
+            let admitted = purposeful || self.preparing || self.trader || rng.gen_ratio(1, 5);
             tracing::info!(
                 account = v.session.account,
                 admitted,
-                probability = if self.trader { 1.0 } else { 0.2 },
-                reason = if admitted {
+                probability = if purposeful || self.trader { 1.0 } else { 0.2 },
+                reason = if purposeful {
+                    "affordable_goal_exchange"
+                } else if admitted {
                     "visit_admitted"
                 } else {
                     "visit_declined"

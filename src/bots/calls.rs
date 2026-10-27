@@ -134,7 +134,9 @@ impl Brain {
             .iter()
             .filter(|o| c.objects[&o.kind].class == "Container")
         {
-            if progression::pickup(v, c, bag, self.mind.future_class)?.is_some() {
+            if progression::pickup(v, c, bag, self.mind.future_class, Some(&self.mind.market))?
+                .is_some()
+            {
                 return Ok(false);
             }
         }
