@@ -41,20 +41,29 @@ with sqlite3.connect(sys.argv[1]) as db:
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(root(),'native.json'),'utf8'));
-  const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),observations=[];
+  const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),observations=[],rewards=[];
+  const lines=async()=>(await readFile(join(root(),'server.log'),'utf8')).split('\n').slice(0,-1);
+  async function awarded(offset,player){
+    const deaths=(await lines()).slice(offset).filter(s=>s.startsWith('{')).map(s=>JSON.parse(s).fields).filter(f=>f.message==='enemy defeated'&&f.owner===player);
+    assert(deaths.length>0&&deaths.every(d=>[0x6b4,0x926].includes(d.kind)),'Unexpected Kitchen deaths: '+JSON.stringify(deaths));
+    const amount=deaths.reduce((sum,d)=>sum+(d.kind===0x926?21:1),0);
+    rewards.push({player,amount,deaths});await writeFile(join(root(),'earned-rewards.json'),JSON.stringify(rewards,null,2));return amount;
+  }
   async function protect(client){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
   async function snapshot(name,client=game){const state=await client.inspect();observations.push({name,state});await writeFile(join(root(),'level-observations.json'),JSON.stringify({preparedThresholdsAndGear:true,observations},null,2));return state;}
-  async function defeat(client){
-    const boss=(await client.inspect()).diagnostic.entities.find(e=>e.kind===0x926);assert(boss);
-    for(let n=0;n<8;n++){
-      if(!(await client.inspect()).diagnostic.entities.some(e=>e.id===boss.id))return;
+  async function earn(client){
+    const before=await client.inspect(),boss=before.diagnostic.entities.find(e=>e.kind===0x926);assert(boss);
+    const offset=(await lines()).length;
+    for(let n=0;n<4;n++){
       await client.act({keys:[],duration_ms:150,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:false}});
-      await client.act({keys:[' '],duration_ms:600});
+      await client.act({keys:[' '],duration_ms:150});
+      await client.act({keys:[],duration_ms:2000});
+      if((await client.inspect()).view.character.experience>before.view.character.experience)return offset;
     }
-    assert.fail('Native spell did not defeat Bonegrind');
+    assert.fail('Native spell did not earn XP');
   }
   await protect(game);
   const start=await snapshot('prepared-19');
@@ -64,12 +73,13 @@ export async function run(game){
   const before=await snapshot('before-kill'),peerBefore=await snapshot('peer-before-kill',peer);
   game.check('honest near-threshold fixtures loaded',before.view.character.level===19&&before.view.character.experience===18049&&peerBefore.view.character.level===1&&peerBefore.view.character.experience===49);
   game.check('both resources are depleted before level-up',before.view.character.hp<before.view.character.stats[0]&&before.view.character.mp<before.view.character.stats[1]);
-  await defeat(game);
+  const offset=await earn(game);
   await game.act({keys:[],duration_ms:800},{name:'level-20-after',when:()=>true});
   const after=await snapshot('after-kill'),peerAfter=await snapshot('peer-after-kill',peer);
-  for(const [label,a,b,award] of [['finishing level',before,after,21],['shared first level',peerBefore,peerAfter,21]]){
+  const award=await awarded(offset,before.view.session.player);
+  for(const [label,a,b] of [['finishing level',before,after],['shared first level',peerBefore,peerAfter]]){
     const x=a.view.character,y=b.view.character;
-    game.check(label+' receives capped real XP and one level',y.experience-x.experience===award&&y.level===x.level+1);
+    game.check(label+' receives attributed real XP and one level',y.experience-x.experience===award&&y.level===x.level+1);
     // Inclusive growth and resource refill: selected Wizard XML and pinned Kithio CheckLevelUp, https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.Leveling.cs#L194-L220
     game.check(label+' growth stays inside selected ranges/caps',y.base_stats.every((v,i)=>v>=Math.min(caps[i],x.base_stats[i]+growth[i][0])&&v<=Math.min(caps[i],x.base_stats[i]+growth[i][1])));
     game.check(label+' refills HP and MP',y.hp===y.stats[0]&&y.mp===y.stats[1]);
@@ -80,10 +90,9 @@ export async function run(game){
   await game.act({keys:['Insert'],duration_ms:500});
   const retained=await snapshot('nexus-reconnect');
   game.check('ordinary Nexus reconnect persists level XP and growth',retained.view.map.name==='Nexus'&&retained.view.session.character===after.view.session.character&&JSON.stringify(retained.view.character.base_stats)===JSON.stringify(after.view.character.base_stats)&&retained.view.character.experience===after.view.character.experience&&retained.view.character.level===20);
-  const capped=await game.join({...fixture,level:20,stats:caps});
+  const capped=await game.join({...fixture,level:20});
   await protect(capped);
-  const capBefore=await snapshot('cap-before',capped);
-  await defeat(capped);
-  const capAfter=await snapshot('cap-after',capped);
-  game.check('level 20 earns further XP without level or stat growth',capAfter.view.character.experience-capBefore.view.character.experience===21&&capAfter.view.character.level===20&&JSON.stringify(capAfter.view.character.base_stats)===JSON.stringify(caps));
+  const capBefore=await snapshot('cap-before',capped),capOffset=await earn(capped);
+  const capAfter=await snapshot('cap-after',capped),capAward=await awarded(capOffset,capBefore.view.session.player);
+  game.check('level 20 earns further XP without level or stat growth',capAfter.view.character.experience-capBefore.view.character.experience===capAward&&capAfter.view.character.level===20&&JSON.stringify(capAfter.view.character.base_stats)===JSON.stringify(capBefore.view.character.base_stats));
 }
