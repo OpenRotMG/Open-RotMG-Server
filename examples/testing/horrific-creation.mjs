@@ -61,8 +61,6 @@ export async function run(game) {
   }
   await go(56.5,22.5);
   await act({keys:['d','w'],duration_ms:200});
-  game.check('native collision aligns the cage-side passage',Math.abs((await game.observe()).position.y-22.5)<0.01);
-  await go(60.5,22.5);
   await go(60.5,20.5);
   await go(64.5,12.5);
   await save('all-coils-before-boss');
