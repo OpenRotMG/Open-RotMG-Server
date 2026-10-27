@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x325,level:20,seed:775,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[-1,0xae5,-1,-1],backpack:[0xb33,0xc30,-1,-1,-1,-1,-1,-1],stats:[670,385,60,25,60,60,75,60]};
+export const fixture={class:0x325,level:20,seed:775,world:'undead-lair',worldSeed:12351,position(info){const [x,y]=info.spawn_points[0];return{x:x+4,y:y-4};},equipment:[-1,0xae5,-1,-1],backpack:[0xb33,0xc30,-1,-1,-1,-1,-1,-1],stats:[670,385,60,25,60,60,75,60]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
