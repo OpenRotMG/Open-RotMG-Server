@@ -68,6 +68,9 @@ impl Brain {
             return Ok(());
         };
         if draft.source == Source::Call {
+            if !sent && self.portal.is_some_and(|(_, until)| until == u64::MAX) {
+                self.portal = None;
+            }
             self.call_goal = None;
         }
         if draft.source == Source::Market {
