@@ -58,7 +58,7 @@ export async function run(game){
     async function click(x,y){const p={x:rect.x+x,y:rect.y+y,button:'left',clickCount:1};await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:0,...p});await frames();try{await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}await frames();}
     async function capture(name){await wait(700);await page.screenshot({path:join(out,name+'.png'),clip:{x:rect.x,y:rect.y,width:800,height:600}});}
     async function response(path,count){const end=Date.now()+15000;while(requests.filter(r=>new URL(r.url()).pathname===path).length<count){if(Date.now()>=end){await capture('menu-response-failure');await writeFile(join(out,'menu-response-failure.json'),JSON.stringify({rect,network,state:await page.evaluate(()=>({visibility:document.visibilityState,playing:document.querySelector('ruffle-player').ruffle().isPlaying}))}));assert.fail('Missing native response: '+path);}await wait(100);}const r=requests.filter(r=>new URL(r.url()).pathname===path)[count-1];assert.equal(r.status(),200);return await r.text();}
-    await capture('title');await click(580,545);await capture('menu-click');
+    await capture('title');await click(400,300);await click(580,545);await capture('menu-click');
     for(const [i,span,x] of [[0,'week',35],[1,'month',125],[2,'all',235]]){
       if(i)await click(x,85);
       const body=await response('/legacy-api/fame/list',i+1);
