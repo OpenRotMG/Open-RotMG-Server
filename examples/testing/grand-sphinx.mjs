@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
 const spec={class:0x323,level:20,seed:818,world:1,equipment:[0xb0a,0xb2d,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]};
 export async function prepare(api){
@@ -11,9 +12,29 @@ export async function prepare(api){
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},observations=[];let protection=0,modifier=0;
-  async function cheat(change){
-    const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change}})});
-    const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
+  async function api(command){
+    const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command})});
+    const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));return receipt;
+  }
+  const cheat=change=>api({op:'cheat',actor:game.actor,change});
+  const start=await game.observe(),scout=(await api({op:'spawn',spec:{...spec,guid:'sphinx-scout',position:start.position,controller:'direct',profile:null}})).result.actor;
+  const scoutName=(await api({op:'inspect',actor:scout})).result.diagnostic.character.name;
+  const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});let scoutProtection=0,lastTeleport=-10000;
+  try{
+  async function travel(point){
+    const now=(await game.observe()).game_ms;
+    if(now-lastTeleport<10000)await game.act({keys:[],duration_ms:10000-(now-lastTeleport)});
+    await protect();
+    await api({op:'cheat',actor:scout,change:{kind:'teleport',position:point}});
+    const time=(await game.observe()).game_ms;if(time>=scoutProtection){await api({op:'cheat',actor:scout,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});scoutProtection=time+60000;}
+    const action=game.act({keys:[],duration_ms:2000});
+    const typing=(async()=>{
+      for(let n=0;n<100&&(await game.observe()).paused;n++)await new Promise(ok=>setTimeout(ok,10));
+      async function enter(){try{await connection.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}finally{await connection.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}}
+      await enter();await connection.call('Input.insertText',{text:'/teleport '+scoutName});await enter();
+    })();
+    const results=await Promise.allSettled([action,typing]);for(const r of results)if(r.status==='rejected')throw r.reason;
+    const arrived=await game.observe();assert(Math.hypot(arrived.position.x-point.x,arrived.position.y-point.y)<.2,'Ordinary native chat teleport must reach the prepared scout');lastTeleport=arrived.game_ms;
   }
   async function protect(){
     const now=(await game.observe()).game_ms;
@@ -34,29 +55,9 @@ export async function run(game){
     }
     throw Error('Native walking did not reach the observed target');
   }
-  async function approach(point,range=.4){
-    const start=(await game.observe()).position;if(Math.hypot(start.x-point.x,start.y-point.y)<range)return;
-    const scene=await map(),{width,height}=scene,blocked=new Set(scene.blocked.map(([x,y])=>y*width+x));
-    const cell=p=>Math.floor(p.y)*width+Math.floor(p.x),from=cell(start),to=cell(point),parent=new Int32Array(width*height).fill(-1),queue=[from];parent[from]=from;
-    for(let at=0;at<queue.length&&parent[to]===-1;at++){
-      const p=queue[at],x=p%width,y=Math.floor(p/width);
-      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
-        const nx=x+dx,ny=y+dy,q=ny*width+nx;
-        if(nx<0||ny<0||nx>=width||ny>=height||blocked.has(q)||parent[q]!==-1)continue;parent[q]=p;queue.push(q);
-      }
-    }
-    assert(parent[to]!==-1,'No walkable native route to observed target');const path=[];
-    for(let p=to;p!==from;p=parent[p])path.push({x:p%width+.5,y:Math.floor(p/width)+.5});path.push(start);path.reverse();
-    function clear(a,b){
-      const steps=Math.ceil(Math.hypot(a.x-b.x,a.y-b.y)*8);let prior=cell(a);
-      for(let n=1;n<=steps;n++){const x=a.x+(b.x-a.x)*n/steps,y=a.y+(b.y-a.y)*n/steps,p=cell({x,y});if(blocked.has(p))return false;if(p!==prior&&p%width!==prior%width&&Math.floor(p/width)!==Math.floor(prior/width)&&(blocked.has(Math.floor(p/width)*width+prior%width)||blocked.has(Math.floor(prior/width)*width+p%width)))return false;prior=p;}return true;
-    }
-    for(let i=0;i<path.length-1;){let next=i+1;while(next+1<path.length&&clear(path[i],path[next+1]))next++;await walk(path[next],.25);i=next;}
-    await walk(point,range);
-  }
   async function fire(id,ms=500){
     await protect();const state=await game.inspect(),target=entity(state,id);assert(target,'Living target required');
-    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>3)await approach(target.pos,2);
+    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>3)await walk(target.pos,2);
     await game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
   await protect();await game.act({keys:[],duration_ms:100});
@@ -66,7 +67,7 @@ export async function run(game){
     const here=(await game.observe()).position;
     const root=scene.entities.filter(e=>[0x678,0x67d,0x668,0xd56,0xd59,0x91f,0x91b,0x675].includes(e.kind)&&!attempted.has(e.id)).sort((a,b)=>Math.hypot(a.pos.x-here.x,a.pos.y-here.y)-Math.hypot(b.pos.x-here.x,b.pos.y-here.y))[0];
     assert(root,'No unattempted qualifying Realm source remains');attempted.add(root.id);
-    await approach(root.pos,2);await protect();
+    await travel(root.pos);await protect();
     const now=(await game.observe()).game_ms;if(now>=modifier){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifier=now+60000;}
     for(let hit=0;hit<100;hit++){
       const state=await game.inspect(),target=state.diagnostic.entities.find(e=>e.id===root.id||e.quest===root.id&&[0x920,0x91c,0x6c1].includes(e.kind));
@@ -76,7 +77,7 @@ export async function run(game){
   }
   assert(sphinx,'Ordinary quest deaths did not admit a Sphinx within the bounded search');
   await writeFile(join(out,'admission.json'),JSON.stringify({attempted:[...attempted],sphinx}));
-  await approach(sphinx.pos,2);await game.act({keys:[],duration_ms:500},{name:'sphinx-entry',when:()=>true});
+  await travel(sphinx.pos);await game.act({keys:[],duration_ms:500},{name:'sphinx-entry',when:()=>true});
   const initial=await save('entry'),boss=entity(initial,sphinx.id);assert(boss);
   game.check('unmodified full-health Sphinx admitted by ordinary Realm quest deaths',boss.hp===55000);
   const reapers=initial.diagnostic.entities.filter(e=>e.kind===0xd55&&e.quest===boss.quest);
@@ -102,16 +103,17 @@ export async function run(game){
   }finally{clearInterval(timer);if(pending)await pending;await writeFile(join(out,'cycle.json'),JSON.stringify({stages:[...stages],speeds:[...speeds],trace}));}
   if(sampleError)throw sampleError;
   const defeated=await game.inspect(),bag=defeated.diagnostic.entities.find(e=>e.items?.some(i=>i===0xa34||i===0xa35));assert(bag,'Eligible potion floor required');
-  await approach(bag.pos);await game.act({keys:[],duration_ms:700},{name:'sphinx-loot',when:()=>true});
+  await walk(bag.pos);await game.act({keys:[],duration_ms:700},{name:'sphinx-loot',when:()=>true});
   const before=await game.observe(),item=bag.items[0];assert(item!==-1);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
   const picked=await save('picked');game.check('native drag commits one earned potion',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
   const portal=defeated.diagnostic.entities.find(e=>e.kind===0x72c);assert(portal,'Sphinx defeat must create Tomb portal');
-  await approach(portal.pos);await game.act({keys:[],duration_ms:1000},{name:'sphinx-portal',when:()=>true});
+  await walk(portal.pos);await game.act({keys:[],duration_ms:1000},{name:'sphinx-portal',when:()=>true});
   await game.act({keys:[],mouse:{x:700,y:580},duration_ms:300});
-  const entered=await save('tomb-entry');game.check('earned Tomb portal admits the same living character',entered.view.world==='Tomb of the Ancients'&&entered.view.session.character===initial.view.session.character&&entered.view.lifecycle.alive);
+  const entered=await save('tomb-entry');game.check('earned Tomb portal admits the same living character',entered.view.map.name==='Tomb of the Ancients'&&entered.view.session.character===initial.view.session.character&&entered.view.lifecycle.alive);
   await game.act({keys:['d'],duration_ms:500},{name:'tomb-journey',when:()=>true});
   const walked=await save('tomb-walk');game.check('normal native input moves inside the earned dungeon',Math.hypot(walked.view.position.x-entered.view.position.x,walked.view.position.y-entered.view.position.y)>.5);
   await game.act({keys:['Insert'],duration_ms:300});const retained=await save('returned');
-  game.check('normal Nexus return retains earned loot',retained.view.world==='Nexus'&&retained.view.character.items[4]===item&&retained.view.character.inventory_revision===picked.view.character.inventory_revision);
+  game.check('normal Nexus return retains earned loot',retained.view.map.name==='Nexus'&&retained.view.character.items[4]===item&&retained.view.character.inventory_revision===picked.view.character.inventory_revision);
+  }finally{connection.close();}
 }
