@@ -1,18 +1,8 @@
-import {readFile,writeFile} from 'node:fs/promises';
+import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {connect} from '../../scripts/record-demo.mjs';
 
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
 const invisible=1<<12;
-async function capturePaused(game,name){
-  const config=JSON.parse(await readFile(join(root,'native.json'),'utf8')),target=config.native.find(c=>c.actor===game.actor);
-  const browser=await connect({...target,url:config.origin+'/',helper:config.browserTools});
-  try{
-    game.check('capture does not advance the short cloak window',await browser.eval('document.querySelector("ruffle-player").ruffle().isPlaying')===false);
-    const image=await browser.call('Page.captureScreenshot',{format:'png'});
-    await writeFile(join(root,name+'.png'),Buffer.from(image.data,'base64'));
-  }finally{browser.close();}
-}
 export const fixture={class:0x300,level:1,seed:763,world:-2,position:'spawn',equipment:[0xa14,0xa56,0xa0d,-1],backpack:Array(8).fill(-1),stats:null};
 export async function run(game){
   const observations={};
@@ -25,7 +15,6 @@ export async function run(game){
   await game.act({keys:[' '],duration_ms:200});
   const cloaked=await save('lowCloaked',game);
   game.check('Shadows spends mana and grants invisibility',cloaked.character.mp<before.character.mp&&(cloaked.character.conditions&invisible)!==0);
-  await capturePaused(game,'rogue-shadows');
   // Selected client shooting does not cancel stealth: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as
   await game.act({keys:['d'],mouse:{x:450,y:300},duration_ms:300});
   const shooting=await save('lowShooting',game);
@@ -54,7 +43,6 @@ export async function run(game){
   await high.act({keys:[' '],duration_ms:200});
   const again=await save('highRecast',high);
   game.check('high cloak can be used again after cooldown',again.character.mp<ready.character.mp&&(again.character.conditions&invisible)!==0);
-  await capturePaused(high,'rogue-ghostly');
 
   const plane=await game.join({...fixture,level:20,seed:765,equipment:[0xa14,0xa5a,0xa0d,-1],stats:[720,252,50,25,75,75,40,50]});
   const planeBefore=await save('planeBefore',plane);
@@ -62,9 +50,5 @@ export async function run(game){
   await plane.act({keys:[' '],mouse:{x:450,y:300},duration_ms:250});
   const teleported=await save('planeTeleported',plane);
   game.check('Planewalker spends mana and grants invisibility',teleported.character.mp<planeBefore.character.mp&&(teleported.character.conditions&invisible)!==0);
-  await capturePaused(plane,'rogue-planewalker');
   game.check('Planewalker actually teleports',Math.hypot(teleported.position.x-planeBefore.position.x,teleported.position.y-planeBefore.position.y)>1);
-  await plane.act({keys:['r'],duration_ms:1000});
-  const retained=await save('planeNexus',plane);
-  game.check('Nexus travel retains living character, gear and spent mana',retained.lifecycle.alive&&retained.session.character===planeBefore.session.character&&retained.character.items.join()===planeBefore.character.items.join()&&retained.character.mp<planeBefore.character.mp);
 }

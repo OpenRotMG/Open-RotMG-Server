@@ -17,7 +17,7 @@ export async function run(game){
   await writeFile(join(root,'rogue-targeting.json'),JSON.stringify({before,awake,cloaked,redirected,visible:await visible.inspect()},null,2));
   game.check('boss retargets westward to the visible peer during cloak',following.pos.x<turn.pos.x-0.1);
   game.check('both ordinary native participants survive',redirected.view.lifecycle.alive&&(await visible.observe()).lifecycle.alive);
-  await game.act({keys:['r'],duration_ms:1500});
+  await game.act({keys:['Insert'],duration_ms:1500});
   const nexus=await game.observe();
   game.check('escape reaches Nexus with the same living Rogue and cloak',nexus.world==='Nexus'&&nexus.session.world!==before.view.session.world&&nexus.session.character===before.view.session.character&&nexus.lifecycle.alive&&nexus.character.items[1]===0xb27);
 }
