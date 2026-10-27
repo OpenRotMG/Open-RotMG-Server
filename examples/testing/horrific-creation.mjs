@@ -117,10 +117,11 @@ export async function run(game) {
   const pet=await creation();
   game.check('native Hexxer lure creates a vulnerable pet',pet.stage===2&&(pet.condition&(1<<23))===0);
   game.check('native player is Hexed in the green pool',((await game.observe()).character.conditions&(1<<27))!==0);
-  await act({keys:[],duration_ms:500},{name:'creation-pet',when:()=>true});
-  await go(75.5,12.5);
+  await act([
+    {actor:game.actor,input:{keys:['d','s'],duration_ms:400}},
+    ...Array.from({length:4},()=>({actor:game.actor,input:{keys:[],duration_ms:200,target:{entity:pet.id,camera_angle:camera,fire:true}}})),
+  ],{name:'creation-pet',when:view=>(view.character.conditions&(1<<27))===0&&view.nearby.some(e=>e.id===pet.id&&e.hp<pet.hp)});
   game.check("native blue pool removes only that player's Hexed",((await game.observe()).character.conditions&(1<<27))===0&&((await partner.observe()).character.conditions&(1<<27))!==0);
-  await act({keys:[],duration_ms:500,target:{entity:pet.id,camera_angle:camera,fire:true}});
   game.check('ordinary native shots damage the same pet',(await creation()).hp<pet.hp);
   for(let n=0;n<20&&(await creation()).stage===2;n++)await wait();
   const restored=await creation();
