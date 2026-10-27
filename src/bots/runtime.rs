@@ -725,6 +725,7 @@ pub(super) async fn launch(
                     };
                     if let Some(transfer) = server::automatic_transfer(&app, id).await? {
                         dialogue::cancel(&mut pending);
+                        ready_reply = None;
                         dialogue::end_agreement(&app, &mut brain, "world changed").await;
                         ensure!(transfer.player == id && transfer.output.packets.same_channel(&sender), "collective transfer does not belong to autonomous output");
                         while output.try_recv().is_ok() {}
@@ -792,6 +793,7 @@ pub(super) async fn launch(
                     if !view.lifecycle.alive {
                         app.society.lock().expect("adventure registry poisoned").leave(account);
                         dialogue::cancel(&mut pending);
+                        ready_reply = None;
                         dialogue::end_agreement(&app, &mut brain, "character died").await;
                         brain.mind.end(&view, "character_died_steps_invalidated");
                         brain.mind.market.finish("character_died_remaining_balance_unenforced");
@@ -1064,6 +1066,7 @@ pub(super) async fn launch(
                                 };
                                 admission = Some(key.clone());
                                 dialogue::cancel(&mut pending);
+                                ready_reply = None;
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
