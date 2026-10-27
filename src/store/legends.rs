@@ -261,12 +261,12 @@ mod tests {
                 .unwrap(),
             xml
         );
-        let first = dead[0].id;
+        let tied = dead[1].id;
         store
             .call(move |db| {
                 db.execute(
                     "UPDATE deaths SET died_at=died_at+1 WHERE character=?1",
-                    [first],
+                    [tied],
                 )?;
                 Ok(())
             })
@@ -278,7 +278,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             ids(&xml, "FameListElem"),
-            dead[1..].iter().map(|c| c.id).collect::<Vec<_>>()
+            std::iter::once(dead[0].id)
+                .chain(dead[2..].iter().map(|c| c.id))
+                .collect::<Vec<_>>()
         );
     }
 }

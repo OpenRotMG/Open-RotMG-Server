@@ -25,7 +25,7 @@ export async function run(game){
   const info=await api({op:'world_info',world});
   const spawn=info.spawn_points[0],position={x:spawn[0],y:spawn[1]+2},victims=[];
   for(let i=0;i<21;i++){
-    const result=await api({op:'spawn',spec:{...fixture,class:i%2?0x300:0x30e,level:1,seed:781+i,world,position,equipment:[-1,-1,-1,-1],guid:'legends-victim-'+i,stats:[100,100,12,0,10,15,12,12],controller:'direct',profile:null}});
+    const result=await api({op:'spawn',spec:{...fixture,class:i%2?0x300:0x30e,level:1,seed:781+i,world,position,equipment:i%2?[0xa14,-1,-1,-1]:fixture.equipment,guid:'legends-victim-'+i,stats:[100,100,12,0,10,15,12,12],controller:'direct',profile:null}});
     const actor=result.result.actor,account=result.result.account;
     const before=(await api({op:'inspect',actor})).diagnostic;
     assert(before.entities.filter(e=>e.kind===0x731).every(e=>Math.hypot(e.pos.x-position.x,e.pos.y-position.y)>=1),'Victims must be outside oxygen vents');
