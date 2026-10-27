@@ -111,14 +111,12 @@ impl Scene {
     async fn pump(&mut self) {
         let v = self.view().await;
         while let Ok(packet) = self.output.try_recv() {
-            receive_life(&self.app, &mut self.brain, &packet, &v)
+            if !receive_life(&self.app, &mut self.brain, &packet, &v)
                 .await
-                .unwrap();
-            if packet.id != wire::TEXT {
-                self.brain
-                    .mind
-                    .market
-                    .receive(&packet, &v, &self.app.content, None)
+                .unwrap()
+            {
+                crate::bots::social::receive_market(&self.app, &mut self.brain, &packet, &v)
+                    .await
                     .unwrap();
             }
         }
@@ -143,6 +141,63 @@ impl Scene {
         }
         panic!("typed equipment offer did not publish");
     }
+    async fn native_acceptance(&mut self) -> bool {
+        let item_name = self.app.content.get(RING as u16).unwrap().name.clone();
+        self.publish().await;
+        let mut heard = false;
+        while let Ok(packet) = self.output.try_recv() {
+            if packet.id == wire::TEXT {
+                let mut r = Reader::new(&packet.body);
+                r.utf().unwrap();
+                r.i32().unwrap();
+                r.i32().unwrap();
+                r.u8().unwrap();
+                r.utf().unwrap();
+                heard |= r.utf().unwrap().contains(&item_name);
+            }
+        }
+        assert!(heard, "normal typed offer must actually publish");
+        let v = self.view().await;
+        let consent = self.text(&format!("Donor, yes {item_name}"), self.peer);
+        assert!(
+            receive_life(&self.app, &mut self.brain, &consent, &v)
+                .await
+                .unwrap()
+        );
+        life(&self.app, &mut self.brain, &v).await.unwrap();
+        let id = v.session.player;
+        let peer = self.peer;
+        self.app
+            .world
+            .for_player(peer)
+            .call(move |w| w.request_trade(peer, "Donor".into()))
+            .await
+            .unwrap();
+        self.pump().await;
+        let v = self.view().await;
+        life(&self.app, &mut self.brain, &v).await.unwrap();
+        self.pump().await;
+        self.app
+            .world
+            .for_player(id)
+            .call(move |w| {
+                for _ in 0..61 {
+                    w.step();
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(3050)).await;
+        let v = self.view().await;
+        life(&self.app, &mut self.brain, &v).await.unwrap();
+        self.brain
+            .mind
+            .social
+            .gift
+            .as_ref()
+            .is_some_and(|g| g.acceptance.is_some())
+    }
     async fn close(self) {
         let dir = self.dir.clone();
         drop(self);
@@ -166,64 +221,11 @@ async fn equipment_consumer_types_actual_offer_and_requires_receipt_even_after_e
             .contains(&item_name)
     );
     assert!(s.brain.mind.social.episodes.is_empty());
-    s.publish().await;
-    let mut heard = false;
-    while let Ok(packet) = s.output.try_recv() {
-        if packet.id == wire::TEXT {
-            let mut r = Reader::new(&packet.body);
-            r.utf().unwrap();
-            r.i32().unwrap();
-            r.i32().unwrap();
-            r.u8().unwrap();
-            r.utf().unwrap();
-            heard |= r.utf().unwrap().contains(&item_name);
-        }
-    }
-    assert!(heard, "normal typed offer must actually publish");
-    let v = s.view().await;
-    let consent = s.text(&format!("Donor, yes {item_name}"), s.peer);
     assert!(
-        receive_life(&s.app, &mut s.brain, &consent, &v)
-            .await
-            .unwrap()
+        s.native_acceptance().await,
+        "normal native gift must reach its acceptance witness"
     );
-    life(&s.app, &mut s.brain, &v).await.unwrap();
-    let id = v.session.player;
     let peer = s.peer;
-    s.app
-        .world
-        .for_player(peer)
-        .call(move |w| w.request_trade(peer, "Donor".into()))
-        .await
-        .unwrap();
-    s.pump().await;
-    let v = s.view().await;
-    life(&s.app, &mut s.brain, &v).await.unwrap();
-    s.pump().await;
-    s.app
-        .world
-        .for_player(id)
-        .call(move |w| {
-            for _ in 0..61 {
-                w.step();
-            }
-            Ok(())
-        })
-        .await
-        .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(3050)).await;
-    let v = s.view().await;
-    life(&s.app, &mut s.brain, &v).await.unwrap();
-    assert!(
-        s.brain
-            .mind
-            .social
-            .gift
-            .as_ref()
-            .unwrap()
-            .acceptance
-            .is_some()
-    );
     assert!(s.brain.mind.social.episodes.is_empty());
     s.brain.profile.companions = 0.;
     let v = s.view().await;
@@ -270,6 +272,14 @@ async fn equipment_consent_is_addressed_kind_actor_bound_and_refusal_never_drops
     let candidate = s.offer(false).await;
     let v = s.view().await;
     let name = s.app.content.get(RING as u16).unwrap().name.clone();
+    let early = s.text(&format!("Donor, yes {name}"), s.peer);
+    assert!(
+        !receive_life(&s.app, &mut s.brain, &early, &v)
+            .await
+            .unwrap()
+    );
+    assert!(!s.brain.mind.social.gift.as_ref().unwrap().consent);
+    s.publish().await;
     for (body, actor) in [
         (format!("Other, yes {name}"), s.peer),
         ("Donor, yes health".into(), s.peer),
@@ -416,5 +426,20 @@ async fn equipment_drop_guard_runs_after_queue_mutation_and_retains_stock_on_rej
     assert_eq!(s.view().await.character.items[candidate.slot], RING);
     assert!(s.brain.mind.social.episodes.is_empty());
     assert!(s.brain.mind.social.drop.is_none());
+    s.close().await;
+}
+
+#[tokio::test]
+async fn equipment_no_space_native_refusal_keeps_goods_without_drop_or_history() {
+    let mut s = Scene::new([HEALTH; 8]).await;
+    let candidate = s.offer(false).await;
+    assert!(!s.native_acceptance().await);
+    let v = s.view().await;
+    assert_eq!(v.character.items[candidate.slot], RING);
+    assert!(s.brain.mind.social.episodes.is_empty());
+    assert!(s.brain.mind.social.drop.is_none());
+    assert!(!s.brain.mind.social.equipment_due(&v));
+    let peer = s.app.world.player_view(s.peer).await.unwrap();
+    assert!(!peer.character.items.contains(&RING));
     s.close().await;
 }

@@ -429,6 +429,9 @@ impl Life {
                 self.next_request = v.elapsed_ms + 60000;
             }
             _ => {
+                if self.outgoing.is_some() {
+                    return Ok(false);
+                }
                 if let Some(g) = self.gift.as_mut().filter(|g| {
                     g.giving
                         && g.kind != HEALTH
@@ -1052,7 +1055,9 @@ mod tests {
         app.world
             .directory(move |d| {
                 let w = d.worlds.get_mut(&session[0]).unwrap();
+                w.players.get_mut(&peer).unwrap().pos = w.players[&id].pos;
                 w.updates(id, true)?;
+                w.updates(peer, true)?;
                 w.request_trade(peer, w.players[&id].character.name.clone())?;
                 w.autonomous_gift(
                     id,
