@@ -23,6 +23,7 @@ export async function run(game){
     }
     return after;
   }
+  await game.act({keys:[],duration_ms:2000});
   await prepare({kind:'vitals',hp:100,mp:100});
   await sample('base-recovery',6);
   await game.act({keys:['1'],duration_ms:200});
@@ -42,9 +43,15 @@ export async function run(game){
   for(let n=0;n<11;n++)await game.act({keys:[],duration_ms:2000});
   view=await snapshot('boost-expiry');
   game.check('expiry clamps resources and restores base VIT without changing base stats',view.character.hp===670&&view.character.mp===385&&view.character.stats.max_hp===670&&view.character.stats.max_mp===385&&view.character.stats.vitality===40);
-  const retained=view;
-  await game.act({keys:['Insert'],duration_ms:500},{name:'nexus-reconnect',when:v=>v.world==='Nexus'});
+  const ally=await game.join({...fixture,class:0x31f,world:view.session.world,position:{x:view.position.x,y:view.position.y-2},equipment:[-1,0xa54,-1,-1],backpack:Array(8).fill(-1),stats:null});
+  await prepare({kind:'vitals',hp:100,mp:100});
+  await ally.act({keys:[' '],duration_ms:200});
+  view=await snapshot('native-healing-aura');
+  game.check('ordinary allied seal applies Healing',Boolean(view.character.conditions&(1<<17)));
+  await sample('healing-recovery',4,20);
+  const retained=await game.observe();
+  await game.act({keys:['Insert'],duration_ms:500});
   view=await snapshot('reconnected');
   game.check('ordinary Nexus escape retains the living character and consumed inventory',view.world==='Nexus'&&view.lifecycle.alive&&view.session.character===retained.session.character&&JSON.stringify(view.character.items)===JSON.stringify(retained.character.items));
-  await writeFile(join(root,'recovery-observations.json'),JSON.stringify({preparedLevelGearVitals:true,conditionsNotNativeVerified:['Sick','Quiet','Bleeding','Healing'],observations},null,2));
+  await writeFile(join(root,'recovery-observations.json'),JSON.stringify({preparedLevelGearVitals:true,conditionsNotNativeVerified:['Sick','Quiet','Bleeding'],observations},null,2));
 }
