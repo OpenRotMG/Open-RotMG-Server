@@ -784,14 +784,26 @@ impl Directory {
     }
 }
 impl World {
-    pub(super) fn populate_realm_heroes(&mut self) -> Result<()> {
+    pub(super) fn populate_realm_heroes(
+        &mut self,
+        sites: &[crate::terrain::realms::Site],
+    ) -> Result<()> {
         // GPL-3.0 requested counts, not authenticated 123.5.1 density (data/REALM-SRC-LICENSE):
         // https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
         // Unlike its 50-attempt skips, our protected allocator fulfills requests or errors.
         for (kind, terrains, range) in [(HEROES[0], &[1][..], 3..5), (HEROES[1], &[3, 4][..], 4..7)]
         {
-            let count = self.rng.gen_range(range);
-            self.populate_landmark_heroes(kind, terrains, count)?;
+            let authored = sites.iter().filter(|site| site.kind == kind).count();
+            let requested: usize = self.rng.gen_range(range);
+            let additional = requested.saturating_sub(authored);
+            tracing::info!(
+                kind,
+                authored,
+                requested,
+                additional,
+                "Realm hero site census"
+            );
+            self.populate_landmark_heroes(kind, terrains, additional)?;
         }
         Ok(())
     }
