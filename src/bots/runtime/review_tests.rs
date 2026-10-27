@@ -129,14 +129,17 @@ async fn review_enter_revision_race_cancels_call_and_dialogue_before_text_or_soc
     let result = dialogue::publish(&app, &mut brain, &request, &reply, &ready).await;
     let canceled = matches!(&result,Err(error) if error.is::<dialogue::Obsolete>());
     let dialogue_sent = text_sent(&mut output, id);
-    let mut society = app.society.lock().unwrap();
-    let offered = society
-        .outgoing(view.session.account, view.elapsed_ms)
-        .is_some();
-    let recorded = society
-        .speech
-        .repeated(view.session.world, view.elapsed_ms, "pc?");
-    drop(society);
+    let (offered, recorded) = {
+        let mut society = app.society.lock().unwrap();
+        (
+            society
+                .outgoing(view.session.account, view.elapsed_ms)
+                .is_some(),
+            society
+                .speech
+                .repeated(view.session.world, view.elapsed_ms, "pc?"),
+        )
+    };
     brain.close_composition(&app, false).await.unwrap();
     for player in [id, peer] {
         lifecycle::finalize(&app, player, CloseReason::Controller)
