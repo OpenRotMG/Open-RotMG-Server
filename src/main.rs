@@ -97,8 +97,9 @@ async fn serve(args: Vec<String>) -> Result<()> {
         testing.is_none() || !config.shore_bots,
         "prepared sessions require --no-shore-bots or shore_bots:false; spawn every controller explicitly"
     );
-    let supervisor = supervision::Supervisor::persisted(state.join("last-critical-incident.json"))?;
     let store = store::Store::open(&state.join("game.db"), &content)?;
+    let supervisor =
+        supervision::Supervisor::recovered(state.join("last-critical-incident.json"), &store)?;
     let directory = match &testing {
         Some(_) => world::Directory::prepared(
             &config.data,
