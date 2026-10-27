@@ -1,5 +1,10 @@
 use super::*;
 
+fn rejects<T>(result: Result<T>, message: &str) {
+    let error = result.err().expect("invalid transfer succeeded");
+    assert!(error.to_string().contains(message), "{error:#}");
+}
+
 #[test]
 fn travel_denials_bindings_expiry_and_once_only_admission() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
@@ -33,18 +38,8 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
         .pos = pos;
     assert_eq!(d.destination(id, Some(exit)).unwrap(), (1, 1, -3));
     let vault = d.instance("vault", Some(2), None).unwrap();
-    assert!(
-        d.issue(1, 1, vault)
-            .unwrap_err()
-            .to_string()
-            .contains("private destination")
-    );
-    assert!(
-        d.issue(1, 1, i32::MAX)
-            .unwrap_err()
-            .to_string()
-            .contains("destination missing")
-    );
+    rejects(d.issue(1, 1, vault), "private destination");
+    rejects(d.issue(1, 1, i32::MAX), "destination missing");
     d.worlds.get_mut(&-3).unwrap().max_players = 1;
     let mut occupant = ch.clone();
     occupant.account = 2;
@@ -55,44 +50,15 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
         .unwrap()
         .enter(occupant, None)
         .unwrap();
-    assert!(
-        d.issue(1, 1, -3)
-            .unwrap_err()
-            .to_string()
-            .contains("destination full")
-    );
+    rejects(d.issue(1, 1, -3), "destination full");
     d.worlds.get_mut(&-3).unwrap().admission_open = false;
-    assert!(
-        d.destination(id, Some(exit))
-            .unwrap_err()
-            .to_string()
-            .contains("has closed. Use Nexus")
-    );
-    assert!(
-        d.issue(1, 1, -3)
-            .unwrap_err()
-            .to_string()
-            .contains("Realm is closed")
-    );
+    rejects(d.destination(id, Some(exit)), "has closed. Use Nexus");
+    rejects(d.issue(1, 1, -3), "Realm is closed");
     assert_eq!(d.destination(id, None).unwrap(), (1, 1, -2));
     let source = &d.worlds[&dungeon].players[&id].character;
     assert_eq!(
-        (
-            source.account,
-            source.id,
-            source.alive,
-            source.hp,
-            source.items.clone(),
-            source.revision
-        ),
-        (
-            ch.account,
-            ch.id,
-            ch.alive,
-            ch.hp,
-            ch.items.clone(),
-            ch.revision
-        )
+        serde_json::to_value(source).unwrap(),
+        serde_json::to_value(&ch).unwrap()
     );
     assert!(d.grants.is_empty());
     assert!(d.worlds[&-3].admissions.is_empty());
@@ -105,26 +71,14 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
         .unwrap();
     let (time, key, _) = d.issue(1, 1, -3).unwrap();
     for (account, destination, stamp) in [(2, -3, time), (1, -2, time), (1, -3, time + 1)] {
-        assert!(
-            d.consume(account, destination, stamp, key.clone())
-                .unwrap_err()
-                .to_string()
-                .contains("binding mismatch")
+        rejects(
+            d.consume(account, destination, stamp, key.clone()),
+            "binding mismatch",
         );
     }
-    assert!(
-        d.consume(1, -3, time, key.clone())
-            .unwrap_err()
-            .to_string()
-            .contains("origin still owns")
-    );
+    rejects(d.consume(1, -3, time, key.clone()), "origin still owns");
     d.tick += 2400;
-    assert!(
-        d.consume(1, -3, time, key.clone())
-            .unwrap_err()
-            .to_string()
-            .contains("grant expired")
-    );
+    rejects(d.consume(1, -3, time, key.clone()), "grant expired");
     d.retire_transfer_grants();
     assert!(d.grants.is_empty());
     assert!(d.worlds[&-3].admissions.is_empty());
@@ -138,10 +92,5 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
     let (character, arrival) = d.consume(1, -3, time, key.clone()).unwrap();
     assert_eq!(character, ch.id);
     d.admit_transfer(arrival, 1, 1, -3).unwrap();
-    assert!(
-        d.consume(1, -3, time, key)
-            .unwrap_err()
-            .to_string()
-            .contains("already used")
-    );
+    rejects(d.consume(1, -3, time, key), "already used");
 }
