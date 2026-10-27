@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+import unittest.mock
 import urllib.error
 from contextlib import closing, contextmanager
 
@@ -35,6 +36,28 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(events, [('announce', config, notice), ('sleep', 90)])
         self.assertEqual(json.loads(output.getvalue()), {'restart_warning': notice, 'seconds': 90, 'players': 2})
 
+
+    def test_caddy_install_reloads_changes_and_restores_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live, source = Path(directory) / 'Caddyfile', Path(directory) / 'source'
+            live.write_text('old')
+            source.write_text('old')
+            calls = []
+            with patch.object(update, 'CADDY', live), patch.object(update, 'run', side_effect=lambda *a: calls.append(a)):
+                self.assertFalse(update.install_caddy(source))
+                self.assertEqual(calls, [])
+                source.write_text('new')
+                ok = unittest.mock.MagicMock(status=200)
+                ok.__enter__.return_value = ok
+                with patch.object(update.urllib.request, 'urlopen', return_value=ok), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertTrue(update.install_caddy(source))
+                self.assertEqual(live.read_text(), 'new')
+                self.assertEqual([c[0] for c in calls], ['caddy', 'systemctl'])
+                source.write_text('broken')
+                with patch.object(update.urllib.request, 'urlopen', side_effect=urllib.error.URLError('down')), \
+                        self.assertRaises(urllib.error.URLError):
+                    update.install_caddy(source)
+                self.assertEqual(live.read_text(), 'new')
 
     def test_vault_migration_preserves_saved_rows_with_unread_accounts_before_between_and_after(self):
         before = {'accounts': [{'id': account} for account in range(1, 6)], 'vaults': [
