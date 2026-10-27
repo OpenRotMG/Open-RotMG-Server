@@ -12,7 +12,7 @@ struct Scene {
     app: App,
     _owners: [Owner; 2],
     output: mpsc::Receiver<Packet>,
-    _peer_output: mpsc::Receiver<Packet>,
+    peer_output: mpsc::Receiver<Packet>,
     brain: Brain,
     peer: i32,
 }
@@ -58,7 +58,7 @@ impl Scene {
             app,
             _owners: [owner, peer_owner],
             output,
-            _peer_output: peer_output,
+            peer_output,
             brain,
             peer,
         }
@@ -141,6 +141,27 @@ impl Scene {
         }
         panic!("typed equipment offer did not publish");
     }
+    async fn native_countdown(&mut self) {
+        let before = self.view().await;
+        self.app.world.clock.set_paused(false);
+        let elapsed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let current = self.view().await;
+                if current.time_ms >= before.time_ms + 3050
+                    && current.clock_at >= before.clock_at + std::time::Duration::from_millis(3050)
+                {
+                    break;
+                }
+                self.pump().await;
+                while self.peer_output.try_recv().is_ok() {}
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+        self.app.world.clock.set_paused(true);
+        elapsed
+            .expect("native countdown must elapse on both actual game and pause-adjusted clocks");
+    }
     async fn native_acceptance(&mut self) -> bool {
         let item_name = self.app.content.get(RING as u16).unwrap().name.clone();
         self.publish().await;
@@ -165,7 +186,6 @@ impl Scene {
                 .unwrap()
         );
         life(&self.app, &mut self.brain, &v).await.unwrap();
-        let id = v.session.player;
         let peer = self.peer;
         self.app
             .world
@@ -189,18 +209,7 @@ impl Scene {
             "gift must remain after ordinary native Change"
         );
         self.pump().await;
-        self.app
-            .world
-            .for_player(id)
-            .call(move |w| {
-                for _ in 0..61 {
-                    w.step();
-                }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(3050)).await;
+        self.native_countdown().await;
         let v = self.view().await;
         life(&self.app, &mut self.brain, &v).await.unwrap();
         self.brain
@@ -220,8 +229,6 @@ impl Scene {
 #[tokio::test]
 async fn equipment_consumer_types_actual_offer_and_requires_receipt_even_after_eligibility_changes()
 {
-    let _logs =
-        tracing::subscriber::set_default(tracing_subscriber::fmt().with_test_writer().finish());
     let mut s = Scene::new([-1; 8]).await;
     let candidate = s.offer(false).await;
     let item_name = s.app.content.get(RING as u16).unwrap().name.clone();
@@ -494,12 +501,11 @@ async fn equipment_drop_rejects_native_window_opened_after_selection_without_can
         .call(move |w| {
             assert!(w.has_active_trade(id));
             assert!(w.has_active_trade(peer));
-            w.now += 3050;
             Ok(())
         })
         .await
         .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(3050)).await;
+    s.native_countdown().await;
     s.app
         .world
         .for_player(peer)
