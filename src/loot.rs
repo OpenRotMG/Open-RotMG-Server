@@ -72,6 +72,10 @@ pub(crate) fn period_surface(kind: u16) -> bool {
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
+        0x6af..=0x6b1 | 0x6b3 => &[],
+        0x6b2 => &[(1., Item(0xab0))],
+        0x6b4 => &[(0.1, Item(0xab0)), (0.1, Item(0xadd))],
+        crate::encounter::tutorial::CHEF => &[(1., Item(0xab0)), (1., Item(0xadd))],
         beach::BOSS => &[
             (0.1, Item(beach::DRINKS[0])),
             (0.1, Item(beach::DRINKS[1])),
@@ -1053,6 +1057,7 @@ pub(crate) fn period_boss(kind: u16) -> bool {
 fn independent(kind: u16) -> bool {
     period_dungeon(kind)
         || period_surface(kind)
+        || crate::encounter::tutorial::ROSTER.contains(&kind)
         || kind == crate::dungeon::tomb::TREASURE
         || crate::quest::final_root(kind)
         || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50 | 0xd52 | 0xd53)

@@ -240,6 +240,9 @@ impl World {
         elapsed: u64,
     ) -> Result<()> {
         let target = target.into();
+        if crate::encounter::tutorial::ROSTER.contains(&self.entities[&id].kind) {
+            return self.tutorial_mechanics(id, target);
+        }
         if matches!(
             self.entities[&id].kind,
             crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
@@ -302,6 +305,15 @@ impl World {
         if kind == 0x91a || super::gods::CONSTRUCTS.contains(&kind) {
             return self.god_mechanics(id, elapsed);
         }
+        let elapsed = if kind == 0x646
+            && self.entities[&id].stage.is_none_or(|stage| stage % 5 == 0)
+            && target.is_none_or(|p| self.entities[&id].pos.distance(p) >= 10.)
+        {
+            self.entities.get_mut(&id).unwrap().activated = Some(self.now);
+            0
+        } else {
+            elapsed
+        };
         let e = &self.entities[&id];
         let (kind, hp, pos, home) = (e.kind, e.hp, e.pos, e.home);
         let stage = encounter::stage(kind, hp, elapsed);

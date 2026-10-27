@@ -99,6 +99,7 @@ mod native_hits;
 
 mod npc_attacks;
 mod npc_queries;
+mod tutorial;
 
 mod reconciliation;
 
@@ -787,6 +788,7 @@ pub struct World {
     finale: endgame_ai::Actors,
     cells: cell_index::CellIndex,
     fountains: Vec<(i32, Pos)>,
+    merchants: BTreeMap<i32, shop::Offer>,
     next_fountain_heal: u64,
     rng: rand::rngs::StdRng,
     pub now: u64,
@@ -1277,7 +1279,7 @@ impl Directory {
             world.safe = safe;
             world.owner = owner;
             world.max_players = max_players;
-            world.encounter = template == "realm-shore"
+            world.encounter = matches!(template.as_str(), "realm-shore" | "tutorial" | "kitchen")
                 || template == crate::endgame::CASTLE
                 || crate::dungeon::DUNGEONS
                     .iter()
@@ -1285,8 +1287,8 @@ impl Directory {
                     .any(|(_, name, _, _)| *name == template);
             if template == "realm-shore" {
                 let started = Instant::now();
-                let groves = source.as_ref().context("Realm source missing")?.groves()?;
-                world.populate_authored_groves(&groves)?;
+                let sites = source.as_ref().context("Realm source missing")?.sites()?;
+                world.populate_authored_sites(&sites)?;
                 // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
                 let beach_bum = world.rng.gen_ratio(1, 200);
                 world.populate_tomb_entry()?;
@@ -1294,8 +1296,8 @@ impl Directory {
                 if beach_bum {
                     world.populate_beach_bum()?;
                 }
-                world.populate_realm_heroes()?;
-                world.populate_named_quests(!groves.is_empty())?;
+                world.populate_realm_heroes(&sites)?;
+                world.populate_named_quests(&sites)?;
                 world.populate_realm_events()?;
                 world.populate_hermit()?;
                 world.populate_manor_entry()?;
@@ -1338,7 +1340,9 @@ impl Directory {
                     .values()
                     .filter(|e| {
                         let object = &world.content.objects[&e.kind];
-                        object.enemy && (object.class != "Wall" || object.passive_destructible())
+                        object.enemy
+                            && !matches!(e.kind, 0x802..=0x805)
+                            && (object.class != "Wall" || object.passive_destructible())
                     })
                     .map(|e| e.kind)
                     .collect();
@@ -2695,6 +2699,7 @@ impl World {
         let mut actor_ids = BTreeSet::new();
         let mut quests_by_level: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         let mut fountains = Vec::new();
+        let mut merchants = BTreeMap::new();
         let mut cells = cell_index::CellIndex::new(map.width as usize, map.height as usize);
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
             for (x, c) in row.iter().enumerate() {
@@ -2801,7 +2806,7 @@ impl World {
                         }
                     }
                     if o.class == "Merchant" {
-                        shop::configure(&mut e, &content)?;
+                        merchants.insert(id, shop::configure(&mut e, &content)?);
                     }
                     if o.name == "White Fountain" {
                         fountains.push((id, pos));
@@ -2878,6 +2883,7 @@ impl World {
             finale: endgame_ai::Actors::default(),
             cells,
             fountains,
+            merchants,
             next_fountain_heal: 0,
             rng: rand::rngs::StdRng::from_entropy(),
             now: 0,
@@ -3221,6 +3227,7 @@ impl World {
         self.non_population_ids.remove(&id);
         self.god_reproduction.remove(&id);
         self.ability_state.objects.remove(&id);
+        self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
         let definition = &self.content.objects[&entity.kind];
         if definition.quest {
@@ -3898,14 +3905,14 @@ impl World {
     fn validate_move_at(&self, id: i32, pos: Pos, time: i32, received: u64) -> Result<f32> {
         ensure!(
             pos.x.is_finite() && pos.y.is_finite(),
-            "non-finite movement"
+            controller("non-finite movement")
         );
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             p.active(),
-            "dead, departing or quarantined player cannot move"
+            controller("dead, departing or quarantined player cannot move")
         );
-        ensure!(time >= 0, "negative movement time");
+        ensure!(time >= 0, controller("negative movement time"));
         let elapsed = if p.last_move == 0 {
             100.
         } else {
@@ -3913,15 +3920,21 @@ impl World {
         };
         ensure!(
             elapsed >= 0.,
-            "movement time reversed: client_time={time} previous_client_time={}",
-            p.last_move
+            controller("movement time reversed").context(format!(
+                "movement time reversed: client_time={time} previous_client_time={}",
+                p.last_move
+            ))
         );
         let cell = self
             .map
             .cell(p.pos.x, p.pos.y)
             .context("player outside map")?;
         let speed = p.speed(&self.content, self.now)? * self.content.grounds[&cell.ground];
-        let push = self.content.pushes[&cell.ground];
+        let push = if p.paused || p.conditions(self.now) & PARALYZED != 0 {
+            (0., 0.)
+        } else {
+            self.content.pushes[&cell.ground]
+        };
         let distance = p.pos.distance(pos);
         let input_distance = |delta| {
             p.pos.distance(Pos {
@@ -3931,16 +3944,14 @@ impl World {
         };
         ensure!(
             p.conditions(self.now) & PARALYZED == 0 || distance <= 0.001,
-            "paralyzed movement"
+            controller("paralyzed movement")
         );
         ensure!(
             input_distance(elapsed) <= speed * elapsed + 0.3,
-            "movement exceeds speed: from=({}, {}) to=({}, {}) distance={distance} allowed={} speed={speed} client_elapsed_ms={elapsed}",
-            p.pos.x,
-            p.pos.y,
-            pos.x,
-            pos.y,
-            speed * elapsed + 0.3
+            controller("movement exceeds speed").context(format!(
+                "movement exceeds speed: from=({}, {}) to=({}, {}) distance={distance} allowed={} speed={speed} client_elapsed_ms={elapsed}",
+                p.pos.x, p.pos.y, pos.x, pos.y, speed * elapsed + 0.3
+            ))
         );
         let server_elapsed = received
             .checked_sub(p.last_move_at)
@@ -3966,8 +3977,10 @@ impl World {
         );
         ensure!(
             charged <= credit + 0.001,
-            "movement exceeds server time budget: distance={distance} credit={credit} server_elapsed_ms={server_elapsed} client_elapsed_ms={elapsed} previous_credit={}",
-            p.movement_credit
+            controller("movement exceeds server time budget").context(format!(
+                "movement exceeds server time budget: distance={distance} credit={credit} server_elapsed_ms={server_elapsed} client_elapsed_ms={elapsed} previous_credit={}",
+                p.movement_credit
+            ))
         );
         let samples = (distance / 0.1).ceil().max(1.) as usize;
         ensure!(
@@ -3981,7 +3994,7 @@ impl World {
                     },
                 )
             }),
-            "movement across a blocked tile"
+            controller("movement across a blocked tile")
         );
         Ok(credit - charged)
     }
@@ -4009,26 +4022,7 @@ impl World {
         if self.discard_correcting_move(id, pos, time)? {
             return Ok(NativeInput::DiscardedUntilGotoAck);
         }
-        let sentinel = pos.x == -1. && pos.y == -1.;
-        if !sentinel {
-            self.validate_native_position(id, pos, time)?;
-        }
-        let p = self.players.get_mut(&id).context("native player missing")?;
-        ensure!(
-            time >= p.last_move,
-            controller("native movement clock regressed")
-        );
-        ensure!(received >= p.last_move_at, "native ingress clock regressed");
-        let speed = p.speed(&self.content, self.now)? * 1000.;
-        p.record_motion(if sentinel { p.pos } else { pos }, time, self.now, speed);
-        if !sentinel {
-            if p.pos.distance(pos) > 0.001 {
-                p.last_motion = Some(((pos.y - p.pos.y).atan2(pos.x - p.pos.x), self.now));
-            }
-            p.pos = pos;
-        }
-        p.last_move = time;
-        p.last_move_at = received;
+        self.move_timed(id, pos, time, received)?;
         Ok(NativeInput::Applied)
     }
     pub fn move_to(&mut self, id: i32, pos: Pos, time: i32) -> Result<()> {
@@ -4038,9 +4032,9 @@ impl World {
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             p.last_move == 0 || i64::from(time) - i64::from(p.last_move) <= 1000,
-            "movement time jump"
+            controller("movement time jump")
         );
-        // MOVE precedes condition updates; accept either form across a toggle.
+        // MOVE precedes condition updates; accept either form across a toggle: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/GameServerConnection.as#L1182-L1194
         let sentinel = pos.x == -1. && pos.y == -1.;
         let immobile = p.paused || p.conditions(self.now) & PARALYZED != 0;
         let correct = immobile && !sentinel && p.pos.distance(pos) > 0.001;
@@ -5946,6 +5940,7 @@ impl World {
             eligible.len()
         } else if crate::loot::period_dungeon(defeated.kind)
             || crate::loot::period_surface(defeated.kind)
+            || crate::encounter::tutorial::ROSTER.contains(&defeated.kind)
             // realm-src Loots.cs Handle rolls public skeleton loot once per death, not per contributor.
             || matches!(defeated.kind, 0x65a..=0x65d)
         {
@@ -6367,7 +6362,16 @@ impl World {
             let queued_hero = kind == 0x668 || matches!(kind, 0x67e..=0x682);
             let mut hero_continue = false;
             let mut target = target;
-            let (mut motion, mut speed) = if lair_escort {
+            let (mut motion, mut speed) = if crate::encounter::tutorial::ROSTER.contains(&kind) {
+                crate::encounter::tutorial::movement(
+                    kind,
+                    if kind == crate::encounter::tutorial::CHEF {
+                        current.stage.expect("Kitchen movement phase missing")
+                    } else {
+                        0
+                    },
+                )
+            } else if lair_escort {
                 if let Err(error) = self.lair_escort_step(id, target, delta) {
                     self.entities.get_mut(&id).unwrap().last_step = Pos { x: 0., y: 0. };
                     tracing::error!(entity=id, %error, "Lair escort movement refused");
@@ -6992,6 +6996,7 @@ impl World {
         self.now += 50;
         self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
+        self.merchant_step();
         self.lab_step();
         self.expire_consumable_boosts();
         self.companion_step()
@@ -7376,7 +7381,10 @@ impl World {
                             || self.entities.get(entity).is_some_and(|e| {
                                 e.hp > 0
                                     || !e.items.is_empty()
-                                    || self.content.objects[&e.kind].class == "Portal"
+                                    || matches!(
+                                        self.content.objects[&e.kind].class.as_str(),
+                                        "Portal" | "Merchant"
+                                    )
                             })
                     })
                     .copied()
@@ -7430,6 +7438,12 @@ impl World {
 fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }
+
+#[cfg(test)]
+mod shop_tests;
+
+#[cfg(test)]
+mod movement_tests;
 
 #[cfg(test)]
 mod death_chat_tests;

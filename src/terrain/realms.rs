@@ -4,8 +4,8 @@ use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use super::prepare::{
-    ScopedLava, WORLD05_ID, WORLD09_ID, WORLD11_ID, bounded_read, read_recipe, safe_path,
-    valid_hash, valid_id,
+    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD05_ID, WORLD09_ID, WORLD11_ID, bounded_read,
+    read_recipe, safe_path, valid_hash, valid_id,
 };
 use serde::Deserialize;
 
@@ -40,8 +40,10 @@ impl Asset {
                 .with_context(|| format!("{} lava support {phase}", self.contract))
         } else {
             ensure!(
-                !matches!(self.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)
-                    || !map.cells.iter().any(|c| c.ground == 244),
+                !matches!(
+                    self.id.as_str(),
+                    WORLD02_ID | WORLD03_ID | WORLD05_ID | WORLD09_ID | WORLD11_ID
+                ) || !map.cells.iter().any(|c| c.ground == 244),
                 "{} requires its source-exact lava capability {phase}",
                 self.contract
             );
@@ -52,17 +54,19 @@ impl Asset {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Grove {
+pub(crate) struct Site {
+    pub(crate) kind: u16,
     pub(crate) bounds: [i32; 4],
     pub(crate) spawn: [i32; 2],
-    pub(crate) trees: usize,
+    pub(crate) support: usize,
+    pub(crate) chest: Option<[i32; 2]>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Groves {
+struct Sites {
     layout: String,
     sha256: String,
-    groves: Vec<Grove>,
+    sites: Vec<Site>,
 }
 
 pub(crate) enum Source {
@@ -71,39 +75,42 @@ pub(crate) enum Source {
     Fixture(Arc<Map>),
 }
 impl Source {
-    pub(crate) fn groves(&self) -> Result<Vec<Grove>> {
+    pub(crate) fn sites(&self) -> Result<Vec<Site>> {
         let asset = match self {
             Self::Encoded(asset) if asset.profile == "fsod" => return Ok(Vec::new()),
             Self::Encoded(asset) => asset,
             #[cfg(test)]
             Self::Fixture(_) => return Ok(Vec::new()),
         };
-        let records: Vec<Groves> =
-            serde_json::from_str(include_str!("../../data/realm-groves.json"))
-                .context("parse authored Grove registry")?;
+        let records: Vec<Sites> = serde_json::from_str(include_str!("../../data/realm-sites.json"))
+            .context("parse authored quest-site registry")?;
         let mut matches = records.into_iter().filter(|r| r.layout == asset.id);
         let record = matches
             .next()
-            .with_context(|| format!("{} has no authored Grove registry", asset.id))?;
+            .with_context(|| format!("{} has no authored quest-site registry", asset.id))?;
         ensure!(
             matches.next().is_none(),
-            "duplicate Grove registry for {}",
+            "duplicate quest-site registry for {}",
             asset.id
         );
         ensure!(
             record.sha256 == asset.sha256,
-            "{} Grove registry hash mismatch: expected {}, loaded {}",
+            "{} quest-site registry hash mismatch: expected {}, loaded {}",
             asset.id,
             record.sha256,
             asset.sha256
         );
+        let groves = record
+            .sites
+            .iter()
+            .filter(|site| site.kind == 0x91f)
+            .count();
         ensure!(
-            (17..25).contains(&record.groves.len()),
-            "{} has invalid authored Grove count {}",
-            asset.id,
-            record.groves.len()
+            (17..25).contains(&groves),
+            "{} has invalid authored Grove count {groves}",
+            asset.id
         );
-        Ok(record.groves)
+        Ok(record.sites)
     }
     pub(crate) fn name(&self) -> &str {
         match self {

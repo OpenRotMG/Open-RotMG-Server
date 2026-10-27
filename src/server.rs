@@ -224,8 +224,8 @@ async fn chars(
         if registered && let Some(browser) = browser.as_mut() {
             browser.authenticate(a.store.browser_identity(account.id).await?);
         }
-        let feed = a.store.updates().await?;
-        let xml = account.xml(&feed.news_xml(&a.origin), a.server_usage()?);
+        let news = a.store.news(account.id, &a.origin).await?;
+        let xml = account.xml(&news, a.server_usage()?);
         Ok((xml, browser.and_then(|b| b.cookie)))
     }
     .await;

@@ -1,6 +1,9 @@
 use super::*;
 use std::collections::HashSet;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdatePost {
@@ -137,24 +140,50 @@ impl UpdateSnapshot {
         Ok(())
     }
 }
-impl UpdateFeed {
-    pub fn news_xml(&self, origin: &str) -> String {
-        let mut xml = String::new();
-        if let Some(source) = &self.source {
-            for post in source.posts.iter().take(10) {
-                xml += &format!(
-                    "<Item><Icon>news</Icon><Title>{}</Title><TagLine>{}</TagLine><Link>{}/updates/</Link><Date>{}</Date></Item>",
-                    xml_escape(&post.title()),
-                    xml_escape(&post.tagline()),
-                    xml_escape(origin),
-                    post.published_at
-                );
-            }
-        }
-        xml
-    }
+fn news_item(icon: &str, title: &str, tagline: &str, link: &str, date: i64) -> String {
+    format!(
+        "<Item><Icon>{icon}</Icon><Title>{}</Title><TagLine>{}</TagLine><Link>{}</Link><Date>{date}</Date></Item>",
+        xml_escape(title),
+        xml_escape(tagline),
+        xml_escape(link)
+    )
 }
 impl Store {
+    pub async fn news(&self, account: i32, origin: &str) -> Result<String> {
+        let feed = self.updates().await?;
+        let content = self.content.clone();
+        let legacy_base = self.legacy_base;
+        // Deriving news from committed deaths avoids duplicate events on retries: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/db/Database.cs#L42-L88
+        let mut items = self.call(move |db| {
+            let mut q = db.prepare("SELECT d.character,d.snapshot,d.receipt,d.died_at FROM deaths d JOIN characters c ON c.id=d.character WHERE c.account=?1 AND c.alive=0 ORDER BY d.died_at DESC,d.character DESC LIMIT 10")?;
+            let mut items = Vec::new();
+            for row in q.query_map([account], |r| Ok((r.get::<_, i32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, i64>(3)?)))? {
+                let (id, raw, paid, date) = row?;
+                let receipt = death_awards::decode_receipt(&paid)?;
+                let ch = receipt.character(&raw, legacy_base)?;
+                ensure!(ch.account == account && ch.id == id && !ch.alive && ch.hp == 0 && ch.fame == receipt.base && (1..=i64::from(i32::MAX)).contains(&date), "invalid personal news death {id} for account {account}");
+                let class = &content.get(ch.class)?.name;
+                items.push((date, news_item("fame", &format!("Your {class} died at level {}",ch.level), &format!("You earned {} glorious Fame",receipt.total), &format!("fame:{id}"), date)));
+            }
+            Ok(items)
+        }).await?;
+        if let Some(source) = feed.source {
+            for post in source.posts.into_iter().take(10) {
+                items.push((
+                    post.published_at,
+                    news_item(
+                        "news",
+                        &preview(&format!("Discord: {}", post.title()), 32),
+                        &post.tagline(),
+                        &format!("{origin}/updates/"),
+                        post.published_at,
+                    ),
+                ));
+            }
+        }
+        items.sort_by_key(|(date, _)| std::cmp::Reverse(*date));
+        Ok(items.into_iter().take(10).map(|(_, xml)| xml).collect())
+    }
     pub async fn sync_updates(&self, mut snapshot: UpdateSnapshot) -> Result<UpdateFeed> {
         snapshot.validate()?;
         self.call(move |db| {
