@@ -475,6 +475,51 @@ fn command_observation(value: &Value) -> Value {
         "world_requests":{"calls":r["calls"].as_u64(),"completed":r["completed"].as_u64(),"send_wait_sum_ms":r["send_wait_sum_ms"].as_f64(),
             "queue_wait_sum_ms":r["queue_wait_sum_ms"].as_f64(),"work_wall_sum_ms":r["work_wall_sum_ms"].as_f64(),"work_cpu_sum_ms":r["work_cpu_sum_ms"].as_f64(),"round_trip_sum_ms":r["round_trip_sum_ms"].as_f64()}}})
 }
+fn lag_diagnostics(value: &Value, browser: &[&Value]) -> Value {
+    let mut lag = crate::world::native_lag::public_snapshot(value);
+    if lag.is_null() {
+        return lag;
+    }
+    let visibility = |v: &Value| {
+        let (Some(end), Some(gap)) = (v["max_gap_end_age_ms"].as_f64(), v["max_gap_ms"].as_f64())
+        else {
+            return "unavailable";
+        };
+        let intervals: Vec<_> = browser
+            .iter()
+            .filter_map(|v| {
+                Some((
+                    v["age_ms"].as_f64()?,
+                    v["sample"]["elapsed_ms"].as_f64()?,
+                    v["sample"]["hidden_during_interval"].as_bool()?,
+                ))
+            })
+            .collect();
+        // Browser sample receipt times are visibility hints, not synchronized client clocks.
+        if intervals
+            .iter()
+            .any(|(age, ms, hidden)| *hidden && *age <= end + gap && age + ms >= end)
+        {
+            "hidden_or_mixed_sample"
+        } else if intervals
+            .iter()
+            .any(|(age, ms, hidden)| !hidden && *age <= end && age + ms >= end + gap)
+        {
+            "visible_sample"
+        } else {
+            "unavailable"
+        }
+    };
+    lag["max_gap_visibility_hint"] = json!(visibility(&lag));
+    if let Some(rows) = lag["history"].as_array_mut() {
+        for row in rows {
+            row["max_gap_visibility_hint"] = json!(visibility(row));
+        }
+    }
+    lag["expected_ack_interval_ms"] = json!(100);
+    lag["bucket_seconds"] = json!(5);
+    lag
+}
 fn public_diagnostics(report: &Value) -> Value {
     let connection = &report["connection"];
     let rtt = connection["rtt_samples"].as_array().expect("RTT samples");
@@ -551,6 +596,7 @@ fn public_diagnostics(report: &Value) -> Value {
         "tick_ms": ticks.map(|t|summary(t.iter().filter_map(|v| v["execution_us"].as_f64().map(|n| n / 1000.0)))),
         "scheduling_delay_ms": ticks.map(|t|summary(t.iter().filter_map(|v| v["scheduling_lateness_us"].as_f64().map(|n| n / 1000.0)))),
         "visible_frame_gap_ms": summary(visible.iter().filter_map(|v| v["sample"]["max_frame_gap_ms"].as_f64())),
+        "native_lag":lag_diagnostics(&report["context"]["native_lag"], &browser),
         "native_acknowledgements":{
             "weapon_tick_records":report["context"]["native_acknowledgements"]["weapon_tick_records"],"goto":report["context"]["native_acknowledgements"]["goto"],
             "shoot":report["context"]["native_acknowledgements"]["shoot"],"oldest_goto_ms":report["context"]["native_acknowledgements"]["oldest_goto_ms"],
@@ -568,7 +614,7 @@ fn public_diagnostics(report: &Value) -> Value {
         "population": {"world_players": report["context"]["world_players"], "world_entities": report["context"]["world_entities"], "world_projectiles": report["context"]["world_projectiles"],
             "total_players": report["context"]["total_players"], "total_worlds": report["context"]["total_worlds"]},
         "history": history, "browser_history": browser_history,
-        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable. Command handler times include awaits/descheduling; world-request sums may overlap and are not exclusive handler CPU."})
+        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable. Command handler times include awaits/descheduling; world-request sums may overlap and are not exclusive handler CPU. native_lag covers up to 120 seconds in five-second buckets of the current World residency; transfer resets it. MOVE tick-ACK ingress gaps include server update cadence, network and client processing, not just network RTT. First ACK has no gap; repeated/regressed tick IDs are counted separately. Visibility hints use overlapping browser samples and never suppress gaps. World performance native_lag windows overlap: do not sum them. Other correction reasons remain in the rejection logs."})
 }
 pub(super) async fn disconnect(
     a: &App,
