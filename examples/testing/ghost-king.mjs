@@ -99,7 +99,7 @@ export async function run(game){
       game.check('King and undamaged Master survive before the 140-second Wait timeout',!!king(state,root.entity)&&king(state,master.id)?.hp===100000);
       await game.act({keys:[],duration_ms:500},{name:'timeout-shielded',when:()=>true});
       for(let n=0;n<5&&king(await game.inspect(),root.entity);n++)await idle(5000);
-      await game.act({keys:[],duration_ms:750},{name:'timeout-released',when:view=>view.objects.some(e=>e.kind===0x92d)});state=await save('timeout-after');
+      await game.act({keys:[],duration_ms:750},{name:'timeout-released',when:view=>view.nearby.some(e=>e.kind===0x92d)});state=await save('timeout-after');
       game.check('timeout releases Actual King and removes nearby owned ghosts without XP',!king(state,root.entity)&&family(state,quest).length===0&&state.diagnostic.entities.some(e=>e.quest===quest&&e.kind===0x92d)&&state.view.character.experience===experience);
     }else{
       for(let n=0;n<60&&king(await game.inspect(),root.entity);n++)await fire(game,master.id);
