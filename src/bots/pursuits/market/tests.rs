@@ -211,3 +211,75 @@ fn maxed_liquid_loot_can_replace_junk_but_not_reserved_cash_or_locked_quotes() {
             .is_none()
     );
 }
+
+#[test]
+fn goal_bank_prepares_carried_surplus_and_refuses_keeps_that_cannot_fit() {
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    let dex = 2636;
+    let index = progression::potion_index(&c, dex).unwrap().unwrap();
+    v.character.base_stats[index] = c.classes[&v.character.class].caps[index] - 1;
+    v.character.items[4..].fill(-1);
+    v.map.name = "Vault".into();
+    let mut chest = v.objects.remove(0);
+    v.objects.clear();
+    chest.id = 42;
+    chest.kind = 0x504;
+    chest.position = v.position;
+    chest.contents = vec![dex, dex, -1, -1, -1, -1, -1, -1];
+    v.objects.push(chest);
+    let mut m = Market::default();
+    m.observe_goal(&v, &c, None, Some(2744)).unwrap();
+    let buy = [goods(dex, 1), goods(2744, 1)];
+    assert_eq!(m.quote(&v, &c, None).unwrap(), Some(buy.clone()));
+    let grid = Grid::terrain(&v);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+    for expected_slot in [4, 5] {
+        let d = m.decide(&v, &c, None, &grid, &mut rng).unwrap().unwrap();
+        assert!(
+            d.journey.is_none(),
+            "one carried personal keep is not prepared payment"
+        );
+        let Some(Action::Swap { from, to }) = d.item else {
+            panic!("expected live withdrawal");
+        };
+        assert_eq!(
+            (from.object, from.kind, to.object, to.slot, to.kind),
+            (42, dex, v.session.player, expected_slot, -1)
+        );
+        v.character.items[to.slot] = from.kind;
+        v.objects[0].contents[from.slot] = to.kind;
+        v.character.inventory_revision += 1;
+    }
+    let d = m.decide(&v, &c, None, &grid, &mut rng).unwrap().unwrap();
+    assert!(matches!(d.journey, Some(Journey::Nexus)));
+    let mut chest = v.objects.remove(0);
+    v.map.name = "Nexus".into();
+    m.bind();
+    m.set_target(Some(2744));
+    assert_eq!(
+        m.quote(&v, &c, None).unwrap(),
+        Some(buy.clone()),
+        "carried-only reentry retains the verified spare"
+    );
+
+    v.map.name = "Vault".into();
+    v.character.base_stats[index] = c.classes[&v.character.class].caps[index] - 8;
+    v.character.items[4..].fill(dex);
+    chest.contents[0] = dex;
+    v.objects.push(chest);
+    assert_eq!(m.quote(&v, &c, None).unwrap(), Some(buy));
+    assert!(
+        m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none(),
+        "eight keeps plus payment cannot fit; do not cycle the same coin"
+    );
+    assert!(m.quote.is_none() && !m.reserves_stock());
+    assert!(v.character.items[4..].iter().all(|kind| *kind == dex));
+    assert_eq!(v.objects[0].contents[0], dex);
+    assert!(
+        matches!(
+            progression::consume(&v, &c, &m, None).unwrap(),
+            Some(Action::Use { slot: 4, .. })
+        ),
+        "refused preparation leaves ordinary personal consumption available"
+    );
+}

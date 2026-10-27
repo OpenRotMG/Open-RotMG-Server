@@ -1076,10 +1076,19 @@ impl Market {
             let Some(chest) = v.objects.iter().find(|o| o.kind == 0x504) else {
                 return Ok(Some(d));
             };
-            let need_stock = carried < usize::from(q[0].quantity);
+            // Personal keeps must travel too: the live chest is no longer funding evidence in Nexus.
+            let keep = if self.target.is_some() {
+                Self::keep(v, c, future, q[0].kind)?
+            } else {
+                0
+            };
+            let carried_surplus = carried.saturating_sub(keep);
+            let need_stock = carried_surplus < usize::from(q[0].quantity);
             let need_space = (need_stock && free == 0)
                 || free + usize::from(q[0].quantity) < usize::from(q[1].quantity);
-            let transfer = if need_space {
+            let transfer = if keep + usize::from(q[0].quantity) > v.character.items.len() - 4 {
+                None
+            } else if need_space {
                 chest
                     .contents
                     .iter()
@@ -1092,7 +1101,8 @@ impl Market {
                             .skip(4)
                             .find(|(_, k)| {
                                 **k >= 0
-                                    && (**k != q[0].kind || carried > usize::from(q[0].quantity))
+                                    && (**k != q[0].kind
+                                        || carried_surplus > usize::from(q[0].quantity))
                             })
                             .map(|(i, _)| i),
                     )
@@ -1136,7 +1146,7 @@ impl Market {
                 } else {
                     d.movement = grid.towards(v.position, chest.position);
                 }
-            } else if carried >= usize::from(q[0].quantity) && !need_space {
+            } else if !need_stock && !need_space {
                 d.journey = Some(Journey::Nexus);
             } else {
                 self.quote = None;
