@@ -175,13 +175,14 @@ async fn incoming_full_inventory_retains_quote_for_existing_vault_preparation_no
         .for_player(id)
         .call(move |w| {
             w.players.get_mut(&peer_id).unwrap().pos = w.players[&id].pos;
+            let speed=w.content.classes[&w.players[&id].character.class].base[4];
+            w.players.get_mut(&id).unwrap().character.base[4] = speed;
             w.updates(id, true)?;
             Ok(())
         })
         .await
         .unwrap();
     let mut v = app.world.player_view(id).await.unwrap();
-    v.character.base_stats[4] = 0;
     assert!(
         v.objects.iter().any(|p| p.kind == 0x720 && p.usable),
         "fixture observes an actual Vault portal"
