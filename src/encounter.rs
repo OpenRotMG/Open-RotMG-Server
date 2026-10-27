@@ -5,6 +5,7 @@ pub(crate) mod attacks;
 pub(crate) mod fauna;
 pub(crate) mod jungle;
 pub(crate) mod landmarks;
+mod minotaur;
 pub(crate) mod tomb;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -265,7 +266,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0x644 => (chase(7.), 4., 200, 10.),
         0x643 => (chase(1.), 12., 500, 10.),
         0x645 => (chase(1.), 4., 1000, 10.),
-        0x646 => (chase(1.), 10., 500, 10.),
+        0x646 => (Stationary, 0., 50, 8.),
         0x64a | 0x64c | 0x64d => (chase(7.), 12., 500, 10.),
         0x64b => (chase(1.), 12., 500, 3.),
         0x64f => (chase(7.), 15., 500, 10.),
@@ -372,6 +373,7 @@ pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
         0x61f => (elapsed / 2500) % 2,
         0x6c6 => (elapsed / 1000) % 2,
         0x649 => (elapsed / 1000) % 2,
+        0x646 => minotaur::phase(elapsed).0,
         0x91a if hp < 400 => 2,
         0x91a => u64::from(elapsed % 3750 >= 2500),
         0x6d8 => (elapsed / 1500) % 3 + 3 * ((elapsed / 2000) % 3),
@@ -401,6 +403,7 @@ pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
     }
     let p = profile(kind).expect("validated encounter motion");
     match kind {
+        0x646 => minotaur::movement(elapsed),
         crate::dungeon::snake::GUARD if hp < crate::dungeon::snake::GUARD_RAGE_HP => (
             Motion::Follow {
                 sight: 10.,
@@ -527,13 +530,6 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
         0x625 | 0xd01 => spread(0, 3, 7., heading),
         0x626 | 0xd02 => spread(0, 4, 7., heading),
         0xd03 | 0xd04 => spread(0, 5, 7., heading),
-        0x646 => {
-            if (elapsed / 500).is_multiple_of(3) {
-                ring(0, 20, 0.)
-            } else {
-                vec![(0, heading)]
-            }
-        }
         0x6c6 => {
             if elapsed % 1000 % 400 < 200 {
                 if (elapsed / 1000).is_multiple_of(2) {

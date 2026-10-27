@@ -340,7 +340,9 @@ impl World {
                 Aim::Target => {
                     let Some(target) = target.filter(|p| {
                         let distance = pos.distance(*p);
-                        if self.entities[&id].kind == 0x651 && self.name != "Abyss of Demons" {
+                        if self.entities[&id].kind == 0x646
+                            || self.entities[&id].kind == 0x651 && self.name != "Abyss of Demons"
+                        {
                             distance < attack.range
                         } else {
                             distance <= attack.range

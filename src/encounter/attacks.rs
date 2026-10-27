@@ -76,7 +76,7 @@ impl Attack {
         self.delay = ms;
         self
     }
-    fn predict(mut self, factor: f32) -> Self {
+    pub(super) fn predict(mut self, factor: f32) -> Self {
         self.predict = Prediction::Lead(factor);
         self
     }
@@ -302,6 +302,9 @@ pub(crate) fn manor_entry_schedule(kind: u16, stage: u64, elapsed: u64) -> Sched
 }
 
 pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
+    if kind == 0x646 {
+        return Some(super::minotaur::schedule(elapsed));
+    }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return Some(abyss_schedule(kind, elapsed));
     }
