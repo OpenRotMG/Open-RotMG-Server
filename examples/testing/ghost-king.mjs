@@ -9,8 +9,9 @@ export async function prepare(api){
   const world=await api({op:'world_info',world:1});
   roots=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x928&&f.layout===world.realm_layout);
   assert(roots.length>=3,'Three ordinarily placed Ghost Kings required');
-  await writeFile(join(out,'roots.json'),JSON.stringify({world,roots}));
-  return {...spec,position:{x:roots[0].x,y:roots[0].y}};
+  const index=['SmallGroup','Mob','HugeMob'].indexOf(process.env.GHOST_BRANCH);assert(index>=0,'Set GHOST_BRANCH to SmallGroup, Mob or HugeMob');
+  await writeFile(join(out,'roots.json'),JSON.stringify({world,roots,branch:process.env.GHOST_BRANCH}));
+  return {...spec,position:{x:roots[index].x,y:roots[index].y}};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -31,16 +32,29 @@ export async function run(game){
   }
   const family=(state,quest)=>state.diagnostic.entities.filter(e=>e.quest===quest&&e.kind>=0x929&&e.kind<=0x92c);
   const king=(state,id)=>state.diagnostic.entities.find(e=>e.id===id);
+  async function approach(actor,point,range=1.5){
+    for(let n=0;n<60;n++){
+      await protect(actor);
+      const view=await actor.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y;if(Math.hypot(dx,dy)<range)return;
+      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+      if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
+      if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
+      const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
+      await actor.act({keys,duration_ms:Math.max(50,Math.min(250,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
+    }
+    throw Error('Native walking did not reach the observed target');
+  }
   async function fire(actor,id,ms=250){
+    await protect(actor);
     const state=await actor.inspect(),target=king(state,id);assert(target,'Living native target required');
-    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2)await cheat(actor,{kind:'teleport',position:target.pos});
+    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2)await approach(actor,target.pos);
     await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
   const initial=await game.observe();await protect(game);
   await game.act({keys:['s'],duration_ms:150});
   game.check('ordinary native movement works at the naturally placed tower',Math.hypot((await game.observe()).position.x-initial.position.x,(await game.observe()).position.y-initial.position.y)>.3);
-  for(const [index,label,loss,stage,counts] of [[0,'SmallGroup',6500,4,[0,3,3,0]],[1,'Mob',19000,5,[0,3,0,3]],[2,'HugeMob',45000,6,[0,3,0,3]]]){
-    const root=roots[index];await cheat(game,{kind:'teleport',position:{x:root.x,y:root.y}});
+  for(const [index,label,loss,stage,counts] of [[0,'SmallGroup',6500,4,[0,3,3,0]],[1,'Mob',19000,5,[0,3,0,3]],[2,'HugeMob',45000,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
+    const root=roots[index];
     await protect(game);
     const before=await save(label+'-idle'),original=king(before,root.entity);assert(original?.kind===0x928&&original.hp===300000,'Untouched ordinary King required');
     for(const stat of [2,5])await cheat(game,{kind:'stat_modifier',index:stat,amount:100,duration_ms:60000});
@@ -83,10 +97,11 @@ export async function run(game){
     if(index<2){
       for(let n=0;n<30&&king(await game.inspect(),actual.id);n++)await fire(game,actual.id);
       game.check(label+' final King is defeated by native sword fire',!king(await game.inspect(),actual.id));
-      await idle(60000);
+      const xp=(await game.observe()).character.experience;await idle(2000);
+      game.check(label+' defeat credit stays stable',(await game.observe()).character.experience===xp);
       continue;
     }
-    await cheat(game,{kind:'teleport',position:actual.pos});
+    await approach(game,actual.pos);
     const contributor=await game.join({...spec,seed:795,position:actual.pos}),outsider=await game.join({...spec,seed:796,position:actual.pos});
     await protect(contributor);await protect(outsider);
     const xp=await Promise.all([game.observe(),contributor.observe(),outsider.observe()]);
@@ -104,10 +119,11 @@ export async function run(game){
     const bags=views.flatMap(s=>s.diagnostic.entities).filter(e=>e.extra_stats.some(([stat,account])=>stat===54&&account>=0)&&e.items?.some(i=>i!==-1));
     const bag=bags.find(e=>e.extra_stats.some(([stat,account])=>stat===54&&account===views[1].view.session.account));assert(bag,'This observed roll must contain a contributor bag for the pickup check');
     game.check('noncontributor cannot see either private reward',!views[2].diagnostic.entities.some(e=>bags.some(b=>b.id===e.id)));
+    await approach(outsider,bag.pos,.4);
     await outsider.act({keys:[],duration_ms:700},{name:'ineligible-no-bag',when:()=>true});
     await outsider.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
     game.check('noncontributor native drag cannot acquire the private reward',(await outsider.observe()).character.inventory_revision===views[2].view.character.inventory_revision&&(await contributor.inspect()).diagnostic.entities.find(e=>e.id===bag.id)?.items[0]===bag.items[0]);
-    await cheat(contributor,{kind:'teleport',position:bag.pos});
+    await approach(contributor,bag.pos,.4);
     await contributor.act({keys:[],duration_ms:700},{name:'eligible-private-bag',when:()=>true});
     const item=bag.items[0],inventory=(await contributor.observe()).character;assert(item!==-1);
     await contributor.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
