@@ -6363,7 +6363,8 @@ impl World {
                 0x953 | 0x954 => 6.,
                 0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
-                0x617 => 8.,
+                // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
+                0x617 => 12.,
                 0x61a => 10.5,
                 0x6d8 => 12.,
                 0x91a => 7.,
@@ -6507,7 +6508,7 @@ impl World {
                         continue;
                     }
                 }
-            } else if current.quest.is_some() {
+            } else if current.quest.is_some() && !crate::endgame::HEROES.contains(&kind) {
                 self.quest_movement(id, target, elapsed)
             } else if crate::encounter::fauna::ROSTER.contains(&kind) {
                 match self.fauna_movement(id, target, elapsed) {
@@ -7116,7 +7117,8 @@ impl World {
                 1. + values[6] as f32 / 8.
             } + if flags & crate::condition::bit(crate::condition::HEALING) != 0
             {
-                20.
+                // Period seals add 28 HP/s, not 20: https://web.archive.org/web/20120418103926id_/http://forums.wildshadow.com/wiki/realm-mad-god/class-guide-paladin
+                28.
             } else {
                 0.
             };
@@ -7536,6 +7538,8 @@ mod lab_tests;
 mod reward_accuracy_tests;
 
 #[cfg(test)]
+mod paladin_tests;
+#[cfg(test)]
 mod wizard_tests;
 
 #[cfg(test)]
@@ -7551,6 +7555,9 @@ mod knight_tests;
 
 #[cfg(test)]
 mod assassin_tests;
+
+#[cfg(test)]
+mod mystic_tests;
 
 #[cfg(test)]
 mod quest_tests;

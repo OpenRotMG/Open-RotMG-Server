@@ -326,7 +326,7 @@ impl World {
             Ok(shots)
         } else if crate::dungeon::trench::ROSTER.contains(&kind) {
             self.ocean_shots(id, target)
-        } else if e.quest.is_some() {
+        } else if e.quest.is_some() && !crate::endgame::HEROES.contains(&kind) {
             self.quest_shots(id, target, elapsed)
         } else if crate::endgame::ROSTER.contains(&kind) {
             self.finale_shots(id, heading, elapsed)
