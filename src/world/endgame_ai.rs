@@ -612,3 +612,64 @@ impl World {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[test]
+fn cyclops_ownership_tags_preserve_the_family_controller() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    for tagged in [false, true] {
+        let map = Map {
+            width: 32,
+            height: 32,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x46,
+                    object: None,
+                    config: String::new(),
+                    terrain: 1,
+                    region: 0,
+                };
+                1024
+            ],
+            spawns: vec![(8.5, 8.5)],
+        };
+        let mut world = World::new(content.clone(), Arc::new(map)).unwrap();
+        world.encounter = true;
+        let mut character = Character::fresh(content.get(0x307).unwrap()).unwrap();
+        character.account = 1;
+        character.id = 1;
+        let player = world.enter(character, None).unwrap();
+        let root = world
+            .spawn_entity(0x67d, Pos { x: 10.5, y: 8.5 }, vec![])
+            .unwrap();
+        if tagged {
+            world.entities.get_mut(&root).unwrap().quest.set(
+                Some(root),
+                root,
+                &mut world.quest_ids,
+            );
+        }
+        world.now = 50;
+        world.npc_step();
+        assert_eq!(*world.entities[&root].quest, tagged.then_some(root));
+        assert_eq!(
+            world.entities[&root].motion,
+            Some(crate::encounter::Motion::WanderHome { radius: 3. })
+        );
+        for kind in 0x67e..=0x682 {
+            assert!(
+                (1..=3).contains(&world.summoned_children(root, kind).count()),
+                "missing Cyclops species {kind:#x}, tagged={tagged}"
+            );
+        }
+        let target = world.players[&player].pos;
+        for (age, expected) in [(0, vec![10, 10, 10]), (5000, vec![0, 1, 2, 3])] {
+            let shots = world.legacy_enemy_shots(root, target, age).unwrap();
+            assert_eq!(
+                shots.iter().map(|s| s.0).collect::<Vec<_>>(),
+                expected,
+                "tagged={tagged}"
+            );
+        }
+    }
+}
