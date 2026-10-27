@@ -20,9 +20,9 @@ export async function run(game) {
   for(let i=0;i<12&&await ground()===0xbf;i++)await game.act({keys:['d','s'],duration_ms:400});
   const out=await game.observe();
   game.check('ordinary input exits quicksand onto dry ground',out.position.x>66&&await ground()!==0xbf);
-  await game.act({keys:['d','s'],duration_ms:600});
+  await game.act({keys:['d','s'],duration_ms:200});
   const dry=await game.observe();
-  game.check('dry ground restores ordinary movement speed',dry.position.x-out.position.x>3);
+  game.check('dry ground restores ordinary movement speed',dry.position.x-out.position.x>1.2);
   for(let i=0;i<12&&await ground()!==0xbf;i++)await game.act({keys:['a','w'],duration_ms:200});
   const reentered=await game.observe();
   game.check('ordinary input reenters generated quicksand',await ground()===0xbf);
