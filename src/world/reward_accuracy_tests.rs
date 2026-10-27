@@ -32,10 +32,10 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 }
 
 #[tokio::test]
-async fn demon_minion_death_rolls_public_equipment_once_not_per_contributor() {
+async fn demon_and_elf_minion_deaths_roll_public_loot_once_not_per_contributor() {
     let (mut w, _store, owners) = reward_world().await;
     let mut successes = 0;
-    for kind in 0x669..=0x66b {
+    for kind in (0x669..=0x66b).chain(0x605..=0x607) {
         for seed in 0..64 {
             let expected = crate::loot::rewards(
                 &w.content,
