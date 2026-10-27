@@ -6,12 +6,12 @@ impl World {
     pub(super) fn deathmage_mechanics(&mut self, id: i32, target: Option<Pos>) -> Result<()> {
         let e = &self.entities[&id];
         if e.kind != 0x925 {
-            let stage = e
-                .quest
-                .and_then(|owner| self.entities.get(&owner))
-                .filter(|owner| owner.kind == 0x925 && e.pos.distance(owner.pos) < 10.)
-                .and_then(|owner| owner.stage)
-                .unwrap_or(0);
+            let stage = match e.quest.and_then(|owner| self.entities.get(&owner)) {
+                Some(owner) if owner.kind == 0x925 && e.pos.distance(owner.pos) < 10. => owner
+                    .stage
+                    .context("living Deathmage controller phase missing")?,
+                _ => 0,
+            };
             ensure!(stage <= 3, "invalid Deathmage order {stage}");
             if e.stage != Some(stage) {
                 self.landmark_enter(id, stage);
@@ -209,6 +209,14 @@ mod tests {
         assert_eq!(w.entities[&ca].stage, Some(0));
         assert_eq!(w.entities[&ca].quest, Some(a));
         assert_eq!(w.entities[&cb].quest, Some(b));
+        let unowned = w
+            .spawn_entity(0x65a, Pos { x: 25., y: 20. }, vec![])
+            .unwrap();
+        w.landmark_mechanics(unowned, target, 4000).unwrap();
+        assert_eq!(w.entities[&unowned].quest, None);
+        assert_eq!(w.entities[&unowned].stage, Some(0));
+        w.entities.get_mut(&b).unwrap().stage = None;
+        assert!(w.landmark_mechanics(cb, target, 4000).is_err());
     }
     #[test]
     fn deathmage_target_window_keeps_attack_hysteresis_and_home_tether() {
