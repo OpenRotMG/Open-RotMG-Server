@@ -14,11 +14,11 @@ export async function run(game){
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},observations=[];let protection=0,modifier=0;
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command})});
-    const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));return receipt;
+    const receipt=await response.json();assert(response.ok&&(command.op==='inspect'?receipt.diagnostic!==undefined:receipt.status==='succeeded'),JSON.stringify({op:command.op,status:receipt.status,error:receipt.error}));return receipt;
   }
   const cheat=change=>api({op:'cheat',actor:game.actor,change});
   const start=await game.observe(),scout=(await api({op:'spawn',spec:{...spec,guid:'sphinx-scout',position:start.position,controller:'direct',profile:null}})).result.actor;
-  const scoutName=(await api({op:'inspect',actor:scout})).result.diagnostic.character.name;
+  const scoutName=(await api({op:'inspect',actor:scout})).diagnostic.character.name;
   const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});let scoutProtection=0,lastTeleport=-10000;
   try{
   async function travel(point){
