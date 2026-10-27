@@ -162,6 +162,10 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
             serde_json::to_value(app.store.vaults(character.account).await.unwrap()).unwrap(),
             vaults
         );
+        let guid = app.store.account_guid(character.account).await.unwrap();
+        let living = app.store.list(guid).await.unwrap().characters;
+        let competing = living.iter().position(|ch| ch.id != character.id).unwrap();
+        assert_ne!(living[competing].id, character.id);
         let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
         let (roster, vault) = persona::life(&profile, &app.content, &mut rng).unwrap();
         let returned = app
@@ -170,7 +174,7 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
                 profile.identity.into(),
                 roster,
                 vault,
-                1,
+                competing,
                 persona::starting_stock(&profile, &app.content).unwrap(),
             )
             .await
@@ -267,6 +271,87 @@ async fn committed_persona_deaths_reopen_as_normal_starters_without_reseeding_we
             runtime::persona_character(&app, profile).await.unwrap(),
             replacement
         );
+    }
+    drop(app);
+    std::fs::remove_dir_all(scratch).unwrap();
+}
+
+#[tokio::test]
+async fn all_dead_legacy_personas_initialize_missing_intent_from_real_death_not_synthetic_archive()
+{
+    let (scratch, path, mut app) = saved_career("legacy-persona-intent");
+    let fresh =
+        crate::store::Character::fresh(app.content.get(crate::content::WIZARD).unwrap()).unwrap();
+    let mut archived =
+        crate::store::Character::fresh(app.content.get(crate::content::PRIEST).unwrap()).unwrap();
+    archived.alive = false;
+    archived.hp = 0;
+    archived.items.fill(-1);
+    let roster = vec![fresh.clone(), archived];
+    let identity = "persona:v1:LegacyCareer".to_owned();
+    let mut character = app
+        .store
+        .persona_character(identity.clone(), roster.clone(), vec![[-1; 8]], 0, None)
+        .await
+        .unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let archived_class: u16 = db.query_row("SELECT json_extract(stats,'$.class') FROM characters WHERE account=?1 ORDER BY id DESC LIMIT 1", [character.account], |r| r.get(0)).unwrap();
+    assert_ne!(archived_class, character.class);
+    assert!(
+        app.store
+            .bot_mind(character.account)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    for legacy_mind in [false, true] {
+        if legacy_mind {
+            let mut mind = app
+                .store
+                .bot_mind(character.account)
+                .await
+                .unwrap()
+                .unwrap();
+            mind.schema = 1;
+            mind.intentions = None;
+            mind.future_class = None;
+            app.store.save_bot_mind(mind).await.unwrap();
+        }
+        character.alive = false;
+        character.hp = 0;
+        app.store
+            .death(character.clone(), "prepared legacy lifecycle".into())
+            .await
+            .unwrap();
+        app.store = crate::store::Store::open(&path, &app.content).unwrap();
+        let replacement = app
+            .store
+            .persona_character(identity.clone(), roster.clone(), vec![[-1; 8]], 0, None)
+            .await
+            .unwrap();
+        assert_eq!(replacement.account, character.account);
+        assert_ne!(replacement.id, character.id);
+        assert_eq!(
+            (replacement.class, replacement.level, replacement.exp),
+            (fresh.class, 1, 0)
+        );
+        assert_eq!(replacement.items, fresh.items);
+        assert_eq!(
+            app.store
+                .bot_mind(character.account)
+                .await
+                .unwrap()
+                .unwrap()
+                .future_class,
+            Some(fresh.class)
+        );
+        assert!(
+            app.store
+                .load(character.account, character.id)
+                .await
+                .is_err()
+        );
+        character = replacement;
     }
     drop(app);
     std::fs::remove_dir_all(scratch).unwrap();

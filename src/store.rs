@@ -1122,11 +1122,37 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         let mut account = self.list(guid).await?;
         let mind = self.bot_mind(account.id).await?;
         if account.characters.is_empty() {
+            let mut mind = match mind {
+                Some(mind) => mind,
+                None => crate::bots::pursuits::Mind::new(account.id),
+            };
+            let initialization = if mind.future_class.is_none() {
+                let owner = account.id;
+                // Synthetic prerequisite archives are not evidence of a previously played life.
+                let (character, class) = self.call(move |db| {
+                    db.query_row("SELECT c.id,json_extract(c.stats,'$.class') FROM deaths d JOIN characters c ON c.id=d.character WHERE c.account=?1 AND c.alive=0 ORDER BY d.died_at DESC,c.id DESC LIMIT 1", [owner], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, u16>(1)?)))
+                        .context("legacy persona has no committed death from which to initialize replacement intent")
+                }).await?;
+                mind.future_class = Some(class);
+                Some(character)
+            } else {
+                None
+            };
             let class = mind
-                .context("persona has no living character or saved career mind")?
                 .future_class
                 .context("persona replacement has no intended class")?;
-            return self.create(account.id, self.content.get(class)?).await;
+            let character = self.create(account.id, self.content.get(class)?).await?;
+            if let Some(previous) = initialization {
+                self.save_bot_mind(mind).await?;
+                tracing::info!(
+                    account = account.id,
+                    previous,
+                    class,
+                    reason = "legacy_missing_replacement_intent",
+                    "persona replacement intent initialized from latest committed death"
+                );
+            }
+            return Ok(character);
         }
         // Resuming the same life preserves its main intention even when the account owns alts.
         if let Some(previous) = mind.as_ref().and_then(|mind| mind.history.back())
