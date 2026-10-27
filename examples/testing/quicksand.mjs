@@ -1,6 +1,6 @@
 export const fixture = {
-  class:0x300, level:20, seed:12351, world:'tomb-of-the-ancients', worldSeed:1, position:{x:31.1,y:16.5},
-  equipment:[-1,-1,-1,-1], backpack:Array(8).fill(-1), stats:[200,100,15,0,75,15,15,10],
+  class:0x300, level:20, seed:12351, world:'tomb-of-the-ancients', worldSeed:1, position:{x:63.1,y:16.5},
+  equipment:[-1,-1,-1,-1], backpack:Array(8).fill(-1), stats:[700,100,15,25,75,15,15,10],
 };
 export async function run(game) {
   const ground=async()=>{
@@ -19,7 +19,7 @@ export async function run(game) {
   game.check('sunk native walk is slow and stays on quicksand',slow.position.x-sunk.position.x>0.7&&slow.position.x-sunk.position.x<1.5&&await ground()===0xbf);
   for(let i=0;i<12&&await ground()===0xbf;i++)await game.act({keys:['d','s'],duration_ms:400});
   const out=await game.observe();
-  game.check('ordinary input exits quicksand onto dry ground',out.position.x>34&&await ground()!==0xbf);
+  game.check('ordinary input exits quicksand onto dry ground',out.position.x>66&&await ground()!==0xbf);
   await game.act({keys:['d','s'],duration_ms:600});
   const dry=await game.observe();
   game.check('dry ground restores ordinary movement speed',dry.position.x-out.position.x>3);
