@@ -455,8 +455,11 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x91b | 0x91f | 0x928 | 0x675 | 0x6c2 | 0x923 => &[],
         0x676 => &[(0.05, Item(0xa23))],
         0x677 => &[(0.05, Item(0xa22))],
-        0x65f | 0x660 | 0x661 | 0x922 => &[(0.02, Item(0xa23))],
-        0x921 | 0x91d | 0x91e | 0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
+        // Ents drop a tincture, Saplings nothing: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.EntAncient.cs#L219-L244
+        0x921 => &[(0.02, Item(0xb0c))],
+        0x922 => &[],
+        0x65f..=0x661 => &[(0.02, Item(0xa23))],
+        0x91d | 0x91e | 0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
         0x6c1 => &[(0.0001, Item(crate::endgame::INCANTATION))],
         0x920 => &[
             (0.3, Tier(6, WEAPONS)),
@@ -1365,6 +1368,15 @@ mod tests {
             );
         }
         assert!(private(0x668));
+    }
+
+    #[test]
+    fn ent_follower_rewards_do_not_use_generic_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let mut rng = rand::rngs::mock::StepRng::new(0, 0);
+        let observed = [0x921, 0x922, 0x65f].map(|kind| rewards(&content, kind, &mut rng));
+        assert_eq!(observed, [vec![0xb0c], vec![], vec![0xa23]]);
+        assert!(matches!(table(0x921), [(chance, Pick::Item(0xb0c))] if *chance == 0.02));
     }
 
     #[test]
