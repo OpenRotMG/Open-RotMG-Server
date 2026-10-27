@@ -345,6 +345,7 @@ impl Events {
         c: &Content,
         grid: &Grid,
         profile: Profile,
+        allow_idle: bool,
     ) -> Result<Option<Decision>> {
         if !shared(&v.map.name) {
             return Ok(None);
@@ -486,6 +487,9 @@ impl Events {
                 d.goal = Goal::Recover;
             }
             return Ok(Some(d));
+        }
+        if !allow_idle {
+            return Ok(None);
         }
         let Some(clear) = o.clear else {
             return Ok(None);

@@ -214,7 +214,13 @@ async fn review_informational_event_calls_survive_planning_changes_and_reach_ent
         let initial = brain
             .mind
             .events
-            .decide(&view, &app.content, &Grid::terrain(&view), brain.profile)
+            .decide(
+                &view,
+                &app.content,
+                &Grid::terrain(&view),
+                brain.profile,
+                true,
+            )
             .unwrap()
             .unwrap();
         let text = if advice {

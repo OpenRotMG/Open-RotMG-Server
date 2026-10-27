@@ -52,7 +52,7 @@ fn fixture() -> (Content, PlayerView, Events, Profile) {
     (c, v, e, p)
 }
 fn decide(e: &mut Events, v: &PlayerView, c: &Content, p: Profile) -> Option<Decision> {
-    e.decide(v, c, &Grid::terrain(v), p).unwrap()
+    e.decide(v, c, &Grid::terrain(v), p, true).unwrap()
 }
 
 #[test]
@@ -221,4 +221,51 @@ fn aftermath_held_incantation_uses_existing_opening_and_readiness_path() {
         decide(&mut e, &v, &c, p).is_none(),
         "unsafe idle opening is deferred"
     );
+}
+
+#[test]
+fn aftermath_commitment_preserves_held_incantation_and_remedy_not_idle_reports() {
+    let (c, mut v, e, p) = fixture();
+    let mut b = Brain::new(p, &v);
+    b.mind.events = e;
+    b.companion = Some(4);
+    b.invitation_until = v.time_ms + 60000;
+    assert!(b.committed(&v));
+    assert!(
+        b.mind
+            .events
+            .decide(&v, &c, &Grid::terrain(&v), p, false)
+            .unwrap()
+            .is_none()
+    );
+    let d = b.decide(&v, &c).unwrap();
+    assert!(d.chat.is_none());
+    assert_ne!(b.activity, Activity::Event);
+
+    v.tick += 1;
+    v.time_ms += 50;
+    v.elapsed_ms += 50;
+    v.map.name = "Oryx's Chamber".into();
+    v.objects.clear();
+    v.objects.push(object(10, crate::endgame::LOCKED_CELLAR));
+    v.character.items[5] = i32::from(crate::endgame::INCANTATION);
+    b.mind.events.bind();
+    let d = b.decide(&v, &c).unwrap();
+    assert!(b.committed(&v));
+    assert!(matches!(d.item, Some(Action::Use { slot: 5, .. })));
+
+    v.tick += 1;
+    v.time_ms += 50;
+    v.elapsed_ms += 50;
+    v.map.name = "Mad Lab".into();
+    v.character.conditions = crate::condition::bit(crate::condition::HEXED);
+    v.objects.clear();
+    let mut blue = object(11, crate::dungeon::lab::DEHEXXER);
+    blue.position.x += 1.;
+    v.objects.push(blue);
+    b.mind.events.bind();
+    b.mind.events.knows_blue = true;
+    let d = b.decide(&v, &c).unwrap();
+    assert!(b.committed(&v));
+    assert_eq!(d.goal, Goal::Remedy(11));
 }

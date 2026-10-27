@@ -842,10 +842,15 @@ impl Brain {
         if let Some(project) = self.mind.supply(v, content, &s.grid)? {
             return Ok((Activity::Supply, project));
         }
-        if !self.committed(v)
-            && decision.item.is_none()
-            && let Some(event) = self.mind.events.decide(v, content, &s.grid, self.profile)?
+        let allow_idle = !self.committed(v) && decision.item.is_none();
+        if let Some(mut event) =
+            self.mind
+                .events
+                .decide(v, content, &s.grid, self.profile, allow_idle)?
         {
+            if decision.item.is_some() {
+                event.item = decision.item;
+            }
             return Ok((Activity::Event, event));
         }
         if decision.item.is_none()
