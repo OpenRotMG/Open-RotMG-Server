@@ -1044,8 +1044,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         })
         .await
     }
-    /// Provisions a persona account on first use, rebuilds its roster once every character has died,
-    /// and returns the `pick`th living character.
+    /// Grants a synthetic snapshot only on first use; later sessions resume a living character
+    /// or create a normal starter of the account's intended class after its roster has died.
     pub async fn persona_character(
         &self,
         identity: String,
@@ -1074,8 +1074,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 [&identity], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
             let taken = accounts::human_name_taken(&tx, &name, 0)?;
             ensure!(!taken, anyhow::anyhow!(Rejected("persona name is already in use")).context(format!("persona {identity} already belongs to another account")));
-            let (guid, account) = match existing {
-                Some(found) => found,
+            let (guid, account, first_use) = match existing {
+                Some((guid, account)) => (guid, account, false),
                 None => {
                     let guid = format!("persona-{:032x}", rand::random::<u128>());
                     tx.execute("INSERT INTO accounts(guid,name,character_slots,vault_mask) VALUES(?1,?2,14,?3)", params![guid, name, (1 << vault.len()) - 1])?;
@@ -1086,15 +1086,13 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                     tx.execute("INSERT INTO account_fame(account,balance,earned) VALUES(?1,0,0)", [account])?;
                     tx.execute("INSERT INTO shore_bots(name,account) VALUES(?1,?2)", params![identity, account])?;
                     tracing::info!(account, identity, chests = vault.len(), ?vault, "persona account provisioned");
-                    (guid, account)
+                    (guid, account, true)
                 }
             };
-            let living: i64 = tx.query_row("SELECT count(*) FROM characters WHERE account=?1 AND alive=1", [account], |r| r.get(0))?;
-            if living == 0 {
+            if first_use {
                 let mut roster = roster;
                 if let Some(kind) = starting_stock {
                     let merchant = roster.iter_mut().find(|ch| ch.alive).context("persona stock has no living owner")?;
-                    // Rebuilds must withdraw durable holdings too, never replay the initial grant.
                     for mut chest in vaults::read(&tx, account)? {
                         let mut moved = 0;
                         for item in chest.items.iter_mut().filter(|item| **item == kind) {
@@ -1109,10 +1107,6 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                     }
                 }
                 for mut ch in roster {
-                    if !ch.alive {
-                        let enough: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM characters WHERE account=?1 AND json_extract(stats,'$.class')=?2 AND json_extract(stats,'$.level')>=?3)", params![account, ch.class, ch.level], |r| r.get(0))?;
-                        if enough { continue; }
-                    }
                     ch.account = account;
                     ch.name.clone_from(&name);
                     tx.execute("INSERT INTO characters(account,stats,items,alive) VALUES(?1,?2,?3,?4)",
@@ -1126,10 +1120,23 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             Ok(guid)
         }).await?;
         let mut account = self.list(guid).await?;
-        ensure!(
-            !account.characters.is_empty(),
-            "persona has no living character after provisioning"
-        );
+        let mind = self.bot_mind(account.id).await?;
+        if account.characters.is_empty() {
+            let class = mind
+                .context("persona has no living character or saved career mind")?
+                .future_class
+                .context("persona replacement has no intended class")?;
+            return self.create(account.id, self.content.get(class)?).await;
+        }
+        // Resuming the same life preserves its main intention even when the account owns alts.
+        if let Some(previous) = mind.as_ref().and_then(|mind| mind.history.back())
+            && let Some(index) = account
+                .characters
+                .iter()
+                .position(|ch| ch.id == previous.binding[1])
+        {
+            return Ok(account.characters.swap_remove(index));
+        }
         let index = pick % account.characters.len();
         Ok(account.characters.swap_remove(index))
     }
@@ -1137,31 +1144,6 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         self.call(move |db| {
             let taken = accounts::human_name_taken(db, &name, account)?;
             ensure!(!taken, Rejected("persona name is already in use"));
-            Ok(())
-        })
-        .await
-    }
-    pub(crate) async fn retire_persona(&self, identity: String, account: i32) -> Result<()> {
-        ensure!(
-            identity.starts_with("persona:v1:") && !identity.starts_with("persona:v1:retired:"),
-            "not an active preset identity"
-        );
-        self.call(move |db| {
-            // Keep all characters, resources and receipts for rollback; only the active registry binding changes.
-            let changed = db.execute(
-                "UPDATE shore_bots SET name=?3 WHERE name=?1 AND account=?2",
-                params![
-                    identity,
-                    account,
-                    format!("persona:v1:retired:{account}:{identity}")
-                ],
-            )?;
-            ensure!(changed == 1, "persona retirement binding changed");
-            tracing::info!(
-                account,
-                identity,
-                "preset session archived without deleting progress"
-            );
             Ok(())
         })
         .await

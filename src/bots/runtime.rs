@@ -814,7 +814,6 @@ pub(super) async fn launch(
                         .gen_range(app.bot_session_seconds[0]..=app.bot_session_seconds[1]),
                 )
         });
-        let mut retired = false;
         let mut result: Result<()> = async {
                 loop {
                     if *cancel.borrow() || *shutdown.borrow() || drain.has_changed()? || !lifecycle::drain::open(&app) { break; }
@@ -911,7 +910,6 @@ pub(super) async fn launch(
                         lifecycle::finalize(&app, id, CloseReason::Controller)?.wait().await?;
                         if selected.is_some() { return Ok(()); }
                         if until.is_some_and(|deadline| app.world.clock.now() >= deadline) {
-                            retired = true;
                             return Ok(());
                         }
                         if *cancel.borrow() { return Ok(()); }
@@ -1016,7 +1014,6 @@ pub(super) async fn launch(
                     let ending = until.is_some_and(|deadline| app.world.clock.now() >= deadline)
                         && pending.is_none() && ready_reply.is_none() && brain.draft.is_none() && director::may_finish(&app, &mut brain, &view);
                     if ending && view.map.name == "Nexus" {
-                        retired = true;
                         break;
                     }
                     if view.lifecycle.busy { continue; }
@@ -1231,18 +1228,13 @@ pub(super) async fn launch(
         }
         dialogue::cancel(&mut pending);
         dialogue::end_agreement(&app, &mut brain, "controller stopped").await;
-        let retire = retired && finalized && result.is_ok() && !*shutdown.borrow();
         if let Err(error) = &result {
             tracing::error!(player=id,name=profile.name,%error,"autonomous controller stopped");
         }
         if let Some(done) = done
             && !*shutdown.borrow()
             && done
-                .send(director::Departure {
-                    profile,
-                    account,
-                    retire,
-                })
+                .send(director::Departure { profile, account })
                 .await
                 .is_err()
         {

@@ -10,7 +10,6 @@ mod tests;
 pub(super) struct Departure {
     pub profile: Profile,
     pub account: i32,
-    pub retire: bool,
 }
 
 async fn fill(
@@ -115,7 +114,7 @@ async fn maintain(
     if !lifecycle::drain::open(app) || app.world.clock.paused() {
         return Ok(());
     }
-    // Provisioning and retirement write durable state; preparation must wait for this turn too.
+    // Provisioning writes durable state; preparation must wait for this turn too.
     let result = async {
         lifecycle::drain::entry(app)?
             .scope(async {
@@ -127,11 +126,6 @@ async fn maintain(
                             anyhow::bail!("population departure channel closed")
                         }
                     };
-                    if exit.retire {
-                        app.store
-                            .retire_persona(exit.profile.identity.into(), exit.account)
-                            .await?;
-                    }
                     online.remove(exit.profile.identity);
                     resting.insert(
                         exit.profile.identity,
@@ -140,7 +134,6 @@ async fn maintain(
                     tracing::info!(
                         name = exit.profile.name,
                         account = exit.account,
-                        retired = exit.retire,
                         online = online.len(),
                         "inhabitant session ended"
                     );
