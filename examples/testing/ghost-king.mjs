@@ -53,20 +53,18 @@ export async function run(game){
   const initial=await game.observe();await protect(game);
   await game.act({keys:['s'],duration_ms:150});
   game.check('ordinary native movement works at the naturally placed tower',Math.hypot((await game.observe()).position.x-initial.position.x,(await game.observe()).position.y-initial.position.y)>.3);
-  for(const [index,label,loss,stage,counts] of [[0,'SmallGroup',6500,4,[0,3,3,0]],[1,'Mob',19000,5,[0,3,0,3]],[2,'HugeMob',45000,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
+  await approach(game,initial.position,.3);
+  for(const [index,label,burst,stage,counts] of [[0,'SmallGroup',700,4,[0,3,3,0]],[1,'Mob',2200,5,[0,3,0,3]],[2,'HugeMob',5200,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
     const root=roots[index];
     await protect(game);
     const before=await save(label+'-idle'),original=king(before,root.entity);assert(original?.kind===0x928&&original.hp===300000,'Untouched ordinary King required');
     await cheat(game,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
     for(let n=0;n<20&&king(await game.inspect(),root.entity).stage!==1;n++)await fire(game,root.entity);
     game.check(label+' admits ordinary sword damage',king(await game.inspect(),root.entity).stage===1);
-    await idle(2500);
-    await game.act({keys:[' '],duration_ms:250});
-    game.check(label+' evaluation uses an ordinary Berserk helm',(await game.observe()).character.conditions&(1<<19));
-    for(let n=0;n<24;n++){
-      const current=king(await game.inspect(),root.entity);if(current.stage>=3||300000-current.hp>=loss)break;
-      await fire(game,root.entity);
-    }
+    const step=input=>({actor:game.actor,input}),sequence=[step({keys:[],duration_ms:2000}),step({keys:[' '],duration_ms:250})];
+    for(let remaining=burst;remaining>0;remaining-=250)sequence.push(step({keys:[],duration_ms:Math.min(250,remaining),target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}}));
+    const evaluated=await game.act(sequence);
+    game.check(label+' evaluation uses an ordinary Berserk helm',evaluated.steps[1].character.conditions&(1<<19));
     for(let n=0;n<7&&king(await game.inspect(),root.entity).stage<3;n++)await idle(1000);
     let state=await save(label+'-selected');
     game.check(label+' is selected by measured combat damage',king(state,root.entity).stage===stage);
