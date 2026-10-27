@@ -6,7 +6,7 @@ fn fixture() -> (Content, PlayerView, Brain) {
     v.session.account = 201;
     v.session.world = -4;
     v.quest = None;
-    let mut peer = v.objects[0].clone();
+    let mut peer = crate::bots::quest_tests::fixture().1.objects.remove(0);
     peer.id = 3;
     peer.kind = crate::content::WIZARD;
     peer.account = Some(200);
@@ -181,7 +181,7 @@ fn brief_public_visibility_loss_recovers_but_unseen_or_unsafe_targets_are_not_ch
         "a minimap marker is not visible shared company"
     );
     advance(&mut v, 5000);
-    v.objects.push(peer.clone());
+    v.objects.push(fixture().1.objects.pop().unwrap());
     assert!(b.crowd.cooperator(&v, |_| true).is_some());
     assert!(
         b.crowd.cooperator(&v, |_| false).is_none(),
@@ -201,7 +201,7 @@ fn brief_public_visibility_loss_recovers_but_unseen_or_unsafe_targets_are_not_ch
     assert!(b.crowd.cooperator(&v, |_| true).is_none());
     advance(&mut v, 50);
     assert_eq!(v.elapsed_ms, 12000);
-    v.objects.push(peer.clone());
+    v.objects.push(fixture().1.objects.pop().unwrap());
     assert!(
         b.crowd.cooperator(&v, |_| true).is_none(),
         "reappearance at the six-second loss deadline cannot restore company"
