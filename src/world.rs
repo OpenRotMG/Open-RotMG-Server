@@ -3978,21 +3978,16 @@ impl World {
                 p.movement_credit
             ))
         );
-        let samples = (distance / 0.1).ceil().max(1.) as usize;
+        let traveled = self
+            .player_travel_distance(p.pos, pos)
+            .ok_or_else(|| controller("movement across a blocked tile"))?;
+        let extra = (traveled - distance).max(0.);
         ensure!(
-            (1..=samples).all(|i| {
-                let f = i as f32 / samples as f32;
-                self.player_step_valid(
-                    p.pos,
-                    Pos {
-                        x: p.pos.x + (pos.x - p.pos.x) * f,
-                        y: p.pos.y + (pos.y - p.pos.y) * f,
-                    },
-                )
-            }),
-            controller("movement across a blocked tile")
+            input_distance(elapsed) + extra <= speed * elapsed + 0.3
+                && charged + extra <= credit + 0.001,
+            controller("collision slide exceeds movement budget")
         );
-        Ok(credit - charged)
+        Ok(credit - charged - extra)
     }
 
     pub fn native_move_received(
@@ -4054,6 +4049,69 @@ impl World {
             self.correct_position(id, time, "immobilized movement")?;
         }
         Ok(())
+    }
+    fn player_segment_valid(&self, from: Pos, to: Pos) -> bool {
+        let samples = (from.distance(to) / 0.1).ceil().max(1.) as usize;
+        (1..=samples).all(|i| {
+            let f = i as f32 / samples as f32;
+            self.player_step_valid(
+                from,
+                Pos {
+                    x: from.x + (to.x - from.x) * f,
+                    y: from.y + (to.y - from.y) * f,
+                },
+            )
+        })
+    }
+    fn player_travel_distance(&self, from: Pos, to: Pos) -> Option<f32> {
+        if self.player_segment_valid(from, to) {
+            return Some(from.distance(to));
+        }
+        // MOVE endpoints can straddle a slide around a corner: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as#L353-L423
+        let (min_x, max_x) = (from.x.min(to.x), from.x.max(to.x));
+        let (min_y, max_y) = (from.y.min(to.y), from.y.max(to.y));
+        let mut best = None;
+        for y in min_y.floor() as i32 - 1..=max_y.floor() as i32 + 1 {
+            for x in min_x.floor() as i32 - 1..=max_x.floor() as i32 + 1 {
+                let Some(cell) = self.map.cell(x as f32, y as f32) else {
+                    continue;
+                };
+                let (blocked, full) = self
+                    .entities_at(Pos {
+                        x: x as f32 + 0.5,
+                        y: y as f32 + 0.5,
+                    })
+                    .fold(
+                        (self.content.grounds[&cell.ground] <= 0., cell.ground == 255),
+                        |(blocked, full), e| {
+                            let object = &self.content.objects[&e.kind];
+                            (blocked || object.blocks, full || object.full_occupy)
+                        },
+                    );
+                if !blocked && !full {
+                    continue;
+                }
+                let (low, high) = if full { (-0.5, 1.5) } else { (-0.01, 1.) };
+                for (dx, dy) in [(low, low), (low, high), (high, low), (high, high)] {
+                    let corner = Pos {
+                        x: x as f32 + dx,
+                        y: y as f32 + dy,
+                    };
+                    if corner.x < min_x || corner.x > max_x || corner.y < min_y || corner.y > max_y
+                    {
+                        continue;
+                    }
+                    let distance = from.distance(corner) + corner.distance(to);
+                    if best.is_none_or(|best| distance < best)
+                        && self.player_segment_valid(from, corner)
+                        && self.player_segment_valid(corner, to)
+                    {
+                        best = Some(distance);
+                    }
+                }
+            }
+        }
+        best
     }
     fn player_step_valid(&self, from: Pos, to: Pos) -> bool {
         let crosses =
