@@ -14,25 +14,40 @@ const FAVORITE_SHAPES: [&str; 8] = [
     "s>{give} ({want})",
     "b>{want}={give}",
 ];
+const REFUSAL_SHAPES: [&str; 8] = [
+    "nty",
+    "nah",
+    "no thx",
+    "sry nty",
+    "nty need {want}",
+    "nah need {want}",
+    "no thx need {want}",
+    "sry nty need {want}",
+];
 pub(super) struct Wording {
     created: Instant,
     next: usize,
     result: Arc<Mutex<Option<std::result::Result<Repertoire, Failure>>>>,
 }
 
-pub(super) const PROMPT: &str = r#"Write THREE reusable 2012 Realm trade-chat templates in ONE reply_to_player call with the sole allowed intent. Separate them with literal |. Total reply at most 128 characters.
-The tokens {give}, {want}, @{name} are LITERAL text. Never substitute items, numbers or real names. Follow the supplied voice across all three; first is the repeated favorite, the other two occasional alternatives. For market_advertise, favorite_shape supplies valid literal syntax for the first template, not descriptive words to print; adapt only its capitalization and optional name signature. Use distinct shapes, not three capitalization variants.
+pub(super) const PROMPT: &str = r#"Write THREE reusable 2012 Realm trade-chat templates in ONE reply_to_player call with the sole allowed intent. Separate them with literal |. Total reply at most 128 characters. Do not add literal quotation marks or markdown inside the reply string; encode tool arguments as normal JSON.
+The tokens {give}, {want}, @{name} are LITERAL text. Never substitute items, numbers or real names. Follow the supplied voice across all three; first is the repeated favorite, the other two occasional alternatives. favorite_shape and syntax_examples supply valid literal syntax for the sole allowed intent, not descriptive words to print; adapt only capitalization and a permitted ad name signature. Use distinct shapes, not three capitalization variants.
 For market_advertise use the supplied syntax_examples as literal ad grammar; never mix in refusal words such as need, nty or no thx. The FIRST must be a priced exchange: seller opening wts, selling, sell, s>, trading, trade or t> with {give} then for, = or an implicit space-separated price then {want}; buyer opening wtb, buying, buy or b> with {want} then for, = or an implicit space-separated price then {give}. Spaces after > and around = are optional. Also allowed: {give} = {want}, or s>{give} ({want}).
-Alternatives may be priced exchanges or bare selling interest (selling {give}, s>{give}) or bare buying interest (wtb {want}, buying {want}, b>{want}). Bare interest omits the price and is NOT an agreed exchange. Each mentioned goods token exactly once. Optionally end an ad with literal @{name}, then optionally one ! at the very end.
+Alternatives may be priced exchanges or bare selling interest (selling {give}, s>{give}) or bare buying interest (wtb {want}, buying {want}, b>{want}). Bare interest omits the price and is NOT an agreed exchange. Each mentioned goods token exactly once. If name_signature is true, optionally end an ad with ONE space followed by literal @{name}, then optionally one ! at the very end. Never attach @{name} directly to a goods token.
 For market_refuse use short refusals: nty, nah, no thx, sry nty, or one of these followed by need {want}. No {give} or name in refusals.
-Keep literal brace tokens lowercase, but vary other capitalization, opening, spacing and name signature to fit this speaker's supplied voice. No other words, punctuation, promises or acceptance. Current inventory facts are inserted only by the program. Native trade windows alone authorize acceptance."#;
+Keep literal brace tokens lowercase, but vary other capitalization, opening, spacing and permitted ad name signature to fit this speaker's supplied voice. No other words, punctuation, promises or acceptance. Current inventory facts are inserted only by the program. Native trade windows alone authorize acceptance."#;
 
-fn voice(seed: u64, _intent: Intent) -> Value {
+fn voice(seed: u64, intent: Intent) -> Value {
+    let shapes = match intent {
+        Intent::MarketAdvertise => FAVORITE_SHAPES,
+        Intent::MarketRefuse => REFUSAL_SHAPES,
+        _ => unreachable!("market voice requires a market intent"),
+    };
     json!({
-        "favorite_shape": FAVORITE_SHAPES[seed as usize % 8],
-        "syntax_examples": FAVORITE_SHAPES,
+        "favorite_shape": shapes[seed as usize % 8],
+        "syntax_examples": shapes,
         "capitalization": (["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3]),
-        "name_signature": (seed / 24).is_multiple_of(2),
+        "name_signature": intent == Intent::MarketAdvertise && (seed / 24).is_multiple_of(2),
     })
 }
 
@@ -278,6 +293,20 @@ mod tests {
             assert!(validated_template(ad.trim(), Intent::MarketAdvertise).unwrap());
         }
         assert!(validated_template("buying {want}, need {give}", Intent::MarketAdvertise).is_err());
+        let attached_name =
+            "s>{give} ({want})|selling {give} for {want}|buying {want} for {give}@{name}!";
+        assert!(repertoire(attached_name, Intent::MarketAdvertise).is_err());
+        for ad in attached_name.split('|').take(2) {
+            assert!(validated_template(ad, Intent::MarketAdvertise).unwrap());
+        }
+        assert!(
+            validated_template("buying {want} for {give}@{name}!", Intent::MarketAdvertise).is_err()
+        );
+        assert!(
+            validated_template("buying {want} for {give} @{name}!", Intent::MarketAdvertise).unwrap()
+        );
+        let ads_for_refusal = "s>{give}={want}|{give}={want}|wtb {want} {give}@{name}!";
+        assert!(repertoire(ads_for_refusal, Intent::MarketRefuse).is_err());
     }
 
     fn content() -> Content {
