@@ -204,8 +204,11 @@ fn knight_piercing_shield_hits_each_target_once_and_respects_condition_gates() {
                 .unwrap();
             assert_eq!(
                 w.entities[&target].statuses.contains_key(&effect),
-                ![condition::INVINCIBLE, condition::STASIS].contains(&flag)
-                    && !(flag == 12 && effect == condition::STUNNED)
+                match flag {
+                    condition::INVINCIBLE | condition::STASIS => false,
+                    12 => effect != condition::STUNNED,
+                    _ => true,
+                }
             );
             assert_eq!(w.entities[&target].hp, old - dealt);
             assert_eq!(
