@@ -54,4 +54,19 @@ export async function run(game){
   game.check('keys are consumed once and never duplicated across transfers',redundant.character.items.slice(4).every(x=>x===-1)&&redundant.character.inventory_revision===initial.character.inventory_revision+2);
   game.check('Nexus escape retains the same living account character equipment and XP',redundant.lifecycle.alive&&redundant.session.account===initial.session.account&&redundant.session.character===initial.session.character&&JSON.stringify(redundant.character.items.slice(0,4))===JSON.stringify(initial.character.items.slice(0,4))&&redundant.character.experience===initial.character.experience);
   game.check('other account remains independent in Nexus',escaped.session.account!==nexus.session.account&&escaped.session.character!==nexus.session.character&&escaped.lifecycle.alive);
+  const portal=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x720);assert(portal,'Nexus Vault portal missing');
+  for(let i=0;i<50;i++){
+    const v=await game.observe(),dx=portal.pos.x-v.position.x,dy=portal.pos.y-v.position.y,distance=Math.hypot(dx,dy);
+    if(distance<1)break;
+    const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+    if(Math.abs(x)>.12)keys.push(x>0?'d':'a');
+    if(Math.abs(y)>.12)keys.push(y>0?'s':'w');
+    await game.act({keys,duration_ms:Math.min(300,Math.max(50,Math.round(distance*80)))});
+  }
+  const vault=await enter(game,nexus.session.world,'private-vault');assert.equal(vault.world,'Vault');
+  const neighbor=await other.observe();
+  game.check('private Vault arrival does not move the other account',neighbor.world==='Nexus'&&neighbor.session.player===escaped.session.player);
+  await game.act({keys:['r'],duration_ms:1000});
+  const final=await save('vault-nexus');
+  game.check('Vault escape preserves the same living character and exact inventory',final.world==='Nexus'&&final.lifecycle.alive&&final.session.character===initial.session.character&&JSON.stringify(final.character.items)===JSON.stringify(redundant.character.items)&&final.character.inventory_revision===redundant.character.inventory_revision);
 }
