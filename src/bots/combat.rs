@@ -225,7 +225,10 @@ fn berserk_ally(v: &PlayerView, content: &Content, grid: &Grid, range: f32) -> R
             || v.position.distance(ally.position) > range
             || !ally
                 .condition_mask
-                .is_some_and(|mask| mask & (bit(BERSERK) | bit(STUNNED) | (1 << 20)) == 0)
+                // Dazed overrides Berserk in the authoritative attack rate.
+                .is_some_and(|mask| {
+                    mask & (bit(BERSERK) | bit(DAZED) | bit(STUNNED) | (1 << 20)) == 0
+                })
         {
             continue;
         }
@@ -453,7 +456,7 @@ pub(super) fn movement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::condition::{BERSERK, INVULNERABLE, QUIET, STUNNED, bit};
+    use crate::condition::{BERSERK, DAZED, INVULNERABLE, QUIET, STUNNED, bit};
 
     #[test]
     fn local_support_warrior_aura_beyond_self_reach_and_controls() {
@@ -489,7 +492,13 @@ mod tests {
             "ally benefit is independent of own buff"
         );
         v.character.conditions = 0;
-        for mask in [None, Some(bit(BERSERK)), Some(bit(STUNNED)), Some(1 << 20)] {
+        for mask in [
+            None,
+            Some(bit(BERSERK)),
+            Some(bit(DAZED)),
+            Some(bit(STUNNED)),
+            Some(1 << 20),
+        ] {
             v.objects[1].condition_mask = mask;
             assert!(
                 ability(&v, &content, &grid, &v.objects[0])
@@ -550,13 +559,13 @@ mod tests {
                 .is_none()
         );
         v.character.conditions = 0;
-        v.objects.pop();
+        v.objects[1].condition_mask = Some(bit(DAZED));
         v.objects[0].position.x = 14.;
         assert!(
             ability(&v, &content, &grid, &v.objects[0])
                 .unwrap()
                 .is_some(),
-            "existing self-benefit"
+            "existing self-benefit remains despite Dazed ally"
         );
     }
 }

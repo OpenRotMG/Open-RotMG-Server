@@ -574,6 +574,7 @@ mod tests {
         v.character.conditions = 0;
         assert!(healing_selected(&v, &content, |_| true).unwrap().is_some());
         v.character.items[1] = 0xc09;
+        v.map.name = "Mad Lab".into();
         v.character.conditions = bit(SICK) | bit(SLOWED);
         assert!(healing_selected(&v, &content, |_| true).unwrap().is_some());
     }

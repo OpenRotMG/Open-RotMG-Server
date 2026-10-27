@@ -429,10 +429,11 @@ mod tests {
         for (name, class) in [
             ("support-priest", crate::content::PRIEST),
             ("support-peer", crate::content::WIZARD),
+            ("support-warrior", 0x031d),
         ] {
             let account = store.list(name.into()).await.unwrap();
             let character = store
-                .create(account.id, w.content.get(class).unwrap())
+                .create_prepared(account.id, w.content.get(class).unwrap(), None)
                 .await
                 .unwrap();
             ids.push(w.enter(character, None).unwrap());
@@ -494,10 +495,9 @@ mod tests {
         p.statuses.clear();
         p.character.hp -= 50;
         let before = p.character.hp;
-        w.players.get_mut(&caster).unwrap().character.mp = 200;
-        for (class, kind) in [(crate::content::PRIEST, 0xa31), (0x031d, 0xa66)] {
+        for (caster, kind) in [(ids[0], 0xa31), (ids[2], 0xa66)] {
             let p = w.players.get_mut(&caster).unwrap();
-            p.character.class = class;
+            p.character.mp = 200;
             p.character.items[1] = kind;
             p.ability_ready_ms = 0;
             let mp = p.character.mp;
@@ -510,7 +510,7 @@ mod tests {
             w.activate_ability(caster, slot, &item, origin).unwrap();
             assert_eq!(w.players[&caster].character.mp, mp - item.mana_cost);
             assert!(w.players[&caster].ability_ready_ms > 0);
-            if class == crate::content::PRIEST {
+            if kind == 0xa31 {
                 assert_eq!(w.players[&peer].character.hp, before + 50);
             } else {
                 assert_ne!(w.players[&peer].conditions(w.now) & bit(BERSERK), 0);
