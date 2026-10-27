@@ -1880,6 +1880,8 @@ fn character_list_advertises_product_name_without_changing_transport() {
 }
 
 #[cfg(test)]
+mod class_unlock_tests;
+#[cfg(test)]
 mod community_schema_tests;
 #[cfg(all(test, unix))]
 mod restart_tests;
