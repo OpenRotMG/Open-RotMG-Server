@@ -900,7 +900,7 @@ pub(in crate::bots) async fn life(
     }
     use crate::world::TradeAction;
     let action = if let Some(t) = &mut brain.mind.market.trade {
-        if t.peer != g.name || !g.consent {
+        if t.peer != g.name || (g.kind != HEALTH && !g.consent) {
             Some(TradeAction::Cancel)
         } else {
             let donor = usize::from(!g.giving);
