@@ -23,7 +23,7 @@ export async function run(game){
   const start=await game.observe();
   for(const [index,item,effect,duration,cost] of [[-1,0xab1,4,3000,40],[0,0xab6,4,5500,140],[1,0xb2c,4,6000,140],[2,0xc1c,14,3500,130]]){
     if(index>=0)await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*index,y:428},to:{x:678,y:385}}});
-    const equipped=(await game.observe()).character;
+    const equipped=(await game.inspect()).view.character;
     game.check('native inventory equips '+item,equipped.items[1]===item);
     game.check(item+' applies only its equipment stat bonuses',JSON.stringify(equipped.stats.slice(4))===JSON.stringify(item===0xb2c?[50,50,42,52]:item===0xc1c?[52,52,40,50]:[50,50,40,50]));
     await cheat({kind:'vitals',hp:700,mp:252});
