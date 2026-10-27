@@ -2,19 +2,22 @@ import {writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 export const fixture = {
-  class:0x30e,level:20,seed:12351,world:'mad-lab',position:{x:12.5,y:48.5},
-  equipment:[0xb08,0xa2e,0xb05,0xacd],backpack:Array(8).fill(-1),
-  stats:[670,385,75,25,50,75,40,60],
+  class:0x307,level:20,seed:12351,world:'mad-lab',position:{x:12.5,y:48.5},
+  equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),
+  stats:[700,252,75,25,50,50,40,50],
 };
 export async function run(game) {
   let serial=0,camera=0;
   const protections=new Map([[game.actor,0]]);
+  async function prepare(actor,change) {
+    const request=join(process.env.QA_RESULTS_DIR,'preparation-'+serial+'.json');
+    await writeFile(request,JSON.stringify({id:'explicit-native-preparation-'+serial++,command:{op:'cheat',actor,change}}));
+    execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(process.env.QA_RESULTS_DIR,'native/native.json'),request]);
+  }
   async function act(input,capture) {
     const now=(await game.observe()).game_ms;
     for(const [actor,expires] of protections)if(now>=expires) {
-      const request=join(process.env.QA_RESULTS_DIR,'protection-request-'+serial+'.json');
-      await writeFile(request,JSON.stringify({id:'explicit-native-protection-'+serial++,command:{op:'cheat',actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}));
-      execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(process.env.QA_RESULTS_DIR,'native/native.json'),request]);
+      await prepare(actor,{kind:'protection',condition:'invincible',duration_ms:60000});
       protections.set(actor,now+60000);
     }
     return game.act(input,capture);
@@ -40,8 +43,18 @@ export async function run(game) {
       if(!e){game.check(name+' defeated through native shots',true);return;}
       const view=await game.observe();
       if(Math.hypot(e.pos.x-view.position.x,e.pos.y-view.position.y)>7)await go(e.pos.x-2,e.pos.y+2);
-      const count=kind===0x976&&e.hp>30000&&protections.get(game.actor)-view.game_ms>10000?10:1;
-      await act(Array.from({length:count},()=>({actor:game.actor,input:{keys:[],duration_ms:500,target:{entity:e.id,camera_angle:camera,fire:true}}})));
+      const target={entity:e.id,camera_angle:camera,fire:true};
+      if(kind===0x976) {
+        if(e.condition&(1<<23)){await wait();continue;}
+        const current=await game.observe();
+        await prepare(game.actor,{kind:'vitals',hp:current.character.hp,mp:current.character.stats.max_mp});
+        if(e.hp>30000&&protections.get(game.actor)-current.game_ms>10000) {
+          await act(Array.from({length:3},()=>[
+            {actor:game.actor,input:{keys:[' '],duration_ms:100,target}},
+            {actor:game.actor,input:{keys:[],duration_ms:1200,target}},
+          ]).flat());
+        } else await act({keys:[' '],duration_ms:1000,target});
+      } else await act({keys:[],duration_ms:500,target});
     }
     await save('failed-fight-'+kind);
     throw Error(name+' survived bounded native fight');
@@ -117,7 +130,7 @@ export async function run(game) {
   game.check('native player is Hexed in the green pool',((await game.observe()).character.conditions&(1<<27))!==0);
   await act([
     {actor:game.actor,input:{keys:['d','s'],duration_ms:400}},
-    ...Array.from({length:4},()=>({actor:game.actor,input:{keys:[],duration_ms:200,target:{entity:pet.id,camera_angle:camera,fire:true}}})),
+    ...Array.from({length:4},(_,n)=>({actor:game.actor,input:{keys:n===0?[' ']:[],duration_ms:200,target:{entity:pet.id,camera_angle:camera,fire:true}}})),
   ],{name:'creation-pet',when:view=>(view.character.conditions&(1<<27))===0&&view.nearby.some(e=>e.id===pet.id&&e.hp<pet.hp)});
   game.check("native blue pool removes only that player's Hexed",((await game.observe()).character.conditions&(1<<27))===0&&((await partner.observe()).character.conditions&(1<<27))!==0);
   game.check('ordinary native shots damage the same pet',(await creation()).hp<pet.hp);
