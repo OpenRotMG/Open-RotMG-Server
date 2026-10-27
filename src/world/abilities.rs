@@ -869,6 +869,9 @@ impl World {
 #[cfg(test)]
 #[path = "huntress_tests.rs"]
 mod huntress_tests;
+#[cfg(test)]
+#[path = "sorcerer_tests.rs"]
+mod sorcerer_tests;
 
 #[cfg(test)]
 mod tests {
