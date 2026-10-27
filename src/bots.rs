@@ -1034,8 +1034,15 @@ impl Brain {
                 } else {
                     range
                 };
-                decision.movement =
-                    combat::movement(v, grid, enemies, focus.map(|p| (p, spacing)), retreat, perception, None);
+                decision.movement = combat::movement(
+                    v,
+                    grid,
+                    enemies,
+                    focus.map(|p| (p, spacing)),
+                    retreat,
+                    perception,
+                    None,
+                );
             }
             let held_heal = v
                 .character
@@ -1567,20 +1574,30 @@ impl Brain {
                         && shot_clear(v, grid, destination, s.passes_cover) =>
                 {
                     let heading = steering.filter(|(id, _)| *id == target).map_or_else(
-                        || (v.position.y - destination.y).atan2(v.position.x - destination.x)
-                            + std::f32::consts::FRAC_PI_2
-                                * if v.session.account % 2 == 0 { 1. } else { -1. },
+                        || {
+                            (v.position.y - destination.y).atan2(v.position.x - destination.x)
+                                + std::f32::consts::FRAC_PI_2
+                                    * if v.session.account % 2 == 0 { 1. } else { -1. }
+                        },
                         |(_, heading)| heading,
                     );
                     let movement = combat::movement(
-                        v, grid, enemies, Some((destination, range)), false, perception,
+                        v,
+                        grid,
+                        enemies,
+                        Some((destination, range)),
+                        false,
+                        perception,
                         Some(combat::Steering {
                             heading,
-                            distance: (combat::speed(v) * self.profile.reaction as f32 * 0.05 + 0.5).max(1.25),
+                            distance: (combat::speed(v) * self.profile.reaction as f32 * 0.05
+                                + 0.5)
+                                .max(1.25),
                             clearance: self.mind.cognition.pickup_clearance,
                         }),
                     );
-                    self.steering = movement.map(|p| (target, (p.y - v.position.y).atan2(p.x - v.position.x)));
+                    self.steering =
+                        movement.map(|p| (target, (p.y - v.position.y).atan2(p.x - v.position.x)));
                     movement
                 }
                 Goal::Follow(_) if v.position.distance(destination) < 4.5 => None,

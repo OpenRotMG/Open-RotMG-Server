@@ -10,19 +10,30 @@ fn constructed_combat_travel_keeps_a_direction_instead_of_reversing() {
         view.position = Pos { x: 60.5, y: 60.5 };
         let projectile = &content.objects[&(view.character.items[0] as u16)].projectiles[&0];
         let range = projectile.speed * projectile.lifetime / 10000.;
-        view.objects[0].position = Pos { x: view.position.x + range * 0.8, y: view.position.y };
+        view.objects[0].position = Pos {
+            x: view.position.x + range * 0.8,
+            y: view.position.y,
+        };
         let mut brain = Brain::new(profile, &view);
         let mut previous = None;
         let mut reversals = 0;
         let mut travelled = 0.;
         for _ in 0..60 {
             let decision = brain.decide(&view, &content).unwrap();
-            assert!(matches!(decision.goal, Goal::Fight(2) | Goal::Hunt(2)), "{}: {:?}", profile.name, decision.goal);
+            assert!(
+                matches!(decision.goal, Goal::Fight(2) | Goal::Hunt(2)),
+                "{}: {:?}",
+                profile.name,
+                decision.goal
+            );
             assert!(decision.journey.is_none());
             let target = decision.movement.expect("ordinary combat movement");
             let length = view.position.distance(target);
             assert!(length > 0.);
-            let direction = Pos { x: (target.x - view.position.x) / length, y: (target.y - view.position.y) / length };
+            let direction = Pos {
+                x: (target.x - view.position.x) / length,
+                y: (target.y - view.position.y) / length,
+            };
             if let Some(prior) = previous {
                 let prior: Pos = prior;
                 reversals += usize::from(prior.x * direction.x + prior.y * direction.y < -0.5);
@@ -39,7 +50,11 @@ fn constructed_combat_travel_keeps_a_direction_instead_of_reversing() {
             view.elapsed_ms += profile.reaction * 50;
         }
         assert!(travelled > 20.);
-        assert!(reversals <= 1, "{} reversed {reversals} times during unthreatened constructed travel", profile.name);
+        assert!(
+            reversals <= 1,
+            "{} reversed {reversals} times during unthreatened constructed travel",
+            profile.name
+        );
     }
 }
 
@@ -62,7 +77,10 @@ fn constructed_recovery_bypasses_retained_combat_steering() {
         decisions.push(decision.movement.expect("ordinary safe recovery backstep"));
     }
     assert!(decisions[0].distance(decisions[1]) < 0.001);
-    assert!(decisions[0].distance(view.objects[0].position) > view.position.distance(view.objects[0].position));
+    assert!(
+        decisions[0].distance(view.objects[0].position)
+            > view.position.distance(view.objects[0].position)
+    );
 }
 
 #[test]
@@ -71,14 +89,40 @@ fn constructed_held_steering_respects_walls_and_paralysis() {
     view.position = Pos { x: 60.5, y: 60.5 };
     view.objects[0].position = Pos { x: 64.5, y: 60.5 };
     let mut grid = Grid::terrain(&view);
-    for y in 58..=62 { grid.walkable.remove(&(61, y)); }
+    for y in 58..=62 {
+        grid.walkable.remove(&(61, y));
+    }
     let perception = combat::Perception::attend(&view, &pursuits::Cognition::default(), false);
-    let steering = Some(combat::Steering { heading: 0., distance: 2.5, clearance: 0.7 });
-    let next = combat::movement(&view, &grid, &[&view.objects[0]], Some((view.objects[0].position, 5.)), false, &perception, steering).expect("safe direction along the wall");
+    let steering = Some(combat::Steering {
+        heading: 0.,
+        distance: 2.5,
+        clearance: 0.7,
+    });
+    let next = combat::movement(
+        &view,
+        &grid,
+        &[&view.objects[0]],
+        Some((view.objects[0].position, 5.)),
+        false,
+        &perception,
+        steering,
+    )
+    .expect("safe direction along the wall");
     assert!(grid.segment(view.position, next));
     assert!(next.x < 61.);
     view.character.conditions |= crate::content::PARALYZED;
-    assert!(combat::movement(&view, &grid, &[&view.objects[0]], Some((view.objects[0].position, 5.)), false, &perception, steering).is_none());
+    assert!(
+        combat::movement(
+            &view,
+            &grid,
+            &[&view.objects[0]],
+            Some((view.objects[0].position, 5.)),
+            false,
+            &perception,
+            steering
+        )
+        .is_none()
+    );
     assert_eq!(combat::speed(&view), 0.);
 }
 

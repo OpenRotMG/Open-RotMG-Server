@@ -379,7 +379,9 @@ pub(super) fn movement(
         let spacing = if retreat {
             separation.min(12.) * 3.
         } else {
-            target.map_or(0., |(p, range)| -(point.distance(p) - range * 0.8).abs() * 3.)
+            target.map_or(0., |(p, range)| {
+                -(point.distance(p) - range * 0.8).abs() * 3.
+            })
         };
         // Retain safe steering, not physical inertia; urgent avoidance stays first: https://www.red3d.com/cwr/steer/gdc99/
         let continuity = steering.map_or(0., |s| (direction - s.heading).cos() * 3.);
