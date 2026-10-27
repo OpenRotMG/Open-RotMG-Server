@@ -43,7 +43,13 @@ CREDITS_SQL = "CREATE TABLE level_credits(recipient INTEGER NOT NULL REFERENCES 
 CREDITS_INDEX_SQL = 'CREATE INDEX level_credits_by_giver ON level_credits(giver)'
 DISCORD_GOLD_SQL = "CREATE TABLE discord_gold_grants(request_id TEXT PRIMARY KEY NOT NULL,account INTEGER NOT NULL REFERENCES accounts(id),discord_id TEXT NOT NULL,actor_id TEXT NOT NULL,amount INTEGER NOT NULL CHECK(typeof(amount)='integer' AND amount BETWEEN 1 AND 2147483647))"
 DISCORD_GOLD_GAME = {**DEATH_FAME_GAME, 'discord_gold_grants': ('request_id', 'account', 'discord_id', 'actor_id', 'amount')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME}
+EMAIL_SQL = {
+    'verified_emails': 'CREATE TABLE verified_emails(account INTEGER PRIMARY KEY REFERENCES credentials(account),email TEXT NOT NULL,verified_at INTEGER NOT NULL CHECK(verified_at>0))',
+    'email_verifications': 'CREATE TABLE email_verifications(account INTEGER PRIMARY KEY REFERENCES credentials(account),email TEXT NOT NULL,hash TEXT NOT NULL UNIQUE,issued_at INTEGER NOT NULL,expires_at INTEGER NOT NULL)',
+    'email_send_attempts': 'CREATE TABLE email_send_attempts(account INTEGER NOT NULL REFERENCES accounts(id),ip_hash TEXT NOT NULL,issued_at INTEGER NOT NULL,PRIMARY KEY(account,issued_at))',
+}
+EMAIL_TABLES = {'verified_emails': ('account', 'email', 'verified_at'), 'email_verifications': ('account', 'email', 'hash', 'issued_at', 'expires_at'), 'email_send_attempts': ('account', 'ip_hash', 'issued_at')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -60,7 +66,8 @@ RELOADED_FAME_GAME = {**AUTH_VAULTS_GAME, 'deaths': FAME_GAME['deaths']}
 RELOADED_PICTURES_GAME = {**RELOADED_FAME_GAME, 'pictures': PICTURES_GAME['pictures'], 'picture_sequence': PICTURES_GAME['picture_sequence']}
 RELOADED_COMMUNITY_GAME = {**RELOADED_PICTURES_GAME, 'trade_transactions': COMMUNITY_GAME['trade_transactions'], 'bot_minds': COMMUNITY_GAME['bot_minds']}
 RELOADED_DEATH_FAME_GAME = {**RELOADED_COMMUNITY_GAME, 'deaths': DEATH_FAME_GAME['deaths'], 'legacy_claims': DEATH_FAME_GAME['legacy_claims'], 'level_credits': DEATH_FAME_GAME['level_credits']}
-RELOADED_GAME = {**RELOADED_DEATH_FAME_GAME, 'discord_gold_grants': DISCORD_GOLD_GAME['discord_gold_grants']}
+RELOADED_DISCORD_GOLD_GAME = {**RELOADED_DEATH_FAME_GAME, 'discord_gold_grants': DISCORD_GOLD_GAME['discord_gold_grants']}
+RELOADED_GAME = {**RELOADED_DISCORD_GOLD_GAME, **EMAIL_TABLES}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -180,9 +187,12 @@ def snapshot(path, schema, *, include_schema=False):
         if 'discord_gold_grants' in schema:
             if db.execute("SELECT sql FROM sqlite_schema WHERE name='discord_gold_grants'").fetchone() != (DISCORD_GOLD_SQL,):
                 raise ValueError('Unsupported Discord gold grant metadata')
+        for table, expected in EMAIL_SQL.items():
+            if table in schema and db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (table,)).fetchone() != (expected,):
+                raise ValueError('Unsupported email verification metadata: ' + table)
         result = {}
         for table, columns in schema.items():
-            if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets'}:
+            if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets', *EMAIL_TABLES}:
                 continue
             selected = tuple(c for c in columns if c != 'guid')
             rows = db.execute('SELECT ' + ','.join(selected) + ' FROM ' + table + ' ORDER BY ' + ','.join(selected[:2])).fetchall()
@@ -533,7 +543,9 @@ def gold_reward_sql(version):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_GAME], include_schema=True)
+    if 'credentials' in matched and (('email_verifications' in matched) != (stored_version >= 20)):
+        raise ValueError('Unsupported email verification schema version')
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if (stored_version > max(GAME_SCHEMAS) or
             ((max(versions) >= 12 or stored_version >= 12) and stored_version not in versions)):
@@ -645,6 +657,9 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         schema = GAME_SCHEMAS[bundle['schema']] if name == 'game' else DISCORD
         if snapshot(directory / filename, schema) != bundle[name]:
             raise ValueError('Restored fields differ from uploaded archive: ' + name)
+    if bundle['schema'] >= 20:
+        with closing(sqlite3.connect(directory / 'game.db')) as db:
+            db.executescript(';'.join(EMAIL_SQL.values()) + ';')
     return bundle
 
 

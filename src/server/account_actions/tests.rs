@@ -51,6 +51,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
         connections: Arc::new(tokio::sync::Semaphore::new(32)),
         control: None,
         discord_link_token: Some("a".repeat(64)),
+        email: None,
         browser_links: Arc::default(),
         owners: Arc::default(),
         admission_started: Arc::default(),

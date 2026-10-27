@@ -76,6 +76,7 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+pub(crate) mod email;
 #[cfg(test)]
 pub(crate) use account_actions::tests::fixture as test_app;
 
@@ -123,6 +124,7 @@ pub struct App {
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
+    pub email: Option<Arc<email::Service>>,
     pub(crate) browser_links: Arc<browser_link::Service>,
     pub owners: Arc<Mutex<BTreeMap<i32, lifecycle::Claim>>>,
     pub(crate) admission_started: Arc<AtomicBool>,
@@ -360,6 +362,17 @@ async fn account_request(
                 ensure!(!password.is_empty(), "email and password required");
                 a.store.authenticate(guid, password).await?
             }
+            "sendVerifyEmail" => {
+                ensure!(
+                    form.get("secret").is_none_or(|s| s.is_empty()),
+                    "external platform authentication is not implemented"
+                );
+                let password = form.get("password").context("password required")?.clone();
+                ensure!(!password.is_empty(), "register before verifying an email");
+                let id = a.store.authenticate(guid, password).await?;
+                email::send(&a, id, request_ip(&a, &headers, peer)?).await?;
+                id
+            }
             "setName" => {
                 ensure!(
                     form.get("secret").is_none_or(|s| s.is_empty()),
@@ -428,7 +441,19 @@ async fn account_request(
     let xml = match result {
         Ok(id) => {
             tracing::info!(account = id, operation, "account request completed");
-            "<Success/>".into()
+            if operation == "verify" {
+                // The selected 123.5.1 account dialog checks direct child presence, not a boolean value.
+                match a.store.email_verified(id).await {
+                    Ok(true) => "<Account><VerifiedEmail/></Account>".into(),
+                    Ok(false) => "<Account/>".into(),
+                    Err(e) => {
+                        tracing::error!(account=id, error=%e, "read email verification state");
+                        "<Error>Unable to read email verification state</Error>".into()
+                    }
+                }
+            } else {
+                "<Success/>".into()
+            }
         }
         Err(e) => {
             tracing::warn!(error=%e, operation, "account request rejected");
@@ -3113,7 +3138,8 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/internal/discord/gold", post(discord_gold))
         .route("/internal/discord/kick", post(discord_kick))
         .route("/internal/discord/recover", post(discord_recover))
-        .route("/api/account/recover", post(reset_password));
+        .route("/api/account/recover", post(reset_password))
+        .route("/api/account/verify-email", post(email::confirm));
     app.route("/dev/testing", post(testing::command))
         .route("/dev/join", post(bot_create))
         .route("/dev/action", post(bot_action))

@@ -12,6 +12,7 @@ Environment=DISCORD_LINK_TOKEN_FILE=%d/discord-link-token
 Environment=RUST_BACKTRACE=1
 EnvironmentFile=-/etc/openrotmg/bot-dialogue.env
 EnvironmentFile=-/etc/openrotmg/discord-oauth.env
+EnvironmentFile=-/etc/openrotmg/email.env
 ExecStart=/opt/openrotmg/server/openrotmg --config /etc/openrotmg/config.json
 Restart=on-failure
 RestartSec=5
