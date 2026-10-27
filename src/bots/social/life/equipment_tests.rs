@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     bots::runtime::tests::actor_in,
     server::{App, Owner},
-    world::{Slot, TradeAction},
+    world::Slot,
 };
 use tokio::sync::mpsc;
 const RING: i32 = 0xa4f;
