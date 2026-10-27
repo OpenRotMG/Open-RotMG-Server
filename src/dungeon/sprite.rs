@@ -93,7 +93,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let (bx, by) = centers[boss];
     map.cells[(by * width + bx) as usize].object = Some(0xd06);
     map.cells[(by * width + bx + 3) as usize].object = Some(0x70e);
-    let gods = rng.gen_range(0..=5);
+    // The guide bounds the count, not its odds; 20% rolls tune rarity for #678, not recovered RNG:
+    // https://web.archive.org/web/20120531054927id_/http://forums.wildshadow.com/wiki/realm-mad-god/sprite-world
+    let gods = (0..5).filter(|_| rng.gen_ratio(1, 5)).count();
     let mut hosts: Vec<_> = centers
         .iter()
         .enumerate()
@@ -214,6 +216,32 @@ fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn native_sprite_gods_are_uncommon_and_bounded() {
+        let content = Content::load(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/data"
+        )))
+        .unwrap();
+        let mut counts = [0; 6];
+        for seed in 0..1024 {
+            let map = generate(&content, seed).unwrap();
+            let gods = map.cells.iter().filter(|c| c.object == Some(0xd05)).count();
+            counts[gods] += 1;
+        }
+        eprintln!("Native Sprite God population histogram (0..=5): {counts:?}");
+        assert!(counts[0] > 300, "empty dungeons should be common");
+        assert!(
+            counts[3..].iter().sum::<usize>() < 100,
+            "large groups should be rare"
+        );
+        assert!(counts[1] > counts[2] && counts[2] > counts[3]);
+        assert!(
+            counts[4] + counts[5] > 0,
+            "retain the historical upper range"
+        );
+    }
 
     #[test]
     fn sprite_floor_uses_reference_palette() {

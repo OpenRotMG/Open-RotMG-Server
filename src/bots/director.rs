@@ -69,7 +69,7 @@ async fn fill(
             break;
         };
         // Logins begin in Nexus; the bot must choose and enter a published Realm portal.
-        runtime::launch(
+        if let Err(error) = runtime::launch(
             app,
             profile,
             character,
@@ -78,7 +78,20 @@ async fn fill(
             owner,
             Some(done.clone()),
         )
-        .await?;
+        .await
+        {
+            if error
+                .downcast_ref::<crate::store::Rejected>()
+                .is_some_and(|r| r.0 == "persona name is already in use")
+            {
+                tracing::info!(
+                    name = profile.name,
+                    "persona name claimed during admission; remaining offline"
+                );
+                continue;
+            }
+            return Err(error);
+        }
         online.insert(profile.identity);
         tracing::info!(
             account,

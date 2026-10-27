@@ -10,15 +10,15 @@ pub(crate) struct NameReservation {
 }
 
 impl World {
-    pub(crate) fn begin_name_choice(
-        &mut self,
+    pub(crate) fn check_name_choice(
+        &self,
         player: i32,
         account: i32,
-    ) -> Result<std::result::Result<NameReservation, &'static str>> {
+    ) -> Result<std::result::Result<(), &'static str>> {
         let trading = self.trade_key(player).is_some();
         let p = self
             .players
-            .get_mut(&player)
+            .get(&player)
             .context("name choice player missing")?;
         ensure!(p.character.account == account, "name choice owner mismatch");
         ensure!(
@@ -31,6 +31,20 @@ impl World {
         if !p.active() || p.pending || p.character.hp <= 0 {
             return Ok(Err("Cannot choose a name while busy or dead."));
         }
+        Ok(Ok(()))
+    }
+    pub(crate) fn begin_name_choice(
+        &mut self,
+        player: i32,
+        account: i32,
+    ) -> Result<std::result::Result<NameReservation, &'static str>> {
+        if let Err(reason) = self.check_name_choice(player, account)? {
+            return Ok(Err(reason));
+        }
+        let p = self
+            .players
+            .get_mut(&player)
+            .context("name choice player missing")?;
         let plan = NameReservation {
             player,
             account,

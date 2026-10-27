@@ -27,6 +27,10 @@ impl World {
             ));
         }
         let chase = |speed, sight, stop| (Motion::Chase { sight, stop }, speed);
+        if e.kind == 0x651 && self.name != "Abyss of Demons" {
+            let profile = encounter::profile(e.kind).expect("White Demon profile");
+            return Ok((profile.motion, profile.speed));
+        }
         Ok(match e.kind {
             0x652 => (Motion::Wander, 2.),
             0x653 => {
@@ -216,11 +220,29 @@ impl World {
         }
         let e = &self.entities[&id];
         let heading = (target.y - e.pos.y).atan2(target.x - e.pos.x);
-        let velocity = if let Some(p) = self
+        let player = self
             .players
             .values()
-            .find(|p| p.pos.x == target.x && p.pos.y == target.y)
-        {
+            .find(|p| p.pos.x == target.x && p.pos.y == target.y);
+        if e.kind == 0x651 && self.name != "Abyss of Demons" {
+            if let Some(p) = player {
+                let history = p.white_demon_aim_history[0];
+                let previous = (history.y - e.pos.y).atan2(history.x - e.pos.x);
+                for (index, angle) in shots.iter_mut() {
+                    *angle += (heading - previous) / 0.1
+                        * (self.content.objects[&e.kind].projectiles[index].speed / 100.)
+                        * factor(*index);
+                }
+            } else {
+                ensure!(
+                    self.decoy_positions()
+                        .any(|p| p.x == target.x && p.y == target.y),
+                    "predictive target is neither a current player nor a live decoy"
+                );
+            }
+            return Ok(());
+        }
+        let velocity = if let Some(p) = player {
             if self.now.saturating_sub(p.motion.at) <= 200 {
                 p.motion.velocity
             } else {
@@ -457,3 +479,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "gods_white_demon_tests.rs"]
+mod white_demon_tests;

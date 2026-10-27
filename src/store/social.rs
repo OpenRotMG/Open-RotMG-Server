@@ -23,13 +23,8 @@ fn lists(db: &Connection, account: i32) -> Result<AccountLists> {
 impl Store {
     pub async fn account_named(&self, name: String) -> Result<i32> {
         self.call(move |db| {
-            db.query_row(
-                "SELECT id FROM accounts WHERE name=?1 COLLATE NOCASE",
-                [name],
-                |r| r.get(0),
-            )
-            .optional()?
-            .ok_or_else(|| anyhow::anyhow!(Rejected("Player not found.")))
+            accounts::named_account(db, &name)?
+                .ok_or_else(|| anyhow::anyhow!(Rejected("Player not found.")))
         })
         .await
     }

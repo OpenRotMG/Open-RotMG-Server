@@ -68,7 +68,7 @@ fn white_demon_gear(content: &Content, seed: u64) -> Vec<i32> {
 }
 
 #[tokio::test]
-async fn god_gear_death_roll_is_once_per_candidate_and_contributor_group_only() {
+async fn god_gear_death_roll_is_once_per_candidate_with_private_colored_bags() {
     let (mut w, _store, owners) = reward_world().await;
     let mut seeds = vec![0, 1, 2, 3];
     let multiple = (0..32768)
@@ -100,12 +100,13 @@ async fn god_gear_death_roll_is_once_per_candidate_and_contributor_group_only() 
             let mut actual = Vec::new();
             for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
                 assert_eq!(bag.items.len(), 8);
-                for (account, _) in &owners[..contributors] {
-                    assert!(
-                        bag.accessible(*account),
-                        "shared gear available to each contributor"
-                    );
-                }
+                assert_eq!(
+                    owners[..contributors]
+                        .iter()
+                        .filter(|(account, _)| bag.accessible(*account))
+                        .count(),
+                    if bag.kind == 0x500 { contributors } else { 1 }
+                );
                 assert!(!bag.accessible(owners[5].0));
                 actual.extend(bag.items.iter().copied().filter(|item| *item >= 0));
             }
@@ -178,7 +179,70 @@ async fn septavius_doom_fraction_qualifies_at_fifteen_percent_without_raising_ot
 }
 
 #[tokio::test]
-async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collection_once() {
+async fn god_potions_do_not_erase_successful_equipment_drops() {
+    let (mut w, _store, owners) = reward_world().await;
+    for kind in [
+        0x651, 0x652, 0x654, 0x655, 0x656, 0x657, 0x658, 0x659, 0x91a, 0x6d8, 0xd05,
+    ] {
+        for count in [1, 2] {
+            let contributors: Vec<_> = owners[..count]
+                .iter()
+                .map(|(account, _)| (*account, crate::loot::potion_damage(kind).unwrap()))
+                .collect();
+            let (seed, loot) = (0..16384)
+                .find_map(|seed| {
+                    let loot = crate::loot::god_loot(
+                        &w.content,
+                        kind,
+                        &contributors,
+                        &mut rand::rngs::StdRng::seed_from_u64(seed),
+                    );
+                    (!loot.shared.is_empty() && loot.private.contains_key(&owners[0].0))
+                        .then_some((seed, loot))
+                })
+                .expect("seeded death must exercise simultaneous equipment and potion rolls");
+            let mut expected: Vec<_> = loot
+                .shared
+                .into_iter()
+                .chain(loot.private.into_values().flatten())
+                .map(i32::from)
+                .collect();
+            expected.sort_unstable();
+            clear_bags(&mut w);
+            let root = w
+                .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
+                .unwrap();
+            w.entities.get_mut(&root).unwrap().damage = owners[..count]
+                .iter()
+                .map(|(_, character)| (*character, crate::loot::potion_damage(kind).unwrap()))
+                .collect();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.defeat_entity(root).unwrap();
+            let mut actual: Vec<_> = w
+                .bag_expiry
+                .keys()
+                .flat_map(|id| {
+                    let bag = &w.entities[id];
+                    assert!(
+                        owners[..count]
+                            .iter()
+                            .any(|(account, _)| bag.accessible(*account))
+                    );
+                    assert!(!bag.accessible(owners[count].0));
+                    bag.items.iter().copied().filter(|item| *item >= 0)
+                })
+                .collect();
+            actual.sort_unstable();
+            assert_eq!(
+                actual, expected,
+                "{kind:#x}, {count} contributors, seed {seed}: successful gear must survive a potion roll"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn god_bags_split_all_successes_reject_nonowners_and_commit_collection_once() {
     let (mut w, store, owners) = reward_world().await;
     let contributors: Vec<_> = owners[..5]
         .iter()
@@ -203,9 +267,13 @@ async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collect
             assert_eq!(bag.items.len(), 8);
             assert!(bag.published);
             assert_eq!(w.bag_expiry[id], w.now + 60_000);
-            for (account, _) in &owners[..5] {
-                assert!(bag.accessible(*account));
-            }
+            assert_eq!(
+                owners[..5]
+                    .iter()
+                    .filter(|(account, _)| bag.accessible(*account))
+                    .count(),
+                if bag.kind == 0x500 { 5 } else { 1 }
+            );
             assert!(!bag.accessible(owners[5].0));
             bag.items.iter().copied().filter(|item| *item >= 0)
         })
@@ -225,8 +293,12 @@ async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collect
             .map(|(id, _)| *id)
             .unwrap()
     };
-    let winner = player(owners[0].0);
-    let peer = player(owners[1].0);
+    let (account, character) = *owners[..5]
+        .iter()
+        .find(|(account, _)| w.entities[&bag].accessible(*account))
+        .unwrap();
+    let winner = player(account);
+    let peer = player(owners.iter().find(|(a, _)| *a != account).unwrap().0);
     let outsider = player(owners[5].0);
     w.players.get_mut(&winner).unwrap().controller = Controller::Human;
     let from = Slot {
@@ -268,10 +340,59 @@ async fn god_shared_bags_split_all_successes_reject_outsiders_and_commit_collect
         w.swap(peer, from, to(peer)).is_err(),
         "committed item cannot be collected twice"
     );
-    let saved = store.load(owners[0].0, owners[0].1).await.unwrap();
+    let saved = store.load(account, character).await.unwrap();
     assert_eq!(saved.items[5], item);
     assert_eq!(saved.items[4], 0xa22);
     assert_eq!(saved.revision, revision);
+}
+
+#[tokio::test]
+async fn purple_god_bag_has_one_owner_even_when_a_bot_contributed() {
+    let (mut w, _store, owners) = reward_world().await;
+    w.rng = rand::rngs::StdRng::seed_from_u64(650);
+    w.god_loot_bags(
+        Pos { x: 1.5, y: 1.5 },
+        crate::loot::GodLoot {
+            shared: vec![0xa3c],
+            shared_owners: owners[..2].iter().map(|(account, _)| *account).collect(),
+            private: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let bag = *w.bag_expiry.keys().next().unwrap();
+    assert_eq!(w.entities[&bag].kind, 0x503);
+    let eligible: Vec<_> = w.players.keys().copied().take(2).collect();
+    let allowed: Vec<_> = eligible
+        .iter()
+        .copied()
+        .filter(|id| w.entities[&bag].accessible(w.players[id].character.account))
+        .collect();
+    assert_eq!(
+        allowed.len(),
+        1,
+        "purple loot must not be shared between contributors"
+    );
+    let owner = allowed[0];
+    let peer = *eligible.iter().find(|id| **id != owner).unwrap();
+    w.players.get_mut(&owner).unwrap().controller = Controller::Human;
+    w.players.get_mut(&peer).unwrap().controller = Controller::Autonomous;
+    let from = Slot {
+        object: bag,
+        slot: 0,
+        kind: 0xa3c,
+    };
+    let to = |id| Slot {
+        object: id,
+        slot: 5,
+        kind: -1,
+    };
+    assert!(w.visible(owner).contains(&bag));
+    assert!(!w.visible(peer).contains(&bag));
+    assert!(w.swap(peer, from, to(peer)).is_err());
+    assert_eq!(w.entities[&bag].items[0], 0xa3c);
+    assert!(!w.entities[&bag].reserved);
+    let plan = w.swap(owner, from, to(owner)).unwrap();
+    assert_eq!(plan.collected, Some(0xa3c));
 }
 
 #[tokio::test]
@@ -302,18 +423,21 @@ async fn god_shared_bags_reject_exhausted_capacity_without_an_extra_entity() {
 }
 
 #[tokio::test]
-async fn god_shared_collection_failed_receipt_retains_reservation_without_credit() {
+async fn god_brown_shared_collection_failed_receipt_retains_reservation_without_credit() {
     let (mut w, store, owners) = reward_world().await;
     w.god_loot_bags(
         Pos { x: 1.5, y: 1.5 },
         crate::loot::GodLoot {
-            shared: vec![0xa3c],
+            shared: vec![0xa22],
             shared_owners: vec![owners[0].0, owners[1].0],
             private: BTreeMap::new(),
         },
     )
     .unwrap();
     let bag = *w.bag_expiry.keys().next().unwrap();
+    assert_eq!(w.entities[&bag].kind, 0x500);
+    assert!(w.entities[&bag].accessible(owners[0].0));
+    assert!(w.entities[&bag].accessible(owners[1].0));
     let player = |account| {
         w.players
             .iter()
@@ -328,7 +452,7 @@ async fn god_shared_collection_failed_receipt_retains_reservation_without_credit
     let from = Slot {
         object: bag,
         slot: 0,
-        kind: 0xa3c,
+        kind: 0xa22,
     };
     let to = |id| Slot {
         object: id,
@@ -337,7 +461,7 @@ async fn god_shared_collection_failed_receipt_retains_reservation_without_credit
     };
     let before = store.load(owners[0].0, owners[0].1).await.unwrap();
     let plan = w.swap(winner, from, to(winner)).unwrap();
-    assert_eq!(plan.collected, Some(0xa3c));
+    assert_eq!(plan.collected, Some(0xa22));
     let error = w
         .finish_inventory(
             plan,
@@ -352,7 +476,7 @@ async fn god_shared_collection_failed_receipt_retains_reservation_without_credit
     assert!(w.players[&winner].persistence_failure.is_some());
     assert!(w.players[&winner].pending);
     assert!(w.entities[&bag].reserved);
-    assert_eq!(w.entities[&bag].items[0], 0xa3c);
+    assert_eq!(w.entities[&bag].items[0], 0xa22);
     assert!(w.entities[&bag].drop_slots.contains(&0));
     assert_eq!(w.players[&winner].character.items, before.items);
     assert_eq!(w.players[&winner].character.revision, before.revision);

@@ -1304,6 +1304,53 @@ fn assert_entry_stop(logs: &DialogueLogs, id: i32) {
 }
 
 #[tokio::test]
+async fn drain_entry_runtime_frozen_before_launch_releases_unpublished_claim() {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let account = app
+        .store
+        .list("frozen-before-launch".into())
+        .await
+        .unwrap()
+        .id;
+    let ch = app
+        .store
+        .create(account, app.content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let character = ch.id;
+    let owner = app.claim(account).unwrap();
+    lifecycle::drain::prepare(&app);
+    let error = start_selected(&app, profile(), ch, -2, Pos { x: 77.5, y: 72.5 }, owner)
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("controller entry interrupted by drain"),
+        "{error:#}"
+    );
+    assert!(
+        app.world
+            .directory(move |d| Ok(d
+                .worlds
+                .values()
+                .all(|w| w.players.values().all(|p| p.character.id != character))))
+            .await
+            .unwrap()
+    );
+    assert_eq!(app.cctv.binding(profile().name), None);
+    assert!(
+        lifecycle::state(&app, account).is_none(),
+        "unpublished rejected launch retained a claim"
+    );
+    tokio::time::timeout(Duration::from_secs(5), lifecycle::drain::terminate(&app))
+        .await
+        .unwrap()
+        .unwrap();
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn drain_entry_runtime_freeze_before_new_entry_is_expected_stop() {
     for mode in [EntryBoundary::Freeze, EntryBoundary::Shutdown] {
         let logs = DialogueLogs::default();
@@ -1348,7 +1395,7 @@ async fn drain_entry_runtime_preserves_actual_failures_after_admission_even_when
         );
         let (dir, app) = server::test_app();
         app.world.clock.set_paused(true);
-        let (_, _, id) = drain_entry_bot(&app).await;
+        let (account, _, id) = drain_entry_bot(&app).await;
         reach_entry_boundary(&app, id, mode).await;
         let stopped = logs.wait("autonomous controller stopped", id).await;
         assert_eq!(stopped["level"], "ERROR");
@@ -1366,11 +1413,9 @@ async fn drain_entry_runtime_preserves_actual_failures_after_admission_even_when
         let drain = tokio::time::timeout(Duration::from_secs(5), lifecycle::drain::terminate(&app))
             .await
             .unwrap();
-        if matches!(mode, EntryBoundary::World | EntryBoundary::Io) {
-            assert!(drain.is_err());
-        } else {
-            drain.unwrap();
-        }
+        let failure = format!("{:#}", drain.unwrap_err());
+        assert!(failure.contains(expected), "{failure}");
+        assert!(lifecycle::state(&app, account).is_some_and(|state| state.2));
         drop(app);
         std::fs::remove_dir_all(dir).unwrap();
     }

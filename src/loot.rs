@@ -1126,7 +1126,8 @@ pub(crate) fn god_loot(
     assert!(!contributors.is_empty(), "god loot needs contributors");
     let mut loot = GodLoot {
         shared: Vec::new(),
-        shared_owners: Vec::new(),
+        // Private potions must not erase successful gear: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs
+        shared_owners: contributors.iter().map(|&(owner, _)| owner).collect(),
         private: std::collections::BTreeMap::new(),
     };
     for item in god_equipment(content, kind, rng) {
@@ -1145,9 +1146,6 @@ pub(crate) fn god_loot(
                     loot.private.entry(owner).or_default().push(item);
                 }
             }
-        }
-        if !loot.private.contains_key(&owner) {
-            loot.shared_owners.push(owner);
         }
     }
     loot
@@ -1397,10 +1395,7 @@ mod tests {
             let qualified: Vec<_> = (1..=count).map(|account| (account, 180)).collect();
             let loot = god_loot(&content, 0x651, &qualified, &mut StepRng::new(0, 1));
             assert_eq!(loot.shared, expected);
-            assert!(
-                loot.shared_owners.is_empty(),
-                "Kithio excludes private reward recipients"
-            );
+            assert_eq!(loot.shared_owners, (1..=count).collect::<Vec<_>>());
             assert_eq!(loot.private.len(), count as usize);
             assert!(loot.private.values().all(|items| *items == [0xa1f]));
         }
@@ -1421,7 +1416,7 @@ mod tests {
             let mut allocated = std::collections::BTreeSet::new();
             for (owner, items) in loot.private {
                 assert!(owners.iter().any(|(account, _)| *account == owner));
-                assert!(!loot.shared_owners.contains(&owner));
+                assert!(loot.shared_owners.contains(&owner));
                 for item in items {
                     assert!(pool.contains(&item));
                     assert!(allocated.insert(item), "one allocation per shared success");

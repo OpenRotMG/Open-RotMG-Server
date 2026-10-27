@@ -11,6 +11,8 @@ pub const SPAWNER: u16 = 0xe28;
 pub const DART: u16 = 0xe25;
 pub const GUARD_RAGE_HP: i32 = 3300;
 const TREASURE_ENTRY_RISE: i32 = 12;
+// Keep bounds and darts on the eleven-tile rails of this later inactive template: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/maps/wmap%27s/snakepit%20treasure%20test.wmap
+const TREASURE_HALF_WIDTH: i32 = 5;
 
 // The modified 7.0 server provides explicit timings, not an authenticated 123.5.1 AI script.
 pub fn phase(elapsed: u64) -> (u64, u64) {
@@ -115,7 +117,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         let half: Vec<(i32, i32)> = (0..rooms.len())
             .map(|i| match i {
                 6 => (15, 15),
-                i if i >= ordinary => (7, 16),
+                i if i >= ordinary => (TREASURE_HALF_WIDTH, 16),
                 _ => {
                     let r = rng.gen_range(7..=9);
                     (r, r)
@@ -271,17 +273,21 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     map.cells[(sy * width + sx) as usize].region = 1;
     map.cells[(sy * width + sx) as usize].object = Some(0x703);
     let (bx, by) = centers[6];
-    // Boss cover is permanent, unlike tunnel blocks: https://bluenosersguide.weebly.com/snake-pit.html
-    for (dx, dy) in [(-6, 0), (6, 0), (0, -6), (0, 6)] {
-        for along in -2..=2 {
-            for thick in 0..2 {
+    // Reconstruct the later map's notched shoulders, rim clearance and mixed cover, not rectangular bars: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/snakepit.wmap
+    for (dx, dy) in [(-10, 0), (10, 0), (0, -10), (0, 10)] {
+        for along in -2i32..=2 {
+            for thick in -1..=1 {
+                if thick == -1 && along.abs() == 2 || thick == 1 && along == 0 {
+                    continue;
+                }
                 let (x, y) = if dx == 0 {
                     (bx + along, by + dy + thick * dy.signum())
                 } else {
                     (bx + dx + thick * dx.signum(), by + along)
                 };
                 map.cells[(y * width + x) as usize].ground = 0x16;
-                map.cells[(y * width + x) as usize].object = Some(0x170);
+                map.cells[(y * width + x) as usize].object =
+                    Some(if dx == 0 && along >= 0 { 0x172 } else { 0x170 });
             }
         }
     }
@@ -316,11 +322,11 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
             && x.abs()
                 <= match y {
                     ..=-11 | 7..=9 => 2,
-                    _ => 7,
+                    _ => TREASURE_HALF_WIDTH,
                 }
     };
     for dy in -16i32..=16 {
-        for dx in -7i32..=7 {
+        for dx in -TREASURE_HALF_WIDTH..=TREASURE_HALF_WIDTH {
             if !inside(dx, dy) {
                 continue;
             }
@@ -339,7 +345,7 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
     map.cells[((cy - 12) * map.width + cx) as usize].object = Some(BUTTON);
     map.cells[(cy * map.width + cx) as usize].object = Some(SPAWNER);
     for dy in [-4, -2, 0, 2, 4] {
-        for dx in [-7, 7] {
+        for dx in [-TREASURE_HALF_WIDTH, TREASURE_HALF_WIDTH] {
             map.cells[((cy + dy) * map.width + cx + dx) as usize].object = Some(DART);
         }
     }
@@ -369,7 +375,7 @@ mod tests {
                         && x.abs()
                             <= match y {
                                 ..=-11 | 7..=9 => 2,
-                                _ => 7,
+                                _ => 5,
                             }
                 };
                 assert!(cx > 7 && cy > 16 && cy + 16 < map.height - 1);
@@ -377,9 +383,11 @@ mod tests {
                     for dx in -7..=7 {
                         let cell = &map.cells[((cy + dy) * map.width + cx + dx) as usize];
                         assert_eq!(
-                            cell.ground != 0xff,
+                            matches!(cell.ground, 0x32 | 0xca | 0xc3),
                             inside(dx, dy),
-                            "seed {seed} outline {dx},{dy}"
+                            "seed {seed}, spawner {cx},{cy}, map {}x{}, outline {dx},{dy}",
+                            map.width,
+                            map.height
                         );
                         if !inside(dx, dy) {
                             continue;
@@ -399,13 +407,22 @@ mod tests {
                     map.cells[((cy - 12) * map.width + cx) as usize].object,
                     Some(BUTTON)
                 );
+                for dy in [-4, -2, 0, 2, 4] {
+                    for dx in [-5, 5] {
+                        assert_eq!(
+                            map.cells[((cy + dy) * map.width + cx + dx) as usize].object,
+                            Some(DART),
+                            "seed {seed} dart {dx},{dy}"
+                        );
+                    }
+                }
             }
         }
         assert!(treasures > 0);
     }
 
     #[test]
-    fn stheno_room_is_a_notched_square() {
+    fn stheno_room_and_cover_have_notched_outlines() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for seed in 0..8 {
             let map = generate(&content, seed).unwrap();
@@ -415,10 +432,19 @@ mod tests {
                 .position(|c| c.object == Some(BOSS))
                 .unwrap() as i32;
             let (bx, by) = (boss % map.width, boss / map.width);
+            let mut cover = [[0; 2]; 4];
             for dy in -16i32..=16 {
                 for dx in -16i32..=16 {
                     let (near, far) = (dx.abs().min(dy.abs()), dx.abs().max(dy.abs()));
                     let cell = &map.cells[((by + dy) * map.width + bx + dx) as usize];
+                    if far < 12 && matches!(cell.object, Some(0x170 | 0x172)) {
+                        let group = if dx.abs() > dy.abs() {
+                            usize::from(dx > 0)
+                        } else {
+                            2 + usize::from(dy > 0)
+                        };
+                        cover[group][usize::from(cell.object == Some(0x172))] += 1;
+                    }
                     let inside = far <= 15 && near < 12;
                     let edge = inside && (far == 15 || near == 11 && far >= 12);
                     if far <= 15 {
@@ -427,7 +453,43 @@ mod tests {
                         assert_eq!(cell.ground, 0xff, "seed {seed} outside {dx},{dy}");
                     }
                     assert_eq!(cell.ground == 0x32, edge, "seed {seed} border {dx},{dy}");
+                    let expected_cover =
+                        matches!((far, near), (9, 0..=1) | (10, 0..=2) | (11, 1..=2));
+                    assert_eq!(
+                        matches!(cell.object, Some(0x170 | 0x172)) && inside,
+                        expected_cover,
+                        "seed {seed} cover {dx},{dy}"
+                    );
+                    if expected_cover {
+                        assert_eq!(cell.ground, 0x16);
+                    }
                 }
+            }
+            for (group, [hard, soft]) in cover.into_iter().enumerate() {
+                assert_eq!(hard + soft, 12, "seed {seed}, cover {group}");
+                assert!(
+                    hard > 0,
+                    "seed {seed}, cover {group} needs permanent shelter"
+                );
+                assert_eq!(soft > 0, group >= 2, "seed {seed}, cover {group}");
+            }
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let outer = (1..=15)
+                    .filter(|r| {
+                        (-2..=2).any(|along| {
+                            let (x, y) = (bx + r * dx + along * dy, by + r * dy + along * dx);
+                            matches!(
+                                map.cells[(y * map.width + x) as usize].object,
+                                Some(0x170 | 0x172)
+                            )
+                        })
+                    })
+                    .max();
+                assert_eq!(
+                    outer,
+                    Some(11),
+                    "seed {seed} cover {dx},{dy}: four clear rim tiles"
+                );
             }
         }
     }
@@ -439,6 +501,12 @@ mod tests {
             let map = generate(&content, seed).unwrap();
             let count = |kind| map.cells.iter().filter(|c| c.object == Some(kind)).count();
             assert_eq!(count(BOSS), 1);
+            let boss = map
+                .cells
+                .iter()
+                .position(|c| c.object == Some(BOSS))
+                .unwrap() as i32;
+            let (bx, by) = (boss % map.width, boss / map.width);
             assert_eq!(count(0x703), 1);
             assert_eq!(count(GUARD), 0);
             assert!(count(SPAWNER) <= 3);
@@ -463,7 +531,10 @@ mod tests {
                 .cells
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| c.object == Some(0x172))
+                .filter(|(i, c)| {
+                    let (x, y) = (*i as i32 % map.width, *i as i32 / map.width);
+                    c.object == Some(0x172) && (x - bx).abs().max((y - by).abs()) > 11
+                })
                 .map(|(i, _)| i)
                 .collect();
             assert!(!soft.is_empty());

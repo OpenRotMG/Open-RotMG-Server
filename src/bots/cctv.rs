@@ -93,6 +93,12 @@ impl Cctv {
     pub(crate) fn binding(&self, name: &str) -> Option<(i32, i32)> {
         self.lock().feeds.get(name).and_then(|f| f.session)
     }
+    pub(crate) fn account_session(&self, account: i32) -> Option<(&'static str, i32)> {
+        self.lock().feeds.iter().find_map(|(name, feed)| {
+            let (player, owner) = feed.session?;
+            (owner == account).then_some((*name, player))
+        })
+    }
     pub(crate) fn perspective(
         &self,
         name: &str,

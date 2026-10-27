@@ -75,6 +75,60 @@ class ProfileTests(unittest.TestCase):
             self.assertGreater(size, 2 * 1024**3)
             self.assertEqual(vanished, 0)
 
+    def test_byte_budget_retires_oldest_eligible_incidents_using_unique_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / 'session-99-42'
+            active.mkdir()
+            (active / 'perf.data.123').write_bytes(b'x' * 50000)
+            for n, size in [(0, 40000), (1, 0), (2, 80000), (3, 70000)]:
+                capture = root / f'incident-{n}'
+                capture.mkdir()
+                profile.write(capture / 'complete.json', {})
+                (capture / 'payload').write_bytes(b'x' * size)
+            (root / 'incident-0' / 'retain').touch()
+            os.link(active / 'perf.data.123', root / 'incident-1' / 'perf.data.123')
+            limit = profile.storage_bytes(root)[0] - 60000
+            with patch.object(profile, 'emit') as emit:
+                self.assertLessEqual(profile.enforce_storage_limit(root, limit), limit)
+            self.assertEqual([Path(call.kwargs['directory']).name for call in emit.call_args_list],
+                             ['incident-1', 'incident-2'])
+            self.assertTrue(all(call.args == ('profiling_incident_retired',)
+                                and call.kwargs['reason'] == 'byte_budget' for call in emit.call_args_list))
+            self.assertEqual(sorted(p.name for p in root.iterdir()),
+                             ['incident-0', 'incident-3', 'session-99-42'])
+            self.assertEqual((active / 'perf.data.123').stat().st_size, 50000)
+            with patch.object(profile, 'emit') as emit:
+                profile.enforce_storage_limit(root, limit)
+                emit.assert_not_called()
+
+    def test_byte_budget_never_discards_pinned_or_unfinished_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, size in [('session-9-42', 80000), ('incident-1', 40000), ('incident-2', 20000)]:
+                path = root / name
+                path.mkdir()
+                (path / 'payload').write_bytes(b'x' * size)
+                if name.startswith('incident'):
+                    profile.write(path / 'complete.json', {})
+            (root / 'incident-1' / 'retain').touch()
+            with patch.object(profile, 'emit'), self.assertRaisesRegex(RuntimeError, 'pinned or active'):
+                profile.enforce_storage_limit(root, 50000)
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ['incident-1', 'session-9-42'])
+            self.assertEqual((root / 'incident-1' / 'payload').stat().st_size, 40000)
+            self.assertEqual((root / 'session-9-42' / 'payload').stat().st_size, 80000)
+
+    def test_byte_budget_refuses_external_links_before_retirement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = root / 'incident-1'
+            capture.mkdir()
+            profile.write(capture / 'complete.json', {})
+            (capture / 'external').symlink_to('/etc/passwd')
+            with self.assertRaisesRegex(RuntimeError, 'External symlink'):
+                profile.enforce_storage_limit(root, 0)
+            self.assertTrue((capture / 'complete.json').is_file())
+
     def test_exact_process_clock_and_execution_interval(self):
         event = self.event()
         self.assertEqual(profile.incident(json.dumps(event), 42)['sample']['execution']['tid'], 43)

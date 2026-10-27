@@ -403,6 +403,7 @@ pub struct Player {
     last_move: i32,
     last_move_at: u64,
     motion: ObservedMotion,
+    white_demon_aim_history: [Pos; 2],
     goto_acks: VecDeque<(bool, Instant)>,
     discarded_attack: Option<(i32, i32)>,
     tick: i32,
@@ -1272,11 +1273,11 @@ impl Directory {
             world.prepared_seed = Some(seed);
         }
         world.name = name.into();
-        // Preserve the blue Nexus/Vault backdrop, not dungeon void: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/worlds/Vault.cs
-        world.background = if matches!(template, "nexus" | "vault") {
-            2
-        } else {
-            0
+        // Select the client's existing starfield, not dungeon void: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_H_Z_/Background.as
+        world.background = match template {
+            "sprite-world" => 1,
+            "nexus" | "vault" => 2,
+            _ => 0,
         };
         world.safe = safe;
         world.owner = owner;
@@ -3505,6 +3506,7 @@ impl World {
                     velocity: Pos { x: 0., y: 0. },
                     at: self.now,
                 },
+                white_demon_aim_history: [pos; 2],
                 goto_acks: VecDeque::new(),
                 discarded_attack: None,
                 tick: 0,
@@ -4266,14 +4268,12 @@ impl World {
         let x1 = (a.x.max(b.x) as i32 + 1).min(self.map.width - 1);
         let y0 = (a.y.min(b.y) as i32 - 1).max(0);
         let y1 = (a.y.max(b.y) as i32 + 1).min(self.map.height - 1);
-        (y0..=y1).flat_map(move |y| {
-            (x0..=x1).flat_map(move |x| {
-                self.cells
-                    .ids((y * self.map.width + x) as usize)
-                    .iter()
-                    .map(|id| self.entities.get(id).expect("occupied cell missing entity"))
+        (y0..=y1)
+            .flat_map(move |y| {
+                (x0..=x1)
+                    .flat_map(move |x| self.cells.ids((y * self.map.width + x) as usize).iter())
             })
-        })
+            .map(move |id| self.entities.get(id).expect("occupied cell missing entity"))
     }
 
     pub fn native_shoot_received(
@@ -5703,10 +5703,16 @@ impl World {
                 let bag =
                     self.loot_bag(pos, None, chunk.iter().copied().map(i32::from).collect())?;
                 let entity = self.entities.get_mut(&bag).unwrap();
-                // Native stat 54 is scalar; group visibility and collection are enforced server-side.
-                entity.bag_owners = loot.shared_owners.clone();
+                // Period purple sacks were owner-only, unlike Kithio's shared gear: https://forums.anandtech.com/threads/realm-of-the-mad-god.2228194/post-33073282
+                let owner = (entity.kind != 0x500)
+                    .then(|| *loot.shared_owners.choose(&mut self.rng).unwrap());
+                if let Some(owner) = owner {
+                    entity.extra_stats.push((54, owner));
+                } else {
+                    entity.bag_owners = loot.shared_owners.clone();
+                }
                 entity.drop_slots = (0..chunk.len()).collect();
-                tracing::info!(entity = bag, owners = ?loot.shared_owners, "contributor-group loot allocated");
+                tracing::info!(entity = bag, ?owner, owners = ?entity.bag_owners, "god equipment bag allocated");
             }
         }
         Ok(())
@@ -5716,6 +5722,16 @@ impl World {
     }
     fn defeat_entity_with_killer(&mut self, id: i32, killer: Option<i32>) -> Result<()> {
         let e = self.remove_entity(id);
+        // Death credit must survive reward errors; the reference also notifies the Realm before loot behaviors: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L54-L60
+        if self.encounter {
+            if crate::endgame::HEROES.contains(&e.kind) {
+                self.critical_deaths.push(e.id);
+            } else if (crate::quest::final_root(e.kind) || matches!(e.kind, 0x678 | 0xd50 | 0xd54))
+                && let Some(original) = *e.quest
+            {
+                self.critical_deaths.push(original);
+            }
+        }
         let definition = &self.content.objects[&e.kind];
         // Reference Reproduce suppresses follower XP; Pentaract Spawn explicitly allows eye XP.
         let reward = if e.kind == crate::dungeon::tomb::ANCHOR
@@ -5823,14 +5839,6 @@ impl World {
         Ok(())
     }
     fn drop_loot(&mut self, defeated: &Entity) -> Result<()> {
-        if crate::endgame::HEROES.contains(&defeated.kind) {
-            self.critical_deaths.push(defeated.id);
-        } else if (crate::quest::final_root(defeated.kind)
-            || matches!(defeated.kind, 0x678 | 0xd50 | 0xd54))
-            && let Some(original) = *defeated.quest
-        {
-            self.critical_deaths.push(original);
-        }
         if let Some(index) = crate::dungeon::DUNGEONS
             .iter()
             .position(|(_, _, name, boss)| *name == self.name && *boss == defeated.kind)
@@ -6258,6 +6266,11 @@ impl World {
             return packets;
         }
         self.beach_notice();
+        // Kithio's next-slot history index makes TryGetHistory(100) read the previous 50 ms sample.
+        for p in self.players.values_mut() {
+            p.white_demon_aim_history.rotate_left(1);
+            p.white_demon_aim_history[1] = p.pos;
+        }
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
         let audience: Vec<_> = self
@@ -6608,7 +6621,14 @@ impl World {
                     }
                     Motion::Follow { idle, .. } => {
                         if let Some(target) = self.follow_goal(id, target, motion, delta) {
-                            Some(target)
+                            Some(if kind == 0x651 && self.name != "Abyss of Demons" {
+                                Pos {
+                                    x: target.x - self.rng.gen_range(-2..2) as f32 / 2.,
+                                    y: target.y - self.rng.gen_range(-2..2) as f32 / 2.,
+                                }
+                            } else {
+                                target
+                            })
                         } else if idle == 0. {
                             speed = 0.;
                             Some(pos)

@@ -183,9 +183,12 @@ async fn serve(args: Vec<String>) -> Result<()> {
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),
+        name_claims: Arc::default(),
         bots: Arc::default(),
         #[cfg(test)]
         quarantined: Arc::default(),
+        #[cfg(test)]
+        persona_departure_gate: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
     };
     server::serve(app, config.bind, client).await
