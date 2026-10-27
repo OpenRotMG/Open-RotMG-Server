@@ -576,9 +576,12 @@ impl Market {
         let body = text
             .strip_prefix(&format!("{}, ", self.name))
             .unwrap_or(&text);
-        let Some(ad) = parse_advertisement(body, |s| parse_goods(s, c)) else {
-            return Ok(false);
+        let ad=if let Some(counter)=counter_body(&body.trim().to_ascii_lowercase()) {
+            parse_advertisement(counter,|s| parse_goods(s,c)).filter(|ad| matches!(ad,Advertisement::Quote(_)))
+        } else {
+            parse_advertisement(body,|s| parse_goods(s,c))
         };
+        let Some(ad)=ad else { return Ok(false); };
         if v.map.name != "Nexus"
             || self.incoming.is_some()
             || self.trade.is_some()
@@ -1268,6 +1271,10 @@ pub(in crate::bots) fn parse_goods(s: &str, c: &Content) -> Option<Goods> {
         }
     };
     Some(Goods { kind, quantity })
+}
+
+pub(in crate::bots) fn counter_body(text: &str) -> Option<&str> {
+    ["nty ", "nah ", "can do ", "no thx ", "sry "].into_iter().find_map(|p| text.strip_prefix(p))
 }
 
 // Templates and human chat share the same shapes; the caller supplies literal slots or real goods.

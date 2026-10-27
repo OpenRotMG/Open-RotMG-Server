@@ -99,6 +99,7 @@ impl Market {
                 && v.session.character > 0
                 && v.character.inventory_revision >= 0
                 && v.character.items.len() == 12
+                && v.character.items.iter().all(|k| (-1..=65535).contains(k))
                 && v.position.x.is_finite()
                 && v.position.y.is_finite(),
             "invalid own market reply identity or geometry"
@@ -129,9 +130,19 @@ impl Market {
                 c.get(u16::try_from(g.kind)?)?;
             }
         }
+        let revision_current = if let ReplyKind::Thanks(witness) = &r.kind {
+            witness.validate()?;
+            let own=witness.writes.iter().find(|w| w.account==r.account && w.id==r.session[2])
+                .context("market thanks receipt belongs to another character")?;
+            ensure!(witness.writes.iter().any(|w| w.account==r.peer.1),"market thanks receipt belongs to another peer");
+            // A settled exchange remains true after ordinary consumption of the received item.
+            v.character.inventory_revision >= own.revision.checked_add(1).context("invalid market receipt revision")?
+        } else {
+            v.character.inventory_revision == r.revision
+        };
         if r.session != [v.session.world, v.session.player, v.session.character]
             || r.account != v.session.account
-            || r.revision != v.character.inventory_revision
+            || !revision_current
             || v.elapsed_ms >= r.until
             || v.map.name != "Nexus"
             || !super::super::settled(v)
@@ -171,12 +182,7 @@ impl Market {
                     && Self::needs_room(v, q)
                     && v.objects.iter().any(|p| p.kind == 0x720 && p.usable)
             }
-            ReplyKind::Thanks(witness) => witness.writes.iter().any(|w| {
-                w.account == v.session.account
-                    && w.id == v.session.character
-                    && w.revision.checked_add(1) == Some(v.character.inventory_revision)
-                    && w.items == v.character.items
-            }),
+            ReplyKind::Thanks(_) => true,
         }))
     }
     pub(in crate::bots) async fn recover_trade_reply(
@@ -227,21 +233,12 @@ impl Market {
             revision = v.character.inventory_revision,
             "market confirmed exchange receipt"
         );
-        if super::super::settled(v)
-            && p.witness.writes.iter().any(|w| {
-                w.account == v.session.account
-                    && w.id == v.session.character
-                    && w.revision.checked_add(1) == Some(v.character.inventory_revision)
-                    && w.items == v.character.items
-            })
-        {
-            self.respond(
-                v,
-                (p.contact.player, p.contact.account, p.contact.name),
-                ReplyKind::Thanks(p.witness),
-                c,
-            )?;
-        }
+        self.respond(
+            v,
+            (p.contact.player, p.contact.account, p.contact.name),
+            ReplyKind::Thanks(p.witness),
+            c,
+        )?;
         Ok(())
     }
 }

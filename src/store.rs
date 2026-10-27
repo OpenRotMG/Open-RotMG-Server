@@ -515,6 +515,23 @@ pub(crate) struct TradeWitness {
     pub transaction: String,
     pub writes: Vec<InventoryWrite>,
 }
+impl TradeWitness {
+    pub(crate) fn validate(&self) -> Result<()> {
+        ensure!(
+            self.transaction.len() == 32
+                && self.transaction.bytes().all(|b| b.is_ascii_hexdigit())
+                && self.writes.len() == 2
+                && self.writes[0].account != self.writes[1].account
+                && self.writes.iter().all(|w| w.account > 0
+                    && w.id > 0
+                    && (0..i32::MAX).contains(&w.revision)
+                    && w.items.len() == 12
+                    && w.items.iter().all(|k| (-1..=65535).contains(k))),
+            "invalid trade receipt witness"
+        );
+        Ok(())
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GiftParticipant {
     pub account: i32,
@@ -1348,18 +1365,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             .await
     }
     pub(crate) async fn trade_committed(&self, witness: TradeWitness) -> Result<bool> {
-        ensure!(
-            witness.transaction.len() == 32
-                && witness.transaction.bytes().all(|b| b.is_ascii_hexdigit())
-                && witness.writes.len() == 2
-                && witness.writes[0].account != witness.writes[1].account
-                && witness.writes.iter().all(|w| w.account > 0
-                    && w.id > 0
-                    && (0..i32::MAX).contains(&w.revision)
-                    && w.items.len() == 12
-                    && w.items.iter().all(|k| (-1..=65535).contains(k))),
-            "invalid trade receipt witness"
-        );
+        witness.validate()?;
         self.call(move |c| {
             let row: Option<(String, String, String, Option<String>)> = c
                 .query_row(

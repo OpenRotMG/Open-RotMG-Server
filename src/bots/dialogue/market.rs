@@ -1,6 +1,6 @@
 use super::*;
 use crate::bots::pursuits::market::{
-    Advertisement, Goods, Message, goods_text, parse_advertisement, parse_goods, parse_quote,
+    Advertisement, Goods, Message, counter_body, goods_text, parse_advertisement, parse_goods, parse_quote,
 };
 
 type Repertoire = [String; 3];
@@ -62,10 +62,6 @@ fn voice(seed: u64, intent: Intent) -> Value {
         "capitalization": (["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3]),
         "name_signature": intent == Intent::MarketAdvertise && (seed / 24).is_multiple_of(2),
     })
-}
-
-fn counter_body(text: &str) -> Option<&str> {
-    ["nty ", "nah ", "can do ", "no thx ", "sry "].into_iter().find_map(|p| text.strip_prefix(p))
 }
 
 fn validated_template(template: &str, intent: Intent) -> std::result::Result<bool, Failure> {
