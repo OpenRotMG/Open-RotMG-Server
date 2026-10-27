@@ -62,7 +62,7 @@ export async function run(game){
     await game.act({keys:['1'],duration_ms:150});
     game.check('native Dexterity effusion and ring supply the HugeMob damage fixture',(await game.observe()).character.stats.dexterity===88);
   }
-  for(const [index,label,burst,stage,counts] of [[0,'SmallGroup',700,4,[0,3,3,0]],[1,'Mob',2200,5,[0,3,0,3]],[2,'HugeMob',4200,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
+  for(const [index,label,burst,stage,counts] of [[0,'SmallGroup',700,4,[0,3,3,0]],[1,'Mob',3000,5,[0,3,0,3]],[2,'HugeMob',4200,6,[0,3,0,3]]].filter(s=>s[1]===process.env.GHOST_BRANCH)){
     const root=roots[index];
     await protect(game);
     const before=await save(label+'-idle'),original=king(before,root.entity);assert(original?.kind===0x928&&original.hp===300000,'Untouched ordinary King required');
