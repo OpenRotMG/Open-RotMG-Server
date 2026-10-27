@@ -61,7 +61,7 @@ export async function run(game){
   await writeFile(join(process.env.QA_RESULTS_DIR,'orbits.json'),JSON.stringify(orbits));
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
-    for(let n=0;n<35&&(await game.inspect()).diagnostic.entities.some(e=>e.id===id);n++)await game.act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    for(let n=0;n<35&&(await game.inspect()).view.objects.some(e=>e.id===id&&e.hp>0);n++)await game.act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
     await game.act({keys:[],duration_ms:500});const s=await game.inspect();
     game.check(id+': native staff defeats target and earns XP',!s.diagnostic.entities.some(e=>e.id===id)&&s.view.character.experience>xp);
   }
