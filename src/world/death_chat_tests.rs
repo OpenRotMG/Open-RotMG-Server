@@ -61,6 +61,67 @@ fn messages(inbox: &mut mpsc::Receiver<Packet>) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn gravestones_follow_all_eleven_tiers_after_committed_death() {
+    let tiers = [
+        (1, 0, 0x723, Some(30_000)),
+        (19, 0, 0x724, Some(60_000)),
+        (20, 0, 0x725, Some(300_000)),
+        (20, 1, 0x726, None),
+        (20, 2, 0x727, None),
+        (20, 3, 0x728, None),
+        (20, 4, 0x729, None),
+        (20, 5, 0x72a, None),
+        (20, 6, 0x72b, None),
+        (20, 7, 0x734, None),
+        (20, 8, 0x735, None),
+    ];
+    for (level, maxed, kind, lifetime) in tiers {
+        let (mut world, store, [victim, witness], _) = fixture().await;
+        let caps = world.content.classes[&crate::content::WIZARD].caps;
+        let p = world.players.get_mut(&victim).unwrap();
+        p.character.level = level;
+        p.character.base = std::array::from_fn(|i| caps[i] - i32::from(i >= maxed));
+        p.character.hp = 0;
+        p.death_pending = true;
+        p.killer = "Medusa".into();
+        let position = p.pos;
+        assert!(world.finish_death(victim).is_err());
+        let (_, ch, killer) = world.pending_deaths().pop().unwrap();
+        assert!(!ch.items.iter().all(|i| *i == -1));
+        assert!(!world.entities.values().any(|e| e.kind == kind));
+        world
+            .committed(victim, store.death(ch.clone(), killer).await)
+            .unwrap();
+        let born = world.now;
+        world.finish_death(victim).unwrap();
+        let graves: Vec<_> = world.entities.values().filter(|e| e.kind == kind).collect();
+        assert_eq!(graves.len(), 1, "level {level}, maxed {maxed}");
+        let grave = graves[0];
+        let grave_id = grave.id;
+        assert_eq!(grave.pos, position);
+        assert_eq!(grave.name, "Victim");
+        assert!(grave.items.is_empty());
+        assert!(grave.accessible(world.players[&witness].character.account));
+        assert_eq!(*grave.expires, lifetime.map(|ms| born + ms));
+        assert!(
+            world.players[&victim]
+                .character
+                .items
+                .iter()
+                .all(|i| *i == -1)
+        );
+        assert!(store.load(ch.account, ch.id).await.is_err());
+        assert!(world.finish_death(victim).is_err());
+        let end = born + lifetime.unwrap_or(3_600_000);
+        world.now = end - 100;
+        world.step();
+        assert!(world.entities.contains_key(&grave_id));
+        world.step();
+        assert_eq!(world.entities.contains_key(&grave_id), lifetime.is_none());
+    }
+}
+
+#[tokio::test]
 async fn death_chat_is_world_wide_once_and_only_after_successful_persistence() {
     for fail in [false, true] {
         let (mut world, store, [victim, witness], inboxes) = fixture().await;
