@@ -1272,7 +1272,7 @@ async fn realm_death_credit_survives_portal_reward_failure() {
         "Castle entry discovers new tiles"
     );
     let mut expected = character;
-    expected.lifetime.tiles += u64::try_from(current.tiles - expected.tiles).unwrap();
+    expected.lifetime.tiles += current.tiles - expected.tiles;
     expected.tiles = current.tiles;
     assert_eq!(*current, expected);
     assert!(
