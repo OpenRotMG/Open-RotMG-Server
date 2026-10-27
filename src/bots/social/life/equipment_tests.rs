@@ -586,3 +586,118 @@ async fn equipment_drop_rejects_native_window_opened_after_check_capture_without
         .unwrap();
     s.close().await;
 }
+
+#[tokio::test]
+async fn health_native_window_without_chat_consent_uses_life_and_verified_receipt() {
+    let mut s = Scene::new([HEALTH, -1, -1, -1, -1, -1, -1, -1]).await;
+    let before = s.view().await;
+    assert_eq!(health(&before), 0);
+    let id = before.session.player;
+    let peer = s.peer;
+    let recipient = s.app.world.player_view(peer).await.unwrap();
+    s.brain.mind.social.gift = Some(Gift {
+        account: recipient.session.account,
+        player: peer,
+        name: "Recipient".into(),
+        giving: false,
+        kind: HEALTH,
+        item_name: "health".into(),
+        equipment: None,
+        until: before.elapsed_ms + 30000,
+        session: [before.session.world, id, before.session.character],
+        requested: true,
+        consent: false,
+        acceptance: None,
+        cancelled: false,
+    });
+    let mine = [false; 12];
+    let mut theirs = [false; 12];
+    theirs[4] = true;
+    s.app
+        .world
+        .for_player(id)
+        .call(move |w| {
+            w.request_trade(id, "Recipient".into())?;
+            w.request_trade(peer, "Donor".into())?;
+            w.change_trade(peer, theirs)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    s.pump().await;
+    let v = s.view().await;
+    life(&s.app, &mut s.brain, &v).await.unwrap();
+    assert!(
+        s.brain.mind.social.gift.is_some(),
+        "legacy health native consent does not require chat assent"
+    );
+    s.native_countdown().await;
+    let v = s.view().await;
+    life(&s.app, &mut s.brain, &v).await.unwrap();
+    let gift = s.brain.mind.social.gift.as_ref().unwrap();
+    assert!(!gift.consent);
+    assert_eq!(gift.acceptance.as_ref().unwrap().kind, HEALTH);
+    assert!(s.brain.mind.social.episodes.is_empty());
+    let plan = s
+        .app
+        .world
+        .for_player(peer)
+        .call(move |w| Ok(w.accept_trade(peer, theirs, mine)?.unwrap()))
+        .await
+        .unwrap();
+    crate::server::persist_trade(&s.app, plan).await.unwrap();
+    let settled = s.view().await;
+    life(&s.app, &mut s.brain, &settled).await.unwrap();
+    assert_eq!(health(&settled), 1);
+    assert!(s.brain.mind.social.gift.is_none());
+    assert_eq!(s.brain.mind.social.episodes.len(), 1);
+    assert_eq!(
+        s.brain.mind.social.episodes[0].interaction,
+        Interaction::ReceivedHealth
+    );
+    s.close().await;
+}
+
+#[tokio::test]
+async fn equipment_native_window_without_chat_consent_is_rejected_without_drop_or_history() {
+    let mut s = Scene::new([-1; 8]).await;
+    s.offer(false).await;
+    s.publish().await;
+    assert!(!s.brain.mind.social.gift.as_ref().unwrap().consent);
+    let before = s.view().await;
+    let id = before.session.player;
+    let peer = s.peer;
+    s.app
+        .world
+        .for_player(id)
+        .call(move |w| {
+            w.request_trade(id, "Recipient".into())?;
+            w.request_trade(peer, "Donor".into())?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    s.pump().await;
+    let v = s.view().await;
+    assert!(!life(&s.app, &mut s.brain, &v).await.unwrap());
+    let after = s.view().await;
+    assert_eq!(after.character.items, before.character.items);
+    assert_eq!(
+        after.character.inventory_revision,
+        before.character.inventory_revision
+    );
+    assert!(s.brain.mind.social.gift.is_none());
+    assert!(s.brain.mind.social.drop.is_none());
+    assert!(s.brain.mind.social.episodes.is_empty());
+    assert!(!s.brain.mind.social.equipment_due(&after));
+    s.app
+        .world
+        .for_player(id)
+        .call(move |w| {
+            assert!(!w.has_active_trade(id));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    s.close().await;
+}
