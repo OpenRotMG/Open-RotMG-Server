@@ -33,9 +33,8 @@ export async function run(game){
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'vitals',hp:600,mp:0}}}),signal:AbortSignal.timeout(10000)});
   const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
-  const poor=await game.observe();
   await game.act({keys:[' '],duration_ms:250});const denied=await game.observe();
-  game.check('zero MP rejects poison without a new cooldown',denied.character.mp>=0&&denied.character.mp<10&&denied.character.ability_ready_ms===poor.character.ability_ready_ms);
+  game.check('zero MP leaves mana nonnegative and cooldown ready',denied.character.mp>=0&&denied.character.mp<10&&denied.character.ability_ready_ms<=denied.game_ms);
   game.check('same living Assassin retains T6',denied.lifecycle.alive&&denied.session.character===before.view.session.character&&denied.character.items[1]===0xb2a);
   await writeFile(join(root,'poison-observations.json'),JSON.stringify({before,initial,thrown,poisoned,equipped,second,victory,credited,denied},null,2));
 }
