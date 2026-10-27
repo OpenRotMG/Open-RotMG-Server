@@ -203,6 +203,10 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             for (dx, dy, kind) in [(-5, 0, 0x1834), (5, 0, 0x1832), (0, -5, 0x182e)] {
                 map.cells[index(cx + dx, cy + dy)].object = Some(kind);
             }
+            // Wall-side crates are visible in https://youtu.be/BJOup8p0M6g (2013); this pair is reconstructed.
+            for dy in [-3, -2] {
+                map.cells[index(cx - radius + 1, cy + dy)].object = Some(0x1867);
+            }
         }
     }
     for (room, parent) in parents.iter().enumerate().skip(1) {
@@ -271,4 +275,58 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         "generated reconstructed Davy key maze"
     );
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    #[test]
+    fn davy_crates_preserve_room_access() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let crate_def = content.get(0x1867).unwrap();
+        assert!(crate_def.blocks && crate_def.full_occupy && crate_def.enemy_occupy_square);
+        assert!(!crate_def.enemy && !crate_def.blocks_sight);
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            let crates: Vec<_> = map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.object == Some(0x1867))
+                .map(|(i, _)| (i as i32 % map.width, i as i32 / map.width))
+                .collect();
+            assert_eq!(crates.len(), 46, "seed {seed}");
+            for &(x, y) in &crates {
+                assert!((7..=9).contains(&(x % 26)) && (11..=12).contains(&(y % 26)));
+                assert!(crates.contains(&(x, y - 1)) || crates.contains(&(x, y + 1)));
+            }
+            let walkable = |i: usize| {
+                let cell = &map.cells[i];
+                content.grounds[&cell.ground] > 0.
+                    && cell.object.is_none_or(|kind| {
+                        door_color(kind).is_some() || !content.objects[&kind].blocks
+                    })
+            };
+            let (sx, sy) = map.spawns[0];
+            let mut reached = vec![false; map.cells.len()];
+            let mut queue = VecDeque::from([(sx as i32, sy as i32)]);
+            while let Some((x, y)) = queue.pop_front() {
+                if x < 0 || y < 0 || x >= map.width || y >= map.height {
+                    continue;
+                }
+                let i = (y * map.width + x) as usize;
+                if reached[i] || !walkable(i) {
+                    continue;
+                }
+                reached[i] = true;
+                queue.extend([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]);
+            }
+            assert!(
+                (0..map.cells.len()).all(|i| !walkable(i) || reached[i]),
+                "unreachable floor with doors open, seed {seed}"
+            );
+        }
+    }
 }

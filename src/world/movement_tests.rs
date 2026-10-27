@@ -56,6 +56,72 @@ fn native(
 }
 
 #[test]
+fn native_berserk_shots_survive_position_correction() {
+    for (until, condition) in [
+        (0, 0),
+        (3000, 0),
+        (1900, 0),
+        (1000, 0),
+        (3000, crate::condition::bit(crate::condition::DAZED)),
+    ] {
+        let (mut world, id) = fixture(0x18, false);
+        world.now = 2000;
+        let p = world.players.get_mut(&id).unwrap();
+        p.statuses.insert(crate::condition::BERSERK, (0, until));
+        p.lab_conditions = condition;
+        let kind = p.character.items[0] as u16;
+        let start = Pos {
+            x: p.pos.x + 0.3,
+            y: p.pos.y,
+        };
+        let period = (1.
+            / (0.0015 + 0.0065 * 15. / 75.)
+            / if until > 1000 { 1.5 } else { 1. }
+            / f64::from(world.content.get(kind).unwrap().rate))
+        .floor() as i32;
+        let shoot = |world: &mut World, time, bullet| {
+            world.native_shoot_received(
+                id,
+                (time, world.attack_epoch + Duration::from_millis(2000)),
+                bullet,
+                kind,
+                start,
+                0.,
+            )
+        };
+        shoot(&mut world, 2000, 1).unwrap();
+        let shots = world.players[&id].character.shots;
+        let projectiles = world.bullets.len();
+        world
+            .correct_native_shot(id, 2000 + period, 2, kind, "fixture correction")
+            .unwrap();
+        world
+            .players
+            .get_mut(&id)
+            .unwrap()
+            .goto_acks
+            .push_back((true, Instant::now()));
+        assert_eq!(
+            shoot(&mut world, 2000 + 2 * period, 3).unwrap(),
+            NativeInput::DiscardedUntilGotoAck
+        );
+        let p = &world.players[&id];
+        assert_eq!(p.next_bullet, 4);
+        assert_eq!(p.character.shots, shots);
+        assert_eq!(world.bullets.len(), projectiles);
+        let error = shoot(&mut world, 2001 + 2 * period, 4).unwrap_err();
+        assert!(error.to_string().contains("discarded attack too fast"));
+        assert_eq!(world.players[&id].next_bullet, 4);
+        world.acknowledge_goto(id, 2000 + 2 * period).unwrap();
+        assert_eq!(
+            shoot(&mut world, 2000 + 3 * period, 4).unwrap(),
+            NativeInput::Applied
+        );
+        assert_eq!(world.players[&id].character.shots, shots + 1);
+    }
+}
+
+#[test]
 fn ocean_trench_advertises_player_teleports_without_enabling_restricted_worlds() {
     let (mut world, _) = fixture(0x18, false);
     for (name, allowed) in [

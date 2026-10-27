@@ -151,6 +151,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
         content,
         swf,
         browser_links: Arc::new(server::browser_link::Service::from_env(&config.origin)?),
+        email: server::email::Service::configured()?,
         origin: config.origin,
         bot_view_origin: config.bot_view_origin,
         sfx: config.data.join("sfx"),

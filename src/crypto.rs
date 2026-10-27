@@ -12,6 +12,7 @@ use std::{
     path::Path,
 };
 
+mod email;
 mod gold;
 mod projectiles;
 
@@ -101,7 +102,10 @@ fn put_u30(out: &mut Vec<u8>, mut v: u32) {
         }
     }
 }
-fn patch_abc(abc: &[u8], replacement: &[String; 4]) -> Result<(Vec<u8>, usize, usize, usize)> {
+fn patch_abc(
+    abc: &[u8],
+    replacement: &[String; 4],
+) -> Result<(Vec<u8>, usize, usize, usize, usize)> {
     ensure!(abc.len() >= 4, "truncated ABC header");
     let mut p = 4;
     for _ in 0..2 {
@@ -116,8 +120,14 @@ fn patch_abc(abc: &[u8], replacement: &[String; 4]) -> Result<(Vec<u8>, usize, u
     let pool = p;
     let count = u30(abc, &mut p)?;
     let gold = abc.windows(gold::METHOD.len()).any(|v| v == gold::METHOD);
+    let email = abc
+        .windows(email::REQUEST.len())
+        .any(|v| v == email::REQUEST);
     let mut out = abc[..pool].to_vec();
-    put_u30(&mut out, count + if gold { 2 } else { 0 });
+    put_u30(
+        &mut out,
+        count + if gold { 2 } else { 0 } + u32::from(email),
+    );
     let mut changed = 0;
     let mut music = 0;
     for _ in 1..count {
@@ -134,6 +144,14 @@ fn patch_abc(abc: &[u8], replacement: &[String; 4]) -> Result<(Vec<u8>, usize, u
             put_u30(&mut out, path.len() as u32);
             out.extend(path);
             music += 1;
+        } else if email && s == b"Sent..." {
+            let text = b"Sending...";
+            put_u30(&mut out, text.len() as u32);
+            out.extend(text);
+        } else if email && s == b"Click here to resend email." {
+            let text = b"Click here to verify email.";
+            put_u30(&mut out, text.len() as u32);
+            out.extend(text);
         } else if gold && s == b"Buy Realm Gold" {
             let title = b"Open RotMG Gold";
             put_u30(&mut out, title.len() as u32);
@@ -149,11 +167,19 @@ fn patch_abc(abc: &[u8], replacement: &[String; 4]) -> Result<(Vec<u8>, usize, u
             out.extend(text);
         }
     }
+    if email {
+        let text = b"Email sent. Check inbox/spam.";
+        put_u30(&mut out, text.len() as u32);
+        out.extend(text);
+    }
     out.extend(&abc[p..]);
     if gold {
         gold::patch(&mut out, count, count + 1)?;
     }
-    Ok((out, changed, music, usize::from(gold)))
+    if email {
+        email::patch(&mut out, count + if gold { 2 } else { 0 })?;
+    }
+    Ok((out, changed, music, usize::from(gold), usize::from(email)))
 }
 const LOADING_METHOD: &[u8] = b"\x05\x03\x09\x0a\x76\x27\x26\xd5\x10\x06\x00\x00\x1c\x77\x1d\x87\x26\xa6\xd6\xd0\x30\xd1\x2a\x11\x03\x00\x00\x29\xd0\x76\x12\x3b\x00\x00\xd0\x66\xaa\x30\x10\x06\x00\x00\x85\x96\xb0\xad\xc0\xc7\xd2\x11\x37\x00\x00\x76\xd2\x2a\x12\x0d\x00\x00\x10\x06\x00\x00\x30\x73\x87\x82\xd7\x1d\x29\xd2\x76\x11\x1f\x00\x00\x2a\x12\x1a\x00\x00\xd2\x11\x15\x00\x00\x29\xd1\x12\x18\x00\x00\xd0\x66\xaf\x0f\x66\xaf\x4e\x60\xfc\x29\x60\x8b\x1f\xa3\xb0\x12\x0a\x00\x00\xd1\x12\x05\x00\x00\xd0\x4f\xc6\x3c\x00\x47\x00\x00";
 fn patch_loading(data: &mut [u8]) -> Result<usize> {
@@ -192,6 +218,7 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
     let mut music = 0;
     let mut gold = 0;
     let mut projectiles = 0;
+    let mut emails = 0;
     while p < body.len() {
         let h = u16::from_le_bytes(
             body.get(p..p + 2)
@@ -219,10 +246,11 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
                 .iter()
                 .position(|b| *b == 0)
                 .context("unterminated DoABC name")?;
-            let (mut abc, c, m, g) = patch_abc(&data[offset..], replacement)?;
+            let (mut abc, c, m, g, e) = patch_abc(&data[offset..], replacement)?;
             changed += c;
             music += m;
             gold += g;
+            emails += e;
             loading += patch_loading(&mut abc)?;
             projectiles += projectiles::patch(&mut abc)?;
             let mut d = data[..offset].to_vec();
@@ -244,6 +272,10 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
         "expected four public-key string fragments, found {changed}"
     );
     ensure!(music == 1, "expected one music URL, found {music}");
+    ensure!(
+        emails == 1,
+        "expected one exact email dialog patch, found {emails}"
+    );
     ensure!(
         gold == 1,
         "expected one gold navigation patch, found {gold}"
