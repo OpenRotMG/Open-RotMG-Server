@@ -561,6 +561,7 @@ impl World {
         }
         Ok(())
     }
+    // Nova geometry is server-defined, not XML: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.UseItem.cs#L206-L237
     fn ability_nova(&mut self, id: i32, item: &Object, pos: Pos) -> Result<()> {
         let spec = item
             .projectiles
