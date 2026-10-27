@@ -127,7 +127,8 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
                         .once(),
                 ]
             } else {
-                vec![fan(0, 1, 0., 500, 4.).chance(0.1)]
+                // Shoot scales angular history every shot and checks cooldown before decrement: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Shoot.cs#L79-L123
+                vec![fan(0, 1, 0., 550, 4.).predict(0.1)]
             }
         }
         0x957 => vec![fan(0, 1, 0., 1000, 10.)],
