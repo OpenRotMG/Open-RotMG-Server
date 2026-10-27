@@ -53,8 +53,8 @@ export async function run(game) {
         await prepare(game.actor,{kind:'vitals',hp:current.character.hp,mp:current.character.stats.max_mp});
         if(e.hp>30000&&protections.get(game.actor)-current.game_ms>10000) {
           await act(Array.from({length:3},()=>[
-            {actor:game.actor,input:{keys:[' '],duration_ms:100,target}},
-            {actor:game.actor,input:{keys:[],duration_ms:1200,target}},
+            {actor:game.actor,input:{keys:[' '],duration_ms:500,target}},
+            {actor:game.actor,input:{keys:[],duration_ms:800,target}},
           ]).flat());
         } else await act({keys:[' '],duration_ms:1000,target});
       } else await act({keys:[],duration_ms:500,target});
@@ -131,10 +131,11 @@ export async function run(game) {
   const pet=await creation();
   game.check('native Hexxer lure creates a vulnerable pet',pet.stage===2&&(pet.condition&(1<<23))===0);
   game.check('native player is Hexed in the green pool',((await game.observe()).character.conditions&(1<<27))!==0);
+  const petTime=(await game.observe()).game_ms;
   await act([
     {actor:game.actor,input:{keys:['d','s'],duration_ms:400}},
-    ...Array.from({length:4},(_,n)=>({actor:game.actor,input:{keys:n===0?[' ']:[],duration_ms:200,target:{entity:pet.id,camera_angle:camera,fire:true}}})),
-  ],{name:'creation-pet',when:view=>(view.character.conditions&(1<<27))===0&&view.nearby.some(e=>e.id===pet.id&&e.hp<pet.hp)});
+    ...Array.from({length:4},(_,n)=>({actor:game.actor,input:{keys:n===0?[' ']:[],duration_ms:500,target:{entity:pet.id,camera_angle:camera,fire:true}}})),
+  ],{name:'creation-pet',when:view=>(view.character.conditions&(1<<27))===0&&view.game_ms>=petTime+1200});
   game.check("native blue pool removes only that player's Hexed",((await game.observe()).character.conditions&(1<<27))===0&&((await partner.observe()).character.conditions&(1<<27))!==0);
   game.check('ordinary native shots damage the same pet',(await creation()).hp<pet.hp);
   for(let n=0;n<20&&(await creation()).stage===2;n++)await wait();
