@@ -113,6 +113,8 @@ impl World {
                 | "Sprite World"
                 | "Undead Lair"
                 | "Abyss of Demons"
+                // Trench groups teleport to rushers: https://www.realmeye.com/wiki/ocean-trench#tips-and-strategies
+                | "Ocean Trench"
         )
     }
 
