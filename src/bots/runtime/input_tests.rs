@@ -7,7 +7,7 @@ fn off_axis_known_corner_admits_actual_safe_keys_and_makes_progress() {
     let mut cells=vec![Cell{ground:1,object:None,config:String::new(),terrain:0,region:0};128*128];
     cells[10*128+12].ground=0xc9;
     let geometry=crate::navigation::Geometry::new((128,128),cells.iter().map(|c|c.ground).collect(),&content.grounds);
-    view.tiles=crate::navigation::Tiles::new(geometry,(0..128).flat_map(|x|(0..128).map(move|y|(x,y))));
+    view.tiles=crate::navigation::Tiles::new(geometry,(0..128).flat_map(|x|(0..128).map(move|y|(x,y)))).into();
     view.position=Pos{x:10.5,y:10.5};
     let grid=Grid::terrain(&view);
     let target=Pos{x:14.5,y:12.};

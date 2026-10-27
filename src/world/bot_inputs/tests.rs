@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn native_cursor_tick_gate_rejects_duplicates_stale_and_ambiguous_wrap() {
+    use crate::world::spectator::advance_cursor;
+    let packet=|tick:u32| {
+        let mut out=Writer::new();
+        out.i32(1).i32(2).i32(tick as i32).f32(3.).f32(4.).u8(1);
+        Packet{id:250,body:out.0}
+    };
+    let mut last=None;
+    assert!(advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
+    assert!(!advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
+    assert!(advance_cursor(&mut last,&packet(0)).unwrap());
+    assert!(!advance_cursor(&mut last,&packet(u32::MAX)).unwrap());
+    assert!(!advance_cursor(&mut last,&packet(1<<31)).unwrap());
+    assert_eq!(last,Some(0));
+    assert!(advance_cursor(&mut last,&Packet{id:250,body:vec![]}).is_err());
+}
+
+#[test]
 fn skill_tracking_is_finite_continuous_and_observations_are_not_queued_twice() {
     let start = Pos { x: 10., y: 10. };
     let target = Pos { x: 20., y: 10. };

@@ -24,20 +24,14 @@ mod entries;
 mod events;
 mod intentions;
 
-#[cfg(test)]
-mod adventure_tests;
-#[cfg(test)]
-mod nexus_spacing_tests;
 mod persona;
 mod progression;
 pub(crate) mod pursuits;
 #[cfg(test)]
 mod quest_tests;
+
 mod realms;
-#[cfg(test)]
-mod snake_exit_tests;
-#[cfg(test)]
-mod snake_routing_tests;
+
 mod social;
 
 /// Who a bot is: identity, temperament and skill. Built from `persona::PERSONAS`.

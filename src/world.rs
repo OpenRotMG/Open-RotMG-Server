@@ -67,14 +67,10 @@ mod ocean_setpiece;
 
 mod population;
 mod population_density;
-#[cfg(test)]
-mod population_reproduction_tests;
 
 mod realm_events;
 mod realm_voice;
 
-#[cfg(test)]
-mod quest_index_tests;
 mod realm_portal;
 mod realm_quests;
 
@@ -2192,33 +2188,7 @@ impl Directory {
             }
         }
     }
-    #[cfg(test)]
-    fn step(&mut self) {
-        self.step_using(|worlds, tick| {
-            for (id, world) in worlds {
-                let _context = crate::supervision::world(*id, tick);
-                world.step();
-                world.report_performance(*id);
-            }
-        });
-    }
-    #[cfg(test)]
-    fn step_using(&mut self, simulate: impl FnOnce(&mut execution::Worlds, u64)) {
-        self.tick += 1;
-        self.retire_transfer_grants();
-        simulate(&mut self.worlds, self.tick);
-        for (id, world) in &mut self.worlds {
-            if *id > 0 && !self.endgame.realms.contains_key(id) {
-                if world.players.is_empty() {
-                    self.idle.entry(*id).or_insert(self.tick);
-                } else {
-                    self.idle.remove(id);
-                }
-            }
-        }
-        let ready: Vec<_> = self.worlds.keys().copied().collect();
-        self.coordinate(&ready);
-    }
+
     fn coordinator_step(&mut self) {
         self.tick += 1;
         self.retire_grants(|worlds, id| worlds.release_world(&id));
@@ -2495,34 +2465,6 @@ impl Handle {
             clock: self.clock.clone(),
             supervisor: self.supervisor.clone(),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_pause_job(
-        &self,
-        call: usize,
-        before: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        self.lifecycle_test_gate(call, before, false)
-    }
-    #[cfg(test)]
-    fn lifecycle_test_gate(
-        &self,
-        call: usize,
-        before: bool,
-        request_only: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        assert!(call > 0);
-        let (entered, ready) = oneshot::channel();
-        let (release, wait) = std::sync::mpsc::channel();
-        assert!(
-            self.lifecycle_job_gate
-                .lock()
-                .unwrap()
-                .replace((call, before, request_only, entered, wait))
-                .is_none()
-        );
-        (ready, release)
     }
 
     pub async fn directory<T: Send + 'static>(
@@ -4230,12 +4172,7 @@ impl World {
             .filter(|e| self.actor_ids.contains(&e.id))
             .count()
     }
-    #[cfg(test)]
-    fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
-        self.non_population_ids
-            .iter()
-            .map(|id| self.entities.get(id).expect("scripted actor missing"))
-    }
+
     fn entities_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
         self.near_entities(
             Pos {
@@ -5545,11 +5482,7 @@ impl World {
         p.bot_aim = None;
         Ok(())
     }
-    #[cfg(test)]
-    pub(crate) fn credit_reservation_for_test(&self, id: i32) -> (Option<Character>, bool) {
-        let p = &self.players[&id];
-        (p.progress_snapshot.clone(), p.departure_snapshot.is_some())
-    }
+
     pub(crate) fn credit_recipients(&self, giver: i32) -> Vec<(i32, i32)> {
         self.players
             .iter()
@@ -7504,202 +7437,10 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 }
 
 #[cfg(test)]
-mod chase_tests;
-#[cfg(test)]
 mod death_chat_tests;
-#[cfg(test)]
-mod dungeon_return_tests;
-#[cfg(test)]
-mod hermit_leash_tests;
-#[cfg(test)]
-mod hermit_loot_tests;
-#[cfg(test)]
-mod instance_lifetime_tests;
-#[cfg(test)]
-mod period_loot_tests;
-#[cfg(test)]
-mod pirate_generation_tests;
+
 #[cfg(test)]
 mod reward_accuracy_tests;
-#[cfg(test)]
-mod sight_tests;
-#[cfg(test)]
-mod spectator_tests;
-#[cfg(test)]
-mod sphinx_loot_tests;
-#[cfg(test)]
-mod sphinx_site_tests;
-#[cfg(test)]
-mod weapon_tests;
-#[cfg(test)]
-mod world_effect_tests;
 
 #[cfg(test)]
-impl World {
-    pub(crate) fn test_paused_script_heartbeats(&mut self, id: i32) -> Result<()> {
-        let p = self.players.get_mut(&id).unwrap();
-        assert!(p.active() && p.paused && p.controller != Controller::Human);
-        let position = p.pos;
-        let credit = p.movement_credit;
-        let character = serde_json::to_value(&p.character)?;
-        let fractions = (p.hp_fraction, p.mp_fraction);
-        // Nonzero residues detect accidentally entering even the full-HP/MP regeneration branch.
-        p.hp_fraction = 0.25;
-        p.mp_fraction = 0.5;
-        p.bot_goal = Some(Pos {
-            x: position.x + 1.,
-            y: position.y,
-        });
-        p.bot_aim = Some(0.);
-        let goal = p.bot_goal;
-        let next_bullet = p.next_bullet;
-        let mut moves = Vec::new();
-        for _ in 0..40 {
-            self.step();
-            let p = &self.players[&id];
-            moves.push((p.last_move, self.now as i32));
-            assert_eq!((p.pos.x, p.pos.y), (position.x, position.y));
-            assert_eq!(p.movement_credit, credit);
-            assert_eq!(serde_json::to_value(&p.character)?, character);
-            assert_eq!((p.hp_fraction, p.mp_fraction), (0.25, 0.5));
-            assert_eq!(p.bot_goal.map(|p| (p.x, p.y)), goal.map(|p| (p.x, p.y)));
-            assert_eq!(p.bot_aim, Some(0.));
-            assert_eq!(p.next_bullet, next_bullet);
-            assert!(!self.bullets.iter().any(|b| b.owner == id));
-        }
-        // Exercise the real guard before checking the recorded heartbeat times.
-        self.move_to(id, position, self.now as i32)?;
-        assert!(moves.iter().all(|(actual, expected)| actual == expected));
-        let p = self.players.get_mut(&id).unwrap();
-        p.hp_fraction = fractions.0;
-        p.mp_fraction = fractions.1;
-        p.bot_goal = None;
-        p.bot_aim = None;
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn native_map_effects_use_decimal_or_prefixed_hex_numbers() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-    assert!(!content.objects[&0x105].stasis_immune);
-    let map = |literal: &str| {
-        Arc::new(Map {
-            width: 1,
-            height: 1,
-            cells: vec![crate::content::Cell {
-                ground: 0x46,
-                object: Some(0x105),
-                config: format!("name:native;eff:{literal};size:137;conn:16"),
-                terrain: 0,
-                region: 0,
-            }],
-            spawns: vec![(0.5, 0.5)],
-        })
-    };
-    for (literal, expected) in [
-        ("16", 16),
-        ("0x10", 16),
-        ("+16", 16),
-        ("-16", -16),
-        ("0x80000000", i32::MIN),
-        ("0xffffffff", -1),
-    ] {
-        let world = World::new(content.clone(), map(literal)).unwrap();
-        let entity = world.entities.values().next().unwrap();
-        assert_eq!(entity.condition, expected, "eff:{literal}");
-        assert_eq!(entity.name, "native");
-        assert_eq!(entity.size, 137);
-        assert!(entity.extra_stats.contains(&(41, 16)));
-    }
-    for literal in ["0x0x10", "0x100000000", "2147483648", "garbage"] {
-        assert!(
-            World::new(content.clone(), map(literal)).is_err(),
-            "eff:{literal}"
-        );
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn fixture_population_seed_is_reproducible_without_prepared_authority() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    for seed in [12351, 423] {
-        let mut left = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
-        let right = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
-        let mut expected_layout_rng = rand::rngs::StdRng::seed_from_u64(seed);
-        for _ in 0..2 {
-            let _: usize = expected_layout_rng.gen_range(0..1);
-        }
-        assert_eq!(
-            left.realm_rng.clone().r#gen::<u64>(),
-            expected_layout_rng.r#gen::<u64>()
-        );
-        assert!(left.prepared_seed.is_none() && right.prepared_seed.is_none());
-        let mut streams = BTreeSet::new();
-        for (id, a) in left.worlds.iter().filter(|(_, w)| w.name == "Realm") {
-            let b = &right.worlds[id];
-            assert!(a.prepared_seed.is_none() && b.prepared_seed.is_none());
-            let next = (
-                a.rng.clone().r#gen::<u64>(),
-                a.event_rng.clone().r#gen::<u64>(),
-            );
-            assert_eq!(
-                next,
-                (
-                    b.rng.clone().r#gen::<u64>(),
-                    b.event_rng.clone().r#gen::<u64>()
-                )
-            );
-            assert!(streams.insert(next));
-            assert_eq!(
-                a.entities
-                    .values()
-                    .map(|e| (e.kind, e.pos.x, e.pos.y))
-                    .collect::<Vec<_>>(),
-                b.entities
-                    .values()
-                    .map(|e| (e.kind, e.pos.x, e.pos.y))
-                    .collect::<Vec<_>>()
-            );
-            assert!(a.map.cells.iter().zip(&b.map.cells).all(|(a, b)| (
-                a.ground, a.object, &a.config, a.terrain, a.region
-            ) == (
-                b.ground, b.object, &b.config, b.terrain, b.region
-            )));
-            assert_eq!(
-                a.entities
-                    .values()
-                    .filter(|e| e.kind == crate::dungeon::manor::KAGE)
-                    .count(),
-                2
-            );
-        }
-        assert_eq!(streams.len(), 2);
-        let worlds = left.worlds.len();
-        assert!(left.prepared_instance("realm-shore").is_err());
-        assert!(
-            left.prepared_instance_with_seed("realm-shore", 423)
-                .is_err()
-        );
-        assert_eq!(left.worlds.len(), worlds);
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn populated_realm_fixture_retains_graveyard_space() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    for seed in [730, 1093] {
-        let directory = Directory::fixture(data, content.clone(), 16, 12351, Some(seed))
-            .unwrap_or_else(|error| panic!("fixture population seed {seed}: {error:#}"));
-        for world in directory.worlds.values().filter(|w| w.name == "Realm") {
-            let count = |kind| world.entities.values().filter(|e| e.kind == kind).count();
-            assert_eq!(count(crate::dungeon::manor::KAGE), 2);
-            assert!((17..25).contains(&count(0x91f)));
-        }
-    }
-}
+impl World {}

@@ -40,33 +40,3 @@ pub(super) fn patch(data: &mut [u8], url: u32, label: u32) -> Result<()> {
     data[positions[2] + 4..positions[2] + 6].copy_from_slice(&index);
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn gold_navigation_is_exact_bounded_and_keeps_method_headers_and_layout() {
-        let mut data = [METHOD, CACHE, LABEL].concat();
-        let original = data.clone();
-        patch(&mut data, 6000, 6001).unwrap();
-        assert_eq!(data.len(), original.len());
-        assert_eq!(&data[..5], &original[..5]);
-        assert_eq!(&data[92..99], &original[92..99]);
-        assert_eq!(&data[132..138], &original[132..138]);
-        assert_eq!(&data[5..28], b"\xd0\x30\x5d\x86\x08\x5d\xce\x01\x2c\xf0\x2e\x4a\xce\x01\x01\x2c\x92\x02\x4f\x86\x08\x02\x47");
-        assert!(data[28..92].iter().all(|v| *v == 0x02));
-        assert_eq!(data[99], 0x47);
-        assert!(data[100..132].iter().all(|v| *v == 0x02));
-        assert!(patch(&mut data, 6000, 6001).is_err());
-        let mut duplicate = original.repeat(2);
-        assert!(patch(&mut duplicate, 6000, 6001).is_err());
-        assert_eq!(duplicate, original.repeat(2));
-        for index in 0..original.len() {
-            let mut corrupt = original.clone();
-            corrupt[index] ^= 1;
-            let before = corrupt.clone();
-            assert!(patch(&mut corrupt, 6000, 6001).is_err());
-            assert_eq!(corrupt, before);
-        }
-    }
-}

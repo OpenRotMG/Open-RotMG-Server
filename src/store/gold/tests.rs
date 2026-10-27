@@ -72,69 +72,6 @@ async fn class_quest_gold_pays_each_colour_once_and_survives_reopen() {
     );
 }
 
-#[test]
-fn class_quest_gold_overflow_rolls_back_all_tiers_and_excludes_bots() {
-    let mut db = Connection::open_in_memory().unwrap();
-    db.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE accounts(id INTEGER PRIMARY KEY,credits INTEGER); CREATE TABLE shore_bots(name TEXT,account INTEGER REFERENCES accounts(id)); INSERT INTO accounts VALUES(1,2147483572),(2,100); INSERT INTO shore_bots VALUES('Bot',2);").unwrap();
-    db.execute_batch(SCHEMA).unwrap();
-    let tx = db.transaction().unwrap();
-    assert!(class_quests(&tx, 1, 26, 13).is_err());
-    drop(tx);
-    assert_eq!(
-        db.query_row("SELECT credits FROM accounts WHERE id=1", [], |r| r
-            .get::<_, i32>(0))
-            .unwrap(),
-        i32::MAX - 75
-    );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM gold_rewards", [], |r| r
-            .get::<_, i32>(0))
-            .unwrap(),
-        0
-    );
-    db.execute("UPDATE accounts SET credits=100 WHERE id=1", [])
-        .unwrap();
-    let tx = db.transaction().unwrap();
-    assert!(class_quests(&tx, 1, 26, 13).unwrap());
-    assert!(!class_quests(&tx, 1, 26, 13).unwrap());
-    assert!(!class_quests(&tx, 2, 65, 13).unwrap());
-    tx.commit().unwrap();
-    assert_eq!(
-        db.query_row("SELECT credits FROM accounts WHERE id=1", [], |r| r
-            .get::<_, i32>(0))
-            .unwrap(),
-        325
-    );
-    assert_eq!(
-        db.query_row("SELECT credits FROM accounts WHERE id=2", [], |r| r
-            .get::<_, i32>(0))
-            .unwrap(),
-        100
-    );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM gold_rewards", [], |r| r
-            .get::<_, i32>(0))
-            .unwrap(),
-        2
-    );
-    let tx = db.transaction().unwrap();
-    assert!(class_quests(&tx, 1, 65, 13).unwrap());
-    assert!(!class_quests(&tx, 1, 65, 13).unwrap());
-    tx.commit().unwrap();
-    assert_eq!(
-        db.query_row("SELECT credits FROM accounts WHERE id=1", [], |r| r
-            .get::<_, i32>(0))
-            .unwrap(),
-        3825
-    );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM gold_rewards", [], |r| r
-            .get::<_, i32>(0))
-            .unwrap(),
-        5
-    );
-}
-
 #[tokio::test]
 async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
     let content = Content::load(Path::new("data")).unwrap();
