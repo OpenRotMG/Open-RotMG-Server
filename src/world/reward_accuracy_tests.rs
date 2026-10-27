@@ -179,6 +179,69 @@ async fn septavius_doom_fraction_qualifies_at_fifteen_percent_without_raising_ot
 }
 
 #[tokio::test]
+async fn god_potions_do_not_erase_successful_equipment_drops() {
+    let (mut w, _store, owners) = reward_world().await;
+    for kind in [
+        0x651, 0x652, 0x654, 0x655, 0x656, 0x657, 0x658, 0x659, 0x91a, 0x6d8, 0xd05,
+    ] {
+        for count in [1, 2] {
+            let contributors: Vec<_> = owners[..count]
+                .iter()
+                .map(|(account, _)| (*account, crate::loot::potion_damage(kind).unwrap()))
+                .collect();
+            let (seed, loot) = (0..16384)
+                .find_map(|seed| {
+                    let loot = crate::loot::god_loot(
+                        &w.content,
+                        kind,
+                        &contributors,
+                        &mut rand::rngs::StdRng::seed_from_u64(seed),
+                    );
+                    (!loot.shared.is_empty() && loot.private.contains_key(&owners[0].0))
+                        .then_some((seed, loot))
+                })
+                .expect("seeded death must exercise simultaneous equipment and potion rolls");
+            let mut expected: Vec<_> = loot
+                .shared
+                .into_iter()
+                .chain(loot.private.into_values().flatten())
+                .map(i32::from)
+                .collect();
+            expected.sort_unstable();
+            clear_bags(&mut w);
+            let root = w
+                .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
+                .unwrap();
+            w.entities.get_mut(&root).unwrap().damage = owners[..count]
+                .iter()
+                .map(|(_, character)| (*character, crate::loot::potion_damage(kind).unwrap()))
+                .collect();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.defeat_entity(root).unwrap();
+            let mut actual: Vec<_> = w
+                .bag_expiry
+                .keys()
+                .flat_map(|id| {
+                    let bag = &w.entities[id];
+                    assert!(
+                        owners[..count]
+                            .iter()
+                            .any(|(account, _)| bag.accessible(*account))
+                    );
+                    assert!(!bag.accessible(owners[count].0));
+                    bag.items.iter().copied().filter(|item| *item >= 0)
+                })
+                .collect();
+            actual.sort_unstable();
+            assert_eq!(
+                actual, expected,
+                "{kind:#x}, {count} contributors, seed {seed}: successful gear must survive a potion roll"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn god_bags_split_all_successes_reject_nonowners_and_commit_collection_once() {
     let (mut w, store, owners) = reward_world().await;
     let contributors: Vec<_> = owners[..5]
