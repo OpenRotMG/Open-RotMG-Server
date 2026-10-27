@@ -10,6 +10,7 @@ mod accounts;
 pub(crate) mod browser_link;
 mod character_slots;
 mod discord_gold;
+mod email;
 mod vaults;
 pub use vaults::{VAULT_CHESTS, VAULT_PRICE};
 mod consumables;
@@ -624,7 +625,7 @@ impl Store {
         ensure!(
             matches!(
                 version,
-                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19
+                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
             ),
             "unsupported game database schema {version}"
         );
@@ -737,6 +738,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             ))?;
         }
         discord_gold::check_schema(&migration, 19)?;
+        email::migrate(&migration, version)?;
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
         }
@@ -830,7 +832,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 19)?;
+        migration.pragma_update(None, "user_version", 20)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

@@ -54,7 +54,7 @@ openrotmg.org {
         X-Content-Type-Options nosniff
         Referrer-Policy strict-origin-when-cross-origin
     }
-    @recovery path /recover /recover/* /link /link/* /api/account/recover /api/account/browser /api/account/browser/* /api/account/link/*
+    @recovery path /recover /recover/* /link /link/* /verify-email /verify-email/* /api/account/verify-email /api/account/recover /api/account/browser /api/account/browser/* /api/account/link/*
     header @recovery Cache-Control "no-store"
     header @recovery >Referrer-Policy "no-referrer"
     header @recovery Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://game.openrotmg.org; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
