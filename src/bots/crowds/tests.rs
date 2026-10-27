@@ -4,6 +4,7 @@ use crate::world::view::VisibleObject;
 fn fixture() -> (Content, PlayerView, Brain) {
     let (c, mut v) = crate::bots::quest_tests::fixture();
     v.session.account = 201;
+    v.session.world = -4;
     v.quest = None;
     let mut peer = v.objects[0].clone();
     peer.id = 3;
@@ -191,14 +192,22 @@ fn brief_public_visibility_loss_recovers_but_unseen_or_unsafe_targets_are_not_ch
     let (c, mut v, mut b) = fixture();
     shared(&c, &v, &mut b);
     v.objects.pop();
+    advance(&mut v, 1000);
+    assert_eq!(v.elapsed_ms, 6000);
     b.crowd.observe(&v, &c);
-    advance(&mut v, 6000);
+    advance(&mut v, 5950);
+    assert_eq!(v.elapsed_ms, 11950);
     b.crowd.observe(&v, &c);
+    assert!(b.crowd.cooperator(&v, |_| true).is_none());
+    advance(&mut v, 50);
+    assert_eq!(v.elapsed_ms, 12000);
     v.objects.push(peer.clone());
     assert!(
         b.crowd.cooperator(&v, |_| true).is_none(),
-        "long separation ends rather than waits forever"
+        "reappearance at the six-second loss deadline cannot restore company"
     );
+    assert!(!b.crowd.cooperation.passive_available(41999));
+    assert!(b.crowd.cooperation.passive_available(42000));
     let (c, mut v, mut b) = fixture();
     shared(&c, &v, &mut b);
     peer.position = Pos { x: 64.5, y: 64.5 };
@@ -236,19 +245,68 @@ fn ongoing_shared_hits_cannot_renew_an_outing_and_session_changes_erase_it() {
 }
 
 #[test]
+fn newer_public_peer_can_attract_passive_company_and_shared_damage_catchup() {
+    let (c, mut v, _) = fixture();
+    v.session.account = 199;
+    let mut b = Brain::new(ARCHETYPES[0], &v);
+    b.crowd.observe(&v, &c);
+    assert!(can_approach(v.session.world, 199, 200));
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert_eq!(
+        b.crowd.destination(&v, None, |_| true).unwrap().account,
+        200
+    );
+    shared(&c, &v, &mut b);
+    v.objects.remove(0);
+    let catchup = adventure(&c, &v, &mut b);
+    assert_eq!(catchup.goal, Goal::Follow(3));
+    assert!(catchup.movement.is_some());
+    assert!(catchup.journey.is_none());
+}
+
+#[test]
+fn public_world_rank_is_strict_acyclic_and_not_account_age_ordered() {
+    assert!(can_approach(-4, 199, 200));
+    assert!(can_approach(-3, 200, 199));
+    for world in [-5, -4, -3, 1, 2] {
+        for account in [199, 200, 201, 202] {
+            assert!(!can_approach(world, account, account));
+            for peer in [199, 200, 201, 202] {
+                if account != peer {
+                    assert_ne!(
+                        can_approach(world, account, peer),
+                        can_approach(world, peer, account)
+                    );
+                }
+                for third in [199, 200, 201, 202] {
+                    if can_approach(world, account, peer) && can_approach(world, peer, third) {
+                        assert!(can_approach(world, account, third));
+                        assert!(!can_approach(world, third, account));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn passive_outings_are_directional_bounded_and_yield_to_safety_and_commitments() {
     let (c, mut v, mut b) = fixture();
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
     b.crowd.approach_selected(3);
     assert!(b.crowd.destination(&v, None, |_| true).is_some());
-    assert!(can_approach(201, 200));
-    assert!(!can_approach(200, 201));
-    assert!(!can_approach(200, 200));
+    assert!(can_approach(v.session.world, 201, 200));
+    assert!(!can_approach(v.session.world, 200, 201));
+    assert!(!can_approach(v.session.world, 200, 200));
     let mut reverse = Crowd::new(true);
-    v.session.account = 199;
+    v.session.account = 200;
+    v.player_markers[0].account = 201;
+    v.objects[1].account = Some(201);
     reverse.attend(&v, &c, &b.mind.cognition, false);
     assert!(reverse.destination(&v, None, |_| true).is_none());
     v.session.account = 201;
+    v.player_markers[0].account = 200;
+    v.objects[1].account = Some(200);
     let marker = v.player_markers.pop().unwrap();
     advance(&mut v, 1000);
     b.crowd.attend(&v, &c, &b.mind.cognition, false);

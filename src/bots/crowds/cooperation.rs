@@ -171,6 +171,12 @@ impl Cooperation {
         let (peer, until) = self.recent?;
         let result = if now >= until {
             Err("expired")
+        } else if self
+            .unseen_since
+            .is_some_and(|since| now.saturating_sub(since) >= SEPARATION)
+        {
+            self.release(now, "lost_public_visibility");
+            return None;
         } else {
             visible(peer).and_then(|p| {
                 if eligible(p) {
@@ -193,7 +199,7 @@ impl Cooperation {
                 Some((peer, position))
             }
             Err("lost_public_visibility") => {
-                let since = *self.unseen_since.get_or_insert_with(|| {
+                self.unseen_since.get_or_insert_with(|| {
                     tracing::info!(
                         account = self.binding.map(|b| b[1]),
                         peer = peer.1,
@@ -202,9 +208,6 @@ impl Cooperation {
                     );
                     now
                 });
-                if now.saturating_sub(since) >= SEPARATION {
-                    self.release(now, "lost_public_visibility");
-                }
                 None
             }
             Err(reason) => {

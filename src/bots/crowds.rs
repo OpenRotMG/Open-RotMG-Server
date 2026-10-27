@@ -248,14 +248,20 @@ impl Crowd {
         {
             return None;
         }
-        self.attended_destination(v.time_ms, v.position, v.session.account, group, |p| {
-            survivable(v, p) && eligible_position(p)
-        })
+        self.attended_destination(
+            v.time_ms,
+            v.position,
+            v.session.world,
+            v.session.account,
+            group,
+            |p| survivable(v, p) && eligible_position(p),
+        )
     }
     fn attended_destination(
         &self,
         time_ms: u64,
         position: Pos,
+        world: i32,
         account: i32,
         group: Option<&adventures::Adventure>,
         eligible_position: impl Fn(Pos) -> bool,
@@ -264,7 +270,7 @@ impl Crowd {
             .values()
             .filter(|(p, seen)| {
                 *seen == time_ms
-                    && can_approach(account, p.account)
+                    && can_approach(world, account, p.account)
                     && eligible_position(p.position)
                     && (self.company.len() < 4 || self.company.contains_key(&(p.id, p.account)))
                     && self
@@ -296,9 +302,10 @@ impl Crowd {
     }
 }
 
-pub(super) fn can_approach(account: i32, peer: i32) -> bool {
-    // A public, strict ordering prevents optional followers from chasing each other in cycles.
-    peer < account
+pub(super) fn can_approach(world: i32, account: i32, peer: i32) -> bool {
+    // A shared world rank prevents cycles without making account age a lifetime leadership rule.
+    let rank = |account| (persona::seed(&format!("{world}:{account}")), account);
+    rank(peer) < rank(account)
 }
 
 pub(super) fn survivable(v: &PlayerView, position: Pos) -> bool {

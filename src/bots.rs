@@ -1445,7 +1445,7 @@ impl Brain {
                 !self.blocked.contains_key(&tile(position))
             })
             && let Some(peer) = &recent_company
-            && crowds::can_approach(v.session.account, peer.account)
+            && crowds::can_approach(v.session.world, v.session.account, peer.account)
             && peer.position.distance(v.position) > 7.
         {
             choices.push((
