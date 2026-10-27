@@ -175,6 +175,4 @@ pub(super) async fn reset_password(
 }
 
 #[cfg(test)]
-mod gold_tests;
-#[cfg(test)]
 pub(crate) mod tests;

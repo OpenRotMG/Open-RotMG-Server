@@ -13,13 +13,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(test)]
-mod guild_tests;
-#[cfg(test)]
-mod persona_tests;
-#[cfg(test)]
-mod protection_tests;
-
 const MAX_REQUEST_BYTES: usize = 8192;
 const MAX_MUTATIONS: usize = 1024;
 

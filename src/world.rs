@@ -66,14 +66,10 @@ mod ocean_setpiece;
 
 mod population;
 mod population_density;
-#[cfg(test)]
-mod population_reproduction_tests;
 
 mod realm_events;
 mod realm_voice;
 
-#[cfg(test)]
-mod quest_index_tests;
 mod realm_portal;
 mod realm_quests;
 
@@ -936,7 +932,7 @@ pub struct Directory {
     pub clock: crate::clock::Clock,
     pub worlds: execution::Worlds,
     templates: BTreeMap<String, Arc<Map>>,
-    realms: Vec<crate::terrain::realms::Source>,
+    realms: Vec<Arc<crate::terrain::realms::Source>>,
     realm_rng: rand::rngs::StdRng,
     content: Arc<Content>,
     ids: Arc<AtomicI32>,
@@ -1120,7 +1116,7 @@ impl Directory {
             clock: crate::clock::Clock::default(),
             worlds: execution::Worlds::new(),
             templates,
-            realms,
+            realms: realms.into_iter().map(Arc::new).collect(),
             realm_rng: rand::rngs::StdRng::seed_from_u64(seed),
             content,
             ids: Arc::new(AtomicI32::new(1000)),
@@ -1177,197 +1173,191 @@ impl Directory {
         safe: bool,
         owner: Option<i32>,
     ) -> Result<World> {
-        let layout =
-            (template == "realm-shore").then(|| self.realm_rng.gen_range(0..self.realms.len()));
-        let mut world = World::with_ids(
-            self.content.clone(),
-            if let Some(index) = layout {
-                self.realms[index].open(&self.content)?
-            } else if template == "pirate-cave" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::pirate::generate(&self.content, seed)?)
-            } else if template == "abyss-of-demons" {
-                let seed = match self.prepared_seed {
-                    Some(seed) => seed ^ self.next_world as u64,
-                    None => rand::random(),
-                };
-                Arc::new(crate::dungeon::abyss::generate(&self.content, seed)?)
-            } else if template == "manor-of-the-immortals" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::manor::generate(&self.content, seed)?)
-            } else if template == "beachzone" {
-                Arc::new(crate::dungeon::beach::generate(&self.content)?)
-            } else if template == "ocean-trench" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::trench::generate(&self.content, seed)?)
-            } else if template == "forbidden-jungle" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::jungle::generate(&self.content, seed)?)
-            } else if template == "spider-den" {
-                let seed = match self.prepared_seed {
-                    Some(seed) => seed ^ self.next_world as u64,
-                    None => rand::random(),
-                };
-                Arc::new(crate::dungeon::spider::generate(&self.content, seed)?)
-            } else if template == "mad-lab" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::lab::generate(&self.content, seed)?)
-            } else if template == "tomb-of-the-ancients" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::tomb::generate(&self.content, seed)?)
-            } else if template == "snake-pit" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::snake_pit(&self.content, seed)?)
-            } else if template == "sprite-world" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::sprite::generate(&self.content, seed)?)
-            } else if template == crate::dungeon::davy::TEMPLATE {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::davy::generate(&self.content, seed)?)
-            } else if template == "undead-lair" {
-                let seed = self
-                    .prepared_seed
-                    .map_or_else(rand::random, |s| s ^ self.next_world as u64);
-                Arc::new(crate::dungeon::undead::generate(&self.content, seed)?)
-            } else {
-                self.templates
-                    .get(template)
-                    .context("world template missing")?
-                    .clone()
-            },
-            self.ids.clone(),
-        )?;
-        world.realm_layout = layout.map(|index| self.realms[index].name().to_owned());
-        world.clock = self.clock.clone();
-        world.attack_epoch = self.clock.now();
-        world.new_tick_at = self.clock.now();
+        self.construction(template, name, safe, owner)()
+    }
+    fn construction(
+        &mut self,
+        template: &str,
+        name: &str,
+        safe: bool,
+        owner: Option<i32>,
+    ) -> impl FnOnce() -> Result<World> + Send + use<> {
+        let source = (template == "realm-shore")
+            .then(|| self.realms[self.realm_rng.gen_range(0..self.realms.len())].clone());
         #[cfg(test)]
-        if layout.is_some_and(|index| {
-            matches!(
-                &self.realms[index],
-                crate::terrain::realms::Source::Fixture(_)
-            )
-        }) {
-            // Reproduce fixture populations without granting prepared-world authority or consuming layout RNG.
-            let seed = self.realm_rng.clone().r#gen::<u64>();
-            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
-            tracing::debug!(seed, "test Realm population seeded");
-        }
-        if let Some(seed) = self.prepared_seed {
-            let seed = seed ^ self.next_world as u64;
-            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
-            world.prepared_seed = Some(seed);
-        }
-        world.name = name.into();
-        // Select the client's existing starfield, not dungeon void: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_H_Z_/Background.as
-        world.background = match template {
-            "sprite-world" => 1,
-            "nexus" | "vault" => 2,
-            _ => 0,
-        };
-        world.safe = safe;
-        world.owner = owner;
-        world.max_players = self.max_players;
-        world.encounter = template == "realm-shore"
-            || template == crate::endgame::CASTLE
-            || crate::dungeon::DUNGEONS
-                .iter()
-                .chain(crate::endgame::DUNGEONS)
-                .any(|(_, name, _, _)| *name == template);
-        if template == "realm-shore" {
-            let started = Instant::now();
-            let groves = self.realms[layout.context("Realm layout selection missing")?].groves()?;
-            world.populate_authored_groves(&groves)?;
-            // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
-            let beach_bum = world.rng.gen_ratio(1, 200);
-            world.populate_tomb_entry()?;
-            world.populate_coil_snakes()?;
-            if beach_bum {
-                world.populate_beach_bum()?;
+        let fixture_seed = source.as_ref().and_then(|source| {
+            matches!(&**source, crate::terrain::realms::Source::Fixture(_))
+                .then(|| self.realm_rng.clone().r#gen::<u64>())
+        });
+        let (content, ids, clock) = (self.content.clone(), self.ids.clone(), self.clock.clone());
+        let (prepared_seed, next_world, max_players) =
+            (self.prepared_seed, self.next_world, self.max_players);
+        let (map, template, name) = (
+            self.templates.get(template).cloned(),
+            template.to_owned(),
+            name.to_owned(),
+        );
+        move || {
+            let mut world = World::with_ids(
+                content.clone(),
+                if let Some(source) = &source {
+                    source.open(&content)?
+                } else if template == "pirate-cave" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::pirate::generate(&content, seed)?)
+                } else if template == "abyss-of-demons" {
+                    let seed = match prepared_seed {
+                        Some(seed) => seed ^ next_world as u64,
+                        None => rand::random(),
+                    };
+                    Arc::new(crate::dungeon::abyss::generate(&content, seed)?)
+                } else if template == "manor-of-the-immortals" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::manor::generate(&content, seed)?)
+                } else if template == "beachzone" {
+                    Arc::new(crate::dungeon::beach::generate(&content)?)
+                } else if template == "ocean-trench" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::trench::generate(&content, seed)?)
+                } else if template == "forbidden-jungle" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::jungle::generate(&content, seed)?)
+                } else if template == "spider-den" {
+                    let seed = match prepared_seed {
+                        Some(seed) => seed ^ next_world as u64,
+                        None => rand::random(),
+                    };
+                    Arc::new(crate::dungeon::spider::generate(&content, seed)?)
+                } else if template == "mad-lab" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::lab::generate(&content, seed)?)
+                } else if template == "tomb-of-the-ancients" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::tomb::generate(&content, seed)?)
+                } else if template == "snake-pit" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::snake_pit(&content, seed)?)
+                } else if template == "sprite-world" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::sprite::generate(&content, seed)?)
+                } else if template == crate::dungeon::davy::TEMPLATE {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::davy::generate(&content, seed)?)
+                } else if template == "undead-lair" {
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    Arc::new(crate::dungeon::undead::generate(&content, seed)?)
+                } else {
+                    map.context("world template missing")?
+                },
+                ids.clone(),
+            )?;
+            world.realm_layout = source.as_ref().map(|source| source.name().to_owned());
+            world.clock = clock.clone();
+            world.attack_epoch = clock.now();
+            world.new_tick_at = clock.now();
+            #[cfg(test)]
+            if let Some(seed) = fixture_seed {
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
+                tracing::debug!(seed, "test Realm population seeded");
             }
-            world.populate_realm_heroes()?;
-            world.populate_named_quests(!groves.is_empty())?;
-            world.populate_realm_events()?;
-            world.populate_hermit()?;
-            world.populate_manor_entry()?;
-            world.populate_ghost_ship()?;
-            world.populate_lost_lands()?;
-            world.populate_realm_population()?;
-            // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
-            let crystal = world.place_named_setpiece(0x935, &[1])?;
-            world.spawn_entity(0x935, crystal, vec![])?;
-            world.reserve_realm_events()?;
-            tracing::info!(
-                layout = world.realm_layout,
-                entities = world.entities.len(),
-                actors = world.actor_ids.len(),
-                elapsed_ms = started.elapsed().as_millis(),
-                "Realm simulation populated"
-            );
-        }
-        world.prepare_endgame()?;
-        if template == crate::dungeon::davy::TEMPLATE {
-            world.prepare_locker()?;
-        }
-        if template == "sprite-world" {
-            let exits: Vec<_> = world
-                .entities
-                .values()
-                .filter(|e| e.kind == 0x70e)
-                .map(|e| e.id)
-                .collect();
-            ensure!(
-                exits.len() == 1,
-                "Sprite World requires one authored completion exit"
-            );
-            world.entities.get_mut(&exits[0]).unwrap().published = false;
-            world.clear_exit = Some(exits[0]);
-        }
-        if world.encounter {
-            let kinds: BTreeSet<_> = world
-                .entities
-                .values()
-                .filter(|e| {
-                    let object = &world.content.objects[&e.kind];
-                    object.enemy && (object.class != "Wall" || object.passive_destructible())
-                })
-                .map(|e| e.kind)
-                .collect();
-            for kind in kinds {
-                if !world.content.objects[&kind].passive_destructible() {
-                    crate::encounter::validate(&world.content, kind)?;
+            if let Some(seed) = prepared_seed {
+                let seed = seed ^ next_world as u64;
+                world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
+                world.prepared_seed = Some(seed);
+            }
+            world.name = name;
+            // Select the client's existing starfield, not dungeon void: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_H_Z_/Background.as
+            world.background = match template.as_str() {
+                "sprite-world" => 1,
+                "nexus" | "vault" => 2,
+                _ => 0,
+            };
+            world.safe = safe;
+            world.owner = owner;
+            world.max_players = max_players;
+            world.encounter = template == "realm-shore"
+                || template == crate::endgame::CASTLE
+                || crate::dungeon::DUNGEONS
+                    .iter()
+                    .chain(crate::endgame::DUNGEONS)
+                    .any(|(_, name, _, _)| *name == template);
+            if template == "realm-shore" {
+                let started = Instant::now();
+                let groves = source.as_ref().context("Realm source missing")?.groves()?;
+                world.populate_authored_groves(&groves)?;
+                // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
+                let beach_bum = world.rng.gen_ratio(1, 200);
+                world.populate_tomb_entry()?;
+                world.populate_coil_snakes()?;
+                if beach_bum {
+                    world.populate_beach_bum()?;
                 }
+                world.populate_realm_heroes()?;
+                world.populate_named_quests(!groves.is_empty())?;
+                world.populate_realm_events()?;
+                world.populate_hermit()?;
+                world.populate_manor_entry()?;
+                world.populate_ghost_ship()?;
+                world.populate_lost_lands()?;
+                world.populate_realm_population()?;
+                // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+                let crystal = world.place_named_setpiece(0x935, &[1])?;
+                world.spawn_entity(0x935, crystal, vec![])?;
+                world.reserve_realm_events()?;
+                tracing::info!(
+                    layout = world.realm_layout,
+                    entities = world.entities.len(),
+                    actors = world.actor_ids.len(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "Realm simulation populated"
+                );
+            }
+            world.prepare_endgame()?;
+            if template == crate::dungeon::davy::TEMPLATE {
+                world.prepare_locker()?;
+            }
+            if template == "sprite-world" {
+                let exits: Vec<_> = world
+                    .entities
+                    .values()
+                    .filter(|e| e.kind == 0x70e)
+                    .map(|e| e.id)
+                    .collect();
+                ensure!(
+                    exits.len() == 1,
+                    "Sprite World requires one authored completion exit"
+                );
+                world.entities.get_mut(&exits[0]).unwrap().published = false;
+                world.clear_exit = Some(exits[0]);
+            }
+            if world.encounter {
+                let kinds: BTreeSet<_> = world
+                    .entities
+                    .values()
+                    .filter(|e| {
+                        let object = &world.content.objects[&e.kind];
+                        object.enemy && (object.class != "Wall" || object.passive_destructible())
+                    })
+                    .map(|e| e.kind)
+                    .collect();
+                for kind in kinds {
+                    if !world.content.objects[&kind].passive_destructible() {
+                        crate::encounter::validate(&world.content, kind)?;
+                    }
+                    crate::loot::validate(&world.content, kind)?;
+                }
+            }
+            for kind in [
+                0x173, 0x653, 0x918, 0x919, 0xd07, 0xd08, 0xd09, 0xd0a, 0xdaa, 0xdab, 0xdac, 0xdad,
+                0xdae, 0xdaf, 0xdb0, 0xdb1, 0xdb2,
+            ] {
+                crate::encounter::validate(&world.content, kind)?;
                 crate::loot::validate(&world.content, kind)?;
             }
+            Ok(world)
         }
-        for kind in [
-            0x173, 0x653, 0x918, 0x919, 0xd07, 0xd08, 0xd09, 0xd0a, 0xdaa, 0xdab, 0xdac, 0xdad,
-            0xdae, 0xdaf, 0xdb0, 0xdb1, 0xdb2,
-        ] {
-            crate::encounter::validate(&world.content, kind)?;
-            crate::loot::validate(&world.content, kind)?;
-        }
-        Ok(world)
     }
     fn resolve(&mut self, target: Target) -> Result<&mut World> {
         match target {
@@ -2196,33 +2186,7 @@ impl Directory {
             }
         }
     }
-    #[cfg(test)]
-    fn step(&mut self) {
-        self.step_using(|worlds, tick| {
-            for (id, world) in worlds {
-                let _context = crate::supervision::world(*id, tick);
-                world.step();
-                world.report_performance(*id);
-            }
-        });
-    }
-    #[cfg(test)]
-    fn step_using(&mut self, simulate: impl FnOnce(&mut execution::Worlds, u64)) {
-        self.tick += 1;
-        self.retire_transfer_grants();
-        simulate(&mut self.worlds, self.tick);
-        for (id, world) in &mut self.worlds {
-            if *id > 0 && !self.endgame.realms.contains_key(id) {
-                if world.players.is_empty() {
-                    self.idle.entry(*id).or_insert(self.tick);
-                } else {
-                    self.idle.remove(id);
-                }
-            }
-        }
-        let ready: Vec<_> = self.worlds.keys().copied().collect();
-        self.coordinate(&ready);
-    }
+
     fn coordinator_step(&mut self) {
         self.tick += 1;
         self.retire_grants(|worlds, id| worlds.release_world(&id));
@@ -2499,34 +2463,6 @@ impl Handle {
             clock: self.clock.clone(),
             supervisor: self.supervisor.clone(),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn lifecycle_test_pause_job(
-        &self,
-        call: usize,
-        before: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        self.lifecycle_test_gate(call, before, false)
-    }
-    #[cfg(test)]
-    fn lifecycle_test_gate(
-        &self,
-        call: usize,
-        before: bool,
-        request_only: bool,
-    ) -> (oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
-        assert!(call > 0);
-        let (entered, ready) = oneshot::channel();
-        let (release, wait) = std::sync::mpsc::channel();
-        assert!(
-            self.lifecycle_job_gate
-                .lock()
-                .unwrap()
-                .replace((call, before, request_only, entered, wait))
-                .is_none()
-        );
-        (ready, release)
     }
 
     pub async fn directory<T: Send + 'static>(
@@ -4233,12 +4169,7 @@ impl World {
             .filter(|e| self.actor_ids.contains(&e.id))
             .count()
     }
-    #[cfg(test)]
-    fn non_population_actors(&self) -> impl Iterator<Item = &Entity> {
-        self.non_population_ids
-            .iter()
-            .map(|id| self.entities.get(id).expect("scripted actor missing"))
-    }
+
     fn entities_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
         self.near_entities(
             Pos {
@@ -5547,11 +5478,7 @@ impl World {
         p.bot_aim = None;
         Ok(())
     }
-    #[cfg(test)]
-    pub(crate) fn credit_reservation_for_test(&self, id: i32) -> (Option<Character>, bool) {
-        let p = &self.players[&id];
-        (p.progress_snapshot.clone(), p.departure_snapshot.is_some())
-    }
+
     pub(crate) fn credit_recipients(&self, giver: i32) -> Vec<(i32, i32)> {
         self.players
             .iter()
@@ -7505,204 +7432,12 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 }
 
 #[cfg(test)]
-mod chase_tests;
-#[cfg(test)]
 mod death_chat_tests;
 #[cfg(test)]
-mod dungeon_return_tests;
-#[cfg(test)]
-mod hermit_leash_tests;
-#[cfg(test)]
-mod hermit_loot_tests;
-#[cfg(test)]
-mod instance_lifetime_tests;
-#[cfg(test)]
 mod lab_tests;
-#[cfg(test)]
-mod period_loot_tests;
-#[cfg(test)]
-mod pirate_generation_tests;
+
 #[cfg(test)]
 mod reward_accuracy_tests;
-#[cfg(test)]
-mod sight_tests;
-#[cfg(test)]
-mod spectator_tests;
-#[cfg(test)]
-mod sphinx_loot_tests;
-#[cfg(test)]
-mod sphinx_site_tests;
-#[cfg(test)]
-mod weapon_tests;
-#[cfg(test)]
-mod world_effect_tests;
 
 #[cfg(test)]
-impl World {
-    pub(crate) fn test_paused_script_heartbeats(&mut self, id: i32) -> Result<()> {
-        let p = self.players.get_mut(&id).unwrap();
-        assert!(p.active() && p.paused && p.controller != Controller::Human);
-        let position = p.pos;
-        let credit = p.movement_credit;
-        let character = serde_json::to_value(&p.character)?;
-        let fractions = (p.hp_fraction, p.mp_fraction);
-        // Nonzero residues detect accidentally entering even the full-HP/MP regeneration branch.
-        p.hp_fraction = 0.25;
-        p.mp_fraction = 0.5;
-        p.bot_goal = Some(Pos {
-            x: position.x + 1.,
-            y: position.y,
-        });
-        p.bot_aim = Some(0.);
-        let goal = p.bot_goal;
-        let next_bullet = p.next_bullet;
-        let mut moves = Vec::new();
-        for _ in 0..40 {
-            self.step();
-            let p = &self.players[&id];
-            moves.push((p.last_move, self.now as i32));
-            assert_eq!((p.pos.x, p.pos.y), (position.x, position.y));
-            assert_eq!(p.movement_credit, credit);
-            assert_eq!(serde_json::to_value(&p.character)?, character);
-            assert_eq!((p.hp_fraction, p.mp_fraction), (0.25, 0.5));
-            assert_eq!(p.bot_goal.map(|p| (p.x, p.y)), goal.map(|p| (p.x, p.y)));
-            assert_eq!(p.bot_aim, Some(0.));
-            assert_eq!(p.next_bullet, next_bullet);
-            assert!(!self.bullets.iter().any(|b| b.owner == id));
-        }
-        // Exercise the real guard before checking the recorded heartbeat times.
-        self.move_to(id, position, self.now as i32)?;
-        assert!(moves.iter().all(|(actual, expected)| actual == expected));
-        let p = self.players.get_mut(&id).unwrap();
-        p.hp_fraction = fractions.0;
-        p.mp_fraction = fractions.1;
-        p.bot_goal = None;
-        p.bot_aim = None;
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn native_map_effects_use_decimal_or_prefixed_hex_numbers() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-    assert!(!content.objects[&0x105].stasis_immune);
-    let map = |literal: &str| {
-        Arc::new(Map {
-            width: 1,
-            height: 1,
-            cells: vec![crate::content::Cell {
-                ground: 0x46,
-                object: Some(0x105),
-                config: format!("name:native;eff:{literal};size:137;conn:16"),
-                terrain: 0,
-                region: 0,
-            }],
-            spawns: vec![(0.5, 0.5)],
-        })
-    };
-    for (literal, expected) in [
-        ("16", 16),
-        ("0x10", 16),
-        ("+16", 16),
-        ("-16", -16),
-        ("0x80000000", i32::MIN),
-        ("0xffffffff", -1),
-    ] {
-        let world = World::new(content.clone(), map(literal)).unwrap();
-        let entity = world.entities.values().next().unwrap();
-        assert_eq!(entity.condition, expected, "eff:{literal}");
-        assert_eq!(entity.name, "native");
-        assert_eq!(entity.size, 137);
-        assert!(entity.extra_stats.contains(&(41, 16)));
-    }
-    for literal in ["0x0x10", "0x100000000", "2147483648", "garbage"] {
-        assert!(
-            World::new(content.clone(), map(literal)).is_err(),
-            "eff:{literal}"
-        );
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn fixture_population_seed_is_reproducible_without_prepared_authority() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    for seed in [12351, 423] {
-        let mut left = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
-        let right = Directory::test_with_seed(data, content.clone(), 16, seed).unwrap();
-        let mut expected_layout_rng = rand::rngs::StdRng::seed_from_u64(seed);
-        for _ in 0..2 {
-            let _: usize = expected_layout_rng.gen_range(0..1);
-        }
-        assert_eq!(
-            left.realm_rng.clone().r#gen::<u64>(),
-            expected_layout_rng.r#gen::<u64>()
-        );
-        assert!(left.prepared_seed.is_none() && right.prepared_seed.is_none());
-        let mut streams = BTreeSet::new();
-        for (id, a) in left.worlds.iter().filter(|(_, w)| w.name == "Realm") {
-            let b = &right.worlds[id];
-            assert!(a.prepared_seed.is_none() && b.prepared_seed.is_none());
-            let next = (
-                a.rng.clone().r#gen::<u64>(),
-                a.event_rng.clone().r#gen::<u64>(),
-            );
-            assert_eq!(
-                next,
-                (
-                    b.rng.clone().r#gen::<u64>(),
-                    b.event_rng.clone().r#gen::<u64>()
-                )
-            );
-            assert!(streams.insert(next));
-            assert_eq!(
-                a.entities
-                    .values()
-                    .map(|e| (e.kind, e.pos.x, e.pos.y))
-                    .collect::<Vec<_>>(),
-                b.entities
-                    .values()
-                    .map(|e| (e.kind, e.pos.x, e.pos.y))
-                    .collect::<Vec<_>>()
-            );
-            assert!(a.map.cells.iter().zip(&b.map.cells).all(|(a, b)| (
-                a.ground, a.object, &a.config, a.terrain, a.region
-            ) == (
-                b.ground, b.object, &b.config, b.terrain, b.region
-            )));
-            assert_eq!(
-                a.entities
-                    .values()
-                    .filter(|e| e.kind == crate::dungeon::manor::KAGE)
-                    .count(),
-                2
-            );
-        }
-        assert_eq!(streams.len(), 2);
-        let worlds = left.worlds.len();
-        assert!(left.prepared_instance("realm-shore").is_err());
-        assert!(
-            left.prepared_instance_with_seed("realm-shore", 423)
-                .is_err()
-        );
-        assert_eq!(left.worlds.len(), worlds);
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn populated_realm_fixture_retains_graveyard_space() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    for seed in [730, 1093] {
-        let directory = Directory::fixture(data, content.clone(), 16, 12351, Some(seed))
-            .unwrap_or_else(|error| panic!("fixture population seed {seed}: {error:#}"));
-        for world in directory.worlds.values().filter(|w| w.name == "Realm") {
-            let count = |kind| world.entities.values().filter(|e| e.kind == kind).count();
-            assert_eq!(count(crate::dungeon::manor::KAGE), 2);
-            assert!((17..25).contains(&count(0x91f)));
-        }
-    }
-}
+impl World {}

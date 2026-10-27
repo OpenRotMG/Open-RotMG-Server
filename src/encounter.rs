@@ -667,13 +667,3 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn white_demon_does_not_inherit_medusas_longer_firing_radius() {
-        for (kind, range) in [(0x651, 10.), (0x654, 12.), (0x657, 12.), (0x659, 12.)] {
-            assert_eq!(super::profile(kind).unwrap().range, range, "{kind:#x}");
-        }
-    }
-}

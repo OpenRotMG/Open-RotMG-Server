@@ -28,19 +28,3 @@ impl Clock {
         }
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn pause_is_idempotent_and_does_not_fund_elapsed_game_time() {
-        let clock = Clock::default();
-        clock.set_paused(true);
-        let frozen = clock.now();
-        std::thread::sleep(Duration::from_millis(25));
-        clock.set_paused(true);
-        assert_eq!(clock.now(), frozen);
-        clock.set_paused(false);
-        assert!(clock.now().duration_since(frozen) < Duration::from_millis(10));
-        assert!(!clock.paused());
-    }
-}

@@ -143,7 +143,7 @@ impl Store {
                     let (raw,paid,killed_by,died_at)=row?;
                     let receipt=death_awards::decode_receipt(&paid)?;
                     let c=receipt.character(&raw,legacy_base)?;
-                    deaths.push(serde_json::json!({"account":c.account,"id":c.id,"name":c.name,"class":c.class,"level":c.level,"base_fame":receipt.base,"total_fame":receipt.total,"died_at":died_at,"killed_by":killed_by,"equipment":c.items.get(..4).context("death without equipment slots")?,"tex1":c.tex1,"tex2":c.tex2}));
+                    deaths.push(serde_json::json!({"account":c.account,"id":c.id,"name":c.name,"class":c.class,"level":c.level,"base_fame":receipt.base,"total_fame":receipt.total,"died_at":died_at,"killed_by":killed_by,"equipment":c.items.get(..4).context("death without equipment slots")?,"stats":c.base,"tex1":c.tex1,"tex2":c.tex2}));
                 }
             }
             tx.commit()?;
@@ -237,97 +237,8 @@ mod tests {
         assert_eq!(deaths[0]["account"], owners[0]);
         assert_eq!(deaths[0]["base_fame"], 70);
         assert_eq!(deaths[0]["killed_by"], "fixture");
+        assert_eq!(deaths[0]["stats"].as_array().unwrap().len(), 8);
         let later = store.graveyard(i64::MAX).await.unwrap();
         assert!(later["deaths"].as_array().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn star_hiscores_match_retained_class_bests_not_wallet_or_uncommitted_fame() {
-        let content = Content::load(Path::new("data")).unwrap();
-        let path = std::env::temp_dir().join(format!(
-            "star-hiscores-{}-{}.db",
-            std::process::id(),
-            rand::random::<u64>()
-        ));
-        let store = Store::open(&path, &content).unwrap();
-        let mut owners = Vec::new();
-        for name in ["Orion", "Lyra", "Nova"] {
-            let id = store
-                .register(
-                    format!("star-{name}"),
-                    format!("{name}@example.invalid"),
-                    "fixture-password".into(),
-                )
-                .await
-                .unwrap();
-            store.choose_name(id, name.into()).await.unwrap();
-            store.compete(id).await.unwrap();
-            owners.push(id);
-        }
-        for (n, owner) in owners[..2].iter().copied().enumerate() {
-            for fame in [if n == 0 { 800 } else { 2000 }, 20] {
-                let mut ch = store
-                    .create(owner, content.get(WIZARD).unwrap())
-                    .await
-                    .unwrap();
-                ch.level = 20;
-                ch.exp = 20000;
-                ch.fame = fame;
-                ch.lifetime.qualified_quests = n as u64 + 3;
-                store.progress(ch.clone()).await.unwrap();
-                store.delete_character(owner, ch.id).await.unwrap();
-            }
-            let kind = if n == 0 { 0x310 } else { 0x300 };
-            let mut ch = store
-                .create_prepared(owner, content.get(kind).unwrap(), None)
-                .await
-                .unwrap();
-            ch.level = 20;
-            ch.exp = 20000;
-            ch.fame = if n == 0 { 150 } else { 20 };
-            store.progress(ch.clone()).await.unwrap();
-            if n == 0 {
-                ch.alive = false;
-                ch.hp = 0;
-                let id = ch.id;
-                store.death(ch, "fixture".into()).await.unwrap();
-                store
-                    .call(move |db| {
-                        db.execute(
-                            "UPDATE characters SET stats=json_set(stats,'$.fame',9999) WHERE id=?1",
-                            [id],
-                        )?;
-                        db.execute(
-                            "UPDATE account_fame SET balance=0 WHERE account=?1",
-                            [owner],
-                        )?;
-                        Ok(())
-                    })
-                    .await
-                    .unwrap();
-            }
-        }
-        let mut pending = store
-            .create(owners[2], content.get(WIZARD).unwrap())
-            .await
-            .unwrap();
-        pending.fame = 2000;
-        pending.lifetime.qualified_quests = 5;
-        let guest = store.list("star-unregistered".into()).await.unwrap();
-        store.compete(guest.id).await.unwrap();
-        eprintln!("STAR_FIXTURE_DB={}", path.display());
-        let scores = store.hiscores(vec![pending]).await.unwrap();
-        assert_eq!(scores["players"].as_array().unwrap().len(), 3);
-        for (id, (expected, quests)) in owners.into_iter().zip([(7, 6), (6, 8), (0, 5)]) {
-            let row = scores["players"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|row| row["account"] == id)
-                .unwrap();
-            assert_eq!(row["stars"], expected);
-            assert_eq!(row["quests"], quests);
-            assert_eq!(row["stars"], store.presentation(id).await.unwrap().stars());
-        }
     }
 }

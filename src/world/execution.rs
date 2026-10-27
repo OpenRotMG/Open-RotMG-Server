@@ -510,6 +510,39 @@ impl Worlds {
             entry.release();
         }
     }
+    pub(super) fn prepare_replacement<T: Send + 'static>(
+        &self,
+        origin: i32,
+        tick: u64,
+        build: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<tokio::sync::oneshot::Receiver<Result<T>>> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let work = move || {
+            let _context = crate::supervision::world(origin, tick);
+            let measure = crate::performance::Measure::start();
+            let result = build();
+            let measure = measure.finish();
+            tracing::info!(
+                origin,
+                elapsed_us = measure.wall.as_micros(),
+                cpu_us = measure.cpu.map(|cpu| cpu.as_micros()),
+                error = ?result.as_ref().err().map(|error| format!("{error:#}")),
+                "unpublished Realm replacement construction completed"
+            );
+            if sender.send(result).is_err() {
+                tracing::info!(origin, "unpublished Realm replacement recipient closed");
+            }
+            Ok(())
+        };
+        match &self.execution {
+            Some(execution) => execution
+                .supervisor
+                .spawn_finite_thread("realm_builder", work)?,
+            // Unstarted Directories have explicitly stepped local execution, not live actors.
+            None => work()?,
+        }
+        Ok(receiver)
+    }
     pub(super) fn release_world(&mut self, id: &i32) {
         self.entries
             .get_mut(id)

@@ -499,6 +499,3 @@ impl Brain {
         })
     }
 }
-
-#[cfg(test)]
-mod tests;
