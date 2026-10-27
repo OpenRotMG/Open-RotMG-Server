@@ -54,13 +54,13 @@ export async function run(game){
     const after=await game.inspect();game.check(id+': native shooting defeats target and awards XP',!after.diagnostic.entities.some(e=>e.id===id)&&after.view.character.experience>before.character.experience);
   }
   for(const kind of [0x615,0x616]){const victim=members(await game.inspect()).find(e=>e.kind===kind);assert(victim);await defeat(victim.id);}
-  await game.act({keys:[],duration_ms:12000});
+  for(let n=0;n<2;n++)await game.act({keys:[],duration_ms:6000});
   const grown=await save('family-growth');
   game.check('reconstructed living population stays within four Archers and three Rogues',members(grown).filter(e=>e.kind===0x616).length<=4&&members(grown).filter(e=>e.kind===0x615).length<=3);
   await game.act({keys:[],duration_ms:700},{name:'hobbit-family',when:()=>true});
   await defeat(mage.id);
   const dead=await save('mage-defeated'),remaining=members(dead);
-  await game.act({keys:[],duration_ms:12500});
+  for(let n=0;n<2;n++)await game.act({keys:[],duration_ms:6250});
   const end=await save('orphans');
   game.check('dead Mage cannot replace followers or transform',!end.diagnostic.entities.some(e=>e.camp===mage.camp&&e.kind===0x617)&&members(end).every(e=>remaining.some(p=>p.id===e.id)));
   game.check('defeat XP is awarded once',end.view.character.experience===dead.view.character.experience);
