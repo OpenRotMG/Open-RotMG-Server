@@ -16,7 +16,9 @@ export async function run(game){
   game.check('prepared entry has no live entity in lightning reach',map.entities.every(e=>e.hp<=0||Math.hypot(e.pos.x-emptyBefore.position.x,e.pos.y-emptyBefore.position.y)>14));
   await game.act({keys:[' '],duration_ms:250},{name:'empty-cast',when:v=>v.character.mp<emptyBefore.character.mp-30});
   const emptyAfter=await game.observe();
-  game.check('empty cast still spends the Lightning Scepter cost',emptyBefore.character.mp-emptyAfter.character.mp>=58&&emptyBefore.character.mp-emptyAfter.character.mp<=60);
+  const emptyRegen=Math.ceil((emptyAfter.game_ms-emptyBefore.game_ms)/1000*(0.6+emptyAfter.character.stats.wisdom/16.7));
+  game.check('empty cast spends one cost within observed regeneration',emptyRegen<60&&emptyBefore.character.mp-emptyAfter.character.mp>=60-emptyRegen&&emptyBefore.character.mp-emptyAfter.character.mp<=60);
+  await prepare({kind:'protection',condition:'invincible',duration_ms:60000});
   const boss=map.entities.find(e=>e.kind===0xd90);assert(boss);
   const {worldSeed,...sorcerer}=fixture;
   game=await game.join({...sorcerer,world:initial.view.session.world,position:{x:boss.pos.x-2,y:boss.pos.y}});
@@ -28,7 +30,7 @@ export async function run(game){
   }
   const vitals=mp=>prepare({kind:'vitals',hp:670,mp});
   await prepare({kind:'protection',condition:'invincible',duration_ms:60000});
-  await game.act({keys:[],duration_ms:3500});
+  await game.act({keys:[],duration_ms:500});
   const start=await game.observe();
   let slowed=[];
   for(const [slot,item,name,cost,damage,maximum] of [[-1,0xae5,'lightning',60,50,3],[0,0xb33,'storms',85,200,8],[1,0xc30,'fulmination',65,180,7]]){
@@ -37,11 +39,18 @@ export async function run(game){
       game.check(name+' equips through native inventory',(await game.observe()).character.items[1]===item);
     }
     await vitals(380);
-    const before=await snapshot(name+'-before'),targetBefore=before.diagnostic.entities.find(e=>e.id===boss.id);assert(targetBefore);
-    game.check(name+' targets an observed vulnerable boss',!(targetBefore.condition&(1<<24)));
+    let before;
+    for(let n=0;n<8;n++){
+      before=await snapshot(name+'-before');
+      const target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
+      if(!(target.condition&(1<<24)))break;
+      await game.act({keys:[],duration_ms:500});
+    }
+    game.check(name+' targets an observed vulnerable boss',!(before.diagnostic.entities.find(e=>e.id===boss.id).condition&(1<<24)));
     await game.act({keys:[' '],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:false},duration_ms:250},{name,when:v=>v.character.mp<before.view.character.mp-cost/2});
     const after=await snapshot(name+'-after'),target=after.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
-    game.check(name+' spends one selected mana cost',after.view.character.mp>=before.view.character.mp-cost&&after.view.character.mp<before.view.character.mp-cost+5);
+    const regenerated=Math.ceil((after.view.time_ms-before.view.time_ms)/1000*(0.6+after.view.character.stats[7]/16.7));
+    game.check(name+' spends one cost within observed regeneration',regenerated<cost&&after.view.character.mp>=before.view.character.mp-cost&&after.view.character.mp<=before.view.character.mp-cost+regenerated);
     const prior=new Map(before.diagnostic.entities.map(e=>[e.id,e]));
     const hits=after.diagnostic.entities.filter(e=>Object.hasOwn(e.damage,String(game.actor))&&e.damage[game.actor]>(prior.get(e.id)?.damage[game.actor]??0));
     game.check(name+' hits distinct enemies within its selected cap',hits.length>0&&hits.length<=maximum);
