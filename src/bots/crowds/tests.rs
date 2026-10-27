@@ -485,7 +485,7 @@ fn known_account_does_not_bypass_rank_routes_visibility_attention_or_cap() {
                 &v,
                 None,
                 |a| b.mind.social.known(a),
-                |p| p != v.player_markers[1].position
+                |p| p.distance(v.player_markers[1].position) > 0.
             )
             .is_none()
     );
