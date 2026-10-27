@@ -7538,6 +7538,9 @@ mod wizard_tests;
 mod priest_tests;
 
 #[cfg(test)]
+mod recovery_tests;
+
+#[cfg(test)]
 mod knight_tests;
 
 #[cfg(test)]
