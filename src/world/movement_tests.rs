@@ -56,6 +56,27 @@ fn native(
 }
 
 #[test]
+fn ocean_trench_advertises_player_teleports_without_enabling_restricted_worlds() {
+    let (mut world, _) = fixture(0x18, false);
+    for (name, allowed) in [
+        ("Ocean Trench", true),
+        ("Vault", false),
+        ("Tutorial", false),
+    ] {
+        world.name = name.into();
+        assert_eq!(world.allow_teleport(), allowed, "{name}");
+        let packet = world.map_info();
+        let mut r = wire::Reader::new(&packet);
+        r.i32().unwrap();
+        r.i32().unwrap();
+        assert_eq!(r.utf().unwrap(), name);
+        r.i32().unwrap();
+        r.i32().unwrap();
+        assert_eq!(r.u8().unwrap(), u8::from(allowed), "{name} MAPINFO");
+    }
+}
+
+#[test]
 fn native_movement_rejects_speed_forged_time_and_blocked_paths_without_mutation() {
     let mut accepted = Vec::new();
     for (label, wall, x, time, received) in [
