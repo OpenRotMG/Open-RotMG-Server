@@ -59,9 +59,18 @@ export async function run(game){
     return {id:e.id,kind:e.kind,angle,near};
   });
   await writeFile(join(process.env.QA_RESULTS_DIR,'orbits.json'),JSON.stringify(orbits));
+  const safe=(s,pos)=>{
+    const p=s.view.position,k=family(s).find(e=>e.id===wizard.id);assert(k,'Wizard must remain alive during escort targeting');
+    const dx=pos.x-p.x,dy=pos.y-p.y,t=((k.pos.x-p.x)*dx+(k.pos.y-p.y)*dy)/(dx*dx+dy*dy);
+    return t<0||t>1||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>3;
+  };
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
-    for(let n=0;n<35&&(await game.inspect()).view.objects.some(e=>e.id===id&&e.hp>0);n++)await game.act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    for(let n=0;n<35;n++){
+      const s=await game.inspect(),e=s.view.objects.find(e=>e.id===id&&e.hp>0);if(!e)break;
+      if(id===wizard.id||safe(s,e.position))await game.act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+      await game.act({keys:[],duration_ms:500});
+    }
     await game.act({keys:[],duration_ms:500});const s=await game.inspect();
     game.check(id+': native staff defeats target and earns XP',!s.diagnostic.entities.some(e=>e.id===id)&&s.view.character.experience>xp);
   }
@@ -69,9 +78,8 @@ export async function run(game){
     await protect();
     let before,victim;
     for(let n=0;n<30;n++){
-      before=await game.inspect();const p=before.view.position,k=family(before).find(e=>e.id===wizard.id);assert(k,'Wizard must remain alive before escort defeat');
-      const safe=e=>{const dx=e.pos.x-p.x,dy=e.pos.y-p.y,t=((k.pos.x-p.x)*dx+(k.pos.y-p.y)*dy)/(dx*dx+dy*dy);return t<0||t>1||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>1.8;};
-      victim=family(before).find(e=>e.kind===kind&&safe(e)&&before.view.objects.some(o=>o.id===e.id&&o.hp>0));if(victim)break;
+      before=await game.inspect();
+      victim=family(before).find(e=>e.kind===kind&&safe(before,e.pos)&&before.view.objects.some(o=>o.id===e.id&&o.hp>0));if(victim)break;
       await game.act({keys:[],duration_ms:400});
     }
     assert(victim,'No visible escort with safe firing line');
