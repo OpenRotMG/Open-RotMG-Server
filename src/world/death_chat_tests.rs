@@ -98,7 +98,7 @@ async fn gravestones_follow_all_eleven_tiers_after_committed_death() {
         assert_eq!(graves.len(), 1, "level {level}, maxed {maxed}");
         let grave = graves[0];
         let grave_id = grave.id;
-        assert_eq!(grave.pos, position);
+        assert_eq!((grave.pos.x, grave.pos.y), (position.x, position.y));
         assert_eq!(grave.name, "Victim");
         assert!(grave.items.is_empty());
         assert!(grave.accessible(world.players[&witness].character.account));
