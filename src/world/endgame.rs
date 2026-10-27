@@ -1225,6 +1225,7 @@ async fn realm_death_credit_survives_portal_reward_failure() {
             .consume(account.id, castle, transfer.key_time, transfer.key.clone())
             .is_err()
     );
+    let mut reservation = directory.reserve_transfer(transfer.key.clone()).unwrap();
     let snapshot = directory
         .begin_source_departure(player, Some(&transfer.key))
         .unwrap()
@@ -1242,6 +1243,7 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     directory
         .finish_source_departure(player, snapshot, Some(transfer.key.clone()))
         .unwrap();
+    reservation.disarm();
     directory.realm_departed(-3, player);
     let (id, arrival) = directory
         .consume(account.id, castle, transfer.key_time, transfer.key.clone())
