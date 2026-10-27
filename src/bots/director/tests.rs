@@ -10,6 +10,7 @@ async fn drain_blocks_population_writes_and_shutdown_is_not_a_critical_exit() {
     done.send(Departure {
         profile,
         account: character.account,
+        retire: true,
     })
     .await
     .unwrap();
@@ -127,6 +128,7 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
             .unwrap()
             .unwrap();
         assert_eq!(exit.account, character.account);
+        assert!(!exit.retire, "named careers do not retire on timed logout");
         done.send(exit).await.unwrap();
         let mut online = BTreeSet::from([profile.identity]);
         let mut resting = BTreeMap::new();

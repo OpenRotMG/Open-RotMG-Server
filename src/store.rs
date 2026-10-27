@@ -1148,6 +1148,31 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         })
         .await
     }
+    pub(crate) async fn retire_persona(&self, identity: String, account: i32) -> Result<()> {
+        ensure!(
+            identity.starts_with("persona:v1:") && !identity.starts_with("persona:v1:retired:"),
+            "not an active preset identity"
+        );
+        self.call(move |db| {
+            // Keep all characters, resources and receipts for rollback; only the active registry binding changes.
+            let changed = db.execute(
+                "UPDATE shore_bots SET name=?3 WHERE name=?1 AND account=?2",
+                params![
+                    identity,
+                    account,
+                    format!("persona:v1:retired:{account}:{identity}")
+                ],
+            )?;
+            ensure!(changed == 1, "persona retirement binding changed");
+            tracing::info!(
+                account,
+                identity,
+                "preset session archived without deleting progress"
+            );
+            Ok(())
+        })
+        .await
+    }
     pub async fn create(&self, account: i32, class: &Object) -> Result<Character> {
         ensure!(
             self.classes.contains_key(&class.kind) && class.class == "Player",
