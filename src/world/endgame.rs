@@ -253,6 +253,7 @@ impl Directory {
             kind,
             destination,
             origin,
+            expires_tick = self.portals[&opened].expires,
             "consumable committed; bound dungeon portal published"
         );
         Ok(())
