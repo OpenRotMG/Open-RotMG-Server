@@ -219,15 +219,15 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
         0x946..=0x949 => vec![fan(0, 1, 0., 1000, 10.)],
         0x945 => {
             let phase = elapsed % 2900;
-            state = elapsed / 2900 * 2 + u64::from(phase >= 2000);
-            age = if phase < 2000 { phase } else { phase - 2000 };
-            vec![fan(
-                0,
-                if phase < 2000 { 3 } else { 1 },
-                40.,
-                if phase < 2000 { 500 } else { 800 },
-                10.,
-            )]
+            let triple = phase >= 900;
+            state = elapsed / 2900 * 2 + u64::from(triple);
+            age = if triple { phase - 900 } else { phase };
+            // Kithio's 100s cooldown permits one triple; +50ms preserves Shoot's pre-decrement timer: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Shoot.cs#L79-L123
+            vec![if triple {
+                fan(0, 3, 40., 100000, 8.).delay(850).once().predict(0.1)
+            } else {
+                fan(0, 1, 0., 850, 8.).predict(0.1)
+            }]
         }
         _ => panic!("unknown fauna attack {kind:#x}"),
     };
@@ -235,5 +235,31 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
         state,
         age,
         attacks,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn horned_drake_alternates_singles_with_one_delayed_triple() {
+        let mut clocks = super::super::attacks::Clocks::default();
+        let mut fired = vec![];
+        for t in (0..5800).step_by(50) {
+            let schedule = schedule(0x945, 1270, t);
+            for i in clocks.due(&schedule, t) {
+                let attack = schedule.attacks[i];
+                assert_eq!(attack.range, 8.);
+                if attack.count == 3 {
+                    assert_eq!(attack.gap, 40_f32.to_radians());
+                }
+                fired.push((t, attack.count));
+            }
+        }
+        assert_eq!(
+            fired,
+            [(0, 1), (850, 1), (1750, 3), (2900, 1), (3750, 1), (4650, 3)]
+        );
     }
 }

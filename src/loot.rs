@@ -639,7 +639,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0xdaa..=0xdaf => &[(0.25, Item(0xa22)), (0.25, Item(0xa23))],
         0x606 | 0x615 => &[(0.04, Item(0xa22)), (0.03, Item(0xa23))],
         0x61c | 0x61e | 0x63b | 0x64a..=0x64d => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
-        0x607 | 0x60a | 0x60c | 0x61d | 0x63c | 0x63f | 0x642..=0x644 => {
+        0x60a | 0x60c => &[(0.03, Item(0xa23))],
+        0x607 | 0x61d | 0x63c | 0x63f | 0x642..=0x644 => {
             &[(0.05, Item(0xa22)), (0.03, Item(0xa23))]
         }
         0x605
@@ -1346,6 +1347,18 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn sandsman_escorts_only_roll_magic_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in [0x60a, 0x60c] {
+            assert!(matches!(table(kind), [(chance, Pick::Item(0xa23))] if *chance == 0.03));
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                vec![0xa23]
+            );
+        }
+    }
 
     #[test]
     fn red_demon_minions_have_separate_public_equipment_rolls() {
