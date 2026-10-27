@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
 import json
@@ -10,9 +10,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKER = 'OpenRotMG disposable Cargo intermediates v1\n'
+BUILD_SLOTS = 2
 
 
 def cache_root():
@@ -37,18 +39,59 @@ def validate_cleanup(root):
 
 
 @contextmanager
-def locked(root, cleaning=False, marker_text=MARKER):
+def lease(path, mode=fcntl.LOCK_EX, wait=True):
+    with os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a') as lock:
+        try:
+            fcntl.flock(lock, mode | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if not wait:
+                raise
+            print(f'Waiting for Cargo lease: {path}', flush=True)
+            fcntl.flock(lock, mode)
+        yield lock
+
+
+@contextmanager
+def build_slot(root):
+    waiting = False
+    while True:
+        for number in range(BUILD_SLOTS):
+            with os.fdopen(os.open(root / f'.build-slot-{number}.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a') as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                print(f'Cargo build slot: {number + 1}/{BUILD_SLOTS}; pid={os.getpid()}', flush=True)
+                yield lock
+                return
+        if not waiting:
+            print(f'Waiting for one of {BUILD_SLOTS} Cargo build slots: {root}', flush=True)
+            waiting = True
+        time.sleep(0.1)
+
+
+@contextmanager
+def locked(root, cleaning=False, marker_text=MARKER, shared=False):
     if root.resolve() != root:
         raise RuntimeError(f'Build cache path must not contain symlinks: {root}')
     root.mkdir(parents=True, exist_ok=True)
+    if (shared or cleaning) and not (root / '.owner').exists():
+        with locked(root, marker_text=marker_text):
+            pass
+    mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
     with os.fdopen(os.open(root / '.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a') as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # The maintenance writer holds this gate while existing readers drain.
+            with lease(root / '.admission.lock', wait=not cleaning) if shared or cleaning else nullcontext():
+                try:
+                    fcntl.flock(lock, mode | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    if cleaning:
+                        raise
+                    print(f'Waiting for artifact store lock: {root}', flush=True)
+                    fcntl.flock(lock, mode)
         except BlockingIOError:
-            if cleaning:
-                raise RuntimeError(f'Cannot clean an active build cache: {root}') from None
-            print(f'Waiting for artifact store lock: {root}', flush=True)
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            raise RuntimeError(f'Cannot clean an active build cache: {root}') from None
         marker = root / '.owner'
         if marker.is_symlink():
             raise RuntimeError(f'Build cache marker must not be a symlink: {marker}')
@@ -201,16 +244,21 @@ def retain_binary(executable, output):
     print(f'Retained binary object: sha256={digest}; output={output}', flush=True)
 
 
-def execute(command, target, output, lock):
+def execute(command, target, output, locks):
+    cpus = os.cpu_count()
+    if cpus is None or cpus < 1:
+        raise RuntimeError('Cannot determine CPU capacity for bounded Cargo parallelism')
     env = {**os.environ, 'CARGO_TARGET_DIR': str(target)}
+    env.setdefault('CARGO_BUILD_JOBS', str(max(1, cpus // BUILD_SLOTS)))
+    descriptors = tuple(lock.fileno() for lock in locks)
     if output is None:
-        return subprocess.call(command, cwd=ROOT, env=env, pass_fds=(lock.fileno(),))
+        return subprocess.call(command, cwd=ROOT, env=env, pass_fds=descriptors)
     if output.resolve().is_relative_to(cache_root().resolve()) or output.is_symlink():
         raise RuntimeError('Retained binary must be outside the cache and not a symlink')
     if any(arg.startswith('--message-format') for arg in command):
         raise RuntimeError('--output owns Cargo message format')
     executable = None
-    with subprocess.Popen([*command, '--message-format=json-render-diagnostics'], cwd=ROOT, env=env, stdout=subprocess.PIPE, text=True, pass_fds=(lock.fileno(),)) as process:
+    with subprocess.Popen([*command, '--message-format=json-render-diagnostics'], cwd=ROOT, env=env, stdout=subprocess.PIPE, text=True, pass_fds=descriptors) as process:
         for line in process.stdout:
             message = json.loads(line)
             if message.get('reason') == 'compiler-message':
@@ -250,22 +298,29 @@ def main(argv=None):
         root = cache_root()
         if root.resolve().is_relative_to(ROOT.resolve()):
             raise RuntimeError('Build cache must be outside the source worktree')
-        with locked(root, cleaning=args.command == 'clean') as lock:
-            if args.command == 'clean':
+        if args.command == 'clean':
+            with locked(root, cleaning=True):
                 clean(root)
-                return 0
-            version = subprocess.check_output(['rustc', *toolchain, '-vV'], cwd=ROOT, text=True)
-            # Cargo tracks env! inputs; runtime diagnostics and job counts need no separate target tree.
-            settings = {key: value for key, value in os.environ.items()
-                        if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))
-                        and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'RUST_MIN_STACK', 'CARGO_BUILD_JOBS')}
-            # Cargo can treat an older sibling checkout's different inputs as fresh.
-            key = hashlib.sha256(json.dumps([str(ROOT), version, settings], sort_keys=True).encode()).hexdigest()[:20]
-            target = root / key
-            # Failed builds can stop before Cargo emits source-bound depfiles.
-            record_source(target, args.output)
-            print(f'Cargo target: {target}; checkout={ROOT}', flush=True)
-            return execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output, lock)
+            return 0
+        version = subprocess.check_output(['rustc', *toolchain, '-vV'], cwd=ROOT, text=True)
+        # Cargo tracks env! inputs; runtime diagnostics and job counts need no separate target tree.
+        settings = {key: value for key, value in os.environ.items()
+                    if key.startswith(('RUST', 'CARGO_PROFILE_', 'CARGO_BUILD_'))
+                    and key not in ('RUST_LOG', 'RUST_BACKTRACE', 'RUST_LIB_BACKTRACE', 'RUST_TEST_THREADS', 'RUST_MIN_STACK', 'CARGO_BUILD_JOBS')}
+        # Cargo can treat an older sibling checkout's different inputs as fresh.
+        key = hashlib.sha256(json.dumps([str(ROOT), version, settings], sort_keys=True).encode()).hexdigest()[:20]
+        target = root / key
+        with locked(root, shared=True):
+            if target.resolve() != target:
+                raise RuntimeError('Cargo target must not contain symlinks')
+            target.mkdir(exist_ok=True)
+        # Waiters must not hold the cleanup barrier or consume slots for the same target.
+        with lease(target / '.build.lock') as target_lock, build_slot(root) as slot_lock:
+            with locked(root, shared=True) as store_lock:
+                record_source(target, args.output)
+                print(f'Cargo target: {target}; checkout={ROOT}', flush=True)
+                return execute(['cargo', *toolchain, args.command, *args.arguments], target, args.output,
+                               (store_lock, target_lock, slot_lock))
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f'Cargo wrapper error: {error}', file=sys.stderr)
         return 1
