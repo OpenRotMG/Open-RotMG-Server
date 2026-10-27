@@ -569,8 +569,8 @@ impl Directory {
                 "world identity collision"
             );
             let rng_before = self.realm_rng.clone();
-            let castle = self.construction(CASTLE, "Oryx's Castle", false, None)?;
-            let realm = self.construction("realm-shore", "Realm", false, None)?;
+            let castle = self.construction(CASTLE, "Oryx's Castle", false, None);
+            let realm = self.construction("realm-shore", "Realm", false, None);
             let realm_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let started = realm_started.clone();
             let result = match self.worlds.prepare_replacement(origin, self.tick, move || {

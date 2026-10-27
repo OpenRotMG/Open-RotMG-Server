@@ -1171,7 +1171,7 @@ impl Directory {
         safe: bool,
         owner: Option<i32>,
     ) -> Result<World> {
-        (self.construction(template, name, safe, owner)?)()
+        self.construction(template, name, safe, owner)()
     }
     fn construction(
         &mut self,
@@ -1179,7 +1179,7 @@ impl Directory {
         name: &str,
         safe: bool,
         owner: Option<i32>,
-    ) -> Result<impl FnOnce() -> Result<World> + Send + use<>> {
+    ) -> impl FnOnce() -> Result<World> + Send + use<> {
         let source = (template == "realm-shore")
             .then(|| self.realms[self.realm_rng.gen_range(0..self.realms.len())].clone());
         #[cfg(test)]
@@ -1190,9 +1190,12 @@ impl Directory {
         let (content, ids, clock) = (self.content.clone(), self.ids.clone(), self.clock.clone());
         let (prepared_seed, next_world, max_players) =
             (self.prepared_seed, self.next_world, self.max_players);
-        let (templates, template, name) =
-            (self.templates.clone(), template.to_owned(), name.to_owned());
-        Ok(move || {
+        let (map, template, name) = (
+            self.templates.get(template).cloned(),
+            template.to_owned(),
+            name.to_owned(),
+        );
+        move || {
             let mut world = World::with_ids(
                 content.clone(),
                 if let Some(source) = &source {
@@ -1262,10 +1265,7 @@ impl Directory {
                         .map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::undead::generate(&content, seed)?)
                 } else {
-                    templates
-                        .get(&template)
-                        .context("world template missing")?
-                        .clone()
+                    map.context("world template missing")?
                 },
                 ids.clone(),
             )?;
@@ -1287,7 +1287,7 @@ impl Directory {
             }
             world.name = name;
             // Select the client's existing starfield, not dungeon void: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_H_Z_/Background.as
-            world.background = match template {
+            world.background = match template.as_str() {
                 "sprite-world" => 1,
                 "nexus" | "vault" => 2,
                 _ => 0,
@@ -1375,7 +1375,7 @@ impl Directory {
                 crate::loot::validate(&world.content, kind)?;
             }
             Ok(world)
-        })
+        }
     }
     fn resolve(&mut self, target: Target) -> Result<&mut World> {
         match target {
