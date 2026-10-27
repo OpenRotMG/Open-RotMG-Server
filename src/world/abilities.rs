@@ -766,6 +766,7 @@ impl World {
                     effect,
                     duration,
                 } => {
+                    // The smaller ring triggers a full-radius blast, not one hit: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Trap.cs#L49-L76
                     let triggered = !self.ability_enemies(pos, radius / 2.).is_empty();
                     if triggered || expired {
                         self.ability_effect(
@@ -862,6 +863,10 @@ impl World {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "huntress_tests.rs"]
+mod huntress_tests;
 
 #[cfg(test)]
 mod tests {
