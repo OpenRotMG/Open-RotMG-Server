@@ -178,7 +178,7 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
             world.players[&player].character.mp,
             mana - if casts { 30 } else { 0 }
         );
-        let ready = world.players[&player].ability_ready_ms;
+        let ready = world.players[&player].ability_ready_ms();
         assert_eq!(ready > 0, casts);
         let hp = world.entities[&target].hp;
         for _ in 0..=(spell.projectiles[&0].lifetime as u64 / 50) {
@@ -196,7 +196,7 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
             world.players[&player].character.shots,
             if casts { 20 } else { 0 }
         );
-        assert_eq!(world.players[&player].ability_ready_ms, ready);
+        assert_eq!(world.players[&player].ability_ready_ms(), ready);
         assert!(world.players[&player].character.mp >= mana - if casts { 30 } else { 0 });
     }
 }
