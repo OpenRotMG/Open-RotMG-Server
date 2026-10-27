@@ -32,8 +32,7 @@ export async function run(game){
     }
     await vitals(250);
     const before=await game.inspect(),old=before.diagnostic.entities.find(e=>e.id===boss.id);assert(old);
-    const mouse={x:300+50*(old.pos.x-before.view.position.x),y:300+50*(old.pos.y-before.view.position.y)};
-    await game.act({keys:[' '],mouse,duration_ms:300},{name,when:view=>view.character.mp<before.view.character.mp-cost/2});
+    await game.act({keys:[' '],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:false},duration_ms:300},{name,when:view=>view.character.mp<before.view.character.mp-cost/2});
     const after=await game.inspect(),target=after.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
     observations.push({name,before,after});
     await writeFile(join(root,'shield-observations.json'),JSON.stringify({preparedVitals:true,observations},null,2));
@@ -49,7 +48,7 @@ export async function run(game){
   const expired=await game.inspect(),target=expired.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
   game.check('Armor Broken expires after four seconds',expired.view.time_ms>=observations.at(-1).after.diagnostic.entities.find(e=>e.id===boss.id).statuses[27][1]&&!(expired.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<26)));
   await vitals(0);const poor=await game.inspect();
-  await game.act({keys:[' '],mouse:{x:450,y:300},duration_ms:250});const denied=await game.inspect();
+  await game.act({keys:[' '],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:false},duration_ms:250});const denied=await game.inspect();
   game.check('insufficient mana admits no shield projectiles',denied.diagnostic.character.shots===poor.diagnostic.character.shots);
   game.check('same living Knight retains Ogmur',denied.view.lifecycle.alive&&denied.view.session.character===start.session.character&&denied.view.character.items[1]===0xc0f);
   await writeFile(join(root,'shield-observations.json'),JSON.stringify({preparedVitals:true,observations,expired,poor,denied},null,2));
