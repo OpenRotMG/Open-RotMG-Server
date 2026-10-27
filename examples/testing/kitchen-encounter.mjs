@@ -1,4 +1,4 @@
-export const fixture={class:0x310,level:20,seed:717,world:'kitchen',position:{x:13.5,y:40.5},equipment:[0xa04,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,30,0,30,20,40,50]};
+export const fixture={class:0x310,level:20,seed:717,world:'kitchen',position:{x:13.5,y:40.5},equipment:[0xa04,0xa31,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,30,25,30,20,40,50]};
 async function walk(game,goal){
   for(let i=0;i<100;i++){
     const view=await game.observe(),dx=goal.x-view.position.x,dy=goal.y-view.position.y,distance=Math.hypot(dx,dy);
@@ -6,6 +6,7 @@ async function walk(game,goal){
     const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
     if(Math.abs(x)>0.12)keys.push(x>0?'d':'a');
     if(Math.abs(y)>0.12)keys.push(y>0?'s':'w');
+    if(view.character.hp<300&&view.character.mp>=60)keys.push(' ');
     await game.act({keys,duration_ms:Math.min(300,Math.max(50,Math.round(distance*80)))});
   }
   throw Error('Native walk did not reach '+JSON.stringify(goal));
