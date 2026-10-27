@@ -1,12 +1,12 @@
 import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x31d,level:20,seed:767,world:-2,position:'spawn',equipment:[0xa00,0xa66,0xa14,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
+export const fixture={class:0x31d,level:20,seed:767,world:-2,position:'spawn',equipment:[0xa00,0xa66,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 const has=(view,index)=>Boolean(view.character.conditions&(1<<(index-1)));
 export async function run(game){
   const initial=await game.observe(),{x,y}=initial.position;
-  const general=await game.join({...fixture,seed:768,position:{x:x+4,y},equipment:[0xa00,0xb29,0xa14,-1]});
-  const juggernaut=await game.join({...fixture,seed:769,position:{x:x+4.25,y},equipment:[0xa00,0xc08,0xa14,-1]});
+  const general=await game.join({...fixture,seed:768,position:{x:x+4,y},equipment:[0xa00,0xb29,0xa7b,-1]});
+  const juggernaut=await game.join({...fixture,seed:769,position:{x:x+4.25,y},equipment:[0xa00,0xc08,0xa7b,-1]});
   const records=[];
   const snapshot=async label=>{const views=await Promise.all([game.observe(),general.observe(),juggernaut.observe()]);records.push({label,views});await writeFile(join(out,'helm-observations.json'),JSON.stringify(records,null,2));return views;};
   const cast=actor=>actor.act({keys:[' '],duration_ms:250});
@@ -55,5 +55,5 @@ export async function run(game){
   await cast(game);
   [self]=await snapshot('insufficient-mana');
   game.check('insufficient mana leaves cooldown unchanged and applies no buff',self.character.mp>=lowMp&&self.character.ability_ready_ms===lowReady&&!has(self,20)&&!has(self,15));
-  for(const actor of [game,general,juggernaut]){const view=await actor.observe();game.check('same living Warrior retains supplied equipment',view.lifecycle.alive&&view.character.class===0x31d&&view.character.items[0]===0xa00&&view.character.items[2]===0xa14);}
+  for(const actor of [game,general,juggernaut]){const view=await actor.observe();game.check('same living Warrior retains supplied equipment',view.lifecycle.alive&&view.character.class===0x31d&&view.character.items[0]===0xa00&&view.character.items[2]===0xa7b);}
 }
