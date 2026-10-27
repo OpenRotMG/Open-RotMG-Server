@@ -55,10 +55,10 @@ export async function run(game){
   await game.act({keys:['a'],duration_ms:300});
   const scene=await game.inspect(),victim=children(scene).find(e=>scene.view.objects.some(o=>o.id===e.id&&o.hp>0));
   if(!victim)throw Error('No visible follower available for replenishment check');
+  const prior=new Set(children(scene).map(e=>e.id));
   for(let n=0;n<12&&(await game.inspect()).view.objects.some(e=>e.id===victim.id&&e.hp>0);n++)await fire(victim.id);
   await game.act({keys:[],duration_ms:300});
   game.check('native bow fire defeats a follower',!(await game.inspect()).diagnostic.entities.some(e=>e.id===victim.id));
-  const prior=new Set(children(await game.inspect()).map(e=>e.id));
   for(let n=0;n<25&&!children(await game.inspect()).some(e=>e.kind===victim.kind&&!prior.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
   const replenished=await save('replenished');
   game.check('living boss replenishes defeated species',children(replenished).some(e=>e.kind===victim.kind&&!prior.has(e.id)));
@@ -73,7 +73,17 @@ export async function run(game){
   const chest=first.diagnostic.entities.find(e=>e.kind===0x501&&e.items.some(i=>i!==-1));
   if(!chest)throw Error('Natural Castle has no stocked chest');
   game.check('Castle chest predates boss defeat and retains its contents',defeated.diagnostic.entities.some(e=>e.id===chest.id&&JSON.stringify(e.items)===JSON.stringify(chest.items)));
-  await cheat({kind:'teleport',position:chest.pos});
+  for(let n=0;n<60;n++){
+    const view=await game.observe(),dx=chest.pos.x-view.position.x,dy=chest.pos.y-view.position.y;
+    if(Math.hypot(dx,dy)<.4)break;
+    const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+    if(Math.abs(x)>.12&&Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
+    if(Math.abs(y)>.12&&Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
+    const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
+    await game.act({keys,duration_ms:Math.max(50,Math.min(300,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
+  }
+  const arrived=await game.observe();
+  game.check('ordinary native movement reaches the Castle chest',Math.hypot(arrived.position.x-chest.pos.x,arrived.position.y-chest.pos.y)<.4);
   await game.act({keys:[],duration_ms:700},{name:'cyclops-chest',when:()=>true});
   const inventory=await game.observe(),item=chest.items[0];
   game.check('selected chest first slot is stocked',item!==-1);
