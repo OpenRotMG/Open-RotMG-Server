@@ -1161,63 +1161,106 @@ pub(in crate::bots) fn goods_text(g: &Goods, c: &Content) -> Result<String> {
     };
     Ok(format!("{} {name}", g.quantity))
 }
-pub(in crate::bots) fn parse_quote(text: &str, c: &Content) -> Option<[Goods; 2]> {
-    let lower = text.trim().to_ascii_lowercase();
-    let lower = lower.split(" @").next()?;
-    let mut body = None;
-    let mut buying = false;
-    for prefix in [
-        "wts ", "sell ", "selling ", "s> ", "trading ", "wtb ", "buy ", "buying ",
-    ] {
-        if let Some(s) = lower.strip_prefix(prefix) {
-            body = Some(s);
-            buying = matches!(prefix, "wtb " | "buy " | "buying ");
-            break;
-        }
-    }
-    let body = body?;
-    let parse = |s: &str| -> Option<Goods> {
-        let s = s.trim();
-        let (quantity, name) = if let Some((n, rest)) = s.split_once(' ') {
-            if let Ok(n) = n.parse::<u8>() {
-                (n, rest)
-            } else {
-                (1, s)
-            }
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::bots) enum Advertisement {
+    Quote([Goods; 2]),
+    Buying(Goods),
+    Selling(Goods),
+}
+
+pub(in crate::bots) fn parse_goods(s: &str, c: &Content) -> Option<Goods> {
+    let s = s.trim();
+    let (quantity, name) = if let Some((n, rest)) = s.split_once(' ') {
+        if let Ok(n) = n.parse::<u8>() {
+            (n, rest)
         } else {
             (1, s)
-        };
-        if !(1..=8).contains(&quantity) {
+        }
+    } else {
+        (1, s)
+    };
+    if !(1..=8).contains(&quantity) {
+        return None;
+    }
+    let kind = match name {
+        "spd" | "speed" => SPEED,
+        "def" | "defense" => DEFENSE,
+        "life" => LIFE,
+        "dhide" => 0xad3,
+        "hydra" => 0xaf9,
+        _ => {
+            let mut items = c
+                .objects
+                .values()
+                .filter(|o| o.class == "Equipment" && o.name.eq_ignore_ascii_case(name));
+            let kind = i32::from(items.next()?.kind);
+            if items.next().is_some() {
+                return None;
+            }
+            kind
+        }
+    };
+    Some(Goods { kind, quantity })
+}
+
+// Templates and human chat share the same shapes; the caller supplies literal slots or real goods.
+pub(in crate::bots) fn parse_advertisement(
+    text: &str,
+    parse: impl Fn(&str) -> Option<Goods>,
+) -> Option<Advertisement> {
+    let lower = text.trim().to_ascii_lowercase();
+    let text = lower.strip_suffix('!').unwrap_or(&lower).trim_end();
+    let text = if let Some((body, name)) = text.rsplit_once(" @") {
+        if name != "{name}"
+            && (name.is_empty()
+                || name.len() > 16
+                || !name.bytes().all(|b| b.is_ascii_alphanumeric()))
+        {
             return None;
         }
-        let kind = match name {
-            "spd" | "speed" => SPEED,
-            "def" | "defense" => DEFENSE,
-            "life" => LIFE,
-            "dhide" => 0xad3,
-            "hydra" => 0xaf9,
-            _ => {
-                let mut items = c
-                    .objects
-                    .values()
-                    .filter(|o| o.class == "Equipment" && o.name.eq_ignore_ascii_case(name));
-                let kind = i32::from(items.next()?.kind);
-                if items.next().is_some() {
-                    return None;
-                }
-                kind
-            }
-        };
-        Some(Goods { kind, quantity })
-    };
-    let mut candidates = Vec::new();
-    if let Some((give, want)) = body.split_once(" for ").or_else(|| body.split_once(" = ")) {
-        candidates.push([parse(give)?, parse(want)?]);
+        body
     } else {
+        text
+    };
+    if text.contains(['@', '!']) {
+        return None;
+    }
+    let opening = [
+        "wts ", "sell ", "selling ", "s>", "trading ", "trade ", "t>", "wtb ", "buy ", "buying ",
+        "b>",
+    ]
+    .into_iter()
+    .find_map(|prefix| {
+        text.strip_prefix(prefix).map(|body| {
+            (
+                body.trim(),
+                matches!(prefix, "wtb " | "buy " | "buying " | "b>"),
+            )
+        })
+    });
+    let (body, buying) = opening.unwrap_or((text, false));
+    let explicit = body
+        .split_once(" for ")
+        .or_else(|| body.split_once('='))
+        .or_else(|| body.strip_suffix(')').and_then(|s| s.split_once(" (")));
+    let mut candidates = Vec::new();
+    if let Some((first, second)) = explicit {
+        candidates.push([parse(first.trim())?, parse(second.trim())?]);
+    } else if opening.is_some() {
         for (i, _) in body.char_indices().filter(|(_, ch)| *ch == ' ') {
-            if let (Some(give), Some(want)) = (parse(&body[..i]), parse(&body[i + 1..])) {
-                candidates.push([give, want]);
+            if let (Some(first), Some(second)) =
+                (parse(body[..i].trim()), parse(body[i + 1..].trim()))
+            {
+                candidates.push([first, second]);
             }
+        }
+        if candidates.is_empty() {
+            let goods = parse(body)?;
+            return Some(if buying {
+                Advertisement::Buying(goods)
+            } else {
+                Advertisement::Selling(goods)
+            });
         }
     }
     if candidates.len() != 1 {
@@ -1230,7 +1273,15 @@ pub(in crate::bots) fn parse_quote(text: &str, c: &Content) -> Option<[Goods; 2]
     if buying {
         q.swap(0, 1);
     }
-    Some(q)
+    Some(Advertisement::Quote(q))
+}
+
+pub(in crate::bots) fn parse_quote(text: &str, c: &Content) -> Option<[Goods; 2]> {
+    match parse_advertisement(text, |s| parse_goods(s, c))? {
+        Advertisement::Quote(q) => Some(q),
+        // Interest alone supplies neither a price nor consent to an exchange.
+        Advertisement::Buying(_) | Advertisement::Selling(_) => None,
+    }
 }
 pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
     ensure!(r.i16()? == 12, "market offer shape");
@@ -1241,4 +1292,64 @@ pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
         *b = n == 1;
     }
     Ok(a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn market_current_message_cancels_after_real_stock_context_changes() {
+        let (dir, app) = crate::server::test_app();
+        app.world.clock.set_paused(true);
+        let (owner, id, _, _) = crate::bots::runtime::tests::actor(
+            &app,
+            "market-current-747",
+            "Trader",
+            [SPEED, SPEED, SPEED, SPEED, SPEED, -1, -1, -1],
+        )
+        .await;
+        let mut v = app.world.player_view(id).await.unwrap();
+        let mut market = Market {
+            name: "Trader".into(),
+            ..Market::default()
+        };
+        market.session = Some(MarketSession {
+            anchor: tile(v.position),
+            until: v.elapsed_ms + 60000,
+            next_move: 0,
+            destination: None,
+        });
+        let q = market.quote(&v, &app.content, None).unwrap().unwrap();
+        let message = Message {
+            text: format!(
+                "wts {} for {}",
+                goods_text(&q[0], &app.content).unwrap(),
+                goods_text(&q[1], &app.content).unwrap()
+            ),
+            channel: Channel::Local,
+        };
+        assert!(
+            market
+                .message_current(&message, &v, &app.content, None)
+                .unwrap()
+        );
+        v.character.items[4..].fill(-1);
+        assert!(
+            !market
+                .message_current(&message, &v, &app.content, None)
+                .unwrap()
+        );
+        let refusal = Message {
+            text: format!("nty need {}", goods_text(&q[1], &app.content).unwrap()),
+            channel: Channel::Local,
+        };
+        assert!(
+            !market
+                .message_current(&refusal, &v, &app.content, None)
+                .unwrap()
+        );
+        drop((owner, app));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

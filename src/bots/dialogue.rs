@@ -259,9 +259,10 @@ impl Service {
             b.daily += 1;
         }
         let market_generation = payload["market_generation"] == true;
+        let reply_limit = if market_generation { 128 } else { 90 };
         let schema = json!({"type":"object","properties":{
             "intent":{"type":"string","enum":payload["allowed_intents"],"description":if market_generation {"The sole allowed market intent."} else {"Actual action. Invite proposes the supplied objective; join accepts that invitation; leave parts company without promising to hold position; wait holds position; talk changes no commitment."}},
-            "reply":{"type":"string","maxLength":90,"description":if market_generation {"Reusable template retaining literal brace tokens, e.g. wts {give} for {want} or nty need {want}. Never substitute items or names."} else {"Short chat consistent with the selected action."}}},"required":["intent","reply"],"additionalProperties":false});
+            "reply":{"type":"string","maxLength":reply_limit,"description":if market_generation {"Three reusable templates separated by |, keeping literal {give}, {want}, @{name} slots. Never substitute items or names."} else {"Short chat consistent with the selected action."}}},"required":["intent","reply"],"additionalProperties":false});
         let prompt = if market_generation {
             market::PROMPT
         } else if payload["allowed_intents"] == json!(["invite"]) {
@@ -359,7 +360,7 @@ impl Service {
         let reply: Reply =
             serde_json::from_str(text).map_err(|_| Failure::Error("invalid_response"))?;
         crate::world::chat::validate(&reply.reply).map_err(|_| Failure::Error("invalid_reply"))?;
-        if reply.reply.encode_utf16().count() > 90
+        if reply.reply.encode_utf16().count() > reply_limit
             || reply.reply.trim().starts_with('/')
             || (reply.intent == Intent::Invite
                 && payload["speaker"]["name"]
