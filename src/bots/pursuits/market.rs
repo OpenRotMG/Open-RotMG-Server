@@ -1295,6 +1295,9 @@ pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
 }
 
 #[cfg(test)]
+mod interaction_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
