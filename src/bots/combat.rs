@@ -217,6 +217,56 @@ pub(super) fn attack(
     Ok(())
 }
 
+fn berserk_ally(v: &PlayerView, content: &Content, grid: &Grid, range: f32) -> Result<bool> {
+    use crate::condition::*;
+    for ally in &v.objects {
+        if ally.hp <= 0
+            || ally.equipped.is_empty()
+            || v.position.distance(ally.position) > range
+            || !ally
+                .condition_mask
+                .is_some_and(|mask| mask & (bit(BERSERK) | bit(STUNNED) | (1 << 20)) == 0)
+        {
+            continue;
+        }
+        let Ok(kind) = u16::try_from(ally.equipped[0]) else {
+            continue;
+        };
+        let Some(shot) = content.get(kind)?.projectiles.get(&0) else {
+            continue;
+        };
+        for enemy in &v.objects {
+            let distance = ally.position.distance(enemy.position);
+            if !content.get(enemy.kind)?.enemy
+                || enemy.hp <= shot.max
+                || enemy.condition_mask.is_none()
+                || !progression::vulnerable(enemy)
+                || distance >= shot.speed * shot.lifetime / 10000.
+            {
+                continue;
+            }
+            // Public weapon reach and clear fire are evidence of a local fight, not peer intent.
+            let steps = (distance * 8.).ceil().max(1.) as u32;
+            if (0..=steps).all(|step| {
+                let f = step as f32 / steps as f32;
+                let point = tile(Pos {
+                    x: ally.position.x + (enemy.position.x - ally.position.x) * f,
+                    y: ally.position.y + (enemy.position.y - ally.position.y) * f,
+                });
+                grid.known.contains(&point)
+                    && (shot.passes_cover
+                        || !v
+                            .objects
+                            .iter()
+                            .any(|o| o.blocks && tile(o.position) == point))
+            }) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Uses the equipped class ability against or away from `enemy`; healing tomes belong to `social`.
 pub(super) fn ability(
     v: &PlayerView,
@@ -291,6 +341,11 @@ pub(super) fn ability(
                     })
             }
             Ability::Decoy { .. } | Ability::Teleport { .. } => endangered,
+            Ability::Condition {
+                effect: BERSERK,
+                range: Some(range),
+                ..
+            } if v.character.class == 0x031d && berserk_ally(v, content, grid, *range)? => true,
             Ability::Condition { effect, .. } if v.character.conditions & bit(*effect) != 0 => {
                 false
             }
@@ -393,4 +448,115 @@ pub(super) fn movement(
         }
     }
     best.map(|(_, point)| point)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::condition::{BERSERK, INVULNERABLE, QUIET, STUNNED, bit};
+
+    #[test]
+    fn local_support_warrior_aura_beyond_self_reach_and_controls() {
+        let (content, mut v) = quest_tests::fixture();
+        v.character.class = 0x031d;
+        v.character.items[0] = 0xa00;
+        v.character.items[1] = 0xa66;
+        v.objects[0].position = Pos { x: 19.5, y: 10.5 };
+        let grid = Grid::terrain(&v);
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        let mut ally = quest_tests::fixture().1.objects.remove(0);
+        ally.id = 3;
+        ally.kind = crate::content::WIZARD;
+        ally.account = Some(3);
+        ally.equipped = vec![0xa97, -1, -1, -1];
+        ally.position = Pos { x: 14.5, y: 10.5 };
+        v.objects.push(ally);
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_some(),
+            "four-tile aura boundary is inclusive"
+        );
+        v.character.conditions = bit(BERSERK);
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_some(),
+            "ally benefit is independent of own buff"
+        );
+        v.character.conditions = 0;
+        for mask in [None, Some(bit(BERSERK)), Some(bit(STUNNED)), Some(1 << 20)] {
+            v.objects[1].condition_mask = mask;
+            assert!(
+                ability(&v, &content, &grid, &v.objects[0])
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        v.objects[1].condition_mask = Some(0);
+        v.objects[1].position.x = 14.51;
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        v.objects[1].position.x = 14.5;
+        v.objects[1].hp = 0;
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        v.objects[1].hp = 500;
+        v.objects[0].condition_mask = Some(bit(INVULNERABLE));
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        v.objects[0].condition_mask = Some(0);
+        v.objects[0].position.x = 30.5;
+        assert!(!berserk_ally(&v, &content, &grid, 4.).unwrap());
+        v.objects[0].position.x = 19.5;
+        v.objects[1].blocks = true;
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        v.objects[1].blocks = false;
+        v.character.mp = 59;
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        v.character.mp = 200;
+        v.character.ability_ready_ms = v.time_ms + 1;
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        v.character.ability_ready_ms = 0;
+        v.character.conditions = bit(QUIET);
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_none()
+        );
+        v.character.conditions = 0;
+        v.objects.pop();
+        v.objects[0].position.x = 14.;
+        assert!(
+            ability(&v, &content, &grid, &v.objects[0])
+                .unwrap()
+                .is_some(),
+            "existing self-benefit"
+        );
+    }
 }

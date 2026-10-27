@@ -236,7 +236,9 @@ impl World {
                         contents: vec![],
                         blocks: false,
                         usable: true,
-                        condition_mask: None,
+                        condition_mask: Some(
+                            q.conditions(w.now) | if q.paused { 1 << 20 } else { 0 },
+                        ),
                     }
                 } else {
                     let e = &w.entities[entity];
@@ -399,5 +401,120 @@ impl World {
         };
         w.performance.borrow_mut().work("perception", started);
         Ok(view)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::condition::{BERSERK, SICK, bit};
+
+    #[tokio::test]
+    async fn local_support_public_conditions_and_actual_ability_benefits() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let map =
+            Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let mut w = World::new(content, map).unwrap();
+        for id in w.entities.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(id);
+        }
+        let map = Arc::make_mut(&mut w.map);
+        map.spawns = vec![(10.5, 10.5)];
+        for cell in &mut map.cells {
+            cell.ground = 0x61;
+            cell.object = None;
+        }
+        let mut ids = Vec::new();
+        for (name, class) in [
+            ("support-priest", crate::content::PRIEST),
+            ("support-peer", crate::content::WIZARD),
+        ] {
+            let account = store.list(name.into()).await.unwrap();
+            let character = store
+                .create(account.id, w.content.get(class).unwrap())
+                .await
+                .unwrap();
+            ids.push(w.enter(character, None).unwrap());
+        }
+        let (caster, peer) = (ids[0], ids[1]);
+        let origin = w.players[&caster].pos;
+        w.players.get_mut(&peer).unwrap().pos = Pos {
+            x: origin.x + 4.,
+            y: origin.y,
+        };
+        w.apply_condition(peer, SICK, 10.).unwrap();
+        w.players.get_mut(&peer).unwrap().paused = true;
+        assert!(
+            w.player_view(1, caster, 0)
+                .unwrap()
+                .objects
+                .iter()
+                .all(|o| o.id != peer),
+            "unknown peer stays unknown"
+        );
+        w.players.get_mut(&caster).unwrap().known.insert(peer);
+        let view = w.player_view(1, caster, 0).unwrap();
+        let mask = view
+            .objects
+            .iter()
+            .find(|o| o.id == peer)
+            .unwrap()
+            .condition_mask
+            .unwrap();
+        let stats = w.stats(peer, caster).unwrap();
+        let mut r = crate::wire::Reader::new(&stats);
+        r.i32().unwrap();
+        r.f32().unwrap();
+        r.f32().unwrap();
+        let count = r.i16().unwrap();
+        let mut public_mask = None;
+        for _ in 0..count {
+            let kind = r.u8().unwrap();
+            let value = r.i32().unwrap();
+            if kind == 29 {
+                public_mask = Some(value);
+                break;
+            }
+        }
+        assert_eq!(Some(mask), public_mask);
+        assert_eq!(mask, bit(SICK) | (1 << 20));
+        w.players.get_mut(&peer).unwrap().pos.x = origin.x + 30.;
+        assert!(
+            w.player_view(1, caster, 0)
+                .unwrap()
+                .objects
+                .iter()
+                .all(|o| o.id != peer),
+            "known but invisible peer stays absent"
+        );
+        let p = w.players.get_mut(&peer).unwrap();
+        p.pos.x = origin.x + 4.;
+        p.paused = false;
+        p.statuses.clear();
+        p.character.hp -= 50;
+        let before = p.character.hp;
+        w.players.get_mut(&caster).unwrap().character.mp = 200;
+        for (class, kind) in [(crate::content::PRIEST, 0xa31), (0x031d, 0xa66)] {
+            let p = w.players.get_mut(&caster).unwrap();
+            p.character.class = class;
+            p.character.items[1] = kind;
+            p.ability_ready_ms = 0;
+            let mp = p.character.mp;
+            let item = w.content.get(kind as u16).unwrap().clone();
+            let slot = crate::world::Slot {
+                object: caster,
+                slot: 1,
+                kind,
+            };
+            w.activate_ability(caster, slot, &item, origin).unwrap();
+            assert_eq!(w.players[&caster].character.mp, mp - item.mana_cost);
+            assert!(w.players[&caster].ability_ready_ms > 0);
+            if class == crate::content::PRIEST {
+                assert_eq!(w.players[&peer].character.hp, before + 50);
+            } else {
+                assert_ne!(w.players[&peer].conditions(w.now) & bit(BERSERK), 0);
+            }
+        }
     }
 }

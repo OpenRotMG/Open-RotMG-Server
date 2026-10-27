@@ -51,13 +51,16 @@ fn healing_selected(
             & (crate::content::PARALYZED | crate::content::STUNNED | crate::content::SLOWED)
             != 0;
     let needs_healing = needs_cleanse
-        || own_need >= (tome.heal.min(v.character.stats[0]) as f32 * 0.35) as i32
+        || (v.character.conditions & crate::condition::bit(crate::condition::SICK) == 0
+            && own_need >= (tome.heal.min(v.character.stats[0]) as f32 * 0.35) as i32)
         || v.objects.iter().any(|o| {
             !o.equipped.is_empty()
                 && eligible(o)
                 && o.hp > 0
+                && o.condition_mask
+                    .is_some_and(|mask| mask & crate::condition::bit(crate::condition::SICK) == 0)
                 && o.max_hp - o.hp >= (tome.heal.min(o.max_hp) as f32 * 0.35) as i32
-                && v.position.distance(o.position) <= tome.heal_range
+                && v.position.distance(o.position) < tome.heal_range
         });
     Ok(needs_healing.then_some(Action::Use {
         slot: 1,
@@ -482,4 +485,96 @@ pub(super) async fn market(
     }
     // A bank trip or lost contact must not hold the other controller's movement lock.
     Ok(brain.mind.market.trade.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::condition::{QUIET, SICK, SLOWED, bit};
+
+    #[test]
+    fn local_support_priest_requested_heal_requires_actual_benefit() {
+        let (content, mut v) = quest_tests::fixture();
+        v.character.class = PRIEST;
+        v.character.items[1] = 0xa31;
+        let peer = &mut v.objects[0];
+        peer.kind = crate::content::WIZARD;
+        peer.account = Some(2);
+        peer.name = "Peer".into();
+        peer.equipped = vec![0xa97, -1, -1, -1];
+        peer.hp = 300;
+        peer.max_hp = 500;
+        peer.position = Pos { x: 14.5, y: 10.5 };
+        let mut life = Life::default();
+        assert!(life.healing(&v, &content, 0.).unwrap().is_none());
+        let mut text = wire::Writer::new();
+        text.utf("Peer")
+            .i32(2)
+            .i32(0)
+            .u8(0)
+            .utf("")
+            .utf("Priest, heal please")
+            .utf("");
+        assert!(
+            life.receive(
+                &Packet {
+                    id: wire::TEXT,
+                    body: text.0
+                },
+                &v,
+                "Priest",
+                0.,
+                false
+            )
+            .unwrap()
+        );
+        assert!(life.healing(&v, &content, 0.).unwrap().is_some());
+        for mask in [None, Some(bit(SICK))] {
+            v.objects[0].condition_mask = mask;
+            assert!(life.healing(&v, &content, 0.).unwrap().is_none());
+        }
+        v.objects[0].condition_mask = Some(0);
+        for x in [15.5, 16.] {
+            v.objects[0].position.x = x;
+            assert!(life.healing(&v, &content, 0.).unwrap().is_none());
+        }
+        v.objects[0].position.x = 14.5;
+        v.objects[0].hp = 500;
+        assert!(life.healing(&v, &content, 0.).unwrap().is_none());
+        v.objects[0].hp = 300;
+        v.character.mp = 119;
+        assert!(
+            life.healing(&v, &content, 0.).unwrap().is_none(),
+            "two-cast reserve"
+        );
+        v.character.mp = 59;
+        assert!(life.healing(&v, &content, 10.).unwrap().is_none());
+        v.character.mp = 200;
+        v.character.ability_ready_ms = v.time_ms + 1;
+        assert!(life.healing(&v, &content, 0.).unwrap().is_none());
+        v.character.ability_ready_ms = 0;
+        v.character.conditions = bit(QUIET);
+        assert!(life.healing(&v, &content, 0.).unwrap().is_none());
+        v.character.conditions = 0;
+        v.elapsed_ms += 10000;
+        assert!(
+            life.healing(&v, &content, 0.).unwrap().is_none(),
+            "request expires"
+        );
+    }
+
+    #[test]
+    fn local_support_priest_sick_self_keeps_useful_cleanse() {
+        let (content, mut v) = quest_tests::fixture();
+        v.character.class = PRIEST;
+        v.character.items[1] = 0xa31;
+        v.character.hp = 200;
+        v.character.conditions = bit(SICK);
+        assert!(healing_selected(&v, &content, |_| true).unwrap().is_none());
+        v.character.conditions = 0;
+        assert!(healing_selected(&v, &content, |_| true).unwrap().is_some());
+        v.character.items[1] = 0xc09;
+        v.character.conditions = bit(SICK) | bit(SLOWED);
+        assert!(healing_selected(&v, &content, |_| true).unwrap().is_some());
+    }
 }
