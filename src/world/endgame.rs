@@ -1266,10 +1266,15 @@ async fn realm_death_credit_survives_portal_reward_failure() {
             Some(transfer.key.clone()),
         )
         .unwrap();
-    assert_eq!(
-        directory.worlds[&castle].players[&arrived].character,
-        character
+    let current = &directory.worlds[&castle].players[&arrived].character;
+    assert!(
+        current.tiles > character.tiles,
+        "Castle entry discovers new tiles"
     );
+    let mut expected = character;
+    expected.lifetime.tiles += u64::try_from(current.tiles - expected.tiles).unwrap();
+    expected.tiles = current.tiles;
+    assert_eq!(*current, expected);
     assert!(
         directory
             .consume(account.id, castle, transfer.key_time, transfer.key)
