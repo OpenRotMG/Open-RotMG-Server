@@ -846,6 +846,8 @@ impl World {
             0x6c1 => (Motion::Wander, 9.),
             0x675 => (Motion::Wander, 4.),
             0x91f if e.stage == Some(0) => (Motion::Wander, 1.),
+            0x91f if e.stage == Some(1) => (Motion::Wander, 2.),
+            0x91f if e.stage == Some(2) => (Motion::Wander, 3.),
             _ => (Motion::Wander, 4.),
         };
         // NR-Core adds a base motor rate; a linear speed conversion loses it on slow quest bosses.
@@ -1250,5 +1252,78 @@ fn ent_sprite_orders_use_strict_owned_radii() {
                 assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn ent_evaluation_wander_uses_primary_nominal_rates() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = Map {
+        width: 32,
+        height: 32,
+        cells: vec![
+            crate::content::Cell {
+                ground: 0x61,
+                object: None,
+                config: String::new(),
+                terrain: 0,
+                region: 0,
+            };
+            32 * 32
+        ],
+        spawns: vec![(8.5, 8.5)],
+    };
+    let mut world = World::new(content, Arc::new(map)).unwrap();
+    world.name = "Realm".into();
+    world.encounter = true;
+    world.safe = false;
+    let character: Character = serde_json::from_value(serde_json::json!({
+        "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+        "class":0x300,"base":[200,100,15,0,75,15,15,10],
+        "id":1,"account":1,"name":"Wander","level":20,"exp":0,
+        "fame":0,"hp":200,"mp":100,"revision":0,"alive":true,
+        "items":[0xa14,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+    }))
+    .unwrap();
+    world.enter(character, None).unwrap();
+    let home = Pos { x: 12.5, y: 12.5 };
+    for (kind, stage, nominal) in [
+        (0x91f, 0, 1.295_f32),
+        (0x91f, 1, 1.85),
+        (0x91f, 2, 2.405),
+        (0x91f, 3, 2.96),
+        (0x920, 0, 1.85),
+    ] {
+        world.now += 50;
+        let id = world.spawn_entity(kind, home, vec![]).unwrap();
+        let e = world.entities.get_mut(&id).unwrap();
+        e.quest.set(Some(id), id, &mut world.quest_ids);
+        e.stage = Some(stage);
+        e.activated = Some(world.now);
+        e.next_shot = u64::MAX;
+        e.motion = Some(crate::encounter::Motion::Wander);
+        e.goal = Some(Pos {
+            x: home.x + 1.,
+            y: home.y,
+        });
+        let hp = e.hp;
+        let rng = rand::RngCore::next_u64(&mut world.rng.clone());
+        world.npc_step();
+        let e = &world.entities[&id];
+        let distance = nominal * 0.05;
+        let tolerance = 2. * f32::EPSILON * home.x;
+        assert!(
+            (e.pos.x - home.x - distance).abs() <= tolerance,
+            "kind={kind:#x}, stage={stage}: displacement {} != {distance}",
+            e.pos.x - home.x
+        );
+        assert_eq!(
+            (e.pos.y, e.home.x, e.home.y, *e.quest, e.hp),
+            (home.y, home.x, home.y, Some(id), hp)
+        );
+        assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
+        assert!(world.critical_deaths.is_empty());
+        world.remove_entity(id);
     }
 }
