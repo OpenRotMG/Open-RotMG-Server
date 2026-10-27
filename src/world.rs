@@ -1201,9 +1201,7 @@ impl Directory {
                 if let Some(source) = &source {
                     source.open(&content)?
                 } else if template == "pirate-cave" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::pirate::generate(&content, seed)?)
                 } else if template == "abyss-of-demons" {
                     let seed = match prepared_seed {
@@ -1212,21 +1210,15 @@ impl Directory {
                     };
                     Arc::new(crate::dungeon::abyss::generate(&content, seed)?)
                 } else if template == "manor-of-the-immortals" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::manor::generate(&content, seed)?)
                 } else if template == "beachzone" {
                     Arc::new(crate::dungeon::beach::generate(&content)?)
                 } else if template == "ocean-trench" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::trench::generate(&content, seed)?)
                 } else if template == "forbidden-jungle" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::jungle::generate(&content, seed)?)
                 } else if template == "spider-den" {
                     let seed = match prepared_seed {
@@ -1235,34 +1227,22 @@ impl Directory {
                     };
                     Arc::new(crate::dungeon::spider::generate(&content, seed)?)
                 } else if template == "mad-lab" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::lab::generate(&content, seed)?)
                 } else if template == "tomb-of-the-ancients" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::tomb::generate(&content, seed)?)
                 } else if template == "snake-pit" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::snake_pit(&content, seed)?)
                 } else if template == "sprite-world" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::sprite::generate(&content, seed)?)
                 } else if template == crate::dungeon::davy::TEMPLATE {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::davy::generate(&content, seed)?)
                 } else if template == "undead-lair" {
-                    let seed = self
-                        .prepared_seed
-                        .map_or_else(rand::random, |s| s ^ next_world as u64);
+                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
                     Arc::new(crate::dungeon::undead::generate(&content, seed)?)
                 } else {
                     map.context("world template missing")?
