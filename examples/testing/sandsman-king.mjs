@@ -29,6 +29,7 @@ export async function run(game){
   game.check('ordinary Realm King has selected 270 HP',family(begin).some(e=>e.id===king.id&&e.hp===270));
   game.check('ordinary camp has two Archers and three Sorcerers',[[0x60a,2],[0x60c,3]].every(([k,n])=>family(begin).filter(e=>e.kind===k).length===n));
   await game.act({keys:[],duration_ms:1800},{name:'sandsman-before',when:()=>true});
+  for(let n=0;n<10&&(await game.observe()).character.hp>=hp;n++)await game.act({keys:[],duration_ms:1000});
   game.check('ordinary encounter damages the native character',(await game.observe()).character.hp<hp);
   await protect();
   const samples=[];
