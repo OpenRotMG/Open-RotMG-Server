@@ -6363,7 +6363,8 @@ impl World {
                 0x953 | 0x954 => 6.,
                 0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
-                0x617 => 8.,
+                // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
+                0x617 => 12.,
                 0x61a => 10.5,
                 0x6d8 => 12.,
                 0x91a => 7.,
