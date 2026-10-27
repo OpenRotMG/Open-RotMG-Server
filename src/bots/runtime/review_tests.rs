@@ -214,12 +214,7 @@ async fn review_informational_event_calls_survive_planning_changes_and_reach_ent
         let initial = brain
             .mind
             .events
-            .decide(
-                &view,
-                &app.content,
-                &Grid::terrain(&view),
-                brain.profile.attention,
-            )
+            .decide(&view, &app.content, &Grid::terrain(&view), brain.profile)
             .unwrap()
             .unwrap();
         let text = if advice {
@@ -383,4 +378,121 @@ async fn review_long_inventory_pending_keeps_sampled_cursor_without_gameplay_con
         .unwrap();
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn aftermath_request_composition_publishes_only_current_missing_own_goal() {
+    for acquire in [None, Some(true), Some(false)] {
+        let (dir, app) = server::test_app();
+        app.world.clock.set_paused(true);
+        let (_owner, id, mut output, mut brain) = tests::actor(
+            &app,
+            "aftermath-request",
+            "Trader",
+            [0xa9e, -1, -1, -1, -1, -1, -1, -1],
+        )
+        .await;
+        let (_peer_owner, peer, _peer_output, _) =
+            tests::actor(&app, "aftermath-audience", "Peer", [-1; 8]).await;
+        app.world
+            .for_player(id)
+            .call(move |w| {
+                w.name = "Wine Cellar".into();
+                let p = w.players.get_mut(&id).unwrap();
+                p.character.level = 20;
+                p.character.items[0] = 0xa9e;
+                p.character.base[3] = 10;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        brain.profile.identity = "Cedar";
+        brain.profile.companions = 8.;
+        brain.activity = Activity::Event;
+        let mut view = step(&app, id).await;
+        brain
+            .mind
+            .intentions
+            .as_mut()
+            .unwrap()
+            .observe(&view, &app.content, "Mossy")
+            .unwrap();
+        let goal = brain.mind.intentions.as_ref().unwrap().item_goal().unwrap();
+        // Only the event observation is prepared; publication still reads the actual world.
+        let mut cue = crate::bots::quest_tests::fixture().1.objects.remove(0);
+        cue.kind = crate::endgame::ORYX2;
+        cue.position = view.position;
+        view.objects.push(cue);
+        brain.mind.events.observe(&view);
+        let cue = view.objects.last_mut().unwrap();
+        cue.kind = 0x71d;
+        cue.hp = 0;
+        cue.usable = true;
+        brain.mind.events.observe(&view);
+        for _ in 0..20 {
+            view = step(&app, id).await;
+        }
+        let speech = brain
+            .mind
+            .events
+            .speech(&view, &app.content, brain.profile, Some(goal), None)
+            .unwrap()
+            .unwrap();
+        let text = speech.text.clone();
+        assert!(
+            !brain
+                .compose(&app, &view, Source::Call, "snake here")
+                .await
+                .unwrap()
+        );
+        public_call(&app, &mut brain, &view, &decision(Goal::Wait, None))
+            .await
+            .unwrap();
+        assert_eq!(brain.composing(Source::Call), Some("snake here"));
+        brain.close_composition(&app, false).await.unwrap();
+        brain.aftermath = Some(speech);
+        let ready = typed(&app, &mut brain, Source::Call, &text).await;
+        assert!(
+            brain
+                .aftermath
+                .as_ref()
+                .unwrap()
+                .valid(
+                    &brain.mind.events,
+                    &ready,
+                    &app.content,
+                    brain.profile,
+                    Some(goal)
+                )
+                .unwrap()
+        );
+        if acquire == Some(true) {
+            app.world
+                .for_player(id)
+                .call(move |w| {
+                    // Exercise current ownership independently of the composer's revision guard.
+                    w.players.get_mut(&id).unwrap().character.items[5] = goal.1;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        } else if acquire == Some(false) {
+            brain.mind.intentions = Some(Default::default());
+        }
+        public_call(&app, &mut brain, &ready, &decision(Goal::Wait, None))
+            .await
+            .unwrap();
+        assert_eq!(text_sent(&mut output, id), acquire.is_none());
+        assert!(brain.draft.is_none());
+        assert!(brain.aftermath.is_none());
+        for player in [id, peer] {
+            lifecycle::finalize(&app, player, CloseReason::Controller)
+                .unwrap()
+                .wait()
+                .await
+                .unwrap();
+        }
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

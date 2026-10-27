@@ -577,6 +577,12 @@ impl Intentions {
             .filter(|m| matches!(m.objective, Objective::Item { .. }))
             .map(|m| m.target)
     }
+    pub(super) fn item_goal(&self) -> Option<(u64, i32)> {
+        self.main
+            .as_ref()
+            .filter(|m| matches!(m.objective, Objective::Item { .. }))
+            .map(|m| (m.id, m.target))
+    }
     fn target_loot(&self, v: &PlayerView, object: i32) -> bool {
         self.item_target().is_some_and(|item| {
             v.objects

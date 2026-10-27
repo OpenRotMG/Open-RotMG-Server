@@ -212,14 +212,67 @@ async fn public_call(
     decision: &Decision,
 ) -> Result<()> {
     let id = view.session.player;
-    if let Some(text) = decision.chat
-        && brain.draft.is_none()
+    let item_goal = brain.mind.intentions.as_ref().and_then(|i| i.item_goal());
+    let idle = brain.activity == Activity::Event
+        && !brain.committed(view)
+        && decision.goal == Goal::Wait
+        && decision.item.is_none()
+        && decision.journey.is_none()
+        && decision.movement.is_none();
+    if brain.aftermath.as_ref().is_some_and(|_| !idle)
+        || if let Some(speech) = &brain.aftermath {
+            !speech.valid(
+                &brain.mind.events,
+                view,
+                &app.content,
+                brain.profile,
+                item_goal,
+            )?
+        } else {
+            false
+        }
     {
-        let _ = brain
-            .compose(app, view, composer::Source::Call, text)
-            .await?;
-        brain.call_goal = matches!(decision.goal, Goal::Portal(_) | Goal::Follow(_))
-            .then(|| decision.goal.clone());
+        tracing::info!(
+            player = id,
+            "bot aftermath composition canceled: context changed"
+        );
+        brain.close_composition(app, false).await?;
+    }
+    if brain.draft.is_none() {
+        let speech = if idle {
+            brain
+                .mind
+                .events
+                .speech(view, &app.content, brain.profile, item_goal, decision.chat)?
+        } else {
+            None
+        };
+        let text = if let Some(speech) = speech {
+            if !speech.valid(
+                &brain.mind.events,
+                view,
+                &app.content,
+                brain.profile,
+                item_goal,
+            )? {
+                return Ok(());
+            }
+            let text = speech.text.clone();
+            brain.aftermath = Some(speech);
+            Some(text)
+        } else {
+            decision
+                .chat
+                .filter(|text| !events::loot_report(text))
+                .map(str::to_owned)
+        };
+        if let Some(text) = text {
+            let _ = brain
+                .compose(app, view, composer::Source::Call, &text)
+                .await?;
+            brain.call_goal = matches!(decision.goal, Goal::Portal(_) | Goal::Follow(_))
+                .then(|| decision.goal.clone());
+        }
     }
     if brain.composing(composer::Source::Call).is_some()
         && brain
@@ -244,6 +297,10 @@ async fn public_call(
         let call_goal = brain.call_goal.clone();
         let until = brain.invitation_until;
         let text_log = text.clone();
+        let aftermath = brain.aftermath.clone();
+        let events = brain.mind.events.clone();
+        let profile = brain.profile;
+        let content = app.content.clone();
         let sent = app
             .world
             .directory(move |d| {
@@ -252,6 +309,12 @@ async fn public_call(
                     (current.session.world, id, current.session.character) == session,
                     "public call session changed"
                 );
+                if let Some(speech) = aftermath {
+                    ensure!(
+                        speech.valid(&events, &current, &content, profile, item_goal)?,
+                        "aftermath speech context changed before Enter"
+                    );
+                }
                 if text == "omw" {
                     ensure!(
                         current.time_ms < until

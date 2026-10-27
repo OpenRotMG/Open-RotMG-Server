@@ -243,6 +243,7 @@ struct Brain {
     draft: Option<composer::Draft>,
     clipboard: String,
     call_goal: Option<Goal>,
+    aftermath: Option<events::Speech>,
     market_words: Option<(pursuits::market::Message, String)>,
     profile: Profile,
     activity: Activity,
@@ -310,6 +311,7 @@ impl Brain {
             draft: None,
             clipboard: String::new(),
             call_goal: None,
+            aftermath: None,
             market_words: None,
             profile,
             activity: Activity::Busy,
@@ -840,14 +842,10 @@ impl Brain {
         if let Some(project) = self.mind.supply(v, content, &s.grid)? {
             return Ok((Activity::Supply, project));
         }
-        if let Some(mut event) =
-            self.mind
-                .events
-                .decide(v, content, &s.grid, self.mind.cognition.attention)?
+        if !self.committed(v)
+            && decision.item.is_none()
+            && let Some(event) = self.mind.events.decide(v, content, &s.grid, self.profile)?
         {
-            if decision.item.is_some() {
-                event.item = decision.item;
-            }
             return Ok((Activity::Event, event));
         }
         if decision.item.is_none()

@@ -69,6 +69,7 @@ impl Brain {
         };
         if draft.source == Source::Call {
             self.call_goal = None;
+            self.aftermath = None;
         }
         if draft.source == Source::Market {
             if sent {
