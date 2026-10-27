@@ -34,7 +34,7 @@ async fn fixture(home: i32) -> (Directory, i32, i32, i32) {
 async fn dungeon_return_retains_each_source_realm_after_entrance_expires() {
     for home in [-3, 1] {
         let (mut d, dungeon, player, exit) = fixture(home).await;
-        d.tick = 601;
+        d.tick = DUNGEON_PORTAL_TICKS;
         d.step();
         assert!(d.portals.is_empty());
         let before = serde_json::to_value(&d.worlds[&dungeon].players[&player].character).unwrap();
