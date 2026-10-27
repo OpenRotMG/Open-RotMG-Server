@@ -27,6 +27,15 @@ Alternatives may be priced exchanges or bare selling interest (selling {give}, s
 For market_refuse use short refusals: nty, nah, no thx, sry nty, or one of these followed by need {want}. No {give} or name in refusals.
 Keep literal brace tokens lowercase, but vary other capitalization, opening, spacing and name signature to fit this speaker's supplied voice. No other words, punctuation, promises or acceptance. Current inventory facts are inserted only by the program. Native trade windows alone authorize acceptance."#;
 
+fn voice(seed: u64, _intent: Intent) -> Value {
+    json!({
+        "favorite_shape": FAVORITE_SHAPES[seed as usize % 8],
+        "syntax_examples": FAVORITE_SHAPES,
+        "capitalization": (["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3]),
+        "name_signature": (seed / 24).is_multiple_of(2),
+    })
+}
+
 fn validated_template(template: &str, intent: Intent) -> std::result::Result<bool, Failure> {
     let remaining = template
         .replace("{give}", "")
@@ -183,12 +192,7 @@ impl Service {
         let service = self.clone();
         let name = name.to_owned();
         let seed = persona::seed(&name);
-        let voice = json!({
-            "favorite_shape": FAVORITE_SHAPES[seed as usize % 8],
-            "syntax_examples": FAVORITE_SHAPES,
-            "capitalization": (["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3]),
-            "name_signature": (seed / 24).is_multiple_of(2),
-        });
+        let voice = voice(seed, intent);
         let payload = json!({"allowed_intents":[intent],"automatic":true,"market_generation":true,
             "bot":{"personality":personality,"style_seed":seed,"voice":voice},
             "message":"Generate my favorite and two occasional alternatives in my own consistent voice. Use only the given grammar and literal slots."});
@@ -236,6 +240,25 @@ impl Service {
 mod tests {
     use super::*;
     use crate::bots::pursuits::market::Channel;
+
+    #[test]
+    fn market_voice_examples_follow_the_allowed_intent() {
+        for seed in 0..48 {
+            for intent in [Intent::MarketAdvertise, Intent::MarketRefuse] {
+                let voice = voice(seed, intent);
+                let examples = voice["syntax_examples"].as_array().unwrap();
+                assert!(
+                    examples.iter().all(|s| validated_template(s.as_str().unwrap(), intent).is_ok()),
+                    "{intent:?}: {voice}"
+                );
+                assert_eq!(voice["favorite_shape"], examples[seed as usize % 8]);
+                assert_eq!(
+                    voice["name_signature"],
+                    json!(intent == Intent::MarketAdvertise && (seed / 24).is_multiple_of(2))
+                );
+            }
+        }
+    }
 
     #[test]
     fn market_favorite_shapes_are_priced_and_invalid_provider_repertoire_stays_rejected() {
