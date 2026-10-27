@@ -9,6 +9,15 @@ pub(super) const REMAINING_TAUNT_MS: u64 = 120_000;
 pub(super) struct RealmDirectory {
     pub realms: BTreeMap<i32, RealmRecord>,
     pub(super) forced: BTreeMap<i32, ForcedRoute>,
+    preparing: Option<RealmPreparation>,
+}
+struct RealmPreparation {
+    origin: i32,
+    castle: i32,
+    realm: i32,
+    rng_before: rand::rngs::StdRng,
+    realm_started: Arc<std::sync::atomic::AtomicBool>,
+    result: tokio::sync::oneshot::Receiver<Result<(World, World, RealmCycle)>>,
 }
 pub(super) struct RealmRecord {
     pub cycle: RealmCycle,
@@ -542,27 +551,75 @@ impl Directory {
         }
     }
     fn replace_realm(&mut self, origin: i32) -> Result<()> {
-        self.worlds.get(&origin).context("closing Realm missing")?;
-        let castle = self.make(CASTLE, "Oryx's Castle", false, None)?;
-        let realm = self.make("realm-shore", "Realm", false, None)?;
-        let next_cycle = RealmCycle::new(realm.hero_identities())?;
+        ensure!(self.worlds.contains_key(&origin), "closing Realm missing");
+        if let Some(preparation) = &self.endgame.preparing {
+            if preparation.origin != origin {
+                return Ok(());
+            }
+        } else {
+            let castle_id = self.next_world;
+            let realm_id = castle_id
+                .checked_add(1)
+                .context("world identity exhausted")?;
+            let next = realm_id
+                .checked_add(1)
+                .context("world identity exhausted")?;
+            ensure!(
+                !self.worlds.contains_key(&castle_id) && !self.worlds.contains_key(&realm_id),
+                "world identity collision"
+            );
+            let rng_before = self.realm_rng.clone();
+            let castle = self.construction(CASTLE, "Oryx's Castle", false, None)?;
+            let realm = self.construction("realm-shore", "Realm", false, None)?;
+            let realm_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let started = realm_started.clone();
+            let result = match self.worlds.prepare_replacement(origin, self.tick, move || {
+                let castle = castle()?;
+                started.store(true, std::sync::atomic::Ordering::Release);
+                let realm = realm()?;
+                let cycle = RealmCycle::new(realm.hero_identities())?;
+                Ok((castle, realm, cycle))
+            }) {
+                Ok(result) => result,
+                Err(error) => {
+                    self.realm_rng = rng_before;
+                    return Err(error);
+                }
+            };
+            // One unpublished build preserves Realm selection/publication order without occupying simulation workers.
+            self.endgame.preparing = Some(RealmPreparation {
+                origin,
+                castle: castle_id,
+                realm: realm_id,
+                rng_before,
+                realm_started,
+                result,
+            });
+            self.next_world = next;
+        }
+        let result = match self.endgame.preparing.as_mut().unwrap().result.try_recv() {
+            Ok(result) => result,
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return Ok(()),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                self.endgame.preparing.take();
+                bail!("Realm preparation worker stopped without returning its result");
+            }
+        };
+        let preparation = self.endgame.preparing.take().unwrap();
+        if !preparation
+            .realm_started
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            self.realm_rng = preparation.rng_before;
+        }
+        let (castle, realm, next_cycle) = result?;
+        let (castle_id, realm_id) = (preparation.castle, preparation.realm);
         let name = (1..=super::realm_portal::NAMES.len())
             .map(|offset| {
                 (self.endgame.realms[&origin].name + offset) % super::realm_portal::NAMES.len()
             })
             .find(|name| self.endgame.realms.values().all(|r| r.name != *name))
             .context("no unused Realm name")?;
-        let castle_id = self.next_world;
-        let realm_id = castle_id
-            .checked_add(1)
-            .context("world identity exhausted")?;
-        let next = realm_id
-            .checked_add(1)
-            .context("world identity exhausted")?;
-        ensure!(
-            !self.worlds.contains_key(&castle_id) && !self.worlds.contains_key(&realm_id),
-            "world identity collision"
-        );
         let players: Vec<_> = self.worlds[&origin]
             .players
             .iter()
@@ -596,7 +653,6 @@ impl Directory {
         realm.admission_open = false;
         self.worlds.insert(castle_id, castle);
         self.worlds.insert(realm_id, realm);
-        self.next_world = next;
         self.idle.insert(castle_id, self.tick);
         let mut record = RealmRecord::new(next_cycle, self.tick * 50);
         record.portal = Some(portal);

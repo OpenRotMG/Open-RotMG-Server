@@ -11,6 +11,56 @@ fn directory() -> Directory {
     Directory::test_with_seed(std::path::Path::new("data"), content, 16, 12351).unwrap()
 }
 #[tokio::test]
+async fn replacement_construction_leaves_directory_and_simulation_responsive() {
+    let handle = super::super::Handle::spawn(directory());
+    handle.clock.set_paused(true);
+    let (entered, ready) = oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let result = handle
+        .directory(move |d| {
+            d.worlds.prepare_replacement(-3, d.tick, move || {
+                entered.send(()).unwrap();
+                wait.recv_timeout(Duration::from_secs(5)).unwrap();
+                Ok(73)
+            })
+        })
+        .await
+        .unwrap();
+    ready.await.unwrap();
+    let before = handle
+        .in_world(-3)
+        .call(|world| Ok(world.tick))
+        .await
+        .unwrap();
+    handle.clock.set_paused(false);
+    tokio::time::timeout(Duration::from_millis(1500), async {
+        handle
+            .directory(|d| {
+                assert!(d.worlds.contains_key(&-3));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        loop {
+            if handle
+                .in_world(-3)
+                .call(|world| Ok(world.tick))
+                .await
+                .unwrap()
+                >= before + 2
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    release.send(()).unwrap();
+    assert_eq!(result.await.unwrap().unwrap(), 73);
+    handle.supervisor.ensure_running().unwrap();
+}
+#[tokio::test]
 async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
     let directory = directory();
     directory.clock.set_paused(true);
