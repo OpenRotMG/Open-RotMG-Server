@@ -23,6 +23,18 @@ spec.loader.exec_module(update)
 
 class UpdateTest(unittest.TestCase):
 
+    def test_restart_warning_announces_then_waits_ninety_seconds(self):
+        config = {'bind': '127.0.0.1:18923'}
+        notice = 'Server restarting in 90 seconds to apply an update.'
+        events = []
+        with patch.object(update.subprocess, 'check_output', return_value='active\n'), \
+                patch.object(update, 'announce', side_effect=lambda c, text: events.append(('announce', c, text)) or {'players': 2}), \
+                patch.object(update.time, 'sleep', side_effect=lambda seconds: events.append(('sleep', seconds))), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertTrue(update.warn_restart(config))
+        self.assertEqual(events, [('announce', config, notice), ('sleep', 90)])
+        self.assertEqual(json.loads(output.getvalue()), {'restart_warning': notice, 'seconds': 90, 'players': 2})
+
 
     def test_vault_migration_preserves_saved_rows_with_unread_accounts_before_between_and_after(self):
         before = {'accounts': [{'id': account} for account in range(1, 6)], 'vaults': [

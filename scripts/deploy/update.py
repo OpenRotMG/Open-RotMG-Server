@@ -27,7 +27,8 @@ ROOT = Path('/var/lib/openrotmg-deploy')
 BACKUPS = Path('/opt/openrotmg-backup')
 CONFIG = Path('/etc/openrotmg/config.json')
 ANNOUNCE_TOKEN = Path('/etc/openrotmg/discord-link-token')
-RESTART_NOTICE_SECONDS = 20
+# Give players time to finish safely before cutover: https://github.com/OpenRotMG/Open-RotMG-Server/issues/689
+RESTART_NOTICE_SECONDS = 90
 DRAIN_TIMEOUT = 20
 DRAIN_HTTP_TIMEOUT = 3
 LAST_BACKUP = Path('/var/lib/openrotmg-backup/last-success.json')
