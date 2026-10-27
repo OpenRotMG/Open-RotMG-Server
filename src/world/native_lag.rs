@@ -147,6 +147,10 @@ impl Window {
             (covered_ms > 0.)
                 .then(|| total.corrections.iter().sum::<u64>() as f64 * 60_000. / covered_ms)
         );
+        out["last_ack_age_ms"] = json!(
+            self.last_ack
+                .map(|(_, t)| now.duration_since(t).as_secs_f64() * 1000.)
+        );
         out["waiting_for_first_ack"] = json!(self.last_ack.is_none());
         if history {
             out["history"] = json!(rows);
@@ -187,7 +191,7 @@ pub(crate) fn public_snapshot(value: &Value) -> Value {
         out
     };
     let mut out = fields(value);
-    for key in ["covered_ms", "corrections_per_minute"] {
+    for key in ["covered_ms", "corrections_per_minute", "last_ack_age_ms"] {
         out[key] = json!(value[key].as_f64());
     }
     out["waiting_for_first_ack"] = json!(value["waiting_for_first_ack"].as_bool());
@@ -225,6 +229,7 @@ mod tests {
         assert_eq!(s["acks"], 5);
         assert_eq!(s["gap_samples"], 3);
         assert_eq!(s["repeated_ticks"], 1);
+        assert_eq!(s["last_ack_age_ms"], 190.);
         assert_eq!(s["max_gap_ms"], 700.);
         assert_eq!(s["over_500ms"], 1);
         assert_eq!(s["under_50ms"], 1);

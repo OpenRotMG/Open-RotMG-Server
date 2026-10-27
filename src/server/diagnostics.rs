@@ -1102,3 +1102,36 @@ pub async fn receipt(
         Err(e) => error(e),
     }
 }
+
+#[cfg(test)]
+mod native_lag_tests {
+    use super::*;
+    #[test]
+    fn visibility_is_a_hint_and_missing_metrics_are_not_zero() {
+        let raw = json!({"max_gap_ms":700.,"max_gap_end_age_ms":100.,"private":"SECRET",
+            "history":[{"max_gap_ms":700.,"max_gap_end_age_ms":100.}]});
+        let visible =
+            json!({"age_ms":0,"sample":{"elapsed_ms":5000.,"hidden_during_interval":false}});
+        let hidden =
+            json!({"age_ms":0,"sample":{"elapsed_ms":5000.,"hidden_during_interval":true}});
+        let partial =
+            json!({"age_ms":0,"sample":{"elapsed_ms":500.,"hidden_during_interval":false}});
+        let v = lag_diagnostics(&raw, &[&visible]);
+        assert_eq!(v["max_gap_visibility_hint"], "visible_sample");
+        assert_eq!(v["history"][0]["max_gap_visibility_hint"], "visible_sample");
+        assert!(!v.to_string().contains("SECRET"));
+        assert_eq!(
+            lag_diagnostics(&raw, &[&visible, &hidden])["max_gap_visibility_hint"],
+            "hidden_or_mixed_sample"
+        );
+        assert_eq!(
+            lag_diagnostics(&raw, &[&partial])["max_gap_visibility_hint"],
+            "unavailable"
+        );
+        assert_eq!(
+            lag_diagnostics(&raw, &[])["max_gap_visibility_hint"],
+            "unavailable"
+        );
+        assert!(lag_diagnostics(&Value::Null, &[]).is_null());
+    }
+}
