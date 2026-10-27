@@ -1299,10 +1299,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn market_current_message_cancels_after_real_stock_context_changes() {
+    async fn market_current_message_cancels_after_stock_context_changes() {
         let (dir, app) = crate::server::test_app();
         app.world.clock.set_paused(true);
-        let (owner, id, _, _) = crate::bots::runtime::tests::actor(
+        let (owner, id, _packets, _brain) = crate::bots::runtime::tests::actor(
             &app,
             "market-current-747",
             "Trader",

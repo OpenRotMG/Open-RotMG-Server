@@ -12,7 +12,7 @@ pub(super) struct Wording {
 
 pub(super) const PROMPT: &str = r#"Write THREE reusable 2012 Realm trade-chat templates in ONE reply_to_player call with the sole allowed intent. Separate them with literal |. Total reply at most 128 characters.
 The tokens {give}, {want}, @{name} are LITERAL text. Never substitute items, numbers or real names. Follow the supplied voice across all three; first is the repeated favorite, the other two occasional alternatives. Use distinct shapes, not three capitalization variants.
-For market_advertise the FIRST must be a priced exchange: seller opening wts, selling, sell, s>, trading, trade or t> with {give} then for or = then {want}; buyer opening wtb, buying, buy or b> with {want} then for or = then {give}. Spaces after > and around = are optional. Also allowed: {give} = {want}, or s>{give} ({want}).
+For market_advertise the FIRST must be a priced exchange: seller opening wts, selling, sell, s>, trading, trade or t> with {give} then for, = or an implicit space-separated price then {want}; buyer opening wtb, buying, buy or b> with {want} then for, = or an implicit space-separated price then {give}. Spaces after > and around = are optional. Also allowed: {give} = {want}, or s>{give} ({want}).
 Alternatives may be priced exchanges or bare selling interest (selling {give}, s>{give}) or bare buying interest (wtb {want}, buying {want}, b>{want}). Bare interest omits the price and is NOT an agreed exchange. Each mentioned goods token exactly once. Optionally end an ad with literal @{name}, then optionally one ! at the very end.
 For market_refuse use short refusals: nty, nah, no thx, sry nty, or one of these followed by need {want}. No {give} or name in refusals.
 Keep literal brace tokens lowercase, but vary other capitalization, opening, spacing and name signature to fit this speaker's supplied voice. No other words, punctuation, promises or acceptance. Current inventory facts are inserted only by the program. Native trade windows alone authorize acceptance."#;
@@ -89,6 +89,7 @@ fn render(
     give: &str,
     want: &str,
     name: &str,
+    c: &Content,
 ) -> std::result::Result<String, Failure> {
     validated_template(template, intent)?;
     let text = template
@@ -96,6 +97,19 @@ fn render(
         .replace("{want}", want)
         .replace("@{name}", &format!("@{name}"));
     crate::world::chat::validate(&text).map_err(|_| Failure::Error("invalid_market_wording"))?;
+    if intent == Intent::MarketAdvertise {
+        let give = parse_goods(&give.to_ascii_lowercase(), c);
+        let want = parse_goods(&want.to_ascii_lowercase(), c);
+        let faithful = match parse_advertisement(&text, |s| parse_goods(s, c)) {
+            Some(Advertisement::Quote([g, w])) => Some(g) == give && Some(w) == want,
+            Some(Advertisement::Selling(g)) => Some(g) == give,
+            Some(Advertisement::Buying(w)) => Some(w) == want,
+            None => false,
+        };
+        if !faithful {
+            return Err(Failure::Error("invalid_market_wording"));
+        }
+    }
     Ok(text)
 }
 
@@ -129,7 +143,7 @@ impl Service {
                 Some(Ok(templates)) => {
                     // Keep a recognizable favorite instead of paraphrasing every advertisement.
                     let index = [0, 0, 1, 0, 0, 2][entry.next];
-                    let text = render(&templates[index], intent, &give, &want, name)?;
+                    let text = render(&templates[index], intent, &give, &want, name, c)?;
                     entry.next = (entry.next + 1) % 6;
                     return Ok(Some(text));
                 }
@@ -159,14 +173,13 @@ impl Service {
         let service = self.clone();
         let name = name.to_owned();
         let seed = persona::seed(&name);
-        let voice = [
-            "compact s> notation, lowercase",
-            "uppercase seller words and a name signature",
-            "lowercase buyer words, no signature",
-            "item-first equals notation, no signature",
-            "lowercase trading words with a name signature",
-            "compact b> notation, uppercase",
-        ][seed as usize % 6];
+        let voice = json!({
+            "favorite_shape": ["compact s> with equals", "selling words with for", "buying words with for",
+                "item-first equals", "wtb with implicit price", "trading words with for",
+                "s> with parenthesized price", "compact b> with equals"][seed as usize % 8],
+            "capitalization": ["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3],
+            "name_signature": (seed / 24).is_multiple_of(2),
+        });
         let payload = json!({"allowed_intents":[intent],"automatic":true,"market_generation":true,
             "bot":{"personality":personality,"style_seed":seed,"voice":voice},
             "message":"Generate my favorite and two occasional alternatives in my own consistent voice. Use only the given grammar and literal slots."});
@@ -222,23 +235,23 @@ mod tests {
     #[test]
     fn market_templates_share_human_parser_without_pricing_bare_interest() {
         let c = content();
-        let q = parse_quote("wts 5 spd for 1 def", &c).unwrap();
-        for template in [
-            "s>{give}={want}",
-            "BUYING {want} FOR {give} @{name}!",
-            "{give} = {want}",
-            "s>{give} ({want})",
-            "trading {give} {want}",
+        for (give, want) in [
+            ("5 spd", "1 def"),
+            ("1 life", "1 Robe of the Master"),
+            ("1 Robe of the Student", "1 def"),
         ] {
-            let text = render(
-                template,
-                Intent::MarketAdvertise,
-                "5 spd",
-                "1 def",
-                "Trader",
-            )
-            .unwrap();
-            assert_eq!(parse_quote(&text, &c), Some(q.clone()), "{text}");
+            let q = parse_quote(&format!("wts {give} for {want}"), &c).unwrap();
+            for template in [
+                "s>{give}={want}",
+                "BUYING {want} FOR {give} @{name}!",
+                "{give} = {want}",
+                "s>{give} ({want})",
+                "trading {give} {want}",
+            ] {
+                let text =
+                    render(template, Intent::MarketAdvertise, give, want, "Trader", &c).unwrap();
+                assert_eq!(parse_quote(&text, &c), Some(q.clone()), "{text}");
+            }
         }
         for template in ["selling {give}!", "wtb {want}", "b>{want} @{name}"] {
             let text = render(
@@ -247,6 +260,7 @@ mod tests {
                 "5 spd",
                 "1 def",
                 "Trader",
+                &c,
             )
             .unwrap();
             assert!(parse_advertisement(&text, |s| parse_goods(s, &c)).is_some());
@@ -272,7 +286,15 @@ mod tests {
             );
         }
         for refusal in ["nty", "nah need {want}", "no thx", "sry nty need {want}"] {
-            let text = render(refusal, Intent::MarketRefuse, "5 spd", "1 def", "Trader").unwrap();
+            let text = render(
+                refusal,
+                Intent::MarketRefuse,
+                "5 spd",
+                "1 def",
+                "Trader",
+                &c,
+            )
+            .unwrap();
             assert_eq!(parse_quote(&text, &c), None);
         }
         assert!(
@@ -290,7 +312,8 @@ mod tests {
                 Intent::MarketAdvertise,
                 &"x".repeat(129),
                 "1 def",
-                "Trader"
+                "Trader",
+                &c
             )
             .is_err()
         );
@@ -337,7 +360,7 @@ mod tests {
                 service
                     .market_wording("Trader", &message, &c, json!({}))
                     .unwrap(),
-                Some(render(&words[index], intent, "5 spd", "1 def", "Trader").unwrap())
+                Some(render(&words[index], intent, "5 spd", "1 def", "Trader", &c).unwrap())
             );
         }
         let changed = Message {
