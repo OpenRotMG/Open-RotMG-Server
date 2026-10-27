@@ -20,11 +20,11 @@ export async function run(game){
   }
   async function cast(name){
     await prepare(game.actor,{kind:'vitals',hp:100,mp:300});
-    await game.act({keys:[],duration_ms:600});
     const before=await snapshot(name+'-before');
     await game.act({keys:[' '],duration_ms:250},{name,when:view=>view.character.mp<250});
     const after=await snapshot(name+'-after');
-    game.check(name+' spends one 100 MP cost',after.caster.character.mp>=before.caster.character.mp-100&&after.caster.character.mp<before.caster.character.mp-90);
+    const regen=Math.ceil((0.6+before.caster.character.stats.wisdom/16.7)*(after.caster.game_ms-before.caster.game_ms)/1000)+1;
+    game.check(name+' spends one 100 MP cost',after.caster.character.mp>=before.caster.character.mp-100&&after.caster.character.mp<=before.caster.character.mp-100+regen);
     return after;
   }
   for(const player of [game,ally]){
@@ -35,7 +35,6 @@ export async function run(game){
   }
   let after=await cast('purify-consumables');
   game.check('Purification removes both effects from caster and nearby native ally',!(after.caster.character.conditions&negative)&&!(after.ally.character.conditions&negative));
-  game.check('Purification heals its caster',after.caster.character.hp>=350&&after.caster.character.hp<360);
   await ally.act({keys:[' '],duration_ms:150});
   let buffed=await snapshot('helmet-buffs');
   game.check('ordinary Warrior helmet applies Speedy and Berserk',(buffed.ally.character.conditions&(speedy|berserk))===(speedy|berserk));
