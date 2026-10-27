@@ -101,7 +101,7 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
     mind.intentions
         .as_mut()
         .unwrap()
-        .observe(&view, &app.content)
+        .observe(&view, &app.content, profile.identity)
         .unwrap();
     mind.social = serde_json::from_value(serde_json::json!({"episodes":[{
         "account":character.account + 1000,"name":"Peer","own_character":character.id,

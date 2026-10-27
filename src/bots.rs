@@ -587,7 +587,7 @@ impl Brain {
             .intentions
             .as_mut()
             .context("unmigrated account intentions")?
-            .observe(v, content)?;
+            .observe(v, content, self.profile.identity)?;
         let (activity, decision) = if v.lifecycle.busy {
             (Activity::Busy, decision)
         } else {
