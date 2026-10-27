@@ -420,7 +420,7 @@ pub(super) fn clear_cover(
     Some(Decision {
         goal: Goal::Break(wall.id),
         movement,
-        aim: movement.is_none().then(|| angle(v.position, wall.position)),
+        aim: movement.is_none().then_some(wall.position),
         item: None,
         journey: None,
         chat: None,
