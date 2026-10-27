@@ -5,6 +5,19 @@ use crate::{
 };
 
 impl World {
+    pub(super) fn npc_flash(&self, id: i32, color: u32, period: f32, duration: f32) {
+        let mut out = Writer::new();
+        out.u8(15)
+            .i32(id)
+            .f32(period)
+            .f32((duration / period).round())
+            .f32(0.)
+            .f32(0.)
+            .u32(color);
+        for p in self.players.values().filter(|p| p.known.contains(&id)) {
+            send(p, wire::SHOW_EFFECT, out.0.clone());
+        }
+    }
     pub(super) fn suspend_npc(&mut self, id: i32, delta: u64) {
         let e = self.entities.get_mut(&id).expect("suspended NPC missing");
         if let Some(activated) = &mut e.activated {
@@ -39,6 +52,17 @@ impl World {
             endgame::{ORYX, ORYX2, OryxPhase},
         };
         let e = &self.entities[&id];
+        if crate::encounter::tutorial::ROSTER.contains(&e.kind) {
+            return Ok(Some(crate::encounter::tutorial::schedule(
+                e.kind,
+                if e.kind == crate::encounter::tutorial::CHEF {
+                    e.stage.context("Kitchen attack phase missing")?
+                } else {
+                    0
+                },
+                self.now - e.activated.context("Tutorial attack clock missing")?,
+            )));
+        }
         if e.kind == crate::dungeon::snake::DART {
             let active = if let Some(owner) = *e.parent {
                 ensure!(
@@ -340,7 +364,9 @@ impl World {
                 Aim::Target => {
                     let Some(target) = target.filter(|p| {
                         let distance = pos.distance(*p);
-                        if self.entities[&id].kind == 0x651 && self.name != "Abyss of Demons" {
+                        if self.entities[&id].kind == 0x646
+                            || self.entities[&id].kind == 0x651 && self.name != "Abyss of Demons"
+                        {
                             distance < attack.range
                         } else {
                             distance <= attack.range

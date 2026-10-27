@@ -9,14 +9,22 @@ use crate::{
 };
 
 impl World {
-    pub(super) fn populate_authored_groves(
+    pub(super) fn populate_authored_sites(
         &mut self,
-        groves: &[crate::terrain::realms::Grove],
+        sites: &[crate::terrain::realms::Site],
     ) -> Result<()> {
         use realm_setpieces::Area;
         let mut areas = Vec::new();
-        for grove in groves {
-            let [x, y, width, height] = grove.bounds;
+        for site in sites {
+            let (ground, scenery) = match site.kind {
+                0x91f => (0x46, Some(0x194)),
+                0x91b => (0xad, Some(0x160)),
+                0x928 | 0x67d => (0x60, Some(0x120)),
+                0x678 => (0x46, Some(0x18e)),
+                0x668 => (0xf4, None),
+                kind => bail!("unsupported authored quest-site kind {kind:#x}"),
+            };
+            let [x, y, width, height] = site.bounds;
             let area = Area {
                 x,
                 y,
@@ -24,8 +32,8 @@ impl World {
                 height,
             };
             let pos = Pos {
-                x: grove.spawn[0] as f32,
-                y: grove.spawn[1] as f32,
+                x: site.spawn[0] as f32,
+                y: site.spawn[1] as f32,
             };
             ensure!(
                 x > 0
@@ -34,8 +42,8 @@ impl World {
                     && height > 0
                     && x.checked_add(width).is_some_and(|v| v < self.map.width)
                     && y.checked_add(height).is_some_and(|v| v < self.map.height),
-                "invalid authored Grove bounds {:?} in {:?}",
-                grove.bounds,
+                "invalid authored quest-site bounds {:?} in {:?}",
+                site.bounds,
                 self.realm_layout
             );
             ensure!(
@@ -47,9 +55,10 @@ impl World {
                     && self
                         .map
                         .cell(pos.x, pos.y)
-                        .is_some_and(|c| c.ground == 0x46 && [6, 7].contains(&c.terrain)),
-                "blocked or invalid authored Grove anchor {:?} in {:?}",
-                grove.spawn,
+                        .is_some_and(|c| c.ground == ground
+                            && (site.kind != 0x91f || [6, 7].contains(&c.terrain))),
+                "blocked or invalid authored quest-site anchor {:?} in {:?}",
+                site.spawn,
                 self.realm_layout
             );
             ensure!(
@@ -57,49 +66,77 @@ impl World {
                     .iter()
                     .chain(&self.setpieces)
                     .all(|a| area.separate(a)),
-                "overlapping authored Grove {:?} in {:?}",
-                grove.bounds,
+                "overlapping authored quest-site {:?} in {:?}",
+                site.bounds,
                 self.realm_layout
             );
-            let trees = (y..y + height)
+            ensure!(
+                site.chest.is_some() == matches!(site.kind, 0x668 | 0x67d | 0x678),
+                "authored site {:#x} has incorrect chest metadata",
+                site.kind
+            );
+            if let Some([cx, cy]) = site.chest {
+                ensure!(
+                    cx >= x
+                        && cx < x + width
+                        && cy >= y
+                        && cy < y + height
+                        && self.walkable(Pos {
+                            x: cx as f32,
+                            y: cy as f32
+                        }),
+                    "blocked or out-of-site authored chest {:?} in {:?}",
+                    site.chest,
+                    self.realm_layout
+                );
+            }
+            let count = (y..y + height)
                 .flat_map(|yy| (x..x + width).map(move |xx| (xx, yy)))
                 .filter(|(xx, yy)| {
-                    self.map.cells[(yy * self.map.width + xx) as usize].object == Some(0x194)
+                    let cell = &self.map.cells[(yy * self.map.width + xx) as usize];
+                    match scenery {
+                        Some(kind) => cell.object == Some(kind),
+                        None => cell.ground == ground,
+                    }
                 })
                 .count();
             ensure!(
-                trees == grove.trees && trees > 0,
-                "authored Grove {:?} in {:?}: expected {} cherry trees, found {trees}",
-                grove.bounds,
+                count == site.support && count > 0,
+                "authored quest-site {:#x} {:?} in {:?}: expected {} support cells, found {count}",
+                site.kind,
+                site.bounds,
                 self.realm_layout,
-                grove.trees
+                site.support
             );
             areas.push(area);
         }
-        // Grove binds one Ent to its foliage; these hash-pinned image-guided anchors are engineered, not recovered coordinates: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/Grove.cs
-        for (grove, area) in groves.iter().zip(areas) {
+        // Enter bosses/chests without repainting; anchors are engineered against hash-bound maps, not recovered: https://github.com/Zolmex/kithio-as3-source/tree/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/setpieces
+        for (site, area) in sites.iter().zip(areas) {
             self.setpieces.push(area);
-            let pos = Pos {
-                x: grove.spawn[0] as f32,
-                y: grove.spawn[1] as f32,
-            };
-            let id = self.spawn_entity(0x91f, pos, vec![])?;
-            let e = self.entities.get_mut(&id).unwrap();
-            e.quest.set(Some(id), id, &mut self.quest_ids);
-            e.stage = Some(0);
-            e.size = 140;
-            tracing::info!(
-                layout = self.realm_layout,
-                entity = id,
-                x = pos.x,
-                y = pos.y,
-                "finite authored Grove Ent placed"
-            );
+            self.spawn_named_quest(
+                site.kind,
+                Pos {
+                    x: site.spawn[0] as f32,
+                    y: site.spawn[1] as f32,
+                },
+            )?;
+            if let Some([x, y]) = site.chest {
+                self.spawn_landmark_chests(
+                    site.kind,
+                    Pos {
+                        x: x as f32,
+                        y: y as f32,
+                    },
+                )?;
+            }
         }
         Ok(())
     }
 
-    pub(super) fn populate_named_quests(&mut self, authored_groves: bool) -> Result<()> {
+    pub(super) fn populate_named_quests(
+        &mut self,
+        sites: &[crate::terrain::realms::Site],
+    ) -> Result<()> {
         for kind in quest::ROSTER {
             quest::validate(&self.content, *kind)?;
             crate::loot::validate(&self.content, *kind)?;
@@ -112,38 +149,53 @@ impl World {
         // GPL-3.0 requested site counts, not authenticated 123.5.1 population density:
         // https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
         for (kind, terrains, count) in [
-            (0x91f, &[7, 6][..], 17..25),
+            (0x91f, &[7, 6][..], 17_usize..25),
             (0x91b, &[6, 7][..], 4..7),
             (0x928, &[4, 3][..], 8..15),
             (0x675, &[5, 2][..], 0..5),
             (0x678, &[8, 5][..], 0..5),
             // Period "Setpiece Location: Low Plains"; LowSand and 5..9 are SetPieces.cs only: https://web.archive.org/web/20120610073636id_/http://forums.wildshadow.com:80/wiki/realm-mad-god/deathmage
             (0x925, &[8, 9][..], 5..10),
-        ]
-        .into_iter()
-        .skip(usize::from(authored_groves))
-        {
-            let count = self.rng.gen_range(count);
-            self.populate_named_sites(kind, terrains, count)?;
+        ] {
+            let authored = sites.iter().filter(|site| site.kind == kind).count();
+            if kind == 0x91f && authored > 0 {
+                continue;
+            }
+            let requested = self.rng.gen_range(count);
+            let additional = requested.saturating_sub(authored);
+            tracing::info!(
+                kind,
+                authored,
+                requested,
+                additional,
+                "Realm named site census"
+            );
+            self.populate_named_sites(kind, terrains, additional)?;
         }
         Ok(())
     }
-    fn populate_named_sites(&mut self, kind: u16, terrains: &[u8], count: i32) -> Result<()> {
-        ensure!(count >= 0, "negative named quest-site count");
+    fn populate_named_sites(&mut self, kind: u16, terrains: &[u8], count: usize) -> Result<()> {
         for _ in 0..count {
             let pos = self.place_named_setpiece(kind, terrains)?;
-            let id = self.spawn_entity(kind, pos, vec![])?;
-            let e = self.entities.get_mut(&id).unwrap();
-            e.quest.set(Some(id), id, &mut self.quest_ids);
-            e.stage = (kind != 0x678).then_some(0);
-            e.size = self.content.objects[&kind].size;
-            tracing::info!(
-                entity = id,
-                kind,
-                terrain = self.map.cell(pos.x, pos.y).unwrap().terrain,
-                "finite named Realm quest placed"
-            );
+            self.spawn_named_quest(kind, pos)?;
         }
+        Ok(())
+    }
+    fn spawn_named_quest(&mut self, kind: u16, pos: Pos) -> Result<()> {
+        let id = self.spawn_entity(kind, pos, vec![])?;
+        let e = self.entities.get_mut(&id).unwrap();
+        e.quest.set(Some(id), id, &mut self.quest_ids);
+        e.stage = (!matches!(kind, 0x678 | 0x668 | 0x67d)).then_some(0);
+        e.size = self.content.objects[&kind].size;
+        tracing::info!(
+            layout = self.realm_layout,
+            entity = id,
+            kind,
+            x = pos.x,
+            y = pos.y,
+            terrain = self.map.cell(pos.x, pos.y).unwrap().terrain,
+            "finite named Realm quest placed"
+        );
         Ok(())
     }
     pub(super) fn quest_members(&self, id: i32, kinds: &[u16]) -> Vec<i32> {
@@ -924,6 +976,104 @@ impl World {
         };
         self.predict_enemy_shots(id, target, &mut shots, |_| factor)?;
         Ok(shots)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authored_sites_bind_finite_quests_without_repainting_or_duplicate_liches() {
+        let path = std::path::Path::new("data");
+        let content = Arc::new(Content::load(path).unwrap());
+        for source in crate::terrain::realms::sources(path).unwrap() {
+            let sites = source.sites().unwrap();
+            let expected = match source.name() {
+                "classic-world-01-reconstruction" => [5, 7, 8, 6],
+                "classic-world-02-reconstruction" => [1, 6, 0, 8],
+                "classic-world-03-reconstruction" => [4, 3, 0, 6],
+                "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
+                name => panic!("unreviewed authored-site roster {name}"),
+            };
+            for (kind, count) in [0x928, 0x67d, 0x678, 0x668].into_iter().zip(expected) {
+                assert_eq!(sites.iter().filter(|s| s.kind == kind).count(), count);
+            }
+            let map = source.open(&content).unwrap();
+            let mut world = World::new(content.clone(), map.clone()).unwrap();
+            world.realm_layout = Some(source.name().into());
+            world.rng = rand::rngs::StdRng::seed_from_u64(595);
+            if !sites.is_empty() {
+                let mut invalid = sites.clone();
+                invalid.last_mut().unwrap().support += 1;
+                assert!(
+                    world
+                        .populate_authored_sites(&invalid)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("expected")
+                );
+                assert!(world.setpieces.is_empty());
+            }
+            world.populate_authored_sites(&sites).unwrap();
+            assert!(Arc::ptr_eq(&map, &world.map));
+            assert_eq!(world.setpieces.len(), sites.len());
+            let authored_liches = sites.iter().filter(|s| s.kind == 0x91b).count();
+            assert_eq!(
+                authored_liches,
+                if source.name() == "classic-world-01-reconstruction" {
+                    6
+                } else {
+                    0
+                }
+            );
+            for site in &sites {
+                let actors: Vec<_> = world
+                    .entities
+                    .values()
+                    .filter(|e| {
+                        e.kind == site.kind
+                            && e.pos.x == site.spawn[0] as f32
+                            && e.pos.y == site.spawn[1] as f32
+                    })
+                    .collect();
+                assert_eq!(actors.len(), 1);
+                let actor = actors[0];
+                assert_eq!(*actor.quest, Some(actor.id));
+                assert_eq!(
+                    actor.stage,
+                    (!matches!(site.kind, 0x678 | 0x668 | 0x67d)).then_some(0)
+                );
+                assert_eq!(actor.hp, content.objects[&site.kind].hp);
+                assert!(world.non_population_ids.contains(&actor.id));
+            }
+            world.populate_named_quests(&sites).unwrap();
+            world.populate_realm_heroes(&sites).unwrap();
+            for (kind, minimum, maximum) in
+                [(0x928, 8, 14), (0x668, 3, 4), (0x67d, 4, 6), (0x678, 0, 4)]
+            {
+                let authored = sites.iter().filter(|s| s.kind == kind).count();
+                let total = world.entities.values().filter(|e| e.kind == kind).count();
+                assert!(
+                    total >= authored.max(minimum) && total <= authored.max(maximum),
+                    "{kind:#x}: {total}, authored {authored}"
+                );
+            }
+            for site in &sites {
+                if let Some([x, y]) = site.chest {
+                    assert!(world.entities.values().any(|e| e.kind == 0x501
+                        && e.pos.x == x as f32
+                        && e.pos.y == y as f32
+                        && e.items.iter().any(|item| *item != -1)));
+                }
+            }
+            let liches = world.entities.values().filter(|e| e.kind == 0x91b).count();
+            assert!(if authored_liches > 0 {
+                liches == authored_liches
+            } else {
+                (4..7).contains(&liches)
+            });
+        }
     }
 }
 
