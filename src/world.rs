@@ -4024,7 +4024,20 @@ impl World {
         if self.discard_correcting_move(id, pos, time)? {
             return Ok(NativeInput::DiscardedUntilGotoAck);
         }
-        self.move_timed(id, pos, time, received)?;
+        let sentinel = pos.x == -1. && pos.y == -1.;
+        let pos = if sentinel { self.players[&id].pos } else { pos };
+        self.validate_native_coordinates(id, pos, time)?;
+        let p = self.players.get_mut(&id).unwrap();
+        ensure!(received >= p.last_move_at, "native ingress clock regressed");
+        // Rechecking client collision or speed here turns delayed packet delivery into snap-backs.
+        let speed = p.speed(&self.content, self.now)? * 1000.;
+        p.record_motion(pos, time, self.now, speed);
+        if p.pos.distance(pos) > 0.001 {
+            p.last_motion = Some(((pos.y - p.pos.y).atan2(pos.x - p.pos.x), self.now));
+        }
+        p.pos = pos;
+        p.last_move = time;
+        p.last_move_at = received;
         Ok(NativeInput::Applied)
     }
     pub fn move_to(&mut self, id: i32, pos: Pos, time: i32) -> Result<()> {

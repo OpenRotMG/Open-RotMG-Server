@@ -210,7 +210,7 @@ impl World {
         p.weapon_ticks.retain(|(sent, _, _)| *sent >= tick);
         Ok(())
     }
-    pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
+    pub(super) fn validate_native_coordinates(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
         let p = self.players.get(&id).context("native player missing")?;
         ensure!(p.persistence_failure.is_none(), "inactive native character");
         ensure!(
@@ -226,7 +226,15 @@ impl World {
             crate::server::lifecycle::controller("non-finite native position")
         );
         ensure!(
-            self.player_step_valid(p.pos, pos),
+            self.map.cell(pos.x, pos.y).is_some(),
+            crate::server::lifecycle::controller("native position is outside world bounds")
+        );
+        Ok(())
+    }
+    pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
+        self.validate_native_coordinates(id, pos, time)?;
+        ensure!(
+            self.player_step_valid(self.players[&id].pos, pos),
             crate::server::lifecycle::controller("native position is outside walkable terrain")
         );
         Ok(())
