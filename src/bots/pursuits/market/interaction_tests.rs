@@ -1,4 +1,5 @@
 use super::*;
+use crate::wire::Writer;
 
 #[tokio::test]
 async fn incoming_refusal_counter_is_funded_and_expires_with_offer_contact_or_own_state() {
@@ -46,15 +47,14 @@ async fn incoming_refusal_counter_is_funded_and_expires_with_offer_contact_or_ow
     market.end_incoming(&v);
     market.trade = None;
     assert!(market.message_current(&reply, &v, &app.content, None).unwrap());
-    let mut changed = v.clone();
-    changed.character.inventory_revision += 1;
-    assert!(!market.message_current(&reply, &changed, &app.content, None).unwrap());
-    changed = v.clone();
-    changed.objects.retain(|p| p.id != peer_id);
-    assert!(!market.message_current(&reply, &changed, &app.content, None).unwrap());
+    v.character.inventory_revision += 1;
+    assert!(!market.message_current(&reply, &v, &app.content, None).unwrap());
+    v.character.inventory_revision -= 1;
+    v.objects.retain(|p| p.id != peer_id);
+    assert!(!market.message_current(&reply, &v, &app.content, None).unwrap());
     for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        changed.position.x = value;
-        assert!(market.message_current(&reply, &changed, &app.content, None).is_err(), "own geometry failure must precede missing peer cancellation");
+        v.position.x = value;
+        assert!(market.message_current(&reply, &v, &app.content, None).is_err(), "own geometry failure must precede missing peer cancellation");
     }
     drop((owner, peer_owner, app));
     std::fs::remove_dir_all(dir).unwrap();
