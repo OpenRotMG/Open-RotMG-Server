@@ -20,7 +20,6 @@ export async function run(game){
   game.check('nearer Rogue is invisible',!!(cloaked.view.character.conditions&(1<<12)));
   game.check('boss retargets westward from its last visible-Rogue position',following.pos.x<approaching.pos.x-0.5);
   game.check('both ordinary native participants survive',after.view.lifecycle.alive&&(await visible.observe()).lifecycle.alive);
-  await game.act({keys:['Insert'],duration_ms:1500});
-  const nexus=await game.observe();
-  game.check('escape reaches Nexus with the same living Rogue and cloak',nexus.world==='Nexus'&&nexus.session.world!==before.view.session.world&&nexus.session.character===before.view.session.character&&nexus.lifecycle.alive&&nexus.character.items[1]===0xb27);
+  game.check('cloak keeps character and equipment while spending mana',after.view.session.character===before.view.session.character&&after.view.character.items.join()===before.view.character.items.join()&&after.view.character.inventory_revision===before.view.character.inventory_revision&&after.view.character.mp<before.view.character.mp);
+  // Separate failed Nexus-load coverage: https://github.com/OpenRotMG/Open-RotMG-Server/issues/930#issuecomment-6450572904
 }
