@@ -134,6 +134,7 @@ async fn merchant_reservations_freeze_quotes_and_settle_once_atomically() {
     let plan = world.buy(player, seller).unwrap();
     let write = settle(&plan);
     let purchase = plan.purchase.as_ref().unwrap().1.clone();
+    let slot = purchase.slot;
     db.execute_batch("CREATE TRIGGER reject_delivery BEFORE UPDATE OF items ON characters BEGIN SELECT RAISE(ABORT,'forced purchase rollback'); END;").unwrap();
     assert!(
         store
@@ -156,7 +157,7 @@ async fn merchant_reservations_freeze_quotes_and_settle_once_atomically() {
     assert_eq!(receipt, Some((1, 0)));
     assert!(store.purchase(write, purchase).await.is_err());
     world.finish_purchase(plan, Ok(receipt)).unwrap();
-    assert_eq!(world.players[&player].character.items[4], 0x131e);
+    assert_eq!(world.players[&player].character.items[slot], 0x131e);
     assert!(values(&world).contains(&(42, 1)));
     world.merchant_step();
     assert!(!world.entities[&seller].published);
