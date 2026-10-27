@@ -71,7 +71,7 @@ export async function run(game){
     game=await game.join({...fixture,level,equipment:[-1,-1,-1,-1]});
     await prepare({kind:'protection',condition:'invulnerable',duration_ms:60000});
     const state=await save('quest-level-'+level),quest=state.view.objects.find(o=>o.id===state.view.quest);
-    game.check('level '+level+' receives an eligible published quest',!!quest&&(level===1?quest.kind===0x604:[0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37].includes(quest.kind)));
+    game.check('level twenty receives the published Red Demon, not an outgrown Swarm',quest?.kind===0x668);
     await game.act({keys:[],duration_ms:6000});
     await game.act({keys:[],duration_ms:500},{name:'quest-level-'+level,when:()=>true});
   }
