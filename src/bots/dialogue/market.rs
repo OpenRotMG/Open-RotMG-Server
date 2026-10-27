@@ -263,7 +263,9 @@ mod tests {
                 let voice = voice(seed, intent);
                 let examples = voice["syntax_examples"].as_array().unwrap();
                 assert!(
-                    examples.iter().all(|s| validated_template(s.as_str().unwrap(), intent).is_ok()),
+                    examples
+                        .iter()
+                        .all(|s| validated_template(s.as_str().unwrap(), intent).is_ok()),
                     "{intent:?}: {voice}"
                 );
                 assert_eq!(voice["favorite_shape"], examples[seed as usize % 8]);
@@ -300,10 +302,12 @@ mod tests {
             assert!(validated_template(ad, Intent::MarketAdvertise).unwrap());
         }
         assert!(
-            validated_template("buying {want} for {give}@{name}!", Intent::MarketAdvertise).is_err()
+            validated_template("buying {want} for {give}@{name}!", Intent::MarketAdvertise)
+                .is_err()
         );
         assert!(
-            validated_template("buying {want} for {give} @{name}!", Intent::MarketAdvertise).unwrap()
+            validated_template("buying {want} for {give} @{name}!", Intent::MarketAdvertise)
+                .unwrap()
         );
         let ads_for_refusal = "s>{give}={want}|{give}={want}|wtb {want} {give}@{name}!";
         assert!(repertoire(ads_for_refusal, Intent::MarketRefuse).is_err());
