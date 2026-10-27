@@ -396,7 +396,9 @@ impl World {
         );
         if matches!(kind, 0x91b | 0x91f | 0x928) {
             match stage {
-                0 if hp < self.content.objects[&kind].hp => {
+                0 if f64::from(hp) / f64::from(self.content.objects[&kind].hp)
+                    < if kind == 0x91b { 0.99999 } else { 1.0 } =>
+                {
                     self.quest_phase(id, 1);
                     self.quest_shield(id, true);
                 }
@@ -931,6 +933,61 @@ impl World {
         };
         self.predict_enemy_shots(id, target, &mut shots, |_| factor)?;
         Ok(shots)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn lich_idle_requires_the_strict_primary_hp_ratio() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+    for cell in &mut map.cells {
+        cell.ground = 0x61;
+        cell.object = None;
+    }
+    let mut world = World::new(content, Arc::new(map)).unwrap();
+    world.now = 12300;
+    let home = Pos { x: 12.5, y: 12.5 };
+    let root = world.spawn_entity(0x91b, home, vec![]).unwrap();
+    world.entities.get_mut(&root).unwrap().quest = Some(root);
+    world.quest_mechanics(root).unwrap();
+    assert_eq!(world.entities[&root].hp, 300000);
+    let rng = rand::RngCore::next_u64(&mut world.rng.clone());
+    for loss in 1..=4 {
+        assert_eq!(
+            world.damage_enemy(-1, root, 8, false, &[], None).unwrap(),
+            1
+        );
+        world.now += 100;
+        world.quest_mechanics(root).unwrap();
+        let entity = &world.entities[&root];
+        assert_eq!(entity.hp, 300000 - loss);
+        assert_eq!(entity.stage, Some(u64::from(loss == 4)), "loss={loss}");
+        assert_eq!(
+            entity.condition & condition::bit(condition::INVULNERABLE) != 0,
+            loss == 4
+        );
+        assert_eq!(
+            (entity.home.x, entity.home.y, entity.quest),
+            (home.x, home.y, Some(root))
+        );
+    }
+    assert_eq!(
+        world.damage_enemy(-1, root, 8, false, &[], None).unwrap(),
+        0
+    );
+    assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
+    assert!(world.critical_deaths.is_empty());
+    for kind in [0x91f, 0x928] {
+        let id = world.spawn_entity(kind, home, vec![]).unwrap();
+        world.entities.get_mut(&id).unwrap().quest = Some(id);
+        assert_eq!(world.damage_enemy(-1, id, 1, true, &[], None).unwrap(), 1);
+        world.quest_mechanics(id).unwrap();
+        assert_eq!(world.entities[&id].stage, Some(1));
+        assert_ne!(
+            world.entities[&id].condition & condition::bit(condition::INVULNERABLE),
+            0
+        );
     }
 }
 
