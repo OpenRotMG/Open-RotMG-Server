@@ -3,7 +3,24 @@ use crate::wire::Reader;
 use tokio::sync::broadcast;
 
 const BUFFER: usize = 256;
+
+pub(crate) fn advance_cursor(last: &mut Option<u32>, packet: &Packet) -> Result<bool> {
+    ensure!(
+        packet.id == 250 && packet.body.len() == 21,
+        "invalid native cursor packet"
+    );
+    let tick = u32::from_be_bytes(packet.body[8..12].try_into()?);
+    if last
+        .is_some_and(|prior| tick.wrapping_sub(prior) == 0 || tick.wrapping_sub(prior) >= 1 << 31)
+    {
+        return Ok(false);
+    }
+    *last = Some(tick);
+    Ok(true)
+}
 pub(crate) struct Attachment {
+    pub world: i32,
+    pub account: i32,
     pub player: i32,
     pub character: i32,
     pub map: Vec<u8>,
@@ -53,10 +70,66 @@ impl Handle {
         )
         .await
     }
+    pub(crate) async fn spectator_cursor(
+        &self,
+        world: i32,
+        player: i32,
+        account: i32,
+        character: i32,
+    ) -> Result<Option<Packet>> {
+        let Some(slot) = self.routing.player(player)? else {
+            return Ok(None);
+        };
+        if slot.id != world {
+            return Ok(None);
+        }
+        self.request(
+            &slot.mailbox,
+            "world",
+            "spectator_cursor",
+            |w| w.performance.get_mut(),
+            move |w| {
+                let Some(p) = w.players.get(&player) else {
+                    return Ok(None);
+                };
+                if p.character.account != account
+                    || p.character.id != character
+                    || p.controller != Controller::Autonomous
+                    || !p.active()
+                    || p.pending
+                {
+                    return Ok(None);
+                }
+                let Some(inputs) = &p.inputs else {
+                    return Ok(None);
+                };
+                let Some(cursor) = inputs.cursor else {
+                    return Ok(None);
+                };
+                ensure!(
+                    cursor.x.is_finite() && cursor.y.is_finite(),
+                    "nonfinite spectator cursor"
+                );
+                let mut out = Writer::new();
+                out.i32(player)
+                    .i32(character)
+                    .i32(w.tick as u32 as i32)
+                    .f32(cursor.x)
+                    .f32(cursor.y)
+                    .u8(u8::from(inputs.fire));
+                Ok(Some(Packet {
+                    id: 250,
+                    body: out.0,
+                }))
+            },
+        )
+        .await
+    }
     pub(crate) async fn spectate(&self, player: i32, account: i32) -> Result<Option<Attachment>> {
         let Some(slot) = self.routing.player(player)? else {
             return Ok(None);
         };
+        let scope = slot.id;
         self.request(
             &slot.mailbox,
             "world",
@@ -73,7 +146,7 @@ impl Handle {
                 if !p.character.alive || p.death_pending || p.departing {
                     return Ok(None);
                 }
-                w.attach_spectator(player).map(Some)
+                w.attach_spectator(player, scope).map(Some)
             },
         )
         .await
@@ -99,7 +172,7 @@ impl World {
             && live_bot(other, target.1)
             && own.known.contains(&target.0)
     }
-    pub(super) fn attach_spectator(&mut self, id: i32) -> Result<Attachment> {
+    pub(super) fn attach_spectator(&mut self, id: i32, world: i32) -> Result<Attachment> {
         let p = self
             .players
             .get_mut(&id)
@@ -169,6 +242,8 @@ impl World {
             body: quest.0,
         });
         Ok(Attachment {
+            world,
+            account: self.players[&id].character.account,
             player: id,
             character,
             map: self.map_info(),

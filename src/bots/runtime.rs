@@ -122,6 +122,92 @@ async fn decide_before_social(
     Ok((!held).then_some(decision))
 }
 
+fn held_movement(grid: &Grid, from: Pos, goal: Pos, distance: f32) -> Option<Pos> {
+    let length = from.distance(goal).min(distance);
+    // Short key holds fit corners where no full reaction-length octant fits.
+    (0..4)
+        .flat_map(|scale| {
+            (0..8).map(move |index| {
+                let heading = index as f32 * std::f32::consts::FRAC_PI_4;
+                let length = length / (1 << scale) as f32;
+                Pos {
+                    x: from.x + heading.cos() * length,
+                    y: from.y + heading.sin() * length,
+                }
+            })
+        })
+        .filter(|point| {
+            from.distance(*point) > 0.1
+                && point.distance(goal) < from.distance(goal)
+                && grid.segment(from, *point)
+        })
+        .min_by(|a, b| a.distance(goal).total_cmp(&b.distance(goal)))
+}
+
+fn execute_inputs(
+    w: &mut crate::world::World,
+    session: (i32, i32, i32),
+    movement: Option<Pos>,
+    aim: Option<Pos>,
+    item: Option<Action>,
+    reaction: u64,
+) -> Result<Option<crate::world::InventoryPlan>> {
+    w.bot_inputs(session, movement, aim, reaction)?;
+    let item = if let Some(Action::Use { slot: 1, x, y }) = item {
+        use crate::content::Ability;
+        let p = &w.players[&session.0];
+        let ability = w.content.get(p.character.items[1] as u16)?;
+        let aimed = ability.abilities.iter().any(|a| {
+            !matches!(
+                a,
+                Ability::Heal { .. }
+                    | Ability::Condition { .. }
+                    | Ability::Clear { .. }
+                    | Ability::Cleanse { .. }
+                    | Ability::SpiritBomb
+            )
+        });
+        let point = if aimed {
+            let p = w
+                .players
+                .get_mut(&session.0)
+                .expect("virtual ability player missing");
+            p.inputs
+                .as_mut()
+                .expect("virtual inputs admitted")
+                .aim(p.pos, Pos { x, y })
+        } else {
+            Pos { x, y }
+        };
+        Some(Action::Use {
+            slot: 1,
+            x: point.x,
+            y: point.y,
+        })
+    } else {
+        item
+    };
+    item.map(|action| w.autonomous_action(session.0, action))
+        .transpose()
+        .map(Option::flatten)
+}
+
+async fn stop_inputs(app: &App, id: i32) -> Result<()> {
+    app.world
+        .for_player(id)
+        .call(move |w| {
+            let p = w
+                .players
+                .get_mut(&id)
+                .context("stopping virtual inputs player missing")?;
+            p.inputs = None;
+            p.bot_goal = None;
+            p.bot_aim = None;
+            Ok(())
+        })
+        .await
+}
+
 async fn enter(
     app: &App,
     profile: Profile,
@@ -647,6 +733,14 @@ pub(super) async fn launch(
                         }).await?;
                     }
                     ensure!(view.session.account == account, "autonomous account binding changed");
+                    app.cctv.inputs(profile.name, &view);
+                    if let Some(blocked) = view.inputs.as_ref().and_then(|input| input.blocked) {
+                        let tile = tile(blocked);
+                        if brain.blocked.get(&tile).is_none_or(|until| *until <= view.tick) {
+                            brain.blocked.insert(tile, view.tick + 100);
+                            tracing::warn!(player=id,tick=view.tick,x=blocked.x,y=blocked.y,"virtual held movement blocked; route excluded");
+                        }
+                    }
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }
                     if view.map.name=="Nexus" && brain.agreement.as_ref().is_none_or(|a|a.waiting.is_none()) && brain.group_lost_since.is_some_and(|since|view.time_ms.saturating_sub(since)>=30000) {
                         app.society.lock().expect("adventure registry poisoned").leave(account);
@@ -753,7 +847,10 @@ pub(super) async fn launch(
                             tracing::info!(player=id, companion=brain.companion, "visible invitation accepted");
                         }
                     }
-                    if deferred_market.is_some() { continue; }
+                    if deferred_market.is_some() {
+                        stop_inputs(&app, id).await?;
+                        continue;
+                    }
                     if pending.is_none() && brain.mind.market.outgoing.is_none() && brain.mind.market.bargain.as_ref().is_none_or(|b|b.resolution.is_some()) && app.dialogue.as_ref().is_none_or(|service|service.automatic_available()) {
                         let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
                         if let Some(plan)=plan {
@@ -809,7 +906,10 @@ pub(super) async fn launch(
                     // World clocks start at different times; banking delay belongs to this account session.
                     let now = app.world.clock.now();
                     brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
-                    let Some(mut decision) = decide_before_social(&app, &mut brain, &view).await? else { continue; };
+                    let Some(mut decision) = decide_before_social(&app, &mut brain, &view).await? else {
+                        stop_inputs(&app, id).await?;
+                        continue;
+                    };
                     if ending && director::may_finish(&app, &mut brain, &view) && decision.journey.is_none() {
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
@@ -848,19 +948,16 @@ pub(super) async fn launch(
                     }
                     brain.goal = decision.goal;
                     brain.destination = decision.movement;
-                    let mut actions = vec![Action::Stop];
-                    if decision.journey.is_none() {
-                        if let Some(pos) = decision.movement { actions.push(Action::Move { x:pos.x, y:pos.y }); }
-                        if let Some(angle) = decision.aim { actions.push(Action::Shoot { angle }); }
-                        if let Some(action) = decision.item { actions.push(action); }
-                    }
-                    let diagnostic = format!("{actions:?}");
+                    let diagnostic = format!("movement={:?} cursor={:?} item={:?}", decision.movement, decision.aim, decision.item);
+                    let input_session = (id, account, view.session.character);
+                    let input_grid = brain.navigation.clone().context("virtual input navigation missing")?;
+                    let held_distance = (combat::speed(&view) * profile.reaction as f32 * 0.05).max(0.5);
+                    let movement = decision.journey.is_none().then_some(decision.movement).flatten();
+                    let aim = decision.journey.is_none().then_some(decision.aim).flatten();
+                    let item = decision.journey.is_none().then_some(decision.item).flatten();
                     match server::inventory(&app, id, move |w| {
-                        let mut plan = None;
-                        for action in actions {
-                            if let Some(item) = w.autonomous_action(id, action)? { plan = Some(item); }
-                        }
-                        Ok(plan)
+                        let movement = movement.and_then(|goal| held_movement(&input_grid, w.players[&id].pos, goal, held_distance));
+                        execute_inputs(w, input_session, movement, aim, item, profile.reaction)
                     }).await? {
                         Ok(true) => {
                             let after = app.world.player_view(id).await?;
@@ -874,6 +971,7 @@ pub(super) async fn launch(
                         Ok(false) => { brain.mind.events.rejected(); },
                         Err(error) => {
                             brain.mind.events.rejected();
+                            stop_inputs(&app, id).await?;
                             if let Some(pos) = brain.destination { brain.blocked.insert(tile(pos), view.tick + 100); }
                             tracing::warn!(player=id,%error,actions=diagnostic,"autonomous commands rejected; route excluded and will reassess");
                             continue;
@@ -1056,5 +1154,7 @@ fn close_controller(
     owner.close(app, reason)
 }
 
+#[cfg(test)]
+mod input_tests;
 #[cfg(test)]
 pub(super) mod tests;

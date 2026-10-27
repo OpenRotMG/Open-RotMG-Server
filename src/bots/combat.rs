@@ -209,7 +209,7 @@ pub(super) fn attack(
         && v.position.distance(point) < range
         && shot_clear(v, grid, point, projectile.passes_cover)
     {
-        decision.aim = Some(angle(v.position, point));
+        decision.aim = Some(point);
     }
     if decision.item.is_none() {
         decision.item = ability(v, content, grid, enemy)?;
@@ -361,6 +361,8 @@ pub(super) fn movement(
         } else {
             index as f32 * std::f32::consts::TAU / perception.directions as f32
         };
+        let direction =
+            (direction / std::f32::consts::FRAC_PI_4).round() * std::f32::consts::FRAC_PI_4;
         let point = Pos {
             x: v.position.x + direction.cos() * distance,
             y: v.position.y + direction.sin() * distance,
