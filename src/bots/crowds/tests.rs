@@ -368,7 +368,11 @@ fn matched_pair() -> (Content, PlayerView, Brain) {
     let (c, mut v, mut b) = fixture();
     let edge = |a: i32| (a as u32 ^ v.session.account as u32).wrapping_mul(2654435761) % 9;
     let account = (2..1000)
-        .find(|a| can_approach(v.session.world, v.session.account, *a) && edge(*a) == edge(200))
+        .find(|a| {
+            *a != 200
+                && can_approach(v.session.world, v.session.account, *a)
+                && edge(*a) == edge(200)
+        })
         .unwrap();
     let position = v.player_markers[0].position;
     v.player_markers.push(PlayerMarker {
