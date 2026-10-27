@@ -61,10 +61,10 @@ export async function run(game){
   const {worldSeed,...shared}=fixture;
   const peer=await game.join({...shared,level:1,world:start.view.session.world,position:{x:start.view.position.x,y:start.view.position.y-1},equipment:[-1,0xa2e,-1,-1],stats:null});
   await protect(peer);
-  await game.act({keys:[],duration_ms:1800},{name:'level-19-before',when:()=>true});
+  await game.act({keys:[],duration_ms:1800,mouse:{x:700,y:240}},{name:'level-19-before',when:()=>true});
   const before=await snapshot('before-kill'),peerBefore=await snapshot('peer-before-kill',peer);
   game.check('honest near-threshold fixtures loaded',before.view.character.level===19&&before.view.character.experience===18049&&peerBefore.view.character.level===1&&peerBefore.view.character.experience===49);
-  game.check('both resources are depleted before level-up',before.view.character.hp<before.view.character.stats.max_hp&&before.view.character.mp<before.view.character.stats.max_mp);
+  game.check('both resources are depleted before level-up',before.view.character.hp<before.view.character.stats[0]&&before.view.character.mp<before.view.character.stats[1]);
   await defeat(game);
   await game.act({keys:[],duration_ms:800},{name:'level-20-after',when:()=>true});
   const after=await snapshot('after-kill'),peerAfter=await snapshot('peer-after-kill',peer);
@@ -73,14 +73,14 @@ export async function run(game){
     game.check(label+' receives capped real XP and one level',y.experience-x.experience===award&&y.level===x.level+1);
     // Inclusive growth and resource refill: selected Wizard XML and pinned Kithio CheckLevelUp, https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.Leveling.cs#L194-L220
     game.check(label+' growth stays inside selected ranges/caps',y.base_stats.every((v,i)=>v>=Math.min(caps[i],x.base_stats[i]+growth[i][0])&&v<=Math.min(caps[i],x.base_stats[i]+growth[i][1])));
-    game.check(label+' refills HP and MP',y.hp===y.stats.max_hp&&y.mp===y.stats.max_mp);
+    game.check(label+' refills HP and MP',y.hp===y.stats[0]&&y.mp===y.stats[1]);
     game.check(label+' remains the same living character',b.view.lifecycle.alive&&b.view.session.character===a.view.session.character);
   }
   game.check('nearby nonattacking peer gains XP without damage credit',peerAfter.diagnostic.character.shots===0&&peerAfter.diagnostic.character.hits===0);
-  await peer.act({keys:[],duration_ms:1000},{name:'shared-level-2',when:()=>true});
+  await peer.act({keys:[],duration_ms:1000,mouse:{x:700,y:240}},{name:'shared-level-2',when:()=>true});
   await game.act({keys:['Insert'],duration_ms:500});
   const retained=await snapshot('nexus-reconnect');
-  game.check('ordinary Nexus reconnect persists level XP and growth',retained.view.world==='Nexus'&&retained.view.session.character===after.view.session.character&&JSON.stringify(retained.view.character.base_stats)===JSON.stringify(after.view.character.base_stats)&&retained.view.character.experience===after.view.character.experience&&retained.view.character.level===20);
+  game.check('ordinary Nexus reconnect persists level XP and growth',retained.view.map.name==='Nexus'&&retained.view.session.character===after.view.session.character&&JSON.stringify(retained.view.character.base_stats)===JSON.stringify(after.view.character.base_stats)&&retained.view.character.experience===after.view.character.experience&&retained.view.character.level===20);
   const capped=await game.join({...fixture,level:20,stats:caps});
   await protect(capped);
   const capBefore=await snapshot('cap-before',capped);
