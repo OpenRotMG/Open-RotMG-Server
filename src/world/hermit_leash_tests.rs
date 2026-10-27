@@ -119,4 +119,15 @@ fn hermit_attack_leash_fits_the_central_dark_water_pool() {
             .to_string(),
         "Hermit has no reachable reward site"
     );
+    Arc::make_mut(&mut world.map).cells[cell].ground = 0x73;
+    world.name = "Realm".into();
+    world.defeat_entity(id).unwrap();
+    assert_eq!(world.portal_requests.len(), 1);
+    let (kind, requested) = world.portal_requests.pop().unwrap();
+    let portal = world.spawn_clear_portal(kind, requested, true).unwrap();
+    let placed = &world.entities[&portal];
+    assert_eq!(
+        (placed.kind, placed.pos.x, placed.pos.y),
+        (0x730, home.x, home.y + 5.)
+    );
 }
