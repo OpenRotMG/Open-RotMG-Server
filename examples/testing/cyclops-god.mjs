@@ -1,12 +1,20 @@
-import {writeFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const spec={class:0x307,level:20,seed:798,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),boss=world.encounter_markers.find(e=>e.kind===0x67d&&e.position.x===1002&&e.position.y===1264);
-  if(!boss)throw Error('World1 authored Castle has no Cyclops God at 1002,1264');
-  await writeFile(join(process.env.QA_RESULTS_DIR,'site.json'),JSON.stringify({world,boss}));
-  return {...spec,position:{x:boss.position.x+2,y:boss.position.y+2}};
+  const registry=JSON.parse(await readFile(resolve('data/realm-sites.json'),'utf8'));
+  for(const id of [1,2]){
+    const world=await api({op:'world_info',world:id}),record=registry.find(r=>r.layout===world.realm_layout);
+    if(!record)continue;
+    const site=record.sites.find(s=>s.kind===0x67d);
+    if(!site)throw Error('Authored Realm has no registered Castle');
+    const boss=world.encounter_markers.find(e=>e.kind===0x67d&&e.position.x===site.spawn[0]&&e.position.y===site.spawn[1]);
+    if(!boss)throw Error('Registered Castle has no ordinary Cyclops God');
+    await writeFile(join(process.env.QA_RESULTS_DIR,'site.json'),JSON.stringify({world,boss,site}));
+    return {...spec,world:id,position:{x:boss.position.x+2,y:boss.position.y+2}};
+  }
+  throw Error('Neither active Realm has an authored Castle layout; this case requires one');
 }
 export async function run(game){
   let serial=0;
