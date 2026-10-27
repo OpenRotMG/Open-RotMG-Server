@@ -337,6 +337,7 @@ impl World {
                     for target in self.ability_enemies(pos, radius) {
                         total += self.damage_enemy(id, target, damage, false, &[], None)?;
                     }
+                    // Heal around the caster using capped post-defense damage: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.UseItem.cs#L433-L445
                     if total > 0 {
                         self.heal_ability(id, item, total, radius)?;
                     }
