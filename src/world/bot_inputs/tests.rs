@@ -57,10 +57,30 @@ fn skill_tracking_is_finite_continuous_and_observations_are_not_queued_twice() {
     }
     let point = novice.cursor.unwrap();
     assert!(
-        point.x.is_finite() && point.y.is_finite() && point.distance(Pos { x: 0., y: 30. }) < 1e-4
+        point.x.is_finite()
+            && point.y.is_finite()
+            && point.distance(Inputs::bounded(start, Pos { x: 0., y: 30. })) < 1e-4
     );
     novice.observe(start, None, None, 7);
     assert!(!novice.fire && novice.keys == [0, 0]);
+}
+
+#[test]
+fn idle_cursor_is_available_and_aim_stays_inside_native_scene() {
+    let start = Pos { x: 10., y: 10. };
+    let mut input = Inputs::default();
+    input.observe(start, None, None, 4);
+    assert!(
+        input.cursor.is_some(),
+        "idle live controller needs a cursor"
+    );
+    input.observe(start, None, Some(Pos { x: 90., y: 50. }), 4);
+    for _ in 0..200 {
+        input.track();
+    }
+    let cursor = input.cursor.unwrap();
+    assert!(start.distance(cursor) <= 5.00001);
+    assert!(((cursor.y - start.y) / (cursor.x - start.x) - 0.5).abs() < 1e-5);
 }
 
 #[test]
@@ -93,7 +113,12 @@ fn lifecycle_clears_inputs_without_replaying_on_ready_or_replacement() {
         let p = w.players.get_mut(&id).unwrap();
         let input = p.inputs.as_ref().unwrap();
         assert_eq!(input.keys, [0, 0]);
-        assert!(input.cursor.is_none() && !input.fire && p.bot_aim.is_none());
+        assert_eq!(
+            input.cursor.is_some(),
+            reason == 0,
+            "busy retains cursor; real lifecycle invalidates it"
+        );
+        assert!(!input.fire && p.bot_aim.is_none());
         p.pending = false;
         p.death_pending = false;
         p.departing = false;

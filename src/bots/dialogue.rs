@@ -31,15 +31,12 @@ impl PublicSpeech {
     }
 }
 
-fn publication_at(created: Instant, profile: Profile, incoming: &str, reply: &str) -> Instant {
+fn publication_at(created: Instant, profile: Profile, incoming: &str) -> Instant {
     let slot = persona::seed(profile.name) % 20;
-    // A stable speaker phase separates clones; length charges are policy, not measured human typing.
+    // Keep speaker phasing, but let the real composer account for outgoing typing time.
     created
         + Duration::from_millis(
-            750 + slot * 60
-                + profile.reaction * 5
-                + incoming.chars().count().min(80) as u64 * 5
-                + reply.chars().count().min(90) as u64 * 15,
+            750 + slot * 60 + profile.reaction * 5 + incoming.chars().count().min(80) as u64 * 5,
         )
 }
 
@@ -80,6 +77,7 @@ pub(super) struct Reply {
     pub intent: Intent,
     pub reply: String,
 }
+#[derive(Clone)]
 pub(super) struct Request {
     pub speaker: i32,
     pub name: String,
@@ -540,14 +538,13 @@ impl Pending {
                 tracing::info!(request=%log_id,player=bot,speaker,"bot dialogue explicitly disabled; deterministic adventure policy");
                 policy.expect("missing deterministic speech")
             };
-            if let Ok(reply) = &result {
+            if result.is_ok() {
                 let at = publication_at(
                     created,
                     profile,
                     payload["message"]
                         .as_str()
                         .expect("dialogue message missing"),
-                    &reply.reply,
                 );
                 tracing::info!(request=%log_id,player=bot,wait_ms=at.saturating_duration_since(Instant::now()).as_millis(),"bot dialogue publication scheduled");
                 tokio::time::sleep_until(at.into()).await;
@@ -591,10 +588,12 @@ pub(super) async fn publish(
     let text = reply.reply.clone();
     let player = v.session.player;
     let peer = request.speaker;
+    let session = request.session;
     let created = request.created;
     let received = app.world.clock.now();
     let plan = request.plan.clone();
     let society = app.society.clone();
+    let content = app.content.clone();
     let owner = adventures::Member {
         account: v.session.account,
         name: brain.profile.name.into(),
@@ -610,6 +609,27 @@ pub(super) async fn publish(
                 created.elapsed() <= Duration::from_secs(10),
                 Obsolete("response_expired")
             );
+            let current = d.player_view(player)?;
+            ensure!(
+                (current.session.world, player, current.session.character) == session,
+                "dialogue source session changed before submit"
+            );
+            if let Some(plan) = &plan
+                && matches!(reply_intent, Intent::Invite | Intent::Join)
+            {
+                let purpose = match plan {
+                    adventures::Plan::Invite { purpose, .. } => *purpose,
+                    adventures::Plan::Answer(offer) => offer.purpose,
+                };
+                ensure!(
+                    purpose.ready(&current, &content)
+                        && current
+                            .objects
+                            .iter()
+                            .any(|p| p.id == peer && purpose.public_ready(p, &content)),
+                    Obsolete("adventure_no_longer_ready")
+                );
+            }
             let now = d.tick * 50;
             let world = d.location(player)?;
             if let Some(unavailable) = d.worlds[&world].dialogue_participants(player, peer)? {
@@ -635,7 +655,7 @@ pub(super) async fn publish(
                 );
                 return Ok(false);
             }
-            d.chat(player, text.clone(), received)?;
+            d.submit_bot_chat(player, text.clone(), received)?;
             if let Some(body) = optional {
                 state.speech.record(world, now, &body);
             }

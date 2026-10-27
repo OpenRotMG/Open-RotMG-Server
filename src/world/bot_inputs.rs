@@ -4,7 +4,14 @@ use super::*;
 mod tests;
 
 #[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct Composition {
+    pub phase: u8,
+    pub text: String,
+}
+
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct Inputs {
+    pub composition: Composition,
     pub keys: [i8; 2],
     pub cursor: Option<Pos>,
     pub fire: bool,
@@ -27,6 +34,21 @@ impl Inputs {
             }
         }
         self.anchor = Some(position);
+        self.cursor.get_or_insert(position);
+    }
+    pub(crate) fn release(&mut self) {
+        self.keys = [0, 0];
+        self.waypoint = None;
+        self.desired = None;
+        self.fire = false;
+    }
+    fn bounded(position: Pos, point: Pos) -> Pos {
+        let distance = position.distance(point);
+        let scale = (5. / distance).min(1.);
+        Pos {
+            x: position.x + (point.x - position.x) * scale,
+            y: position.y + (point.y - position.y) * scale,
+        }
     }
     fn observe(&mut self, position: Pos, movement: Option<Pos>, aim: Option<Pos>, reaction: u64) {
         self.translate(position);
@@ -38,7 +60,7 @@ impl Inputs {
             [heading.cos().round() as i8, heading.sin().round() as i8]
         });
         self.waypoint = movement;
-        self.desired = aim;
+        self.desired = aim.map(|point| Self::bounded(position, point));
         self.fire = aim.is_some();
         // Observation cadence already supplies response latency; tracking adds convergence, not another queued reaction.
         self.tracking_speed = 120. / reaction as f32;
@@ -48,7 +70,7 @@ impl Inputs {
     }
     pub(crate) fn aim(&mut self, position: Pos, desired: Pos) -> Pos {
         self.translate(position);
-        self.desired = Some(desired);
+        self.desired = Some(Self::bounded(position, desired));
         *self.cursor.get_or_insert(position)
     }
     fn track(&mut self) {
@@ -80,7 +102,64 @@ impl Inputs {
         })
     }
 }
+impl Directory {
+    pub(crate) fn submit_bot_chat(&mut self, id: i32, text: String, now: Instant) -> Result<()> {
+        let world = self.location(id)?;
+        let p = &self.worlds[&world].players[&id];
+        ensure!(
+            p.controller == Controller::Autonomous && p.active() && !p.pending,
+            "bot chat source is not ready"
+        );
+        ensure!(
+            !text.trim_start().starts_with('/')
+                && p.inputs
+                    .as_ref()
+                    .is_some_and(|input| matches!(input.composition.phase, 1 | 2)
+                        && input.composition.text == text),
+            "bot Enter does not match its public composition"
+        );
+        self.chat(id, text, now)?;
+        self.worlds
+            .get_mut(&world)
+            .expect("chat world admitted")
+            .players
+            .get_mut(&id)
+            .expect("chat player admitted")
+            .inputs
+            .as_mut()
+            .expect("chat inputs admitted")
+            .composition = Composition::default();
+        Ok(())
+    }
+}
+
 impl World {
+    pub(crate) fn compose_bot_inputs(
+        &mut self,
+        session: (i32, i32, i32),
+        composition: Composition,
+    ) -> Result<bool> {
+        let p = self
+            .players
+            .get(&session.0)
+            .context("composition player missing")?;
+        ensure!(
+            (p.character.account, p.character.id) == (session.1, session.2),
+            "composition owner replaced"
+        );
+        if !p.active() || p.pending {
+            return Ok(false);
+        }
+        self.bot_inputs(session, None, None, 1)?;
+        self.players
+            .get_mut(&session.0)
+            .expect("composition player admitted")
+            .inputs
+            .as_mut()
+            .expect("composition virtual input")
+            .composition = composition;
+        Ok(true)
+    }
     pub(crate) fn bot_inputs(
         &mut self,
         session: (i32, i32, i32),
@@ -115,9 +194,14 @@ impl World {
         );
         p.bot_goal = None;
         p.bot_aim = None;
-        p.inputs
-            .get_or_insert_with(Inputs::default)
-            .observe(p.pos, movement, aim, reaction);
+        let inputs = p.inputs.get_or_insert_with(Inputs::default);
+        let composing = inputs.composition.phase != 0;
+        inputs.observe(
+            p.pos,
+            movement.filter(|_| !composing),
+            aim.filter(|_| !composing),
+            reaction,
+        );
         Ok(())
     }
     pub(super) fn step_bot_inputs(&mut self, id: i32) {
@@ -125,6 +209,10 @@ impl World {
             .players
             .get_mut(&id)
             .expect("virtual input player missing");
+        if p.inputs.is_none() && p.controller == Controller::Autonomous && p.active() && !p.pending
+        {
+            p.inputs = Some(Inputs::default());
+        }
         let Some(input) = &mut p.inputs else {
             return;
         };
@@ -136,13 +224,18 @@ impl World {
             || p.death_pending
             || p.departing
             || p.persistence_failure.is_some()
-            || p.pending
         {
             *input = Inputs::default();
             p.bot_aim = None;
             return;
         }
         input.translate(p.pos);
+        if p.pending {
+            input.release();
+            input.composition = Composition::default();
+            p.bot_aim = None;
+            return;
+        }
         input.track();
         let ground = self
             .map

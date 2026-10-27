@@ -161,7 +161,7 @@ fn mouse_aimed_spell_uses_actual_cursor_and_tome_does_not_move_it() {
             );
         } else {
             assert!(
-                input.cursor.is_none() && !input.fire,
+                input.cursor.unwrap().distance(pos) < 1e-5 && !input.fire,
                 "self-centered tome cannot drag pointer"
             );
         }
@@ -345,7 +345,7 @@ async fn virtual_inputs_execute_held_diagonal_and_actual_cursor_between_decision
             w.step();
             let p = &w.players[&id];
             let state = p.inputs.as_ref().unwrap();
-            assert!(!state.fire && state.cursor.is_none() && state.keys == [0, 0]);
+            assert!(!state.fire && state.cursor.is_some() && state.keys == [0, 0]);
             w.players.get_mut(&id).unwrap().pending = false;
             w.step();
             assert!(
@@ -361,10 +361,11 @@ async fn virtual_inputs_execute_held_diagonal_and_actual_cursor_between_decision
             .spectator_cursor(-2, id, session.1, session.2)
             .await
             .unwrap()
-            .is_none()
+            .is_some()
     );
     stop_inputs(&app, id).await.unwrap();
-    assert!(app.world.player_view(id).await.unwrap().inputs.is_none());
+    let stopped = app.world.player_view(id).await.unwrap().inputs.unwrap();
+    assert!(stopped.cursor.is_some() && !stopped.fire && stopped.keys == [0, 0]);
     lifecycle::finalize(&app, id, CloseReason::Controller)
         .unwrap()
         .wait()

@@ -17,6 +17,7 @@ pub(crate) mod adventures;
 mod calls;
 pub(crate) mod cctv;
 mod combat;
+mod composer;
 mod crowds;
 pub(crate) mod dialogue;
 mod director;
@@ -239,6 +240,10 @@ struct Scene<'a> {
     remedy: Option<&'a crate::world::view::VisibleObject>,
 }
 struct Brain {
+    draft: Option<composer::Draft>,
+    clipboard: String,
+    call_goal: Option<Goal>,
+    market_words: Option<(pursuits::market::Message, String)>,
     profile: Profile,
     activity: Activity,
     intent: serde_json::Value,
@@ -302,6 +307,10 @@ impl Brain {
         mind.market.trader = profile.role == persona::Role::Trader;
         mind.events.knows_blue = profile.knows_blue;
         Self {
+            draft: None,
+            clipboard: String::new(),
+            call_goal: None,
+            market_words: None,
             profile,
             activity: Activity::Busy,
             intent: serde_json::Value::Null,
