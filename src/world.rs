@@ -7368,7 +7368,10 @@ impl World {
                             || self.entities.get(entity).is_some_and(|e| {
                                 e.hp > 0
                                     || !e.items.is_empty()
-                                    || self.content.objects[&e.kind].class == "Portal"
+                                    || matches!(
+                                        self.content.objects[&e.kind].class.as_str(),
+                                        "Portal" | "Merchant"
+                                    )
                             })
                     })
                     .copied()

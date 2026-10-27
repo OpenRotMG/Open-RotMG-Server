@@ -104,6 +104,12 @@ async fn merchant_reservations_freeze_quotes_and_settle_once_atomically() {
     assert!(format!("{:#}", world.buy(player, seller).err().unwrap()).contains("rank"));
     assert!(!world.entities[&seller].reserved);
     world.entities.get_mut(&seller).unwrap().extra_stats = saved_rank;
+    let (packets, mut inbox) = mpsc::channel(64);
+    let (lost, _) = watch::channel(None);
+    world.players.get_mut(&player).unwrap().tx = Some(Output { packets, lost });
+    world.step();
+    world.step();
+    while inbox.try_recv().is_ok() {}
     let plan = world.buy(player, seller).unwrap();
     assert!(world.buy(player, seller).is_err());
     world.now = 60_000;
@@ -128,6 +134,37 @@ async fn merchant_reservations_freeze_quotes_and_settle_once_atomically() {
     assert!(values(&world).contains(&(42, 2)));
     world.merchant_step();
     assert!(values(&world).contains(&(36, 90)));
+    world.step();
+    world.step();
+    let mut published = BTreeMap::new();
+    while let Ok(packet) = inbox.try_recv() {
+        if packet.id != wire::NEW_TICK {
+            continue;
+        }
+        let mut r = wire::Reader::new(&packet.body);
+        r.i32().unwrap();
+        r.i32().unwrap();
+        for _ in 0..r.i16().unwrap() {
+            let entity = r.i32().unwrap();
+            r.f32().unwrap();
+            r.f32().unwrap();
+            for _ in 0..r.i16().unwrap() {
+                let key = r.u8().unwrap();
+                if matches!(key, 31 | 62) {
+                    r.utf().unwrap();
+                } else {
+                    let value = r.i32().unwrap();
+                    if entity == seller {
+                        published.insert(key, value);
+                    }
+                }
+            }
+        }
+        r.done().unwrap();
+    }
+    assert_eq!(published.get(&43), Some(&5));
+    assert_eq!(published.get(&44), Some(&25));
+    assert_eq!(published.get(&36), Some(&90));
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute("UPDATE accounts SET credits=90 WHERE id=?1", [account])
         .unwrap();
