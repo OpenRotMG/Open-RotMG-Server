@@ -143,7 +143,7 @@ impl Store {
                     let (raw,paid,killed_by,died_at)=row?;
                     let receipt=death_awards::decode_receipt(&paid)?;
                     let c=receipt.character(&raw,legacy_base)?;
-                    deaths.push(serde_json::json!({"account":c.account,"id":c.id,"name":c.name,"class":c.class,"level":c.level,"base_fame":receipt.base,"total_fame":receipt.total,"died_at":died_at,"killed_by":killed_by,"equipment":c.items.get(..4).context("death without equipment slots")?,"tex1":c.tex1,"tex2":c.tex2}));
+                    deaths.push(serde_json::json!({"account":c.account,"id":c.id,"name":c.name,"class":c.class,"level":c.level,"base_fame":receipt.base,"total_fame":receipt.total,"died_at":died_at,"killed_by":killed_by,"equipment":c.items.get(..4).context("death without equipment slots")?,"stats":c.base,"tex1":c.tex1,"tex2":c.tex2}));
                 }
             }
             tx.commit()?;
@@ -237,6 +237,7 @@ mod tests {
         assert_eq!(deaths[0]["account"], owners[0]);
         assert_eq!(deaths[0]["base_fame"], 70);
         assert_eq!(deaths[0]["killed_by"], "fixture");
+        assert_eq!(deaths[0]["stats"].as_array().unwrap().len(), 8);
         let later = store.graveyard(i64::MAX).await.unwrap();
         assert!(later["deaths"].as_array().unwrap().is_empty());
     }
