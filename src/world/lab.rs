@@ -286,7 +286,7 @@ impl World {
                 }
                 // Attack/pool shapes: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation; cycle order and 10/16/1 s windows are reconstruction, not recovered AI or HP thresholds.
                 Some(1 | 5) if inside(lab::HEXXER) => self.lab_stage(id, 2),
-                Some(2) if inside(lab::DEHEXXER) => self.lab_stage(id, 8),
+                Some(2) if elapsed >= 10000 && inside(lab::DEHEXXER) => self.lab_stage(id, 8),
                 Some(1) if elapsed >= 10000 || target.is_none() => self.lab_stage(id, 3),
                 Some(3 | 8) if pos.distance(home) < 0.5 => {
                     self.lab_stage(id, if stage == Some(3) { 4 } else { 1 });

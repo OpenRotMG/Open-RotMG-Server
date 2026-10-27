@@ -88,6 +88,9 @@ fn creation_attacks_and_pool_cycle_preserve_identity_and_damage() {
             0
         );
         shots(&w, 0, 0);
+        w.entities.get_mut(&id).unwrap().pos = Pos { x: 75.5, y: 12.5 };
+        w.lab_mechanics(id, Some(home), 9999).unwrap();
+        assert_eq!(w.entities[&id].stage, Some(2));
         w.now += 10000;
         assert!(matches!(
             w.lab_movement(id).0,
