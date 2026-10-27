@@ -261,12 +261,12 @@ mod tests {
                 .unwrap(),
             xml
         );
-        let tied = dead[1].id;
+        let (highest, tied) = (dead[0].id, dead[1].id);
         store
             .call(move |db| {
                 db.execute(
-                    "UPDATE deaths SET died_at=died_at+1 WHERE character=?1",
-                    [tied],
+                    "UPDATE deaths SET died_at=died_at+1 WHERE character IN (?1,?2)",
+                    params![highest, tied],
                 )?;
                 Ok(())
             })
