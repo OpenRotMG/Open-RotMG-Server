@@ -156,8 +156,12 @@ impl Store {
             let name:String=tx.query_row("SELECT name FROM accounts JOIN competitors ON competitors.account=accounts.id WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM shore_bots WHERE shore_bots.account=accounts.id)",[account],|r|r.get(0)).context("player has no competitive profile")?;
             let mut q=tx.prepare("SELECT item,found_at FROM collections WHERE account=?1 ORDER BY item")?;
             let items=q.query_map([account],|r|Ok(serde_json::json!({"item":r.get::<_,i32>(0)?,"found_at":r.get::<_,i64>(1)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(q);
+            let players:i64=tx.query_row("SELECT count(*) FROM competitors c WHERE NOT EXISTS(SELECT 1 FROM shore_bots b WHERE b.account=c.account)",[],|r|r.get(0))?;
+            let mut q=tx.prepare("SELECT x.item,count(*) FROM collections x JOIN competitors c ON c.account=x.account WHERE NOT EXISTS(SELECT 1 FROM shore_bots b WHERE b.account=x.account) GROUP BY x.item ORDER BY x.item")?;
+            let owners=q.query_map([],|r|Ok(serde_json::json!({"item":r.get::<_,i32>(0)?,"owners":r.get::<_,i64>(1)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
             drop(q);tx.commit()?;
-            Ok(serde_json::json!({"account":account,"name":name,"items":items}))
+            Ok(serde_json::json!({"account":account,"name":name,"items":items,"ownership":{"players":players,"items":owners}}))
         }).await
     }
 }
@@ -165,6 +169,34 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn collection_ownership_counts_all_competitors_once_and_excludes_bots_and_outsiders() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let path = std::env::temp_dir().join(format!("collection-owners-{}.db", rand::random::<u64>()));
+        let store = Store::open(&path, &content).unwrap();
+        let mut owners = Vec::new();
+        for name in ["Player", "Empty", "Shorebot", "Outsider"] {
+            let id = store.register(format!("ownership-{name}"), format!("{name}@example.invalid"), "fixture-password".into()).await.unwrap();
+            if name != "Outsider" { store.compete(id).await.unwrap(); }
+            owners.push(id);
+        }
+        let ids = owners.clone();
+        store.call(move |db| {
+            db.execute("INSERT INTO shore_bots(name,account) VALUES('fixture',?1)", [ids[2]])?;
+            for id in [ids[0], ids[2], ids[3]] {
+                db.execute("INSERT INTO collections(account,item,found_at) VALUES(?1,2594,123)", [id])?;
+            }
+            db.execute("INSERT INTO collections(account,item,found_at) VALUES(?1,2595,456)", [ids[0]])?;
+            Ok(())
+        }).await.unwrap();
+        let collection = store.collection(owners[0]).await.unwrap();
+        assert_eq!(collection["items"][0]["found_at"], 123);
+        assert_eq!(collection["ownership"], serde_json::json!({"players":2,"items":[{"item":2594,"owners":1},{"item":2595,"owners":1}]}));
+        assert_eq!(store.collection(owners[1]).await.unwrap()["ownership"], collection["ownership"]);
+        assert!(store.collection(owners[2]).await.is_err());
+        assert!(store.collection(owners[3]).await.is_err());
+    }
 
     #[tokio::test]
     async fn characters_and_graveyard_list_only_competing_players() {
