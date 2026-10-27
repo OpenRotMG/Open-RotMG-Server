@@ -674,6 +674,7 @@ impl World {
                         },
                         0xffddff00,
                     );
+                    // Snapshot landing targets and subtract defense once per dose: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.UseItem.cs#L164-L196
                     let targets = self
                         .ability_enemies(thrown.position, radius)
                         .into_iter()

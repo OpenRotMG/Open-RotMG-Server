@@ -7538,4 +7538,7 @@ mod wizard_tests;
 mod priest_tests;
 
 #[cfg(test)]
+mod assassin_tests;
+
+#[cfg(test)]
 impl World {}
