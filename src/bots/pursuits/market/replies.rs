@@ -54,13 +54,15 @@ impl Market {
         ensure!(v.session.account>0 && v.session.player>0 && v.session.character>0
             && v.character.inventory_revision>=0 && v.character.items.len()==12
             && v.position.x.is_finite() && v.position.y.is_finite(),"invalid own market reply identity or geometry");
-        ensure!(r.account>0 && r.peer.0>0 && r.peer.1>0 && r.peer.1!=r.account
+        ensure!(r.account>0 && r.session[1]>0 && r.session[2]>0 && r.revision>=0
+            && r.peer.0>0 && r.peer.1>0 && r.peer.1!=r.account
             && !r.peer.2.is_empty() && r.peer.2.len()<=16
             && r.peer.2.bytes().all(|b| b.is_ascii_alphanumeric())
             && message.channel==Channel::Tell(r.peer.2.clone())
             && message.text==Self::reply_text(&r.kind,c)?,"invalid bound market reply intent");
         if let ReplyKind::Counter(q) | ReplyKind::Bank(q) = &r.kind {
             ensure!(q[0].kind!=q[1].kind && q.iter().all(|g| (0..=65535).contains(&g.kind) && (1..=8).contains(&g.quantity)),"invalid market reply quote");
+            for g in q { c.get(u16::try_from(g.kind)?)?; }
         }
         if r.session != [v.session.world,v.session.player,v.session.character] || r.account!=v.session.account
             || r.revision!=v.character.inventory_revision || v.elapsed_ms>=r.until
