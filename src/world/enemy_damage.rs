@@ -106,6 +106,7 @@ impl World {
         let lantern = lethal && e.kind == crate::dungeon::davy::UNLIT && self.locker.is_some();
         let kill = lethal && !transform && !lantern;
         let kind = e.kind;
+        let position = e.pos;
 
         let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
         if e.kind == 0x90b {
@@ -137,9 +138,11 @@ impl World {
             .u8(u8::from(kill))
             .u8(bullet.unwrap_or(0))
             .i32(if bullet.is_some() { owner } else { 0 });
+        // Quest arrows retain distant bosses, but damage plays audio without a range check: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Character.as
         // The shooter already predicts enemy projectile damage: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L121-L129
         for (id, p) in &self.players {
             if p.known.contains(&target)
+                && p.pos.distance(position) < 20.
                 && (*id != owner || bullet.is_none() || !self.content.objects[&kind].enemy)
             {
                 send(p, 47, o.0.clone());
@@ -185,6 +188,88 @@ impl World {
 mod tests {
     use super::*;
     use crate::condition::{self, INVINCIBLE, INVULNERABLE, STASIS, STUNNED};
+
+    #[tokio::test]
+    async fn quest_damage_notifications_stay_local_without_losing_the_arrow() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let map = Arc::new(Map {
+            width: 100,
+            height: 100,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x61,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0,
+                };
+                10000
+            ],
+            spawns: vec![(50.5, 50.5)],
+        });
+        let mut world = World::new(content.clone(), map).unwrap();
+        let position = Pos { x: 50.5, y: 50.5 };
+        let boss = world.spawn_entity(0xd59, position, vec![]).unwrap();
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let mut peers = Vec::new();
+        for (name, pos, receives) in [
+            ("attacker", Pos { x: 51.5, y: 50.5 }, true),
+            ("boundary", Pos { x: 70.49, y: 50.5 }, true),
+            ("outside", Pos { x: 70.5, y: 50.5 }, false),
+            ("diagonal", Pos { x: 66.5, y: 66.5 }, false),
+            ("distant", Pos { x: 90.5, y: 50.5 }, false),
+            ("unknown", Pos { x: 51.5, y: 50.5 }, false),
+        ] {
+            let account = store.list(name.into()).await.unwrap();
+            let mut ch = store
+                .create(account.id, content.get(0x30e).unwrap())
+                .await
+                .unwrap();
+            ch.level = 20;
+            let (packets, mut rx) = mpsc::channel(64);
+            let player = world
+                .enter(
+                    ch,
+                    Some(Output {
+                        packets,
+                        lost: watch::channel(None).0,
+                    }),
+                )
+                .unwrap();
+            world.players.get_mut(&player).unwrap().pos = pos;
+            world.updates(player, true).unwrap();
+            assert_eq!(world.players[&player].quest, Some(boss));
+            assert!(world.players[&player].known.contains(&boss));
+            if name == "unknown" {
+                world.players.get_mut(&player).unwrap().known.remove(&boss);
+            }
+            while rx.try_recv().is_ok() {}
+            peers.push((player, rx, receives));
+        }
+        let attacker = peers[0].0;
+        for (bullet, raw) in [(Some(1), 100), (None, 100), (Some(2), 30000)] {
+            assert!(
+                world
+                    .damage_enemy(attacker, boss, raw, false, &[], bullet)
+                    .unwrap()
+                    > 0
+            );
+            for (player, rx, receives) in &mut peers {
+                let damage = std::iter::from_fn(|| rx.try_recv().ok())
+                    .filter(|p| p.id == 47)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    damage.len(),
+                    usize::from(*receives && (*player != attacker || bullet.is_none())),
+                    "player {player}, bullet {bullet:?}"
+                );
+                for packet in damage {
+                    assert_eq!(wire::Reader::new(&packet.body).i32().unwrap(), boss);
+                }
+            }
+        }
+        assert!(!world.entities.contains_key(&boss));
+    }
 
     #[test]
     fn projectile_damage_is_not_echoed_to_its_predicting_owner() {
