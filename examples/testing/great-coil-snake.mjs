@@ -24,12 +24,6 @@ export async function run(game){
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
   const initial=await save('arrival');
   game.check('natural temple has selected 900-HP Coil and stocked chest',entity(initial,coil.id)?.hp===900&&entity(initial,chest.id)?.items.some(i=>i!==-1));
-  await game.act({keys:[],duration_ms:2400},{name:'coil-arrival',when:()=>true});
-  const exposed=await save('exposed');
-  game.check('native enemy attacks damage the Rogue',exposed.view.character.hp<initial.view.character.hp);
-  const path=join(process.env.QA_RESULTS_DIR,'protection.json');
-  await writeFile(path,JSON.stringify({id:'coil-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
   const samples=[],shots=new Map();let pending=null,error;
   const record=s=>{samples.push(s);for(const p of s.view.projectiles)if(!shots.has(p.owner+':'+p.id))shots.set(p.owner+':'+p.id,p);};
   async function sample(input,capture){
@@ -37,7 +31,13 @@ export async function run(game){
     try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
     if(error)throw error;
   }
-  await sample({keys:[],duration_ms:6000},{name:'coil-eggs',when:v=>v.game_ms>6500});
+  await sample({keys:[],duration_ms:6000},{name:'coil-arrival',when:v=>v.game_ms>3500});
+  const exposed=await save('exposed');
+  game.check('native enemy attacks damage the Rogue',samples.some(s=>s.view.character.hp<initial.view.character.hp));
+  const path=join(process.env.QA_RESULTS_DIR,'protection.json');
+  await writeFile(path,JSON.stringify({id:'coil-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
+  await sample({keys:[],duration_ms:6000},{name:'coil-eggs',when:v=>v.game_ms>9000});
   await sample({keys:[],duration_ms:6000});
   const active=await save('active'),xp=active.view.character.experience;
   game.check('natural Coil activates and wanders',samples.some(s=>{const e=entity(s,coil.id);return e?.activated!==null&&Math.hypot(e.pos.x-coil.pos.x,e.pos.y-coil.pos.y)>.1;}));
