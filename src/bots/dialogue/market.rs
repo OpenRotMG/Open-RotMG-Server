@@ -330,6 +330,15 @@ mod tests {
         ] { assert!(validated_template(bad,intent).is_err(),"{intent:?}: {bad}"); }
     }
 
+    #[test]
+    fn market_counter_templates_reject_advertisement_only_syntax() {
+        for bad in ["nty s>{give} ({want})!","nty selling {give} for {want}","nty {give}={want}!","nty ({give})={want}","nty {give}  for  {want}"] {
+            assert!(validated_template(bad,Intent::MarketCounter).is_err(),"{bad}");
+            assert!(repertoire(&format!("{bad}|nah {{give}} for {{want}}|can do {{give}}={{want}}"),Intent::MarketCounter).is_err(),"{bad}");
+        }
+        assert!(repertoire("nty {give} for {want}|nah {give}={want}|can do {give} for {want}",Intent::MarketCounter).is_ok());
+    }
+
     #[tokio::test]
     async fn market_interaction_cache_repeats_favorites_and_renders_only_current_slots() {
         let c=content();

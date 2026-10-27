@@ -193,7 +193,11 @@ async fn incoming_full_inventory_retains_quote_for_existing_vault_preparation_no
     let q = market.quote(&v, &app.content, None).unwrap().unwrap();
     assert_eq!(q[0].kind, DEFENSE);
     assert_eq!(q[1].kind, SPEED);
-    market.quote = Some(q.clone());
+    let grid=Grid::terrain(&v);
+    let mut rng=rand::rngs::mock::StepRng::new(u64::MAX,0);
+    assert!(market.decide(&v,&app.content,None,&grid,&mut rng).unwrap().is_none());
+    assert!(market.session.is_none()&&market.session_used&&!market.preparing,"ordinary nontrader actually declined this visit");
+    assert_eq!(market.quote,Some(q.clone()));
     market.incoming_request("Seller".into(), &v);
     market.trade = Some(SessionTrade {
         binding: [v.session.world, id, v.session.character],
@@ -222,6 +226,37 @@ async fn incoming_full_inventory_retains_quote_for_existing_vault_preparation_no
     v.character.inventory_revision+=1;
     assert!(!market.message_current(&reply,&v,&app.content,None).unwrap());
     v.character.inventory_revision-=1;
+    market.end_incoming(&v);market.trade=None;
+    let portal=v.objects.iter().find(|p|p.kind==0x720&&p.usable).unwrap().id;
+    let decision=market.decide(&v,&app.content,None,&grid,&mut rng).unwrap().expect("selected capacity preparation must reach the existing Vault route after declined admission");
+    assert_eq!(decision.goal,Goal::Portal(portal));
+    assert!(decision.movement.is_some()||matches!(decision.journey,Some(Journey::Portal(id)) if id==portal));
+    assert!(market.session.is_none()&&market.session_used,"preparation must not reopen advertising");
+    let mut expired=Market { name:"Trader".into(),trader:true,..Market::default() };
+    let mut admitted_rng=rand::rngs::StdRng::seed_from_u64(748);
+    assert!(expired.decide(&v,&app.content,None,&grid,&mut admitted_rng).unwrap().is_some());
+    let until=expired.session.as_ref().unwrap().until;
+    let elapsed=v.elapsed_ms;v.elapsed_ms=until;
+    let decision=expired.decide(&v,&app.content,None,&grid,&mut admitted_rng).unwrap().expect("selected preparation precedes ad-session expiry");
+    assert_eq!(decision.goal,Goal::Portal(portal));
+    assert!(decision.movement.is_some()||matches!(decision.journey,Some(Journey::Portal(id)) if id==portal));
+    assert_eq!(expired.session.as_ref().unwrap().until,until,"banking never renews the ad-session deadline");
+    v.elapsed_ms=elapsed;
+    let items=v.character.items.clone();v.character.items[5..].fill(-1);
+    assert!(market.decide(&v,&app.content,None,&grid,&mut rng).unwrap().is_none());
+    assert!(!market.preparing&&market.session.is_none()&&market.session_used,"available room releases preparation without restarting ads");
+    v.elapsed_ms=until;
+    assert!(expired.decide(&v,&app.content,None,&grid,&mut admitted_rng).unwrap().is_none());
+    assert!(!expired.preparing&&expired.session.is_none(),"completed preparation must not revive an expired ad session");
+    v.elapsed_ms=elapsed;v.character.items=items;
+    for remove in [false,true] {
+        if remove { v.objects.retain(|p|p.kind!=0x720); }
+        else { for p in &mut v.objects { if p.kind==0x720 { p.usable=false; } } }
+        market.preparing=true;
+        assert!(market.decide(&v,&app.content,None,&grid,&mut rng).unwrap().is_none());
+        assert!(!market.preparing&&!market.reserves_stock(),"no usable observed Vault must release preparation and reserve");
+        assert!(!market.message_current(&reply,&v,&app.content,None).unwrap());
+    }
     v.character.items[5..].fill(-1);
     assert!(
         !market
