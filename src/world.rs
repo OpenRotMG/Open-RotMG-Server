@@ -7533,4 +7533,7 @@ mod reward_accuracy_tests;
 mod wizard_tests;
 
 #[cfg(test)]
+mod priest_tests;
+
+#[cfg(test)]
 impl World {}

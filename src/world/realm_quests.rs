@@ -851,6 +851,8 @@ impl World {
             0x91f if e.stage == Some(0) => (Motion::Wander, 1.),
             0x91f if e.stage == Some(1) => (Motion::Wander, 2.),
             0x91f if e.stage == Some(2) => (Motion::Wander, 3.),
+            0x91b if matches!(e.stage, Some(0 | 3)) => (Motion::Wander, 5.),
+            0x91b if matches!(e.stage, Some(1 | 2)) => (Motion::Wander, 3.5),
             _ => (Motion::Wander, 4.),
         };
         // NR-Core adds a base motor rate; a linear speed conversion loses it on slow quest bosses.
@@ -1312,7 +1314,11 @@ fn quest_preparation_motors_preserve_other_phases() {
         (0x928, 5, 10., 0.),
         (0x928, 6, 0., 0.),
         (0x928, 6, 10., 0.),
-        (0x91b, 3, 0., 2.96),
+        (0x91b, 0, 0., 3.515),
+        (0x91b, 1, 0., 2.6825),
+        (0x91b, 2, 0., 2.6825),
+        (0x91b, 3, 0., 3.515),
+        (0x91b, 4, 0., 2.96),
     ] {
         world.now += 50;
         let id = world.spawn_entity(kind, home, vec![]).unwrap();
