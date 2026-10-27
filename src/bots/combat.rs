@@ -334,29 +334,44 @@ pub(super) fn ability(
     }))
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Steering {
+    pub heading: f32,
+    pub distance: f32,
+    pub clearance: f32,
+}
+
 pub(super) fn movement(
     v: &PlayerView,
     grid: &Grid,
     enemies: &[&VisibleObject],
-    target: Option<Pos>,
-    range: f32,
+    target: Option<(Pos, f32)>,
     retreat: bool,
     perception: &Perception,
+    steering: Option<Steering>,
 ) -> Option<Pos> {
     if v.character.conditions & crate::content::PARALYZED != 0 {
         return None;
     }
     let mut best = None;
-    for index in 0..perception.directions {
-        let direction = index as f32 * std::f32::consts::TAU / perception.directions as f32;
+    let distance = steering.map_or(1.25, |s| s.distance);
+    for index in 0..perception.directions + usize::from(steering.is_some()) {
+        let direction = if index == perception.directions {
+            steering.expect("retained heading candidate").heading
+        } else {
+            index as f32 * std::f32::consts::TAU / perception.directions as f32
+        };
         let point = Pos {
-            x: v.position.x + direction.cos() * 1.25,
-            y: v.position.y + direction.sin() * 1.25,
+            x: v.position.x + direction.cos() * distance,
+            y: v.position.y + direction.sin() * distance,
         };
         if !grid.segment(v.position, point) {
             continue;
         }
         let safety = clearance(v, point, perception);
+        if steering.is_some_and(|s| safety < s.clearance) {
+            continue;
+        }
         let separation = enemies
             .iter()
             .map(|e| point.distance(e.position))
@@ -364,9 +379,13 @@ pub(super) fn movement(
         let spacing = if retreat {
             separation.min(12.) * 3.
         } else {
-            target.map_or(0., |p| -(point.distance(p) - range * 0.8).abs() * 3.)
+            target.map_or(0., |(p, range)| {
+                -(point.distance(p) - range * 0.8).abs() * 3.
+            })
         };
-        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing;
+        // Retain safe steering, not physical inertia; urgent avoidance stays first: https://www.red3d.com/cwr/steer/gdc99/
+        let continuity = steering.map_or(0., |s| (direction - s.heading).cos() * 3.);
+        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing + continuity;
         if best.is_none_or(|(prior, _)| score > prior) {
             best = Some((score, point));
         }

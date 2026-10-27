@@ -1,6 +1,131 @@
 use super::*;
 use crate::world::view::{PlayerMarker, VisibleObject};
 
+#[test]
+fn constructed_combat_travel_keeps_a_direction_instead_of_reversing() {
+    for profile in ARCHETYPES {
+        let (content, mut view) = quest_tests::fixture();
+        view.character.level = 20;
+        view.character.mp = 0;
+        view.position = Pos { x: 60.5, y: 60.5 };
+        let projectile = &content.objects[&(view.character.items[0] as u16)].projectiles[&0];
+        let range = projectile.speed * projectile.lifetime / 10000.;
+        view.objects[0].position = Pos {
+            x: view.position.x + range * 0.8,
+            y: view.position.y,
+        };
+        let mut brain = Brain::new(profile, &view);
+        let mut previous = None;
+        let mut reversals = 0;
+        let mut travelled = 0.;
+        for _ in 0..60 {
+            let decision = brain.decide(&view, &content).unwrap();
+            assert!(
+                matches!(decision.goal, Goal::Fight(2) | Goal::Hunt(2)),
+                "{}: {:?}",
+                profile.name,
+                decision.goal
+            );
+            assert!(decision.journey.is_none());
+            let target = decision.movement.expect("ordinary combat movement");
+            let length = view.position.distance(target);
+            assert!(length > 0.);
+            let direction = Pos {
+                x: (target.x - view.position.x) / length,
+                y: (target.y - view.position.y) / length,
+            };
+            if let Some(prior) = previous {
+                let prior: Pos = prior;
+                reversals += usize::from(prior.x * direction.x + prior.y * direction.y < -0.5);
+            }
+            previous = Some(direction);
+            let step = length.min(combat::speed(&view) * profile.reaction as f32 * 0.05);
+            view.position.x += direction.x * step;
+            view.position.y += direction.y * step;
+            travelled += step;
+            brain.goal = decision.goal;
+            brain.destination = decision.movement;
+            view.tick += profile.reaction;
+            view.time_ms += profile.reaction * 50;
+            view.elapsed_ms += profile.reaction * 50;
+        }
+        assert!(travelled > 20.);
+        assert!(
+            reversals <= 1,
+            "{} reversed {reversals} times during unthreatened constructed travel",
+            profile.name
+        );
+    }
+}
+
+#[test]
+fn constructed_recovery_bypasses_retained_combat_steering() {
+    let (content, mut view) = quest_tests::fixture();
+    view.character.level = 20;
+    view.character.mp = 0;
+    view.position = Pos { x: 60.5, y: 60.5 };
+    view.objects[0].position = Pos { x: 64.5, y: 60.5 };
+    view.character.hp = (view.character.stats[0] as f32 * ARCHETYPES[0].recovery * 0.75) as i32;
+    let mut decisions = Vec::new();
+    for heading in [0., std::f32::consts::PI] {
+        let mut brain = Brain::new(ARCHETYPES[0], &view);
+        brain.steering = Some((2, heading));
+        let decision = brain.decide(&view, &content).unwrap();
+        assert_eq!(decision.goal, Goal::Recover);
+        assert!(decision.journey.is_none());
+        assert!(brain.steering.is_none());
+        decisions.push(decision.movement.expect("ordinary safe recovery backstep"));
+    }
+    assert!(decisions[0].distance(decisions[1]) < 0.001);
+    assert!(
+        decisions[0].distance(view.objects[0].position)
+            > view.position.distance(view.objects[0].position)
+    );
+}
+
+#[test]
+fn constructed_held_steering_respects_walls_and_paralysis() {
+    let (_, mut view) = quest_tests::fixture();
+    view.position = Pos { x: 60.5, y: 60.5 };
+    view.objects[0].position = Pos { x: 64.5, y: 60.5 };
+    let mut grid = Grid::terrain(&view);
+    for y in 58..=62 {
+        grid.walkable.remove(&(61, y));
+    }
+    let perception = combat::Perception::attend(&view, &pursuits::Cognition::default(), false);
+    let steering = Some(combat::Steering {
+        heading: 0.,
+        distance: 2.5,
+        clearance: 0.7,
+    });
+    let next = combat::movement(
+        &view,
+        &grid,
+        &[&view.objects[0]],
+        Some((view.objects[0].position, 5.)),
+        false,
+        &perception,
+        steering,
+    )
+    .expect("safe direction along the wall");
+    assert!(grid.segment(view.position, next));
+    assert!(next.x < 61.);
+    view.character.conditions |= crate::content::PARALYZED;
+    assert!(
+        combat::movement(
+            &view,
+            &grid,
+            &[&view.objects[0]],
+            Some((view.objects[0].position, 5.)),
+            false,
+            &perception,
+            steering
+        )
+        .is_none()
+    );
+    assert_eq!(combat::speed(&view), 0.);
+}
+
 fn scene(level: i32) -> (Content, PlayerView) {
     let (c, mut v) = quest_tests::fixture();
     v.character.level = level;
