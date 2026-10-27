@@ -302,6 +302,18 @@ pub(crate) fn manor_entry_schedule(kind: u16, stage: u64, elapsed: u64) -> Sched
 }
 
 pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
+    if super::tutorial::ROSTER.contains(&kind) {
+        let (stage, age) = if kind != super::tutorial::CHEF {
+            (0, elapsed)
+        } else if hp < 90 {
+            (3, 0)
+        } else if elapsed % 9700 < 4500 {
+            (1 + elapsed / 9700 * 4, elapsed % 9700)
+        } else {
+            (2 + elapsed / 9700 * 4, elapsed % 9700 - 4500)
+        };
+        return Some(super::tutorial::schedule(kind, stage, age));
+    }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {
         return Some(abyss_schedule(kind, elapsed));
     }

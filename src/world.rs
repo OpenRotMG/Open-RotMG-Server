@@ -103,6 +103,7 @@ mod native_hits;
 
 mod npc_attacks;
 mod npc_queries;
+mod tutorial;
 
 mod reconciliation;
 
@@ -1288,7 +1289,7 @@ impl Directory {
         world.safe = safe;
         world.owner = owner;
         world.max_players = self.max_players;
-        world.encounter = template == "realm-shore"
+        world.encounter = matches!(template, "realm-shore" | "tutorial" | "kitchen")
             || template == crate::endgame::CASTLE
             || crate::dungeon::DUNGEONS
                 .iter()
@@ -1349,7 +1350,9 @@ impl Directory {
                 .values()
                 .filter(|e| {
                     let object = &world.content.objects[&e.kind];
-                    object.enemy && (object.class != "Wall" || object.passive_destructible())
+                    object.enemy
+                        && !matches!(e.kind, 0x802..=0x805)
+                        && (object.class != "Wall" || object.passive_destructible())
                 })
                 .map(|e| e.kind)
                 .collect();
@@ -6019,6 +6022,7 @@ impl World {
             eligible.len()
         } else if crate::loot::period_dungeon(defeated.kind)
             || crate::loot::period_surface(defeated.kind)
+            || crate::encounter::tutorial::ROSTER.contains(&defeated.kind)
             // realm-src Loots.cs Handle rolls public skeleton loot once per death, not per contributor.
             || matches!(defeated.kind, 0x65a..=0x65d)
         {
@@ -6440,7 +6444,16 @@ impl World {
             let queued_hero = kind == 0x668 || matches!(kind, 0x67e..=0x682);
             let mut hero_continue = false;
             let mut target = target;
-            let (mut motion, mut speed) = if lair_escort {
+            let (mut motion, mut speed) = if crate::encounter::tutorial::ROSTER.contains(&kind) {
+                crate::encounter::tutorial::movement(
+                    kind,
+                    if kind == crate::encounter::tutorial::CHEF {
+                        current.stage.expect("Kitchen movement phase missing")
+                    } else {
+                        0
+                    },
+                )
+            } else if lair_escort {
                 if let Err(error) = self.lair_escort_step(id, target, delta) {
                     self.entities.get_mut(&id).unwrap().last_step = Pos { x: 0., y: 0. };
                     tracing::error!(entity=id, %error, "Lair escort movement refused");

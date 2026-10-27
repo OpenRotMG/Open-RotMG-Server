@@ -85,7 +85,7 @@ impl World {
             }
             let object = &self.content.objects[&e.kind];
             object.class != "Wall"
-                && !matches!(e.kind, 0xd5f | 0xd60)
+                && !matches!(e.kind, 0xd5f | 0xd60 | 0x802..=0x805)
                 && (object.enemy || matches!(e.kind, 0x173 | 0xd7d))
         };
         // Fully awake worlds need the fused traversal, not an extra materialized ID pass.

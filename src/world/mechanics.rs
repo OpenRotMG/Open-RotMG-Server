@@ -240,6 +240,9 @@ impl World {
         elapsed: u64,
     ) -> Result<()> {
         let target = target.into();
+        if crate::encounter::tutorial::ROSTER.contains(&self.entities[&id].kind) {
+            return self.tutorial_mechanics(id, target);
+        }
         if matches!(
             self.entities[&id].kind,
             crate::dungeon::beach::BOSS | crate::dungeon::beach::BUM
