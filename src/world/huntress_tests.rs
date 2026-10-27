@@ -76,12 +76,14 @@ fn huntress_tiers_arm_then_blast_multiple_enemies_once() {
         let far = enemy(&mut w, pos, radius + 0.1);
         cast(&mut w, owner, pos).unwrap();
         assert_eq!(w.players[&owner].character.mp, 252 - cost);
+        w.players.get_mut(&owner).unwrap().character.mp = 252;
         assert!(
             cast(&mut w, owner, pos)
                 .unwrap_err()
                 .to_string()
                 .contains("cooldown")
         );
+        assert_eq!(w.players[&owner].character.mp, 252);
         w.now = 1499;
         w.ability_step();
         assert_eq!(w.entities[&inner].hp, 7500);
