@@ -4408,13 +4408,7 @@ impl World {
             && p.statuses
                 .get(&crate::condition::BERSERK)
                 .is_some_and(|(_, until)| self.now >= *until && self.now - until < 1000);
-        let berserk =
-            condition & crate::condition::bit(crate::condition::BERSERK) != 0 || late_berserk;
-        let normal_period = |dex| {
-            let frequency = 0.0015 + (0.008 - 0.0015) * f64::from(dex) / 75.;
-            (1. / frequency / f64::from(item.rate) / if berserk { 1.5 } else { 1. }).floor() as f32
-        };
-        let normal_cooldown = normal_period(dex);
+        let normal_cooldown = p.normal_attack_period(dex, self.now, item.rate, native);
         let effective_cooldown =
             reconciliation::attack_cooldown(p, &self.content, self.now, item.rate)?;
         let cooldown =
@@ -4425,7 +4419,7 @@ impl World {
             };
         let admission_dex = if native { p.advertised_dex(dex) } else { dex };
         let admission = if native {
-            normal_period(admission_dex)
+            p.normal_attack_period(admission_dex, self.now, item.rate, true)
         } else {
             cooldown
         };

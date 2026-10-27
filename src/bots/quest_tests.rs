@@ -1,5 +1,5 @@
 use super::*;
-use crate::world::view::{Lifecycle, MapInfo, OwnCharacter, Session, VisibleObject};
+use crate::world::view::{Lifecycle, MapInfo, OwnCharacter, PlayerMarker, Session, VisibleObject};
 
 fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
     brain
@@ -218,4 +218,79 @@ pub(super) fn fixture() -> (Content, PlayerView) {
         }],
     };
     (content, view)
+}
+
+fn rusher_fixture() -> (Content, PlayerView) {
+    let (content, mut view) = fixture();
+    view.map.name = "Abyss of Demons".into();
+    view.objects[0].kind = 0x927;
+    view.objects[0].position = Pos { x: 110.5, y: 10.5 };
+    view.player_markers.push(PlayerMarker {
+        id: 3,
+        account: 3,
+        name: "Rusher".into(),
+        position: Pos { x: 100.5, y: 10.5 },
+    });
+    (content, view)
+}
+
+#[test]
+fn dungeon_quest_uses_a_public_rusher_without_abandoning_its_goal() {
+    let (content, mut view) = rusher_fixture();
+    for world in [
+        "Pirate Cave",
+        "Snake Pit",
+        "Sprite World",
+        "Undead Lair",
+        "Abyss of Demons",
+        "Ocean Trench",
+    ] {
+        view.map.name = world.into();
+        let mut brain = Brain::new(ARCHETYPES[0], &view);
+        let decision = brain.decide(&view, &content).unwrap();
+        assert_eq!(decision.goal, Goal::Hunt(2), "{world}");
+        assert!(
+            matches!(decision.journey, Some(Journey::Regroup(3))),
+            "{world}: {:?}",
+            decision.journey
+        );
+        view.tick += 10;
+        view.time_ms += 100;
+        view.elapsed_ms += 100;
+        assert!(
+            brain.decide(&view, &content).unwrap().journey.is_none(),
+            "{world}: cooldown"
+        );
+    }
+}
+
+#[test]
+fn dungeon_rusher_does_not_override_safety_or_teleport_policy() {
+    for case in 0..8 {
+        let (content, mut v) = rusher_fixture();
+        let mut profile = ARCHETYPES[0];
+        match case {
+            0 => v.map.allow_teleport = false,
+            1 => v.player_markers.clear(),
+            2 => v.player_markers[0].position = Pos { x: 5.5, y: 10.5 },
+            3 => v.player_markers[0].position = Pos { x: 20.5, y: 10.5 },
+            4 => v.character.hp = 100,
+            5 => profile.knows_minimap = false,
+            6 => {
+                let mut enemy = fixture().1.objects.pop().unwrap();
+                enemy.id = 4;
+                enemy.kind = 0x927;
+                enemy.position = Pos { x: 12.5, y: 10.5 };
+                v.objects.push(enemy);
+            }
+            7 => v.player_markers[0].position = v.objects[0].position,
+            _ => unreachable!(),
+        }
+        let decision = Brain::new(profile, &v).decide(&v, &content).unwrap();
+        assert!(
+            !matches!(decision.journey, Some(Journey::Regroup(_))),
+            "case {case}: {:?}",
+            decision.journey
+        );
+    }
 }

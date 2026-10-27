@@ -1573,13 +1573,41 @@ impl Brain {
         }
         choices.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (_, goal, destination) in choices {
-            if self.blocked.contains_key(&tile(destination)) {
+            let shortcut = if matches!(goal, Goal::Hunt(_))
+                && self.agreement.is_none()
+                && self.companion.is_none()
+                && health >= 0.75
+                && peaceful
+                && decision.item.is_none()
+                && v.time_ms >= self.next_teleport
+            {
+                self.crowd
+                    .shortcut(v, self.group.as_ref(), destination)
+                    .filter(|p| enemies.iter().all(|e| e.position.distance(p.position) > 3.))
+                    .map(|p| p.id)
+            } else {
+                None
+            };
+            if shortcut.is_none() && self.blocked.contains_key(&tile(destination)) {
                 if self.agreement.as_ref().is_some_and(|a| a.waiting.is_some()) {
                     return Ok(decision);
                 }
                 continue;
             }
             let movement = match goal {
+                Goal::Hunt(quest) if shortcut.is_some() => {
+                    let target = shortcut.expect("selected dungeon shortcut missing");
+                    self.next_teleport = v.time_ms + 10_000;
+                    decision.journey = Some(Journey::Regroup(target));
+                    tracing::info!(
+                        account = v.session.account,
+                        target,
+                        quest,
+                        world = v.session.world,
+                        "autonomous dungeon rusher shortcut"
+                    );
+                    None
+                }
                 Goal::Gather(_) if v.position.distance(destination) < 0.7 => None,
                 Goal::Survey(..) if v.position.distance(destination) <= 8. => None,
                 Goal::Portal(id) if v.position.distance(destination) <= 2. => {
