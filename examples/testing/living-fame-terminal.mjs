@@ -50,9 +50,9 @@ export async function run(game){
     await game.act({keys:[],duration_ms:1800,mouse:{x:700,y:240}},{name:'terminal-fame-hover',when:view=>view.game_ms>=start+500});
     const before=await game.inspect();
     game.check('prepared terminal character loaded through native client',before.view.character.level===20&&before.view.character.fame===2000);
-    await page.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:rect.x+300,y:rect.y+300});
-    await game.act({keys:['d'],duration_ms:300});
-    await game.act({keys:[],duration_ms:800},{name:'terminal-fame-unhover',when:()=>true});
+    await game.act({keys:['d'],duration_ms:300,mouse:{x:300,y:300}});
+    const leaveStart=(await game.observe()).game_ms;
+    await game.act({keys:[],duration_ms:1800},{name:'terminal-fame-unhover',when:view=>view.game_ms>=leaveStart+500});
     const after=await game.inspect();
     await writeFile(join(process.env.QA_RESULTS_DIR,'terminal-observations.json'),JSON.stringify({before,after},null,2));
     game.check('terminal character remains alive and native movement works',after.view.lifecycle.alive&&after.view.position.x>before.view.position.x);
