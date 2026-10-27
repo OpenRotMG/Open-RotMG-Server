@@ -16,7 +16,7 @@ export async function run(game){
   const observations=[{incomingProtection:protectedState}];
   const save=()=>writeFile(join(root,'archer-observations.json'),JSON.stringify(observations,null,2));
   const target=state=>state.diagnostic.entities.find(e=>e.kind===0xd90);
-  const aim=state=>({x:300+(target(state).pos.x-state.view.position.x)*50,y:300+(target(state).pos.y-state.view.position.y)*50});
+  const shot={entity:boss.id,camera_angle:-Math.PI/4,fire:false};
   const vulnerable=async()=>{
     for(let attempt=0;attempt<16;attempt++){
       const state=await game.inspect(),enemy=target(state);assert(enemy&&Number.isInteger(enemy.activated));
@@ -33,7 +33,7 @@ export async function run(game){
   await game.act({keys:[],duration_ms:350,drag:{from:{x:722,y:472},to:{x:634,y:384}}});
   const bow=await vulnerable();
   game.check('native Archer equips a bow',bow.view.character.items[0]===0xa1a);
-  await game.act({keys:[],mouse:aim(bow),duration_ms:700});
+  await game.act({keys:[],target:{...shot,fire:true},duration_ms:700});
   const fired=await game.inspect();observations.push({bow,fired});await save();
   game.check('ordinary bow fire damages the enemy without spending mana',target(fired).hp<target(bow).hp&&fired.view.character.mp>=bow.view.character.mp);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:384},to:{x:722,y:472}}});
@@ -47,7 +47,7 @@ export async function run(game){
     if(item===0xc07){
       const empty=await game.observe();
       game.check('Thunder lacks mana after tiered casts',empty.character.mp<100&&empty.character.ability_ready_ms<=empty.game_ms);
-      await game.act({keys:[' '],mouse:{x:450,y:300},duration_ms:300});
+      await game.act({keys:[' '],target:shot,duration_ms:300});
       const refused=await game.observe();
       observations.push({insufficientMana:{empty,refused}});await save();
       game.check('insufficient mana prevents casting without a debit',refused.character.mp>=empty.character.mp&&refused.character.ability_ready_ms<=refused.game_ms);
@@ -61,9 +61,7 @@ export async function run(game){
     const before=await vulnerable(),enemy=target(before);assert(enemy);
     game.check(`quiver ${item.toString(16)} equip stats`,before.view.character.stats[5]===dex&&before.view.character.stats[2]===(item===0xc07?80:75));
     if(item===0xb28)game.check('T6 defense and speed bonuses',before.view.character.stats[3]===33&&before.view.character.stats[4]===52);
-    const mouse=aim(before);
-    assert(mouse.x>=0&&mouse.x<600&&mouse.y>=0&&mouse.y<600,'target remains on screen');
-    await game.act({keys:[' '],mouse,duration_ms:700},item===0xc07?{name:'archer-thunder',when:view=>view.game_ms>=before.view.time_ms+250&&view.character.mp<before.view.character.mp-50}:undefined);
+    await game.act({keys:[' '],target:shot,duration_ms:700},item===0xc07?{name:'archer-thunder',when:view=>view.game_ms>=before.view.time_ms+250&&view.character.mp<before.view.character.mp-50}:undefined);
     const after=await game.inspect(),hit=target(after);assert(hit);
     observations.push({item,before,after});await save();
     game.check(`quiver ${item.toString(16)} spends mana`,after.view.character.mp<=before.view.character.mp-cost+20);
@@ -76,7 +74,7 @@ export async function run(game){
       await game.act({keys:['4'],duration_ms:300});
       const ready=await game.observe();
       game.check('cooldown check has full mana and an unexpired deadline',ready.character.mp===100&&ready.character.items[7]===-1&&ready.character.ability_ready_ms-ready.game_ms>=1500);
-      await game.act({keys:[' '],mouse,duration_ms:300});
+      await game.act({keys:[' '],target:shot,duration_ms:300});
       const denied=await game.observe();
       observations.push({cooldown:{ready,denied}});
       game.check('Thunder cooldown prevents a second mana debit',denied.character.mp>=ready.character.mp);
