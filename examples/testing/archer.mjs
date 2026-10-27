@@ -27,20 +27,20 @@ export async function run(game){
     throw Error('No bounded Septavius vulnerability window observed');
   };
   await game.act({keys:[],duration_ms:3500});
-  await game.act({keys:[],duration_ms:350,drag:{from:{x:684,y:578},to:{x:734,y:428}}});
+  await game.act({keys:[],duration_ms:350,drag:{from:{x:678,y:472},to:{x:722,y:384}}});
   const armored=await game.observe();
   game.check('native leather armor equips and grants defense',armored.character.items[2]===0xa0d&&armored.character.stats.defense===31);
-  await game.act({keys:[],duration_ms:350,drag:{from:{x:734,y:578},to:{x:634,y:428}}});
+  await game.act({keys:[],duration_ms:350,drag:{from:{x:722,y:472},to:{x:634,y:384}}});
   const bow=await vulnerable();
   game.check('native Archer equips a bow',bow.view.character.items[0]===0xa1a);
   await game.act({keys:[],mouse:aim(bow),duration_ms:700});
   const fired=await game.inspect();observations.push({bow,fired});await save();
   game.check('ordinary bow fire damages the enemy without spending mana',target(fired).hp<target(bow).hp&&fired.view.character.mp>=bow.view.character.mp);
-  await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:734,y:578}}});
+  await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:384},to:{x:722,y:472}}});
   game.check('bow is stored before isolated quiver casts',(await game.observe()).character.items[0]===-1);
   for(const [item,effect,cost,dex,slot] of [[0xa61,4,50,50,null],[0xade,14,65,53,0],[0xb28,14,75,55,1],[0xc07,6,100,50,2]]){
     if(slot!==null){
-      await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot*50,y:528},to:{x:684,y:428}}});
+      await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot*44,y:428},to:{x:678,y:384}}});
       game.check(`native equip ${item.toString(16)}`,(await game.observe()).character.items[1]===item);
     }
     if(item===0xade)await game.act({keys:[],duration_ms:1000});
