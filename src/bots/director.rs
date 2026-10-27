@@ -13,35 +13,93 @@ pub(super) struct Departure {
     pub retire: bool,
 }
 
+fn targets(population: usize) -> [usize; 4] {
+    // Attendance is tuned, not a census; period views are predominantly blue stars:
+    // https://www.youtube.com/watch?v=G08RmJiBdl8&t=30s
+    let weights = [1, 4, 4, 1];
+    let mut targets = weights.map(|weight| population * weight / 10);
+    for _ in targets.iter().sum::<usize>()..population {
+        let group = [3, 0, 2, 1]
+            .into_iter()
+            .max_by_key(|&i| population as i64 * weights[i] as i64 - targets[i] as i64 * 10)
+            .expect("population bands exist");
+        targets[group] += 1;
+    }
+    targets
+}
+
+fn rank_band(identity: &str, stars: i32, classes: usize) -> usize {
+    if identity.starts_with("guest:v1:") {
+        0
+    } else if stars < classes as i32 {
+        1
+    } else if stars < 2 * classes as i32 {
+        2
+    } else {
+        3
+    }
+}
+
 async fn fill(
     app: &App,
     done: &mpsc::Sender<Departure>,
-    online: &mut BTreeSet<&'static str>,
+    online: &mut BTreeMap<&'static str, i32>,
     resting: &BTreeMap<&'static str, Instant>,
 ) -> Result<()> {
-    let mut candidates = persona::PERSONAS.clone();
-    candidates.shuffle(&mut rand::thread_rng());
-    for profile in candidates {
-        if online.len() == app.bot_population {
-            break;
-        }
-        if online.contains(profile.identity)
+    if online.len() >= app.bot_population {
+        return Ok(());
+    }
+    let targets = targets(app.bot_population);
+    let classes = app.content.classes.len();
+    let mut counts = [0usize; 4];
+    for (&identity, &account) in online.iter() {
+        ensure!(
+            !app.world.supervisor.account_fenced(account)?,
+            "fenced account remains in active population"
+        );
+        counts[rank_band(identity, app.store.account_stars(account).await?, classes)] += 1;
+    }
+    let mut profiles: Vec<_> = persona::PERSONAS
+        .iter()
+        .chain(persona::GUESTS.iter())
+        .copied()
+        .collect();
+    profiles.shuffle(&mut rand::thread_rng());
+    let mut candidates = Vec::new();
+    for profile in profiles {
+        if online.contains_key(profile.identity)
             || resting
                 .get(profile.identity)
                 .is_some_and(|until| *until > app.world.clock.now())
         {
             continue;
         }
-        if let Some(account) = app.store.shore_account(profile.identity.into()).await?
-            && app.world.supervisor.account_fenced(account)?
-        {
-            tracing::error!(
-                account,
-                name = profile.name,
-                "fenced persona remains offline pending inspection"
-            );
-            continue;
-        }
+        let stars = if let Some(account) = app.store.shore_account(profile.identity.into()).await? {
+            if app.world.supervisor.account_fenced(account)? {
+                tracing::error!(
+                    account,
+                    name = profile.name,
+                    "fenced persona remains offline pending inspection"
+                );
+                continue;
+            }
+            app.store.account_stars(account).await?
+        } else {
+            profile.stars
+        };
+        candidates.push((profile, rank_band(profile.identity, stars, classes)));
+    }
+    while online.len() < app.bot_population {
+        let Some(index) = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, band))| counts[*band] < targets[*band])
+            .max_by_key(|(_, (_, band))| targets[*band] - counts[*band])
+            .map(|(index, _)| index)
+        else {
+            break;
+        };
+        let (profile, _) = candidates.swap_remove(index);
         let character = match runtime::persona_character(app, profile).await {
             Ok(character) => character,
             Err(error)
@@ -60,6 +118,22 @@ async fn fill(
             }
         };
         let account = character.account;
+        let band = rank_band(
+            profile.identity,
+            app.store.account_stars(account).await?,
+            classes,
+        );
+        if counts[band] >= targets[band] {
+            tracing::info!(
+                account,
+                name = character.name,
+                band,
+                ?counts,
+                ?targets,
+                "persona rank changed before admission; remaining offline"
+            );
+            continue;
+        }
         let Some(owner) = app.try_claim(account)? else {
             tracing::warn!(
                 online = online.len(),
@@ -92,13 +166,24 @@ async fn fill(
             }
             return Err(error);
         }
-        online.insert(profile.identity);
+        online.insert(profile.identity, account);
+        counts[band] += 1;
         tracing::info!(
             account,
             name = profile.name,
+            band,
+            ?counts,
+            ?targets,
             online = online.len(),
             target = app.bot_population,
             "inhabitant logged in"
+        );
+    }
+    if counts != targets {
+        tracing::warn!(
+            ?counts,
+            ?targets,
+            "population rank targets unfilled; no substitution across bands"
         );
     }
     Ok(())
@@ -108,7 +193,7 @@ async fn maintain(
     app: &App,
     done: &mpsc::Sender<Departure>,
     departed: &mut mpsc::Receiver<Departure>,
-    online: &mut BTreeSet<&'static str>,
+    online: &mut BTreeMap<&'static str, i32>,
     resting: &mut BTreeMap<&'static str, Instant>,
 ) -> Result<()> {
     let stopping = lifecycle::drain::stopping(app);
@@ -172,7 +257,7 @@ async fn maintain(
 
 pub(super) async fn start(app: &App) -> Result<()> {
     let (done, mut departed) = mpsc::channel(app.bot_population.max(1));
-    let mut online = BTreeSet::new();
+    let mut online = BTreeMap::new();
     let mut resting = BTreeMap::new();
     maintain(app, &done, &mut departed, &mut online, &mut resting).await?;
     let app = app.clone();

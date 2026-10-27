@@ -956,6 +956,17 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         };
         self.list_id(id).await
     }
+    pub(crate) async fn account_stars(&self, account: i32) -> Result<i32> {
+        let legacy_base = self.legacy_base;
+        let classes = self.classes.clone();
+        // Census reads must not award class-quest Gold through presentation().
+        self.call(move |db| {
+            Ok(read_presentation(db, account, legacy_base, &classes)?
+                .0
+                .stars())
+        })
+        .await
+    }
     pub async fn presentation(&self, account: i32) -> Result<AccountPresentation> {
         let legacy_base = self.legacy_base;
         let classes = self.classes.clone();
