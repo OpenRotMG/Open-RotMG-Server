@@ -40,7 +40,11 @@ export async function run(game){
     for(const p of s.view.projectiles.filter(p=>p.owner===boss.id))if(!shots.has(p.id))shots.set(p.id,{...p,seen:s.view.time_ms});
   }
   const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},70);
-  try{for(const keys of [[],['s'],['w'],[],['a'],['d']])await game.act({keys,duration_ms:2300});}
+  try{for(let n=0;n<3;n++){
+    await game.act({keys:['s'],duration_ms:250});
+    await game.act({keys:['w'],duration_ms:250});
+    await game.act({keys:[],duration_ms:4100});
+  }}
   finally{clearInterval(timer);if(pending)await pending;}
   if(error)throw error;
   const volleys=Map.groupBy([...shots.values()],p=>p.seen);

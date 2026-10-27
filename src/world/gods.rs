@@ -224,7 +224,7 @@ impl World {
             .players
             .values()
             .find(|p| p.pos.x == target.x && p.pos.y == target.y);
-        if e.kind == 0x646 || e.kind == 0x651 && self.name != "Abyss of Demons" {
+        if matches!(e.kind, 0x646 | 0x955) || e.kind == 0x651 && self.name != "Abyss of Demons" {
             if let Some(p) = player {
                 let history = p.white_demon_aim_history[0];
                 let previous = (history.y - e.pos.y).atan2(history.x - e.pos.x);
