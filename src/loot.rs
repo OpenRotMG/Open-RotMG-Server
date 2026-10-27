@@ -1345,6 +1345,29 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
+    fn red_demon_minions_have_separate_public_equipment_rolls() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, expected) in [
+            (0x669, vec![(0.02, 0xa05), (0.02, 0xa9a), (0.02, 0xa1c)]),
+            (0x66a, vec![(0.03, 0xa1c)]),
+            (0x66b, vec![(0.03, 0xa17), (0.02, 0xa0a)]),
+        ] {
+            let actual: Vec<_> = table(kind)
+                .iter()
+                .map(|(p, pick)| (*p, candidates(&content, *pick)[0]))
+                .collect();
+            assert_eq!(actual, expected, "{kind:#x}");
+            assert!(!private(kind));
+            assert!(period_surface(kind), "one public attempt per death");
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                expected.iter().map(|(_, item)| *item).collect::<Vec<_>>()
+            );
+        }
+        assert!(private(0x668));
+    }
+
+    #[test]
     fn god_bound_equipment_is_allocated_once_and_never_in_shared_loot() {
         let mut content = Content::load(std::path::Path::new("data")).unwrap();
         let pool = candidates(&content, Pick::Tier(6, WEAPONS));
