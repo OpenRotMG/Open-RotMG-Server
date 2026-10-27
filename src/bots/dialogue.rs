@@ -70,6 +70,9 @@ pub(super) enum Intent {
     Join,
     MarketAdvertise,
     MarketRefuse,
+    MarketCounter,
+    MarketBank,
+    MarketThanks,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -902,7 +905,10 @@ impl Brain {
             | Intent::Invite
             | Intent::Join
             | Intent::MarketAdvertise
-            | Intent::MarketRefuse => {}
+            | Intent::MarketRefuse
+            | Intent::MarketCounter
+            | Intent::MarketBank
+            | Intent::MarketThanks => {}
         }
     }
 }
