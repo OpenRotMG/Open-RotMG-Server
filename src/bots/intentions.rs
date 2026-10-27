@@ -605,6 +605,10 @@ impl Intentions {
                 _ => false,
             })
     }
+    pub(super) fn call_available(&self, v: &PlayerView) -> bool {
+        // A relocation is not dungeon entry or progress, and cannot erase an existing excursion.
+        self.main.is_some() && self.detour.is_none() && !self.return_to_main && self.available(v)
+    }
     pub(super) fn eligible(&self, v: &PlayerView, goal: &Goal, committed: bool) -> bool {
         !self.optional(v, goal, committed)
             || self.matches(goal)

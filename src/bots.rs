@@ -620,6 +620,7 @@ impl Brain {
                 cctv::reason(activity, &decision, v, content),
                 committed,
             );
+        self.intent["public_call"] = serde_json::json!(self.calls.last);
         self.intent["acquisition"] = serde_json::json!({"resources":self.mind.market.resource_payload(),
             "step":cctv::reason(activity, &decision, v, content),"selected_action":&decision.item});
         Ok(decision)

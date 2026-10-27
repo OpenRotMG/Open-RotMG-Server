@@ -439,6 +439,24 @@ impl Market {
         self.target
             .is_some_and(|target| acquisition::helps_target(c, target, kind))
     }
+    pub(in crate::bots) fn needs_resource(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+        kind: i32,
+    ) -> Result<bool> {
+        if self.target.is_none_or(|target| {
+            v.character.items.contains(&target)
+                || Self::live_vault(v).is_some_and(|items| items.contains(&target))
+                || !acquisition::helps_target(c, target, kind)
+        }) {
+            return Ok(false);
+        }
+        Ok(self
+            .resources(v, c, future)?
+            .is_some_and(|p| matches!(p.state, AcquisitionState::Saving { .. })))
+    }
     pub(in crate::bots) fn set_target(&mut self, target: Option<i32>) {
         if self.target != target && !self.locked() {
             self.quote = None;
