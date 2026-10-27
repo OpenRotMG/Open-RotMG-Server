@@ -174,10 +174,10 @@ impl Service {
         let name = name.to_owned();
         let seed = persona::seed(&name);
         let voice = json!({
-            "favorite_shape": ["compact s> with equals", "selling words with for", "buying words with for",
+            "favorite_shape": (["compact s> with equals", "selling words with for", "buying words with for",
                 "item-first equals", "wtb with implicit price", "trading words with for",
-                "s> with parenthesized price", "compact b> with equals"][seed as usize % 8],
-            "capitalization": ["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3],
+                "s> with parenthesized price", "compact b> with equals"][seed as usize % 8]),
+            "capitalization": (["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3]),
             "name_signature": (seed / 24).is_multiple_of(2),
         });
         let payload = json!({"allowed_intents":[intent],"automatic":true,"market_generation":true,
