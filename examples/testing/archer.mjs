@@ -51,17 +51,22 @@ export async function run(game){
       const restored=await game.observe();
       game.check('ordinary potion restores mana and is consumed',restored.character.mp>refused.character.mp&&restored.character.items[11]===-1);
     }
-    const before=await vulnerable(cost),enemy=target(before);assert(enemy);
+    const before=await vulnerable(cost);
     game.check(`quiver ${item.toString(16)} equip stats`,before.view.character.stats[5]===dex&&before.view.character.stats[2]===(item===0xc07?80:75));
     if(item===0xb28)game.check('T6 Vitality and Wisdom bonuses',before.view.character.stats[6]===42&&before.view.character.stats[7]===52);
     await game.act({keys:[' '],target:shot,duration_ms:700},item===0xc07?{name:'archer-thunder',when:view=>view.game_ms>=before.view.time_ms+250&&view.character.mp<before.view.character.mp-50}:undefined);
-    const after=await game.inspect(),hit=target(after);assert(hit);
-    observations.push({item,before,after});await save();
+    const after=await game.inspect();
+    const affected=after.diagnostic.entities.filter(e=>{
+      const status=e.statuses[String(effect)];return status&&status[0]>=before.view.time_ms;
+    });
+    observations.push({item,before,after,affected:affected.map(e=>e.id)});await save();
+    const hit=item===0xc07?affected[0]:target(after);assert(hit,'quiver condition reaches a living enemy');
+    if(item===0xc07)game.check('Thunder affects exactly one enemy',affected.length===1);
     game.check(`quiver ${item.toString(16)} spends mana`,after.view.character.mp<=before.view.character.mp-cost+20);
     const status=hit.statuses[String(effect)];
     game.check(`quiver ${item.toString(16)} applies a fresh timed condition ${effect}`,status&&status[0]>=before.view.time_ms&&status[1]-status[0]===(item===0xc07?4000:3000));
     game.check(`quiver ${item.toString(16)} keeps equipped item`,after.view.character.items[1]===item);
-    game.check(`quiver ${item.toString(16)} damages target`,hit.hp<enemy.hp);
+    game.check(`quiver ${item.toString(16)} damages target`,hit.hp<before.diagnostic.entities.find(e=>e.id===hit.id).hp);
     if(item===0xc07){
       // Thunder is the cooldown outlier: https://github.com/OpenRotMG/Open-RotMG-Server/blob/03d3dfbff20751a1c94bdf24990c718b9ef46614/data/objects.xml#L5697-L5727
       const retry=await game.act([
@@ -79,6 +84,8 @@ export async function run(game){
   await game.act({keys:[],duration_ms:3500});
   const expired=await game.inspect();observations.push({expired});await save();
   game.check('same living character retains equipment',expired.view.lifecycle.alive&&expired.view.character.items[1]===0xc07&&expired.view.character.items[2]===0xa0d);
-  const deadline=target(observations.find(o=>o.item===0xc07).after).statuses['6'][1];
-  game.check('Thunder Daze expires after four seconds',expired.view.time_ms>=deadline&&!Object.entries(target(expired).statuses).some(([effect,[,until]])=>effect==='6'&&until>expired.view.time_ms));
+  const thunder=observations.find(o=>o.item===0xc07),id=thunder.affected[0];
+  const deadline=thunder.after.diagnostic.entities.find(e=>e.id===id).statuses['6'][1];
+  const survivor=expired.diagnostic.entities.find(e=>e.id===id);assert(survivor,'Dazed enemy remains observed for expiry');
+  game.check('Thunder Daze expires after four seconds',expired.view.time_ms>=deadline&&!Object.entries(survivor.statuses).some(([effect,[,until]])=>effect==='6'&&until>expired.view.time_ms));
 }
