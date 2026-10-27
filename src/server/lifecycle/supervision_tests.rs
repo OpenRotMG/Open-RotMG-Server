@@ -12,7 +12,7 @@ fn fixture() -> (std::path::PathBuf, App) {
     .unwrap();
     app.world = crate::world::Handle::supervised(
         directory,
-        crate::supervision::Supervisor::persisted(dir.join("incident.json")).unwrap(),
+        crate::supervision::Supervisor::recovered(dir.join("incident.json"), &app.store).unwrap(),
     );
     app.world.clock.set_paused(true);
     (dir, app)
@@ -96,13 +96,16 @@ async fn fatal_world_and_persistence_workers_stop_real_server_and_preserve_incid
         );
         assert!(incident.fences_preserved);
         assert!(incident.fenced_accounts.is_empty());
-        assert!(crate::supervision::Supervisor::persisted(dir.join("incident.json")).is_ok());
+        assert!(
+            crate::supervision::Supervisor::recovered(dir.join("incident.json"), &app.store)
+                .is_ok()
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn failed_shutdown_drain_preserves_held_completion_fence_after_reopen() {
+async fn failed_shutdown_drain_releases_fences_only_after_recovery() {
     let (dir, app) = fixture();
     let (_owner, player, mut character) = avatar(&app, "held-shutdown").await;
     let account = character.account;
@@ -136,26 +139,36 @@ async fn failed_shutdown_drain_preserves_held_completion_fence_after_reopen() {
         .await
         .unwrap_err();
     assert_eq!(error.to_string(), original);
-    let restarted = crate::supervision::Supervisor::persisted(dir.join("incident.json")).unwrap();
-    let incident = restarted.latest().unwrap().unwrap();
+    let incident = app.world.supervisor.latest().unwrap().unwrap();
     assert_eq!(incident.component, "shutdown");
     assert_eq!(incident.failure, "failed");
     assert!(incident.fences_preserved);
     assert_eq!(incident.fenced_accounts, vec![account]);
-    assert!(restarted.check_account(account).is_err());
-    assert!(restarted.check_account(account + 1).is_ok());
+    assert!(app.world.supervisor.check_account(account).is_err());
     release_sql.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(5), completion)
         .await
         .unwrap()
         .unwrap()
         .unwrap();
-    assert!(restarted.check_account(account).is_err());
+    assert!(app.world.supervisor.check_account(account).is_err());
+    let store = crate::store::Store::open(&dir.join("game.db"), &app.content).unwrap();
+    let restarted =
+        crate::supervision::Supervisor::recovered(dir.join("incident.json"), &store).unwrap();
+    assert!(restarted.check_account(account).is_ok());
+    assert!(
+        restarted
+            .latest()
+            .unwrap()
+            .unwrap()
+            .fenced_accounts
+            .is_empty()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn failed_shutdown_checkpoint_failure_retains_original_error_and_blocks_reopen() {
+async fn failed_shutdown_checkpoint_failure_retains_original_error_but_allows_recovery() {
     let (dir, app) = fixture();
     app.world
         .supervisor
@@ -170,7 +183,9 @@ async fn failed_shutdown_checkpoint_failure_retains_original_error_and_blocks_re
             .contains("account-fence checkpoint failed")
     );
     assert_eq!(error.root_cause().to_string(), "original drain failure");
-    assert!(crate::supervision::Supervisor::persisted(dir.join("incident.json")).is_err());
+    assert!(
+        crate::supervision::Supervisor::recovered(dir.join("incident.json"), &app.store).is_ok()
+    );
     assert!(
         !app.world
             .supervisor
@@ -221,12 +236,14 @@ async fn recorded_drain_and_critical_checkpoint_failures_both_survive_select() {
     assert_eq!(saved.id, incident.id);
     assert_eq!(saved.component, "fixture-critical");
     assert!(!saved.fences_preserved);
-    assert!(crate::supervision::Supervisor::persisted(dir.join("incident.json")).is_err());
+    assert!(
+        crate::supervision::Supervisor::recovered(dir.join("incident.json"), &app.store).is_ok()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn fatal_fame_fences_survive_restart_without_rejecting_already_accepted_sql() {
+async fn fatal_fame_fences_stop_ownership_without_rejecting_accepted_sql() {
     let (dir, app) = fixture();
     let (_pending_owner, pending_player, mut pending) = avatar(&app, "pending").await;
     let (failed_owner, _, failed) = avatar(&app, "failed").await;
@@ -304,19 +321,23 @@ async fn fatal_fame_fences_survive_restart_without_rejecting_already_accepted_sq
     let mut incident = tokio::time::timeout(Duration::from_secs(5), app.world.supervisor.failed())
         .await
         .unwrap();
-    assert!(crate::supervision::Supervisor::persisted(dir.join("incident.json")).is_err());
+    assert!(!incident.fences_preserved);
     preserve_uncertain(&app, &mut incident).unwrap();
-    let restarted = crate::supervision::Supervisor::persisted(dir.join("incident.json")).unwrap();
     let mut expected = vec![pending_account, failed.account, closing.account];
     expected.sort_unstable();
     assert_eq!(
-        restarted.latest().unwrap().unwrap().fenced_accounts,
+        app.world
+            .supervisor
+            .latest()
+            .unwrap()
+            .unwrap()
+            .fenced_accounts,
         expected
     );
     for account in expected {
-        assert!(restarted.check_account(account).is_err());
+        assert!(app.world.supervisor.check_account(account).is_err());
     }
-    assert!(restarted.check_account(giver_character.account).is_ok());
+    assert!(app.world.supervisor.ensure_running().is_err());
     let error = app.claim(recipient_character.account).err().unwrap();
     assert!(error.to_string().contains("critical worker stopped"));
     let error = reserve_player(&app, recipient_character.account, recipient, "new_progress")
@@ -360,5 +381,11 @@ async fn fatal_fame_fences_survive_restart_without_rejecting_already_accepted_sq
             .is_err()
     );
     app.shutdown.send_replace(true);
+    let store = crate::store::Store::open(&dir.join("game.db"), &app.content).unwrap();
+    let restarted =
+        crate::supervision::Supervisor::recovered(dir.join("incident.json"), &store).unwrap();
+    for account in [pending_account, failed.account, closing.account] {
+        assert!(restarted.check_account(account).is_ok());
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }

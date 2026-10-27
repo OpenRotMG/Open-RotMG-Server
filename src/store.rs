@@ -602,6 +602,24 @@ impl Store {
             .context("Wizard class missing")?
             .base;
         let mut c = Connection::open(path)?;
+        let integrity: String = c
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .context("game database integrity_check could not run")?;
+        ensure!(
+            integrity == "ok",
+            "game database integrity_check failed: {integrity}"
+        );
+        let foreign_key: Option<(String, Option<i64>, String, i32)> = c
+            .query_row("PRAGMA foreign_key_check", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .optional()
+            .context("game database foreign_key_check could not run")?;
+        ensure!(
+            foreign_key.is_none(),
+            "game database foreign_key_check failed (table, rowid, parent, key): {foreign_key:?}"
+        );
+        tracing::info!(path=%path.display(), "account store integrity and foreign keys verified");
         let version: i32 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
             matches!(
@@ -1852,3 +1870,7 @@ impl Account {
 mod class_quest_tests;
 #[cfg(test)]
 mod community_schema_tests;
+#[cfg(all(test, unix))]
+mod restart_tests;
+#[cfg(test)]
+mod startup_tests;
