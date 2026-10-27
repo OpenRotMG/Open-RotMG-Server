@@ -58,6 +58,7 @@ fn native(
 #[test]
 fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
     let (mut world, player) = fixture(0x18, false);
+    world.encounter = true;
     let mage = world
         .spawn_entity(0x617, Pos { x: 20.5, y: 8.5 }, vec![])
         .unwrap();
