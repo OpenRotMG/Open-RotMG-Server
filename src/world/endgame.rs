@@ -456,10 +456,8 @@ impl Directory {
                     }
                 }
             }
-            // Ordinary maintenance must not retain this loan while waiting for another Realm.
-            if cycle.stage != RealmStage::Transferring {
-                self.worlds.release_world(origin);
-            }
+            // Preparation owns its inputs; even closing Realms must run while another loan is pending.
+            self.worlds.release_world(origin);
         }
         let transferring: Vec<_> = self
             .endgame
