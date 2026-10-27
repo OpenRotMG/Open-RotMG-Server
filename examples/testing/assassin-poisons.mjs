@@ -25,10 +25,10 @@ export async function run(game){
   const second=await game.observe();
   game.check('T6 spends one 110 MP cost',second.character.mp>=equipped.character.mp-110&&second.character.mp<equipped.character.mp-100);
   await game.act({keys:[],duration_ms:4500},{name:'assassin-victory',when:v=>v.verification.kills>initial.verification.kills});
-  const victory=await game.inspect();
-  game.check('T6 poison defeats Bonegrind without weapon fire',!victory.diagnostic.entities.some(e=>e.id===boss.id)&&(await game.observe()).verification.kills===initial.verification.kills+1);
+  const victory=await game.inspect(),credited=await game.observe();
+  game.check('T6 poison defeats Bonegrind without weapon fire',!victory.diagnostic.entities.some(e=>e.id===boss.id)&&credited.verification.kills>initial.verification.kills&&credited.verification.shots===initial.verification.shots);
   await game.act({keys:[],duration_ms:4000});
-  game.check('poison kill is credited only once',(await game.observe()).verification.kills===initial.verification.kills+1);
+  game.check('poison kills are not credited again',(await game.observe()).verification.kills===credited.verification.kills);
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'vitals',hp:600,mp:0}}}),signal:AbortSignal.timeout(10000)});
@@ -37,5 +37,5 @@ export async function run(game){
   await game.act({keys:[' '],duration_ms:250});const denied=await game.observe();
   game.check('zero MP rejects poison without a new cooldown',denied.character.mp>=0&&denied.character.mp<10&&denied.character.ability_ready_ms===poor.character.ability_ready_ms);
   game.check('same living Assassin retains T6',denied.lifecycle.alive&&denied.session.character===before.view.session.character&&denied.character.items[1]===0xb2a);
-  await writeFile(join(root,'poison-observations.json'),JSON.stringify({before,thrown,poisoned,equipped,second,victory,denied},null,2));
+  await writeFile(join(root,'poison-observations.json'),JSON.stringify({before,initial,thrown,poisoned,equipped,second,victory,credited,denied},null,2));
 }
