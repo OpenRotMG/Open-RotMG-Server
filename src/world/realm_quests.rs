@@ -699,7 +699,7 @@ impl World {
         }
         let target = target.into();
         let e = &self.entities[&id];
-        if e.kind == 0x91f && matches!(e.stage, Some(3..=6)) {
+        if matches!(e.kind, 0x91f | 0x928) && matches!(e.stage, Some(3..=6)) {
             return (Motion::Stationary, 0.);
         }
         let leash = match e.kind {
@@ -1260,7 +1260,7 @@ fn ent_sprite_orders_use_strict_owned_radii() {
 
 #[cfg(test)]
 #[test]
-fn ent_movement_uses_primary_nominal_components() {
+fn quest_preparation_motors_preserve_other_phases() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Map {
         width: 32,
@@ -1304,6 +1304,15 @@ fn ent_movement_uses_primary_nominal_components() {
         (0x91f, 6, 0., 0.),
         (0x91f, 6, 10., 0.),
         (0x920, 0, 0., 1.85),
+        (0x928, 3, 0., 0.),
+        (0x928, 3, 10., 0.),
+        (0x928, 4, 0., 0.),
+        (0x928, 4, 10., 0.),
+        (0x928, 5, 0., 0.),
+        (0x928, 5, 10., 0.),
+        (0x928, 6, 0., 0.),
+        (0x928, 6, 10., 0.),
+        (0x91b, 3, 0., 2.96),
     ] {
         world.now += 50;
         let id = world.spawn_entity(kind, home, vec![]).unwrap();
