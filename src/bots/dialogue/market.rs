@@ -22,7 +22,7 @@ pub(super) struct Wording {
 
 pub(super) const PROMPT: &str = r#"Write THREE reusable 2012 Realm trade-chat templates in ONE reply_to_player call with the sole allowed intent. Separate them with literal |. Total reply at most 128 characters.
 The tokens {give}, {want}, @{name} are LITERAL text. Never substitute items, numbers or real names. Follow the supplied voice across all three; first is the repeated favorite, the other two occasional alternatives. For market_advertise, favorite_shape supplies valid literal syntax for the first template, not descriptive words to print; adapt only its capitalization and optional name signature. Use distinct shapes, not three capitalization variants.
-For market_advertise the FIRST must be a priced exchange: seller opening wts, selling, sell, s>, trading, trade or t> with {give} then for, = or an implicit space-separated price then {want}; buyer opening wtb, buying, buy or b> with {want} then for, = or an implicit space-separated price then {give}. Spaces after > and around = are optional. Also allowed: {give} = {want}, or s>{give} ({want}).
+For market_advertise use the supplied syntax_examples as literal ad grammar; never mix in refusal words such as need, nty or no thx. The FIRST must be a priced exchange: seller opening wts, selling, sell, s>, trading, trade or t> with {give} then for, = or an implicit space-separated price then {want}; buyer opening wtb, buying, buy or b> with {want} then for, = or an implicit space-separated price then {give}. Spaces after > and around = are optional. Also allowed: {give} = {want}, or s>{give} ({want}).
 Alternatives may be priced exchanges or bare selling interest (selling {give}, s>{give}) or bare buying interest (wtb {want}, buying {want}, b>{want}). Bare interest omits the price and is NOT an agreed exchange. Each mentioned goods token exactly once. Optionally end an ad with literal @{name}, then optionally one ! at the very end.
 For market_refuse use short refusals: nty, nah, no thx, sry nty, or one of these followed by need {want}. No {give} or name in refusals.
 Keep literal brace tokens lowercase, but vary other capitalization, opening, spacing and name signature to fit this speaker's supplied voice. No other words, punctuation, promises or acceptance. Current inventory facts are inserted only by the program. Native trade windows alone authorize acceptance."#;
@@ -185,6 +185,7 @@ impl Service {
         let seed = persona::seed(&name);
         let voice = json!({
             "favorite_shape": FAVORITE_SHAPES[seed as usize % 8],
+            "syntax_examples": FAVORITE_SHAPES,
             "capitalization": (["lowercase", "UPPERCASE", "initial capital"][(seed / 8) as usize % 3]),
             "name_signature": (seed / 24).is_multiple_of(2),
         });
@@ -248,6 +249,14 @@ mod tests {
         }
         assert!(
             validated_template("s>{give} ({want}) @{name}!", Intent::MarketAdvertise).unwrap()
+        );
+        let mixed_refusal = "WTB {want} for {give} | s>{give} ({want}) | buying {want}, need {give}";
+        assert!(repertoire(mixed_refusal, Intent::MarketAdvertise).is_err());
+        for ad in mixed_refusal.split('|').take(2) {
+            assert!(validated_template(ad.trim(), Intent::MarketAdvertise).unwrap());
+        }
+        assert!(
+            validated_template("buying {want}, need {give}", Intent::MarketAdvertise).is_err()
         );
     }
 
