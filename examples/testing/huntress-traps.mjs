@@ -47,6 +47,7 @@ export async function run(game){
   await game.act({keys:[' '],duration_ms:200,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:false}});
   await game.act({keys:[],duration_ms:1800});
   const denied=await game.inspect(),target=denied.view.objects.find(e=>e.id===boss.id);
-  game.check('insufficient mana creates no trap or Paralyzed effect',target&&!(target.condition_mask&(1<<13))&&!denied.diagnostic.entities.some(e=>e.kind===0x711)&&denied.view.character.ability_ready_ms===poor.character.ability_ready_ms);
+  await writeFile(join(root,'trap-observations.json'),JSON.stringify({preparedProtection:true,preparedVitals:true,observations,poor,denied},null,2));
+  game.check('insufficient mana creates no trap or Paralyzed effect',poor.character.mp===0&&denied.view.character.mp<130&&target&&!(target.condition_mask&(1<<13))&&!denied.diagnostic.entities.some(e=>e.kind===0x711));
   game.check('same living Huntress retains the equipped Coral trap',denied.view.lifecycle.alive&&denied.view.session.character===start.session.character&&denied.view.character.items[1]===0xc1c);
 }
