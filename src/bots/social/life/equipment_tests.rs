@@ -429,7 +429,7 @@ async fn equipment_drop_is_initial_choice_and_commits_ordinary_removal_and_picku
 }
 
 #[tokio::test]
-async fn equipment_drop_guard_runs_after_queue_mutation_and_retains_stock_on_rejection() {
+async fn equipment_drop_guard_rechecks_stale_revision_and_retains_stock_on_rejection() {
     let mut s = Scene::new([-1; 8]).await;
     let candidate = s.offer(true).await;
     let id = s.brain.session.1;
@@ -466,45 +466,109 @@ async fn equipment_no_space_native_refusal_keeps_goods_without_drop_or_history()
 }
 
 #[tokio::test]
-async fn equipment_drop_rejects_native_window_opened_after_selection_without_cancelling_it() {
+async fn equipment_drop_rejects_native_window_opened_after_check_capture_without_cancelling_it() {
     let mut s = Scene::new([-1; 8]).await;
-    let candidate = s.offer(true).await;
+    s.offer(true).await;
+    let candidate = s.brain.mind.social.drop.take().unwrap();
     assert!(s.brain.mind.market.trade.is_none());
     let before = s.view().await;
     let id = before.session.player;
     let peer = s.peer;
-    let mut mine = [false; 12];
-    mine[candidate.slot] = true;
-    s.app
+    let peer_before = s.app.world.player_view(peer).await.unwrap();
+    let bags_before = s
+        .app
         .world
         .for_player(id)
-        .call(move |w| {
-            w.request_trade(peer, "Donor".into())?;
-            w.request_trade(id, "Recipient".into())?;
-            w.change_trade(id, mine)?;
-            assert!(w.has_active_trade(id));
-            Ok(())
+        .call(|w| {
+            Ok(w.entities
+                .iter()
+                .filter(|(_, e)| w.content.objects[&e.kind].class == "Container")
+                .map(|(id, e)| (*id, e.items.clone()))
+                .collect::<BTreeMap<_, _>>())
         })
         .await
         .unwrap();
-    life(&s.app, &mut s.brain, &before).await.unwrap();
-    let after = s.view().await;
-    assert_eq!(after.character.items, before.character.items);
-    assert_eq!(
-        after.character.inventory_revision,
-        before.character.inventory_revision
+    let diagnostic = s.dir.join("drop-rejection.log");
+    let _diagnostics = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(std::sync::Mutex::new(
+                std::fs::File::create(&diagnostic).unwrap(),
+            ))
+            .finish(),
     );
+    let mut mine = [false; 12];
+    mine[candidate.slot] = true;
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let actor = s.app.world.for_player(id);
+    let opening = tokio::spawn(async move {
+        actor
+            .call(move |w| {
+                entered.send(()).unwrap();
+                wait.recv().context("native-window gate abandoned")?;
+                w.request_trade(peer, "Donor".into())?;
+                w.request_trade(id, "Recipient".into())?;
+                w.change_trade(id, mine)?;
+                Ok(())
+            })
+            .await
+    });
+    ready.await.unwrap();
+    let app = s.app.clone();
+    let mut dropping = Box::pin(generosity::drop_equipment(
+        &app,
+        &mut s.brain,
+        &before,
+        candidate,
+    ));
+    // Check is captured before the first await, while this World still cannot run its queued fence.
+    assert!(futures_util::poll!(dropping.as_mut()).is_pending());
+    release.send(()).unwrap();
+    opening.await.unwrap().unwrap();
+    dropping.await.unwrap();
+    let rejection = std::fs::read_to_string(diagnostic).unwrap();
+    assert!(rejection.contains("equipment drop blocked by active native trade"));
+    assert!(rejection.contains("equipment drop rejected; no delivery inferred"));
+    assert_eq!(
+        crate::server::lifecycle::state(&s.app, before.session.account),
+        Some((false, Some(id), false))
+    );
+    let after = s.view().await;
+    let peer_after = s.app.world.player_view(peer).await.unwrap();
+    for (before, after) in [(&before, &after), (&peer_before, &peer_after)] {
+        assert_eq!(after.character.items, before.character.items);
+        assert_eq!(
+            after.character.inventory_revision,
+            before.character.inventory_revision
+        );
+        let saved = s
+            .app
+            .store
+            .load(after.session.account, after.session.character)
+            .await
+            .unwrap();
+        assert_eq!(saved.items, before.character.items);
+        assert_eq!(saved.revision, before.character.inventory_revision);
+    }
     assert!(s.brain.mind.social.episodes.is_empty());
-    s.app
+    let bags_after = s
+        .app
         .world
         .for_player(id)
         .call(move |w| {
             assert!(w.has_active_trade(id));
             assert!(w.has_active_trade(peer));
-            Ok(())
+            Ok(w.entities
+                .iter()
+                .filter(|(_, e)| w.content.objects[&e.kind].class == "Container")
+                .map(|(id, e)| (*id, e.items.clone()))
+                .collect::<BTreeMap<_, _>>())
         })
         .await
         .unwrap();
+    assert_eq!(bags_after, bags_before);
     s.native_countdown().await;
     s.app
         .world
