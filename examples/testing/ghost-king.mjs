@@ -57,10 +57,12 @@ export async function run(game){
     const root=roots[index];
     await protect(game);
     const before=await save(label+'-idle'),original=king(before,root.entity);assert(original?.kind===0x928&&original.hp===300000,'Untouched ordinary King required');
-    for(const stat of [2,5])await cheat(game,{kind:'stat_modifier',index:stat,amount:100,duration_ms:60000});
+    await cheat(game,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
     for(let n=0;n<20&&king(await game.inspect(),root.entity).stage!==1;n++)await fire(game,root.entity);
     game.check(label+' admits ordinary sword damage',king(await game.inspect(),root.entity).stage===1);
     await idle(2500);
+    await game.act({keys:[' '],duration_ms:250});
+    game.check(label+' evaluation uses an ordinary Berserk helm',(await game.observe()).character.conditions&(1<<19));
     for(let n=0;n<24;n++){
       const current=king(await game.inspect(),root.entity);if(current.stage>=3||300000-current.hp>=loss)break;
       await fire(game,root.entity);
