@@ -62,7 +62,7 @@ export async function run(game){
   }
   assert(livingEgg,'No young natural egg with a clear dagger shot');
   const beforeEgg=await game.inspect();
-  await game.act({keys:[],duration_ms:200,target:{entity:livingEgg.id,camera_angle:-Math.PI/4,fire:true}});
+  await game.act({keys:[],duration_ms:50,target:{entity:livingEgg.id,camera_angle:-Math.PI/4,fire:true}});
   await game.act({keys:[],duration_ms:400});
   const afterEgg=await save('egg-destroyed');
   game.check('shooting an egg kills it without XP or immediate hatch',!entity(afterEgg,livingEgg.id)&&afterEgg.view.character.experience===beforeEgg.view.character.experience&&afterEgg.diagnostic.character.lifetime.kills===beforeEgg.diagnostic.character.lifetime.kills+1&&!afterEgg.diagnostic.entities.some(e=>e.kind===0xdc0&&e.activated>beforeEgg.diagnostic.time_ms&&Math.hypot(e.pos.x-livingEgg.pos.x,e.pos.y-livingEgg.pos.y)<1));
@@ -117,6 +117,10 @@ export async function run(game){
     await game.act({keys:[],mouse:{x:700,y:580},duration_ms:1500});
     const entered=await save('jungle-entered');
     game.check('native interaction enters the earned Forbidden Jungle portal',entered.view.map.name==='Forbidden Jungle'&&entered.view.lifecycle.alive&&entered.view.session.character===initial.view.session.character);
+    await game.act({keys:[],duration_ms:2500});
+    await game.act({keys:['d'],duration_ms:300});
+    const moving=await save('jungle-moving');
+    game.check('Jungle admission finishes with ordinary native movement',moving.view.map.name==='Forbidden Jungle'&&Math.hypot(moving.view.position.x-entered.view.position.x,moving.view.position.y-entered.view.position.y)>.1);
     await game.act({keys:[],duration_ms:700},{name:'jungle-entered',when:()=>true});
     await writeFile(join(process.env.QA_RESULTS_DIR,'outcome.json'),JSON.stringify({coil:coil.id,destroyedEgg:livingEgg.id,portals,portalEntryObserved:true}));
   }
