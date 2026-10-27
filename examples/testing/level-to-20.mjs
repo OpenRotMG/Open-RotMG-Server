@@ -6,9 +6,8 @@ import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
 const root=()=>process.argv[process.argv.indexOf('--run-dir')+1];
 const caps=[670,385,75,25,50,75,40,60],growth=[[20,30],[5,15],[1,2],[0,0],[0,2],[1,2],[0,1],[0,2]];
-export const fixture={class:0x30e,level:19,seed:777,world:'sprite-world',worldSeed:1,
-  position:world=>{const boss=world.encounter_markers.find(e=>e.kind===0xd06);assert(boss);return{x:boss.position.x-4,y:boss.position.y};},
-  equipment:[0xb08,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:caps.map(n=>n-1)};
+export const fixture={class:0x30e,level:19,seed:777,world:'kitchen',position:{x:13.5,y:40.5},
+  equipment:[-1,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:caps.map(n=>n-1)};
 export async function enter({actor,account,browser,signal}){
   // Threshold fixtures are not an earned 1–20 journey; mutate only the unloaded disposable character.
   const seeded=execFileSync('python3',['-c',`
@@ -18,7 +17,7 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert row and row[1]==1
     ch=json.loads(row[0]);assert ch['exp']==50*(ch['level']-1)**2
     if ch['level']<20:
-        ch.update(exp=50*ch['level']**2-1,hp=100,mp=1)
+        ch.update(exp=50*ch['level']**2-1,hp=100,mp=200 if ch['level']==19 else 1)
         ch['fame']=ch['exp']//1000
         assert db.execute('UPDATE characters SET stats=? WHERE id=? AND account=?',(json.dumps(ch),int(sys.argv[2]),int(sys.argv[3]))).rowcount==1
     print(json.dumps({'actor':int(sys.argv[2]),'account':int(sys.argv[3]),'character':ch,'prepared':True}))
@@ -49,17 +48,17 @@ export async function run(game){
   }
   async function snapshot(name,client=game){const state=await client.inspect();observations.push({name,state});await writeFile(join(root(),'level-observations.json'),JSON.stringify({preparedThresholdsAndGear:true,observations},null,2));return state;}
   async function defeat(client){
-    const boss=(await client.inspect()).diagnostic.entities.find(e=>e.kind===0xd06);assert(boss);
-    for(let n=0;n<35;n++){
+    const boss=(await client.inspect()).diagnostic.entities.find(e=>e.kind===0x926);assert(boss);
+    for(let n=0;n<8;n++){
       if(!(await client.inspect()).diagnostic.entities.some(e=>e.id===boss.id))return;
-      await client.act({keys:[],duration_ms:800,target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true}});
+      await client.act({keys:[],duration_ms:150,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:false}});
+      await client.act({keys:[' '],duration_ms:600});
     }
-    assert.fail('Native staff did not defeat Limon');
+    assert.fail('Native spell did not defeat Bonegrind');
   }
   await protect(game);
   const start=await snapshot('prepared-19');
-  const {worldSeed,...shared}=fixture;
-  const peer=await game.join({...shared,level:1,world:start.view.session.world,position:{x:start.view.position.x,y:start.view.position.y-1},equipment:[-1,0xa2e,-1,-1],stats:null});
+  const peer=await game.join({...fixture,level:1,world:start.view.session.world,position:{x:start.view.position.x,y:start.view.position.y-1},stats:null});
   await protect(peer);
   await game.act({keys:[],duration_ms:1800,mouse:{x:700,y:240}},{name:'level-19-before',when:()=>true});
   const before=await snapshot('before-kill'),peerBefore=await snapshot('peer-before-kill',peer);
@@ -68,7 +67,7 @@ export async function run(game){
   await defeat(game);
   await game.act({keys:[],duration_ms:800},{name:'level-20-after',when:()=>true});
   const after=await snapshot('after-kill'),peerAfter=await snapshot('peer-after-kill',peer);
-  for(const [label,a,b,award] of [['finishing level',before,after,630],['shared first level',peerBefore,peerAfter,25]]){
+  for(const [label,a,b,award] of [['finishing level',before,after,21],['shared first level',peerBefore,peerAfter,21]]){
     const x=a.view.character,y=b.view.character;
     game.check(label+' receives capped real XP and one level',y.experience-x.experience===award&&y.level===x.level+1);
     // Inclusive growth and resource refill: selected Wizard XML and pinned Kithio CheckLevelUp, https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.Leveling.cs#L194-L220
@@ -86,5 +85,5 @@ export async function run(game){
   const capBefore=await snapshot('cap-before',capped);
   await defeat(capped);
   const capAfter=await snapshot('cap-after',capped);
-  game.check('level 20 earns further XP without level or stat growth',capAfter.view.character.experience-capBefore.view.character.experience===630&&capAfter.view.character.level===20&&JSON.stringify(capAfter.view.character.base_stats)===JSON.stringify(caps));
+  game.check('level 20 earns further XP without level or stat growth',capAfter.view.character.experience-capBefore.view.character.experience===21&&capAfter.view.character.level===20&&JSON.stringify(capAfter.view.character.base_stats)===JSON.stringify(caps));
 }
