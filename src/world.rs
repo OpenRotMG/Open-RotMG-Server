@@ -5703,10 +5703,16 @@ impl World {
                 let bag =
                     self.loot_bag(pos, None, chunk.iter().copied().map(i32::from).collect())?;
                 let entity = self.entities.get_mut(&bag).unwrap();
-                // Native stat 54 is scalar; group visibility and collection are enforced server-side.
-                entity.bag_owners = loot.shared_owners.clone();
+                // Period purple sacks were owner-only, unlike Kithio's shared gear: https://forums.anandtech.com/threads/realm-of-the-mad-god.2228194/post-33073282
+                let owner = (entity.kind != 0x500)
+                    .then(|| *loot.shared_owners.choose(&mut self.rng).unwrap());
+                if let Some(owner) = owner {
+                    entity.extra_stats.push((54, owner));
+                } else {
+                    entity.bag_owners = loot.shared_owners.clone();
+                }
                 entity.drop_slots = (0..chunk.len()).collect();
-                tracing::info!(entity = bag, owners = ?loot.shared_owners, "contributor-group loot allocated");
+                tracing::info!(entity = bag, ?owner, owners = ?entity.bag_owners, "god equipment bag allocated");
             }
         }
         Ok(())
