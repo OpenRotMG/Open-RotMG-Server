@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -51,23 +52,81 @@ def lease(path, mode=fcntl.LOCK_EX, wait=True):
         yield lock
 
 
+def build_tickets(root):
+    tickets = sorted(root.glob('.build-ticket-v1-*'))
+    for path in tickets:
+        number = path.name.removeprefix('.build-ticket-v1-')
+        info = path.lstat()
+        if (len(number) != 20 or any(c not in '0123456789' for c in number)
+                or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_size != 0
+                or info.st_dev != root.stat().st_dev):
+            raise RuntimeError(f'Invalid Cargo build ticket; preserved: {path}')
+    return tickets
+
+
+def remove_build_ticket(path, lock):
+    before, opened = path.lstat(), os.fstat(lock.fileno())
+    if (before.st_dev, before.st_ino, before.st_size, before.st_nlink) != (opened.st_dev, opened.st_ino, 0, 1):
+        raise RuntimeError(f'Cargo build ticket changed; preserved: {path}')
+    path.unlink()
+
+
 @contextmanager
 def build_slot(root):
-    waiting = False
-    while True:
-        for number in range(BUILD_SLOTS):
-            with os.fdopen(os.open(root / f'.build-slot-{number}.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a') as lock:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    continue
-                print(f'Cargo build slot: {number + 1}/{BUILD_SLOTS}; pid={os.getpid()}', flush=True)
-                yield lock
-                return
-        if not waiting:
-            print(f'Waiting for one of {BUILD_SLOTS} Cargo build slots: {root}', flush=True)
-            waiting = True
-        time.sleep(0.1)
+    queue = root / '.build-queue.lock'
+    with lease(queue):
+        tickets = build_tickets(root)
+        number = int(tickets[-1].name.rsplit('-', 1)[1]) + 1 if tickets else 0
+        if number >= 10**20:
+            raise RuntimeError('Cargo build ticket sequence exhausted')
+        path = root / f'.build-ticket-v1-{number:020d}'
+        ticket = os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'a')
+        fcntl.flock(ticket, fcntl.LOCK_EX)
+    print(f'Cargo build ticket: {path.name}; pid={os.getpid()}', flush=True)
+    queued, waiting, slot = True, False, None
+    try:
+        with ticket:
+            try:
+                while slot is None:
+                    with lease(queue):
+                        tickets = build_tickets(root)
+                        while tickets and tickets[0] != path:
+                            with os.fdopen(os.open(tickets[0], os.O_RDWR | os.O_NOFOLLOW), 'a') as older:
+                                try:
+                                    fcntl.flock(older, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                                except BlockingIOError:
+                                    break
+                                # An unlocked empty ticket has no surviving waiter, regardless of PID reuse or age.
+                                remove_build_ticket(tickets.pop(0), older)
+                        if path not in tickets:
+                            raise RuntimeError(f'Owned Cargo build ticket disappeared: {path}')
+                        if tickets[0] == path:
+                            for number in range(BUILD_SLOTS):
+                                candidate = os.fdopen(os.open(root / f'.build-slot-{number}.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a')
+                                try:
+                                    fcntl.flock(candidate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                                except BlockingIOError:
+                                    candidate.close()
+                                    continue
+                                slot = candidate
+                                remove_build_ticket(path, ticket)
+                                queued = False
+                                print(f'Cargo build slot: {number + 1}/{BUILD_SLOTS}; pid={os.getpid()}', flush=True)
+                                break
+                    if slot is None:
+                        if not waiting:
+                            print(f'Waiting for one of {BUILD_SLOTS} Cargo build slots: {root}', flush=True)
+                            waiting = True
+                        time.sleep(0.1)
+            finally:
+                if queued:
+                    with lease(queue):
+                        remove_build_ticket(path, ticket)
+        yield slot
+    finally:
+        if slot is not None:
+            slot.close()
 
 
 @contextmanager

@@ -31,6 +31,24 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
     (w, store, owners)
 }
 
+#[test]
+fn septavius_stages_a_realm_exit_until_clear_commit() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = crate::dungeon::undead::generate(&content, 12351).unwrap();
+    let mut world = World::new(content, Arc::new(map)).unwrap();
+    world.name = "Undead Lair".into();
+    world.encounter = true;
+    let boss = world.actors().find(|e| e.kind == 0xd90).unwrap().id;
+    world.defeat_entity(boss).unwrap();
+    assert!(world.cleared);
+    assert!(!world.entities.contains_key(&boss));
+    let exit = &world.entities[&world.clear_exit.unwrap()];
+    assert_eq!(exit.kind, 0x704);
+    assert!(!exit.published);
+    assert_eq!(world.actors().filter(|e| e.kind == 0x704).count(), 1);
+    assert!(!world.actors().any(|e| e.kind == 0x71d));
+}
+
 fn clear_bags(w: &mut World) {
     for id in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
         w.remove_entity(id);
