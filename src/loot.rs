@@ -66,7 +66,7 @@ pub(crate) fn period_surface(kind: u16) -> bool {
             | 0x614 | 0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
             | 0x624..=0x626 | 0x629..=0x62f | 0x631..=0x633
             | 0x63b | 0x63c | 0x63e..=0x640 | 0x642..=0x645 | 0x647..=0x64d
-            | 0x64f | 0x650 | 0x900..=0x902
+            | 0x64f | 0x650 | 0x669..=0x66b | 0x900..=0x902
     )
 }
 fn table(kind: u16) -> &'static [(f64, Pick)] {
@@ -455,8 +455,11 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x91b | 0x91f | 0x928 | 0x675 | 0x6c2 | 0x923 => &[],
         0x676 => &[(0.05, Item(0xa23))],
         0x677 => &[(0.05, Item(0xa22))],
-        0x65f | 0x660 | 0x661 | 0x922 => &[(0.02, Item(0xa23))],
-        0x921 | 0x91d | 0x91e | 0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
+        // Ents drop a tincture, Saplings nothing: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.EntAncient.cs#L219-L244
+        0x921 => &[(0.02, Item(0xb0c))],
+        0x922 => &[],
+        0x65f..=0x661 => &[(0.02, Item(0xa23))],
+        0x91d | 0x91e | 0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
         0x6c1 => &[(0.0001, Item(crate::endgame::INCANTATION))],
         0x920 => &[
             (0.3, Tier(6, WEAPONS)),
@@ -1343,6 +1346,38 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn red_demon_minions_have_separate_public_equipment_rolls() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, expected) in [
+            (0x669, vec![(0.02, 0xa05), (0.02, 0xa9a), (0.02, 0xa1c)]),
+            (0x66a, vec![(0.03, 0xa1c)]),
+            (0x66b, vec![(0.03, 0xa17), (0.02, 0xa0a)]),
+        ] {
+            let actual: Vec<_> = table(kind)
+                .iter()
+                .map(|(p, pick)| (*p, candidates(&content, *pick)[0]))
+                .collect();
+            assert_eq!(actual, expected, "{kind:#x}");
+            assert!(!private(kind));
+            assert!(period_surface(kind), "one public attempt per death");
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                expected.iter().map(|(_, item)| *item).collect::<Vec<_>>()
+            );
+        }
+        assert!(private(0x668));
+    }
+
+    #[test]
+    fn ent_follower_rewards_do_not_use_generic_potions() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let mut rng = rand::rngs::mock::StepRng::new(0, 0);
+        let observed = [0x921, 0x922, 0x65f].map(|kind| rewards(&content, kind, &mut rng));
+        assert_eq!(observed, [vec![0xb0c], vec![], vec![0xa23]]);
+        assert!(matches!(table(0x921), [(chance, Pick::Item(0xb0c))] if *chance == 0.02));
+    }
 
     #[test]
     fn god_bound_equipment_is_allocated_once_and_never_in_shared_loot() {

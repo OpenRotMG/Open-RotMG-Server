@@ -300,7 +300,10 @@ impl World {
         if crate::dungeon::abyss::ROSTER.contains(&self.entities[&id].kind) {
             return self.abyss_mechanics(id, target, elapsed);
         }
-        if self.entities[&id].quest.is_some() {
+        // Quest tags retain hero ownership, not their AI: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Cyclops.cs
+        if self.entities[&id].quest.is_some()
+            && !crate::endgame::HEROES.contains(&self.entities[&id].kind)
+        {
             return self.quest_mechanics(id);
         }
         if crate::endgame::ROSTER.contains(&self.entities[&id].kind) {

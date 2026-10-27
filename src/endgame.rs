@@ -674,8 +674,11 @@ pub(crate) fn loot(kind: u16) -> &'static [(f64, crate::loot::Pick)] {
             (0.06, Tier(5, RINGS)),
         ],
         0x1749 => &[(0.2, Tier(7, WEAPONS)), (0.03, Item(0xa22))],
-        0x669..=0x66b
-        | 0x67e..=0x682
+        // Compiled Kithio keeps these shared equipment pools separate from boss/chest loot: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.RedDemon.cs#L44-L85
+        0x669 => &[(0.02, Item(0xa05)), (0.02, Item(0xa9a)), (0.02, Item(0xa1c))],
+        0x66a => &[(0.03, Item(0xa1c))],
+        0x66b => &[(0.03, Item(0xa17)), (0.02, Item(0xa0a))],
+        0x67e..=0x682
         | 0xd7c
         | 0xd7e
         | 0xd7f
