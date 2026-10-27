@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateNativeChat,guardNativeInput,dispatchNativeChat} from './native-chat.mjs';
+import {validateNativeChat,guardNativeInput,dispatchNativeChat,holdNativeInput} from './native-chat.mjs';
 
 const input=chat=>({keys:[],duration_ms:1000,chat});
 function controller(beforeSend=()=>{}) {
@@ -16,6 +16,17 @@ function controller(beforeSend=()=>{}) {
   return {call,events,attempts,state,advance(ms){now+=ms;},loseLease(){leaseError=Error('lease lost');},stop(){state.abort();}};
 }
 const enter=type=>({method:'Input.dispatchKeyEvent',type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+function lifecycle(beforeSend=()=>{},afterSend=()=>{}) {
+  const inputHold={current:null},events=[],bindings={w:['KeyW',87]};
+  const call=async(method,params)=>{
+    await beforeSend(method,params);
+    guardNativeInput(method,params,inputHold.current);
+    events.push({method,...params});
+    await afterSend(method,params);
+  };
+  return {inputHold,events,hold:(...args)=>holdNativeInput(inputHold,call,bindings,...args)};
+}
 
 test('native-chat refuses invalid or mixed input before any effects',async()=>{
   const c=controller();
@@ -83,4 +94,100 @@ test('native-chat cannot open or type outside an active hold, including after cl
     assert.throws(()=>guardNativeInput(method,params,state,undefined,100),/bounded hold/);
   }
   assert.doesNotThrow(()=>guardNativeInput('Input.dispatchKeyEvent',{type:'keyUp'},undefined,Error('lease lost')));
+});
+
+for(const next of ['chat','key'])test(`holdNativeInput late drag rejection cannot stop or release B's pending ${next} input`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:100});
+  const drag=Promise.withResolvers(),pendingDown=Promise.withResolvers();
+  let delayB=false;
+  const c=lifecycle(async(method,params)=>{
+    if(delayB&&params.type==='keyDown')await pendingDown.promise;
+  },async(method,params)=>{
+    if(params.type==='mouseMoved')await drag.promise;
+  });
+  const a=c.hold(['w'],{x:1,y:2},100,{x:3,y:4});
+  await flush();t.mock.timers.tick(50);await flush();
+  assert(c.events.some(e=>e.type==='mouseMoved'));
+  t.mock.timers.tick(50);
+  const resultA=await a;await resultA.down;
+  assert.equal(c.inputHold.current,null);
+  assert.equal(resultA.started,100);assert.equal(resultA.released,200);
+  const releasedA=c.events.slice();
+  delayB=true;
+  const b=next==='chat'?c.hold([],undefined,100,undefined,'B remains active'):c.hold(['w'],undefined,100);
+  const stateB=c.inputHold.current;
+  drag.reject(Error('late A drag failure'));await flush();
+  assert.equal(c.inputHold.current,stateB);
+  assert.notEqual(stateB.stopped,true);
+  assert.deepEqual(c.events,releasedA,'A must not resend keyUp or mouseReleased into B');
+  pendingDown.resolve();await flush();
+  assert.equal(stateB.started,200);
+  assert.deepEqual(c.events.slice(releasedA.length),next==='chat'?
+    [enter('keyDown'),enter('keyUp'),{method:'Input.insertText',text:'B remains active'},enter('keyDown'),enter('keyUp')]:
+    [{method:'Input.dispatchKeyEvent',type:'keyDown',key:'w',code:'KeyW',windowsVirtualKeyCode:87}]);
+  t.mock.timers.tick(100);
+  const resultB=await b;
+  assert((await resultB.down).every(r=>r.status==='fulfilled'));
+  assert.equal(c.inputHold.current,null);
+});
+
+test('holdNativeInput late drag rejection with no active hold reuses completed cleanup',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:100});
+  const drag=Promise.withResolvers();
+  const c=lifecycle(undefined,async(method,params)=>{if(params.type==='mouseMoved')await drag.promise;});
+  const a=c.hold([],{x:1,y:2},100,{x:3,y:4});
+  await flush();t.mock.timers.tick(50);await flush();t.mock.timers.tick(50);
+  const result=await a;await result.down;
+  const events=c.events.slice();
+  drag.reject(Error('late A drag failure'));await flush();
+  assert.equal(c.inputHold.current,null);
+  assert.deepEqual(c.events,events);
+});
+
+test('holdNativeInput confirms in-flight cleanup before rejecting a current abort',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:100});
+  const release=Promise.withResolvers();
+  const c=lifecycle(undefined,async(method,params)=>{if(params.type==='keyUp')await release.promise;});
+  let settled=false;
+  const hold=c.hold(['w'],undefined,100);
+  const rejection=assert.rejects(hold,/current hold failed/).then(()=>{settled=true;});
+  await flush();t.mock.timers.tick(100);await flush();
+  const state=c.inputHold.current;
+  const aborted=state.abort(Error('current hold failed'));
+  await flush();assert.equal(settled,false);assert.equal(c.inputHold.current,state);
+  assert.equal(c.events.filter(e=>e.type==='keyUp').length,1);
+  release.resolve();await aborted;await rejection;
+  assert.equal(c.inputHold.current,null);
+});
+
+test('holdNativeInput reports chat failure only after confirmed release, including release failure',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:100});
+  const release=Promise.withResolvers();
+  let keyUps=0,settled=false;
+  const c=lifecycle(undefined,async(method,params)=>{
+    if(method==='Input.insertText')throw Error('chat dispatch failed');
+    if(params.type==='keyUp'&&++keyUps===2)await release.promise;
+  });
+  const hold=c.hold([],undefined,100,undefined,'hello');
+  const rejection=assert.rejects(hold,/chat dispatch failed; input release unconfirmed: .*release failed/).then(()=>{settled=true;});
+  await flush();const state=c.inputHold.current;
+  assert.equal(state.stopped,true);assert.equal(settled,false);
+  release.reject(Error('release failed'));await rejection;
+  assert.equal(c.inputHold.current,null);
+  assert.equal(c.events.filter(e=>e.type==='keyDown').length,1);
+});
+
+test('holdNativeInput confirms cleanup on undispatched DOWN timeout and blocks the delayed DOWN',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:100});
+  const down=Promise.withResolvers(),release=Promise.withResolvers();
+  const c=lifecycle(async(method,params)=>{if(params.type==='keyDown')await down.promise;},
+    async(method,params)=>{if(params.type==='keyUp')await release.promise;});
+  let settled=false;
+  const hold=c.hold(['w'],undefined,100);
+  const rejection=assert.rejects(hold,/DOWN was not dispatched/).then(()=>{settled=true;});
+  await flush();t.mock.timers.tick(10000);await flush();
+  assert.equal(c.inputHold.current.stopped,true);assert.equal(settled,false);
+  down.resolve();await flush();
+  assert.deepEqual(c.events,[{method:'Input.dispatchKeyEvent',type:'keyUp',key:'w',code:'KeyW',windowsVirtualKeyCode:87}]);
+  release.resolve();await rejection;assert.equal(c.inputHold.current,null);
 });
