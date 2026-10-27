@@ -6,15 +6,21 @@ fn fixture() -> (Content, PlayerView, Brain) {
     v.session.account = 201;
     v.session.world = -4;
     v.quest = None;
-    let mut peer = crate::bots::quest_tests::fixture().1.objects.remove(0);
-    peer.id = 3;
-    peer.kind = crate::content::WIZARD;
-    peer.account = Some(200);
-    peer.name = "GuestObserved".into();
-    peer.position = Pos { x: 22.5, y: 10.5 };
-    peer.hp = 500;
-    peer.max_hp = 500;
-    peer.equipped = v.character.items[..4].to_vec();
+    let peer = VisibleObject {
+        id: 3,
+        kind: crate::content::WIZARD,
+        account: Some(200),
+        name: "GuestObserved".into(),
+        position: Pos { x: 22.5, y: 10.5 },
+        hp: 500,
+        max_hp: 500,
+        level: None,
+        equipped: v.character.items[..4].to_vec(),
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    };
     v.player_markers.push(PlayerMarker {
         id: peer.id,
         account: peer.account.unwrap(),
@@ -181,7 +187,7 @@ fn brief_public_visibility_loss_recovers_but_unseen_or_unsafe_targets_are_not_ch
         "a minimap marker is not visible shared company"
     );
     advance(&mut v, 5000);
-    v.objects.push(fixture().1.objects.pop().unwrap());
+    v.objects.push(peer);
     assert!(b.crowd.cooperator(&v, |_| true).is_some());
     assert!(
         b.crowd.cooperator(&v, |_| false).is_none(),
@@ -191,7 +197,7 @@ fn brief_public_visibility_loss_recovers_but_unseen_or_unsafe_targets_are_not_ch
 
     let (c, mut v, mut b) = fixture();
     shared(&c, &v, &mut b);
-    v.objects.pop();
+    peer = v.objects.pop().unwrap();
     advance(&mut v, 1000);
     assert_eq!(v.elapsed_ms, 6000);
     b.crowd.observe(&v, &c);
@@ -201,7 +207,7 @@ fn brief_public_visibility_loss_recovers_but_unseen_or_unsafe_targets_are_not_ch
     assert!(b.crowd.cooperator(&v, |_| true).is_none());
     advance(&mut v, 50);
     assert_eq!(v.elapsed_ms, 12000);
-    v.objects.push(fixture().1.objects.pop().unwrap());
+    v.objects.push(peer);
     assert!(
         b.crowd.cooperator(&v, |_| true).is_none(),
         "reappearance at the six-second loss deadline cannot restore company"
@@ -210,8 +216,7 @@ fn brief_public_visibility_loss_recovers_but_unseen_or_unsafe_targets_are_not_ch
     assert!(b.crowd.cooperation.passive_available(42000));
     let (c, mut v, mut b) = fixture();
     shared(&c, &v, &mut b);
-    peer.position = Pos { x: 64.5, y: 64.5 };
-    v.objects[1] = peer;
+    v.objects[1].position = Pos { x: 64.5, y: 64.5 };
     assert!(b.crowd.cooperator(&v, |_| true).is_none());
 }
 
@@ -233,7 +238,9 @@ fn ongoing_shared_hits_cannot_renew_an_outing_and_session_changes_erase_it() {
     );
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
     assert!(
-        b.crowd.destination(&v, None, |_| true).is_none(),
+        b.crowd
+            .destination(&v, None, |a| b.mind.social.known(a), |_| true)
+            .is_none(),
         "cooperative expiry cannot immediately become a fresh passive outing"
     );
     advance(&mut v, 30_000);
@@ -253,7 +260,10 @@ fn newer_public_peer_can_attract_passive_company_and_shared_damage_catchup() {
     assert!(can_approach(v.session.world, 199, 200));
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
     assert_eq!(
-        b.crowd.destination(&v, None, |_| true).unwrap().account,
+        b.crowd
+            .destination(&v, None, |a| b.mind.social.known(a), |_| true)
+            .unwrap()
+            .account,
         200
     );
     shared(&c, &v, &mut b);
@@ -294,7 +304,11 @@ fn passive_outings_are_directional_bounded_and_yield_to_safety_and_commitments()
     let (c, mut v, mut b) = fixture();
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
     b.crowd.approach_selected(3);
-    assert!(b.crowd.destination(&v, None, |_| true).is_some());
+    assert!(
+        b.crowd
+            .destination(&v, None, |a| b.mind.social.known(a), |_| true)
+            .is_some()
+    );
     assert!(can_approach(v.session.world, 201, 200));
     assert!(!can_approach(v.session.world, 200, 201));
     assert!(!can_approach(v.session.world, 200, 200));
@@ -303,7 +317,11 @@ fn passive_outings_are_directional_bounded_and_yield_to_safety_and_commitments()
     v.player_markers[0].account = 201;
     v.objects[1].account = Some(201);
     reverse.attend(&v, &c, &b.mind.cognition, false);
-    assert!(reverse.destination(&v, None, |_| true).is_none());
+    assert!(
+        reverse
+            .destination(&v, None, |a| b.mind.social.known(a), |_| true)
+            .is_none()
+    );
     v.session.account = 201;
     v.player_markers[0].account = 200;
     v.objects[1].account = Some(200);
@@ -311,15 +329,27 @@ fn passive_outings_are_directional_bounded_and_yield_to_safety_and_commitments()
     advance(&mut v, 1000);
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
     assert!(b.crowd.keeping_company(3));
-    assert!(b.crowd.destination(&v, None, |_| true).is_none());
+    assert!(
+        b.crowd
+            .destination(&v, None, |a| b.mind.social.known(a), |_| true)
+            .is_none()
+    );
     v.player_markers.push(marker);
     advance(&mut v, 1000);
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
-    assert!(b.crowd.destination(&v, None, |_| true).is_some());
+    assert!(
+        b.crowd
+            .destination(&v, None, |a| b.mind.social.known(a), |_| true)
+            .is_some()
+    );
     advance(&mut v, 90_000);
     b.crowd.attend(&v, &c, &b.mind.cognition, false);
     assert!(!b.crowd.keeping_company(3));
-    assert!(b.crowd.destination(&v, None, |_| true).is_none());
+    assert!(
+        b.crowd
+            .destination(&v, None, |a| b.mind.social.known(a), |_| true)
+            .is_none()
+    );
 
     let (c, mut v, mut b) = fixture();
     shared(&c, &v, &mut b);
@@ -332,4 +362,230 @@ fn passive_outings_are_directional_bounded_and_yield_to_safety_and_commitments()
     b.invitation_until = v.time_ms + 10_000;
     b.decide(&v, &c).unwrap();
     assert!(b.crowd.cooperator(&v, |_| true).is_none());
+}
+
+fn matched_pair() -> (Content, PlayerView, Brain) {
+    let (c, mut v, mut b) = fixture();
+    let edge = |a: i32| (a as u32 ^ v.session.account as u32).wrapping_mul(2654435761) % 9;
+    let account = (2..200)
+        .find(|a| can_approach(v.session.world, v.session.account, *a) && edge(*a) == edge(200))
+        .unwrap();
+    let position = v.player_markers[0].position;
+    v.player_markers.push(PlayerMarker {
+        id: 4,
+        account,
+        position,
+        name: "GuestHelpful".into(),
+    });
+    v.objects.push(VisibleObject {
+        id: 4,
+        account: Some(account),
+        kind: crate::content::PRIEST,
+        name: "GuestHelpful".into(),
+        position,
+        hp: 500,
+        max_hp: 500,
+        level: None,
+        equipped: vec![0xa00],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    });
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    (c, v, b)
+}
+
+fn receive_heal(v: &PlayerView, b: &mut Brain) {
+    let mut notice = wire::Writer::default();
+    notice
+        .i32(v.session.player)
+        .utf("+50")
+        .i32(0xff00ff00_u32 as i32);
+    let mut packets = vec![Packet {
+        id: wire::NOTIFICATION,
+        body: notice.0,
+    }];
+    for (effect, target) in [(1, v.session.player), (5, 4)] {
+        let mut w = wire::Writer::default();
+        w.u8(effect)
+            .i32(target)
+            .f32(v.objects[2].position.x)
+            .f32(v.objects[2].position.y)
+            .f32(0.)
+            .f32(0.)
+            .i32(0);
+        packets.push(Packet {
+            id: wire::SHOW_EFFECT,
+            body: w.0,
+        });
+    }
+    for packet in packets {
+        b.mind
+            .social
+            .receive(&packet, v, "OwnGuest", 0., false)
+            .unwrap();
+    }
+    assert!(b.mind.social.known(v.player_markers[1].account));
+}
+
+fn destination(v: &PlayerView, b: &Brain) -> Option<i32> {
+    b.crowd
+        .destination(v, None, |a| b.mind.social.known(a), |_| true)
+        .map(|p| p.id)
+}
+
+#[test]
+fn attributed_heal_prefers_matched_account_without_level_special_follow() {
+    let (c, mut v, mut b) = matched_pair();
+    assert_eq!(destination(&v, &b), Some(3));
+    receive_heal(&v, &mut b);
+    for level in [1, 5, 6, 20] {
+        v.character.level = level;
+        assert_eq!(destination(&v, &b), Some(4));
+        let grid = b.navigation_grid(&v, &c, &[]);
+        assert!(b.mind.social.decide(&v, &grid, 0., false).is_none());
+    }
+    b.mind.social.bind();
+    v.objects[2].id = 5;
+    v.objects[2].name = "GuestReplacement".into();
+    v.player_markers[1].id = 5;
+    v.player_markers[1].name = "GuestReplacement".into();
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    b.crowd.contacts.remove(&4);
+    assert_eq!(
+        destination(&v, &b),
+        Some(5),
+        "account, not character/name, carries the fact"
+    );
+}
+
+#[test]
+fn factual_preference_is_bounded_and_retained_company_wins() {
+    let (c, mut v, mut b) = matched_pair();
+    b.crowd.approach_selected(3);
+    receive_heal(&v, &mut b);
+    assert_eq!(destination(&v, &b), Some(3));
+    b.crowd.approaching = None;
+    b.crowd.company.clear();
+    v.player_markers[1].position.x += 4.;
+    v.objects[2].position.x += 4.;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert_eq!(destination(&v, &b), Some(3));
+}
+
+#[test]
+fn known_account_does_not_bypass_rank_routes_visibility_attention_or_cap() {
+    let (c, mut v, mut b) = matched_pair();
+    receive_heal(&v, &mut b);
+    let known = v.player_markers[1].account;
+    assert!(
+        b.crowd
+            .destination(
+                &v,
+                None,
+                |a| b.mind.social.known(a),
+                |p| p != v.player_markers[1].position
+            )
+            .is_none()
+    );
+    v.objects[2].hp = 0;
+    b.crowd.contacts.remove(&4);
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert_ne!(destination(&v, &b), Some(4));
+    v.objects[2].hp = 500;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    v.session.account = (2..200)
+        .find(|a| *a != known && !can_approach(v.session.world, *a, known))
+        .unwrap();
+    assert_ne!(destination(&v, &b), Some(4));
+    v.session.account = 201;
+    b.crowd.company = (10..14)
+        .map(|id| ((id, id), (v.time_ms + 90_000, true)))
+        .collect();
+    assert_eq!(destination(&v, &b), None);
+    b.crowd.company.clear();
+    v.player_markers.pop();
+    advance(&mut v, 1);
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert_eq!(destination(&v, &b), Some(3));
+    v.player_markers.push(PlayerMarker {
+        id: 4,
+        account: known,
+        position: v.objects[2].position,
+        name: v.objects[2].name.clone(),
+    });
+    b.mind.cognition.attention = 0;
+    b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    assert_eq!(
+        destination(&v, &b),
+        Some(3),
+        "unattended known cue cannot refresh"
+    );
+}
+
+#[test]
+fn prepared_episodes_are_boolean_positive_facts_not_greeting_reputation() {
+    let (c, mut v, mut b) = matched_pair();
+    let account = v.player_markers[1].account;
+    let character = v.session.character;
+    let episode = |interaction| {
+        serde_json::json!({
+            "account": account,
+            "name": "GuestHelpful",
+            "own_character": character,
+            "interaction": interaction,
+            "amount": 1
+        })
+    };
+    for interaction in ["Recognized", "Refused"] {
+        b.mind.social = serde_json::from_value(serde_json::json!({
+            "episodes": vec![episode(interaction); 32]
+        }))
+        .unwrap();
+        assert_eq!(destination(&v, &b), Some(3));
+    }
+    for interaction in ["HealedBy", "ReceivedHealth", "GaveHealth"] {
+        b.mind.social = serde_json::from_value(serde_json::json!({
+            "episodes": [episode(interaction)]
+        }))
+        .unwrap();
+        assert_eq!(destination(&v, &b), Some(4));
+        let episode = b.mind.social.episodes[0].clone();
+        b.mind.social.episodes.resize(32, episode);
+        assert_eq!(destination(&v, &b), Some(4));
+        v.player_markers[1].position.x += 4.;
+        b.crowd.attend(&v, &c, &b.mind.cognition, false);
+        assert_eq!(destination(&v, &b), Some(3));
+        v.player_markers[1].position.x -= 4.;
+        b.crowd.attend(&v, &c, &b.mind.cognition, false);
+    }
+}
+
+#[test]
+fn repeated_help_and_recognition_cannot_renew_passive_expiry_or_cooldown() {
+    let (c, mut v, mut b) = matched_pair();
+    receive_heal(&v, &mut b);
+    b.crowd.approach_selected(4);
+    let deadline = b.crowd.company[&(4, v.player_markers[1].account)].0;
+    for ms in [89_999, 1, 29_999, 1] {
+        advance(&mut v, ms);
+        receive_heal(&v, &mut b);
+        b.mind.social.bind();
+        let grid = b.navigation_grid(&v, &c, &[]);
+        assert!(b.mind.social.decide(&v, &grid, 0., false).is_none());
+        b.crowd.attend(&v, &c, &b.mind.cognition, false);
+        if v.time_ms < deadline {
+            assert_eq!(
+                b.crowd.company[&(4, v.player_markers[1].account)].0,
+                deadline
+            );
+            assert_eq!(destination(&v, &b), Some(4));
+        } else if v.time_ms < deadline + 30_000 {
+            assert!(!b.crowd.keeping_company(4));
+            assert_eq!(destination(&v, &b), Some(3));
+        } else {
+            assert_eq!(destination(&v, &b), Some(4));
+        }
+    }
 }

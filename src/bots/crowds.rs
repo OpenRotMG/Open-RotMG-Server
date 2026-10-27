@@ -241,6 +241,7 @@ impl Crowd {
         &'a self,
         v: &PlayerView,
         group: Option<&adventures::Adventure>,
+        known: impl Fn(i32) -> bool,
         eligible_position: impl Fn(Pos) -> bool,
     ) -> Option<&'a PlayerMarker> {
         if !matches!(v.map.name.as_str(), "Realm" | "Pirate Cave" | "Snake Pit")
@@ -248,29 +249,22 @@ impl Crowd {
         {
             return None;
         }
-        self.attended_destination(
-            v.time_ms,
-            v.position,
-            v.session.world,
-            v.session.account,
-            group,
-            |p| survivable(v, p) && eligible_position(p),
-        )
+        self.attended_destination(v, group, known, |p| {
+            survivable(v, p) && eligible_position(p)
+        })
     }
     fn attended_destination(
         &self,
-        time_ms: u64,
-        position: Pos,
-        world: i32,
-        account: i32,
+        v: &PlayerView,
         group: Option<&adventures::Adventure>,
+        known: impl Fn(i32) -> bool,
         eligible_position: impl Fn(Pos) -> bool,
     ) -> Option<&PlayerMarker> {
         self.contacts
             .values()
             .filter(|(p, seen)| {
-                *seen == time_ms
-                    && can_approach(world, account, p.account)
+                *seen == v.time_ms
+                    && can_approach(v.session.world, v.session.account, p.account)
                     && eligible_position(p.position)
                     && (self.company.len() < 4 || self.company.contains_key(&(p.id, p.account)))
                     && self
@@ -284,10 +278,12 @@ impl Crowd {
                     let shared = group.is_some_and(|g| {
                         !g.finished && g.members.iter().any(|m| m.account == p.account)
                     }) || self.contacts.values().any(|(q, seen)| {
-                        *seen == time_ms && q.id != p.id && q.position.distance(p.position) < 14.
+                        *seen == v.time_ms && q.id != p.id && q.position.distance(p.position) < 14.
                     });
-                    p.position.distance(position) - if shared { 8. } else { 0. }
-                        + ((p.account as u32 ^ account as u32).wrapping_mul(2654435761) % 9) as f32
+                    p.position.distance(v.position) - if shared { 8. } else { 0. }
+                        + ((p.account as u32 ^ v.session.account as u32).wrapping_mul(2654435761)
+                            % 9) as f32
+                        - if known(p.account) { 3. } else { 0. }
                 };
                 // Small score changes do not justify abandoning company already being approached.
                 let approaching = |p: &PlayerMarker| {

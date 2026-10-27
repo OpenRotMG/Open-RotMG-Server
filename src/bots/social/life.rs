@@ -492,19 +492,6 @@ impl Life {
                 );
             }
         }
-        if v.map.name != "Nexus"
-            && v.character.level <= 5
-            && let Some(p) = v.objects.iter().find(|p| {
-                p.hp > 0
-                    && p.account.is_some_and(|a| self.known(a))
-                    && v.position.distance(p.position) > 7.
-            })
-        {
-            let mut d = idle();
-            d.goal = Goal::Follow(p.id);
-            d.movement = grid.towards(v.position, p.position);
-            return Some(d);
-        }
         None
     }
 }

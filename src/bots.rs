@@ -1468,9 +1468,12 @@ impl Brain {
             && crowds::cooperative_available(&choices, v.position, range, |position| {
                 !self.blocked.contains_key(&tile(position))
             })
-            && let Some(marker) = self.crowd.destination(v, self.group.as_ref(), |position| {
-                !self.blocked.contains_key(&tile(position))
-            })
+            && let Some(marker) = self.crowd.destination(
+                v,
+                self.group.as_ref(),
+                |account| self.mind.social.known(account),
+                |position| !self.blocked.contains_key(&tile(position)),
+            )
         {
             let distance = marker.position.distance(v.position);
             if distance > 7. {
