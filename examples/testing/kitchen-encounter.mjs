@@ -1,6 +1,6 @@
 export const fixture={class:0x310,level:20,seed:717,world:'kitchen',position:{x:13.5,y:40.5},equipment:[0xa04,0xa31,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,30,25,30,20,40,50]};
 async function walk(game,goal){
-  for(let i=0;i<100;i++){
+  for(let i=0;i<50;i++){
     const view=await game.observe(),dx=goal.x-view.position.x,dy=goal.y-view.position.y,distance=Math.hypot(dx,dy);
     if(distance<0.4)return;
     const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
@@ -26,10 +26,10 @@ export async function run(game){
   const victory=await game.inspect();
   game.check('native wand fire defeats Bonegrind',!victory.diagnostic.entities.some(e=>e.id===boss.id));
   await walk(game,{x:7.5,y:33.5});
-  const door=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x122&&Math.abs(e.pos.x-7.5)<0.1&&Math.abs(e.pos.y-30.5)<0.1);
-  game.check('authored exit door is visible',!!door);
-  await game.act({keys:[],duration_ms:2000,target:{entity:door.id,camera_angle:-Math.PI/4,fire:true}});
-  game.check('native fire opens the Kitchen exit corridor',!(await game.inspect()).diagnostic.entities.some(e=>e.id===door.id));
+  const doors=(await game.inspect()).diagnostic.entities.filter(e=>e.kind===0x122&&Math.abs(e.pos.x-7.5)<1.1&&Math.abs(e.pos.y-30.5)<0.1);
+  game.check('three authored exit panels are visible',doors.length===3);
+  for(const door of doors)await game.act({keys:[],duration_ms:2000,target:{entity:door.id,camera_angle:-Math.PI/4,fire:true}});
+  game.check('native fire opens the Kitchen exit corridor',!(await game.inspect()).diagnostic.entities.some(e=>doors.some(door=>door.id===e.id)));
   await walk(game,{x:7.5,y:27.5});
   await walk(game,{x:7.5,y:5.5});
   await game.act({keys:[],duration_ms:500},{name:'kitchen-exit',when:()=>true});
