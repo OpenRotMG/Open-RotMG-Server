@@ -24,9 +24,9 @@ export async function run(game){
   const initial=await save('arrival');
   const distance=Math.hypot(initial.view.position.x-mage.pos.x,initial.view.position.y-mage.pos.y);
   game.check('native arrival is between eight and twelve tiles from a natural Mage',distance>8&&distance<12);
-  await game.act({keys:[],duration_ms:1600,target:{entity:mage.id,camera_angle:-Math.PI/4,fire:false}},{name:'hobbit-activation',when:()=>true});
+  await game.act({keys:[],duration_ms:1600,target:{entity:mage.id,camera_angle:-Math.PI/4,fire:false}});
+  await game.act({keys:[],duration_ms:1600},{name:'hobbit-activation',when:v=>v.game_ms>=2200});
   const active=await save('activation');
-  // The build-118 period page independently states the twelve-tile gate: https://web.archive.org/web/20120530043951id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
   game.check('Hobbit Mage activates at the documented twelve-tile gate',active.diagnostic.entities.some(e=>e.id===mage.id&&e.activated!==null));
   const path=join(process.env.QA_RESULTS_DIR,'protection.json');
   await writeFile(path,JSON.stringify({id:'hobbit-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));

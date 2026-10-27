@@ -67,7 +67,7 @@ fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
     world.npc_step();
     assert!(world.entities[&mage].activated.is_some());
     for (age, index) in [(0, 0), (400, 1), (800, 2), (1200, 0)] {
-        let shots = crate::encounter::fauna::schedule(0x617, 200, age)
+        let shots = crate::encounter::attacks::schedule(0x617, 200, age)
             .unwrap()
             .snapshot(1.);
         assert_eq!(shots.len(), 15);
