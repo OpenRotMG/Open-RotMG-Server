@@ -13,7 +13,7 @@ export async function run(game){
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
   const initial=await game.observe();
-  const ally=await game.join({...fixture,class:0x31d,world:initial.session.world,position:{x:initial.position.x+2,y:initial.position.y},equipment:[-1,0xb29,-1,-1],backpack:[0xa50,0xa51,0xc41,-1,-1,-1,-1,-1],stats:null});
+  const ally=await game.join({...fixture,class:0x31d,world:initial.session.world,position:{x:initial.position.x,y:initial.position.y-2},equipment:[-1,0xb29,-1,-1],backpack:[0xa50,0xa51,0xc41,-1,-1,-1,-1,-1],stats:null});
   const bit=index=>1<<(index-1),negative=bit(9)|bit(10),speedy=bit(15),berserk=bit(20),hexed=bit(28);
   async function snapshot(name){
     const view={name,caster:await game.observe(),ally:await ally.observe()};observations.push(view);return view;
