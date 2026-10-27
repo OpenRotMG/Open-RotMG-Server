@@ -67,7 +67,7 @@ export async function run(game){
     game.check(label+' Company produces one owned Master',!!master&&family(state,quest).filter(e=>e.kind===0x929).length===1);
     game.check(label+' Company has the expected total population',family(state,quest).length===(index===2?18:12));
     if(index===2){
-      // Decay removes actors rather than awarding combat loot: pinned Kithio logic/behaviors/Decay.cs, d15f321edcce0ef890001890c6991c25a1b0f718.
+      // Decay bypasses combat rewards: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Decay.cs
       const waitStart=king(state,root.entity).activated,experience=state.view.character.experience;
       while((await game.observe()).game_ms-waitStart<139000)await idle(Math.min(10000,139000-((await game.observe()).game_ms-waitStart)));
       state=await save('timeout-before');
@@ -89,7 +89,10 @@ export async function run(game){
     const contributor=await game.join({...spec,seed:795,position:actual.pos}),outsider=await game.join({...spec,seed:796,position:actual.pos});
     await protect(contributor);await protect(outsider);
     const xp=await Promise.all([game.observe(),contributor.observe(),outsider.observe()]);
-    await fire(contributor,actual.id,150);
+    for(let n=0;n<8;n++){
+      if((king(await game.inspect(),actual.id).damage[contributor.actor]??0)>500)break;
+      await fire(contributor,actual.id,150);
+    }
     await fire(game,actual.id,150);
     let damaged=await save('multiplayer-damage');
     game.check('two native players contribute above the private 500-damage threshold',damaged.diagnostic.entities.find(e=>e.id===actual.id).damage[game.actor]>500&&damaged.diagnostic.entities.find(e=>e.id===actual.id).damage[contributor.actor]>500);
