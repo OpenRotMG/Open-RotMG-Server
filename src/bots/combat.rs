@@ -269,8 +269,8 @@ pub(super) fn ability(
                 worthwhile(reach(shot), shot.passes_cover)
             }
             // Area abilities land at the cursor, not after the weapon's flight time.
-            Ability::Nova
-            | Ability::Poison { .. }
+            Ability::Nova => progression::vulnerable(enemy) && worthwhile(14., false),
+            Ability::Poison { .. }
             | Ability::Drain { .. }
             | Ability::Lightning { .. }
             | Ability::Daze { .. } => worthwhile(14., false),
