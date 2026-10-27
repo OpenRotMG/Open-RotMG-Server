@@ -56,6 +56,46 @@ fn native(
 }
 
 #[test]
+fn swarm_directed_shots_use_constant_angular_prediction_and_cooldown() {
+    let (mut world, player) = fixture(0x18, false);
+    let target = world.players[&player].pos;
+    let previous = Pos {
+        x: target.x,
+        y: target.y - 0.5,
+    };
+    world
+        .players
+        .get_mut(&player)
+        .unwrap()
+        .white_demon_aim_history = [previous, target];
+    let start = Pos {
+        x: target.x - 3.,
+        y: target.y,
+    };
+    let swarm = world.spawn_entity(0x955, start, vec![]).unwrap();
+    let heading = (target.y - start.y).atan2(target.x - start.x);
+    let expected = heading
+        + (heading - (previous.y - start.y).atan2(previous.x - start.x)) / 0.1 * (65. / 100.) * 0.1;
+    let mut fired = vec![];
+    for age in (0..3000).step_by(50) {
+        world.now = age;
+        let schedule = crate::encounter::fauna::schedule(0x955, 360, age);
+        for (projectile, angle) in world
+            .scheduled_attacks(swarm, Some(target), &schedule)
+            .unwrap()
+        {
+            assert_eq!(projectile, 0);
+            assert!(
+                (angle - expected).abs() < 0.00001,
+                "age={age}: {angle} != {expected}"
+            );
+            fired.push(age);
+        }
+    }
+    assert_eq!(fired, [0, 550, 1100, 1650, 2200, 2750]);
+}
+
+#[test]
 fn native_berserk_shots_survive_position_correction() {
     for (until, condition) in [
         (0, 0),
