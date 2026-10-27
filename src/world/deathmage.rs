@@ -139,6 +139,7 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::condition;
 
     fn world() -> World {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
