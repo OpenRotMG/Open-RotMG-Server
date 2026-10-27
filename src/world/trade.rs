@@ -498,6 +498,9 @@ impl World {
         }
         Ok(None)
     }
+    pub(crate) fn has_active_trade(&self, id: i32) -> bool {
+        self.trade_key(id).is_some()
+    }
     pub(super) fn trade_key(&self, id: i32) -> Option<i32> {
         self.trades
             .iter()

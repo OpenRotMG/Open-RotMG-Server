@@ -113,6 +113,10 @@ pub(super) async fn drop_equipment(
     let kind = candidate.kind;
     let result = crate::server::guarded_inventory(app, id, move |w, current| {
         ensure!(
+            !w.has_active_trade(id),
+            crate::server::lifecycle::controller("equipment drop blocked by active native trade")
+        );
+        ensure!(
             check.current(&candidate, &current, &content)?,
             crate::server::lifecycle::controller("equipment drop candidate expired")
         );

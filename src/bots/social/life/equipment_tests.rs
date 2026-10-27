@@ -457,3 +457,62 @@ async fn equipment_no_space_native_refusal_keeps_goods_without_drop_or_history()
     assert!(!peer.character.items.contains(&RING));
     s.close().await;
 }
+
+#[tokio::test]
+async fn equipment_drop_rejects_native_window_opened_after_selection_without_cancelling_it() {
+    let mut s = Scene::new([-1; 8]).await;
+    let candidate = s.offer(true).await;
+    assert!(s.brain.mind.market.trade.is_none());
+    let before = s.view().await;
+    let id = before.session.player;
+    let peer = s.peer;
+    let mut mine = [false; 12];
+    mine[candidate.slot] = true;
+    s.app
+        .world
+        .for_player(id)
+        .call(move |w| {
+            w.request_trade(peer, "Donor".into())?;
+            w.request_trade(id, "Recipient".into())?;
+            w.change_trade(id, mine)?;
+            assert!(w.has_active_trade(id));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    life(&s.app, &mut s.brain, &before).await.unwrap();
+    let after = s.view().await;
+    assert_eq!(after.character.items, before.character.items);
+    assert_eq!(
+        after.character.inventory_revision,
+        before.character.inventory_revision
+    );
+    assert!(s.brain.mind.social.episodes.is_empty());
+    s.app
+        .world
+        .for_player(id)
+        .call(move |w| {
+            assert!(w.has_active_trade(id));
+            assert!(w.has_active_trade(peer));
+            w.now += 3050;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(3050)).await;
+    s.app
+        .world
+        .for_player(peer)
+        .call(move |w| {
+            assert!(
+                w.accept_trade(peer, [false; 12], mine)?.is_none(),
+                "original donor mask remains unchanged, with no donor acceptance"
+            );
+            assert!(w.has_active_trade(id));
+            w.cancel_trade(id, "Test complete");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    s.close().await;
+}
