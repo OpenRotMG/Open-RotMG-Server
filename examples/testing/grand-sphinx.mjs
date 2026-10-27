@@ -26,7 +26,6 @@ export async function run(game){
     if(now-lastTeleport<10000)await game.act({keys:[],duration_ms:10000-(now-lastTeleport)});
     await protect();
     await api({op:'cheat',actor:scout,change:{kind:'teleport',position:point}});
-    const time=(await game.observe()).game_ms;if(time>=scoutProtection){await api({op:'cheat',actor:scout,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});scoutProtection=time+60000;}
     const action=game.act({keys:[],duration_ms:2000});
     const typing=(async()=>{
       for(let n=0;n<100&&(await game.observe()).paused;n++)await new Promise(ok=>setTimeout(ok,10));
@@ -39,6 +38,7 @@ export async function run(game){
   async function protect(){
     const now=(await game.observe()).game_ms;
     if(now>=protection){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});protection=now+60000;}
+    if(now>=scoutProtection){await api({op:'cheat',actor:scout,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});scoutProtection=now+60000;}
   }
   async function map(){
     const view=await game.observe(),response=await fetch(config.origin+'/dev/map?player='+view.session.player,{headers});assert(response.ok);return response.json();
