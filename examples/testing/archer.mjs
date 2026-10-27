@@ -23,7 +23,6 @@ export async function run(game){
     }
     throw Error('No bounded affordable Septavius vulnerability window observed');
   };
-  await game.act({keys:[],duration_ms:3500});
   await game.act({keys:[],duration_ms:350,drag:{from:{x:678,y:472},to:{x:722,y:384}}});
   const armored=await game.observe();
   game.check('native leather armor equips and grants defense',armored.character.items[2]===0xa0d&&armored.character.stats.defense===31);
@@ -81,11 +80,12 @@ export async function run(game){
     }
     game.check('same living Archer',after.view.lifecycle.alive&&after.view.session.character===before.view.session.character);
   }
-  await game.act({keys:[],duration_ms:3500});
-  const expired=await game.inspect();observations.push({expired});await save();
-  game.check('same living character retains equipment',expired.view.lifecycle.alive&&expired.view.character.items[1]===0xc07&&expired.view.character.items[2]===0xa0d);
   const thunder=observations.find(o=>o.item===0xc07),id=thunder.affected[0];
   const deadline=thunder.after.diagnostic.entities.find(e=>e.id===id).statuses['6'][1];
+  const now=(await game.observe()).game_ms;
+  if(now<deadline)await game.act({keys:[],duration_ms:deadline-now+50});
+  const expired=await game.inspect();observations.push({expired});await save();
+  game.check('same living character retains equipment',expired.view.lifecycle.alive&&expired.view.character.items[1]===0xc07&&expired.view.character.items[2]===0xa0d);
   const survivor=expired.diagnostic.entities.find(e=>e.id===id);assert(survivor,'Dazed enemy remains observed for expiry');
   game.check('Thunder Daze expires after four seconds',expired.view.time_ms>=deadline&&!Object.entries(survivor.statuses).some(([effect,[,until]])=>effect==='6'&&until>expired.view.time_ms));
 }
