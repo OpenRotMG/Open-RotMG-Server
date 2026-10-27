@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x300,level:8,seed:814,world:1,equipment:[0xa14,0xb27,0xa0d,-1],backpack:Array(8).fill(-1),stats:[720,252,50,25,50,75,40,50]};
+const spec={class:0x300,level:8,seed:814,world:1,equipment:[0xa19,0xb27,0xa0d,-1],backpack:Array(8).fill(-1),stats:[720,252,50,25,50,75,40,50]};
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-let coil,chest;
+let coil,chest,blocked;
+const clearLine=(a,b)=>Array.from({length:Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)*10)+1},(_,i)=>{const t=i/Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)*10));return !blocked.has([Math.floor(a.x+(b.x-a.x)*t),Math.floor(a.y+(b.y-a.y)*t)].join(','));}).every(Boolean);
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
   const scout=await api({op:'spawn',spec:{...spec,guid:'coil-scout',position:{x,y},controller:'direct',profile:null}});
@@ -12,7 +13,7 @@ export async function prepare(api){
   const report=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
-  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
+  const map=await response.json();blocked=new Set(map.blocked.map(p=>p.join(',')));
   const coils=map.entities.filter(e=>e.kind===0xdc2);assert.equal(coils.length,2);
   coil=coils.find(e=>[-3,-2,-1,0].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));assert(coil,'No natural Coil with a clear approach');
   chest=map.entities.find(e=>e.kind===0x501&&e.pos.x===coil.pos.x&&e.pos.y===coil.pos.y);assert(chest,'Natural temple lacks its chest');
@@ -53,11 +54,18 @@ export async function run(game){
   const path=join(process.env.QA_RESULTS_DIR,'protection.json');
   await writeFile(path,JSON.stringify({id:'coil-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
   execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
-  const livingEgg=(await game.inspect()).diagnostic.entities.filter(e=>e.kind===0xdc1).sort((a,b)=>b.id-a.id)[0];
-  assert(livingEgg,'No surviving egg to destroy');
-  const beforeEgg=await game.inspect();await defeat(livingEgg.id);
+  let livingEgg;
+  for(let n=0;n<24;n++){
+    const s=await game.inspect();
+    livingEgg=s.diagnostic.entities.find(e=>e.kind===0xdc1&&e.activated!==null&&s.diagnostic.time_ms-e.activated<3000&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<4.5&&clearLine(s.view.position,e.pos));
+    if(livingEgg)break;await sample({keys:[],duration_ms:500});
+  }
+  assert(livingEgg,'No young natural egg with a clear dagger shot');
+  const beforeEgg=await game.inspect();
+  await game.act({keys:[],duration_ms:200,target:{entity:livingEgg.id,camera_angle:-Math.PI/4,fire:true}});
+  await game.act({keys:[],duration_ms:400});
   const afterEgg=await save('egg-destroyed');
-  game.check('shooting an egg kills it without XP or immediate hatch',afterEgg.view.character.experience===beforeEgg.view.character.experience&&afterEgg.diagnostic.character.lifetime.kills===beforeEgg.diagnostic.character.lifetime.kills+1&&!afterEgg.diagnostic.entities.some(e=>e.kind===0xdc0));
+  game.check('shooting an egg kills it without XP or immediate hatch',!entity(afterEgg,livingEgg.id)&&afterEgg.view.character.experience===beforeEgg.view.character.experience&&afterEgg.diagnostic.character.lifetime.kills===beforeEgg.diagnostic.character.lifetime.kills+1&&!afterEgg.diagnostic.entities.some(e=>e.kind===0xdc0&&e.activated>beforeEgg.diagnostic.time_ms&&Math.hypot(e.pos.x-livingEgg.pos.x,e.pos.y-livingEgg.pos.y)<1));
   await sample({keys:[],duration_ms:6000},{name:'coil-eggs',when:v=>v.game_ms>9000});
   await sample({keys:[],duration_ms:6000});
   const active=await save('active'),xp=active.view.character.experience;
