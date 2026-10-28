@@ -17,10 +17,12 @@ export async function run(observer){
   await api({op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
   const records=[];
   const save=async label=>{const s={label,state:await game.inspect(),arena:await observer.inspect(),map:await map()};records.push(s);await writeFile(join(out,'treasure.json'),JSON.stringify(records));return s;};
+  await game.act({keys:[],duration_ms:2500});
   const initial=await save('initial');
   game.check('optional treasure begins at selected full 50000 HP',initial.map.entities.find(e=>e.id===treasure.id).hp===50000);
   await game.act({keys:[],duration_ms:500,target:{entity:treasure.id,camera_angle:-Math.PI/4,fire:true}});
-  await game.act({keys:[],duration_ms:8500},{name:'tomb-canopic-jars',when:()=>true});
+  const jarsAt=(await game.observe()).game_ms;
+  await game.act({keys:[],duration_ms:8500},{name:'tomb-canopic-jars',when:v=>v.game_ms>=jarsAt+8000});
   const spawned=await save('jars');
   const jars=spawned.map.entities.filter(e=>e.kind>=0xd2d&&e.kind<=0xd30);
   game.check('ordinary damage produces eight jars of four selected kinds',jars.length===8&&new Set(jars.map(e=>e.kind)).size===4&&spawned.map.entities.some(e=>e.id===treasure.id&&e.hp<49500));

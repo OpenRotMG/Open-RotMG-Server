@@ -76,7 +76,8 @@ export async function run(game){
   const late=await game.join({...spec,world:start.session.world,position:'spawn'});
   await api({op:'cheat',actor:late.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
   humans.push(late.actor);expiry.set(late.actor,(await game.observe()).game_ms+60000);
-  await advance(1500,{name:'tomb-late-join-awakened',when:()=>true});
+  const lateAt=(await game.observe()).game_ms;
+  await advance(3000,{name:'tomb-late-join-awakened',when:v=>v.game_ms>=lateAt+2500});
   const joined=await late.inspect();await writeFile(join(out,'late-join.json'),JSON.stringify(joined));
   game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.diagnostic.entities.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.diagnostic.entities.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.diagnostic.character.tombs===0);
   const repeated=await save('after-late-join');game.check('late admission does not duplicate or replace awakened bosses',repeated.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3&&bosses.every(e=>repeated.map.entities.some(x=>x.id===e.id)));

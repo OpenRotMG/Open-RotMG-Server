@@ -42,7 +42,7 @@ export async function run(game){
     await api({op:'cheat',actor:scout,change:{kind:'teleport',position:initial.position}});
   }
   try{
-    await protect();
+    await act({keys:[],duration_ms:2500});
     for(const target of targets){
       await travel({x:target.pos.x-4,y:target.pos.y});
       const observations=[];
