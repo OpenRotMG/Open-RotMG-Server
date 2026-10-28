@@ -131,6 +131,51 @@ async fn view_changed(changes: &mut Option<tokio::sync::watch::Receiver<()>>) {
     }
 }
 
+enum VisualEvent {
+    Cursor,
+    Input(Result<Option<Packet>>),
+    Packet(std::result::Result<Packet, tokio::sync::broadcast::error::RecvError>),
+}
+
+async fn next_visual(
+    input: impl std::future::Future<Output = Result<Option<Packet>>>,
+    receiver: &mut tokio::sync::broadcast::Receiver<Packet>,
+    ticks: &mut tokio::time::Interval,
+    cursor: bool,
+) -> VisualEvent {
+    tokio::select! {
+        biased;
+        _ = ticks.tick(), if cursor => VisualEvent::Cursor,
+        input = input => VisualEvent::Input(input),
+        packet = receiver.recv() => VisualEvent::Packet(packet),
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn slow_cursor_does_not_starve_queued_native_packets_or_close() {
+    let (sender, mut receiver) = tokio::sync::broadcast::channel(4);
+    for _ in 0..4 {
+        sender.send(Packet { id: wire::NEW_TICK, body: vec![] }).unwrap();
+    }
+    let mut ticks = tokio::time::interval(Duration::from_millis(50));
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut received = 0;
+    let mut closed = false;
+    for _ in 0..64 {
+        match next_visual(async {
+            if received == 4 { Ok(None) } else { std::future::pending().await }
+        }, &mut receiver, &mut ticks, true).await {
+            VisualEvent::Cursor => tokio::time::sleep(Duration::from_millis(60)).await,
+            VisualEvent::Packet(Ok(packet)) => { assert_eq!(packet.id, wire::NEW_TICK); received += 1; },
+            VisualEvent::Input(Ok(None)) => { closed = true; break; },
+            _ => panic!("unexpected native view event"),
+        }
+    }
+    assert_eq!(received, 4, "cursor sampling starved native ticks");
+    assert!(closed, "cursor sampling starved socket close");
+}
+
 struct Stream {
     socket: WebSocket,
     codec: Codec,
@@ -337,7 +382,8 @@ impl Stream {
                     self.transition(&mut lease).await?;
                     break;
                 },
-                _ = cursor_ticks.tick(), if cursor != 0 => {
+                event = next_visual(self.input(), &mut attached.receiver, &mut cursor_ticks, cursor != 0) => match event {
+                VisualEvent::Cursor => {
                     if attachment_changed(a.cctv.binding(name), attached.player, attached.account) {
                         self.transition(&mut lease).await?;
                         break;
@@ -357,7 +403,7 @@ impl Stream {
                         for packet in packets { self.output(packet.id, packet.body).await?; }
                     }
                 },
-                packet = self.input() => {
+                VisualEvent::Input(packet) => {
                     let Some(packet)=packet? else { break; };
                     // The recovered engine still reports collision/ACK packets; none belong to a gameplay session here.
                     if !matches!(packet.id, wire::MOVE | wire::UPDATE_ACK | wire::PONG | 14 | 24) {
@@ -365,13 +411,14 @@ impl Stream {
                         if self.ignored==1 { tracing::info!(bot=name, packet=packet.id, "read-only bot viewer input ignored"); }
                     }
                 },
-                packet = attached.receiver.recv() => match packet {
+                VisualEvent::Packet(packet) => match packet {
                     Ok(packet) => if let Some(packet)=projection.packet(packet,&a.content)? { self.output(packet.id,packet.body).await?; },
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         self.transition(&mut lease).await?;
                         break;
                     },
                     Err(error) => return Err(error).context("native bot view overflowed; reconnect for a fresh snapshot"),
+                }
                 }
             }
         }
