@@ -13,10 +13,17 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  god=map.entities.find(e=>e.kind===0x640&&[-9,-8,-7,-6,-5,-4,-3,-2,-1,0].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
-  assert(god,'No natural HighPlains camp with a clear approach');
-  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(e=>e.camp===god.camp)));
-  return {...spec,position:{x:god.pos.x-8,y:god.pos.y}};
+  const clear=p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(','));
+  for(const e of map.entities.filter(e=>e.kind===0x640))for(let n=0;n<32;n++){
+    const angle=n*Math.PI/16,position={x:e.pos.x+7.5*Math.cos(angle),y:e.pos.y+7.5*Math.sin(angle)};
+    const family=map.entities.filter(m=>m.camp===e.camp);
+    if(!Array.from({length:31},(_,i)=>clear({x:e.pos.x+(position.x-e.pos.x)*i/30,y:e.pos.y+(position.y-e.pos.y)*i/30})).every(Boolean))continue;
+    if(!family.some(m=>m.kind===0x63c&&Math.hypot(m.pos.x-position.x,m.pos.y-position.y)>7.5&&Math.hypot(m.pos.x-position.x,m.pos.y-position.y)<9.9))continue;
+    god=e;
+    await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(family));
+    return {...spec,position};
+  }
+  throw Error('No natural HighPlains camp with a clear approach outside Mage stopping range');
 }
 export async function run(game){
   const samples=[],shots=new Map();let protectedUntil=0,serial=0;
