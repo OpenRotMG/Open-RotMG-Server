@@ -15,10 +15,13 @@ async fn vault_purchase_rollback_capacity_and_death_preserve_account_storage() {
         .await
         .unwrap();
     let other = store
-        .account("vault-other".into(), String::new())
+        .register(
+            "vault-other".into(),
+            "vault-other@example.test".into(),
+            "vault-other-password".into(),
+        )
         .await
-        .unwrap()
-        .id;
+        .unwrap();
     let ch = store
         .create(account, content.get(0x30e).unwrap())
         .await
@@ -52,6 +55,7 @@ async fn vault_purchase_rollback_capacity_and_death_preserve_account_storage() {
         .unwrap();
     let seller = *world.closed_vaults.keys().next().unwrap();
     world.players.get_mut(&player).unwrap().known.insert(seller);
+    assert!(world.buy(player, seller).is_err());
     world.players.get_mut(&player).unwrap().pos = world.entities[&seller].pos;
     let plan = world.buy(player, seller).unwrap();
     let chest = plan.vault_purchase.as_ref().unwrap().chest;
