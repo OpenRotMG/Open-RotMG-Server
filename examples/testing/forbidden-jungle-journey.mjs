@@ -6,6 +6,7 @@ export async function run(game){
  const out=process.argv[process.argv.indexOf('--run-dir')+1];
  const log=async label=>{const s=await game.inspect();await appendFile(join(out,'journey.jsonl'),JSON.stringify({label,...s})+'\n');return s;};
  const capture=async name=>{await game.act({keys:[],duration_ms:700},{name,when:()=>true});};
+ const aim=(a,b)=>{const x=35.355*(b.x-a.x-b.y+a.y),y=35.355*(b.x-a.x+b.y-a.y),scale=Math.max(1,Math.hypot(x,y)/270);return {x:300+x/scale,y:325+y/scale};};
  const keys=(a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,x=dx-dy,y=dx+dy;return [Math.abs(x)>.1&&Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>.1&&Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean);};
  async function move(point){
   for(let n=0;n<90;n++){
@@ -33,7 +34,7 @@ export async function run(game){
    if(!enemies.length){roomsCleared++;await log('room-cleared');return;}
    const targets=enemies.filter(e=>Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<9.7).sort((a,b)=>priority.indexOf(a.kind)-priority.indexOf(b.kind));
    if(!targets.length){await move({x:center.x-6*dx,y:center.y-6*dy});continue;}
-   await log('room-shot-'+targets[0].id);await heal();await game.act({keys:[],duration_ms:1200,target:{entity:targets[0].id,camera_angle:-Math.PI/4,fire:true}});
+   await log('room-shot-'+targets[0].id);await heal();await game.act({keys:[],duration_ms:1200,mouse:aim(s.view.position,targets[0].pos)});
   }
   assert.fail('Native ranged fire did not clear the ordinary room');
  }
@@ -69,7 +70,7 @@ export async function run(game){
    movement=keys(s.view.position,{x:center.x+8.5*Math.cos(angle),y:center.y+8.5*Math.sin(angle)});
    if(s.view.character.hp<650&&s.view.character.mp>=100)movement.push(' ');
   }else await heal();
-  await game.act({keys:movement,duration_ms:boss.stage===6?500:1000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+  await game.act({keys:movement,duration_ms:boss.stage===6?500:1000,mouse:aim(s.view.position,boss.pos)});
  }
  const clear=await log('defeat');
  game.check('ordinary native shots defeat Mixcoatl after actual phases',!clear.diagnostic.entities.some(e=>e.kind===0xdc3)&&stages.has(1)&&stages.has(6));
