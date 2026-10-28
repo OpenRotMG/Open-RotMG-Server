@@ -718,13 +718,8 @@ impl World {
                 <= 512,
             "slime split budget exhausted"
         );
-        for i in 0..count {
-            let angle = i as f32 * std::f32::consts::TAU / count as f32;
-            let pos = Pos {
-                x: defeated.pos.x + 0.2 * angle.cos(),
-                y: defeated.pos.y + 0.2 * angle.sin(),
-            };
-            self.spawn_entity(kind, pos, vec![])?;
+        for _ in 0..count {
+            self.spawn_entity(kind, defeated.pos, vec![])?;
         }
         Ok(())
     }

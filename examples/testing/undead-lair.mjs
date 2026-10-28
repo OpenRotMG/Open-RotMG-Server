@@ -18,7 +18,7 @@ export async function run(game){
     if(prior)for(const e of prior.diagnostic.entities){
       if(![0xd9b,0xd9c,0xd9e,0xda2,0xda3].includes(e.kind)||s.diagnostic.entities.some(c=>c.id===e.id))continue;
       if(e.kind===0xda2||e.kind===0xda3)traps.add(e.id);
-      else {const children=s.diagnostic.entities.filter(c=>c.kind===(e.kind===0xd9e?0xd9f:0xd9d)&&distance(c.pos,e.pos)<2);if(children.length)splits.push({parent:e.id,kind:e.kind,children:children.map(c=>c.id)});}
+      else {const children=s.diagnostic.entities.filter(c=>c.kind===(e.kind===0xd9b?0xd9c:e.kind===0xd9e?0xd9f:0xd9d)&&distance(c.pos,e.pos)<2);if(children.length)splits.push({parent:e.id,kind:e.kind,children:children.map(c=>c.id)});}
     }
     prior=s;return s;
   }
