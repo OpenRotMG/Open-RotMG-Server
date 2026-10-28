@@ -33,11 +33,14 @@ export async function run(game){
   }
   await prepare(game,{kind:'vitals',hp:100,mp:100});
   let result=await use(0x707);
-  game.check('Healing Ichor restores 150 HP only',restored(result.before,result.after,'hp',150)&&result.after.character.mp-result.before.character.mp<=2);
+  game.check('Healing Ichor restores 150 HP only',restored(result.before,result.after,'hp',150)&&result.after.character.mp-result.before.character.mp<=recovery(result.before,result.after,'mp'));
   // Keep selected restoration amounts instead of modern rebalances: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
   for(const [hp,mp] of [[100,100],[670,100],[100,385],[669,384],[670,385]]){
     await prepare(game,{kind:'vitals',hp,mp});result=await use(0xc12);
-    game.check('Coral Juice independently clamps both resources '+hp+'/'+mp,Math.abs(result.after.character.hp-Math.min(670,hp+100))<=2&&Math.abs(result.after.character.mp-Math.min(385,mp+100))<=2);
+    game.check('Coral Juice independently clamps both resources '+hp+'/'+mp,['hp','mp'].every(key=>{
+      const cap=result.before.character.stats[key==='hp'?'max_hp':'max_mp'],expected=Math.min(cap,result.before.character[key]+100);
+      return result.after.character[key]>=expected&&result.after.character[key]<=Math.min(cap,expected+recovery(result.before,result.after,key));
+    }));
   }
   const origin=await game.observe();
   const near=await game.join({...fixture,world:origin.session.world,position:{x:origin.position.x+9.5,y:origin.position.y},backpack:Array(8).fill(-1)});
@@ -58,7 +61,13 @@ export async function run(game){
     for(let n=0;n<8;n++)await game.act({keys:[],duration_ms:2000});
     const sober=await save('sober-'+item);
     game.check('cocktail Drunk expires before stat boosts '+item,!(sober.character.conditions&(1<<9))&&Object.entries(boosts).every(([key,amount])=>sober.character.stats[key]===base[key]+amount));
-    for(let n=0;n<Math.ceil((duration-16)/2)+1;n++)await game.act({keys:[],duration_ms:2000});
+    const extra=duration===30?6:0;
+    for(let n=0;n<extra/2;n++)await game.act({keys:[],duration_ms:2000});
+    if(extra){
+      const extended=await save('extended-'+item),elapsed=extended.game_ms-result.after.game_ms;
+      game.check('Lime boosts remain active beyond 20 seconds',elapsed>20000&&elapsed<30000&&Object.entries(boosts).every(([key,amount])=>extended.character.stats[key]===base[key]+amount));
+    }
+    for(let n=0;n<Math.ceil((duration-16-extra)/2)+1;n++)await game.act({keys:[],duration_ms:2000});
     const expired=await save('expired-'+item);
     game.check('cocktail boosts expire without changing base stats '+item,JSON.stringify(expired.character.stats)===JSON.stringify(base));
   }
