@@ -58,9 +58,10 @@ export async function run(game){
   }
   const spent=await game.observe();await game.act({keys:['1'],duration_ms:200});
   game.check('spent cloth cannot be reused',(await game.observe()).character.inventory_revision===spent.character.inventory_revision);
-  await game.act({keys:['Insert'],duration_ms:1200},{name:'cloths-reconnected',when:v=>v.world==='Nexus'});
+  await game.act({keys:['Insert'],duration_ms:1200});
   const reconnected=await game.observe(),persisted=(await game.inspect()).diagnostic.character;
   game.check('normal Nexus reconnect preserves identity inventory and both textures',reconnected.world==='Nexus'&&reconnected.session.character===initial.session.character&&JSON.stringify(reconnected.character.items)===JSON.stringify(spent.character.items)&&persisted.tex1===expected[0]&&persisted.tex2===expected[1]);
+  await game.act({keys:[],duration_ms:1200},{name:'cloths-reconnected',when:v=>v.world==='Nexus'});
   await writeFile(join(out,'cloth-observations.json'),JSON.stringify({preparedInventoryAndProtection:true,samples},null,2));
   }finally{cdp.close();}
 }
