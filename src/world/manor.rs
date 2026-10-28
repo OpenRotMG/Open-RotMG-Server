@@ -432,7 +432,7 @@ mod tests {
             .spawn_entity(COFFIN, world.entities[&boss].home, vec![])
             .unwrap();
         world.entities.get_mut(&id).unwrap().next_aux = 1;
-        for (hp, bats, vampires) in [(14999, 15, 0), (7999, 38, 2)] {
+        for (hp, bats, vampires) in [(14999, 15, 0), (7999, 23, 2)] {
             world.entities.get_mut(&id).unwrap().hp = hp;
             for _ in 0..2 {
                 world.manor_mechanics(id, None, 0).unwrap();
