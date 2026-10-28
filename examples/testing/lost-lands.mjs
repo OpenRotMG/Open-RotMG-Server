@@ -24,11 +24,11 @@ export async function prepare(api){
   assert(sites.length,'Ordinary quest sites required for event admission');
   sites.sort((a,b)=>questKinds.indexOf(a.kind)-questKinds.indexOf(b.kind));
   await writeFile(join(out,'sites.json'),JSON.stringify({candidates,world,sites}));
-  return {...spec,world,position:{x:sites[0].x,y:sites[0].y}};
+  return {...spec,world,position:refuge};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,lastTeleport=-10000,companion,companionUntil=0;
+  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,scoutModifier=0,lastTeleport=-10000,companion,companionUntil=0,peerModifier=0,cooperate=false;
   const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
@@ -36,6 +36,18 @@ export async function run(game){
   }
   const scout=(await api({op:'spawn',spec:{...spec,world,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
   const scoutName=(await api({op:'inspect',actor:scout})).diagnostic.character.name;
+  async function prepareScout(change){
+    for(let n=0;n<100;n++){
+      const life=(await api({op:'inspect',actor:scout})).view.lifecycle;assert(life.alive&&!life.death_pending&&!life.departing,'Prepared scout must remain alive');
+      if(!life.busy)return api({op:'cheat',actor:scout,change});await new Promise(ok=>setTimeout(ok,50));
+    }
+    throw Error('Scout persistence did not finish before its next prepared mutation');
+  }
+  async function playing(){
+    const deadline=Date.now()+15000;
+    while(Date.now()<deadline){if(!(await game.observe()).paused)return;await new Promise(ok=>setTimeout(ok,25));}
+    throw Error('Native action did not establish its active bounded window within 15 seconds');
+  }
   try{
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
   async function save(label){const state=await game.inspect();records.push({label,state});await writeFile(join(out,'encounter.json'),JSON.stringify(records));return state;}
@@ -46,29 +58,47 @@ export async function run(game){
   async function protect(){
     const now=(await game.observe()).game_ms;
     if(now>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}
+    if(now>=scoutUntil){await prepareScout({kind:'protection',condition:'invulnerable',duration_ms:60000});scoutUntil=now+60000;}
     if(companion&&now>=companionUntil){await api({op:'cheat',actor:companion.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});companionUntil=now+60000;}
   }
-  async function idle(ms){while(ms>0){await protect();const step=Math.min(ms,5000,until-(await game.observe()).game_ms);await game.act({keys:[],duration_ms:step});ms-=step;}}
+  async function idle(ms){while(ms>0){await protect();const now=(await game.observe()).game_ms,step=Math.min(ms,10000,until-now,scoutUntil-now,...(companion?[companionUntil-now]:[]));await game.act({keys:[],duration_ms:step});ms-=step;}}
   async function at(point){
     const now=(await game.observe()).game_ms;
     if(now-lastTeleport<10000)await idle(10000-(now-lastTeleport));
     await protect();
-    if((await game.observe()).game_ms>=scoutUntil){await api({op:'cheat',actor:scout,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});scoutUntil=(await game.observe()).game_ms+60000;}
-    await api({op:'cheat',actor:scout,change:{kind:'teleport',position:point}});
+    await prepareScout({kind:'teleport',position:point});
     const action=game.act({keys:[],duration_ms:2000});
     const typing=(async()=>{
-      for(let n=0;n<100&&(await game.observe()).paused;n++)await new Promise(ok=>setTimeout(ok,10));
+      await playing();
       async function enter(){try{await connection.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}finally{await connection.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}}
       await enter();await connection.call('Input.insertText',{text:'/teleport '+scoutName});await enter();
     })();
     for(const r of await Promise.allSettled([action,typing]))if(r.status==='rejected')throw r.reason;
     const arrived=await game.observe();assert(Math.hypot(arrived.position.x-point.x,arrived.position.y-point.y)<.2,'Native teleport must reach direct scout');lastTeleport=arrived.game_ms;
-    await api({op:'cheat',actor:scout,change:{kind:'teleport',position:refuge}});
+    await prepareScout({kind:'teleport',position:refuge});
+  }
+  // Ordinary scout defeats preserve the director roll and reserve native receipts for the encounter.
+  async function sourceFire(target){
+    await protect();let now=(await game.observe()).game_ms;
+    while(Math.min(until,scoutUntil)-now<10000){await prepareScout({kind:'teleport',position:refuge});await idle(Math.min(until,scoutUntil)-now);await protect();now=(await game.observe()).game_ms;}
+    assert(target.hp>0,'Ordinary admission target must be alive');
+    await prepareScout({kind:'teleport',position:target.pos});
+    if(now>=scoutModifier){await prepareScout({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});scoutModifier=now+60000;}
+    const action=game.act({keys:[],duration_ms:10000});
+    const firing=(async()=>{
+      await playing();
+      for(let n=0;n<4;n++){
+        const state=await api({op:'inspect',actor:scout}),enemy=entity(state,target.id);if(!enemy)break;
+        if((await game.observe()).game_ms>now+6500)break;
+        await api({op:'act',actor:scout,action:{command:'shoot',angle:Math.atan2(enemy.pos.y-state.view.position.y,enemy.pos.x-state.view.position.x)},duration_ms:1500,pauseAfter:false});
+      }
+    })();
+    for(const r of await Promise.allSettled([action,firing]))if(r.status==='rejected')throw r.reason;
   }
   async function walk(point,range=1.5,follow=null){
     for(let n=0;n<30;n++){
       await protect();const s=await game.inspect(),v=s.view;
-      if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>f.message==='enemy defeated'&&f.entity===follow),'Chased target vanished without defeat');return;}point=target.pos;}
+      if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>['enemy defeated','timed enemy defeat'].includes(f.message)&&f.entity===follow),'Chased target vanished without defeat');return;}point=target.pos;}
       if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
       const key=(x,y)=>x+','+y,cell=p=>key(Math.floor(p.x),Math.floor(p.y));
       const blocked=new Set(v.objects.filter(e=>e.blocks).map(e=>cell(e.position)));
@@ -92,31 +122,36 @@ export async function run(game){
   async function fire(id,ms=500){
     await protect();const state=await game.inspect(),target=entity(state,id);assert(target,'Living target required');
     if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2){await walk(target.pos,1.5,id);if(!entity(await game.inspect(),id))return;}
+    const current=entity(await game.inspect(),id);if(current?.kind===0xd50&&current.stage>=9){await save('dying');await idle(2500);return;}
     const now=(await game.observe()).game_ms;if(now>=modifiedUntil){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifiedUntil=now+60000;}
-    await game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    const input={keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}};
+    if(cooperate&&target.kind===0xd50){
+      if(now>=peerModifier){await api({op:'cheat',actor:companion.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});peerModifier=now+60000;}
+      await game.act([[{actor:game.actor,input},{actor:companion.actor,input}]]);
+    }else await game.act(input);
   }
   const initial=await save('before-admission');
   game.check('startup reserves one Lord outside active indexes',reserved.length===1);
   let admitted;
   for(const site of sites){
-    await at({x:site.x,y:site.y});
-    for(let n=0;n<120;n++){
-      const state=await game.inspect(),root=entity(state,site.entity),family=state.diagnostic.entities.filter(e=>e.quest===site.entity);
+    await protect();await prepareScout({kind:'teleport',position:{x:site.x,y:site.y}});
+    for(let n=0;n<30;n++){
+      const state=await api({op:'inspect',actor:scout}),root=entity(state,site.entity),family=state.diagnostic.entities.filter(e=>e.quest===site.entity);
       const target=family.find(e=>[0x91d,0x929].includes(e.kind))??root??family.find(e=>[0x6c2,0x6c1,0x920,0x91c,0x92d].includes(e.kind));if(!target)break;
-      await fire(target.id,2000);
+      await sourceFire(target);
     }
-    await idle(1000);await save('quest-'+site.entity);
+    await prepareScout({kind:'teleport',position:refuge});await idle(1000);await save('quest-'+site.entity);
     const events=(await history()).filter(f=>f.message==='quest defeat summoned a Realm event');
     admitted=events.find(f=>f.kind===0xd50);
     if(admitted)break;
     for(const event of events.filter(f=>[0xd56,0xd59].includes(f.kind)))if(!sites.some(s=>s.entity===event.entity))sites.push(event);
   }
   assert(admitted,'Bounded ordinary quest defeats did not admit a Lord; do not substitute a spawned fixture');
-  await writeFile(join(out,'admission.json'),JSON.stringify(admitted));
+  await writeFile(join(out,'admission.json'),JSON.stringify({...admitted,preparation_actor:scout,attempted:records.filter(r=>r.label.startsWith('quest-')).map(r=>r.label)}));
   await at({x:admitted.x,y:admitted.y});
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-waiting',when:()=>true});
   const entry=await save('entry'),lord=entity(entry,admitted.entity);assert(lord?.hp===70000&&lord.stage===0);
-  game.check('ordinary quest defeat admits the untouched reserved Lord',lord.id===reserved[0].entity&&lord.kind===0xd50&&lord.quest===lord.id);
+  game.check('ordinary prepared scout defeats admit the untouched reserved Lord',lord.id===reserved[0].entity&&lord.kind===0xd50&&lord.quest===lord.id);
   companion=await game.join({...spec,world,seed:818,position:lord.pos});await protect();
   const peerBefore=await companion.observe(),peerCharacter=peerBefore.session.character;
   for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[peerCharacter]??0)<=700;n++)await companion.act({keys:[],duration_ms:500,target:{entity:lord.id,camera_angle:-Math.PI/4,fire:true}});
@@ -150,10 +185,11 @@ export async function run(game){
   await idle(500);state=await save('shield-released');
   const defeats=await history();
   game.check('native crystal defeats release the shield without waiting for decay',protectionIds.every(id=>defeats.some(f=>f.message==='enemy defeated'&&f.entity===id))&&!crystals(state).length&&entity(state,lord.id).stage!==8&&!(entity(state,lord.id).condition&(1<<24)));
+  cooperate=true;
   const beforeFinalXp=state.view.character.experience,existingBags=new Set(state.diagnostic.entities.filter(e=>e.items).map(e=>e.id));
   for(let n=0;n<300&&entity(await game.inspect(),lord.id);n++){
     state=await game.inspect();
-    if(entity(state,lord.id).stage>=9){await idle(2500);continue;}
+    if(entity(state,lord.id).stage>=9){await save('dying');await idle(2500);continue;}
     const crystal=crystals(state)[0];
     await fire(crystal?.id??lord.id,1000);
   }
