@@ -14,10 +14,10 @@ export async function prepare(api){
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   const clear=(x,y)=>!blocked.has([Math.floor(x),Math.floor(y)].join(','));
-  sludge=map.entities.find(e=>e.kind===0x950&&clear(e.pos.x-2,e.pos.y)&&Array.from({length:5},(_,i)=>i*Math.PI*2/5).every(a=>clear(e.pos.x+4*Math.cos(a),e.pos.y+4*Math.sin(a))));
+  sludge=map.entities.find(e=>e.kind===0x950&&clear(e.pos.x-.25,e.pos.y)&&Array.from({length:5},(_,i)=>i*Math.PI*2/5).every(a=>clear(e.pos.x+4*Math.cos(a),e.pos.y+4*Math.sin(a))));
   assert(sludge,'No naturally populated Sludge with clear initial landing positions');
   await writeFile(join(process.env.QA_RESULTS_DIR,'natural-sludges.json'),JSON.stringify(map.entities.filter(e=>e.kind===0x950)));
-  return {...spec,position:{x:sludge.pos.x-2,y:sludge.pos.y}};
+  return {...spec,position:{x:sludge.pos.x-.25,y:sludge.pos.y}};
 }
 export async function run(game){
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
@@ -33,7 +33,7 @@ export async function run(game){
   for(let n=0;n<24;n++){
     await game.act({keys:[],duration_ms:250});const s=await game.inspect();trace.push(s);
     await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify(trace));
-    if(!protectedAfterHit&&s.view.character.hp<hp&&(s.view.character.conditions&(1<<4))!==0){
+    if(!protectedAfterHit&&s.view.character.hp<hp&&(s.view.character.conditions&(1<<3))!==0){
       await writeFile(path,JSON.stringify({id:'sludge-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
       execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);protectedAfterHit=true;
     }
@@ -41,7 +41,7 @@ export async function run(game){
   assert(protectedAfterHit,'No unprotected damage and Slowed observed before protection');
   game.check('selected parent spinner speed and lifetime reach the native session',trace.some(s=>s.view.projectiles.some(p=>p.owner===sludge.id&&p.speed===42&&p.lifetime_ms===3200)));
   game.check('native enemy attacks damage the prepared Wizard',trace.some(s=>s.view.character.hp<hp));
-  game.check('native spinner applies selected Slowed status',trace.some(s=>(s.view.character.conditions&(1<<4))!==0));
+  game.check('native spinner applies selected Slowed status',trace.some(s=>(s.view.character.conditions&(1<<3))!==0));
   const wave=trace.find(s=>children(s).length===5);assert(wave,'No complete five-Sludget wave observed');
   game.check('admitted children arrive after the 1500 ms telegraph',children(wave).every(e=>e.activated>=parent(active).activated+1500));
   game.check('Sludgets use selected 250 HP and small appearance',children(wave).every(e=>e.hp===250&&e.size===50));
