@@ -245,6 +245,69 @@ async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
     assert!(store.load(ch.account, ch.id).await.is_err());
 }
 
+#[test]
+fn leather_armor_selected_bonuses_caps_eligibility_and_fame() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let collectible = crate::loot::collectibles(&content);
+    let roster = [
+        (0xa78, 5, 0, 0, 0, 0),
+        (0xa0d, 6, 0, 0, 0, 0),
+        (0xa79, 7, 0, 0, 0, 0),
+        (0xa7a, 8, 0, 2, 0, 0),
+        (0xad0, 9, 0, 2, 0, 0),
+        (0xad1, 10, 0, 2, 0, 0),
+        (0xad2, 12, 0, 2, 0, 0),
+        (0xa0e, 13, 0, 3, 0, 0),
+        (0xad3, 14, 0, 3, 0, 1),
+        (0xa8e, 15, 0, 4, 0, 2),
+        (0xa8f, 16, 0, 4, 0, 3),
+        (0xa90, 17, 0, 4, 0, 4),
+        (0xaf9, 17, 0, 5, 0, 4),
+        (0xafa, 18, 0, 5, 0, 5),
+        (0xafb, 19, 0, 5, 0, 6),
+        (0xa3e, 11, 3, 3, 0, 1),
+        (0xc18, 16, 3, 4, 0, 5),
+        (0xc28, 14, 3, 3, 3, 2),
+    ];
+    for (item, defense, speed, dexterity, attack, percent) in roster {
+        assert_eq!(collectible.contains(&item), !matches!(item, 0xafa | 0xafb));
+        for (&kind, class) in &content.classes {
+            let mut ch = Character::fresh(content.get(kind).unwrap()).unwrap();
+            ch.base = class.caps;
+            ch.fame = 199;
+            ch.items.fill(-1);
+            ch.items[2] = i32::from(item);
+            let allowed = matches!(kind, 0x300 | 0x307 | 0x320 | 0x322 | 0x324);
+            assert_eq!(ch.effective(&content).is_ok(), allowed, "{kind:x}/{item:x}");
+            if !allowed {
+                continue;
+            }
+            let mut expected = ch.base;
+            for (index, amount) in [(2, attack), (3, defense), (4, speed), (5, dexterity)] {
+                expected[index] += amount;
+            }
+            assert_eq!(ch.effective(&content).unwrap(), expected);
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), percent);
+            let receipt =
+                evaluate(&ch, &ch.lifetime, history(), &content, empty_balances()).unwrap();
+            assert_eq!(
+                receipt
+                    .rows
+                    .iter()
+                    .find(|r| r.kind == BonusKind::WellEquipped)
+                    .map_or(0, |r| r.amount),
+                199 * percent as i32 / 100
+            );
+            ch.items[2] = -1;
+            ch.items[4] = i32::from(item);
+            assert_eq!(ch.effective(&content).unwrap(), ch.base);
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), 0);
+            ch.base[3] += 1;
+            assert!(ch.effective(&content).is_err());
+        }
+    }
+}
+
 fn history() -> DeathHistory {
     DeathHistory {
         retained_deaths: 1,
