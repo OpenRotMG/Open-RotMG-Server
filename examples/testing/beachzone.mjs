@@ -12,7 +12,7 @@ export async function run(game){
       const v=await actor.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;
       if(Math.hypot(dx,dy)<tolerance)return;
       const keys=Math.abs(dx)>Math.abs(dy)?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
-      await actor.act({keys,duration_ms:Math.max(80,Math.min(350,Math.round(Math.max(Math.abs(dx),Math.abs(dy))/(4+5.6*v.character.stats[4]/75)*1000)))});
+      await actor.act({keys,duration_ms:Math.max(80,Math.min(350,Math.round(Math.max(Math.abs(dx),Math.abs(dy))/(4+5.6*v.character.stats.speed/75)*1000)))});
     }
     throw Error('Native walk did not reach '+JSON.stringify(point));
   }
