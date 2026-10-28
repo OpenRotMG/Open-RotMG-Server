@@ -57,12 +57,6 @@ async fn resolve(
             "native bot view origin is not approved".into(),
         ));
     }
-    if source <= 0 || target <= 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "source and target must be positive player IDs".into(),
-        ));
-    }
     headers.remove("origin");
     let ip = request_ip(a, &headers, peer)
         .map_err(|error| (StatusCode::FORBIDDEN, error.to_string()))?;
@@ -70,6 +64,21 @@ async fn resolve(
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
             "too many perspective inspections; retry shortly".into(),
+        ));
+    }
+    resolve_target(a, name, source, target).await
+}
+
+pub(super) async fn resolve_target(
+    a: &App,
+    name: &str,
+    source: i32,
+    target: i32,
+) -> Result<String, (StatusCode, String)> {
+    if source <= 0 || target <= 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "source and target must be positive player IDs".into(),
         ));
     }
     let missing = || {
