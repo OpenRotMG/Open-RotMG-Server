@@ -56,7 +56,7 @@ export async function run(game){
   await defeat(root.entity);await game.act({keys:[],duration_ms:500});state=await save('deathmage-defeated');
   game.check('ordinary dagger fire defeats Deathmage without a replacement boss',!entity(state,root.entity)&&family(state).length>0&&state.diagnostic.entities.filter(e=>e.quest===root.entity).every(e=>e.kind>=0x65a&&e.kind<=0x65e));
   game.check('owned four-kind survivors release to Default',family(state).filter(e=>e.kind!==0x65e).every(e=>e.stage===0));
-  const counts=family(state).map(e=>e.id);await game.act({keys:[],duration_ms:11000});state=await save('no-resummon');
+  const counts=family(state).map(e=>e.id);await game.act({keys:[],duration_ms:10000});await game.act({keys:[],duration_ms:1000});state=await save('no-resummon');
   game.check('dead Deathmage cannot replenish after ten seconds',family(state).every(e=>counts.includes(e.id)));
   const survivors=family(state);for(const kind of [0x65a,0x65b,0x65c,0x65d,0x65e]){const target=survivors.find(e=>e.kind===kind);assert(target);await defeat(target.id);game.check('native defeat of skeleton role '+kind,!entity(await game.inspect(),target.id));}
   await save('skeleton-rewards');
