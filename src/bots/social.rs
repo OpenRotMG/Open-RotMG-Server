@@ -494,7 +494,7 @@ pub(super) async fn market(
 }
 
 #[cfg(test)]
-mod tests {
+mod support_tests {
     use super::*;
     use crate::condition::{QUIET, SICK, SLOWED, bit};
 

@@ -222,7 +222,7 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
         assert_eq!(exit.account, character.account);
         assert!(!exit.retire, "named careers do not retire on timed logout");
         done.send(exit).await.unwrap();
-        let mut online = BTreeSet::from([profile.identity]);
+        let mut online = BTreeMap::from([(profile.identity, character.account)]);
         let mut resting = BTreeMap::new();
         maintain(&app, &done, &mut departed, &mut online, &mut resting)
             .await

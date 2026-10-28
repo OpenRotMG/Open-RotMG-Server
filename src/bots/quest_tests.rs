@@ -7,7 +7,7 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
         .intentions
         .as_mut()
         .unwrap()
-        .observe(v, c)
+        .observe(v, c, brain.profile.identity)
         .unwrap();
     let enemies: Vec<_> = v
         .objects

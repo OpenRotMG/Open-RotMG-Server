@@ -247,10 +247,16 @@ impl Crowd {
             return None;
         }
         // Rushers shorten the existing dungeon quest: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
-        self.attended_destination(v.time_ms, v.position, v.session.account, group, |p| {
-            p.distance(v.position) > 24.
-                && p.distance(objective) + 16. < v.position.distance(objective)
-        })
+        self.attended_destination(
+            v,
+            group,
+            |_| false,
+            |_| true,
+            |p| {
+                p.distance(v.position) > 24.
+                    && p.distance(objective) + 16. < v.position.distance(objective)
+            },
+        )
     }
     pub fn destination<'a>(
         &'a self,
@@ -264,22 +270,27 @@ impl Crowd {
         {
             return None;
         }
-        self.attended_destination(v, group, known, |p| {
-            survivable(v, p) && eligible_position(p)
-        })
+        self.attended_destination(
+            v,
+            group,
+            known,
+            |account| can_approach(v.session.world, v.session.account, account),
+            |p| survivable(v, p) && eligible_position(p),
+        )
     }
     fn attended_destination(
         &self,
         v: &PlayerView,
         group: Option<&adventures::Adventure>,
         known: impl Fn(i32) -> bool,
+        eligible: impl Fn(i32) -> bool,
         eligible_position: impl Fn(Pos) -> bool,
     ) -> Option<&PlayerMarker> {
         self.contacts
             .values()
             .filter(|(p, seen)| {
                 *seen == v.time_ms
-                    && can_approach(v.session.world, v.session.account, p.account)
+                    && eligible(p.account)
                     && eligible_position(p.position)
                     && (self.company.len() < 4 || self.company.contains_key(&(p.id, p.account)))
                     && self
