@@ -2,7 +2,7 @@ use super::*;
 use crate::content::{ConsumableEffect, Object};
 
 #[cfg(test)]
-mod tests;
+mod tincture_tests;
 
 #[derive(Clone)]
 pub(super) struct Boost {
