@@ -53,7 +53,7 @@ export async function run(game){
   const sorcererAfter=await sorcerer.inspect();
   await writeFile(join(out,'sorcerer-damage.json'),JSON.stringify({preparedProtection:true,before:sorcererBefore,after:sorcererAfter}));
   game.check('Sorcerer can fire the same slot-eight wand',sorcererAfter.diagnostic.character.shots>sorcererBefore.diagnostic.character.shots);
-  game.check('native wand shots damage an ordinary enemy',sorcererBefore.diagnostic.entities.some(e=>sorcererAfter.diagnostic.entities.find(q=>q.id===e.id)?.hp<e.hp));
+  game.check('native wand shots record real enemy damage credit',sorcererAfter.diagnostic.character.hits>sorcererBefore.diagnostic.character.hits&&sorcererAfter.diagnostic.entities.some(e=>Object.entries(e.damage).some(([owner,amount])=>Number(owner)===sorcererAfter.diagnostic.character.id&&amount>0)));
   const wizard=await game.join({...spec,class:0x30e,stats:[670,385,75,25,50,75,40,60],world:initial.view.session.world,equipment:[-1,-1,-1,-1],backpack:[0xa04,0xa97,-1,-1,-1,-1,-1,-1]});
   await wizard.act({keys:[],duration_ms:2500});
   const wizardInitial=await wizard.observe();
