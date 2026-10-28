@@ -85,6 +85,7 @@ export async function run(game){
         if(t>=0&&t<=1&&Math.hypot(boss.pos.x-p.x-t*dx,boss.pos.y-p.y-t*dy)<.8){await act({keys:['s'],duration_ms:150});continue;}
       }
       await act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+      await act({keys:[],duration_ms:500});
     }
     const after=await game.inspect();
     game.check(id+': native staff defeats target and earns XP',!entity(after,id)&&after.view.character.experience>before.view.character.experience);
