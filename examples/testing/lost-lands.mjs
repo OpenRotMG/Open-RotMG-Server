@@ -57,10 +57,11 @@ export async function run(game){
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
   async function protect(){
-    const now=(await game.observe()).game_ms;
-    if(now>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}
-    if(now>=scoutUntil){await prepareScout({kind:'protection',condition:'invulnerable',duration_ms:60000});scoutUntil=now+60000;}
-    if(companion&&now>=companionUntil){await api({op:'cheat',actor:companion.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});companionUntil=now+60000;}
+    const now=(await game.observe()).game_ms,through=now+15000;
+    // Ten-second native actions and their setup must not cross the prepared protection expiry.
+    if(through>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}
+    if(through>=scoutUntil){await prepareScout({kind:'protection',condition:'invulnerable',duration_ms:60000});scoutUntil=now+60000;}
+    if(companion&&through>=companionUntil){await api({op:'cheat',actor:companion.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});companionUntil=now+60000;}
   }
   async function idle(ms){while(ms>0){await protect();const now=(await game.observe()).game_ms,step=Math.min(ms,10000,until-now,scoutUntil-now,...(companion?[companionUntil-now]:[]));await game.act({keys:[],duration_ms:step});ms-=step;}}
   async function at(point){
