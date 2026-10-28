@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+process.env.RUST_LOG='info,openrotmg::world::named_births=debug,openrotmg::world::native_hits=debug';
 const out=process.env.QA_RESULTS_DIR,bit=n=>1<<(n-1);
 const spec={class:0x31d,level:20,seed:825,world:1,equipment:[0xb40,-1,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 let placement;
@@ -68,7 +69,10 @@ export async function run(game){
   game.check('native hits publish Weak during Daisy',samples.some(s=>s.view.character.conditions&bit(3)));
   for(let n=0;n<15&&entity(await game.inspect(),prisoner.id).stage!==3;n++)await idle(500);
   await idle(1500);state=await save('clones');const clones=kinds(state,0x942).filter(e=>e.quest===prisoner.quest);
-  game.check('clone phase admits four spawned and four tossed owned Clones',clones.length===8&&clones.every(e=>e.hp===15000));
+  const tosses=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.includes('"message":"named tosses admitted within owned and shared budgets"')).map(l=>JSON.parse(l).fields);
+  const toss=tosses.findLast(e=>e.owner===prisoner.id&&e.kind===0x942);assert(toss,'Observed Clone toss admission required');
+  await writeFile(join(out,'clone-admission.json'),JSON.stringify({toss,clones}));
+  game.check('clone phase produces four births plus terrain-admitted owned tosses',toss.requested===4&&toss.admitted>=0&&toss.admitted<=4&&clones.length===4+toss.admitted&&clones.every(e=>e.hp===15000&&e.expires-e.activated===17000));
   mystic=await game.join({class:0x323,level:20,seed:826,world:1,position:state.view.position,equipment:[-1,0xb2d,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]});await protect(mystic);
   for(const kind of [0x942,0x943]){
     state=await game.inspect();const child=kinds(state,kind).find(e=>!(flags(state,e.id)&bit(23))) ;assert(child,'Susceptible living child required');
