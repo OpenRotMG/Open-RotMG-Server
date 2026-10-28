@@ -15,6 +15,7 @@ export async function run(game){
   // Default 11.25-degree spacing is client logic, not a missing XML value: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/objects/Player.as#L987-L1013
   for(const [item,count] of [[0xa1a,1],[0xa75,1],[0xa1b,1],[0xa76,1],[0xa77,1],[0xa1c,1],[0xa1d,2],[0xa3a,1],[0xa1e,3],[0xa8b,3],[0xa8c,3],[0xa8d,3],[0xb02,3],[0xb03,3],[0xb04,3],[0xc02,1],[0xc10,2],[0xc1b,1]]){
     await cheat(game.actor,{kind:'item',slot:4,item});
+    await game.act({keys:[],duration_ms:200});
     await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:634,y:384}}});
     const equipped=await game.observe();
     game.check(`native Archer equips ${item.toString(16)}`,equipped.character.items[0]===item);
@@ -45,6 +46,7 @@ export async function run(game){
   await cheat(huntress.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
   for(const item of [0xa1a,0xa75,0xa1b,0xa76,0xa77,0xa1c,0xa1d,0xa3a,0xa1e,0xa8b,0xa8c,0xa8d,0xb02,0xb03,0xb04,0xc02,0xc10,0xc1b]){
     await cheat(huntress.actor,{kind:'item',slot:4,item});
+    await huntress.act({keys:[],duration_ms:200});
     await huntress.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:634,y:384}}});
     const equipped=await huntress.observe();game.check(`native Huntress equips ${item.toString(16)}`,equipped.character.items[0]===item);
     let before;
