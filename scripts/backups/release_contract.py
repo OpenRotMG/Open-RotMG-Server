@@ -20,6 +20,7 @@ def check(binary, data, directory, revision):
         account, email = db.execute('SELECT account,email FROM credentials ORDER BY account LIMIT 1').fetchone()
         db.execute('INSERT INTO verified_emails VALUES(?,?,1)', (account, email))
         db.execute('INSERT INTO email_verifications VALUES(?,?,?,1,2)', (account, email, 'EMAIL_BACKUP_PRIVATE_CANARY'))
+        db.execute('INSERT INTO email_password_resets VALUES(?,?,?,1,2)', (account, email, 'RESET_BACKUP_PRIVATE_CANARY'))
         db.execute('INSERT INTO email_send_attempts VALUES(?,?,1)', (account, 'EMAIL_BACKUP_PRIVATE_CANARY'))
     discord = directory / 'levels.sqlite'
     with closing(sqlite3.connect(discord)) as db, db:
@@ -30,9 +31,9 @@ def check(binary, data, directory, revision):
     bundle = backup.export(written / 'game.db', discord, archive, version, version, version)
     if len(bundle['game']['bot_minds']) != 2 or len(bundle['game']['trade_transactions']) != 1:
         raise RuntimeError('Release community payload missing from backup')
-    if bundle['schema'] != 20:
-        raise RuntimeError('Release backup is not schema20')
-    if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY']):
+    if bundle['schema'] != 21:
+        raise RuntimeError('Release backup is not schema21')
+    if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY', b'RESET_BACKUP_PRIVATE_CANARY']):
         raise RuntimeError('Release backup exported a login identity')
     restored = directory / 'restored'
     backup.restore(archive, restored)

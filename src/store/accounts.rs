@@ -9,7 +9,7 @@ pub(super) fn hash(password: &str) -> Result<String> {
         .map(|v| v.to_string())
         .map_err(|_| anyhow::anyhow!("password hashing failed"))
 }
-fn email(value: &str) -> Result<String> {
+pub(crate) fn email(value: &str) -> Result<String> {
     // HELLO credentials must fit the server's 2048-bit PKCS#1 v1.5 block.
     ensure!(
         value.len() <= 245 && value.is_ascii(),

@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 
 mod account_actions;
 mod accounts;
+pub(crate) use accounts::email as validate_email;
 pub(crate) mod browser_link;
 mod character_slots;
 mod discord_gold;
@@ -626,7 +627,7 @@ impl Store {
         ensure!(
             matches!(
                 version,
-                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21
             ),
             "unsupported game database schema {version}"
         );
@@ -833,7 +834,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 20)?;
+        migration.pragma_update(None, "user_version", 21)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

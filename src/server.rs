@@ -315,6 +315,31 @@ async fn account_request(
         Ok(false) => return limited(),
         Err(e) => return error(e),
     }
+    if operation == "forgotPassword" {
+        let result = async {
+            ensure!(
+                form.get("secret").is_none_or(|s| s.is_empty()),
+                "external platform authentication is not implemented"
+            );
+            email::request_reset(
+                &a,
+                form.get("guid").context("guid required")?.clone(),
+                request_ip(&a, &headers, peer)?,
+            )
+        }
+        .await;
+        return match result {
+            Ok(()) => (
+                [
+                    ("content-type", "application/xml"),
+                    ("cache-control", "no-store"),
+                ],
+                "<Success/>",
+            )
+                .into_response(),
+            Err(e) => error(e),
+        };
+    }
     let result: Result<i32> = async {
         let guid = form.get("guid").context("guid required")?.clone();
         if operation == "changePassword" {
