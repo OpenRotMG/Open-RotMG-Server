@@ -15,7 +15,7 @@ export async function prepare(api){
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   const natural=map.entities.filter(e=>e.kind===0x952);
   await writeFile(join(process.env.QA_RESULTS_DIR,'natural-lizards.json'),JSON.stringify(natural));
-  lizard=natural.find(e=>Array.from({length:9},(_,i)=>i-4).every(dx=>Array.from({length:9},(_,i)=>i-4).every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
+  lizard=natural.find(e=>[-2,-1,0].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
   assert(lizard,'No naturally populated Great Lizard with a clear approach');
   return {...spec,position:{x:lizard.pos.x-2,y:lizard.pos.y}};
 }
