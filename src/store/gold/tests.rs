@@ -10,6 +10,14 @@ async fn wallets_keep_death_earnings_purchases_and_swap_separate_after_reopen() 
     let guid = "wallets-owner".to_owned();
     let account = store.list(guid.clone()).await.unwrap().id;
     let foreign = store.list("wallets-foreign".into()).await.unwrap().id;
+    store
+        .register(
+            "wallets-foreign".into(),
+            "foreign@example.invalid".into(),
+            "wallet-fixture".into(),
+        )
+        .await
+        .unwrap();
     assert_eq!(
         (
             store.presentation(account).await.unwrap().credits,
