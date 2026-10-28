@@ -31,15 +31,17 @@ export async function run(game){
   const returned=await save('reentered');game.check('ordinary Nexus reconnect preserves chest contents and inventory',same(returned.diagnostic.entities.find(e=>e.kind===0x504).items,reordered)&&same(returned.view.character.items,withdrawn.view.character.items)&&returned.view.session.character===initial.view.session.character&&returned.view.character.inventory_revision===withdrawn.view.character.inventory_revision);
   const peer=await game.join({...fixture,backpack:Array(8).fill(-1)});await enter(peer);const privatePeer=await save('other-account',peer);
   game.check('second native account enters a different private Vault with no shared items',privatePeer.view.session.account!==returned.view.session.account&&privatePeer.view.session.world!==returned.view.session.world&&same(privatePeer.diagnostic.entities.find(e=>e.kind===0x504).items,Array(8).fill(-1)));
-  await walk(returned.diagnostic.entities.find(e=>e.kind===0x504).pos);await game.act({keys:[],duration_ms:1200},{name:'vault-after',when:()=>true});
+  await walk(returned.diagnostic.entities.find(e=>e.kind===0x504).pos);await game.act({keys:[],mouse:{x:590,y:480},duration_ms:200});await game.act({keys:[],duration_ms:1200},{name:'vault-after',when:()=>true});
   const durable=JSON.parse(execFileSync('python3',['-c',`import json,sqlite3,sys
 with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
  print(json.dumps({'vault':[(a,b,json.loads(c),d) for a,b,c,d in db.execute('SELECT account,chest,items,revision FROM vaults ORDER BY account,chest')], 'integrity':db.execute('PRAGMA integrity_check').fetchone()[0],'foreign_keys':db.execute('PRAGMA foreign_key_check').fetchall()}))`,config.state+'/game.db'],{encoding:'utf8'}));
   game.check('durable account chest identities and exact contents agree with native views',durable.integrity==='ok'&&durable.foreign_keys.length===0&&durable.vault.length===2&&durable.vault.some(([a,c,items])=>a===initial.view.session.account&&c===0&&same(items,reordered))&&durable.vault.some(([a,c,items])=>a===privatePeer.view.session.account&&c===0&&same(items,Array(8).fill(-1))));
   await writeFile(join(out,'vault-durable.json'),JSON.stringify(durable,null,2));
   const seller=returned.diagnostic.entities.find(e=>e.kind===0x505);assert(seller);await walk(seller.pos);
-  const beforeBuy=await save('guest-buy-before'),buyStart=(await game.observe()).game_ms;
-  await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1800},{name:'vault-guest-refusal',when:v=>v.game_ms>=buyStart+700});
+  const beforeBuy=await save('guest-buy-before');
+  await game.act({keys:[],mouse:{x:700,y:575},duration_ms:300});
+  const buyStart=(await game.observe()).game_ms;
+  await game.act({keys:[],duration_ms:1200},{name:'vault-guest-refusal',when:v=>v.game_ms>=buyStart+300});
   const guestRefusal=await save('guest-buy-refused');
   game.check('guest purchase leaves chest ownership inventory and revision unchanged',same(guestRefusal.view.character.items,beforeBuy.view.character.items)&&guestRefusal.view.character.inventory_revision===beforeBuy.view.character.inventory_revision&&guestRefusal.diagnostic.entities.filter(e=>e.kind===0x504).length===1&&guestRefusal.diagnostic.entities.some(e=>e.id===seller.id&&e.kind===0x505));
 }
