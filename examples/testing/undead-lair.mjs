@@ -57,7 +57,7 @@ export async function run(game){
       for(let n=0;n<80;n++){
         const s=await game.inspect(),v=s.view;assert(v.lifecycle.alive,'Knight died during lair traversal');
         const dx=p.x-v.position.x,dy=p.y-v.position.y;if(Math.max(Math.abs(dx),Math.abs(dy))<.3){reached=true;break;}
-        const horizontal=Math.abs(dx)>Math.abs(dy),delta=horizontal?dx:dy;
+        const horizontal=Math.abs(dx)>=.3&&(Math.abs(dy)<.3||Math.abs(dx)<Math.abs(dy)),delta=horizontal?dx:dy;
         const keys=horizontal?(delta>0?['d','s']:['a','w']):(delta>0?['a','s']:['d','w']);
         const enemy=s.diagnostic.entities.filter(e=>e.hp>0&&e.kind>=0xd91&&e.kind<=0xdb2&&e.kind!==0xda2&&e.kind!==0xda3&&distance(v.position,e.pos)<3.2).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];
         await sample({keys,duration_ms:Math.max(50,Math.min(450,Math.round(Math.abs(delta)/7.5*1000))),...(combat&&enemy?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
