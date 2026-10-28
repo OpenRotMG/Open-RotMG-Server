@@ -85,10 +85,16 @@ export async function run(game){
     game.check('wounded tribe receives observed healing',healed);
     game.check('Shaman stars apply selected Hallucinating and Quiet',conditions);
     game.check('owned tribes move around their Fire',orbit);await capture('tribal-healing');
-    await defeat(fire.id);const detached=await save('fire-defeated');
-    game.check('Fire defeat detaches surviving tribes without deleting them',tribe.every(e=>entity(detached,e.id)?.parent===null));
+    let beforeKill;
+    for(let n=0;n<45;n++){
+      const s=await game.inspect();if(!entity(s,fire.id))break;beforeKill=s;
+      await shoot(fire.id,50);await game.act({keys:[],duration_ms:850});await heal();
+    }
+    assert(beforeKill);trace.push({label:'before-final-fire-shot',...beforeKill});
+    const survivors=tribe.filter(e=>entity(beforeKill,e.id)),detached=await save('fire-defeated');
+    game.check('Fire defeat detaches surviving tribes without deleting them',!entity(detached,fire.id)&&survivors.length>0&&survivors.every(e=>entity(detached,e.id)?.parent===null));
     await game.act({keys:[],duration_ms:2500});const orphan=await save('tribes-orphaned');
-    game.check('detached tribes survive the timed ownership sweep',tribe.every(e=>entity(orphan,e.id)?.parent===null));
+    game.check('detached tribes survive the timed ownership sweep',survivors.every(e=>entity(orphan,e.id)?.parent===null));
     await capture('surviving-tribes');
   }else{
     const kind=part==='totem'?0xdcd:0xdcf,childKind=part==='totem'?0xdcc:0xdce;
