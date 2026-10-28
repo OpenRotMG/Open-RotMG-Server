@@ -56,7 +56,7 @@ export async function run(spectator){
   for(let n=0;n<24;n++){
     await protect(game.actor);await protect(spectator.actor);
     await game.act({keys:[],duration_ms:500});
-    const s=await game.inspect();trace.push({time:s.view.game_ms,entities:s.diagnostic.entities.filter(e=>e.quest===root),projectiles:s.view.projectiles});
+    const s=await game.inspect();trace.push({time:s.view.time_ms,entities:s.diagnostic.entities.filter(e=>e.quest===root),projectiles:s.view.projectiles});
   }
   await writeFile(join(out,'cycle.json'),JSON.stringify(trace));
   let state=await save('active');
@@ -75,11 +75,14 @@ export async function run(spectator){
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
       const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
-      await actor.act({keys,duration_ms:Math.max(50,Math.min(250,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
+      await actor.act({keys,duration_ms:Math.max(50,Math.min(750,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
     }throw Error('Native walk did not reach target');
   }
   async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>2)await approach(actor,id);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await game.act({keys:[],duration_ms:750},{name:'cube-active',when:()=>true});
+  const mana=(await game.observe()).character.mp;
+  await game.act({keys:[' '],duration_ms:150});
+  game.check('ordinary native helm spends mana and grants Speedy for pursuit',(await game.observe()).character.mp<mana&&((await game.observe()).character.conditions&(1<<14))!==0);
   for(let n=0;n<30&&entity(await game.inspect(),victim.id);n++)await fire(game,victim.id);
   game.check('native sword fire defeats an Overseer',!entity(await game.inspect(),victim.id));
   const census=await fetch(config.origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
@@ -88,6 +91,7 @@ export async function run(spectator){
   state=await save('replenished');game.check('living Cube replenishes an owned Overseer',family(state).some(e=>e.kind===0xd5a&&!old.has(e.id)));
   const boss=entity(state,root);assert(boss);
   const partner=await game.join({...spec,seed:821,position:boss.pos});await protect(partner.actor);
+  await game.act({keys:[' '],duration_ms:150});
   for(const actor of [game,partner]){for(let n=0;n<8&&(entity(await game.inspect(),root).damage[actor.actor]??0)<600;n++)await fire(actor,root,150);}
   state=await save('contributors');game.check('two native clients contribute above the 500-damage threshold',[game,partner].every(a=>entity(state,root).damage[a.actor]>500));
   const xp=await Promise.all([game.observe(),partner.observe(),spectator.observe()]);
