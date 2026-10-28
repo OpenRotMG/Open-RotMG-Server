@@ -1567,34 +1567,38 @@ mod tests {
     }
 
     #[test]
-    fn ent_god_defense_roll_requires_180_damage_without_erasing_gear() {
+    fn ent_and_ghost_god_potions_require_180_damage_without_erasing_gear() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        assert_eq!(bonus(0x655), &[(0.015, 0xa20)]);
         let owners = [(10, 179), (20, 180), (30, 181)];
-        let loot = god_loot(
-            &content,
-            0x655,
-            &owners,
-            &mut rand::rngs::mock::StepRng::new(0, 0),
-        );
-        assert!(!loot.private.contains_key(&10));
-        for owner in [20, 30] {
-            assert_eq!(loot.private[&owner], [0xa20]);
+        // Kithio's 18% threshold is inclusive, not the later 7.0 reward policy: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L88-L112
+        for (kind, potion) in [(0x655, 0xa20), (0x659, 0xa21)] {
+            assert_eq!(bonus(kind), &[(0.015, potion)]);
+            let loot = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(0, 0),
+            );
+            assert!(!loot.private.contains_key(&10));
+            for owner in [20, 30] {
+                assert_eq!(loot.private[&owner], [potion]);
+            }
+            assert_eq!(loot.shared_owners, [10, 20, 30]);
+            let expected: Vec<_> = table(kind)
+                .iter()
+                .flat_map(|(_, pick)| candidates(&content, *pick))
+                .collect();
+            assert_eq!(loot.shared, expected);
+            assert!(!loot.shared.contains(&potion));
+            let empty = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0),
+            );
+            assert!(empty.shared.is_empty() && empty.private.is_empty());
         }
-        assert_eq!(loot.shared_owners, [10, 20, 30]);
-        let expected: Vec<_> = table(0x655)
-            .iter()
-            .flat_map(|(_, pick)| candidates(&content, *pick))
-            .collect();
-        assert_eq!(loot.shared, expected);
-        assert!(!loot.shared.contains(&0xa20));
-        let empty = god_loot(
-            &content,
-            0x655,
-            &owners,
-            &mut rand::rngs::mock::StepRng::new(u64::MAX, 0),
-        );
-        assert!(empty.shared.is_empty() && empty.private.is_empty());
+        assert_eq!(crate::dungeon::portal_drop(0x659), Some((0x71a, 0.17)));
     }
 
     #[test]
