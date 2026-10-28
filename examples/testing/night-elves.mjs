@@ -79,7 +79,8 @@ export async function run(game){
   await act({keys:[],duration_ms:2500});
   const dead=await save('defeated'),survivors=family(dead),endStart=(await game.observe()).game_ms;
   game.check('living elf orphans remain for post-leader observation',survivors.length>0&&survivors.every(e=>![0x650,0x64f].includes(e.kind)));
-  await act({keys:[],duration_ms:11000},{name:'night-elves-defeated',when:v=>v.game_ms>=endStart+500});
+  await act({keys:[],duration_ms:10000});
+  await act({keys:[],duration_ms:1000},{name:'night-elves-defeated',when:v=>v.game_ms>=endStart+10500});
   const final=await save('after-root-death');
   game.check('leader deaths preserve surviving ordinary elves',survivors.every(e=>family(final).some(p=>p.id===e.id)));
   game.check('current orphan reconstruction wanders',family(final).some(e=>survivors.some(p=>p.id===e.id&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2)));
