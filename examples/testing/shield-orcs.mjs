@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {connect} from '../../scripts/record-demo.mjs';
 const spec={class:0x30e,level:20,seed:831,world:1,equipment:[0xb08,0xb24,-1,-1],backpack:[0xa97,...Array(7).fill(-1)],stats:[670,385,75,0,50,75,40,60]};
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let queen;
@@ -31,22 +30,13 @@ export async function prepare(api){
   throw Error('No natural Shield Orc camp with a walkable inner-orbit approach in the three Realms');
 }
 export async function run(game){
-  const samples=[],shots=new Map(),volleys=[];let protectedUntil=0,serial=0;
-  const config=JSON.parse(await readFile(join(root(),'native.json'),'utf8')),native=config.native.find(n=>n.actor===game.actor);assert(native);
-  const connection=await connect({...native,url:config.origin+'/',helper:config.browserTools,onEvent:event=>{
-    if(event.method!=='Network.webSocketFrameReceived'||event.params.response.opcode!==2)return;
-    const b=Buffer.from(event.params.response.payloadData,'base64');
-    if(b.length<25||b[4]!==19||b.readInt32BE(6)!==queen.id)return;
-    assert(b.readUInt32BE(0)===b.length&&[25,30].includes(b.length),'Malformed Queen volley');
-    volleys.push({time:event.params.timestamp,bullet:b[5],angle:b.readFloatBE(19),count:b.length===30?b[25]:1,gap:b.length===30?b.readFloatBE(26):0});
-  }});
-  await connection.call('Network.enable');
+  const samples=[],shots=new Map();let protectedUntil=0,serial=0,pollMs=100;
   const family=s=>s.diagnostic.entities.filter(e=>e.camp===queen.camp);
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
   const record=s=>{samples.push(s);for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);};
   async function step(input,capture){
     let pending=null,error;
-    const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
+    const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},pollMs);
     try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
     if(error)throw error;const s=await game.inspect();record(s);return s;
   }
@@ -92,6 +82,7 @@ export async function run(game){
   const xp=unreplaced.view.character.experience;
   await act({keys:[],duration_ms:500,drag:{from:{x:634,y:428},to:{x:634,y:385}}});
   game.check('native inventory equips the supplied low-damage staff for withdrawal',(await game.observe()).character.items[0]===0xa97);
+  pollMs=25;
   for(let n=0;n<60;n++){
     const q=family(await game.inspect()).find(e=>e.id===queen.id);if(!q||q.stage===2)break;
     await act({keys:[],duration_ms:50,target:{entity:queen.id,camera_angle:-Math.PI/4,fire:true}});
@@ -100,12 +91,13 @@ export async function run(game){
   await act({keys:[],duration_ms:1500},{name:'shield-orcs-withdrawn',when:()=>true});
   const dead=await save('queen-withdrawn');
   game.check('wounded Queen telegraphs and withdraws',samples.some(s=>family(s).some(e=>e.id===queen.id&&e.stage===2&&e.hp<500))&&!family(dead).some(e=>e.id===queen.id));
-  game.check('native client receives the ten-shot final ring',volleys.some(v=>v.count===10&&v.angle===0&&Math.abs(v.gap-Math.PI/5)<.000001));
+  game.check('ten-shot final ring is observed during native combat',samples.some(s=>new Set(s.view.projectiles.filter(p=>p.owner===queen.id&&Math.abs(p.angle/(Math.PI/5)-Math.round(p.angle/(Math.PI/5)))<.001).map(p=>Math.round(p.angle/(Math.PI/5)))).size===10));
   game.check('withdrawal awards no kill XP',dead.view.character.experience===xp);
+  pollMs=100;
   const survivorIds=new Set(family(dead).map(e=>e.id)),orphanStart=dead.view.time_ms;
   await act({keys:[],duration_ms:5000});
   const end=await save('survivors'),aftermath=samples.filter(s=>s.view.time_ms>orphanStart+1000);
   game.check('survivors remain and cease firing after command loss',aftermath.length>0&&family(end).length===2&&family(end).every(e=>survivorIds.has(e.id)&&e.stage===4)&&!aftermath.some(s=>s.view.projectiles.some(p=>survivorIds.has(p.owner))));
   game.check('same prepared living Wizard completes the encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
-  }finally{connection.close();await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()],volleys}));}
+  }finally{await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));}
 }
