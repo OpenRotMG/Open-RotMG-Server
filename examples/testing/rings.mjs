@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
 const base=[670,385,75,25,50,75,40,60];
-export const fixture={class:0x30e,level:20,seed:877,world:'vault',position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xc31,-1,-1,-1,-1,-1,-1,-1],stats:base};
+export const fixture={class:0x30e,level:20,seed:877,world:'vault',position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xc31,0xc20,-1,-1,-1,-1,-1,-1],stats:base};
 const bonus=(...pairs)=>{const b=Array(8).fill(0);for(const [i,n] of pairs)b[i]=n;return b;};
 const rings=[
   [0xc31,bonus([0,60],[1,60],[3,4],[6,4])],[0xc20,bonus([6,5],[7,5])],
@@ -44,7 +44,9 @@ export async function run(game){
     game.check(id.toString(16)+' native removal reverses bonuses once',removed.character.items[3]===-1&&removed.character.items[4]===id&&removed.character.inventory_revision===equipped.character.inventory_revision+1&&same(removed.character.stats,base)&&removed.character.mp<=base[1]&&removed.character.hp<=base[0]);
     await appendFile(join(out,'rings.jsonl'),JSON.stringify({id,boost,before,equipped,removed})+'\n');
   }
-  await drag(pack,ring);const beforeExit=await game.observe();
+  await drag(pack,ring);const beforeSwap=await game.observe();
+  await drag({x:678,y:428},ring);const beforeExit=await game.observe();
+  game.check('direct ring replacement removes old bonuses without stacking',beforeExit.character.items[3]===0xc20&&beforeExit.character.items[5]===0xacb&&beforeExit.character.inventory_revision===beforeSwap.character.inventory_revision+1&&same(beforeExit.character.stats,base.map((n,i)=>n+(i>=6?5:0))));
   await game.act({keys:['Insert'],duration_ms:1200},{name:'rings-retained',when:v=>v.world==='Nexus'});
   const after=await game.observe();
   game.check('Nexus reconnect preserves ring stats inventory and living identity',after.world==='Nexus'&&after.session.world!==beforeExit.session.world&&after.lifecycle.alive&&after.session.character===initial.session.character&&same(after.character.items,beforeExit.character.items)&&same(after.character.stats,beforeExit.character.stats)&&after.character.inventory_revision===beforeExit.character.inventory_revision);
