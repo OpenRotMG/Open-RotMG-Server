@@ -61,9 +61,17 @@ export async function run(game){
     const bag=all.entities.find(e=>e.items.includes(0xa34)&&distance(e.pos,home)<12);assert(bag);
     game.check('legitimate private reward includes DEF and VIT',bag.items.includes(0xa20)&&bag.extra_stats.some(([stat,owner])=>stat===54&&owner===start.view.session.account));
     await walk(bag.pos);await game.act({keys:[],duration_ms:700},{name:scene+'-loot',when:()=>true});
-    const v=await game.observe(),slot=bag.items.indexOf(0xa20);
-    await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},to:{x:634,y:428}}});
-    const picked=await save('picked');game.check('native Defense pickup commits once',picked.view.character.items[4]===0xa20&&picked.view.character.inventory_revision===v.character.inventory_revision+1);
+    for(const overflow of all.entities.filter(e=>e.id>bag.id&&e.items.some(i=>i>=0)&&distance(e.pos,bag.pos)<.01).sort((a,b)=>b.id-a.id)){
+      for(const [slot,item] of overflow.items.entries())if(item>=0){
+        const v=await game.observe(),empty=v.character.items.findIndex((i,n)=>n>=4&&i===-1);assert(empty>=4,'Overflow exceeds prepared inventory');
+        await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},to:{x:634+44*((empty-4)%4),y:428+44*Math.floor((empty-4)/4)}}});
+        game.check('native overflow pickup commits the displayed item',(await game.observe()).character.items[empty]===item&&(await game.observe()).character.inventory_revision===v.character.inventory_revision+1);
+      }
+      await game.act({keys:[],duration_ms:500});game.check('empty overflow bag is removed',!(await map()).entities.some(e=>e.id===overflow.id));
+    }
+    const v=await game.observe(),slot=bag.items.indexOf(0xa20),empty=v.character.items.findIndex((i,n)=>n>=4&&i===-1);assert(empty>=4);
+    await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},to:{x:634+44*((empty-4)%4),y:428+44*Math.floor((empty-4)/4)}}});
+    const picked=await save('picked');game.check('native Defense pickup commits once',picked.view.character.items[empty]===0xa20&&picked.view.character.inventory_revision===v.character.inventory_revision+1);
     if(scene==='idol'){
       game.check('Idol defeat leaves the main encounter and other room untouched',picked.diagnostic.character.abysses===0&&all.entities.some(e=>e.id===boss.id&&e.hp===10000)&&all.entities.some(e=>e.kind===0xe1d&&e.id!==enemy.id&&e.hp===25000)&&!all.entities.some(e=>e.kind===0x704));
       game.check('defeat restores the original entrance tiles',entrance.every(t=>picked.view.tiles.some(a=>a.x===t.x&&a.y===t.y&&a.ground===0x3c)));
@@ -73,7 +81,7 @@ export async function run(game){
       await game.act({keys:[],duration_ms:1000});game.check('completion does not repeat',(await game.inspect()).diagnostic.character.abysses===1);
       const portal=all.entities.find(e=>e.kind===0x704);assert(portal);await walk(portal.pos);
       await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
-      const returned=await save('returned');game.check('completion exit retains the same living character and reward',returned.view.map.name==='Realm'&&returned.view.session.character===start.view.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.abysses===1&&returned.view.character.items[4]===0xa20);
+      const returned=await save('returned');game.check('completion exit retains the same living character and reward',returned.view.map.name==='Realm'&&returned.view.session.character===start.view.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.abysses===1&&returned.view.character.items[empty]===0xa20);
     }
   }
   const end=await game.observe();game.check('same living character completes the bounded scene',end.lifecycle.alive&&end.session.character===start.view.session.character);
