@@ -70,7 +70,7 @@ export async function run(game){
     await travel(root.pos);await protect();
     const now=(await game.observe()).game_ms;if(now>=modifier){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifier=now+60000;}
     for(let hit=0;hit<100;hit++){
-      const state=await game.inspect(),target=state.diagnostic.entities.find(e=>e.id===root.id||e.quest===root.id&&[0x920,0x91c,0x6c1].includes(e.kind));
+      const state=await game.inspect(),target=state.diagnostic.entities.filter(e=>e.id===root.id||e.quest===root.id&&[0x920,0x91c,0x6c1,0x91d,0x924].includes(e.kind)).sort((a,b)=>Number(![0x91d,0x924].includes(a.kind))-Number(![0x91d,0x924].includes(b.kind)))[0];
       if(!target)break;await fire(target.id);
     }
     await game.act({keys:[],duration_ms:200});await save('admission-source-'+root.id);
