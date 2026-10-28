@@ -144,7 +144,6 @@ async fn next_visual(
     cursor: bool,
 ) -> VisualEvent {
     tokio::select! {
-        biased;
         _ = ticks.tick(), if cursor => VisualEvent::Cursor,
         input = input => VisualEvent::Input(input),
         packet = receiver.recv() => VisualEvent::Packet(packet),
