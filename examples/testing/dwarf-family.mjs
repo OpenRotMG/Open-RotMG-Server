@@ -70,6 +70,13 @@ export async function run(game){
   }
   const victim=family(samples.at(-1)).find(e=>e.kind===0x61c);assert(victim);
   const previous=new Set(family(samples.at(-1)).map(e=>e.id));await defeat(victim.id);
+  for(let n=0;n<40;n++){
+    const p=(await game.observe()).position,dx=king.pos.x-p.x,dy=king.pos.y-p.y,distance=Math.hypot(dx,dy);if(distance<.4)break;
+    const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+    if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');
+    await act({keys,duration_ms:Math.min(500,Math.max(50,Math.round(distance*120)))});
+  }
+  game.check('native movement returns to the original walkable MidForest camp',Math.hypot((await game.observe()).position.x-king.pos.x,(await game.observe()).position.y-king.pos.y)<.4);
   for(let n=0;n<16&&!family(await game.inspect()).some(e=>e.kind===0x61c&&!previous.has(e.id));n++)await act({keys:[],duration_ms:1000});
   const replenished=await save('replenished');
   game.check('living King replenishes a defeated escort within current caps',entity(replenished,king.id)&&caps(replenished)&&family(replenished).some(e=>e.kind===0x61c&&!previous.has(e.id)));
