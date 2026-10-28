@@ -15,7 +15,7 @@ export async function prepare(api){
   return spec;
 }
 export async function run(observer){
-  let game=observer;
+  let game=observer,shrine;
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},records=[];
   async function api(command){
@@ -30,7 +30,8 @@ export async function run(observer){
   }
   async function map(){
     const state=await game.observe(),response=await fetch(config.origin+'/dev/map?player='+state.session.player,{headers});
-    assert(response.ok);return await response.json();
+    assert(response.ok);const scene=await response.json();
+    return shrine?{entities:scene.entities.filter(e=>e.quest===shrine.id)}:scene;
   }
   async function save(label){const state=await game.inspect();records.push({label,state});await writeFile(join(out,'encounter.json'),JSON.stringify(records));return state;}
   const protectedUntil=new Map();
@@ -45,16 +46,23 @@ export async function run(observer){
     if(now>=until){await cheat(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil.set(actor.actor,now+60000);}
     if(restore)await cheat(actor,{kind:'teleport',position:restore});
   }
-  async function fire(actor,id,ms=500){await protect(observer);await protect(actor);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
-  const initial=await map();await writeFile(join(out,'initial-map.json'),JSON.stringify(initial));
+  async function fire(actor,id,ms=500){
+    await protect(observer);await protect(actor);
+    const state=await actor.inspect(),target=state.diagnostic.entities.find(e=>e.id===id);assert(target,'Living visible native target required');
+    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2)await approach(actor,target.pos,1.5);
+    await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+  }
+  let initial=await map();
   game.check('no Skull Shrine is active before an earned event',!initial.entities.some(e=>e.kind===0xd56));
-  const blocked=new Set(initial.blocked.map(p=>p.join(',')));
+  let blocked=new Set(initial.blocked.map(p=>p.join(',')));
   function approachPoint(point){
     const position=[[1.5,0],[-1.5,0],[0,1.5],[0,-1.5],[1,1],[-1,1],[1,-1],[-1,-1]].map(([x,y])=>({x:point.x+x,y:point.y+y})).find(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')));
     assert(position,'No walkable prepared attack position beside the observed hero');return position;
   }
   const order=[0x678,0x67d,0x668,0x675,0x928,0x91b];
   const candidates=initial.entities.filter(e=>order.includes(e.kind)).sort((a,b)=>order.indexOf(a.kind)-order.indexOf(b.kind));
+  await writeFile(join(out,'initial-map.json'),JSON.stringify({width:initial.width,height:initial.height,candidates,shrines:initial.entities.filter(e=>e.kind===0xd56)}));
+  initial=null;
   const events=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
   let admission;
   for(const candidate of candidates){
@@ -72,7 +80,9 @@ export async function run(observer){
     if(admission)break;
   }
   assert(admission,'Bounded ordinary hero defeats did not admit a Skull Shrine');
-  const shrine={id:admission.entity,kind:0xd56,pos:{x:admission.x,y:admission.y}},logs=await events();
+  shrine={id:admission.entity,kind:0xd56,pos:{x:admission.x,y:admission.y}};
+  blocked=null;candidates.length=0;
+  const logs=await events();
   game.check('ordinary qualifying defeat admits the reserved shrine exactly once',!!admission&&logs.filter(f=>f.message==='quest defeat summoned a Realm event'&&f.entity===shrine.id).length===1);
   await writeFile(join(out,'admission.json'),JSON.stringify({shrine,admission}));
   game=await observer.join({...spec,seed:820,position:{x:shrine.pos.x+8,y:shrine.pos.y}});
