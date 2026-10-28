@@ -41,7 +41,7 @@ export async function run(game){
         const dx=p.x-v.position.x,dy=p.y-v.position.y;if(Math.max(Math.abs(dx),Math.abs(dy))<.6){reached=true;break;}
         const horizontal=Math.abs(dx)>Math.abs(dy),delta=horizontal?dx:dy;
         const input={keys:horizontal?(delta>0?['d','s']:['a','w']):(delta>0?['a','s']:['d','w']),duration_ms:Math.max(80,Math.min(500,Math.round(Math.abs(delta)/7.5*1000)))};
-        const enemy=v.objects.filter(e=>e.kind>=0x683&&e.kind<=0x689&&distance(v.position,e.position)<3).sort((a,b)=>distance(v.position,a.position)-distance(v.position,b.position))[0];
+        const enemy=v.objects.filter(e=>e.hp>0&&e.kind>=0x683&&e.kind<=0x689&&distance(v.position,e.position)<3).sort((a,b)=>distance(v.position,a.position)-distance(v.position,b.position))[0];
         if(combat&&enemy)input.target={entity:enemy.id,camera_angle:-Math.PI/4,fire:true};
         await sample(input);
       }
@@ -64,6 +64,7 @@ export async function run(game){
   game.check('untouched selected 800-HP Dreadstump emits no attack',live?.hp===800&&![...shots.values()].some(p=>p.owner===boss.id));
   // The selected client fixes projectile values; the HP gate is a comparator: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.PirateCave.cs#L17-L32
   let damaged;
+  await walk(live.pos,false);
   for(let n=0;n<8;n++){
     await sample({keys:[],duration_ms:100,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});await sample({keys:[],duration_ms:250});
     damaged=(await game.inspect()).diagnostic.entities.find(e=>e.id===boss.id);assert(damaged,'Boss died before its attack phase');if(damaged.hp<640)break;
