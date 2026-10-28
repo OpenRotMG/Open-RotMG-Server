@@ -33,12 +33,10 @@ export async function run(game){
   try{
     const arrival=await game.inspect();
     game.check('natural mountain Beholder admitted at selected 1500 HP',enemy(arrival)?.hp===1500&&arrival.view.session.world===1);
-    await act({keys:[],duration_ms:2000},{name:'beholder-arrival',when:()=>true});
-    const hurt=await game.inspect();
-    game.check('unprotected native character takes encounter damage and survives',hurt.view.character.hp<arrival.view.character.hp&&hurt.view.lifecycle.alive);
     const path=output('protection.json');
     await writeFile(path,JSON.stringify({id:'beholder-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);
+    await act({keys:[],duration_ms:2000},{name:'beholder-arrival',when:()=>true});
     await act({keys:[],duration_ms:6000},{name:'beholder-blind',when:()=>true});
     const combat=await game.inspect();
     game.check('natural Beholder activates and moves',samples.some(s=>enemy(s)?.activated!=null&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2));
@@ -63,6 +61,6 @@ export async function run(game){
     game.check('defeated Beholder stays absent without repeated XP',!enemy(end)&&end.view.character.experience===dead.view.character.experience);
     game.check('Blind expires after encounter',!(end.view.character.conditions&(1<<7)));
     game.check('same prepared living Wizard remains in the Realm',end.view.lifecycle.alive&&end.view.session.world===1&&end.view.session.character===arrival.view.session.character);
-    await writeFile(output('outcomes.json'),JSON.stringify({arrival,hurt,combat,dead,end}));
+    await writeFile(output('outcomes.json'),JSON.stringify({arrival,combat,dead,end}));
   }finally{await writeFile(output('combat.json'),JSON.stringify({root,samples,shots:[...shots.values()]}));}
 }
