@@ -247,9 +247,6 @@ fn dungeon_drink_refusals_and_failed_commit_publish_no_effects() {
         );
         assert_eq!(p.character.items, before.items);
         assert_eq!(p.effective(&w.content, w.now).unwrap(), before.base);
-        assert_eq!(
-            p.conditions(w.now) & crate::condition::bit(crate::condition::DRUNK),
-            0
-        );
+        assert_eq!(p.conditions(w.now), 0);
     }
 }
