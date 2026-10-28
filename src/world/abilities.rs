@@ -988,11 +988,70 @@ mod tests {
         };
         assert!(world.use_item(owner, slot, Pos { x: 6.5, y: 4.5 }).is_err());
         assert_eq!(world.players[&owner].character.mp, before);
+        assert_eq!(world.players[&owner].ability_ready_ms, 0);
         assert_eq!(world.ability_state.objects.len(), objects);
         assert_eq!(world.players[&owner].pos.distance(origin), 0.);
         world.use_item(owner, slot, Pos { x: 8.5, y: 4.5 }).unwrap();
         assert_eq!(world.players[&owner].character.mp, before - 60);
         assert_eq!(world.players[&owner].pos.x, 8.5);
+    }
+
+    #[test]
+    fn ability_refusals_preserve_spend_deadline_inventory_and_effects() {
+        let origin = Pos { x: 4.5, y: 4.5 };
+        let (mut world, owner, _) = decoy_world(origin, 0., None);
+        for (class, equipped, slot, mana, quiet, paused, ready) in [
+            (0x324, 0xae3, 1, 59, false, false, 0),
+            (0x324, 0xae3, 1, 192, true, false, 0),
+            (0x324, 0xae3, 1, 192, false, true, 0),
+            (0x324, 0xae3, 1, 192, false, false, u64::MAX),
+            (0x30e, 0xae3, 1, 192, false, false, 0),
+            (0x324, -1, 1, 192, false, false, 0),
+            (0x324, 0xae3, 4, 192, false, false, 0),
+        ] {
+            let p = world.players.get_mut(&owner).unwrap();
+            p.character.class = class;
+            p.character.items[1] = equipped;
+            p.character.items[4] = 0xae3;
+            p.character.mp = mana;
+            p.lab_conditions = if quiet {
+                crate::condition::bit(crate::condition::QUIET)
+            } else {
+                0
+            };
+            p.paused = paused;
+            p.ability_ready_ms = ready;
+            let before = p.character.clone();
+            let objects = world.ability_state.objects.len();
+            assert!(
+                world
+                    .use_item(
+                        owner,
+                        Slot {
+                            object: owner,
+                            slot,
+                            kind: 0xae3
+                        },
+                        origin
+                    )
+                    .is_err()
+            );
+            let p = &world.players[&owner];
+            assert_eq!(p.character.mp, before.mp);
+            assert_eq!(p.character.items, before.items);
+            assert_eq!(p.character.revision, before.revision);
+            assert_eq!(p.ability_ready_ms, ready);
+            assert_eq!(p.pos.distance(origin), 0.);
+            assert_eq!(world.ability_state.objects.len(), objects);
+        }
+        let slot = Slot {
+            object: owner,
+            slot: 1,
+            kind: 0xae3,
+        };
+        world.use_item(owner, slot, origin).unwrap();
+        assert_eq!(world.players[&owner].character.mp, 132);
+        assert!(world.players[&owner].ability_ready_ms > 0);
     }
 
     #[test]
