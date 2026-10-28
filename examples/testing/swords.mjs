@@ -26,14 +26,14 @@ export async function run(game){
       }
       await game.act({keys:[],duration_ms:500});
       const before=await game.inspect();
-      const action=await game.act({keys:[],mouse:{x:480,y:325},duration_ms:2200},i===0||item===0xc01||item===0xc05?{name:'sword-'+item.toString(16),when:view=>view.verification.shots>before.view.verification.shots}:undefined);
-      const after=await game.inspect(),shots=after.diagnostic.character.shots-before.diagnostic.character.shots;
-      const duration=action.steps[0].game_ms-action.steps[0].before_ms;
+      const action=await game.act({keys:[],mouse:{x:480,y:325},duration_ms:2200},i===0||item===0xc01||item===0xc05?{name:'sword-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots}:undefined);
+      const after=await game.inspect(),observed=await game.observe(),shots=after.diagnostic.character.shots-before.diagnostic.character.shots;
+      const duration=action.steps[0].input_release_wall_ms-action.steps[0].input_started_wall_ms;
       const pellets=item===0xc01?2:1,rate=item===0xc05?0.6:1;
-      // The selected client, not modern balance, defines cadence and the 40-degree Demon spread: https://web.archive.org/web/20120601000000id_/http://forums.wildshadow.com/wiki/realm-mad-god/swords
+      // The selected client, not modern balance, defines cadence and the 40-degree Demon spread: https://web.archive.org/web/20120524234154id_/http://forums.wildshadow.com/wiki/realm-mad-god/swords
       const period=Math.floor(1000/(1.5+6.5*50/75)/rate);
       game.check(item.toString(16)+' fires at selected cadence',shots%pellets===0&&Math.abs(shots/pellets-duration/period)<=2);
-      game.check(item.toString(16)+' preserves stats mana inventory and identity',JSON.stringify(after.view.character.stats)===JSON.stringify(initial.character.stats)&&after.view.character.mp===before.view.character.mp&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&after.view.lifecycle.alive&&after.view.session.character===initial.session.character);
+      game.check(item.toString(16)+' preserves stats mana inventory and identity',JSON.stringify(observed.character.stats)===JSON.stringify(initial.character.stats)&&after.view.character.mp===before.view.character.mp&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&after.view.lifecycle.alive&&after.view.session.character===initial.session.character);
       observations.push({item,shots,duration,period,before,after});
       await writeFile(join(root,'swords.json'),JSON.stringify(observations,null,2));
     }
