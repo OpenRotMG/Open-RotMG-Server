@@ -3,7 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const stock=[0xa22,0xa23,0xa25,0xa2a,0xa4a,0xa3c,0xc0c,0xb3e];
-export const fixture={class:0x30e,level:20,seed:898,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:stock,stats:[670,385,50,25,50,50,40,75]};
+export const fixture={class:0x30e,level:20,seed:898,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:stock,stats:[670,385,50,25,50,50,40,50]};
 export async function run(game){
   const out=join(process.env.QA_RESULTS_DIR,'native'),records=[];
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
