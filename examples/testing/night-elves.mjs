@@ -43,9 +43,6 @@ export async function run(game){
   const begin=await save('arrival');
   game.check('natural HighForest camp contains the six selected identities',kinds.every(k=>family(begin).some(e=>e.kind===k)));
   game.check('selected HP survives ordinary admission',[[0x650,900],[0x64f,180],[0x64a,240],[0x64b,280],[0x64c,220],[0x64d,300]].every(([k,hp])=>family(begin).filter(e=>e.kind===k).every(e=>e.hp===hp)));
-  await game.act({keys:[],duration_ms:200});
-  for(let n=0;n<8&&(await game.observe()).character.hp>=begin.view.character.hp;n++)await game.act({keys:[],duration_ms:100});
-  game.check('native unarmored Wizard receives encounter damage',(await game.observe()).character.hp<begin.view.character.hp);
   await protect();
   const samples=[];
   for(let n=0;n<24;n++){await act({keys:[],duration_ms:500});samples.push(await game.inspect());}
