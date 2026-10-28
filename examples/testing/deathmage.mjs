@@ -12,7 +12,7 @@ export async function prepare(api){
   const roots=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x925);
   assert(roots.length>=5&&roots.length<=9&&roots.every(r=>[8,9].includes(r.terrain)));
   root=roots[0];await writeFile(join(out,'placement.json'),JSON.stringify({world,roots}));
-  return {class:0x300,level:20,seed:795,world:1,position:{x:root.x,y:root.y},equipment:[0xaff,0xb27,0xaf9,-1],backpack:Array(8).fill(-1),stats:[770,252,75,0,75,75,0,0]};
+  return {class:0x300,level:20,seed:795,world:1,position:{x:root.x,y:root.y},equipment:[0xaff,0xb27,0xaf9,-1],backpack:Array(8).fill(-1),stats:[720,252,50,0,75,75,0,0]};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
