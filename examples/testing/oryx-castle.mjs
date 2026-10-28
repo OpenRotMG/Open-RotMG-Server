@@ -4,8 +4,9 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
 const mode=process.env.CASTLE_MODE??'route';
-assert(['route','left','right'].includes(mode),'CASTLE_MODE must be route, left or right');
-export const fixture={class:0x30e,level:20,seed:866,world:'oryx-castle',position:mode==='route'?'spawn':{x:127.5,y:39.5},equipment:[0xb08,-1,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
+const positions={route:'spawn',left:{x:127.5,y:39.5},right:{x:127.5,y:39.5},tower:{x:127.5,y:61.5},armor:{x:114.5,y:39.5},ordinary:{x:123.5,y:88.5}};
+assert(Object.hasOwn(positions,mode),'Unknown CASTLE_MODE');
+export const fixture={class:0x30e,level:20,seed:866,world:'oryx-castle',position:positions[mode],equipment:[0xb08,-1,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(root,'native/native.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(config.state,'control.token'),'utf8')).trim(),'Content-Type':'application/json'};
@@ -48,7 +49,31 @@ export async function run(game){
   }
   const initial=await save('entrance'),authored=await map();
   await writeFile(join(root,'castle-authored-map.json'),JSON.stringify(authored));
+  if(mode==='tower'){
+    await game.act({keys:[],duration_ms:2500},{name:'castle-quiet',when:()=>true});
+    const hit=await save('tower-hit');
+    game.check('natural Living Floor projectile applies Quiet and drains MP',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0);
+    game.check('selected tower does not add the later-guide Weak condition',!(hit.view.character.conditions&4)&&hit.view.lifecycle.alive);
+    return;
+  }
   await act({keys:[],duration_ms:1500},{name:'castle-entrance',when:()=>true});
+  if(mode==='armor'||mode==='ordinary'){
+    const before=await save('armor-before'),population=await map();
+    const armor=population.entities.filter(e=>e.kind===0xd7e&&(mode==='armor'?e.parent!==null:e.parent===null)).sort((a,b)=>distance(a.pos,before.view.position)-distance(b.pos,before.view.position))[0];
+    assert(armor&&distance(armor.pos,before.view.position)<5,'Requested authored/spawned armor absent');
+    await kill(armor.id);
+    const first=await save('armor-defeated');
+    game.check('actual '+mode+' Haunted Armor defeat grants no XP or base fame',!((await map()).entities.some(e=>e.id===armor.id))&&first.view.character.experience===before.view.character.experience);
+    if(mode==='armor'){
+      await act({keys:[],duration_ms:4000});
+      const replacement=(await map()).entities.find(e=>e.kind===0xd7e&&e.parent===armor.parent&&e.id!==armor.id);assert(replacement,'Same spawner did not replace its actually defeated armor');
+      await kill(replacement.id);
+      const second=await save('replacement-defeated');
+      game.check('same spawner replacement has a fresh identity and still grants no XP',!((await map()).entities.some(e=>e.id===replacement.id))&&second.view.character.experience===first.view.character.experience);
+      await writeFile(join(root,'castle-armor-identities.json'),JSON.stringify({armor,replacement}));
+    }
+    return;
+  }
   const goal={x:127.5,y:47.5},walls=[];
   if(mode==='route'){
   // Build 122 requires the full anti-rush route, not an arena-only fixture: https://wikiwiki.jp/rmd/version/build122.0.1
