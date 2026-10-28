@@ -28,8 +28,8 @@ export async function run(game) {
   }
   const menu=()=>game.act({keys:[],mouse:{x:650,y:520},duration_ms:500});
   async function teleport(name) {
-    const before=await game.observe();
-    return game.act({keys:[],mouse:{x:550,y:400},duration_ms:1000},{name,when:v=>v.game_ms>=before.game_ms+400});
+    await game.act({keys:[],mouse:{x:550,y:400},duration_ms:100});
+    return game.act({keys:[],duration_ms:800},{name,when:()=>true});
   }
   await menu();
   await game.act({keys:[],mouse:{x:300,y:300},duration_ms:300});
@@ -50,6 +50,7 @@ export async function run(game) {
   await menu();await teleport('nexus-teleport-landed');
   const landed=await game.observe();
   game.check('eligible Nexus menu teleport lands exactly on the live target',distance(landed,await peer.observe())<.01&&landed.session.character===start.session.character&&landed.game_ms-refused.game_ms<10000);
+  await peer.act({keys:[],duration_ms:800},{name:'target-observes-arrival',when:()=>true});
   await game.act({keys:['a'],duration_ms:200});
   const moved=await game.observe();
   game.check('native movement resumes after GOTO acknowledgement',distance(moved,landed)>.3);
@@ -74,6 +75,7 @@ export async function run(game) {
   game.check('ordinary Vault entry reconnects only the sender',(await game.observe()).world==='Vault'&&(await peer.observe()).session.world===start.session.world);
   await game.act({keys:['Insert'],duration_ms:1000});
   for(let i=0;i<8&&(await game.observe()).world!=='Nexus';i++)await game.act({keys:[],duration_ms:500});
+  await game.act({keys:[],duration_ms:1000},{name:'teleport-reconnected',when:()=>true});
   const final=await game.observe(),other=await peer.observe();
   game.check('reconnect preserves both living character identities',final.world==='Nexus'&&final.session.character===start.session.character&&other.session.character===originalPeer.session.character);
   game.check('both ordinary clients remain alive with unchanged inventory',final.lifecycle.alive&&other.lifecycle.alive&&JSON.stringify(final.character.items)===JSON.stringify(start.character.items)&&JSON.stringify(other.character.items)===JSON.stringify(originalPeer.character.items));
