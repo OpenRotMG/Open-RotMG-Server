@@ -426,6 +426,30 @@ mod tests {
     }
 
     #[test]
+    fn genuine_coffin_threshold_waves_do_not_repeat() {
+        let (mut world, boss) = arena();
+        let id = world
+            .spawn_entity(COFFIN, world.entities[&boss].home, vec![])
+            .unwrap();
+        world.entities.get_mut(&id).unwrap().next_aux = 1;
+        for (hp, bats, vampires) in [(14999, 15, 0), (7999, 38, 2)] {
+            world.entities.get_mut(&id).unwrap().hp = hp;
+            for _ in 0..2 {
+                world.manor_mechanics(id, None, 0).unwrap();
+                for (kind, count) in [(BAT, bats), (0x1728, vampires)] {
+                    assert_eq!(
+                        world
+                            .actors()
+                            .filter(|e| e.parent == Some(id) && e.kind == kind)
+                            .count(),
+                        count
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ruthven_return_clears_only_his_bats_once_per_cycle() {
         let (mut world, boss) = arena();
         let home = world.entities[&boss].home;
