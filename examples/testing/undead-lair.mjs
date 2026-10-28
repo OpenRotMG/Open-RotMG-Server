@@ -53,13 +53,21 @@ export async function run(game){
         const dx=p.x-v.position.x,dy=p.y-v.position.y;if(Math.max(Math.abs(dx),Math.abs(dy))<.6){reached=true;break;}
         const horizontal=Math.abs(dx)>Math.abs(dy),delta=horizontal?dx:dy;
         const keys=horizontal?(delta>0?['d','s']:['a','w']):(delta>0?['a','s']:['d','w']);
-        const enemy=s.diagnostic.entities.filter(e=>e.hp>0&&e.kind>=0xd91&&e.kind<=0xdb2&&distance(v.position,e.pos)<3.2).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];
+        const enemy=s.diagnostic.entities.filter(e=>e.hp>0&&e.kind>=0xd91&&e.kind<=0xdb2&&e.kind!==0xda2&&e.kind!==0xda3&&distance(v.position,e.pos)<3.2).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];
         await sample({keys:[...keys,...heal(v)],duration_ms:Math.max(80,Math.min(450,Math.round(Math.abs(delta)/7.5*1000))),...(combat&&enemy?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
       }
       assert(reached,'Native movement did not reach '+JSON.stringify(p));
     }
   }
   await sample({keys:[],duration_ms:900},{name:'lair-entry',when:()=>true});
+  for(const kind of [0xda2,0xda3]){
+    const v=await game.observe(),trap=map.entities.filter(e=>e.kind===kind).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];assert(trap,'Natural lair trap missing');
+    await walk(trap.pos);await sample({keys:[],duration_ms:1100},{name:'lair-trap-'+kind,when:()=>true});
+    const fired=[...shots.values()].filter(p=>p.owner===trap.id).length;
+    game.check(kind+': ordinary movement triggers a natural single-use trap',fired>0&&!(await game.inspect()).diagnostic.entities.some(e=>e.id===trap.id));
+    await sample({keys:[],duration_ms:1100});
+    game.check(kind+': removed trap never repeats its volley',[...shots.values()].filter(p=>p.owner===trap.id).length===fired);
+  }
   const boss=map.entities.find(e=>e.kind===0xd90);assert(boss,'Natural Septavius missing');
   await walk({x:boss.pos.x-6,y:boss.pos.y});
   await sample({keys:[],duration_ms:900},{name:'lair-boss-arrival',when:()=>true});
