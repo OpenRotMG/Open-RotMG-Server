@@ -40,10 +40,10 @@ export async function run(game){
   await prepare({kind:'item',slot:4,item:0xc3a});
   await game.act({keys:['1'],duration_ms:150});
   const boosted=await snapshot('boosted');
-  game.check('native Blue Paradise adds temporary maxima without modifying capped base stats',boosted.character.stats[0]===720&&boosted.character.stats[1]===435&&JSON.stringify(boosted.character.base_stats)===JSON.stringify(caps)&&boosted.character.items[4]===-1);
+  game.check('native Blue Paradise adds temporary maxima without modifying capped base stats',boosted.character.stats.max_hp===720&&boosted.character.stats.max_mp===435&&JSON.stringify(boosted.character.base_stats)===JSON.stringify(caps)&&boosted.character.items[4]===-1);
   for(let i=0;i<16;i++)await game.act({keys:[],duration_ms:2000});
   const expired=await snapshot('expired');
-  game.check('temporary maxima expire without removing permanent gains',expired.character.stats[0]===670&&expired.character.stats[1]===385&&JSON.stringify(expired.character.base_stats)===JSON.stringify(caps));
+  game.check('temporary maxima expire without removing permanent gains',expired.character.stats.max_hp===670&&expired.character.stats.max_mp===385&&JSON.stringify(expired.character.base_stats)===JSON.stringify(caps));
   const retained=await snapshot('before-reconnect');
   await game.act({keys:['Insert'],duration_ms:500});
   const reconnected=await snapshot('reconnected');

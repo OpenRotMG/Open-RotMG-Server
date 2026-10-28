@@ -38,6 +38,91 @@ fn steps(w: &mut World, count: usize) {
 }
 
 #[test]
+fn potion_publication_is_silent_atomic_and_reports_only_actual_restoration() {
+    for (index, kind) in [
+        0xae9, 0xaea, 0xa1f, 0xa20, 0xa21, 0xa4c, 0xa34, 0xa35, 0xa22, 0xa23,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for succeeds in [false, true] {
+            let (mut w, id) = fixture();
+            let caps = w.content.classes[&0x30e].caps;
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.base = caps;
+            if index < 8 {
+                p.character.base[index] -= if index < 2 { 2 } else { 1 };
+            }
+            p.character.hp = caps[0] - 7;
+            p.character.mp = caps[1] - 9;
+            p.character.items[4] = kind;
+            p.known.insert(id);
+            let before = p.character.clone();
+            let (packets, mut inbox) = mpsc::channel(64);
+            let (lost, _) = watch::channel(None);
+            p.tx = Some(Output { packets, lost });
+            let slot = Slot {
+                object: id,
+                slot: 4,
+                kind,
+            };
+            let plan = w.use_item(id, slot, Pos { x: 0., y: 0. }).unwrap().unwrap();
+            assert!(inbox.try_recv().is_err());
+            assert_eq!(w.players[&id].character, before);
+            assert!(w.use_item(id, slot, Pos { x: 0., y: 0. }).is_err());
+            let result = if succeeds {
+                Ok(before.revision + 1)
+            } else {
+                Err(anyhow::anyhow!("injected potion commit failure"))
+            };
+            assert_eq!(w.finish_inventory(plan, result).is_ok(), succeeds);
+            let after = &w.players[&id].character;
+            let packets: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok()).collect();
+            assert!(!packets.iter().any(|p| p.id == wire::TEXT));
+            if !succeeds {
+                assert_eq!(after, &before);
+                assert!(
+                    !packets
+                        .iter()
+                        .any(|p| matches!(p.id, wire::NOTIFICATION | wire::SHOW_EFFECT | 4))
+                );
+                continue;
+            }
+            assert_eq!((after.items[4], after.revision), (-1, before.revision + 1));
+            assert_eq!(after.base, caps);
+            let notifications: Vec<_> = packets
+                .iter()
+                .filter(|p| p.id == wire::NOTIFICATION)
+                .collect();
+            if index < 8 {
+                assert!(notifications.is_empty());
+                w.players.get_mut(&id).unwrap().character.items[4] = kind;
+                assert!(
+                    w.use_item(id, slot, Pos { x: 0., y: 0. })
+                        .err()
+                        .unwrap()
+                        .to_string()
+                        .contains("class cap")
+                );
+                assert!(inbox.try_recv().is_err());
+                assert_eq!(w.players[&id].character.revision, before.revision + 1);
+                assert_eq!(w.players[&id].character.items[4], kind);
+            } else {
+                // Kithio clips notifications to actual gain: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.UseItem.cs#L105-L151
+                let mut r = wire::Reader::new(&notifications[0].body);
+                assert_eq!(notifications.len(), 1);
+                assert_eq!(r.i32().unwrap(), id);
+                assert_eq!(r.utf().unwrap(), if index == 8 { "+7" } else { "+9" });
+                assert_eq!(
+                    if index == 8 { after.hp } else { after.mp },
+                    caps[index - 8]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn recovery_rates_and_condition_matrix() {
     // This guards reconstruction, not fidelity: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/StatsManager.cs#L87-L141 conflicts with Kithio's MP divisor.
     for (conditions, hp, mp) in [

@@ -48,6 +48,76 @@ async fn snapshot(s: &Store, id: i32) -> (String, String, i32, bool) {
 }
 
 #[tokio::test]
+async fn stat_potions_clip_all_class_caps_and_reject_stale_or_failed_commits() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let s = Store::open(Path::new(":memory:"), &content).unwrap();
+    for (&class, definition) in &content.classes {
+        for (index, kind) in [0xae9, 0xaea, 0xa1f, 0xa20, 0xa21, 0xa4c, 0xa34, 0xa35]
+            .into_iter()
+            .enumerate()
+        {
+            for remaining in 1..=if index < 2 { 6 } else { 2 } {
+                let account = s
+                    .list(format!("potions-{class}-{index}-{remaining}"))
+                    .await
+                    .unwrap();
+                let mut ch = s
+                    .create_prepared(account.id, content.get(class).unwrap(), None)
+                    .await
+                    .unwrap();
+                ch.base[index] = definition.caps[index] - remaining;
+                ch.items[4] = kind;
+                ch.revision = s.exchange(vec![write(&ch)], vec![]).await.unwrap()[0];
+                s.progress(ch.clone()).await.unwrap();
+                let before = snapshot(&s, ch.id).await;
+                s.call(|db| {
+                    db.execute_batch("CREATE TRIGGER potion_fail AFTER UPDATE ON characters BEGIN SELECT RAISE(ABORT,'injected potion failure'); END;")?;
+                    Ok(())
+                }).await.unwrap();
+                let amount = remaining.min(if index < 2 { 5 } else { 1 });
+                assert!(
+                    s.consume_stat(ch.clone(), Some(4), index, amount, vec![])
+                        .await
+                        .is_err()
+                );
+                assert_eq!(snapshot(&s, ch.id).await, before);
+                s.call(|db| {
+                    db.execute_batch("DROP TRIGGER potion_fail")?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+                let revision = s
+                    .consume_stat(ch.clone(), Some(4), index, amount, vec![])
+                    .await
+                    .unwrap();
+                let saved = s.load(ch.account, ch.id).await.unwrap();
+                let mut expected = ch.base;
+                expected[index] += amount;
+                assert_eq!(saved.base, expected);
+                assert_eq!(
+                    (saved.items[4], revision, saved.revision),
+                    (-1, ch.revision + 1, revision)
+                );
+                let committed = snapshot(&s, ch.id).await;
+                let id = ch.id;
+                assert!(
+                    s.consume_stat(ch, Some(4), index, amount, vec![])
+                        .await
+                        .is_err()
+                );
+                assert!(
+                    s.consume_stat(saved, Some(4), index, amount, vec![])
+                        .await
+                        .is_err()
+                );
+                assert_eq!(snapshot(&s, id).await, committed);
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn dye_transaction_failure_rolls_back_appearance_inventory_and_revision() {
     let (s, ch) = fixture(Path::new(":memory:")).await;
     s.call(|db| {
