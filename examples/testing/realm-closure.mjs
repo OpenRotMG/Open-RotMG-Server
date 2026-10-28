@@ -22,7 +22,8 @@ export async function run(game){
   let blocked,peer;
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)}),value=await response.json();
-    assert(response.ok&&value.status==='succeeded',JSON.stringify(value));return value;
+    const valid=command.op==='observe'?value.actor===command.actor:command.op==='inspect'?value.view?.session.character===command.actor:value.status==='succeeded';
+    assert(response.ok&&valid,JSON.stringify(value));return value;
   }
   const cheat=(actor,change)=>api({op:'cheat',actor,change});
   async function events(){return (await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);}
@@ -70,6 +71,7 @@ export async function run(game){
     try{return db.prepare('SELECT count(*) AS n FROM account_lists WHERE account=? AND list_id=0 AND target=?').get(account,scout.account).n===1;}finally{db.close();}
   }
   const menu=(client,y)=>[{actor:client.actor,input:{keys:[],mouse:{x:650,y:520},duration_ms:250}},{actor:client.actor,input:{keys:[],mouse:{x:550,y},duration_ms:350}}];
+  await act(game,{keys:[],duration_ms:800});
   for(const client of clients){await act(client,menu(client,432));game.check('native party lock persists for scout and account '+(await client.observe()).session.account,locked((await client.observe()).session.account));}
   await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout}));
   opening.blocked.length=0;opening.entities.length=0;
@@ -123,8 +125,13 @@ export async function run(game){
       const views=await Promise.all(clients.map(c=>c.observe()));
       if(views.some(v=>Math.hypot(v.position.x-anchor.pos.x,v.position.y-anchor.pos.y)>5.5)){await approach(anchor.pos);continue;}
       if(target){
-        const duration_ms=target.kind===0xd5e?1000:1500;
-        await act(game,[clients.map(c=>({actor:c.actor,input:{keys:[],duration_ms,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}}}))]);
+        const duration_ms=target.kind===0xd5e?1000:1500,states=await Promise.all(clients.map(c=>c.inspect()));
+        const group=states.map((s,i)=>{
+          const known=s.view.objects.find(e=>e.id===target.id&&e.hp>0);assert(known,'A living target must be known to each actual native client');
+          const dx=known.position.x-s.view.position.x,dy=known.position.y-s.view.position.y,scale=Math.min(50,270/Math.hypot(dx,dy));
+          return {actor:clients[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}};
+        });
+        await act(game,[group]);
       }else await act(game,{keys:[],duration_ms:anchor.stage===1&&[0x91f,0x91b,0x928].includes(anchor.kind)?1000:10000});
     }
     assert(completed||(await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next),'Native combat did not finish counted encounter '+next);
