@@ -75,7 +75,10 @@ export async function run(game){
     const s=await game.inspect();
     game.check(id+': ordinary staff fire defeats target and earns XP',!s.diagnostic.entities.some(e=>e.id===id)&&s.view.character.experience>before.character.experience);
   }
-  await defeat(children(replacement)[0].id);
+  const distance=e=>Math.hypot(e.pos.x-replacement.view.position.x,e.pos.y-replacement.view.position.y);
+  const victim=children(replacement).filter(e=>replacement.view.objects.some(o=>o.id===e.id)).sort((a,b)=>distance(a)-distance(b))[0];
+  assert(victim&&distance(victim)<5,'No nearby visible Sludget available for native defeat');
+  await defeat(victim.id);
   await defeat(sludge.id);
   await game.act({keys:[],duration_ms:1500});
   const dead=await save('defeated'),survivors=new Set(children(dead).map(e=>e.id));
