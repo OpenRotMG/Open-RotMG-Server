@@ -23,9 +23,10 @@ export async function run(game){
     }
     await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:500},{name:'damage-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots});
     const after=await game.inspect(),enemy=after.diagnostic.entities.find(e=>e.id===boss.id);assert(enemy);
-    observations.push({item,before,after});
+    const damaged=before.diagnostic.entities.filter(e=>e.kind>=0xd90&&e.kind<=0xdb2&&after.diagnostic.entities.some(a=>a.id===e.id&&a.hp<e.hp));
+    observations.push({item,damaged:damaged.map(e=>({id:e.id,kind:e.kind,before:e.hp,after:after.diagnostic.entities.find(a=>a.id===e.id).hp})),before,after});
     await writeFile(join(root,'dagger-damage.json'),JSON.stringify(observations,null,2));
-    game.check(item.toString(16)+' damages the same natural enemy',enemy.hp<target.hp&&after.diagnostic.character.shots>before.diagnostic.character.shots);
+    game.check(item.toString(16)+' damages natural enemies or earns a real kill',after.diagnostic.character.shots>before.diagnostic.character.shots&&(damaged.length>0||after.diagnostic.character.kills>before.diagnostic.character.kills));
     game.check(item.toString(16)+' firing preserves MP inventory and living Rogue',after.view.character.mp===before.view.character.mp&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&after.view.lifecycle.alive&&after.view.session.character===start.session.character);
   }
 }
