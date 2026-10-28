@@ -17,7 +17,7 @@ export async function prepare(api){
   for(const e of map.entities.filter(e=>e.kind===0x649))for(let dx=-9;dx<=9;dx++)for(let dy=-9;dy<=9;dy++){
     const position={x:Math.floor(e.pos.x)+.5+dx,y:Math.floor(e.pos.y)+.5+dy},distance=Math.hypot(position.x-e.pos.x,position.y-e.pos.y);
     if(distance<8||distance>9)continue;
-    if(Array.from({length:21},(_,i)=>({x:e.pos.x+(position.x-e.pos.x)*i/20,y:e.pos.y+(position.y-e.pos.y)*i/20})).every(p=>[-1,0,1].every(x=>[-1,0,1].every(y=>!blocked.has([Math.floor(p.x+x),Math.floor(p.y+y)].join(',')))))){
+    if(Array.from({length:21},(_,i)=>({x:e.pos.x+(position.x-e.pos.x)*i/20,y:e.pos.y+(position.y-e.pos.y)*i/20})).every(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')))){
       god=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify({world:spec.world,layout:info.realm_layout,members:map.entities.filter(m=>m.camp===e.camp)}));return {...spec,position};
     }
   }
