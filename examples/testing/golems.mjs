@@ -57,10 +57,11 @@ export async function run(game){
       const arrival=await game.inspect();
       game.check(tag+': natural root and four satellites admitted',family(arrival,camp).some(e=>e.id===root.id&&e.hp===220)&&members.filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7).length===4);
       await act({keys:[],duration_ms:2000},{name:'golem-'+tag,when:()=>true});
-      await act({keys:[],duration_ms:2500});
+      await act({keys:[],duration_ms:4500});
       const combat=samples.slice(start),ids=new Set(members.map(e=>e.id));
       game.check(tag+': root activates and moves',combat.some(s=>family(s,camp).some(e=>e.id===root.id&&e.activated!==null&&Math.hypot(e.pos.x-root.pos.x,e.pos.y-root.pos.y)>.2)));
-      game.check(tag+': native combat observes root projectile',[...shots.values()].some(p=>p.owner===root.id));
+      const speeds={0x62f:[55],0x631:[55],0x62d:[75],0x62e:[10],0x632:[45,60],0x633:[120,70]};
+      for(const speed of speeds[root.kind])game.check(tag+': native root projectile speed '+speed,[...shots.values()].some(p=>p.owner===root.id&&p.speed===speed));
       for(const kind of [0x6d5,0x6d6,0x6d7])game.check(tag+': gray '+kind.toString(16)+' fires selected missile',[...shots.values()].some(p=>members.some(e=>e.id===p.owner&&e.kind===kind)&&p.speed===65&&p.lifetime_ms===2500));
       const hub=members.find(e=>e.kind>=0x6d2&&e.kind<=0x6d4);assert(hub);
       game.check(tag+': colored hub orbits its own root',combat.some(s=>{const f=family(s,camp),h=f.find(e=>e.id===hub.id),r=f.find(e=>e.id===root.id);return h&&r&&Math.abs(Math.hypot(h.pos.x-r.pos.x,h.pos.y-r.pos.y)-3)<.15;}));
@@ -70,11 +71,11 @@ export async function run(game){
       game.check(tag+': ordinary native fire defeats root',!family(defeated,camp).some(e=>e.id===root.id));
       const survivors=family(defeated,camp).filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7);
       game.check(tag+': satellites survive root death with bounded cleanup',survivors.length>0&&survivors.every(e=>e.expires>defeated.view.time_ms&&e.expires<=defeated.view.time_ms+30000));
-      // This verifies the retained Trapped reconstruction, not Kithio's conflicting 16-second decay: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/cond/GolemSatellites.cs
       const target=survivors.find(e=>e.id===hub.id);assert(target,'Colored satellite must survive root defeat');
       const xp=defeated.view.character.experience;
       for(let n=0;n<40&&family(await game.inspect(),camp).some(e=>e.id===target.id);n++)await act({keys:[],duration_ms:250,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
       const satelliteDead=await game.inspect(),remaining=family(satelliteDead,camp).filter(e=>survivors.some(p=>p.id===e.id));
+      // The September 7, 2012 page supports ten XP, not an exact decay delay: https://wikiwiki.jp/rmd/?cmd=read&page=Gray%20Satellite%202
       game.check(tag+': native satellite defeat awards ten XP each',!remaining.some(e=>e.id===target.id)&&satelliteDead.view.character.experience-xp===10*(survivors.length-remaining.length));
       const cleanupXp=satelliteDead.view.character.experience;
       for(let n=0;n<4;n++)await act({keys:[],duration_ms:10000});
