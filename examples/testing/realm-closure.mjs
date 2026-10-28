@@ -14,7 +14,7 @@ export async function prepare(api){
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},protection=new Map(),records=[];
-  let attackUntil=0;
+  let attackUntil=0,blocked;
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)}),value=await response.json();
     assert(response.ok&&value.status==='succeeded',JSON.stringify(value));return value;
@@ -22,8 +22,10 @@ export async function run(game){
   const cheat=(client,change)=>api({op:'cheat',actor:client.actor,change});
   async function events(){return (await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);}
   async function map(){
-    const response=await fetch(config.origin+'/dev/map?player='+(await game.observe()).session.player,{headers,signal:AbortSignal.timeout(10000)});
-    assert(response.ok,'Privileged map observation failed');return response.json();
+    const response=await fetch(config.origin+'/dev/map?player='+(await game.observe()).session.player,{headers,signal:AbortSignal.timeout(30000)});
+    assert(response.ok,'Privileged map observation failed');const value=await response.json();
+    if(blocked){blocked.fill(0);for(const [x,y] of value.blocked)blocked[y*value.width+x]=1;}
+    return value;
   }
   async function save(label){const value={label,main:await game.inspect(),peer:await peer.observe()};records.push(value);await writeFile(join(out,'closure.json'),JSON.stringify(records));return value;}
   const initial=await game.observe(),origin=initial.session.world,peer=await game.join({...spec,seed:788,world:origin,position:initial.position}),peerInitial=await peer.observe();
@@ -41,8 +43,9 @@ export async function run(game){
     }
     return result;
   }
-  const opening=await map(),width=opening.width,total=width*opening.height,blocked=new Uint8Array(total),original=opening.entities.filter(e=>roots.has(e.kind)&&(e.quest===e.id||[0x668,0x67d].includes(e.kind)));
-  for(const [x,y] of opening.blocked)blocked[y*width+x]=1;
+  const opening=await map(),width=opening.width,total=width*opening.height,original=opening.entities.filter(e=>roots.has(e.kind)&&(e.quest===e.id||[0x668,0x67d].includes(e.kind)));
+  blocked=new Uint8Array(total);for(const [x,y] of opening.blocked)blocked[y*width+x]=1;
+  opening.blocked.length=0;opening.entities.length=0;
   const clear=(a,b)=>{
     const steps=Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)*4);
     for(let n=0;n<=steps;n++)for(const [dx,dy] of [[-.3,-.3],[-.3,.3],[.3,-.3],[.3,.3]]){
@@ -79,14 +82,19 @@ export async function run(game){
     const log=await events(),credits=log.filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin),defeated=new Set(credits.map(e=>e.hero));
     const current=await map();
     for(const e of current.entities)if(roots.has(e.kind)&&e.quest===e.id)seen.set(e.id,e);
+    current.blocked.length=0;current.entities.length=0;
     const position=(await game.observe()).position;
     const next=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y))[0];
     if(next===undefined){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
     let completed=false;
     for(let step=0;step<200;step++){
       const log=await events();if(log.some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next)){completed=true;break;}
-      const state=await map(),family=state.entities.filter(e=>e.id===next||e.quest===next);
-      if(!family.length){await act({keys:[],duration_ms:1000});continue;}
+      const state=await game.inspect(),family=state.diagnostic.entities.filter(e=>e.id===next||e.quest===next);
+      if(!family.length){
+        if(Math.hypot(state.view.position.x-seen.get(next).pos.x,state.view.position.y-seen.get(next).pos.y)>15)await walk(seen.get(next).pos,12);
+        else await act({keys:[],duration_ms:1000});
+        continue;
+      }
       const vulnerable=family.filter(e=>e.hp>0&&!(e.condition&((1<<24)|(1<<25))));
       const healer=vulnerable.find(e=>e.kind===0x91d);
       const target=healer??vulnerable.find(e=>roots.has(e.kind)||[0x920,0x91c,0x92d,0x6c1,0x929,0xd5e,0xd62].includes(e.kind));
