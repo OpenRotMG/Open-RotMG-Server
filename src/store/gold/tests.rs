@@ -51,7 +51,8 @@ async fn wallets_keep_death_earnings_purchases_and_swap_separate_after_reopen() 
         .create(account, content.get(WIZARD).unwrap())
         .await
         .unwrap();
-    for (slot, currency, item, price) in [(4, 0, 0x705, 25), (5, 1, 0xa50, 35)] {
+    for (currency, item, price) in [(0, 0x705, 25), (1, 0xa50, 35)] {
+        let slot = (4..12).find(|slot| ch.items[*slot] == -1).unwrap();
         let mut items = ch.items.clone();
         items[slot] = i32::from(item);
         let write = InventoryWrite {
