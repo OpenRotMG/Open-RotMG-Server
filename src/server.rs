@@ -2155,6 +2155,11 @@ async fn reconnect(
             };
             let world = &d.worlds[&destination];
             if world.occupancy() >= world.max_players {
+                tracing::info!(
+                    player = id,
+                    destination,
+                    "portal transfer refused: destination full"
+                );
                 let message = crate::world::chat_info("Destination is full.");
                 crate::world::send(
                     &d.worlds[&d.location(id)?].players[&id],
@@ -2892,13 +2897,13 @@ async fn map(State(a): State<App>, headers: HeaderMap, Query(view): Query<MapVie
         Some(id) => a.world.for_player(id),
         None => a.world.in_world(-1),
     };
-    let result: Result<serde_json::Value> = async {
+    let result: Result<Vec<u8>> = async {
         control(&a, &headers)?;
         world.call(move |w| w.inspect_map(view.player)).await
     }
     .await;
     match result {
-        Ok(v) => Json(v).into_response(),
+        Ok(v) => ([(axum::http::header::CONTENT_TYPE, "application/json")], v).into_response(),
         Err(e) => error(e),
     }
 }

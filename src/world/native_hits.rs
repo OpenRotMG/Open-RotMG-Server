@@ -202,7 +202,11 @@ impl World {
     pub(super) fn damage_player(&mut self, id: i32, b: &Bullet, echo: bool) -> Result<()> {
         let p = self.players.get(&id).context("projectile target missing")?;
         let flags = p.conditions(self.now);
-        let affects = !crate::condition::protected(flags);
+        // Invulnerable blocks HP loss, not projectile conditions: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.cs#L382-L409
+        let affects = flags
+            & (crate::condition::bit(crate::condition::INVINCIBLE)
+                | crate::condition::bit(crate::condition::STASIS))
+            == 0;
         let damage =
             crate::condition::damage(b.damage, self.defense(id)?, flags, b.spec.armor_piercing);
         if affects {
