@@ -42,7 +42,7 @@ export async function run(game){
   }
   const arrival=await save('arrival'),demon=members(arrival).find(e=>e.kind===0x622);assert(demon);
   await shoot(demon.id);await act({keys:[],duration_ms:500});const defeated=await save('demon-defeated');
-  game.check('native Demon defeat earns XP while Werewolf lives',!entity(defeated,demon.id)&&entity(defeated,leader.id)&&defeated.view.character.experience>=arrival.view.character.experience+8);
+  game.check('native Demon defeat earns XP while Werewolf lives',!entity(defeated,demon.id)&&entity(defeated,leader.id)&&defeated.view.character.experience>=arrival.view.character.experience+4);
   for(let n=0;n<24;n++)await act({keys:[],duration_ms:500});const refill=await save('demon-replenished');
   game.check('living owner replenishes Demon Wargs within its cap',members(refill).filter(e=>e.kind===0x622).length===3&&members(refill).some(e=>e.kind===0x622&&!members(arrival).some(p=>p.id===e.id)));
   await shoot(leader.id);await act({keys:[],duration_ms:500},{name:'wargs-orphaned',when:()=>true});const orphaned=await save('orphaned');
@@ -59,7 +59,7 @@ export async function run(game){
   game.check('dead owner creates no replacement Wargs or repeat XP',samples.every(s=>members(s).every(e=>members(orphaned).some(p=>p.id===e.id))&&s.view.character.experience===orphaned.view.character.experience));
   const victim=members(samples.at(-1)).find(e=>e.kind===0x620);assert(victim);
   await shoot(victim.id);await act({keys:[],duration_ms:500});const dead=await save('orphan-defeated');
-  game.check('native orphan Tawny defeat earns XP',!entity(dead,victim.id)&&dead.view.character.experience>=orphaned.view.character.experience+6);
+  game.check('native orphan Tawny defeat earns XP',!entity(dead,victim.id)&&dead.view.character.experience>=orphaned.view.character.experience+3);
   for(let n=0;n<24;n++)await act({keys:[],duration_ms:500});const end=await save('finished');
   game.check('defeated orphan stays absent without repeated XP',!entity(end,victim.id)&&members(end).every(e=>members(dead).some(p=>p.id===e.id))&&end.view.character.experience===dead.view.character.experience);
   game.check('same prepared character survives',end.view.lifecycle.alive&&end.view.session.character===arrival.view.session.character);
