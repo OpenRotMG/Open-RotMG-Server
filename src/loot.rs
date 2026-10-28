@@ -1570,8 +1570,13 @@ mod tests {
     fn realm_god_potions_require_180_damage_without_erasing_gear() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let owners = [(10, 179), (20, 180), (30, 181)];
-        for (kind, potion) in [(0x655, 0xa20), (0x657, 0xa1f), (0x658, 0xa20)] {
-            assert_eq!(bonus(kind), &[(0.015, potion)]);
+        for (kind, chance, potion) in [
+            (0x655, 0.015, 0xa20),
+            (0x657, 0.015, 0xa1f),
+            (0x658, 0.015, 0xa20),
+            (0x651, 0.01, 0xa1f),
+        ] {
+            assert_eq!(bonus(kind), &[(chance, potion)]);
             let loot = god_loot(
                 &content,
                 kind,
