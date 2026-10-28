@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-export const fixture={class:0x30e,level:20,seed:885,world:'beachzone',position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xb36,0xb37,0xb38,0xb39,0xb3a,0xb3b,0xb3c,0xb3d],stats:[670,385,50,25,50,50,0,0]};
+export const fixture={class:0x30e,level:20,seed:885,world:'beachzone',position:'spawn',equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,0,0]};
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(root,'native/native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),samples=[];
@@ -25,10 +25,10 @@ export async function run(game){
   }
   const recovery=(before,after,key)=>Math.ceil((after.game_ms-before.game_ms)/1000*(key==='hp'?1+before.character.stats.vitality/8:.6+before.character.stats.wisdom/16.7))+1;
   const restored=(before,after,key,amount)=>after.character[key]-before.character[key]>=amount&&after.character[key]-before.character[key]<=amount+recovery(before,after,key);
-  for(let item=0xb36;item<=0xb3d;item++){
+  for(let item=0xb34;item<=0xb3d;item++){
     await prepare(game,{kind:'vitals',hp:100,mp:100});
-    const {before,after}=await use(item,item-0xb36+4),key=item%2===0?'hp':'mp',other=key==='hp'?'mp':'hp';
-    game.check('wine '+item+' restores only its selected resource by 150',restored(before,after,key,150)&&after.character[other]-before.character[other]<=recovery(before,after,other));
+    const {before,after}=await use(item,4+(item-0xb34)%8),key=item%2===0?'hp':'mp',other=key==='hp'?'mp':'hp',amount=item===0xb34?230:150;
+    game.check('wine '+item+' restores only its selected resource by '+amount,restored(before,after,key,amount)&&after.character[other]-before.character[other]<=recovery(before,after,other));
     game.check('wine '+item+' does not cause Drunk',!(after.character.conditions&(1<<9)));
   }
   await prepare(game,{kind:'vitals',hp:100,mp:100});

@@ -150,9 +150,16 @@ fn dungeon_drinks_commit_once_and_gate_each_resource_independently() {
         (0xc12, 100, 100),
         (0xa3f, 100, 0),
         (0xc1a, 0, 100),
-        (0xb36, 150, 0),
-        (0xb37, 0, 150),
-    ] {
+    ]
+    .into_iter()
+    .chain((0xb34..=0xb3d).map(|item| {
+        let amount = if item == 0xb34 { 230 } else { 150 };
+        if item % 2 == 0 {
+            (item, amount, 0)
+        } else {
+            (item, 0, amount)
+        }
+    })) {
         for (sick, quiet, full) in [
             (false, false, false),
             (true, false, false),
@@ -248,5 +255,84 @@ fn dungeon_drink_refusals_and_failed_commit_publish_no_effects() {
         assert_eq!(p.character.items, before.items);
         assert_eq!(p.effective(&w.content, w.now).unwrap(), before.base);
         assert_eq!(p.conditions(w.now), 0);
+    }
+}
+
+#[test]
+fn group_drinks_keep_strict_range_and_current_recipient_eligibility() {
+    for item in [0xa3f, 0xc1a] {
+        for (distance, state, healed, restored) in [
+            (9.99, "ready", true, true),
+            (10., "ready", false, false),
+            (10.01, "ready", false, false),
+            (1., "paused", true, false),
+            (1., "pending", false, false),
+            (1., "dead", false, false),
+            (1., "departing", false, false),
+            (1., "sick", false, true),
+            (1., "quiet", true, false),
+        ] {
+            let (mut w, owner) = super::movement_tests::fixture(0x18, false);
+            let mut ch = w.players[&owner].character.clone();
+            ch.id = 2;
+            ch.account = 2;
+            ch.hp = 10;
+            ch.mp = 10;
+            ch.items.fill(-1);
+            let peer = w.enter(ch, None).unwrap();
+            let origin = w.players[&owner].pos;
+            let p = w.players.get_mut(&peer).unwrap();
+            p.pos = Pos {
+                x: origin.x + distance,
+                y: origin.y,
+            };
+            match state {
+                "paused" => p.paused = true,
+                "pending" => p.pending = true,
+                "dead" => p.character.hp = 0,
+                "departing" => p.departing = true,
+                "sick" => w.apply_condition(peer, SICK, 1000).unwrap(),
+                "quiet" => w.apply_condition(peer, QUIET, 1000).unwrap(),
+                "ready" => {}
+                _ => unreachable!(),
+            }
+            let before = w.players[&peer].character.clone();
+            w.players.get_mut(&owner).unwrap().character.items[4] = item;
+            let plan = w
+                .use_item(
+                    owner,
+                    Slot {
+                        object: owner,
+                        slot: 4,
+                        kind: item,
+                    },
+                    origin,
+                )
+                .unwrap()
+                .unwrap();
+            let revision = plan.revision + 1;
+            w.finish_inventory(plan, Ok(revision)).unwrap();
+            let p = &w.players[&peer];
+            assert_eq!(
+                p.character.hp,
+                if item == 0xa3f && healed {
+                    (before.hp + 100).min(before.base[0])
+                } else {
+                    before.hp
+                },
+                "{item:#x} {distance} {state}"
+            );
+            assert_eq!(
+                p.character.mp,
+                if item == 0xc1a && restored {
+                    (before.mp + 100).min(before.base[1])
+                } else {
+                    before.mp
+                },
+                "{item:#x} {distance} {state}"
+            );
+            assert_eq!(p.character.items, before.items);
+            assert_eq!(p.character.revision, before.revision);
+        }
     }
 }
