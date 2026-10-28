@@ -391,7 +391,7 @@ mod tests {
                     assert_eq!(after.mp, if quiet { 0 } else { (mp + amount).min(385) });
                     assert_eq!(after.revision, before.revision + 1);
                     assert_eq!(after.items[4], if ground { kind } else { -1 });
-                    assert_eq!(after.inventory_potion_used, !ground);
+                    assert_eq!(after.lifetime.inventory_potion_used, !ground);
                     assert!(w.use_item(id, slot, pos).is_err());
                 }
             }
