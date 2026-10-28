@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x30e,level:20,seed:837,world:1,equipment:[0xa9f,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const spec={class:0x30e,level:20,seed:837,world:1,equipment:[0xa9f,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let lion;
 export async function prepare(api){
@@ -42,7 +42,7 @@ export async function run(game){
     const path=join(process.env.QA_RESULTS_DIR,'protection.json');
     await writeFile(path,JSON.stringify({id:'werecat-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root(),'native.json'),path]);
-    for(let n=0;n<40;n++)await act({keys:[],duration_ms:250},n===28?{name:'werecats-attacks',when:()=>true}:undefined);
+    for(let n=0;n<24;n++)await act({keys:[],duration_ms:250},n===16?{name:'werecats-attacks',when:()=>true}:undefined);
     for(const [kind,speed,lifetime] of [[0x635,65,2200],[0x636,80,1000],[0x639,70,2000],[0x637,55,2700]]){
       const ids=new Set(initial.filter(e=>e.kind===kind).map(e=>e.id));
       game.check(kind+': activation and movement observed',samples.some(s=>family(s).some(e=>ids.has(e.id)&&e.activated!==null&&initial.some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.1))));
@@ -57,12 +57,21 @@ export async function run(game){
       return p?.next_aux===0&&s.view.time_ms-before.view.time_ms<=100&&Math.hypot(p.pos.x-before.view.position.x,p.pos.y-before.view.position.y)>.8&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<.3;
     })));
     sampling=false;
-    const victim=family(await game.inspect()).find(e=>e.kind===0x635);assert(victim);
-    for(let n=0;n<20&&family(await game.inspect()).some(e=>e.id===victim.id);n++)await act({keys:[],duration_ms:200,target:{entity:victim.id,camera_angle:-Math.PI/4,fire:true}});
+    await act({keys:[],duration_ms:10000});
+    const filled=await save('filled'),tigers=family(filled).filter(e=>e.kind===0x635),beforeIds=new Set(tigers.map(e=>e.id));
+    game.check('current living Tiger slots reach their cap before the replacement test',tigers.length===3);
+    const victim=tigers.sort((a,b)=>Math.hypot(b.pos.x-lion.pos.x,b.pos.y-lion.pos.y)-Math.hypot(a.pos.x-lion.pos.x,a.pos.y-lion.pos.y))[0];assert(victim);
+    for(let n=0;n<60;n++){
+      const s=await game.inspect(),cat=family(s).find(e=>e.id===victim.id);if(!cat)break;
+      const owner=family(s).find(e=>e.id===lion.id);assert(owner,'Owner died before follower check');
+      const p=s.view.position,ownerBehindAim=(cat.pos.x-p.x)*(owner.pos.x-p.x)+(cat.pos.y-p.y)*(owner.pos.y-p.y)<-.5;
+      await act(ownerBehindAim?{keys:[],duration_ms:50,target:{entity:cat.id,camera_angle:-Math.PI/4,fire:true}}:{keys:[],duration_ms:100});
+      if(ownerBehindAim)await act({keys:[],duration_ms:300});
+    }
     game.check('native staff defeats a Tiger while owner lives',!family(await game.inspect()).some(e=>e.id===victim.id)&&family(await game.inspect()).some(e=>e.id===lion.id));
-    for(let n=0;n<44;n++)await act({keys:[],duration_ms:250});
+    await act({keys:[],duration_ms:10000});
     const refill=await save('reinforced');
-    game.check('living owner admits a replacement Tiger',family(refill).some(e=>e.kind===0x635&&!initial.some(p=>p.id===e.id)));
+    game.check('living owner replaces an actually vacated Tiger slot',family(refill).filter(e=>e.kind===0x635).length===3&&family(refill).some(e=>e.kind===0x635&&!beforeIds.has(e.id)));
     for(let n=0;n<30&&family(await game.inspect()).some(e=>e.id===lion.id);n++)await act({keys:[],duration_ms:200,target:{entity:lion.id,camera_angle:-Math.PI/4,fire:true}});
     const orphaned=await save('owner-defeated');
     game.check('ordinary native staff defeats owner',!family(orphaned).some(e=>e.id===lion.id));
