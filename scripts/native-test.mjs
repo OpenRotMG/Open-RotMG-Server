@@ -281,7 +281,7 @@ export async function runCase(scenario, options) {
       const inspectLine=line=>{const kind=browserDiagnostic(line,closing);if(kind==='fatal')fail(Error('Browser ERROR: '+line));else if(kind)(report.browserDiagnostics??=[]).push({kind,line});};
       chrome.child.stderr.on('data',bytes=>{try{writeSync(browserLog,bytes);browserLines+=bytes;let n;while((n=browserLines.indexOf('\n'))>=0){inspectLine(browserLines.slice(0,n));browserLines=browserLines.slice(n+1);}}catch(error){fail(error);}});
       chrome.child.stderr.on('end',()=>{if(browserLines)inspectLine(browserLines);});
-      let receipt='';chrome.child.stdout.on('data',b=>receipt+=b);await waitFor(()=>receipt.includes('\n'),'Managed browser did not return its receipt',30000);browser=JSON.parse(receipt.split('\n')[0]);assert(browser.target&&browser.owner===owner&&browser.pid===chrome.child.pid,'Invalid managed browser receipt');
+      let receipt='';chrome.child.stdout.on('data',b=>receipt+=b);await waitFor(()=>receipt.includes('\n'),'Managed browser did not return its receipt',30000);browser=JSON.parse(receipt.split('\n')[0]);assert(browser.target&&browser.owner===owner&&browser.pid===chrome.child.pid,'Invalid managed browser receipt: '+receipt.split('\n')[0]);
       ownedBrowsers.push({...browser,port:chromePort});report.browser={owner,port:chromePort,target:browser.target,pid:browser.pid};
       if(archive){actor=archive.actor;account=archive.account;}
       let resolveGuest,rejectGuest;const guest=new Promise((ok,bad)=>{resolveGuest=ok;rejectGuest=bad;});guest.catch(()=>{});let requests=0,guestDone=false;
