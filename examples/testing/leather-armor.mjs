@@ -9,6 +9,7 @@ const groups=[
 ];
 const spec=([classId,stats,items])=>({class:classId,level:20,seed:874,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:[...items.map(row=>row[0]),0xb05,-1],stats});
 const pack=i=>({x:634+44*(i%4),y:428+44*Math.floor(i/4)}),armor={x:722,y:385};
+const stableCharacter=({ability_ready_ms,...state})=>JSON.stringify(state);
 export const fixture=spec(groups[0]);
 export async function run(game){
   const observations=[];
@@ -19,9 +20,9 @@ export async function run(game){
     const drag=async(from,to,capture)=>game.act({keys:[],duration_ms:400,drag:{from,to}},capture);
     await drag(pack(6),armor);
     const denied=await game.observe();
-    game.check(group[0]+' rejects robe atomically',JSON.stringify(denied.character)===JSON.stringify(initial.character));
+    game.check(group[0]+' rejects robe atomically',stableCharacter(denied.character)===stableCharacter(initial.character));
     await drag(pack(0),{x:634,y:385});
-    game.check(group[0]+' rejects leather in weapon slot atomically',JSON.stringify((await game.observe()).character)===JSON.stringify(initial.character));
+    game.check(group[0]+' rejects leather in weapon slot atomically',stableCharacter((await game.observe()).character)===stableCharacter(initial.character));
     for(const [slot,[item,defense,speed,dexterity,attack]] of group[2].entries()){
       const before=await game.observe(),expected={...initial.character.stats};
       for(const [stat,bonus] of Object.entries({defense,speed,dexterity,attack}))expected[stat]+=bonus;
