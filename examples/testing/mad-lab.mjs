@@ -96,6 +96,8 @@ export async function run(game){
   await act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},to:{x:634,y:428}}});
   const picked=await save('reward-picked');
   game.check('native drag commits the earned Wisdom potion once',picked.view.character.items[4]===0xa35&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
+  await act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},to:{x:678,y:428}}});
+  game.check('dragging the emptied reward slot cannot duplicate the potion',(await game.observe()).character.inventory_revision===picked.view.character.inventory_revision);
   await walk(exit.pos.x,exit.pos.y);await act({keys:[],duration_ms:900});
   await act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
   const returned=await save('returned');
