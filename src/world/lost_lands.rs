@@ -202,3 +202,98 @@ impl World {
         })
     }
 }
+
+#[cfg(test)]
+#[test]
+fn lost_lands_activation_protection_and_final_credit() {
+    // These timings test reconstruction, not recovered AI: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.LotLL.cs
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+    for cell in &mut map.cells {
+        cell.ground = 0x61;
+        cell.object = None;
+    }
+    let mut w = World::new(content, Arc::new(map)).unwrap();
+    w.encounter = true;
+    let mut ch = Character::fresh(w.content.get(0x30e).unwrap()).unwrap();
+    ch.id = 1;
+    ch.account = 1;
+    let player = w.enter(ch, None).unwrap();
+    let root = w
+        .spawn_entity(0xd50, Pos { x: 12.5, y: 12.5 }, vec![])
+        .unwrap();
+    let target = Some(Pos { x: 15., y: 12.5 });
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].hp, 70000);
+    assert_eq!(w.entities[&root].stage, Some(0));
+    assert_eq!(
+        w.damage_enemy(player, root, 700, true, &[], None).unwrap(),
+        700
+    );
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].stage, Some(0));
+    w.damage_enemy(player, root, 1, true, &[], None).unwrap();
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].stage, Some(1));
+    for (now, stage) in [
+        (99, 1),
+        (100, 2),
+        (3199, 2),
+        (3200, 3),
+        (13199, 3),
+        (13200, 5),
+        (15199, 5),
+        (15200, 6),
+        (20199, 6),
+        (20200, 7),
+    ] {
+        w.now = now;
+        w.named_birth_step();
+        w.landmark_mechanics(root, target, 50).unwrap();
+        assert_eq!(w.entities[&root].stage, Some(stage), "time={now}");
+    }
+    w.now = 21700;
+    w.named_birth_step();
+    w.landmark_mechanics(root, target, 50).unwrap();
+    let crystals = w.landmark_members(root, 0xd51);
+    assert_eq!(crystals.len(), 8);
+    assert_eq!(w.entities[&root].stage, Some(8));
+    assert_eq!(
+        w.damage_enemy(player, root, 1000, true, &[], None).unwrap(),
+        0
+    );
+    for crystal in crystals {
+        assert_eq!(*w.entities[&crystal].quest, Some(root));
+        w.damage_enemy(player, crystal, 6000, true, &[], None)
+            .unwrap();
+    }
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].stage, Some(1));
+    w.damage_enemy(player, root, 62299, true, &[], None)
+        .unwrap();
+    assert_eq!(w.entities[&root].hp, 7000);
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].stage, Some(1));
+    w.damage_enemy(player, root, 1, true, &[], None).unwrap();
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].stage, Some(9));
+    assert_eq!(
+        w.damage_enemy(player, root, 10000, true, &[], None)
+            .unwrap(),
+        0
+    );
+    let xp = w.players[&player].character.exp;
+    assert!(w.critical_deaths.is_empty());
+    w.now += 1999;
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].stage, Some(9));
+    w.now += 1;
+    w.landmark_mechanics(root, target, 50).unwrap();
+    assert_eq!(w.entities[&root].stage, Some(10));
+    assert_eq!(*w.entities[&root].expires, Some(w.now + 50));
+    w.finish_timed_defeat(root).unwrap();
+    assert!(!w.entities.contains_key(&root));
+    assert_eq!(w.critical_deaths, vec![root]);
+    assert!(w.players[&player].character.exp > xp);
+    assert_eq!(w.players[&player].character.kills, 9);
+}
