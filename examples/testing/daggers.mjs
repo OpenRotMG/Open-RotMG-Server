@@ -32,7 +32,7 @@ export async function run(game){
       // Selected cadence predates modern dagger buffs: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as#L887-L908
       const rate=item===0xa17?1.5:item===0xb21?0.9:1,period=Math.floor(1000/(1.5+6.5*50/75)/rate);
       game.check(item.toString(16)+' fires at selected cadence',shots>0&&Math.abs(shots-duration/period)<=2);
-      const stats=[...initial.character.stats];if(item===0xc0a)stats[7]+=4;
+      const stats={...initial.character.stats};if(item===0xc0a)stats.wisdom+=4;
       game.check(item.toString(16)+' retains selected stats and Cronus-only WIS bonus',JSON.stringify(observed.character.stats)===JSON.stringify(stats));
       game.check(item.toString(16)+' firing preserves MP inventory and living identity',after.view.character.mp===before.view.character.mp&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&after.view.lifecycle.alive&&after.view.session.character===initial.session.character);
       observations.push({item,shots,duration,period,before,after});
