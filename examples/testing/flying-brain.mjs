@@ -26,7 +26,10 @@ export async function run(game){
   const enemy=s=>s.diagnostic.entities.find(e=>e.id===root.id);
   async function act(input,capture){
     let pending,error;
-    const record=s=>{samples.push(s);for(const p of s.view.projectiles.filter(p=>p.owner===root.id))shots.set(p.id,p);};
+    const record=s=>{samples.push(s);for(const p of s.view.projectiles.filter(p=>p.owner===root.id)){
+      const born_ms=Math.round((s.view.time_ms-Math.hypot(p.position.x-p.start.x,p.position.y-p.start.y)/(p.speed/10)*1000)/50)*50;
+      shots.set(p.id+':'+born_ms,{...p,born_ms});
+    }};
     const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
     try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
     if(error)throw error;const s=await game.inspect();record(s);return s;
@@ -45,7 +48,7 @@ export async function run(game){
     game.check('natural Flying Brain activates and moves',samples.some(s=>enemy(s)?.activated!=null&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2));
     game.check('native Pink Bolts use selected speed 12 tiles/s and 1.8s lifetime',shots.size>=15&&[...shots.values()].every(p=>p.speed===120&&p.lifetime_ms===1800));
     const volleys=new Map();
-    for(const p of shots.values()){if(!volleys.has(p.start_time_ms))volleys.set(p.start_time_ms,[]);volleys.get(p.start_time_ms).push(p);}
+    for(const p of shots.values()){if(!volleys.has(p.born_ms))volleys.set(p.born_ms,[]);volleys.get(p.born_ms).push(p);}
     const complete=[...volleys.values()].filter(v=>v.length===5);
     // Shoot's centered 72-degree fan includes the target bearing: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Mountain.cs
     game.check('native volley is a five-shot ring at 72-degree gaps',complete.length>=3&&complete.every(v=>{
@@ -56,7 +59,7 @@ export async function run(game){
       const e=enemy(s);if(!e)return false;
       return s.view.projectiles.some(p=>p.owner===root.id&&Math.abs(Math.atan2(Math.sin(p.angle-Math.atan2(s.view.position.y-p.start.y,s.view.position.x-p.start.x)),Math.cos(p.angle-Math.atan2(s.view.position.y-p.start.y,s.view.position.x-p.start.x))))<.025);
     }));
-    const times=complete.map(v=>v[0].start_time_ms).sort((a,b)=>a-b);
+    const times=complete.map(v=>v[0].born_ms).sort((a,b)=>a-b);
     game.check('consecutive native rings have 500ms cadence',times.slice(1).filter((t,i)=>Math.abs(t-times[i]-500)<=50).length>=3);
     for(let n=0;n<80&&enemy(await game.inspect());n++){
       const s=await game.inspect(),e=enemy(s),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
