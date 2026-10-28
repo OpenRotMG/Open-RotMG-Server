@@ -49,7 +49,8 @@ export async function run(game){
   async function protect(){
     const now=(await game.observe()).game_ms;
     if(now>=protection){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});protection=now+60000;}
-    if(now>=scoutProtection){await prepareScout({kind:'protection',condition:'invulnerable',duration_ms:60000});scoutProtection=now+60000;}
+    // Only the human tests projectile conditions; the scout is admission preparation.
+    if(now>=scoutProtection){await prepareScout({kind:'protection',condition:'invincible',duration_ms:60000});scoutProtection=now+60000;}
   }
   async function idle(ms,capture){
     while(ms>0){await protect();const now=(await game.observe()).game_ms,step=Math.min(ms,10000,protection-now,scoutProtection-now);await game.act({keys:[],duration_ms:step},capture);capture=undefined;ms-=step;}
@@ -78,8 +79,8 @@ export async function run(game){
   }
   async function sourceFire(target){
     const id=target.id;
-    await protect();const now=(await game.observe()).game_ms,remaining=Math.min(protection-now,scoutProtection-now);
-    if(remaining<6100){await prepareScout({kind:'teleport',position:refuge});await idle(remaining);return;}
+    await protect();let now=(await game.observe()).game_ms;const remaining=Math.min(protection-now,scoutProtection-now);
+    if(remaining<6100){await prepareScout({kind:'teleport',position:refuge});await idle(remaining);await protect();now=(await game.observe()).game_ms;}
     assert(target.hp>0,'Ordinary admission target must be alive');
     await prepareScout({kind:'teleport',position:target.pos});
     if(now>=scoutModifier){await prepareScout({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});scoutModifier=now+60000;}
