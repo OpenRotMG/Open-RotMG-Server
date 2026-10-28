@@ -36,7 +36,11 @@ export async function run(game){
   game.check('native client receives selected cube projectile',shots.some(p=>p.speed===speed&&p.lifetime_ms===2000));
   // Kithio agrees on 2/1/5 shots; radius, prediction and reproduction still differ: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Shore.cs#L168-L199
   const count=kind===0x60e?2:kind===0x60f?1:5;
-  game.check('native client receives the variant volley',samples.some(s=>s.view.projectiles.filter(p=>p.owner===cube.id).length>=count));
+  game.check('native player view contains the variant volley and angular spacing',samples.some(s=>{
+    const groups=new Map();
+    for(const p of s.view.projectiles.filter(p=>p.owner===cube.id)){const key=p.start.x+':'+p.start.y;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p.angle);}
+    return [...groups.values()].some(angles=>angles.length===count&&angles.sort((a,b)=>a-b).every((a,i)=>i===0||Math.abs(a-angles[i-1]-(kind===0x60e?10:72)*Math.PI/180)<.0001));
+  }));
   await game.act({keys:[],duration_ms:700},{name:'cube-attacks',when:()=>true});
   const xp=(await game.observe()).character.experience;
   for(let n=0;n<80;n++){
