@@ -65,23 +65,21 @@ export async function run(game){
   const arena=await save('boss-room'),boss=entities(arena).find(e=>e.kind===0x936);assert(boss);
   game.check('entrance-to-boss route is traversable with ordinary populated rooms',arena.view.lifecycle.alive&&arena.diagnostic.character.kills>entry.diagnostic.character.kills&&arena.view.character.experience>entry.view.character.experience);
   // Wall-web rendering is not a Slowed source: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/SpiderWeb.as
-  await walk({x:72.5,y:21.5});
+  await walk({x:72.5,y:21.7});
   await game.act({keys:[],duration_ms:2500},{name:'arachna-web',when:()=>true});
   const web=await save('web-and-attacks'),spokes=entities(web).filter(e=>e.kind>=0x937&&e.kind<=0x93f);
   game.check('Arachna establishes all nine web spokes and reaches vulnerable attack phase',spokes.length===9&&entities(web).find(e=>e.id===boss.id)?.stage===2&&!(entities(web).find(e=>e.id===boss.id).condition&(1<<24)));
-  await walk({x:72.5,y:18.5});
-  await game.act({keys:[],duration_ms:1500},{name:'arachna-slow',when:()=>true});
-  const slowed=await save('web-contact');
-  game.check('native web contact applies Slowed',slowed.view.character.conditions&(1<<3));
+  game.check('native web contact applies Slowed',web.view.character.conditions&(1<<3));
   for(let n=0;n<100;n++){
     const s=await game.inspect(),e=entities(s).find(e=>e.id===boss.id);if(!e)break;
     if(distance(s.view.position,e.pos)>6)await walk(e.pos,false,4);
     else await game.act({keys:[],duration_ms:300,target:{entity:e.id,camera_angle:-Math.PI/4,fire:true}});
   }
+  await game.act({keys:[],duration_ms:500},{name:'arachna-defeated',when:()=>true});
   const defeated=await save('defeated');
   game.check('native staff defeats Arachna and awards one Spider Den completion',!entities(defeated).some(e=>e.id===boss.id)&&defeated.diagnostic.character.spider_dens===entry.diagnostic.character.spider_dens+1);
   const exit=entities(defeated).find(e=>e.kind===0x71d);assert(exit,'Boss did not publish Nexus exit');
-  const bag=entities(defeated).find(e=>e.items.includes(0x707)&&e.bag_owners.includes(defeated.view.session.account));assert(bag,'Eligible account did not receive personal Healing Ichor');
+  const bag=entities(defeated).find(e=>e.items.includes(0x707)&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===defeated.view.session.account));assert(bag,'Eligible account did not receive personal Healing Ichor');
   await walk(bag.pos);
   await game.act({keys:[],duration_ms:500},{name:'arachna-rewards',when:()=>true});
   const beforePickup=await save('before-pickup');
