@@ -139,12 +139,12 @@ export async function run(game){
   }finally{clearInterval(timer);if(pending)await pending;await writeFile(join(out,'cycle.json'),JSON.stringify({stages:[...stages],speeds:[...speeds],trace}));}
   if(sampleError)throw sampleError;
   const defeated=await game.inspect(),bag=defeated.diagnostic.entities.find(e=>e.items?.some(i=>i===0xa34||i===0xa35));assert(bag,'Eligible potion floor required');
-  await walk(bag.pos);await game.act({keys:[],duration_ms:700},{name:'sphinx-loot',when:()=>true});
+  await walk(bag.pos,1);await game.act({keys:[],duration_ms:700},{name:'sphinx-loot',when:()=>true});
   const before=await game.observe(),item=bag.items[0];assert(item!==-1);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
   const picked=await save('picked');game.check('native drag commits one earned item',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
   const portal=defeated.diagnostic.entities.find(e=>e.kind===0x72c);assert(portal,'Sphinx defeat must create Tomb portal');
-  await walk(portal.pos);await game.act({keys:[],duration_ms:1000},{name:'sphinx-portal',when:()=>true});
+  await walk(portal.pos,1);await game.act({keys:[],duration_ms:1000},{name:'sphinx-portal',when:()=>true});
   await game.act({keys:[],mouse:{x:700,y:580},duration_ms:300});
   const entered=await save('tomb-entry');game.check('earned Tomb portal admits the same living character',entered.view.map.name==='Tomb of the Ancients'&&entered.view.session.character===initial.view.session.character&&entered.view.lifecycle.alive);
   // The client entry card advances only while native gameplay is running.
