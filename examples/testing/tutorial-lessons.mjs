@@ -31,11 +31,13 @@ export async function run(game){
   async function lesson(name,goal){await walk(goal);await game.act({keys:[],duration_ms:800},{name,when:()=>true});await record(name);}
   // Selected proximity overlays are independent, not sequential gates: https://github.com/OpenRotMG/Open-RotMG-Client/blob/0282b3a48ad0c73abd683572ece4e6c71b0cb055/client.swf
   await lesson('minimap',{x:12.5,y:164.5});
-  await walk({x:12.5,y:164});await walk({x:15.5,y:164});await walk({x:15.5,y:161.3});await walk({x:12.5,y:161.3});
-  await lesson('health',{x:12.5,y:157.5});
-  await walk({x:12.5,y:161.5});await walk({x:15.5,y:161.5});await walk({x:15.5,y:164});
+  await walk({x:12.5,y:164});
+  await lesson('minimap-away',{x:17.5,y:164});
+  const away=await game.observe();game.check('ordinary movement leaves the minimap trigger',Math.hypot(away.position.x-12.5,away.position.y-164.5)>3);
   await lesson('minimap-revisited',{x:12.5,y:164.5});
   game.check('ordinary backtracking revisits the minimap sign',(await game.observe()).lifecycle.alive);
+  game=await game.join({...fixture,position:{x:12.5,y:153.5}});const health=game;
+  await lesson('health',{x:12.5,y:157.5});
   game=await game.join({...fixture,position:{x:12.5,y:49.5}});
   const initial=await record('late-prepared-entry');
   await lesson('equipment',{x:12.5,y:47.5});
@@ -62,5 +64,5 @@ export async function run(game){
   }finally{cdp.close();}
   const returned=await record('reentry');
   game.check('ordinary tutorial command returns the same living character with earned ring',returned.view.map.name==='Tutorial'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.view.character.items[3]===0xa4f&&returned.view.character.inventory_revision===used.view.character.inventory_revision);
-  game.check('the early lesson participant also remains alive',(await first.observe()).lifecycle.alive);
+  game.check('the early lesson participants also remain alive',(await first.observe()).lifecycle.alive&&(await health.observe()).lifecycle.alive);
 }
