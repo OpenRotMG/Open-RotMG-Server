@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {setTimeout as delay} from 'node:timers/promises';
 
 export const fixture={class:0x323,level:20,seed:860,world:'tomb-of-the-ancients',worldSeed:12,position:'spawn',equipment:[0xb0a,0xb2d,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]};
 export async function run(game){
@@ -17,7 +16,7 @@ export async function run(game){
   async function protect(){
     const now=(await game.observe()).game_ms;
     if(now<protection)return;
-    for(const actor of [...humans,...support.map(s=>s.actor)]){
+    for(const actor of [...humans,...support]){
       if((expiry.get(actor)??0)>now)continue;
       await api({op:'cheat',actor,change:{kind:'protection',condition:humans.includes(actor)?'invulnerable':'invincible',duration_ms:60000}});
       if(!humans.includes(actor))await api({op:'cheat',actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
@@ -28,38 +27,20 @@ export async function run(game){
   async function advance(ms,capture){
     while(ms>0){await protect();const step=Math.min(ms,10000,protection-(await game.observe()).game_ms);await game.act({keys:[],duration_ms:step},capture);capture=undefined;ms-=step;}
   }
-  const wizard={class:0x30e,level:20,seed:860,world:start.session.world,equipment:[0xb08,0xa2e,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60],controller:'direct',profile:null};
+  const wizard={class:0x30e,level:20,seed:860,world:start.session.world,equipment:[0xb08,0xa2e,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60],controller:'game_bot',profile:'Pixl'};
   async function squad(objective){
     for(let n=0;n<6;n++){
       const actor=(await api({op:'spawn',spec:{...wizard,guid:'tomb-squad-'+objective.id+'-'+n,position:{x:objective.pos.x-1+(n%3),y:objective.pos.y-2+Math.floor(n/3)}}})).result.actor;
-      support.push({actor,objective});
+      support.push(actor);
       await api({op:'cheat',actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
       await api({op:'cheat',actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
       expiry.set(actor,(await game.observe()).game_ms+60000);
     }
   }
-  async function combat(){
-    await protect();
-    const remaining=protection-(await game.observe()).game_ms;
-    if(remaining<6500){await advance(remaining);await protect();}
-    const scene=await map(),shots=[];
-    for(const {actor,objective} of support){
-      const p=(await api({op:'observe',actor})).position;
-      const priests=scene.entities.filter(e=>[0xd2a,0xd2b].includes(e.kind)&&Math.hypot(e.pos.x-objective.pos.x,e.pos.y-objective.pos.y)<10);
-      const target=priests.sort((a,b)=>Math.hypot(a.pos.x-p.x,a.pos.y-p.y)-Math.hypot(b.pos.x-p.x,b.pos.y-p.y))[0]??scene.entities.find(e=>e.id===objective.id);
-      if(target)shots.push({actor,angle:Math.atan2(target.pos.y-p.y,target.pos.x-p.x)});
-    }
-    assert(protection-(await game.observe()).game_ms>=6500,'Protection must cover the bounded combat round');
-    const action=game.act({keys:[],duration_ms:6500});
-    const firing=(async()=>{
-      for(let n=0;(await game.observe()).paused;n++){assert(n<250,'Native action did not unpause');await delay(20);}
-      await Promise.all(shots.map(({actor,angle})=>api({op:'act',actor,action:{command:'shoot',angle},duration_ms:6000,pauseAfter:false})));
-    })();
-    const results=await Promise.allSettled([action,firing]);for(const r of results)if(r.status==='rejected')throw r.reason;
-  }
+  const combat=()=>advance(2000);
   for(const objective of objectives.slice(0,-1))await squad(objective);
   const final=objectives.at(-1);
-  for(let n=0;n<8;n++){
+  for(let n=0;n<30;n++){
     await combat();
     const m=await map();if(m.entities.filter(e=>e.kind===0xd29).length===1)break;
   }
@@ -67,7 +48,7 @@ export async function run(game){
   game.check('all but the last objective can die without awakening any statue',gated.map.entities.filter(e=>e.kind===0xd29).length===1&&gated.map.entities.some(e=>e.id===final.id)&&statues.every(e=>gated.map.entities.some(x=>x.id===e.id))&&!gated.map.entities.some(e=>[0xd26,0xd27,0xd28].includes(e.kind)));
   game.check('optional treasure remains outside the objective gate',gated.map.entities.some(e=>e.kind===0xd2c));
   await squad(final);
-  for(let n=0;n<8;n++){await combat();if(!(await map()).entities.some(e=>e.kind===0xd29))break;}
+  for(let n=0;n<30;n++){await combat();if(!(await map()).entities.some(e=>e.kind===0xd29))break;}
   const awakened=await save('awakened'),bosses=awakened.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind));
   game.check('last real objective death replaces all three statues exactly once',!awakened.map.entities.some(e=>e.kind===0xd29)&&bosses.length===3&&new Set(bosses.map(e=>e.kind)).size===3&&statues.every(e=>!awakened.map.entities.some(x=>x.id===e.id)));
   game.check('awakening does not grant completion credit',awakened.state.diagnostic.character.tombs===0);
