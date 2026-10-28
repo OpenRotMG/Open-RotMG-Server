@@ -15,7 +15,7 @@ export async function prepare(api){
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   const kinds=new Set(JSON.parse(execFileSync('python3',['-c',"import json,xml.etree.ElementTree as E; print(json.dumps([int(e.attrib['type'],0) for e in E.parse('data/objects.xml').getroot() if e.find('Enemy') is not None]))"],{encoding:'utf8'})));
   const candidates=map.entities.filter(e=>e.kind===0x658).map(e=>({entity:e,clearance:Math.min(...map.entities.filter(p=>p.id!==e.id&&kinds.has(p.kind)).map(p=>Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)))})).filter(({entity:e})=>{
-    for(let dx=-9;dx<=9;dx++)for(let dy=-3;dy<=3;dy++)if(blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))return false;
+    for(let dx=-6;dx<=0;dx++)if(blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(',')))return false;
     return true;
   }).sort((a,b)=>b.clearance-a.clearance);
   assert(candidates.length,'No naturally placed Slime God has a clear observation corridor');root=candidates[0].entity;
