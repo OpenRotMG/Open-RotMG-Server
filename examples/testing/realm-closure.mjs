@@ -22,16 +22,16 @@ function towerPair(towers,views,assignments){
 let scout,spawnPoints;
 export async function prepare(api){
   const candidates=await Promise.all([-3,1].map(async id=>({id,...await api({op:'world_info',world:id})})));
-  const count=w=>w.encounter_markers.filter(e=>roots.has(e.kind)).length;
-  // Selecting an existing smaller Realm fits the receipt cap without removing encounters.
+  const count=w=>w.encounter_markers.filter(e=>e.kind===0x67d).length;
+  // Marker selection changes the starting slot, never its actual closure roster.
   candidates.sort((a,b)=>count(a)-count(b));
   const world=candidates[0],boss=world.encounter_markers.find(e=>e.kind===0x67d);
-  assert(candidates.every(w=>w.name==='Realm'&&count(w)>20),'Both existing ordinary Realm slots must be fully populated');
+  assert(candidates.every(w=>w.name==='Realm'&&count(w)>0),'Both ordinary Realm slots need an observed Cyclops encounter');
   assert(boss,'An ordinarily populated Cyclops encounter is required');
   assert(Array.isArray(world.spawn_points)&&world.spawn_points.length&&world.spawn_points.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite)),'World spawn_points must contain coordinate pairs');
   spawnPoints=world.spawn_points.map(([x,y])=>({x,y}));
   scout=(await api({op:'spawn',spec:{...spec,world:world.id,guid:'closure-scout-'+randomUUID(),position:{x:Math.floor(boss.position.x)+.5,y:Math.floor(boss.position.y)+.5},controller:'direct',profile:null}})).result;
-  await writeFile(join(out,'scout-preparation.json'),JSON.stringify({...scout,spawnPoints,selectedWorld:world.id,candidates:candidates.map(w=>({world:w.id,roots:count(w),layout:w.realm_layout}))}));
+  await writeFile(join(out,'scout-preparation.json'),JSON.stringify({...scout,spawnPoints,selectedWorld:world.id,candidates:candidates.map(w=>({world:w.id,cyclopsMarkers:count(w),layout:w.realm_layout}))}));
   return {...spec,world:world.id,position:boss.position};
 }
 export async function run(game){
