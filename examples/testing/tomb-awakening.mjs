@@ -1,0 +1,84 @@
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+
+export const fixture={class:0x323,level:20,seed:860,world:'tomb-of-the-ancients',worldSeed:0,position:'spawn',equipment:[0xb0a,0xb2d,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]};
+export async function run(game){
+  const out=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8'));
+  const headers={Authorization:'Bearer '+(await readFile(join(config.state,'control.token'),'utf8')).trim(),'Content-Type':'application/json'};
+  let serial=0;
+  const api=async command=>{const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:'tomb-awakening-'+(++serial),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok&&s.status!=='failed',JSON.stringify(s));return s;};
+  const start=await game.observe();
+  const map=async()=>{const r=await fetch(config.origin+'/dev/map?player='+start.session.player,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);return r.json();};
+  const layout=await map(),objectives=layout.entities.filter(e=>e.kind===0xd29),statues=layout.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind));assert(objectives.length>=3&&statues.length===3);
+  const records=[],support=[],expiry=new Map();let protection=0;
+  const save=async label=>{const s={label,state:await game.inspect(),map:await map()};records.push(s);await writeFile(join(out,'awakening.json'),JSON.stringify(records));return s;};
+  async function protect(){
+    const now=(await game.observe()).game_ms;
+    if(now<protection)return;
+    for(const actor of [game.actor,...support.map(s=>s.actor)]){
+      if((expiry.get(actor)??0)>now)continue;
+      await api({op:'cheat',actor,change:{kind:'protection',condition:actor===game.actor?'invulnerable':'invincible',duration_ms:60000}});
+      if(actor!==game.actor)await api({op:'cheat',actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
+      expiry.set(actor,now+60000);
+    }
+    protection=Math.min(...expiry.values());
+  }
+  async function advance(ms,capture){
+    while(ms>0){await protect();const step=Math.min(ms,10000,protection-(await game.observe()).game_ms);await game.act({keys:[],duration_ms:step},capture);capture=undefined;ms-=step;}
+  }
+  const wizard={class:0x30e,level:20,seed:860,world:start.session.world,equipment:[0xb08,0xa2e,0xafc,0xacd],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60],controller:'direct',profile:null};
+  async function squad(objective){
+    for(let n=0;n<6;n++){
+      const actor=(await api({op:'spawn',spec:{...wizard,guid:'tomb-squad-'+objective.id+'-'+n,position:{x:objective.pos.x-1+(n%3),y:objective.pos.y-2+Math.floor(n/3)}}})).result.actor;
+      support.push({actor,objective});
+      await api({op:'cheat',actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
+      await api({op:'cheat',actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
+      expiry.set(actor,(await game.observe()).game_ms+60000);
+    }
+  }
+  async function combat(){
+    await protect();
+    const remaining=protection-(await game.observe()).game_ms;
+    if(remaining<6500){await advance(remaining);await protect();}
+    const scene=await map(),shots=[];
+    for(const {actor,objective} of support){
+      const p=(await api({op:'observe',actor})).position;
+      const priests=scene.entities.filter(e=>[0xd2a,0xd2b].includes(e.kind)&&Math.hypot(e.pos.x-objective.pos.x,e.pos.y-objective.pos.y)<10);
+      const target=priests.sort((a,b)=>Math.hypot(a.pos.x-p.x,a.pos.y-p.y)-Math.hypot(b.pos.x-p.x,b.pos.y-p.y))[0]??scene.entities.find(e=>e.id===objective.id);
+      if(target)shots.push({actor,angle:Math.atan2(target.pos.y-p.y,target.pos.x-p.x)});
+    }
+    assert(protection-(await game.observe()).game_ms>=6500,'Protection must cover the bounded combat round');
+    const action=game.act({keys:[],duration_ms:6500});
+    const firing=(async()=>{
+      for(let n=0;(await game.observe()).paused;n++){assert(n<250,'Native action did not unpause');await delay(20);}
+      await Promise.all(shots.map(({actor,angle})=>api({op:'act',actor,action:{command:'shoot',angle},duration_ms:6000,pauseAfter:false})));
+    })();
+    const results=await Promise.allSettled([action,firing]);for(const r of results)if(r.status==='rejected')throw r.reason;
+  }
+  for(const objective of objectives.slice(0,-1))await squad(objective);
+  const final=objectives.at(-1);
+  for(let n=0;n<8;n++){
+    await combat();
+    const m=await map();if(m.entities.filter(e=>e.kind===0xd29).length===1)break;
+  }
+  const gated=await save('last-objective-gate');
+  game.check('all but the last objective can die without awakening any statue',gated.map.entities.filter(e=>e.kind===0xd29).length===1&&gated.map.entities.some(e=>e.id===final.id)&&statues.every(e=>gated.map.entities.some(x=>x.id===e.id))&&!gated.map.entities.some(e=>[0xd26,0xd27,0xd28].includes(e.kind)));
+  game.check('optional treasure remains outside the objective gate',gated.map.entities.some(e=>e.kind===0xd2c));
+  await squad(final);
+  // The September 2012 guide gates awakening on sarcophagi, not optional treasure: https://geegamers.blogspot.com/2012/09/tomb-of-ancients-rotmg-guide-english.html
+  for(let n=0;n<8;n++){await combat();if(!(await map()).entities.some(e=>e.kind===0xd29))break;}
+  const awakened=await save('awakened'),bosses=awakened.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind));
+  game.check('last real objective death replaces all three statues exactly once',!awakened.map.entities.some(e=>e.kind===0xd29)&&bosses.length===3&&new Set(bosses.map(e=>e.kind)).size===3&&statues.every(e=>!awakened.map.entities.some(x=>x.id===e.id)));
+  game.check('awakening does not grant completion credit',awakened.state.view.character.tombs===0);
+  const {worldSeed,...spec}=fixture;
+  const late=await game.join({...spec,world:start.session.world,position:'spawn'});
+  await api({op:'cheat',actor:late.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
+  await advance(1500,{name:'tomb-late-join-awakened',when:()=>true});
+  const joined=await late.inspect();await writeFile(join(out,'late-join.json'),JSON.stringify(joined));
+  game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.diagnostic.entities.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.diagnostic.entities.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.view.character.tombs===0);
+  const repeated=await save('after-late-join');game.check('late admission does not duplicate or replace awakened bosses',repeated.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3&&bosses.every(e=>repeated.map.entities.some(x=>x.id===e.id)));
+  await game.act({keys:['Insert'],duration_ms:300});
+  const escaped=await game.observe();game.check('uncleared escape retains the same living character and zero completion',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===start.session.character&&escaped.character.tombs===0);
+}
