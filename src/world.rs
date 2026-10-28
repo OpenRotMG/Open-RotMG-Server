@@ -7561,6 +7561,8 @@ mod priest_tests;
 
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod travel_tests;
 
 #[cfg(test)]
 mod knight_tests;
