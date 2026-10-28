@@ -99,9 +99,9 @@ export async function run(game){
   state=await save('replenished');game.check('owned Cube population replenishes after native combat',family(state).some(e=>!old.has(e.id))&&await reproduced());
   assert(entity(state,root));
   const partner=await game.join({...spec,seed:821,position:state.view.position});await protect(partner.actor);
-  const players=(await Promise.all([game.inspect(),partner.inspect()])).map(s=>s.diagnostic.player);
-  for(const [i,actor] of [game,partner].entries()){for(let n=0;n<8&&(entity(await game.inspect(),root).damage[players[i]]??0)<600;n++)await fire(actor,root,150);}
-  state=await save('contributors');game.check('two native clients contribute above the 500-damage threshold',players.every(id=>entity(state,root).damage[id]>500));
+  const characters=(await Promise.all([game.inspect(),partner.inspect()])).map(s=>s.view.session.character);
+  for(const [i,actor] of [game,partner].entries()){for(let n=0;n<8&&(entity(await game.inspect(),root).damage[characters[i]]??0)<600;n++)await fire(actor,root,150);}
+  state=await save('contributors');game.check('two native clients contribute above the 500-damage threshold',characters.every(id=>entity(state,root).damage[id]>500));
   const xp=await Promise.all([game.observe(),partner.observe(),spectator.observe()]);
   for(let n=0;n<70&&entity(await game.inspect(),root);n++)await fire(game,root);
   state=await save('defeated');game.check('native bow combat defeats the admitted Cube God',!entity(state,root));
