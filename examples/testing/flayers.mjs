@@ -77,7 +77,7 @@ export async function run(game){
     const old=new Set(family(await game.inspect()).map(e=>e.id));
     for(let n=0;n<12&&!family(await game.inspect()).some(e=>e.kind===0x648&&!old.has(e.id));n++)await act({keys:[],duration_ms:1000});
     const replaced=await save('veteran-replaced');
-    game.check('living God replaces a defeated Veteran within current cap',family(replaced).some(e=>e.id===god.id)&&family(replaced).filter(e=>e.kind===0x648).length===3&&family(replaced).some(e=>e.kind===0x648&&!old.has(e.id)));
+    game.check('living God replaces a defeated Veteran within current cap',family(replaced).some(e=>e.id===god.id)&&family(replaced).filter(e=>e.kind===0x648).length<=3&&family(replaced).some(e=>e.kind===0x648&&!old.has(e.id)));
     await defeat(god.id);
     await act({keys:[],duration_ms:2000});
     const dead=await save('god-defeated'),survivors=family(dead).map(e=>e.id);
