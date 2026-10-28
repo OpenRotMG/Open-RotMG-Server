@@ -108,7 +108,12 @@ export async function run(game){
   }
   state=await save('defeated');game.check('native combat defeats Prisoner and grants eligible XP',!entity(state,prisoner.id)&&state.view.character.experience>xp);
   await idle(2000);state=await save('cleanup');game.check('defeat removes owned Steeds without respawning Crystal',!kinds(state,0x943).some(e=>e.quest===prisoner.quest)&&!kinds(state,0x935).length);
-  const bag=state.diagnostic.entities.find(e=>e.items?.some(i=>i!==-1)&&e.extra_stats.some(([s,o])=>s===54&&o===state.view.session.account));assert(bag,'Observed private reward required');
+  const rewards=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.includes('"message":"loot bag allocated"')||l.includes('"message":"enemy defeated"')).map(l=>JSON.parse(l).fields);
+  const death=rewards.findLastIndex(e=>e.message==='enemy defeated'&&e.entity===prisoner.id);assert(death>=0,'Prisoner defeat receipt required');
+  const previous=rewards.slice(0,death).findLastIndex(e=>e.message==='enemy defeated');
+  const drops=rewards.slice(previous+1,death).filter(e=>e.message==='loot bag allocated'&&e.owner===state.view.session.account);assert(drops.length===1,'One observed Prisoner private allocation required');const drop=drops[0];
+  const bag=entity(state,drop.entity);assert(bag?.items.some(i=>i!==-1),'Living Prisoner reward bag required');
+  game.check('Prisoner allocation owns only its selected reward pool',bag.extra_stats.some(([s,o])=>s===54&&o===state.view.session.account)&&bag.items.every(i=>[-1,0xb3f,0xa03,0xa1f,0xa20,0xa4c,0xa21,0xa34,0xa35].includes(i)));
   await approach(game,bag.pos,.4);await game.act({keys:[],duration_ms:700},{name:'prisoner-reward',when:()=>true});
   const before=await game.observe(),slot=bag.items.findIndex(i=>i!==-1),item=bag.items[slot];
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot%4*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}}});state=await save('picked');
