@@ -1569,11 +1569,9 @@ mod tests {
     #[test]
     fn defense_god_thresholds_preserve_equipment() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for (kind, threshold, chance) in [
-            (0x655, 180, 0.015),
-            (0x656, 270, 0.01),
-            (0x658, 180, 0.015),
-        ] {
+        for (kind, threshold, chance) in
+            [(0x655, 180, 0.015), (0x656, 270, 0.01), (0x658, 180, 0.015)]
+        {
             assert_eq!(bonus(kind), &[(chance, 0xa20)]);
             let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
             let loot = god_loot(
