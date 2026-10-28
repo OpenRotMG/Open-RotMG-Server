@@ -74,7 +74,6 @@ export async function run(game){
   }
   await save('king-healed');
   game.check('wounded living King receives support healing after native staff damage',samples.slice(healStart).some((s,i,a)=>i&&entity(s,king.id)?.hp>entity(a[i-1],king.id)?.hp));
-  await cheat({kind:'stats',values:[670,385,75,0,50,75,40,60]});
   async function defeat(id){
     const before=await game.inspect();
     for(let n=0;n<100;n++){
@@ -98,6 +97,7 @@ export async function run(game){
     const after=await save('replenished-'+kind);
     game.check(kind+': living King replenishes defeated role within current cap',entity(after,king.id)&&family(after).some(e=>e.kind===kind&&!old.has(e.id))&&caps(after));
   }
+  await cheat({kind:'stats',values:[670,385,75,0,50,75,40,60]});
   await defeat(king.id);const dead=await save('king-defeated');
   await act({keys:[],duration_ms:500},{name:'orcs-defeated',when:()=>true});
   for(let n=0;n<12;n++)await act({keys:[],duration_ms:1000});
