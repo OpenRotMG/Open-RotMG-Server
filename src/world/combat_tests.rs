@@ -416,6 +416,9 @@ fn selected_staves_keep_individual_damage_cadence_waves_and_collision() {
                 w.entities.get_mut(&target).unwrap().hp = 10000;
             }
             let hp = targets.map(|target| w.entities[&target].hp);
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.shots = 1;
+            p.character.lifetime.shots = 1;
             let mut b = shot(&w, id, kind, 0);
             b.id = 0;
             b.friendly = true;
