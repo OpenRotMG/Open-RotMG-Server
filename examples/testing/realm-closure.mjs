@@ -77,8 +77,28 @@ export async function run(game){
   await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout,assistance:{attack_bonus:attackBonus,protection_ms:60000}}));
   opening.blocked.length=0;opening.entities.length=0;
   await act(game,{keys:[],duration_ms:500},{name:'realm-opening',when:()=>true});await save('opening');
+  async function clearPartyPanel(){
+    for(let step=0;step<4;step++){
+      const states=await Promise.all(clients.map(c=>c.inspect()));
+      const objects=states.flatMap(s=>{
+        const portals=new Set(s.diagnostic.entities.filter(e=>e.extra_stats.some(([stat])=>stat===37)).map(e=>e.id));
+        return s.view.objects.filter(e=>e.contents.length>0||portals.has(e.id));
+      });
+      if(states.every(s=>objects.every(e=>Math.hypot(s.view.position.x-e.position.x,s.view.position.y-e.position.y)>1.4)))return;
+      const position=states[0].view.position,points=[];
+      for(const dy of [-3,0,3])for(const dx of [-3,0,3]){
+        const p={x:Math.floor(position.x)+dx+.5,y:Math.floor(position.y)+dy+.5};
+        const clear=states.every(s=>Array.from({length:16},(_,i)=>(i+1)/16).every(t=>!blocked[Math.floor(s.view.position.y+(p.y-s.view.position.y)*t)*width+Math.floor(s.view.position.x+(p.x-s.view.position.x)*t)]));
+        if((dx||dy)&&clear&&p.x>=0&&p.y>=0&&p.x<width&&p.y<opening.height&&!blocked[Math.floor(p.y)*width+Math.floor(p.x)]&&objects.every(e=>Math.hypot(p.x-e.position.x,p.y-e.position.y)>3))points.push(p);
+      }
+      assert(points.length,'No walkable party-menu clearance away from nearby containers/portals');
+      await appendFile(join(out,'party-clearance.jsonl'),JSON.stringify({positions:states.map(s=>s.view.position),objects:objects.map(e=>({id:e.id,position:e.position})),point:points[0]})+'\n');
+      await approach(points[0],1);
+    }
+    assert.fail('Native movement did not clear the interaction panel for party-menu travel');
+  }
   async function travel(anchor){
-    const points=[];
+    await clearPartyPanel();const points=[];
     for(let y=-5;y<=5;y++)for(let x=-5;x<=5;x++){
       const p={x:Math.floor(anchor.x)+x+.5,y:Math.floor(anchor.y)+y+.5},d=Math.hypot(p.x-anchor.x,p.y-anchor.y);
       if(d>=1.5&&d<5&&!blocked[Math.floor(p.y)*width+Math.floor(p.x)])points.push(p);
@@ -93,7 +113,7 @@ export async function run(game){
     await act(game,menus(400));
     for(const client of clients){
       const after=await client.observe();
-      assert(after.session.world===origin&&after.lifecycle.alive&&Math.hypot(after.position.x-points[0].x,after.position.y-points[0].y)<.2,'Native menu did not complete the actual scout teleport');
+      assert(after.session.world===origin&&after.lifecycle.alive&&Math.hypot(after.position.x-points[0].x,after.position.y-points[0].y)<.2,'Native menu did not complete the actual scout teleport: '+JSON.stringify({actor:client.actor,expected:points[0],position:after.position,world:after.session.world,origin}));
       jumps.set(client.actor,after.game_ms);await appendFile(join(out,'travel.jsonl'),JSON.stringify({actor:client.actor,anchor,position:after.position,game_ms:after.game_ms})+'\n');
     }
   }
