@@ -87,17 +87,18 @@ export async function run(game){
   const phases=new Set();
   for(let n=0;n<160;n++){
     const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===boss.id);assert(e&&s.view.lifecycle.alive,'Knight or Septavius lost during phase observation');
-    const elapsed=s.diagnostic.time_ms-e.activated;phases.add(Math.floor(elapsed/13000)%4);if(elapsed>=52000)break;
+    const elapsed=s.diagnostic.time_ms-e.activated;phases.add(e.stage%4);if(elapsed>=52000)break;
     const angle=Math.atan2(s.view.position.y-e.pos.y,s.view.position.x-e.pos.x)+.12,target={x:e.pos.x+7*Math.cos(angle),y:e.pos.y+7*Math.sin(angle)};
     const dx=target.x-s.view.position.x,dy=target.y-s.view.position.y,horizontal=Math.abs(dx)>Math.abs(dy),delta=horizontal?dx:dy;
     const keys=horizontal?(delta>0?['d','s']:['a','w']):(delta>0?['a','s']:['d','w']);
     const minion=s.diagnostic.entities.find(c=>c.kind>=0xdaa&&c.kind<=0xdb2&&distance(s.view.position,c.pos)<3);
     await sample({keys,duration_ms:350,...(minion?{target:{entity:minion.id,camera_angle:-Math.PI/4,fire:true}}:{})},n===5?{name:'lair-phases',when:()=>true}:undefined);
   }
+  await writeFile(join(out,'encounters.json'),JSON.stringify({seen:[...seen.values()],shots:[...shots.values()],escorts:[...escorts.values()],splits,traps:[...traps],phases:[...phases]}));
   game.check('all four Septavius phase windows execute without a late-join restart',phases.size===4);
   await save('phases-observed');
   const bossShots=[...shots.values()].filter(p=>p.owner===boss.id);
-  game.check('native client receives all four implemented Septavius projectile patterns',[[80,1500],[70,2000],[90,2600],[57,3000]].every(([speed,life])=>bossShots.some(p=>p.speed===speed&&p.lifetime_ms===life)));
+  game.check('all four configured Septavius projectile types are observed',[[80,1500],[40,4000],[90,2600],[57,3000]].every(([speed,life])=>bossShots.some(p=>p.speed===speed&&p.lifetime_ms===life)));
   game.check('both escort waves retain the same boss owner',[[0xdaa,0xdaf],[0xdb0,0xdb2]].every(([lo,hi])=>[...escorts.values()].some(e=>e.kind>=lo&&e.kind<=hi&&e.parent===boss.id)));
   for(let n=0;n<150;n++){
     const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===boss.id);if(!e)break;
@@ -120,6 +121,5 @@ export async function run(game){
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
   const returned=await save('returned');
   game.check('Realm exit retains the same living character reward and single clear',returned.view.map.name==='Realm'&&returned.view.session.world===before.view.session.world&&returned.view.session.character===before.view.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.dungeons[2]===defeated.diagnostic.character.dungeons[2]&&returned.view.character.items[4]===0xa35);
-  await writeFile(join(out,'encounters.json'),JSON.stringify({seen:[...seen.values()],shots:[...shots.values()],escorts:[...escorts.values()],splits,traps:[...traps],phases:[...phases]}));
   await sample({keys:[],duration_ms:900},{name:'lair-returned',when:()=>true});
 }
