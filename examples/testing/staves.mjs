@@ -7,7 +7,7 @@ const groups=[
   [0x323,[0xa9d,0xa9e,0xa9f,0xaa0,0xaa1,0xaa2]],
   [0x321,[0xb08,0xb09,0xb0a,0xc03,0xc15,0xc24]],
 ];
-const spec=([classId,items])=>({class:classId,level:20,seed:873,world:-2,position:'spawn',equipment:[items[0],-1,-1,-1],backpack:[...items.slice(1),0xa04,-1,-1],stats:[600,200,50,25,30,50,40,30]});
+const spec=([classId,items])=>({class:classId,level:20,seed:873,world:-2,position:'spawn',equipment:[items[0],-1,-1,-1],backpack:[...items.slice(1),0xa04,-1,-1],stats:[600,200,50,25,30,50,30,30]});
 export const fixture=spec(groups[0]);
 export async function run(game){
   const observations=[];
