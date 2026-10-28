@@ -30,6 +30,7 @@ export async function run(game){
     const before=await client.observe();
     await client.act({keys:[String(slot-3)],duration_ms:300},{name,when:v=>v.character.items[slot]===-1});
     const after=await client.inspect();samples.push({name,before,after});
+    await writeFile(join(root,'drake-observations.json'),JSON.stringify(samples));
     game.check(name+' consumes exactly one egg',after.view.character.items[slot]===-1&&after.view.character.inventory_revision===before.character.inventory_revision+1&&after.view.character.items.every((item,i)=>i===slot||item===before.character.items[i]));
     game.check(name+' publishes its selected drake',pets(after).some(e=>e.kind===kind)&&after.view.objects.some(e=>e.kind===kind));
     return after;
@@ -53,10 +54,12 @@ export async function run(game){
   const beforeTravel=await game.inspect(),ids=pets(beforeTravel).map(e=>e.id);
   await game.act({keys:['Insert'],duration_ms:700});
   const escaped=await game.inspect();
-  game.check('Nexus reconnect preserves identity and consumed eggs',escaped.view.world==='Nexus'&&escaped.view.session.character===beforeTravel.view.session.character&&JSON.stringify(escaped.view.character.items)===JSON.stringify(beforeTravel.view.character.items));
+  game.check('Nexus reconnect preserves identity and consumed eggs',escaped.view.map.name==='Nexus'&&escaped.view.session.character===beforeTravel.view.session.character&&JSON.stringify(escaped.view.character.items)===JSON.stringify(beforeTravel.view.character.items));
   game.check('temporary drakes do not persist into Nexus',pets(escaped).length===0);
   const observer=await game.join({...base,backpack:Array(8).fill(-1),position:beforeTravel.view.position});
   game.check('old-world observer sees no abandoned drakes',!(await observer.inspect()).diagnostic.entities.some(e=>ids.includes(e.id)));
+  await observer.act({keys:['Insert'],duration_ms:700});
+  game.check('observer leaves the combat fixture alive',(await observer.observe()).world==='Nexus');
   const nexus=await game.join({...base,world:-2,position:'spawn'});
   for(const [i,kind] of [0x1402,0x1404,0x1405,0x1403,0x1400,0x1401,0x1400,0x1401].entries())await use(nexus,i+4,kind,'nexus-'+i);
   game.check('eight companions coexist rather than replacing each other',pets(await nexus.inspect()).length===8);
@@ -64,10 +67,11 @@ export async function run(game){
   const refused=await nexus.observe();await nexus.act({keys:['1'],duration_ms:400},{name:'drakes-limit',when:()=>true});
   const afterRefusal=await nexus.inspect();
   game.check('ninth companion refusal preserves egg and revision',afterRefusal.view.character.items[4]===0xaa9&&afterRefusal.view.character.inventory_revision===refused.character.inventory_revision&&pets(afterRefusal).length===8);
+  const beforeWalk=await nexus.observe();
   await nexus.act({keys:['d'],duration_ms:700});
   await nexus.act({keys:[],duration_ms:1000},{name:'drakes-follow',when:()=>true});
   const followed=await nexus.inspect();
-  game.check('companions follow native movement',pets(followed).every(e=>Math.hypot(e.pos.x-followed.view.position.x,e.pos.y-followed.view.position.y)<2));
+  game.check('companions follow native movement',Math.hypot(beforeWalk.position.x-followed.view.position.x,beforeWalk.position.y-followed.view.position.y)>1&&pets(followed).every(e=>Math.hypot(e.pos.x-followed.view.position.x,e.pos.y-followed.view.position.y)<2));
   for(let i=0;i<3;i++)await nexus.act({keys:[],duration_ms:10000});
   const thirty=await nexus.inspect();samples.push({name:'after-thirty-seconds',view:thirty});
   game.check('30-second variants expire while both White drakes remain',pets(thirty).length===2&&pets(thirty).every(e=>e.kind===0x1401));
