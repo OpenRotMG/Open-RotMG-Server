@@ -60,15 +60,31 @@ async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor(
                 w.defeat_entity(id).unwrap();
                 let mut actual = Vec::new();
                 for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
-                    assert!(bag.bag_owners.is_empty());
+                    let follower = matches!(kind, 0x91d | 0x91e);
+                    assert_eq!(
+                        bag.bag_owners.len(),
+                        if follower && bag.kind == 0x500 {
+                            contributors
+                        } else {
+                            0
+                        }
+                    );
                     for item in bag.items.iter().copied().filter(|item| *item >= 0) {
                         let bound = w.content.objects[&(item as u16)].soulbound;
-                        assert_eq!(!bag.extra_stats.is_empty(), bound);
-                        if bound {
+                        let owned = bound || (follower && bag.kind != 0x500);
+                        assert_eq!(!bag.extra_stats.is_empty(), owned);
+                        if owned {
                             assert!(
                                 owners[..contributors]
                                     .iter()
                                     .any(|(owner, _)| bag.extra_stats.contains(&(54, *owner)))
+                            );
+                            assert!(!bag.accessible(owners[5].0));
+                        } else if follower {
+                            assert!(
+                                owners[..contributors]
+                                    .iter()
+                                    .all(|(owner, _)| bag.accessible(*owner))
                             );
                             assert!(!bag.accessible(owners[5].0));
                         }
