@@ -3402,6 +3402,15 @@ impl World {
                 .context("world has no spawn cells")?;
             Pos { x, y }
         };
+        let last_move_at = if tx.is_some() {
+            self.clock
+                .now()
+                .checked_duration_since(self.attack_epoch)
+                .context("native entry predates world epoch")?
+                .as_millis() as u64
+        } else {
+            self.now
+        };
         let char_id = ch.id;
         if let Some(kind) = ch.pet_kind {
             self.attach_companion(id, kind, pos)?;
@@ -3472,7 +3481,7 @@ impl World {
                 attack_count: 0,
                 attack_suppressed: None,
                 last_move: 0,
-                last_move_at: self.now,
+                last_move_at,
                 motion: ObservedMotion {
                     position: pos,
                     time: 0,
