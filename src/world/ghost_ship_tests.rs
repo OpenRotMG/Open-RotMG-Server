@@ -1,4 +1,5 @@
 use super::*;
+use crate::condition;
 
 fn ship_world() -> (World, i32, i32, i32) {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
