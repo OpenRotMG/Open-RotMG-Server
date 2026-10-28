@@ -8,7 +8,7 @@ export async function run(game){
   const output=name=>join(process.env.QA_RESULTS_DIR,name),samples=[],shots=new Map();
   const report=JSON.parse(await readFile(output('native/result.json'),'utf8'));
   const token=(await readFile(output('native/state/control.token'),'utf8')).trim();
-  let protectedUntil=0,armoredUntil=0;
+  let protectedUntil=0,armoredUntil=0,recordShots=true;
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
   const entities=async()=>(await game.inspect()).diagnostic.entities;
   async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(output('lab-journey.json'),JSON.stringify(samples));return state;}
@@ -25,12 +25,12 @@ export async function run(game){
       await prepare({kind:'stat_modifier',index:3,amount:100,duration_ms:60000});armoredUntil=now+60000;
     }
     let pending=null,error=null;
-    const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(s=>{
+    const timer=recordShots?setInterval(()=>{if(!pending)pending=game.inspect().then(s=>{
       for(const p of s.view.projectiles){
         const e=s.diagnostic.entities.find(e=>e.id===p.owner);
         if(e&&e.kind>=0x979&&e.kind<=0x991)shots.set(p.owner+':'+p.id,{kind:e.kind,...p});
       }
-    }).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
+    }).catch(e=>{error=e;}).finally(()=>{pending=null;});},100):null;
     try{return await game.act(input,capture);}
     finally{clearInterval(timer);if(pending)await pending;if(error)throw error;await writeFile(output('lab-projectiles.json'),JSON.stringify([...shots.values()]));}
   }
@@ -89,6 +89,7 @@ export async function run(game){
   game.check('native movement and weapon fire traverse four populated rooms and earn ordinary kills',traversed.diagnostic.character.kills>=entered.diagnostic.character.kills+4&&traversed.view.character.experience>entered.view.character.experience);
   game.check('last ordinary room has no fabricated equipment bags',!traversed.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)));
   game.check('native traversal observes real robot and both acid turret projectiles',[0x990,0x991].every(kind=>[...shots.values()].some(p=>p.kind===kind))&&[...shots.values()].some(p=>p.kind>=0x979&&p.kind<=0x983));
+  recordShots=false;
   await walk(56.5,23.5);await walk(57.5,23.5);await walk(57.5,20.5);await walk(60.5,20.5);await walk(62.5,12.5);
   const boss=(await entities()).find(e=>e.kind===0x976);assert(boss);
   await defeat(boss.id);await walk(62.5,12.5);
