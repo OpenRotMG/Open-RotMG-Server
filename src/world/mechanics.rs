@@ -388,21 +388,7 @@ impl World {
             tracing::debug!(entity = id, kind, stage, "encounter phase entered");
             match kind {
                 0x614 if stage == 1 => {
-                    let mut out = Writer::new();
-                    out.u8(15)
-                        .i32(id)
-                        .f32(0.6)
-                        .f32(5.)
-                        .f32(0.)
-                        .f32(0.)
-                        .u32(0xff666666);
-                    for p in self
-                        .players
-                        .values()
-                        .filter(|p| p.known.contains(&id) && p.pos.distance(pos) < 20.)
-                    {
-                        send(p, wire::SHOW_EFFECT, out.0.clone());
-                    }
+                    self.npc_flash(id, 0xff484848, 0.6, 5.);
                     tracing::debug!(entity = id, "Goblin horde commanded by wounded mage");
                 }
                 0xd06 if stage % 5 == 3 => {

@@ -160,4 +160,5 @@ export async function run(game){
     const earned=(await game.observe()).character.experience;await idle(2000);
     game.check('defeat XP is once only',(await game.observe()).character.experience===earned);
   }
+  game.check('retired class-shaped escorts never appear in the sampled native encounter',records.every(({state})=>state.diagnostic.entities.every(e=>e.kind<0x662||e.kind>0x667)));
 }

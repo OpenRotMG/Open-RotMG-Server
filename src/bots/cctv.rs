@@ -25,6 +25,7 @@ struct Registry {
     feeds: BTreeMap<String, Feed>,
     ips: HashMap<(IpAddr, bool), usize>,
     perspective_reads: HashMap<IpAddr, (Instant, u8)>,
+    views: HashMap<String, std::sync::Weak<crate::server::bot_view::control::View>>,
 }
 struct Feed {
     updated: Instant,
@@ -63,6 +64,13 @@ impl Feed {
 }
 
 impl Cctv {
+    #[cfg(test)]
+    pub(crate) fn test_catalogue() -> Arc<Self> {
+        let cctv = Arc::new(Self::default());
+        cctv.entered("A", 1, 11);
+        cctv.entered("B", 2, 22);
+        cctv
+    }
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
         self.0.lock().expect("bot CCTV registry poisoned")
     }
@@ -89,6 +97,37 @@ impl Cctv {
         self.lock().feeds.iter().filter(|(_,f)|f.session.is_some()).map(|(name,f)|
             json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame})
         ).collect()
+    }
+    pub(crate) fn register_view(
+        &self,
+        view: &Arc<crate::server::bot_view::control::View>,
+    ) -> Result<String, (StatusCode, String)> {
+        let mut registry = self.lock();
+        registry.views.retain(|_, view| view.strong_count() != 0);
+        if registry.views.len() >= VIEWERS {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "native view registry is full; retry shortly".into(),
+            ));
+        }
+        let token = format!("{:032x}", rand::random::<u128>());
+        match registry.views.entry(token.clone()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(Arc::downgrade(view));
+                Ok(token)
+            }
+            std::collections::hash_map::Entry::Occupied(_) => Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "native view identifier collision".into(),
+            )),
+        }
+    }
+    pub(crate) fn view(&self, token: &str) -> Option<Arc<crate::server::bot_view::control::View>> {
+        let weak = self.lock().views.get(token).cloned()?;
+        weak.upgrade()
+    }
+    pub(crate) fn forget_view(&self, token: &str) {
+        self.lock().views.remove(token);
     }
     pub(crate) fn binding(&self, name: &str) -> Option<(i32, i32)> {
         self.lock().feeds.get(name).and_then(|f| f.session)
@@ -317,6 +356,30 @@ impl Viewer {
         })
     }
 }
+impl Viewer {
+    pub(crate) fn retarget(&mut self, name: &str, source: Option<i32>) -> Result<()> {
+        let mut registry = self.cctv.lock();
+        ensure!(
+            source.is_none_or(|source| registry
+                .feeds
+                .get(&self.name)
+                .and_then(|feed| feed.session)
+                .is_some_and(|(player, _)| player == source)),
+            "native perspective source changed"
+        );
+        ensure!(
+            registry
+                .feeds
+                .get(name)
+                .is_some_and(|feed| feed.session.is_some()),
+            "target bot has no living session"
+        );
+        registry.feed(&self.name).viewers -= 1;
+        registry.feed(name).viewers += 1;
+        self.name = name.to_owned();
+        Ok(())
+    }
+}
 impl Drop for Viewer {
     fn drop(&mut self) {
         let mut registry = self.cctv.lock();
@@ -385,6 +448,54 @@ pub(crate) async fn stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retarget_keeps_saturated_native_admission_and_transfers_only_bot_count() {
+        let cctv = Cctv::test_catalogue();
+        let mut viewers = (1..=32)
+            .map(|ip| Viewer::join(&cctv, "A", IpAddr::from([127, 0, 0, ip]), true).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            Viewer::join(&cctv, "A", IpAddr::from([127, 0, 0, 99]), true)
+                .err()
+                .unwrap()
+                .0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        for _ in 0..20 {
+            viewers[0].retarget("B", None).unwrap();
+            viewers[0].retarget("A", None).unwrap();
+        }
+        viewers[0].retarget("B", None).unwrap();
+        assert!(viewers[0].retarget("missing", None).is_err());
+        {
+            let registry = cctv.lock();
+            assert_eq!(registry.ips.values().sum::<usize>(), 32);
+            assert_eq!(registry.feeds["A"].viewers, 31);
+            assert_eq!(registry.feeds["B"].viewers, 1);
+        }
+        drop(viewers);
+        assert!(cctv.lock().ips.is_empty());
+        let ip = IpAddr::from([127, 0, 0, 1]);
+        let _one = Viewer::join(&cctv, "A", ip, true).unwrap();
+        let _two = Viewer::join(&cctv, "B", ip, true).unwrap();
+        assert_eq!(
+            Viewer::join(&cctv, "A", ip, true).err().unwrap().0,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert!(Viewer::join(&cctv, "A", ip, false).is_ok());
+    }
+
+    #[test]
+    fn perspective_retargets_recheck_source_at_commit() {
+        let cctv = Cctv::test_catalogue();
+        let mut viewer = Viewer::join(&cctv, "A", IpAddr::from([127, 0, 0, 1]), true).unwrap();
+        cctv.entered("A", 3, 11);
+        assert!(viewer.retarget("B", Some(1)).is_err());
+        assert_eq!(cctv.lock().feeds["A"].viewers, 1);
+        viewer.retarget("B", Some(3)).unwrap();
+        assert_eq!(cctv.lock().feeds["B"].viewers, 1);
+    }
 
     #[test]
     fn telemetry_aim_and_position_describe_actual_input_not_desired_decision() {

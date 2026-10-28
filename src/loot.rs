@@ -63,10 +63,10 @@ pub(crate) fn period_surface(kind: u16) -> bool {
         kind,
         0x202 | 0x204 | 0x205 | 0x209 | 0x20d | 0x20f
             | 0x600..=0x602 | 0x604..=0x607 | 0x609 | 0x60a | 0x60c..=0x610
-            | 0x614 | 0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
+            | 0x612..=0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
             | 0x624..=0x626 | 0x629..=0x62f | 0x631..=0x633
             | 0x63b | 0x63c | 0x63e..=0x640 | 0x642..=0x645 | 0x647..=0x64d
-            | 0x64f | 0x650 | 0x65f..=0x661 | 0x669..=0x66b | 0x900..=0x902 | 0x91d | 0x91e
+            | 0x64f | 0x650 | 0x65f..=0x661 | 0x669..=0x66b | 0x6c6 | 0x900..=0x902 | 0x91d | 0x91e
     )
 }
 fn table(kind: u16) -> &'static [(f64, Pick)] {
@@ -570,14 +570,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa22)),
             (0.05, Tier(2, RINGS)),
         ],
-        0x6c6 => &[
-            (0.1, Tier(4, WEAPONS)),
-            (0.05, Tier(3, WEAPONS)),
-            (0.1, Tier(4, ARMOR)),
-            (0.05, Tier(3, ARMOR)),
-            (0.03, Item(0xa22)),
-            (0.02, Item(0xa23)),
-        ],
+        0x6c6 => &[(0.04, Item(0xa23))],
         0x900 => &[
             (0.04, Item(0xa22)),
             (0.01, Item(0xa23)),
@@ -593,7 +586,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xa23)),
             (0.01, Tier(2, RINGS)),
         ],
-        0x612 | 0x613 => &[(0.03, Item(0xa22))],
+        0x612 | 0x613 => &[(0.04, Item(0xa22))],
         0x618 => &[(0.04, Item(0xa22))],
         0x619 => &[(0.03, Item(0xa23))],
         0x953 => &[
@@ -1393,6 +1386,25 @@ mod tests {
     }
 
     #[test]
+    fn nomad_has_one_public_four_percent_magic_potion_roll() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert!(matches!(table(0x6c6), [(p, Pick::Item(0xa23))] if *p == 0.04));
+        assert!(period_surface(0x6c6) && !private(0x6c6));
+        assert_eq!(
+            rewards(&content, 0x6c6, &mut rand::rngs::mock::StepRng::new(0, 0)),
+            vec![0xa23]
+        );
+        assert!(
+            rewards(
+                &content,
+                0x6c6,
+                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn oasis_chest_armor_keeps_period_tiers() {
         let armor: Vec<_> = chest_table(0x678)
             .into_iter()
@@ -1422,12 +1434,14 @@ mod tests {
     }
 
     #[test]
-    fn elf_escorts_keep_their_distinct_public_potion_rolls() {
+    fn goblin_and_elf_escorts_keep_their_public_potion_rolls() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for (kind, chance, item) in [
             (0x605, 0.04, 0xa22),
             (0x606, 0.04, 0xa22),
             (0x607, 0.03, 0xa23),
+            (0x612, 0.04, 0xa22),
+            (0x613, 0.04, 0xa22),
         ] {
             assert!(matches!(table(kind), [(p, Pick::Item(id))] if *p == chance && *id == item));
             assert!(period_surface(kind) && !private(kind));
