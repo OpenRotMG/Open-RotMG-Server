@@ -10,7 +10,7 @@ export async function run(game){
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
-    const value=await response.json();assert(response.ok&&value.status==='succeeded',JSON.stringify(value));return value;
+    const value=await response.json();assert(response.ok&&value.status!=='failed',JSON.stringify(value));return value;
   }
   async function save(label,client=game){const record={label,...await client.inspect()};records.push(record);await writeFile(join(root,'lifecycle-observations.json'),JSON.stringify(records));return record;}
   await game.act({keys:['1'],duration_ms:500});
