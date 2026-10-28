@@ -22,7 +22,7 @@ export async function run(game){
   await game.act({keys:[],duration_ms:300,drag:{from:{x:634,y:428},to:{x:634,y:385}}});
   game.check('cloth refuses equipment slot without spending',JSON.stringify((await game.observe()).character.items)===JSON.stringify(initial.character.items));
   const expected=[0,0];
-  // Large/Small select channels, not pattern size: selected 123.5.1 Objects XML (0x1200/0x1300).
+  // Large/Small select channels, not atlas size: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf (0x1200/0x1300).
   for(let i=0;i<cloths.length;i++){
     const c=cloths[i],slot=i%8+4;
     if(i>=8&&i%8===0){
