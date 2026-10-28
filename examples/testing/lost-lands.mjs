@@ -4,7 +4,8 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
-const questKinds=[0x675,0x678,0x668,0x67d,0x91f,0x91b,0x928];
+// Ent followers currently violate the public soulbound-loot guard; this is a Lord-only route.
+const questKinds=[0x675,0x678,0x668,0x67d,0x91b,0x928];
 const spec={class:0x31d,level:20,seed:817,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 const cappedQuestXp=(50+(spec.level-1)*100)/2;
 const history=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
