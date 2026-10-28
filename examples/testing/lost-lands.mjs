@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
-// Ent followers currently violate the public soulbound-loot guard; this is a Lord-only route.
+// Keep this Lord route separate from the Ent Soulbound packaging follow-up.
 const questKinds=[0x675,0x678,0x668,0x67d,0x91b,0x928];
 const spec={class:0x31d,level:20,seed:817,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 const cappedQuestXp=(50+(spec.level-1)*100)/2;
@@ -136,7 +136,8 @@ export async function run(game){
   const initial=await save('before-admission');
   game.check('startup reserves one Lord outside active indexes',reserved.length===1);
   let admitted;
-  for(const site of sites){
+  for(let siteIndex=0;siteIndex<sites.length;siteIndex++){
+    const site=sites[siteIndex];
     await protect();await prepareScout({kind:'teleport',position:{x:site.x,y:site.y}});
     for(let n=0;n<30;n++){
       const state=await api({op:'inspect',actor:scout}),root=entity(state,site.entity),family=state.diagnostic.entities.filter(e=>e.quest===site.entity);
@@ -148,7 +149,7 @@ export async function run(game){
     const events=(await history()).filter(f=>f.message==='quest defeat summoned a Realm event');
     admitted=events.find(f=>f.kind===0xd50);
     if(admitted)break;
-    for(const event of events.filter(f=>[0xd56,0xd59].includes(f.kind)))if(!sites.some(s=>s.entity===event.entity))sites.push(event);
+    for(const event of events.filter(f=>[0xd54,0xd56,0xd59].includes(f.kind)))if(!sites.some(s=>s.entity===event.entity))sites.splice(siteIndex+1,0,event);
   }
   assert(admitted,'Bounded ordinary quest defeats did not admit a Lord; do not substitute a spawned fixture');
   await writeFile(join(out,'admission.json'),JSON.stringify({...admitted,preparation_actor:scout,attempted:records.filter(r=>r.label.startsWith('quest-')).map(r=>r.label)}));
