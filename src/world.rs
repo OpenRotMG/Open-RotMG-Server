@@ -7609,6 +7609,8 @@ mod mystic_tests;
 #[cfg(test)]
 mod ghost_ship_tests;
 #[cfg(test)]
+mod ocean_tests;
+#[cfg(test)]
 mod pentaract_tests;
 #[cfg(test)]
 mod quest_tests;
