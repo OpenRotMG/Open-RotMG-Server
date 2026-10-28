@@ -128,6 +128,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legends_only_rank_bot_lives_with_complete_earned_history() {
+        let (store, content, human) = fixture().await;
+        let bot = store.list("earned-legends-bot".into()).await.unwrap().id;
+        store.call(move |db| {
+            db.execute("INSERT INTO shore_bots(name,account) VALUES('persona:v1:LegendBot',?1)", [bot])?;
+            Ok(())
+        }).await.unwrap();
+        let mut seeded = Vec::new();
+        for _ in 0..21 {
+            let mut ch = store.create(bot, content.get(WIZARD).unwrap()).await.unwrap();
+            ch.lifetime = FameLifetime::known_only();
+            ch.exp = 1_000_000;
+            ch.fame = 1000;
+            let raw = serde_json::to_string(&ch).unwrap();
+            let id = ch.id;
+            store.call(move |db| {
+                db.execute("UPDATE characters SET stats=?1 WHERE id=?2", params![raw,id])?;
+                Ok(())
+            }).await.unwrap();
+            ch.gain_experience(&content, 1000, &mut rand::thread_rng()).unwrap();
+            ch.alive = false;
+            ch.hp = 0;
+            store.death(ch, "fixture".into()).await.unwrap();
+            seeded.push(id);
+        }
+        let now = 2_000_000_000;
+        let mut earned = store.create(bot, content.get(WIZARD).unwrap()).await.unwrap();
+        earned.gain_experience(&content, 100_000, &mut rand::thread_rng()).unwrap();
+        earned.alive = false;
+        earned.hp = 0;
+        store.death(earned.clone(), "fixture".into()).await.unwrap();
+        let human = death(&store, &content, human, now).await;
+        let human_id = human.id;
+        store.call(move |db| {
+            let raw: String = db.query_row("SELECT snapshot FROM deaths WHERE character=?1", [human_id], |r|r.get(0))?;
+            let mut ch: Character = serde_json::from_str(&raw)?;
+            ch.lifetime = FameLifetime::known_only();
+            let receipt = death_awards::DeathFameReceipt::paid(&ch, 0, death_awards::ReceiptPolicy::LegacyPaid)?;
+            db.execute("UPDATE deaths SET snapshot=?1,receipt=?2 WHERE character=?3", params![serde_json::to_string(&ch)?,serde_json::to_string(&receipt)?,human_id])?;
+            db.execute("UPDATE deaths SET died_at=?1", [now])?;
+            Ok(())
+        }).await.unwrap();
+        let archived = store.fame(bot, seeded[0]).await.unwrap();
+        for span in ["week", "month", "all"] {
+            let xml = store.legends_at(span.into(), bot, seeded[0], now).await.unwrap();
+            let rows = ids(&xml, "FameListElem");
+            assert_eq!(rows.len(), 2, "{span}: seeded rows must not consume the top twenty");
+            assert!(rows.contains(&earned.id) && rows.contains(&human.id));
+            assert!(ids(&xml, "MyFameListElem").is_empty(), "seeded own-row must also stay excluded");
+        }
+        assert_eq!(store.fame(bot, seeded[0]).await.unwrap(), archived);
+    }
+
+    #[tokio::test]
     async fn legends_windows_exclude_cutoff_and_future_deaths_but_retain_archives() {
         let (store, content, account) = fixture().await;
         let now = 2_000_000_000;
