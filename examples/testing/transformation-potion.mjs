@@ -27,17 +27,23 @@ export async function run(game){
   await game.act({keys:[],duration_ms:1000},{name:'transformation-before',when:v=>!(v.character.conditions&(HEXED|INVISIBLE))});
   await game.act({keys:[' '],duration_ms:200});
   game.check('ordinary cloak applies Invisible',Boolean((await game.observe()).character.conditions&INVISIBLE));
+  const useStarted=(await game.observe()).game_ms;
   const transformed=await use('1','transformation-hexed');
   game.check('potion replaces Invisible with Hexed without Speedy or Stunned',(transformed.character.conditions&(HEXED|INVISIBLE|SPEEDY|STUNNED))===HEXED);
   await game.act({keys:['1'],duration_ms:200});
   game.check('empty slot cannot consume again',(await game.observe()).character.inventory_revision===transformed.character.inventory_revision);
   await game.act({keys:[],mouse:{x:500,y:300},duration_ms:800});
   game.check('potion Hexed alone still permits native weapon fire',(await game.observe()).verification.shots>transformed.verification.shots);
-  // Pool permanence must not leak into the potion timer: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
-  while((await game.observe()).game_ms<transformed.game_ms+28000)await game.act({keys:[],duration_ms:1000});
-  const near=await save('before-expiry');
-  game.check('Hexed survives through at least 28 seconds',Boolean(near.character.conditions&HEXED));
-  while((await game.observe()).game_ms<transformed.game_ms+31000)await game.act({keys:[],duration_ms:500});
+  // Bracket application by observed clocks, not screenshot completion: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
+  let early=false,late=false;
+  while((await game.observe()).game_ms<transformed.game_ms+31000){
+    await game.act({keys:[],duration_ms:500});
+    const view=await game.observe(),hexed=Boolean(view.character.conditions&HEXED);
+    samples.push({name:'timer',view});
+    early ||= view.game_ms<useStarted+30000&&!hexed;
+    late ||= view.game_ms>=transformed.game_ms+30000&&hexed;
+  }
+  game.check('Hexed expiry stays inside the observed 30-second application bracket',!early&&!late);
   await game.act({keys:[],duration_ms:800},{name:'transformation-expired',when:v=>!(v.character.conditions&HEXED)});
   game.check('Hexed expires after the selected 30 seconds',!((await save('expired')).character.conditions&HEXED));
   game.check('second potion applies Hexed before the blue cure',Boolean((await use('2','transformation-second')).character.conditions&HEXED));
