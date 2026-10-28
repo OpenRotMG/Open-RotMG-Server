@@ -88,7 +88,7 @@ export async function run(game){
   await chat(game,0,'/guild Across worlds');
   game.check('guild routing crosses worlds after reconnect',guild(0,'Across worlds').length===1&&guild(1,'Across worlds').length===1&&!has(2,'Across worlds'));
   await peer.act({keys:[],duration_ms:500},{name:'guild-cross-world',when:()=>true});
-  await peer.act({keys:['r'],duration_ms:250});
+  await peer.act({keys:['Insert'],duration_ms:700});
   await peer.act({keys:[],duration_ms:1000});
   game.check('Nexus reconnect preserves the same living character', (await peer.observe()).session.character===separate.session.character&&(await peer.observe()).session.world===(await game.observe()).session.world);
   await chat(peer,1,'/g Back in Nexus');
