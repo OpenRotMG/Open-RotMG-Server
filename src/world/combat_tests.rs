@@ -238,11 +238,11 @@ fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
         let p = w.players.get_mut(&id).unwrap();
         p.character.class = 0x31e;
         p.character.items[0] = kind as i32;
-        p.character.base[2] = 50;
-        p.character.base[5] = 50;
+        p.character.base = [770, 252, 50, 40, 50, 50, 75, 50];
         let item = w.content.get(kind).unwrap().clone();
         let count = if kind == 0xc01 { 2 } else { 1 };
         assert_eq!(item.shots, count);
+        assert_eq!(item.arc, if count == 2 { 40. } else { 11.25 });
         assert_eq!(item.rate, if kind == 0xc05 { 0.6 } else { 1. });
         let start = Pos { x: 8.8, y: 8.5 };
         for bullet in 0..count as u8 {
