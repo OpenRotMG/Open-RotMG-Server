@@ -73,11 +73,14 @@ export async function run(game) {
   async function walk(player,x,y) {
     const start=await player.observe(),response=await fetch(config.origin+'/dev/map?player='+start.session.player,{headers});assert(response.ok,'Owned test map read: '+response.status);
     const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(','))),pass=(x,y)=>x>=0&&y>=0&&x<map.width&&y<map.height&&!blocked.has(x+','+y);
+    const clear=(x,y)=>[-1,0,1].every(dx=>[-1,0,1].every(dy=>pass(x+dx,y+dy)));
     const goal=[Math.floor(x),Math.floor(y)],queue=[goal],distance=new Map([[goal.join(','),0]]);
+    assert(clear(...goal),'Walking goal needs client corner clearance');
+    await writeFile(join(root,'walk-map-'+player.actor+'.json'),JSON.stringify(map));
     for(let i=0;i<queue.length;i++) {
       const [a,b]=queue[i];
       for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]]) {
-        const c=a+dx,d=b+dy,k=c+','+d;if(!pass(c,d)||!pass(c,b)||!pass(a,d)||distance.has(k))continue;
+        const c=a+dx,d=b+dy,k=c+','+d;if(!clear(c,d)||!pass(c,b)||!pass(a,d)||distance.has(k))continue;
         distance.set(k,distance.get(a+','+b)+1);queue.push([c,d]);
       }
     }
@@ -90,7 +93,7 @@ export async function run(game) {
         let [c,d]=choices[0];const dx=c-a,dy=d-b;
         for(let n=0;n<7;n++) {
           const e=c+dx,f=d+dy;
-          if(!pass(e,f)||!pass(e,d)||!pass(c,f)||!distance.has(e+','+f)||distance.get(e+','+f)>=distance.get(c+','+d))break;
+          if(!clear(e,f)||!pass(e,d)||!pass(c,f)||!distance.has(e+','+f)||distance.get(e+','+f)>=distance.get(c+','+d))break;
           c=e;d=f;
         }
         aim={x:c+.5,y:d+.5};
@@ -98,6 +101,8 @@ export async function run(game) {
       const dx=aim.x-p.x,dy=aim.y-p.y,sx=(dx-dy)/Math.SQRT2,sy=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(sx)>.08)keys.push(sx>0?'d':'a');if(Math.abs(sy)>.08)keys.push(sy>0?'s':'w');
       await player.act({keys,duration_ms:Math.min(1000,Math.max(50,Math.round(Math.hypot(dx,dy)*160)))});
+      const moved=(await player.observe()).position;
+      assert(Math.hypot(moved.x-p.x,moved.y-p.y)>.01,'Native walk stalled: '+JSON.stringify({position:p,aim,keys}));
     }
     throw Error('Native walk failed: '+JSON.stringify({x,y,position:(await player.observe()).position}));
   }
@@ -113,7 +118,7 @@ export async function run(game) {
     await ui(player,index,'named-'+index,async c=>{await type(c,300,255,index===0?'GuildOwner':'GuildGuest');await click(c,480,380);});
     game.check('ordinary client chooses its account name '+index,(await player.inspect()).diagnostic.character.name===(index===0?'GuildOwner':'GuildGuest'));
     await player.act({keys:[],mouse:{x:300,y:300},duration_ms:200});
-    await walk(player,73.9,75.5);await walk(player,109.5,42.2);
+    await walk(player,73.9,75.5);await walk(player,109.5,43.2);
   }
   await ui(game,0,'guild-register',async()=>{});
   await ui(game,0,'create-cancel-dialog',c=>click(c,700,580));
