@@ -67,6 +67,7 @@ export async function run(game) {
   await ui('free-name-chosen',()=>replace('FirstNamesEXTRA123'));
   game.check('first choice is free and the actual client caps input at ten letters',JSON.stringify(await db('SELECT name,credits FROM accounts WHERE id=?'))===JSON.stringify([['FirstNames',1000]]));
   game.check('first choice publishes the account name to the live player',(await game.inspect()).diagnostic.character.name==='FirstNames');
+  await game.act({keys:[],mouse:{x:300,y:300},duration_ms:200});
   await walk(72.5,74.5);await walk(73.9,74.5);
   await ui('paid-name-offer',async()=>{});
   await ui('paid-name-dialog',()=>click(700,580));
@@ -75,6 +76,7 @@ export async function run(game) {
   await ui('paid-name-chosen',()=>replace('NextName'));
   game.check('accepted native rename debits exactly 1000 Gold',JSON.stringify(await db('SELECT name,credits FROM accounts WHERE id=?'))===JSON.stringify([['NextName',0]]));
   game.check('paid rename publishes the new player identity',(await game.inspect()).diagnostic.character.name==='NextName');
+  await game.act({keys:[],mouse:{x:300,y:300},duration_ms:200});
   await walk(72.5,74.5);await walk(73.9,74.5);
   await ui('unfunded-name-dialog',()=>click(700,580));
   await ui('unfunded-name-refusal',async()=>{await type(300,255,'ThirdName');await click(480,380);});
@@ -89,8 +91,9 @@ export async function run(game) {
       if(Math.abs(sy)>.1)keys.push(sy>0?'s':'w');
       await game.act({keys,duration_ms:Math.min(300,Math.max(50,Math.round(distance*100)))});
     }
-    throw Error('Native walk did not reach the Vault route');
+    throw Error(`Native walk to ${x},${y} stopped at ${JSON.stringify((await game.observe()).position)}`);
   }
+  await game.act({keys:[],mouse:{x:300,y:300},duration_ms:200});
   await walk(73.9,75.5);await walk(79,77.5);
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1000});
   for(let i=0;i<8&&(await game.observe()).world!=='Vault';i++)await game.act({keys:[],duration_ms:500});
