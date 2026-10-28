@@ -1015,6 +1015,7 @@ async fn persist_death_inner(
     killer: String,
 ) -> Result<()> {
     lifecycle::stage(Stage::Store);
+    // Only worn amulets bypass death/grave/Fame, not backpack copies: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.cs#L439-L466
     let slot = ch
         .items
         .iter()

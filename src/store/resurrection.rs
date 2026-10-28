@@ -47,3 +47,133 @@ impl Store {
         }).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn resurrection_preserves_progress_rejects_replays_and_later_death_pays_once() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let dir = std::env::temp_dir().join(format!("resurrection-{}", rand::random::<u64>()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("game.db");
+        let store = Store::open(&path, &content).unwrap();
+        let account = store.list("amulet-owner".into()).await.unwrap().id;
+        let other = store.list("amulet-other".into()).await.unwrap().id;
+        let mut ch = store
+            .create(account, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        ch.level = 20;
+        ch.exp = 18050;
+        ch.fame = 18;
+        store.progress(ch.clone()).await.unwrap();
+        ch.items[3] = 0xb3e;
+        ch.items[4] = 0xb3e;
+        ch.revision = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: ch.id,
+                    account,
+                    revision: ch.revision,
+                    items: ch.items.clone(),
+                }],
+                vec![],
+            )
+            .await
+            .unwrap()[0];
+        ch.alive = false;
+        ch.hp = 0;
+        ch.mp = 0;
+        ch.lifetime.shots = 3;
+        let fatal = ch.clone();
+        assert!(
+            store
+                .resurrect(ch.clone(), 4, content.clone())
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .resurrect(ch.clone(), 0, content.clone())
+                .await
+                .is_err()
+        );
+        ch.account = other;
+        assert!(store.resurrect(ch, 3, content.clone()).await.is_err());
+        let restored = store
+            .resurrect(fatal.clone(), 3, content.clone())
+            .await
+            .unwrap();
+        let mut expected = fatal.items.clone();
+        expected[3] = -1;
+        assert!(restored.alive);
+        assert_eq!(
+            (restored.id, restored.level, restored.exp, restored.fame),
+            (fatal.id, 20, 18050, 18)
+        );
+        assert_eq!(
+            [restored.hp, restored.mp],
+            restored.effective(&content).unwrap()[..2]
+        );
+        assert_eq!(restored.items, expected);
+        assert_eq!(restored.lifetime, fatal.lifetime);
+        assert_eq!(restored.revision, fatal.revision + 1);
+        assert!(
+            store
+                .resurrect(fatal.clone(), 3, content.clone())
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .death(fatal, "stale fatal snapshot".into())
+                .await
+                .is_err()
+        );
+        assert!(store.fame(account, restored.id).await.is_err());
+        let wallet = store.presentation(account).await.unwrap();
+        assert_eq!(wallet.fame, 0);
+        drop(store);
+        let store = Store::open(&path, &content).unwrap();
+        let mut next = store.load(account, restored.id).await.unwrap();
+        assert_eq!(
+            (next.hp, next.mp, &next.items, next.revision),
+            (restored.hp, restored.mp, &expected, restored.revision)
+        );
+        assert_eq!(store.presentation(account).await.unwrap(), wallet);
+        next.alive = false;
+        next.hp = 0;
+        assert!(
+            store
+                .resurrect(next.clone(), 3, content.clone())
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .resurrect(next.clone(), 4, content.clone())
+                .await
+                .is_err()
+        );
+        store
+            .death(next.clone(), "second fatal hit".into())
+            .await
+            .unwrap();
+        let paid = store.presentation(account).await.unwrap();
+        assert!(paid.fame > 0);
+        let archive = store.fame(account, next.id).await.unwrap();
+        assert!(
+            store
+                .death(next.clone(), "replayed hit".into())
+                .await
+                .is_err()
+        );
+        assert_eq!(store.presentation(account).await.unwrap(), paid);
+        assert_eq!(store.fame(account, next.id).await.unwrap(), archive);
+        assert!(store.load(account, next.id).await.is_err());
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
