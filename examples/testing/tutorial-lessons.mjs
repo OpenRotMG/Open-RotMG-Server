@@ -17,7 +17,7 @@ export async function run(game){
       assert(stalled<3,'Native walk stuck at '+JSON.stringify(view.position)+' toward '+JSON.stringify(goal));
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>.1)keys.push(x>0?'d':'a');if(Math.abs(y)>.1)keys.push(y>0?'s':'w');
-      await game.act({keys,duration_ms:Math.min(700,Math.max(50,Math.round(distance*120)))});
+      await game.act({keys,duration_ms:Math.min(700,Math.max(100,Math.round(distance*120)))});
     }
     throw Error('Native movement did not reach '+JSON.stringify(goal));
   }
