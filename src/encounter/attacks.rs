@@ -338,6 +338,18 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
     let mut state = 0;
     let mut age = elapsed;
     let attacks = match kind {
+        // Prefer the compiled primary cycle over Trapped's earlier one-second alternation: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Midland.cs#L682-L699
+        0x6c6 => {
+            let phase = elapsed % 5300;
+            let (projectile, count, interval, entry) = if phase < 3100 {
+                (0, 3, 500, 0)
+            } else {
+                (1, 1, 700, 3100)
+            };
+            state = elapsed / 5300 * 2 + u64::from(projectile);
+            age = phase - entry;
+            vec![fan(projectile, count, 11., interval, 10.).delay(interval)]
+        }
         0x21b => vec![],
         0x21c => vec![fan(0, 1, 0., 1000, 10.).predict(1.)],
         0x21d..=0x21f => vec![fan(0, 1, 0., 500, 10.).predict(1.)],

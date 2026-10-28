@@ -66,7 +66,7 @@ pub(crate) fn period_surface(kind: u16) -> bool {
             | 0x612..=0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
             | 0x624..=0x626 | 0x629..=0x62f | 0x631..=0x633
             | 0x63b | 0x63c | 0x63e..=0x640 | 0x642..=0x645 | 0x647..=0x64d
-            | 0x64f | 0x650 | 0x65f..=0x661 | 0x669..=0x66b | 0x900..=0x902 | 0x91d | 0x91e
+            | 0x64f | 0x650 | 0x65f..=0x661 | 0x669..=0x66b | 0x6c6 | 0x900..=0x902 | 0x91d | 0x91e
     )
 }
 fn table(kind: u16) -> &'static [(f64, Pick)] {
@@ -570,14 +570,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa22)),
             (0.05, Tier(2, RINGS)),
         ],
-        0x6c6 => &[
-            (0.1, Tier(4, WEAPONS)),
-            (0.05, Tier(3, WEAPONS)),
-            (0.1, Tier(4, ARMOR)),
-            (0.05, Tier(3, ARMOR)),
-            (0.03, Item(0xa22)),
-            (0.02, Item(0xa23)),
-        ],
+        0x6c6 => &[(0.04, Item(0xa23))],
         0x900 => &[
             (0.04, Item(0xa22)),
             (0.01, Item(0xa23)),
@@ -1360,6 +1353,25 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn nomad_has_one_public_four_percent_magic_potion_roll() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert!(matches!(table(0x6c6), [(p, Pick::Item(0xa23))] if *p == 0.04));
+        assert!(period_surface(0x6c6) && !private(0x6c6));
+        assert_eq!(
+            rewards(&content, 0x6c6, &mut rand::rngs::mock::StepRng::new(0, 0)),
+            vec![0xa23]
+        );
+        assert!(
+            rewards(
+                &content,
+                0x6c6,
+                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+            )
+            .is_empty()
+        );
+    }
 
     #[test]
     fn oasis_chest_armor_keeps_period_tiers() {
