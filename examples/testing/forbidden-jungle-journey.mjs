@@ -25,6 +25,18 @@ export async function run(game){
    if(v.character.mp>=100)await game.act({keys:[' '],duration_ms:350});
   }
  }
+ const priority=[0xdd3,0xdd0,0xdcd,0xdcf,0xdd2,0xdd1,0xdce,0xdcc];let roomsCleared=0;
+ async function clearRoom(center,dx,dy){
+  for(let n=0;n<45;n++){
+   const s=await game.inspect(),enemies=s.diagnostic.entities.filter(e=>priority.includes(e.kind)&&Math.hypot(e.home.x-center.x,e.home.y-center.y)<8);
+   if(n===0)assert(enemies.length>0,'Generated room has no ordinary population');
+   if(!enemies.length){roomsCleared++;await log('room-cleared');return;}
+   const targets=enemies.filter(e=>Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<9.7).sort((a,b)=>priority.indexOf(a.kind)-priority.indexOf(b.kind));
+   if(!targets.length){await move({x:center.x-6*dx,y:center.y-6*dy});continue;}
+   await log('room-shot-'+targets[0].id);await heal();await game.act({keys:[],duration_ms:1200,target:{entity:targets[0].id,camera_angle:-Math.PI/4,fire:true}});
+  }
+  assert.fail('Native ranged fire did not clear the ordinary room');
+ }
  const initial=await log('realm');
  await game.act({keys:['1'],duration_ms:900});const opened=await log('key-consumed'),portal=opened.diagnostic.entities.find(e=>e.kind===0x733);assert(portal);
  game.check('one supplied Totem Key commits one usable entrance',opened.view.character.items[4]===-1&&portal.published);
@@ -40,8 +52,10 @@ export async function run(game){
  for(const i of path){
   const [x,y]=rooms[i],[px,py]=rooms[previous],dx=x-px,dy=y-py,from={x:20+px*20+.5,y:20+py*20+.5},to={x:20+x*20+.5,y:20+y*20+.5};
   await heal();await move({x:from.x-4*dy,y:from.y+4*dx});await move({x:from.x+4*dx,y:from.y+4*dy});
+  await move({x:to.x-9.5*dx,y:to.y-9.5*dy});if(i!==generated.boss_room)await clearRoom(to,dx,dy);
   await move({x:to.x-4*dx,y:to.y-4*dy});await heal();await log('room-'+i);previous=i;
  }
+ game.check('ordinary native fire clears each populated room on the boss route',roomsCleared===path.length-1);
  const [bx,by]=rooms[generated.boss_room];await move({x:20+bx*20+.5-9,y:20+by*20+.5});
  await capture('boss-arrival');const stages=new Set();
  for(let n=0;n<90;n++){
@@ -63,7 +77,7 @@ export async function run(game){
  await game.act({keys:[],duration_ms:2200});const retired=await log('boss-totems-retired'),totems=retired.diagnostic.entities.filter(e=>e.kind===0xdc4);
  game.check('four Boss Totems remain and stop firing after their own boss dies',totems.length===4&&!retired.view.projectiles.some(p=>totems.some(e=>e.id===p.owner))&&retired.diagnostic.character.jungles===1);
  await writeFile(join(out,'boss-phases.json'),JSON.stringify([...stages]));
- const bag=clear.diagnostic.entities.find(e=>e.items?.includes(0xc1a));assert(bag);await heal();await move(bag.pos);
+ const bag=clear.diagnostic.entities.find(e=>e.items?.includes(0xc1a)&&Math.hypot(e.pos.x-(20+bx*20+.5),e.pos.y-(20+by*20+.5))<13);assert(bag);await heal();await move(bag.pos);
  await capture('earned-rewards');const before=await game.observe(),slot=bag.items.indexOf(0xc1a);
  const drag={from:{x:634+(slot%4)*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}};
  await game.act({keys:[],duration_ms:350,drag});const picked=await log('pollen-picked');
