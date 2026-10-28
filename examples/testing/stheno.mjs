@@ -67,5 +67,6 @@ export async function run(observer){
   const final=await save('stheno-final');
   game.check('return admission finishes and movement works',Math.hypot(final.view.position.x-returned.view.position.x,final.view.position.y-returned.view.position.y)>.1);
   game.check('Stheno XP is not awarded repeatedly',final.view.character.experience===defeated.view.character.experience);
+  game.check('successful exit commits exactly one Snake Pit clear',defeated.view.character.snake_pits===initial.view.character.snake_pits&&returned.view.character.snake_pits===initial.view.character.snake_pits+1&&final.view.character.snake_pits===returned.view.character.snake_pits);
   await writeFile(join(root,'stheno-outcome.json'),JSON.stringify({boss,bag,portal,initial,defeated,picked,returned,final,observer:await observer.inspect()}));
 }
