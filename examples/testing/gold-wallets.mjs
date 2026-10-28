@@ -43,7 +43,12 @@ c.commit();c.close();print(json.dumps({'prepared_deleted_history':True,'account'
 export async function run(game){
   const config=JSON.parse(await readFile(join(out(),'native.json'),'utf8'));
   const result=JSON.parse(await readFile(join(out(),'result.json'),'utf8'));
-  const c=await connect({...result.browser,url:config.origin+'/',helper:config.browserTools});
+  let reply;const dialogs=[];
+  const c=await connect({...result.browser,url:config.origin+'/',helper:config.browserTools,onEvent:event=>{
+    if(event.method==='Page.javascriptDialogOpening'){
+      dialogs.push(event.params);reply=c.call('Page.handleJavaScriptDialog',{accept:false});
+    }
+  }});
   const wallet=()=>JSON.parse(execFileSync('python3',['-c',`
 import sqlite3,json,sys
 c=sqlite3.connect('file:'+sys.argv[1]+'/state/game.db?mode=ro',uri=True)
@@ -56,9 +61,7 @@ print(json.dumps({'wallet':c.execute('SELECT credits,balance,earned FROM account
     await game.act({keys:[],duration_ms:1500},{name:'wallet-rewarded',when:()=>true});
     const initial=wallet();
     game.check('blue rank pays and notifies once on native load',initial.rewards.length===1&&initial.rewards[0][0]==='class_star_blue'&&initial.rewards[0][1]>0);
-    let reply;const dialogs=[];
     await c.call('Page.enable');
-    c.on('Page.javascriptDialogOpening',event=>{dialogs.push(event);reply=c.call('Page.handleJavaScriptDialog',{accept:false});});
     await game.act({keys:[],duration_ms:800,mouse:{x:700,y:576}});
     await reply;
     game.check('Get Gold invokes the local guide confirmation',dialogs.length===1&&dialogs[0].type==='confirm'&&dialogs[0].message.includes(config.origin+'/gold/'));
