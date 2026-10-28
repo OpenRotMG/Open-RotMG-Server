@@ -8,13 +8,14 @@ const spec={class:0x31d,level:20,seed:820,world:1,equipment:[0xb0b,0xb29,0xa7b,-
 let scout,roots;
 async function fields(){return (await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);}
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),log=await fields();
-  const end=log.findLastIndex(f=>f.message==='Realm simulation populated'&&f.layout===world.realm_layout);assert(end>=0);
-  const start=log.slice(0,end).findLastIndex(f=>f.message==='Realm simulation populated');
-  const kinds=[0x678,0x668,0x67d];
-  roots=log.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&kinds.includes(f.kind));
+  const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
+  scout=(await api({op:'spawn',spec:{...spec,guid:'cube-admission-'+randomUUID(),position:{x,y},controller:'direct',profile:null}})).result.actor;
+  const state=await api({op:'inspect',actor:scout}),report=JSON.parse(await readFile(join(out,'native/result.json'),'utf8'));
+  const token=(await readFile(join(out,'native/state/control.token'),'utf8')).trim();
+  const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(response.ok);
+  const kinds=[0x678,0x668,0x67d,0x91b];
+  roots=(await response.json()).entities.filter(e=>kinds.includes(e.kind)).map(e=>({entity:e.id,kind:e.kind,x:e.pos.x,y:e.pos.y}));
   roots.sort((a,b)=>kinds.indexOf(a.kind)-kinds.indexOf(b.kind));assert(roots.length>0);
-  scout=(await api({op:'spawn',spec:{...spec,guid:'cube-admission-'+randomUUID(),position:{x:roots[0].x,y:roots[0].y},controller:'direct',profile:null}})).result.actor;
   await writeFile(join(out,'placement.json'),JSON.stringify({world,roots,scout}));
   return {...spec,position:'spawn'};
 }
@@ -32,7 +33,7 @@ export async function run(spectator){
     await api({op:'cheat',actor:scout,change:{kind:'teleport',position:{x:root.x,y:root.y}}});
     for(let n=0;n<30;n++){
       await protect(scout);await protect(spectator.actor);
-      const state=await inspect(scout),target=state.diagnostic.entities.find(e=>e.quest===root.entity&&[root.kind,0x920].includes(e.kind));
+      const state=await inspect(scout),target=state.diagnostic.entities.find(e=>(e.id===root.entity||e.quest===root.entity)&&[root.kind,0x91c].includes(e.kind));
       if(!target)break;
       await api({op:'cheat',actor:scout,change:{kind:'teleport',position:target.pos}});
       await driver({op:'act',actor:scout,action:{command:'shoot',angle:0},duration_ms:1000});
@@ -79,9 +80,10 @@ export async function run(spectator){
   }
   async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>2)await approach(actor,id);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await game.act({keys:[],duration_ms:750},{name:'cube-active',when:()=>true});
-  const old=new Set(family(state).filter(e=>e.kind===0xd5a).map(e=>e.id));
   for(let n=0;n<30&&entity(await game.inspect(),victim.id);n++)await fire(game,victim.id);
   game.check('native sword fire defeats an Overseer',!entity(await game.inspect(),victim.id));
+  const census=await fetch(config.origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
+  const old=new Set((await census.json()).entities.filter(e=>e.quest===root&&e.kind===0xd5a).map(e=>e.id));
   for(let n=0;n<15&&!family(await game.inspect()).some(e=>e.kind===0xd5a&&!old.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
   state=await save('replenished');game.check('living Cube replenishes an owned Overseer',family(state).some(e=>e.kind===0xd5a&&!old.has(e.id)));
   const boss=entity(state,root);assert(boss);
