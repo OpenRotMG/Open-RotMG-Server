@@ -14,7 +14,7 @@ export async function prepare(api){
   assert(candidates.length,'No natural Medusa with a clear approach');
   const distance=(a,b)=>Math.hypot(a.pos.x-b.pos.x,a.pos.y-b.pos.y),count=a=>candidates.filter(b=>distance(a,b)<30).length;
   const anchor=candidates.sort((a,b)=>count(b)-count(a))[0];
-  medusas=candidates.filter(e=>distance(anchor,e)<30).sort((a,b)=>distance(anchor,a)-distance(anchor,b)).slice(0,40);
+  medusas=candidates.filter(e=>distance(anchor,e)<30).sort((a,b)=>distance(anchor,a)-distance(anchor,b)).slice(0,4);
   await writeFile(join(process.env.QA_RESULTS_DIR,'medusas.json'),JSON.stringify(medusas));
   return {...spec,position:{x:medusas[0].pos.x-4,y:medusas[0].pos.y}};
 }
@@ -22,9 +22,9 @@ export async function run(game){
   const out=process.env.QA_RESULTS_DIR,root=join(out,'native'),start=await game.observe();let serial=0,protectedUntil=0;
   async function command(command){const path=join(out,'request.json');await writeFile(path,JSON.stringify({id:'entry-'+serial++,command}));return JSON.parse(execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path],{encoding:'utf8'}));}
   async function protect(){
-    let v=await game.observe();
-    if(protectedUntil&&protectedUntil-v.game_ms<15000)while(v.game_ms<protectedUntil){await command({op:'cheat',actor:game.actor,change:{kind:'vitals',hp:v.character.stats.max_hp,mp:v.character.mp}});await game.act({keys:[],duration_ms:200});v=await game.observe();assert(v.lifecycle.alive);}
-    if(v.game_ms>=protectedUntil){await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;}
+    const v=await game.observe();assert(v.lifecycle.alive);
+    if(!protectedUntil){await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;}
+    assert(v.game_ms<protectedUntil-5000,'Bounded Medusa sample exhausted its prepared protection window');
   }
   async function walk(goal){
     for(let n=0;n<300;n++){
@@ -41,16 +41,18 @@ export async function run(game){
     await walk({x:medusa.pos.x-4,y:medusa.pos.y});
     for(let n=0;n<20;n++){
       await protect();const s=await game.inspect(),enemy=s.diagnostic.entities.find(e=>e.id===medusa.id);if(!enemy)break;
+      if(Math.hypot(enemy.pos.x-s.view.position.x,enemy.pos.y-s.view.position.y)>4)await walk(enemy.pos);
       await game.act({keys:s.view.character.mp>=85?[' ']:[],duration_ms:500,target:{entity:medusa.id,camera_angle:-Math.PI/4,fire:true}});
     }
     await game.act({keys:[],duration_ms:500});
-    const dead=await game.inspect();assert(!dead.diagnostic.entities.some(e=>e.id===medusa.id),'Natural Medusa not defeated');
+    const dead=await game.inspect(),events=(await readFile(join(root,'server.log'),'utf8')).split('\n').filter(s=>s.startsWith('{')).map(s=>JSON.parse(s).fields);
+    assert(events.some(e=>e.message==='enemy defeated'&&e.entity===medusa.id&&e.owner===start.session.player),'Native player did not defeat the selected Medusa');
     portal=dead.diagnostic.entities.find(e=>e.kind===0x71b);attempts.push({medusa:medusa.id,portal:portal?.id});
     await writeFile(join(out,'attempts.json'),JSON.stringify(attempts));if(portal)break;
   }
   assert(portal,'No Abyss portal in the bounded natural Medusa sample');
-  const log=await readFile(join(root,'server.log'),'utf8');
-  game.check('native Medusa defeat actually earns an Abyss portal',attempts.length>0&&log.includes('defeat earned a dungeon portal'));
+  const events=(await readFile(join(root,'server.log'),'utf8')).split('\n').filter(s=>s.startsWith('{')).map(s=>JSON.parse(s).fields);
+  game.check('native Medusa defeat actually earns an Abyss portal',events.some(e=>e.message==='defeat earned a dungeon portal'&&e.portal===0x71b&&attempts.some(a=>a.medusa===e.entity)));
   for(let n=0;n<60;n++){
     const v=await game.observe(),dx=portal.pos.x-v.position.x,dy=portal.pos.y-v.position.y;if(Math.hypot(dx,dy)<.6)break;
     const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
@@ -65,5 +67,5 @@ export async function run(game){
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
   const returned=await game.inspect();
   game.check('Cowardice escape returns to the original Realm without clear credit',returned.view.session.world===start.session.world&&returned.view.lifecycle.alive&&returned.diagnostic.character.abysses===0);
-  await writeFile(join(out,'earned-entry.json'),JSON.stringify({attempts,portal,entered,returned,scope:'Prepared level/gear/invincibility, one scout-selected starting position, HP/MP preparation before each target and bounded HP preparation during renewal. Native walking/kills, natural drop rolls, portal use and exit; not earned leveling or a drop-rate estimate.'}));
+  await writeFile(join(out,'earned-entry.json'),JSON.stringify({attempts,portal,entered,returned,scope:'Prepared level/gear/invincibility, one scout-selected starting position, HP/MP preparation before each target, with at most four natural Medusa trials and no protection renewal. Native walking/kills, natural drop rolls, portal use and exit; not earned leveling or a drop-rate estimate.'}));
 }
