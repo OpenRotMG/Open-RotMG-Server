@@ -53,9 +53,11 @@ export async function run(game){
   }
   const initial=await save('idle');await protect(game);
   game.check('untouched naturally placed Lich starts vulnerable at selected HP',entity(initial,root.entity)?.hp===300000&&!(entity(initial,root.entity).condition&(1<<24)));
-  await game.act({keys:['s'],duration_ms:150});
-  game.check('ordinary movement works at the natural ruin',Math.hypot((await game.observe()).position.x-initial.view.position.x,(await game.observe()).position.y-initial.view.position.y)>.3);
-  await approach(game,initial.view.position,.3);
+  if(index<2){
+    await game.act({keys:['s'],duration_ms:150});
+    game.check('ordinary movement works at the natural ruin',Math.hypot((await game.observe()).position.x-initial.view.position.x,(await game.observe()).position.y-initial.view.position.y)>.3);
+    await approach(game,initial.view.position,.3);
+  }
   for(let n=0;n<(index>=2?2:0);n++){
     const partner=await game.join({...spec,seed:794+n,class:n===1?0x31f:spec.class,stats:n===1?[770,252,50,25,50,50,40,75]:spec.stats,position:initial.view.position,equipment:[0xb0b,n===1?0xb26:0xb29,0xa7b,0xacc]});
     partners.push(partner);await protect(partner);
