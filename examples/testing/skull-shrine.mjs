@@ -64,8 +64,8 @@ export async function run(observer){
   const shrine={id:admission.entity,kind:0xd56,pos:{x:admission.x,y:admission.y}},logs=await events();
   game.check('ordinary qualifying defeat admits the reserved shrine exactly once',!!admission&&logs.filter(f=>f.message==='quest defeat summoned a Realm event'&&f.entity===shrine.id).length===1);
   await writeFile(join(out,'admission.json'),JSON.stringify({shrine,admission}));
-  game=await observer.join({...spec,seed:820,position:{x:shrine.pos.x+3,y:shrine.pos.y}});
-  await game.act({keys:[],duration_ms:1500});
+  game=await observer.join({...spec,seed:820,position:{x:shrine.pos.x+8,y:shrine.pos.y}});
+  for(let n=0;n<12&&(await game.observe()).character.hp===770;n++)await game.act({keys:[],duration_ms:200});
   const vulnerable=await game.observe();
   game.check('unprotected native shrine encounter removes HP without killing the character',vulnerable.character.hp<770&&vulnerable.lifecycle.alive);
   await writeFile(join(out,'unprotected.json'),JSON.stringify(vulnerable));
