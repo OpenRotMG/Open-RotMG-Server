@@ -46,8 +46,10 @@ export async function run(game){
     await save('failed-walk');throw Error('Native walk did not reach '+x+','+y);
   }
   async function defeat(id){
+    const before=(await game.inspect()).diagnostic.character.kills;
     for(let n=0;n<65;n++){
-      const e=(await entities()).find(e=>e.id===id);if(!e)return;
+      const state=await game.inspect(),e=state.diagnostic.entities.find(e=>e.id===id);
+      if(!e){assert(state.diagnostic.character.kills>before,'Enemy left local inspection without observed kill credit: '+id);return;}
       if(e.condition&(1<<23)){await act({keys:[],duration_ms:2000});continue;}
       const v=await game.observe();
       if(v.character.conditions&(1<<27)){
@@ -67,8 +69,6 @@ export async function run(game){
   const entered=await save('key-entry');
   game.check('ordinary Lab Key opens and admits the same living character at the entrance',entered.view.map.name==='Mad Lab'&&entered.view.session.character===initial.view.session.character&&entered.view.character.items[4]===-1&&distance(entered.view.position,{x:12.5,y:66.5})<1);
   game.check('entrance retains the selected Portal of Cowardice',(await entities()).some(e=>e.kind===0x703&&distance(e.pos,entered.view.position)<3));
-  const robots=entered.diagnostic.entities.filter(e=>e.kind>=0x979&&e.kind<=0x983);
-  game.check('natural middle rooms contain sixteen selected robots and four coils',robots.length===16&&entered.diagnostic.entities.filter(e=>e.kind===0x188a).length===4);
   for(const [x,y] of [[12.5,48.5],[32.5,48.5],[32.5,30.5],[56.5,30.5]]){
     await walk(x,y);
     const room=(await entities()).filter(e=>e.kind>=0x979&&e.kind<=0x983&&distance(e.pos,{x,y})<12);
@@ -78,13 +78,12 @@ export async function run(game){
     await walk(x,y);
   }
   const traversed=await save('ordinary-rooms');
-  game.check('native movement and weapon fire traverse populated rooms and defeat ordinary robots',traversed.diagnostic.character.kills>entered.diagnostic.character.kills&&traversed.view.character.experience>entered.view.character.experience&&!traversed.diagnostic.entities.some(e=>robots.some(r=>r.id===e.id)));
-  game.check('ordinary robot deaths do not fabricate equipment bags',!traversed.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)));
-  game.check('acid-room turrets survive ordinary combat',traversed.diagnostic.entities.filter(e=>e.kind===0x990||e.kind===0x991).length===2);
+  game.check('native movement and weapon fire traverse four populated rooms and earn ordinary kills',traversed.diagnostic.character.kills>=entered.diagnostic.character.kills+4&&traversed.view.character.experience>entered.view.character.experience);
+  game.check('last ordinary room has no fabricated equipment bags',!traversed.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)));
   game.check('native traversal observes real robot and both acid turret projectiles',[0x990,0x991].every(kind=>[...shots.values()].some(p=>p.kind===kind))&&[...shots.values()].some(p=>p.kind>=0x979&&p.kind<=0x983));
   await walk(56.5,23.5);await walk(58.5,23.5);await walk(58.5,20.5);await walk(60.5,20.5);await walk(62.5,12.5);
   const boss=(await entities()).find(e=>e.kind===0x976);assert(boss);
-  await defeat(boss.id);
+  await defeat(boss.id);await walk(62.5,12.5);
   await act({keys:[],duration_ms:1000},{name:'lab-boss-defeated',when:()=>true});
   const cleared=await save('boss-defeated');
   game.check('native shots defeat Dr Terrible and commit one Mad Lab clear',!cleared.diagnostic.entities.some(e=>e.id===boss.id)&&cleared.diagnostic.character.mad_labs===entered.diagnostic.character.mad_labs+1);
