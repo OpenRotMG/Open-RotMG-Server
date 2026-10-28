@@ -41,7 +41,7 @@ export async function run(game){
     await act({keys:[],duration_ms:500},{name:'djinn-arrival',when:()=>true});
     game.check('Djinn does not fire outside seven-tile targeting radius',shots.size===0);
     await act({keys:['d','s'],duration_ms:650});
-    await act({keys:[],duration_ms:5000},{name:'djinn-rings',when:v=>v.view.projectiles.some(p=>p.owner===root.id)});
+    await act({keys:[],duration_ms:5000},{name:'djinn-rings',when:()=>shots.size>=8});
     const combat=await game.inspect();
     game.check('natural Djinn activates and pursues',samples.some(s=>enemy(s)?.activated!==null&&enemy(s)&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2));
     game.check('native White Bullets use selected speed six tiles/s and 1.5s lifetime',shots.size>=8&&[...shots.values()].every(p=>p.speed===60&&p.lifetime_ms===1500));
