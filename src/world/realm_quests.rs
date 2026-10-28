@@ -699,6 +699,13 @@ impl World {
         }
         let target = target.into();
         let e = &self.entities[&id];
+        // Actual sprite armor setup has no inherited motor, including the shared home leash.
+        // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.EntAncient.cs#L263-L277
+        if (matches!(e.kind, 0x91f | 0x928) && matches!(e.stage, Some(3..=6)))
+            || (e.kind == 0x924 && elapsed < 1000)
+        {
+            return (Motion::Stationary, 0.);
+        }
         let leash = match e.kind {
             0x91f | 0x920 => 6.,
             0x91b | 0x91c | 0x91d | 0x6c1 => 5.,
@@ -736,9 +743,10 @@ impl World {
                 if let Some(bearer) = self.quest_members(id, &[0x91d]).first()
                     && e.pos.distance(self.entities[bearer].pos) > 2.
                 {
+                    // Reselecting by kind can change the gated bearer: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Protect.cs
                     (
                         Motion::Protect {
-                            anchor: Anchor::QuestMember(self.entities[bearer].kind),
+                            anchor: Anchor::QuestEntity(*bearer),
                             distance: 2.,
                         },
                         9.,
@@ -846,6 +854,10 @@ impl World {
             0x6c1 => (Motion::Wander, 9.),
             0x675 => (Motion::Wander, 4.),
             0x91f if e.stage == Some(0) => (Motion::Wander, 1.),
+            0x91f if e.stage == Some(1) => (Motion::Wander, 2.),
+            0x91f if e.stage == Some(2) => (Motion::Wander, 3.),
+            0x91b if matches!(e.stage, Some(0 | 3)) => (Motion::Wander, 5.),
+            0x91b if matches!(e.stage, Some(1 | 2)) => (Motion::Wander, 3.5),
             _ => (Motion::Wander, 4.),
         };
         // NR-Core adds a base motor rate; a linear speed conversion loses it on slow quest bosses.
@@ -925,23 +937,26 @@ impl World {
             }
             0x921 if t.is_multiple_of(600) => fan(0, 1, 0.),
             0x922 if t.is_multiple_of(1000) => fan(0, 1, 0.),
+            0x924 if t < 1000 => vec![],
             0x923 | 0x924 if t.is_multiple_of(1000) => fan(0, 4, 10.),
-            0x929 if s == 3 && t == 2950 => ring(0, 8, 22.5f32.to_radians()),
+            // fixedAngle is the fan center, not its first arrow: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Shoot.cs#L99-L107
+            0x929 if s == 3 && t == 2950 => quest::fan(0, 8, 45., 22.5f32.to_radians()),
             0x929
                 if s < 3
                     && e.condition & condition::bit(condition::INVULNERABLE) == 0
                     && t.is_multiple_of(400) =>
             {
-                ring(0, 4, [0f32, 45., 22.5][s as usize].to_radians())
+                quest::fan(0, 4, 90., [0f32, 45., 22.5][s as usize].to_radians())
             }
             0x92a..=0x92c
                 if e.condition & condition::bit(condition::INVULNERABLE) == 0
                     && t.is_multiple_of(if k == 0x92a { 400 } else { 800 }) =>
             {
-                ring(
+                quest::fan(
                     0,
                     if k == 0x92c { 8 } else { 4 },
-                    if k == 0x92a { 0. } else { 45f32.to_radians() },
+                    if k == 0x92c { 45. } else { 90. },
+                    [0f32, 45., 22.5][(k - 0x92a) as usize].to_radians(),
                 )
             }
             0x675 if t.is_multiple_of(600) => fan(0, 4, 7.),
@@ -1083,6 +1098,68 @@ mod tests {
                 (4..7).contains(&liches)
             });
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn ghost_volleys_use_primary_centered_fixed_angles() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+    for cell in &mut map.cells {
+        cell.ground = 0x61;
+        cell.object = None;
+    }
+    let mut world = World::new(content, Arc::new(map)).unwrap();
+    let home = Pos { x: 12.5, y: 12.5 };
+    let mut character = Character::fresh(world.content.get(0x30e).unwrap()).unwrap();
+    character.account = 1;
+    character.id = 1;
+    let player = world.enter(character, None).unwrap();
+    for (kind, stage, time, expected) in [
+        (0x929, 0, 400, vec![-135f32, -45., 45., 135.]),
+        (0x929, 1, 400, vec![-90., 0., 90., 180.]),
+        (0x929, 2, 400, vec![-112.5, -22.5, 67.5, 157.5]),
+        (
+            0x929,
+            3,
+            2950,
+            vec![-135., -90., -45., 0., 45., 90., 135., 180.],
+        ),
+        (0x92a, 0, 400, vec![-135., -45., 45., 135.]),
+        (0x92b, 0, 800, vec![-90., 0., 90., 180.]),
+        (
+            0x92c,
+            0,
+            800,
+            vec![-135., -90., -45., 0., 45., 90., 135., 180.],
+        ),
+    ] {
+        let id = world.spawn_entity(kind, home, vec![]).unwrap();
+        let e = world.entities.get_mut(&id).unwrap();
+        e.stage = Some(stage);
+        e.condition = 0;
+        for target in [Pos { x: 17.5, y: 12.5 }, Pos { x: 12.5, y: 17.5 }] {
+            world.players.get_mut(&player).unwrap().pos = target;
+            let shots = world.quest_shots(id, target, time).unwrap();
+            assert_eq!(shots.len(), expected.len(), "kind={kind:#x}, stage={stage}");
+            for ((index, angle), degrees) in shots.iter().zip(&expected) {
+                assert_eq!(*index, 0);
+                let error = (*angle - degrees.to_radians() + std::f32::consts::PI)
+                    .rem_euclid(std::f32::consts::TAU)
+                    - std::f32::consts::PI;
+                assert!(
+                    error.abs() < 0.00001,
+                    "kind={kind:#x}, stage={stage}, angle={angle}, expected={degrees}"
+                );
+            }
+            assert!(world.quest_shots(id, target, time + 50).unwrap().is_empty());
+        }
+        if stage != 3 {
+            world.quest_shield(id, true);
+            assert!(world.quest_shots(id, home, time).unwrap().is_empty());
+        }
+        world.remove_entity(id);
     }
 }
 
@@ -1250,5 +1327,286 @@ fn ent_sprite_orders_use_strict_owned_radii() {
                 assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn quest_preparation_motors_preserve_other_phases() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = Map {
+        width: 32,
+        height: 32,
+        cells: vec![
+            crate::content::Cell {
+                ground: 0x61,
+                object: None,
+                config: String::new(),
+                terrain: 0,
+                region: 0,
+            };
+            32 * 32
+        ],
+        spawns: vec![(8.5, 8.5)],
+    };
+    let mut world = World::new(content, Arc::new(map)).unwrap();
+    world.name = "Realm".into();
+    world.encounter = true;
+    world.safe = false;
+    let character: Character = serde_json::from_value(serde_json::json!({
+        "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+        "class":0x300,"base":[200,100,15,0,75,15,15,10],
+        "id":1,"account":1,"name":"Wander","level":20,"exp":0,
+        "fame":0,"hp":200,"mp":100,"revision":0,"alive":true,
+        "items":[0xa14,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+    }))
+    .unwrap();
+    world.enter(character, None).unwrap();
+    let home = Pos { x: 12.5, y: 12.5 };
+    for (kind, stage, offset, nominal) in [
+        (0x91f, 0, 0., 1.295_f32),
+        (0x91f, 1, 0., 1.85),
+        (0x91f, 2, 0., 2.405),
+        (0x91f, 3, 0., 0.),
+        (0x91f, 3, 10., 0.),
+        (0x91f, 4, 0., 0.),
+        (0x91f, 4, 10., 0.),
+        (0x91f, 5, 0., 0.),
+        (0x91f, 5, 10., 0.),
+        (0x91f, 6, 0., 0.),
+        (0x91f, 6, 10., 0.),
+        (0x920, 0, 0., 1.85),
+        (0x928, 3, 0., 0.),
+        (0x928, 3, 10., 0.),
+        (0x928, 4, 0., 0.),
+        (0x928, 4, 10., 0.),
+        (0x928, 5, 0., 0.),
+        (0x928, 5, 10., 0.),
+        (0x928, 6, 0., 0.),
+        (0x928, 6, 10., 0.),
+        (0x91b, 0, 0., 3.515),
+        (0x91b, 1, 0., 2.6825),
+        (0x91b, 2, 0., 2.6825),
+        (0x91b, 3, 0., 3.515),
+        (0x91b, 4, 0., 2.96),
+    ] {
+        world.now += 50;
+        let id = world.spawn_entity(kind, home, vec![]).unwrap();
+        let position = Pos {
+            x: home.x + offset,
+            y: home.y,
+        };
+        world.position_entity(id, position).unwrap();
+        let e = world.entities.get_mut(&id).unwrap();
+        e.quest.set(Some(id), id, &mut world.quest_ids);
+        e.stage = Some(stage);
+        e.activated = Some(world.now);
+        e.next_shot = u64::MAX;
+        e.motion = Some(crate::encounter::Motion::Wander);
+        e.goal = Some(Pos {
+            x: position.x + 1.,
+            y: position.y,
+        });
+        let hp = e.hp;
+        let rng = rand::RngCore::next_u64(&mut world.rng.clone());
+        world.npc_step();
+        let e = &world.entities[&id];
+        let distance = nominal * 0.05;
+        let tolerance = 2. * f32::EPSILON * position.x;
+        assert!(
+            (e.pos.x - position.x - distance).abs() <= tolerance,
+            "kind={kind:#x}, stage={stage}, offset={offset}: displacement {} != {distance}",
+            e.pos.x - position.x
+        );
+        assert_eq!(
+            (e.pos.y, e.home.x, e.home.y, *e.quest, e.hp),
+            (position.y, home.x, home.y, Some(id), hp)
+        );
+        assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
+        assert!(world.critical_deaths.is_empty());
+        world.remove_entity(id);
+    }
+    for (kind, age, offset, moving, bullets) in [
+        (0x924, 0, 0., false, 0),
+        (0x924, 0, 12., false, 0),
+        (0x924, 999, 0., false, 0),
+        (0x924, 999, 12., false, 0),
+        (0x924, 1000, 0., true, 4),
+        (0x924, 1000, 12., true, 0),
+        (0x923, 0, 0., true, 4),
+    ] {
+        world.now += 50;
+        let id = world.spawn_entity(kind, home, vec![]).unwrap();
+        let position = Pos {
+            x: home.x + offset,
+            y: home.y,
+        };
+        world.position_entity(id, position).unwrap();
+        let e = world.entities.get_mut(&id).unwrap();
+        e.quest.set(Some(id), id, &mut world.quest_ids);
+        e.stage = (age > 0).then_some(0);
+        e.activated = Some(world.now - if age == 0 { 50 } else { age });
+        e.next_shot = if age == 0 { u64::MAX } else { world.now };
+        let hp = e.hp;
+        let rng = rand::RngCore::next_u64(&mut world.rng.clone());
+        world.npc_step();
+        let e = &world.entities[&id];
+        assert_eq!(
+            (e.pos.x, e.pos.y) != (position.x, position.y),
+            moving,
+            "kind={kind:#x}, age={age}, offset={offset}"
+        );
+        assert_eq!(
+            world.bullets.iter().filter(|b| b.owner == id).count(),
+            bullets,
+            "kind={kind:#x}, age={age}, offset={offset}"
+        );
+        assert_eq!(
+            (e.home.x, e.home.y, *e.quest, e.hp, e.stage, e.activated),
+            (home.x, home.y, Some(id), hp, Some(0), Some(world.now - age))
+        );
+        if offset == 0. {
+            assert_eq!(
+                e.next_shot,
+                world.now + crate::encounter::profile(kind).unwrap().interval
+            );
+        }
+        if moving {
+            assert_eq!(
+                e.motion,
+                Some(if offset == 0. {
+                    crate::encounter::Motion::Orbit {
+                        anchor: crate::encounter::Anchor::Player,
+                        radius: 4.,
+                    }
+                } else {
+                    crate::encounter::Motion::Protect {
+                        anchor: crate::encounter::Anchor::Home,
+                        distance: 1.,
+                    }
+                })
+            );
+        } else {
+            assert_eq!(e.motion, Some(crate::encounter::Motion::Stationary));
+            assert_eq!(e.bullet, 0);
+            assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
+        }
+        assert!(world.players.values().all(|p| p.character.alive));
+        assert!(world.critical_deaths.is_empty());
+        world.remove_entity(id);
+    }
+    for (offsets, distance) in [
+        (vec![4., 1.25], 0.28675_f32),
+        (vec![4., -2.5], 0.28675),
+        (vec![1.25, 4.], 0.17575),
+        (vec![], 0.17575),
+    ] {
+        world.now += 50;
+        let boss = world.spawn_entity(0x91c, home, vec![]).unwrap();
+        let mut members = vec![boss];
+        for &offset in &offsets {
+            members.push(
+                world
+                    .spawn_entity(
+                        0x91d,
+                        Pos {
+                            x: home.x + offset,
+                            y: home.y,
+                        },
+                        vec![],
+                    )
+                    .unwrap(),
+            );
+        }
+        for member in &members {
+            let e = world.entities.get_mut(member).unwrap();
+            e.quest.set(Some(boss), *member, &mut world.quest_ids);
+            e.stage = Some(0);
+            e.activated = Some(world.now);
+            e.next_shot = u64::MAX;
+        }
+        let e = world.entities.get_mut(&boss).unwrap();
+        e.motion = Some(crate::encounter::Motion::Wander);
+        e.goal = Some(Pos {
+            x: home.x + 1.,
+            y: home.y,
+        });
+        let hp = e.hp;
+        world.npc_step();
+        let e = &world.entities[&boss];
+        assert!(
+            (e.pos.x - home.x - distance).abs() <= 2. * f32::EPSILON * home.x,
+            "Actual Lich must retain its chosen bearer and moving controls: offsets={offsets:?}, position={:?}",
+            e.pos
+        );
+        assert_eq!(
+            (e.pos.y, e.home.x, e.home.y, *e.quest, e.hp),
+            (home.y, home.x, home.y, Some(boss), hp)
+        );
+        assert!(world.critical_deaths.is_empty());
+        for member in members {
+            world.remove_entity(member);
+        }
+    }
+    let boss = world.spawn_entity(0x91c, home, vec![]).unwrap();
+    let bearer = world.spawn_entity(0x91d, home, vec![]).unwrap();
+    let foreign_boss = world.spawn_entity(0x91c, home, vec![]).unwrap();
+    let foreign = world.spawn_entity(0x91d, home, vec![]).unwrap();
+    let unowned = world.spawn_entity(0x91c, home, vec![]).unwrap();
+    for (id, tag) in [
+        (boss, boss),
+        (bearer, boss),
+        (foreign_boss, foreign_boss),
+        (foreign, foreign_boss),
+    ] {
+        world
+            .entities
+            .get_mut(&id)
+            .unwrap()
+            .quest
+            .set(Some(tag), id, &mut world.quest_ids);
+    }
+    let anchor = |id| crate::encounter::Anchor::QuestEntity(id);
+    let position = world
+        .orbit_anchor(boss, anchor(bearer), None::<Pos>)
+        .unwrap();
+    assert_eq!((position.x, position.y), (home.x, home.y));
+    for (caller, target, error) in [
+        (boss, foreign, "quest entity anchor ownership mismatch"),
+        (
+            unowned,
+            bearer,
+            "quest entity anchor lacks encounter ownership",
+        ),
+        (boss, i32::MAX, "own quest entity anchor absent"),
+    ] {
+        assert!(
+            world
+                .orbit_anchor(caller, anchor(target), None::<Pos>)
+                .unwrap_err()
+                .to_string()
+                .contains(error)
+        );
+    }
+    assert!(
+        world
+            .orbit_anchor(
+                boss,
+                crate::encounter::Anchor::BoundEntity(bearer),
+                None::<Pos>
+            )
+            .is_err()
+    );
+    world.remove_entity(bearer);
+    assert!(
+        world
+            .orbit_anchor(boss, anchor(bearer), None::<Pos>)
+            .unwrap_err()
+            .to_string()
+            .contains("own quest entity anchor absent")
+    );
+    assert!(world.quest_members(boss, &[0x91d]).is_empty());
+    for id in [boss, foreign_boss, foreign, unowned] {
+        world.remove_entity(id);
     }
 }

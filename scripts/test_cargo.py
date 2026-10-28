@@ -5,9 +5,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -46,12 +48,47 @@ class BuildStorageTests(unittest.TestCase):
             code = guard.main(args or ['build', '--locked'])
         return code, execute
 
-
-
-
-
-
-
+    def test_fifo_waiter_prevents_barging_and_dead_waiter_is_reaped(self):
+        root = self.root / 'queue'
+        root.mkdir()
+        code = ('import pathlib,runpy,sys,time\n'
+                'helper=runpy.run_path(sys.argv[1])\n'
+                'with helper["build_slot"](pathlib.Path(sys.argv[2])):\n'
+                ' pathlib.Path(sys.argv[3]).touch()\n'
+                ' time.sleep(30)\n')
+        processes = []
+        def wait_for(predicate):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if predicate():
+                    return
+                time.sleep(.01)
+            self.fail('Timed out waiting for owned queue-test process')
+        def start(name):
+            log = self.root / f'{name}.log'
+            with log.open('wb') as stream:
+                child = subprocess.Popen([sys.executable, '-c', code, guard.__file__, str(root),
+                                          str(self.root / f'{name}.ready')], stdout=stream, stderr=subprocess.STDOUT)
+            processes.append(child)
+            wait_for(lambda: 'Waiting for one of 2 Cargo build slots' in log.read_text())
+            return child
+        try:
+            with guard.build_slot(root) as first, guard.build_slot(root):
+                older = start('older')
+                os.kill(older.pid, signal.SIGSTOP)
+                start('newer')
+                first.close()
+                time.sleep(.3)
+                self.assertFalse((self.root / 'newer.ready').exists(), 'New arrival overtook a live older waiter')
+                older.kill()
+                older.wait(timeout=5)
+                wait_for(lambda: (self.root / 'newer.ready').exists())
+                self.assertEqual(list(root.glob('.build-ticket-v1-*')), [])
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
 
     def test_cleanup_refuses_foreign_contents_and_symlinks_without_deleting_original(self):
         root = guard.cache_root()

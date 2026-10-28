@@ -59,6 +59,46 @@ fn decision(goal: Goal, chat: Option<&'static str>) -> Decision {
 }
 
 #[tokio::test]
+async fn dungeon_call_wait_starts_after_publication_and_cancellation_releases_it() {
+    let (dir, app) = server::test_app();
+    app.world.clock.set_paused(true);
+    let (_owner, id, mut output, mut brain) =
+        tests::actor(&app, "portal-wait", "Trader", [-1; 8]).await;
+    let view = app.world.player_view(id).await.unwrap();
+    let portal = view.objects.iter().find(|o| o.usable).unwrap().id;
+    brain.portal = Some((portal, u64::MAX));
+    let ready = typed(&app, &mut brain, Source::Call, "here").await;
+    brain.call_goal = Some(Goal::Portal(portal));
+    assert_eq!(brain.portal, Some((portal, u64::MAX)));
+    public_call(
+        &app,
+        &mut brain,
+        &ready,
+        &decision(Goal::Portal(portal), None),
+    )
+    .await
+    .unwrap();
+    assert!(text_sent(&mut output, id));
+    let (target, until) = brain.portal.unwrap();
+    assert_eq!(target, portal);
+    assert!((4000..=8000).contains(&(until - ready.time_ms)));
+    brain.portal = Some((portal, u64::MAX));
+    brain
+        .compose(&app, &ready, Source::Call, "here")
+        .await
+        .unwrap();
+    brain.close_composition(&app, false).await.unwrap();
+    assert!(brain.portal.is_none());
+    lifecycle::finalize(&app, id, CloseReason::Controller)
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn review_enter_revision_race_cancels_call_and_dialogue_before_text_or_society() {
     let (dir, app) = server::test_app();
     app.world.clock.set_paused(true);

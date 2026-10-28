@@ -38,6 +38,99 @@ fn fatal(ch: &mut Character, fame: i32) {
 }
 
 #[tokio::test]
+async fn class_stars_retain_live_deleted_and_committed_death_bests_not_wallets() {
+    let (path, content, store, mut ch) = setup().await;
+    ch.level = 20;
+    ch.exp = 19_999;
+    ch.fame = 19;
+    store.progress(ch.clone()).await.unwrap();
+    assert_eq!(store.presentation(ch.account).await.unwrap().stars(), 0);
+    ch.gain_experience(&content, 1, &mut rand::thread_rng())
+        .unwrap();
+    store.progress(ch.clone()).await.unwrap();
+    let p = store.presentation(ch.account).await.unwrap();
+    assert_eq!(
+        (p.stars(), p.next_quest(WIZARD, ch.fame), p.fame),
+        (1, 150, 0)
+    );
+    store.delete_character(ch.account, ch.id).await.unwrap();
+    let mut lower = store
+        .create(ch.account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    lower.fame = 19;
+    store.progress(lower.clone()).await.unwrap();
+    assert_eq!(
+        store.presentation(ch.account).await.unwrap().best_fame[&WIZARD],
+        20
+    );
+    store.delete_character(ch.account, lower.id).await.unwrap();
+
+    let class = *content
+        .classes
+        .keys()
+        .find(|class| **class != WIZARD)
+        .unwrap();
+    let mut dead = store
+        .create_prepared(ch.account, content.get(class).unwrap(), None)
+        .await
+        .unwrap();
+    fatal(&mut dead, 18);
+    store
+        .death(dead.clone(), "class quest fixture".into())
+        .await
+        .unwrap();
+    let db = Connection::open(&path).unwrap();
+    let receipt: String = db
+        .query_row(
+            "SELECT receipt FROM deaths WHERE character=?1",
+            [dead.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let total = decode_receipt(&receipt).unwrap().total;
+    assert!(total >= 20);
+    let p = store.presentation(ch.account).await.unwrap();
+    assert_eq!(p.best_fame, BTreeMap::from([(WIZARD, 20), (class, total)]));
+    assert_eq!(p.fame, total);
+    let expected = 1 + AccountPresentation::THRESHOLDS
+        .iter()
+        .filter(|threshold| total >= **threshold)
+        .count() as i32;
+    assert_eq!(p.stars(), expected);
+    assert!(store.death(dead.clone(), "duplicate".into()).await.is_err());
+    db.execute(
+        "UPDATE account_fame SET balance=0 WHERE account=?1",
+        [ch.account],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE characters SET stats=json_set(stats,'$.fame',9999) WHERE id=?1",
+        [dead.id],
+    )
+    .unwrap();
+    drop(store);
+    let reopened = Store::open(&path, &content).unwrap();
+    let p = reopened.presentation(ch.account).await.unwrap();
+    assert_eq!(
+        (p.stars(), p.fame, p.best_fame[&class]),
+        (expected, 0, total)
+    );
+    let xml = reopened
+        .list("death-awards".into())
+        .await
+        .unwrap()
+        .xml("", 0.);
+    assert!(xml.contains(&format!("<ClassStats objectType=\"{class}\"><BestLevel>1</BestLevel><BestFame>{total}</BestFame></ClassStats>")));
+    db.execute(
+        "UPDATE deaths SET receipt=json_set(receipt,'$.total',-1) WHERE character=?1",
+        [dead.id],
+    )
+    .unwrap();
+    assert!(reopened.presentation(ch.account).await.is_err());
+}
+
+#[tokio::test]
 async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
     let (path, content, store, mut ch) = setup().await;
     store.rename(ch.account, "Awardchief".into()).await.unwrap();
@@ -57,7 +150,7 @@ async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
     equip(
         &store,
         &mut ch,
-        vec![0xaa2, -1, -1, 0xabf, -1, -1, -1, -1, -1, -1, -1, -1],
+        vec![0xaa2, -1, -1, 0xabf, 0xb07, -1, -1, -1, -1, -1, -1, -1],
     )
     .await;
     let saved = ch.clone();
@@ -152,12 +245,16 @@ async fn all_death_fame_phase2_schema17_roundtrip_corruption() {
         .await
         .unwrap();
     let before = store.fame(ch.account, ch.id).await.unwrap();
+    assert!(
+        before.contains("<Bonus id=\"Ancestor\" desc=\"First death on this account\">30</Bonus>")
+    );
+    assert!(before.contains("<Bonus id=\"First Born\" desc=\"Beat the Fame total of every previous character\">13</Bonus>"));
     drop(store);
     let db = Connection::open(&path).unwrap();
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        20
+        21
     );
     let original: String = db
         .query_row(

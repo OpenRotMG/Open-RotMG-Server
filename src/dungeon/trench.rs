@@ -82,6 +82,10 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 }
             }
         }
+        // Build 122.0.1 shows coral; this offset remains reconstructed: https://steamcommunity.com/sharedfiles/filedetails/?id=23486568
+        if i != 12 {
+            map.cells[index(cx - 4, cy)].object = Some(0x1711);
+        }
     }
     for pair in rooms.windows(2) {
         let (mut x, mut y) = pair[0];
@@ -156,4 +160,43 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         "generated reconstructed Ocean Trench layout"
     );
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn coral_dressing_preserves_trench_layout_and_encounters() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let coral = content.get(0x1711).unwrap();
+        assert!(coral.static_object);
+        assert!(!coral.blocks && !coral.blocks_sight && !coral.full_occupy);
+        assert!(!coral.occupy_square && !coral.enemy_occupy_square);
+        let mut baseline = Sha256::new();
+        let mut counts = Vec::new();
+        for seed in (0..64).chain([12351, u64::MAX]) {
+            let mut map = generate(&content, seed).unwrap();
+            let mut count = 0;
+            for cell in &mut map.cells {
+                if cell.object == Some(0x1711) {
+                    assert_eq!(cell.ground, 0x2e, "coral outside OceanFloor, seed {seed}");
+                    cell.object = None;
+                    count += 1;
+                }
+            }
+            counts.push((seed, count));
+            baseline.update(serde_json::to_vec(&map).unwrap());
+        }
+        let fingerprint = format!("{:x}", baseline.finalize());
+        for (seed, count) in counts {
+            assert_eq!(count, 12, "one coral per non-boss room, seed {seed}");
+        }
+        // A scenery fix must not reshuffle geometry, vents or encounter spawns.
+        assert_eq!(
+            fingerprint,
+            "56488cc7153604a260eea0f9fa930f3f97e7f41e2d622eeec87be742fa48a3ac"
+        );
+    }
 }

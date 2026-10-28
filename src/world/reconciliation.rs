@@ -54,6 +54,23 @@ pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
 }
 
 impl Player {
+    // Discarded native shots need the same Berserk cadence as admitted shots: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as#L664-L677
+    pub(super) fn normal_attack_period(
+        &self,
+        dex: i32,
+        now: u64,
+        item_rate: f32,
+        native: bool,
+    ) -> f32 {
+        let berserk = self.conditions(now) & crate::condition::bit(crate::condition::BERSERK) != 0
+            || native
+                && self
+                    .statuses
+                    .get(&crate::condition::BERSERK)
+                    .is_some_and(|(_, until)| now >= *until && now - until < 1000);
+        let frequency = 0.0015 + (0.008 - 0.0015) * f64::from(dex) / 75.;
+        (1. / frequency / f64::from(item_rate) / if berserk { 1.5 } else { 1. }).floor() as f32
+    }
     pub(super) fn advertised_weapon(&self, kind: u16) -> bool {
         self.weapon_ticks
             .iter()
@@ -210,7 +227,7 @@ impl World {
         p.weapon_ticks.retain(|(sent, _, _)| *sent >= tick);
         Ok(())
     }
-    pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
+    pub(super) fn validate_native_coordinates(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
         let p = self.players.get(&id).context("native player missing")?;
         ensure!(p.persistence_failure.is_none(), "inactive native character");
         ensure!(
@@ -226,8 +243,8 @@ impl World {
             crate::server::lifecycle::controller("non-finite native position")
         );
         ensure!(
-            self.player_step_valid(p.pos, pos),
-            crate::server::lifecycle::controller("native position is outside walkable terrain")
+            self.map.cell(pos.x, pos.y).is_some(),
+            crate::server::lifecycle::controller("native position is outside world bounds")
         );
         Ok(())
     }
@@ -303,12 +320,24 @@ impl World {
         let count = if time == last { count } else { 0 };
         if time != last {
             let dex = p.advertised_dex(p.effective(&self.content, self.now)?[5]);
-            let rate = 0.0015 + 0.0065 * dex as f64 / 75.;
-            let cooldown = (1. / (rate * f64::from(item.rate))).floor() as f32;
-            ensure!(
-                i64::from(time) - i64::from(last) >= cooldown as i64 - 2,
-                crate::server::lifecycle::protocol("discarded attack too fast")
-            );
+            let cooldown = p.normal_attack_period(dex, self.now, item.rate, true);
+            let elapsed = i64::from(time) - i64::from(last);
+            if elapsed < cooldown as i64 - 2 {
+                tracing::warn!(
+                    player = id,
+                    kind,
+                    dex,
+                    client_time = time,
+                    last_client_time = last,
+                    elapsed_ms = elapsed,
+                    required_ms = cooldown,
+                    condition = p.conditions(self.now),
+                    "discarded attack cadence rejected"
+                );
+                return Err(crate::server::lifecycle::protocol(
+                    "discarded attack too fast",
+                ));
+            }
         }
         ensure!(
             count < item.shots,

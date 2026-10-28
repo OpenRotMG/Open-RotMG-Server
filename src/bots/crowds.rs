@@ -237,6 +237,21 @@ impl Crowd {
             }
         }
     }
+    pub fn shortcut(
+        &self,
+        v: &PlayerView,
+        group: Option<&adventures::Adventure>,
+        objective: Pos,
+    ) -> Option<&PlayerMarker> {
+        if !v.map.allow_teleport || matches!(v.map.name.as_str(), "Realm" | "Nexus") {
+            return None;
+        }
+        // Rushers shorten the existing dungeon quest: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
+        self.attended_destination(v.time_ms, v.position, v.session.account, group, |p| {
+            p.distance(v.position) > 24.
+                && p.distance(objective) + 16. < v.position.distance(objective)
+        })
+    }
     pub fn destination<'a>(
         &'a self,
         v: &PlayerView,

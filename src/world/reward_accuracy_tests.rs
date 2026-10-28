@@ -31,6 +31,64 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
     (w, store, owners)
 }
 
+#[tokio::test]
+async fn demon_and_elf_minion_deaths_roll_public_loot_once_not_per_contributor() {
+    let (mut w, _store, owners) = reward_world().await;
+    let mut successes = 0;
+    for kind in (0x669..=0x66b).chain(0x605..=0x607) {
+        for seed in 0..64 {
+            let expected = crate::loot::rewards(
+                &w.content,
+                kind,
+                &mut rand::rngs::StdRng::seed_from_u64(seed),
+            );
+            successes += expected.len();
+            for contributors in [1, 3] {
+                clear_bags(&mut w);
+                let id = w
+                    .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
+                    .unwrap();
+                w.entities.get_mut(&id).unwrap().damage = owners[..contributors]
+                    .iter()
+                    .map(|(_, character)| (*character, 1))
+                    .collect();
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.defeat_entity(id).unwrap();
+                let mut actual = Vec::new();
+                for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
+                    assert!(bag.bag_owners.is_empty());
+                    actual.extend(bag.items.iter().copied().filter(|item| *item >= 0));
+                }
+                assert_eq!(
+                    actual,
+                    expected.iter().map(|id| i32::from(*id)).collect::<Vec<_>>(),
+                    "kind={kind:#x}, seed={seed}, contributors={contributors}"
+                );
+                assert!(!w.entities.contains_key(&id));
+            }
+        }
+    }
+    assert!(successes > 0);
+}
+
+#[test]
+fn septavius_stages_a_realm_exit_until_clear_commit() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let map = crate::dungeon::undead::generate(&content, 12351).unwrap();
+    let mut world = World::new(content, Arc::new(map)).unwrap();
+    world.name = "Undead Lair".into();
+    world.encounter = true;
+    let boss = world.actors().find(|e| e.kind == 0xd90).unwrap().id;
+    world.defeat_entity(boss).unwrap();
+    assert!(world.cleared);
+    assert!(!world.entities.contains_key(&boss));
+    let exit = &world.entities[&world.clear_exit.unwrap()];
+    assert_eq!(exit.kind, 0x704);
+    assert!(!exit.published);
+    assert_eq!(world.actors().filter(|e| e.kind == 0x704).count(), 1);
+    assert!(!world.actors().any(|e| e.kind == 0x71d));
+}
+
 fn clear_bags(w: &mut World) {
     for id in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
         w.remove_entity(id);

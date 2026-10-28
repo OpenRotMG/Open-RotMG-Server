@@ -342,16 +342,28 @@ impl Life {
         let Some(account) = p.account else {
             return Ok(false);
         };
-        let Some(body) = text.strip_prefix(&format!("{own_name}, ")) else {
+        let addressed = text.strip_prefix(&format!("{own_name}, "));
+        // Route shorthand to real tome policy, not dialogue: https://github.com/OpenRotMG/Open-RotMG-Server/issues/752
+        if v.character.class == PRIEST
+            && ["heal", "heal pls", "heal please"].iter().any(|request| {
+                addressed
+                    .unwrap_or(&text)
+                    .trim()
+                    .eq_ignore_ascii_case(request)
+            })
+        {
+            self.heal_request = Some((account, v.elapsed_ms + 10000));
+            tracing::info!(
+                account = v.session.account,
+                peer = account,
+                "autonomous healing request received"
+            );
+            return Ok(true);
+        }
+        let Some(body) = addressed else {
             return Ok(false);
         };
         match body {
-            "heal please" => {
-                self.heal_request = Some((account, v.elapsed_ms + 10000));
-                if v.character.class != PRIEST || v.character.items[1] < 0 {
-                    return Ok(true);
-                }
-            }
             "spare health?" => {
                 if self.gift.is_some() {
                     return Ok(true);

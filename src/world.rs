@@ -52,6 +52,7 @@ mod ground;
 mod guilds;
 mod lab;
 
+mod deathmage;
 mod lair;
 mod landmark_ai;
 
@@ -1003,9 +1004,19 @@ impl Directory {
             .map(|p| p.character.clone())
             .collect()
     }
+    pub fn human_player_count(&self) -> usize {
+        self.worlds
+            .summaries()
+            .map(|(_, w)| {
+                w.players
+                    .values()
+                    .filter(|p| p.controller == Controller::Human)
+                    .count()
+            })
+            .sum()
+    }
     pub fn health(&self, started: Instant) -> serde_json::Value {
         let worlds: Vec<_> = self.worlds.summaries().collect();
-        let players: usize = worlds.iter().map(|(_, w)| w.players.len()).sum();
         let qa_actors = worlds
             .iter()
             .flat_map(|(_, w)| w.players.values())
@@ -1018,7 +1029,7 @@ impl Directory {
             .count();
         serde_json::json!({
             "status":"development","uptime_seconds":started.elapsed().as_secs(),
-            "worlds":worlds.len(),"players":players-qa_actors-bots,"bots":bots,"qa_actors":qa_actors,
+            "worlds":worlds.len(),"players":self.human_player_count(),"bots":bots,"qa_actors":qa_actors,
             "entities":worlds.iter().map(|(_,w)|w.entities).sum::<usize>(),
             "projectiles":worlds.iter().map(|(_,w)|w.bullets).sum::<usize>(),
             "tick":self.tick,"max_tick_us":self.max_tick_us,"tick_scope":"coordinator, not world simulation",
@@ -4029,7 +4040,20 @@ impl World {
         if self.discard_correcting_move(id, pos, time)? {
             return Ok(NativeInput::DiscardedUntilGotoAck);
         }
-        self.move_timed(id, pos, time, received)?;
+        let sentinel = pos.x == -1. && pos.y == -1.;
+        let pos = if sentinel { self.players[&id].pos } else { pos };
+        self.validate_native_coordinates(id, pos, time)?;
+        let p = self.players.get_mut(&id).unwrap();
+        ensure!(received >= p.last_move_at, "native ingress clock regressed");
+        // Rechecking client collision or speed here turns delayed packet delivery into snap-backs.
+        let speed = p.speed(&self.content, self.now)? * 1000.;
+        p.record_motion(pos, time, self.now, speed);
+        if p.pos.distance(pos) > 0.001 {
+            p.last_motion = Some(((pos.y - p.pos.y).atan2(pos.x - p.pos.x), self.now));
+        }
+        p.pos = pos;
+        p.last_move = time;
+        p.last_move_at = received;
         Ok(NativeInput::Applied)
     }
     pub fn move_to(&mut self, id: i32, pos: Pos, time: i32) -> Result<()> {
@@ -4383,7 +4407,9 @@ impl World {
         };
         let condition = p.conditions(self.now);
         let origin = if native {
-            self.validate_native_position(id, center, time).map(|_| 0.)
+            // Terrain checks undo client prediction and recreate MOVE snap-backs: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/networking/handlers/PlayerShootPacketHandler.cs
+            self.validate_native_coordinates(id, center, time)
+                .map(|_| 0.)
         } else if !p.paused && p.pos.distance(center) > 0.001 {
             self.validate_move_at(id, center, time, received)
         } else {
@@ -4413,13 +4439,7 @@ impl World {
             && p.statuses
                 .get(&crate::condition::BERSERK)
                 .is_some_and(|(_, until)| self.now >= *until && self.now - until < 1000);
-        let berserk =
-            condition & crate::condition::bit(crate::condition::BERSERK) != 0 || late_berserk;
-        let normal_period = |dex| {
-            let frequency = 0.0015 + (0.008 - 0.0015) * f64::from(dex) / 75.;
-            (1. / frequency / f64::from(item.rate) / if berserk { 1.5 } else { 1. }).floor() as f32
-        };
-        let normal_cooldown = normal_period(dex);
+        let normal_cooldown = p.normal_attack_period(dex, self.now, item.rate, native);
         let effective_cooldown =
             reconciliation::attack_cooldown(p, &self.content, self.now, item.rate)?;
         let cooldown =
@@ -4430,7 +4450,7 @@ impl World {
             };
         let admission_dex = if native { p.advertised_dex(dex) } else { dex };
         let admission = if native {
-            normal_period(admission_dex)
+            p.normal_attack_period(admission_dex, self.now, item.rate, true)
         } else {
             cooldown
         };
@@ -5487,6 +5507,7 @@ impl World {
             .zip(self.content.classes[&p.character.class].caps)
             .filter(|(value, cap)| **value >= *cap)
             .count();
+        // Maxed graves last until reset, unlike later ten-minute rules: https://web.archive.org/web/20120606073802/http://forums.wildshadow.com/wiki/realm-mad-god/gravestones
         let (kind, lifetime) = match maxed {
             0 if p.character.level == 1 => (0x723, Some(30_000)),
             0 if p.character.level < 20 => (0x724, Some(60_000)),
@@ -5881,6 +5902,8 @@ impl World {
                 let kind = if matches!(
                     defeated.kind,
                     0x927
+                        // Septavius's completion exit returns to the Realm, not Nexus: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
+                        | 0xd90
                         | crate::dungeon::abyss::MALPHAS
                         | crate::dungeon::snake::BOSS
                         | crate::dungeon::jungle::BOSS
@@ -6357,13 +6380,16 @@ impl World {
                 0x953 | 0x954 => 6.,
                 0x619 => 8.,
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
-                0x617 => 8.,
+                // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
+                0x617 => 12.,
                 0x61a => 10.5,
                 0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
+                0x925 => 30.,
+                0x65a..=0x65d => 15.,
                 _ => 12.,
             };
             // Activated enemies keep the same sight radius; they do not keep
@@ -6398,14 +6424,14 @@ impl World {
                     && !p.paused
                     && pos.distance(p.pos) < simulation_radius
             });
-            let manor_clock =
-                crate::dungeon::manor::ROSTER.contains(&kind) && entity.activated.is_some();
+            let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind) || kind == 0x925)
+                && entity.activated.is_some();
             if !burst
                 && !armed_abyss_missile
                 && !armed_abyss_flamer
                 && target.is_none()
                 && !nearby
-                && !manor_clock
+                && !persistent_clock
             {
                 self.suspend_npc(id, delta);
                 continue;
@@ -6499,7 +6525,7 @@ impl World {
                         continue;
                     }
                 }
-            } else if current.quest.is_some() {
+            } else if current.quest.is_some() && !crate::endgame::HEROES.contains(&kind) {
                 self.quest_movement(id, target, elapsed)
             } else if crate::encounter::fauna::ROSTER.contains(&kind) {
                 match self.fauna_movement(id, target, elapsed) {
@@ -7108,7 +7134,8 @@ impl World {
                 1. + values[6] as f32 / 8.
             } + if flags & crate::condition::bit(crate::condition::HEALING) != 0
             {
-                20.
+                // Period seals add 28 HP/s, not 20: https://web.archive.org/web/20120418103926id_/http://forums.wildshadow.com/wiki/realm-mad-god/class-guide-paladin
+                28.
             } else {
                 0.
             };
@@ -7526,6 +7553,31 @@ mod lab_tests;
 
 #[cfg(test)]
 mod reward_accuracy_tests;
+
+#[cfg(test)]
+mod paladin_tests;
+#[cfg(test)]
+mod wizard_tests;
+
+#[cfg(test)]
+mod necromancer_tests;
+#[cfg(test)]
+mod priest_tests;
+
+#[cfg(test)]
+mod recovery_tests;
+
+#[cfg(test)]
+mod knight_tests;
+
+#[cfg(test)]
+mod assassin_tests;
+
+#[cfg(test)]
+mod mystic_tests;
+
+#[cfg(test)]
+mod quest_tests;
 
 #[cfg(test)]
 impl World {}

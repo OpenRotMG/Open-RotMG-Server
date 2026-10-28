@@ -7,6 +7,8 @@ pub(crate) mod name_claims_tests;
 #[cfg(test)]
 mod password_tests;
 mod pictures;
+#[cfg(test)]
+mod realmdex_tests;
 use crate::{
     content::{Content, WIZARD},
     crypto::Keys,
@@ -315,6 +317,31 @@ async fn account_request(
         Ok(false) => return limited(),
         Err(e) => return error(e),
     }
+    if operation == "forgotPassword" {
+        let result = async {
+            ensure!(
+                form.get("secret").is_none_or(|s| s.is_empty()),
+                "external platform authentication is not implemented"
+            );
+            email::request_reset(
+                &a,
+                form.get("guid").context("guid required")?.clone(),
+                request_ip(&a, &headers, peer)?,
+            )
+        }
+        .await;
+        return match result {
+            Ok(()) => (
+                [
+                    ("content-type", "application/xml"),
+                    ("cache-control", "no-store"),
+                ],
+                "<Success/>",
+            )
+                .into_response(),
+            Err(e) => error(e),
+        };
+    }
     let result: Result<i32> = async {
         let guid = form.get("guid").context("guid required")?.clone();
         if operation == "changePassword" {
@@ -550,6 +577,19 @@ async fn critical_incident(
         }))})).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, self::error(error)).into_response(),
     }
+}
+async fn realmdex_stats(State(a): State<App>) -> Response {
+    let (status, body) = match a.world.directory(|d| Ok(d.human_player_count())).await {
+        Ok(players) => (StatusCode::OK, players.to_string()),
+        Err(error) => {
+            tracing::error!(%error, "RealmDex player count unavailable");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "player count unavailable".into(),
+            )
+        }
+    };
+    (status, [("cache-control", "no-store")], body).into_response()
 }
 async fn health(State(a): State<App>) -> Response {
     let started = a.started;
@@ -3180,6 +3220,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         ))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
+        .route("/realmdex/stats", get(realmdex_stats))
         .route("/api/bots", get(crate::bots::cctv::list))
         .route("/api/bots/{name}/socket", get(bot_view::socket))
         .route(

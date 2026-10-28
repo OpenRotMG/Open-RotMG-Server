@@ -78,9 +78,7 @@ pub(super) fn damage(n: Node<'_, '_>, name: &str) -> Result<i32> {
     Ok(value)
 }
 pub(super) fn duration(n: Node<'_, '_>, name: &str) -> Result<u64> {
-    let ms = std::time::Duration::try_from_secs_f32(positive(n, name)?)?
-        .as_millis()
-        .try_into()?;
+    let ms = (positive(n, name)? * 1000.).round() as u64;
     ensure!(ms > 0 && ms <= 60000, "invalid ability duration");
     Ok(ms)
 }

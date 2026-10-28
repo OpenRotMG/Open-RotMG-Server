@@ -5,6 +5,8 @@ mod equipment;
 mod generosity;
 mod incoming;
 mod life;
+#[cfg(test)]
+mod tests;
 pub(crate) use life::Life;
 pub(super) use life::{cancel_gift as interrupt_gift, life, receive_life};
 
@@ -191,6 +193,11 @@ pub(super) async fn market(
     if !revoke_market(app, brain).await? {
         return Ok(true);
     }
+    brain
+        .mind
+        .market
+        .recover_trade_reply(&app.store, v, &app.content)
+        .await?;
     let incoming_active = if brain.mind.market.incoming.is_some() {
         incoming::incoming(app, brain, v).await?
     } else {

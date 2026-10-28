@@ -325,3 +325,176 @@ impl World {
         self.repopulate_families()
     }
 }
+
+#[cfg(test)]
+#[test]
+fn populated_realms_keep_all_arrivals_connected() -> Result<()> {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path)?);
+    // Fixed geography is distinct from variable buildings: https://web.archive.org/web/20130522030032id_/https://forums.wildshadow.com/wiki/realm-mad-god/maps-builds-106-123
+    for source in crate::terrain::realms::sources(path)? {
+        let name = source.name().to_owned();
+        let directory =
+            Directory::configured(path, content.clone(), 16, 785, Some(785), vec![source], 2)?;
+        let world = &directory.worlds[&-3];
+        let width = world.map.width as usize;
+        let passable: Vec<_> = (0..world.map.cells.len())
+            .map(|i| {
+                world.walkable(Pos {
+                    x: (i % width) as f32 + 0.5,
+                    y: (i / width) as f32 + 0.5,
+                })
+            })
+            .collect();
+        assert_eq!(world.map.spawns.len(), 4, "{name}");
+        let index = |x: f32, y: f32| y as usize * width + x as usize;
+        let (x, y) = world.map.spawns[0];
+        let start = index(x, y);
+        let mut distance = vec![u32::MAX; passable.len()];
+        distance[start] = 0;
+        let mut queue = std::collections::VecDeque::from([start]);
+        while let Some(i) = queue.pop_front() {
+            for next in [
+                i.wrapping_sub(width),
+                i + width,
+                if i % width > 0 { i - 1 } else { usize::MAX },
+                if i % width + 1 < width {
+                    i + 1
+                } else {
+                    usize::MAX
+                },
+            ] {
+                if next < passable.len() && passable[next] && distance[next] == u32::MAX {
+                    distance[next] = distance[i] + 1;
+                    queue.push_back(next);
+                }
+            }
+        }
+        for &(x, y) in &world.map.spawns {
+            let i = index(x, y);
+            assert!(
+                passable[i] && distance[i] != u32::MAX,
+                "{name}: arrival {x},{y}"
+            );
+            assert_eq!(world.map.cells[i].terrain, 11, "{name}: arrival habitat");
+            assert!(
+                world
+                    .entities
+                    .values()
+                    .filter(|e| e.population_slot.is_some())
+                    .all(|e| e.pos.distance(Pos { x, y }) >= 12.),
+                "{name}: arrival population clearance"
+            );
+            println!("{name} arrival={x},{y} distance_from_south={}", distance[i]);
+        }
+        for (label, matches) in [("road", 0xd0), ("rock", 0x60)] {
+            assert!(
+                world
+                    .map
+                    .cells
+                    .iter()
+                    .enumerate()
+                    .any(|(i, c)| c.ground == matches && distance[i] != u32::MAX),
+                "{name}: unreachable {label}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path)?);
+    // Period MidForest uses Light Grass and HighPlains is snowy; boundaries remain reconstruction: https://wikiwiki.jp/rmd/%E5%9C%B0%E5%BD%A2
+    let sources: Vec<_> = crate::terrain::realms::sources(path)?
+        .into_iter()
+        .filter(|s| {
+            matches!(
+                s.name(),
+                "classic-world-01-reconstruction"
+                    | "classic-world-02-reconstruction"
+                    | "classic-world-03-reconstruction"
+            )
+        })
+        .collect();
+    assert_eq!(sources.len(), 3);
+    for source in sources {
+        let name = source.name().to_owned();
+        let directory =
+            Directory::configured(path, content.clone(), 16, 756, Some(756), vec![source], 2)?;
+        let world = &directory.worlds[&-3];
+        let snowy = name != "classic-world-01-reconstruction";
+        for terrain in 1..=12 {
+            assert_eq!(
+                world.population_regions[terrain].target > 0,
+                terrain != 3 || snowy,
+                "{name}: terrain {terrain}"
+            );
+        }
+        for terrain in [2, 3, 7, 8] {
+            let region = &world.population_regions[terrain];
+            if terrain == 3 && !snowy {
+                assert!(region.sites.is_empty() && world.population_count(3) == 0);
+                continue;
+            }
+            assert!(!region.sites.is_empty(), "{name}: terrain {terrain}");
+            let area = world
+                .map
+                .cells
+                .iter()
+                .filter(|c| c.terrain as usize == terrain)
+                .count();
+            let count = world.population_count(terrain as u8);
+            assert!(count >= region.target && count <= region.limit);
+            let kinds: BTreeSet<_> = world
+                .entities
+                .values()
+                .filter(|e| {
+                    e.population_slot.is_some()
+                        && content.objects[&e.kind].terrain as usize == terrain
+                })
+                .map(|e| e.kind)
+                .collect();
+            println!(
+                "{name} terrain={terrain} area={area} sites={} target={} limit={} bodies={count} kinds={kinds:?}",
+                region.sites.len(),
+                region.target,
+                region.limit
+            );
+            for kind in match terrain {
+                2 => &[0x646, 0x649, 0x903][..],
+                3 => &[0x640, 0x900, 0x957],
+                7 => &[0x61f, 0x62d, 0x62e, 0x945],
+                8 => &[0x60d, 0x6c4, 0x6c7],
+                _ => unreachable!(),
+            } {
+                assert!(kinds.contains(kind), "{name}: missing natural {kind:#x}");
+            }
+        }
+        for entity in world
+            .entities
+            .values()
+            .filter(|e| e.population_slot.is_some())
+        {
+            let slot = entity.population_slot.unwrap();
+            assert_eq!(world.population[slot].entity, Some(entity.id));
+            assert_eq!(
+                world.map.cell(entity.pos.x, entity.pos.y).unwrap().terrain,
+                world.population_terrain(&world.population[slot])
+            );
+            assert!(world.walkable(entity.pos) && world.outside_setpieces(entity.pos));
+            assert!(entity.quest.is_none());
+        }
+        assert_eq!(
+            world.population_counts.iter().sum::<usize>(),
+            world
+                .entities
+                .values()
+                .filter(|e| e.population_slot.is_some())
+                .count()
+        );
+    }
+    Ok(())
+}

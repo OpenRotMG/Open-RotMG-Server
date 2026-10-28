@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 
 mod account_actions;
 mod accounts;
+pub(crate) use accounts::email as validate_email;
 pub(crate) mod browser_link;
 mod character_slots;
 mod discord_gold;
@@ -64,6 +65,7 @@ pub struct AccountPresentation {
     pub best_fame: BTreeMap<u16, i32>,
 }
 impl AccountPresentation {
+    // Preserve the recovered client's inclusive quests, not the later base-only ranks: https://github.com/ViciousFate/rotmg-redis/blob/de251d3e0cfb59b30eb74572e2d8ed87f9e14afa/rotmg_cli_master/src/com/company/assembleegameclient/util/_Z_B_.as#L20-L55
     const THRESHOLDS: [i32; 5] = [20, 150, 400, 800, 2000];
 
     pub fn stars(&self) -> i32 {
@@ -510,6 +512,28 @@ pub struct InventoryWrite {
     pub revision: i32,
     pub items: Vec<i32>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TradeWitness {
+    pub transaction: String,
+    pub writes: Vec<InventoryWrite>,
+}
+impl TradeWitness {
+    pub(crate) fn validate(&self) -> Result<()> {
+        ensure!(
+            self.transaction.len() == 32
+                && self.transaction.bytes().all(|b| b.is_ascii_hexdigit())
+                && self.writes.len() == 2
+                && self.writes[0].account != self.writes[1].account
+                && self.writes.iter().all(|w| w.account > 0
+                    && w.id > 0
+                    && (0..i32::MAX).contains(&w.revision)
+                    && w.items.len() == 12
+                    && w.items.iter().all(|k| (-1..=65535).contains(k))),
+            "invalid trade receipt witness"
+        );
+        Ok(())
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GiftParticipant {
     pub account: i32,
@@ -627,7 +651,7 @@ impl Store {
         ensure!(
             matches!(
                 version,
-                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21
             ),
             "unsupported game database schema {version}"
         );
@@ -834,7 +858,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 20)?;
+        migration.pragma_update(None, "user_version", 21)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -959,6 +983,17 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             self.authenticate(guid, password).await?
         };
         self.list_id(id).await
+    }
+    pub(crate) async fn account_stars(&self, account: i32) -> Result<i32> {
+        let legacy_base = self.legacy_base;
+        let classes = self.classes.clone();
+        // Census reads must not award class-quest Gold through presentation().
+        self.call(move |db| {
+            Ok(read_presentation(db, account, legacy_base, &classes)?
+                .0
+                .stars())
+        })
+        .await
     }
     pub async fn presentation(&self, account: i32) -> Result<AccountPresentation> {
         let legacy_base = self.legacy_base;
@@ -1178,9 +1213,16 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     }
     pub(crate) async fn retire_persona(&self, identity: String, account: i32) -> Result<()> {
         ensure!(
-            identity.starts_with("persona:v1:") && !identity.starts_with("persona:v1:retired:"),
+            ["persona:v1:", "guest:v1:"].iter().any(|prefix| identity
+                .strip_prefix(prefix)
+                .is_some_and(|suffix| !suffix.starts_with("retired:"))),
             "not an active preset identity"
         );
+        let namespace = identity
+            .split_once(":v1:")
+            .context("preset namespace missing")?
+            .0
+            .to_owned();
         self.call(move |db| {
             // Keep all characters, resources and receipts for rollback; only the active registry binding changes.
             let changed = db.execute(
@@ -1188,7 +1230,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 params![
                     identity,
                     account,
-                    format!("persona:v1:retired:{account}:{identity}")
+                    format!("{namespace}:v1:retired:{account}:{identity}")
                 ],
             )?;
             ensure!(changed == 1, "persona retirement binding changed");
@@ -1358,6 +1400,38 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         self.exchange_transaction(writes, vec![], None, Some((transaction, delivery)))
             .await
+    }
+    pub(crate) async fn trade_committed(&self, witness: TradeWitness) -> Result<bool> {
+        witness.validate()?;
+        self.call(move |c| {
+            let row: Option<(String, String, String, Option<String>)> = c
+                .query_row(
+                    "SELECT owners,writes,revisions,delivery FROM trade_transactions WHERE id=?1",
+                    [&witness.transaction],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .optional()?;
+            let Some((owners, writes, revisions, delivery)) = row else {
+                return Ok(false);
+            };
+            let owners: Vec<i32> = serde_json::from_str(&owners)?;
+            let writes: Vec<InventoryWrite> = serde_json::from_str(&writes)?;
+            let revisions: Vec<i32> = serde_json::from_str(&revisions)?;
+            ensure!(
+                delivery.is_none()
+                    && writes == witness.writes
+                    && owners == writes.iter().map(|w| w.account).collect::<Vec<_>>()
+                    && revisions.len() == 2
+                    && writes
+                        .iter()
+                        .zip(revisions)
+                        .all(|(w, r)| w.revision.checked_add(1) == Some(r)),
+                "committed trade payload or participants differ from accepted window: {}",
+                witness.transaction
+            );
+            Ok(true)
+        })
+        .await
     }
     pub(crate) async fn gift_committed(&self, acceptance: GiftAcceptance) -> Result<bool> {
         ensure!(
@@ -1705,7 +1779,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
     }
     pub async fn fame(&self, account: i32, id: i32) -> Result<String> {
         let legacy_base = self.legacy_base;
-        // The legacy field is called CreatedOn, but the client labels it as the death date.
+        // CreatedOn is the death date in Unix seconds, not character creation: selected 123.5.1 Fame request Yp::Hp, https://github.com/OpenRotMG/Open-RotMG-Client/blob/39acbfbf3bf545c397d6ac94f0a9430d6d660ac2/client.swf
         self.call(move|db|{let (snapshot,killer,died_at,paid):(String,String,u64,String)=db.query_row("SELECT snapshot,killed_by,died_at,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;let receipt=death_awards::decode_receipt(&paid)?;let c = receipt.character(&snapshot,legacy_base)?;ensure!(receipt.base==c.fame,"receipt base disagreement");ensure!(c.id==id && c.account==account && !c.alive && c.hp==0 && c.items.len()==12,"invalid archived death snapshot");let total=receipt.total;
         let [shots,hits,tiles,kills,gods,oryx,quests,assists]=match receipt.policy {
             death_awards::ReceiptPolicy::Historical=>{let l=&c.lifetime;[l.shots,l.projectile_hits,l.tiles,l.kills,l.god_kills,l.oryx_kills,l.qualified_quests,l.level_assists]},
@@ -1919,8 +1993,109 @@ fn character_list_advertises_product_name_without_changing_transport() {
 }
 
 #[cfg(test)]
+#[test]
+fn class_stars_use_inclusive_class_bests_and_the_greater_current_goal() {
+    let mut p = AccountPresentation {
+        guild: None,
+        credits: 0,
+        fame: 0,
+        best_fame: BTreeMap::new(),
+    };
+    assert_eq!(p.stars(), 0);
+    assert_eq!(p.next_quest(WIZARD, 0), 20);
+    for (index, threshold) in [20, 150, 400, 800, 2000].into_iter().enumerate() {
+        p.best_fame.insert(WIZARD, threshold - 1);
+        assert_eq!(p.stars(), index as i32);
+        assert_eq!(p.next_quest(WIZARD, 0), threshold);
+        p.best_fame.insert(WIZARD, threshold);
+        assert_eq!(p.stars(), index as i32 + 1);
+        let next = [150, 400, 800, 2000, -1][index];
+        assert_eq!(p.next_quest(WIZARD, 0), next);
+        p.best_fame.insert(WIZARD, 0);
+        assert_eq!(p.next_quest(WIZARD, threshold), next);
+    }
+    p.best_fame = BTreeMap::from([(WIZARD, 2000), (0x300, 150)]);
+    p.fame = 1_000_000;
+    assert_eq!(p.stars(), 7);
+    assert_eq!(p.next_quest(WIZARD, 1999), -1);
+    assert_eq!(p.next_quest(0x300, 800), 2000);
+}
+
+#[cfg(test)]
+mod class_unlock_tests;
+#[cfg(test)]
 mod community_schema_tests;
+#[cfg(test)]
+mod death_record_tests;
+#[cfg(test)]
+mod level_tests;
+#[cfg(test)]
+mod living_fame_tests;
 #[cfg(all(test, unix))]
 mod restart_tests;
 #[cfg(test)]
 mod startup_tests;
+
+#[cfg(test)]
+#[tokio::test]
+async fn warrior_unlock_requires_own_rogue_five_and_survives_deletion_and_restart() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let dir = std::env::temp_dir().join(format!("warrior-unlock-{}", rand::random::<u64>()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("game.db");
+    let store = Store::open(&path, &content).unwrap();
+    let account = store.list("warrior-owner".into()).await.unwrap().id;
+    let foreign = store.list("warrior-foreign".into()).await.unwrap().id;
+    let warrior = content.get(0x31d).unwrap();
+    assert_eq!(&warrior.slots[..4], &[1, 16, 7, 9]);
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let mut rogue = store
+        .create_prepared(account, content.get(0x300).unwrap(), None)
+        .await
+        .unwrap();
+    rogue.level = 4;
+    store.progress(rogue.clone()).await.unwrap();
+    assert!(
+        store
+            .create(account, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    rogue.level = 5;
+    store.progress(rogue.clone()).await.unwrap();
+    store.delete_character(account, rogue.id).await.unwrap();
+    drop(store);
+    let store = Store::open(&path, &content).unwrap();
+    assert!(
+        store
+            .create(foreign, warrior)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("is locked")
+    );
+    let created = store.create(account, warrior).await.unwrap();
+    assert_eq!(created.class, 0x31d);
+    assert_eq!(&created.items[..4], &[0xa00, 0xa66, -1, -1]);
+    let loaded = store.load(account, created.id).await.unwrap();
+    assert_eq!(loaded.items, created.items);
+    assert_eq!(
+        store
+            .list("warrior-owner".into())
+            .await
+            .unwrap()
+            .best_levels[&0x300],
+        5
+    );
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}

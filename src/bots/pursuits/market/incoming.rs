@@ -109,6 +109,14 @@ impl Market {
         if self.spare(v, c, future, q[0].kind)? < q[0].quantity {
             return Ok(Some(TradeAction::Cancel));
         }
+        if Self::needs_room(v, &q) && v.objects.iter().any(|p| p.kind == 0x720 && p.usable) {
+            let peer = (g.player, g.account, g.name.clone());
+            self.quote = Some(q.clone());
+            self.preparing = true;
+            self.respond(v, peer, ReplyKind::Bank(q), c)?;
+            tracing::info!(account = v.session.account, "market capacity preparation");
+            return Ok(Some(TradeAction::Cancel));
+        }
         if peer.unwrap().position.distance(v.position) >= 2. {
             return Ok(None);
         }
@@ -170,10 +178,8 @@ impl Market {
                 },
                 "market incoming exchange refused"
             );
-            self.queue(
-                format!("nty need {}", goods_text(&q[1], c)?),
-                Channel::Tell(g.name.clone()),
-            );
+            let peer = (g.player, g.account, g.name.clone());
+            self.respond(v, peer, ReplyKind::Counter(q), c)?;
             return Ok(Some(TradeAction::Cancel));
         }
         Ok(
