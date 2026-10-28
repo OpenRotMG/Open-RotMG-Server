@@ -3,23 +3,25 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
-export const fixture={class:0x323,level:20,seed:867,world:'oryx-chamber',position:w=>{const p=w.encounter_markers.find(e=>e.kind===0x1740).position;return {x:p.x-5,y:p.y};},equipment:[0xb08,0xae4,-1,-1],backpack:[0x722,-1,-1,-1,-1,-1,-1,-1],stats:[670,385,60,25,60,50,40,75]};
+export const fixture={class:0x323,level:20,seed:867,world:'oryx-chamber',position:w=>{const p=w.encounter_markers.find(e=>e.kind===0x1740).position;return {x:p.x-5,y:p.y};},equipment:[0xb08,0xae4,-1,-1],backpack:[0x722,0x722,-1,-1,-1,-1,-1,-1],stats:[670,385,60,25,60,50,40,75]};
 export async function run(game){
   const out=process.env.QA_RESULTS_DIR,records=[];
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const protectedClients=[];let until=0;
   function protectClient(g){
-    const act=g.act;protectedClients.push(g);
+    const act=g.act;protectedClients.push({actor:g.actor,act});
     g.act=async(input,capture)=>{
       let remaining=input.duration_ms;
       while(remaining>0){
-        const now=(await g.inspect()).view.time_ms;
+        let now=(await g.inspect()).view.time_ms;
         if(now>=until){
           for(const client of protectedClients){
             const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
             const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));
           }
           until=now+60000;
+          for(const client of protectedClients)await client.act({keys:['a','d'],duration_ms:25});
+          now=(await g.inspect()).view.time_ms;
         }
         const duration_ms=Math.min(remaining,until-now);remaining-=duration_ms;
         await act({...input,duration_ms},remaining?undefined:capture);
@@ -33,8 +35,8 @@ export async function run(game){
   protectClient(observer);
   await game.act({keys:[],duration_ms:2200});
   await game.act({keys:[],duration_ms:800},{name:'chamber-before',when:()=>true});
-  await game.act({keys:['1'],duration_ms:200});
-  game.check('pre-victory Incantation is retained',(await game.observe()).character.items[4]===0x722);
+  await game.act({keys:['2'],duration_ms:200});
+  game.check('pre-victory Incantation is retained',(await game.observe()).character.items[5]===0x722);
   let minion=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x1749);assert(minion,'Opening summons actual Minions of Oryx');
   await game.act({keys:[' '],duration_ms:150,target:{entity:minion.id,camera_angle:-Math.PI/4,fire:false}});
   const frozen=await save('minion-stasis');
@@ -81,10 +83,12 @@ export async function run(game){
   await walk(game,locked.pos);
   await walk(observer,locked.pos);
   await observer.act({keys:[],duration_ms:100});
+  await game.act({keys:['2'],duration_ms:200});
+  await save('rejected-slot-retry');
   const before=await save('before-unlock');
   await game.act({keys:['1'],duration_ms:900},{name:'cellar-unlock',when:v=>v.character.items[4]===-1});
   const opened=await save('after-unlock'),portal=opened.diagnostic.entities.find(e=>e.kind===0x700);assert(portal);
-  game.check('committed use consumes once and replaces the locked portal',opened.view.character.items[4]===-1&&opened.view.character.inventory_revision===before.view.character.inventory_revision+1&&!opened.diagnostic.entities.some(e=>e.kind===0x721));
+  game.check('committed use consumes once and replaces the locked portal',opened.view.character.items[4]===-1&&opened.view.character.items[5]===0x722&&opened.view.character.inventory_revision===before.view.character.inventory_revision+1&&!opened.diagnostic.entities.some(e=>e.kind===0x721));
   await observer.act({keys:['1'],duration_ms:200});
   game.check('competing user retains their Incantation',(await observer.observe()).character.items[4]===0x722);
   for(const g of [observer,game]){
@@ -95,5 +99,5 @@ export async function run(game){
   await game.act({keys:['r'],duration_ms:1700});const returned=await save('returned');
   game.check('same living character exits to Nexus with its progress',returned.view.map.name==='Nexus'&&returned.view.lifecycle.alive&&returned.view.session.character===start.view.session.character&&returned.diagnostic.character.lifetime.oryx_kills===a.diagnostic.character.lifetime.oryx_kills);
   const report=JSON.parse(await readFile(join(out,'native/result.json'),'utf8'));
-  await writeFile(join(out,'fixture-limits.json'),JSON.stringify({preparedStats:fixture.stats,preparedInvincible:true,preparedChamber:true,earnedCastleRoute:false,origin:report.origin}));
+  await writeFile(join(out,'fixture-limits.json'),JSON.stringify({preparedStats:fixture.stats,preparedInvincible:true,preparedChamber:true,rejectedSlotRetryAccepted:false,earnedCastleRoute:false,origin:report.origin}));
 }
