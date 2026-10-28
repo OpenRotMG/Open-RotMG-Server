@@ -27,6 +27,7 @@ export async function run(game){
         const after=await snapshot(`${kind}-${mp}-after`),a=after.view.character,b=before.view.character;
         game.check(`${amount} MP potion consumes exactly once at starting MP ${mp}`,a.items[4]===-1&&a.inventory_revision===b.inventory_revision+1);
         game.check(`${amount} MP potion restores its amount capped at385 at starting MP ${mp}`,a.mp>=Math.min(385,b.mp+amount)&&a.mp<=Math.min(385,b.mp+amount)+2);
+        game.check(`${amount} MP potion preserves health, stats and other slots at starting MP ${mp}`,a.hp===b.hp&&JSON.stringify(a.base_stats)===JSON.stringify(b.base_stats)&&JSON.stringify(a.stats)===JSON.stringify(b.stats)&&a.items.every((item,slot)=>slot===4||item===b.items[slot]));
         await game.act({keys:['1'],duration_ms:100});const empty=await game.observe();
         game.check(`${amount} MP empty-slot reuse cannot consume twice at starting MP ${mp}`,empty.character.inventory_revision===a.inventory_revision&&empty.character.mp<=a.mp+1);
       }
@@ -45,11 +46,12 @@ export async function run(game){
         {actor:game.actor,input:{keys:[],duration_ms:1200}},
       ],{name:`magic-${amount}-ground`,when:v=>v.character.mp>=amount+10});
       const after=await snapshot(`${kind}-ground-after`),a=after.view.character,b=before.view.character;
-      game.check(`${amount} MP ground use restores without pickup`,a.mp>=b.mp+amount&&a.mp<=b.mp+amount+2&&JSON.stringify(a.items)===JSON.stringify(b.items)&&a.inventory_revision===b.inventory_revision+1);
+      game.check(`${amount} MP ground use restores without pickup`,a.mp>=b.mp+amount&&a.mp<=b.mp+amount+2&&a.hp===b.hp&&JSON.stringify(a.stats)===JSON.stringify(b.stats)&&JSON.stringify(a.base_stats)===JSON.stringify(b.base_stats)&&JSON.stringify(a.items)===JSON.stringify(b.items)&&a.inventory_revision===b.inventory_revision+1);
       game.check(`${amount} MP ground source consumed once`,!after.diagnostic.entities.some(e=>e.id===bag.id&&e.items?.includes(kind)));
     }
     const retained=await snapshot('before-reconnect');
-    await game.act({keys:['Insert'],duration_ms:1500},{name:'magic-potions-reconnected',when:v=>v.world==='Nexus'});
+    await game.act({keys:['Insert'],duration_ms:700});
+    await game.act({keys:[],duration_ms:1200},{name:'magic-potions-reconnected',when:v=>v.world==='Nexus'});
     const after=await snapshot('reconnected');
     game.check('ordinary Nexus reconnect retains same living character and spent inventory',after.view.world==='Nexus'&&after.view.lifecycle.alive&&after.view.session.character===initial.view.session.character&&JSON.stringify(after.view.character.items)===JSON.stringify(retained.view.character.items)&&after.view.character.inventory_revision===retained.view.character.inventory_revision);
   }finally{await writeFile(output('potion-observations.json'),JSON.stringify({preparedItemsStatsVitals:true,quietEvidence:'PR132; not reverified by this case',observations},null,2));}
