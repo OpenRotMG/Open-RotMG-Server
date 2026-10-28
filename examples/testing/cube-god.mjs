@@ -73,15 +73,16 @@ export async function run(game){
   async function approach(actor,destination,range=1.5){
     for(let n=0;n<80;n++){
       await protect(actor.actor);await protect(spectator.actor);
-      const point=typeof destination==='number'?entity(await actor.inspect(),destination)?.pos:destination;assert(point,'Walking target must still exist');
-      const view=await actor.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y;if(Math.hypot(dx,dy)<range)return;
+      const point=typeof destination==='number'?entity(await actor.inspect(),destination)?.pos:destination;
+      if(!point){assert((await fields()).some(f=>f.message==='enemy defeated'&&f.entity===destination),'Walking target vanished without a logged defeat');return false;}
+      const view=await actor.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y;if(Math.hypot(dx,dy)<range)return true;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
       const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
       await actor.act({keys,duration_ms:Math.max(50,Math.min(750,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
     }throw Error('Native walk did not reach target');
   }
-  async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>6)await approach(actor,id,5.5);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
+  async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>6&&!await approach(actor,id,5.5))return;await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await game.act({keys:[],duration_ms:750},{name:'cube-active',when:()=>true});
   const census=await fetch(origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
   const owned=(await census.json()).entities.filter(e=>e.quest===root),old=new Set(owned.map(e=>e.id));await writeFile(join(out,'census.json'),JSON.stringify(owned));
