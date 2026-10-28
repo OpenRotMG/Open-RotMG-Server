@@ -1273,17 +1273,61 @@ mod retire_tests {
     #[tokio::test]
     async fn retirement_requires_registered_persona_and_paused_fixture() {
         let (dir, app) = super::super::test_app();
-        write_json(&dir.join("testing.json"), &json!({"schema":1,"provenance":"prepared"})).unwrap();
+        write_json(
+            &dir.join("testing.json"),
+            &json!({"schema":1,"provenance":"prepared"}),
+        )
+        .unwrap();
         let testing = Testing::open(&dir).unwrap().unwrap();
         app.world.clock.set_paused(true);
-        assert!(execute(&app, &testing, "missing", Command::Retire {actor:1}).await.unwrap_err().to_string().contains("not spawned"));
-        for (controller, profile) in [(Controller::Native,Some("Acrobat".into())),(Controller::Direct,None),(Controller::GameBot,None)] {
-            fs::write(testing.path("actor-1", "spawn"), serde_json::to_vec(&Registration {guid:"fixture".into(),controller,profile}).unwrap()).unwrap();
-            assert!(execute(&app, &testing, "protected", Command::Retire {actor:1}).await.unwrap_err().to_string().contains("registered prepared persona"));
+        assert!(
+            execute(&app, &testing, "missing", Command::Retire { actor: 1 })
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("not spawned")
+        );
+        for (controller, profile) in [
+            (Controller::Native, Some("Acrobat".into())),
+            (Controller::Direct, None),
+            (Controller::GameBot, None),
+        ] {
+            fs::write(
+                testing.path("actor-1", "spawn"),
+                serde_json::to_vec(&Registration {
+                    guid: "fixture".into(),
+                    controller,
+                    profile,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            assert!(
+                execute(&app, &testing, "protected", Command::Retire { actor: 1 })
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("registered prepared persona")
+            );
         }
-        fs::write(testing.path("actor-1", "spawn"), serde_json::to_vec(&Registration {guid:"fixture".into(),controller:Controller::GameBot,profile:Some("Acrobat".into())}).unwrap()).unwrap();
+        fs::write(
+            testing.path("actor-1", "spawn"),
+            serde_json::to_vec(&Registration {
+                guid: "fixture".into(),
+                controller: Controller::GameBot,
+                profile: Some("Acrobat".into()),
+            })
+            .unwrap(),
+        )
+        .unwrap();
         app.world.clock.set_paused(false);
-        assert!(execute(&app, &testing, "running", Command::Retire {actor:1}).await.unwrap_err().to_string().contains("paused"));
+        assert!(
+            execute(&app, &testing, "running", Command::Retire { actor: 1 })
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("paused")
+        );
         drop((testing, app));
         fs::remove_dir_all(dir).unwrap();
     }
