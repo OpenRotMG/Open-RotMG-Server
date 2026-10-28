@@ -65,13 +65,17 @@ export async function run(observer){
   game.check('ordinary qualifying defeat admits the reserved shrine exactly once',!!admission&&logs.filter(f=>f.message==='quest defeat summoned a Realm event'&&f.entity===shrine.id).length===1);
   await writeFile(join(out,'admission.json'),JSON.stringify({shrine,admission}));
   game=await observer.join({...spec,seed:820,position:{x:shrine.pos.x+3,y:shrine.pos.y}});
+  await game.act({keys:[],duration_ms:1500});
+  const vulnerable=await game.observe();
+  game.check('unprotected native shrine encounter removes HP without killing the character',vulnerable.character.hp<770&&vulnerable.lifecycle.alive);
+  await writeFile(join(out,'unprotected.json'),JSON.stringify(vulnerable));
   await protect(game);
   await game.act({keys:[],duration_ms:500});
   await game.act({keys:[],duration_ms:500},{name:'shrine-arrival',when:()=>true});
   const start=await save('arrival'),root=s=>s.diagnostic.entities.find(e=>e.id===shrine.id);
   game.check('native client sees the selected 10000-HP stationary shrine',root(start)?.hp===10000&&root(start).kind===0xd56);
   const samples=[];let done=false;
-  const action=game.act({keys:[],duration_ms:10000},{name:'shrine-skulls',when:v=>v.game_ms>=start.view.game_ms+8500}).finally(()=>done=true);
+  const action=game.act({keys:[],duration_ms:10000},{name:'shrine-skulls',when:v=>v.game_ms>=start.view.time_ms+8500}).finally(()=>done=true);
   const sampling=(async()=>{while(!done){samples.push(await game.inspect());await new Promise(ok=>setTimeout(ok,60));}})();
   for(const result of await Promise.allSettled([action,sampling]))if(result.status==='rejected')throw result.reason;
   await writeFile(join(out,'movement-attacks.json'),JSON.stringify(samples));
