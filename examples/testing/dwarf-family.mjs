@@ -12,23 +12,23 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  king=map.entities.find(e=>e.kind===0x61f&&Array.from({length:7},(_,i)=>[-1,0,1].every(j=>!blocked.has([Math.floor(e.pos.x)-i,Math.floor(e.pos.y)+j].join(',')))).every(Boolean));
+  king=map.entities.find(e=>e.kind===0x61f&&Array.from({length:9},(_,i)=>[-1,0,1].every(j=>!blocked.has([Math.floor(e.pos.x)-i,Math.floor(e.pos.y)+j].join(',')))).every(Boolean));
   assert(king,'No natural Dwarf King with a clear approach');
   await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(e=>e.camp===king.camp)));
-  return {...spec,position:{x:king.pos.x-3,y:king.pos.y}};
+  return {...spec,position:{x:king.pos.x-8,y:king.pos.y}};
 }
 export async function run(game){
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
   const family=s=>s.diagnostic.entities.filter(e=>e.camp===king.camp),entity=(s,id)=>family(s).find(e=>e.id===id);
   let protectedUntil=0;
-  const act=async input=>{
+  const act=async(input,capture)=>{
     await protect();
     while(protectedUntil-(await game.observe()).game_ms<input.duration_ms+500){await game.act({keys:[],duration_ms:100});await protect();}
-    return game.act(input);
+    return game.act(input,capture);
   };
   const begin=await save('arrival');
   game.check('natural MidForest family has selected initial HP and composition',[[0x61f,1,320],[0x61c,2,80],[0x61d,1,80],[0x61e,1,100]].every(([k,n,hp])=>family(begin).filter(e=>e.kind===k&&e.hp===hp).length===n));
-  await game.act({keys:[],duration_ms:2000},{name:'dwarf-encounter',when:()=>true});
+  for(let n=0;n<16&&(await game.observe()).character.hp===begin.view.character.hp;n++)await game.act({keys:[],duration_ms:500});
   game.check('unprotected native Wizard receives encounter damage',(await game.observe()).character.hp<begin.view.character.hp);
   const protect=async()=>{
     const now=(await game.observe()).game_ms;if(now<protectedUntil)return;
@@ -38,7 +38,7 @@ export async function run(game){
   };
   await protect();
   const samples=[];
-  for(let n=0;n<32;n++){await act({keys:[],duration_ms:500});samples.push(await game.inspect());}
+  for(let n=0;n<32;n++){await act({keys:[],duration_ms:500},n===16?{name:'dwarf-encounter',when:()=>true}:undefined);samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'movement-and-attacks.json'),JSON.stringify(samples));
   for(const [kind,speed,lifetime] of [[0x61f,60,900],[0x61c,60,600],[0x61d,35,3500],[0x61e,60,600]]){
     const ids=new Set(family(begin).filter(e=>e.kind===kind).map(e=>e.id));
@@ -59,7 +59,13 @@ export async function run(game){
   game.check('current escort caps hold throughout observed combat',samples.every(caps));
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
-    for(let n=0;n<80&&entity(await game.inspect(),id);n++)await act({keys:[],duration_ms:200,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    for(let n=0;n<80;n++){
+      const s=await game.inspect(),e=entity(s,id);if(!e)break;
+      const k=entity(s,king.id);assert(k,'King must survive escort targeting');
+      const p=s.view.position,dx=e.pos.x-p.x,dy=e.pos.y-p.y,t=((k.pos.x-p.x)*dx+(k.pos.y-p.y)*dy)/(dx*dx+dy*dy);
+      if(id===king.id||t<0||Math.hypot(k.pos.x-p.x-t*dx,k.pos.y-p.y-t*dy)>.9)await act({keys:[],duration_ms:200,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+      else await act({keys:[],duration_ms:200});
+    }
     const after=await game.inspect();game.check(id+': native shooting defeats target and awards XP',!entity(after,id)&&after.view.character.experience>xp);return after;
   }
   const victim=family(samples.at(-1)).find(e=>e.kind===0x61c);assert(victim);
