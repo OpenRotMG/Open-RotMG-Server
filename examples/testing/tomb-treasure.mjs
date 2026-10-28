@@ -31,7 +31,7 @@ export async function run(observer){
   await game.act({keys:[],duration_ms:700,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
   const broken=await save('jar-broken');
   game.check('native fire breaks a real jar and produces its Scarab',!broken.map.entities.some(e=>e.id===target.id)&&broken.map.entities.some(e=>e.kind===0xd1b&&e.tomb?.producer===target.id));
-  game.check('treasure and jar rewards do not awaken bosses or count completion',broken.map.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind)).length===3&&broken.map.entities.filter(e=>e.kind===0xd29).length===layout.entities.filter(e=>e.kind===0xd29).length&&broken.state.view.character.tombs===0&&broken.arena.view.character.tombs===0);
+  game.check('treasure and jar rewards do not awaken bosses or count completion',broken.map.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind)).length===3&&broken.map.entities.filter(e=>e.kind===0xd29).length===layout.entities.filter(e=>e.kind===0xd29).length&&broken.state.diagnostic.character.tombs===0&&broken.arena.diagnostic.character.tombs===0);
   await game.act({keys:['Insert'],duration_ms:300});
-  const returned=await game.observe();game.check('ordinary escape keeps the same living character and earned XP without clear credit',returned.world==='Nexus'&&returned.lifecycle.alive&&returned.session.character===initial.state.view.session.character&&returned.character.experience===broken.state.view.character.experience&&returned.character.tombs===0);
+  const returned=await game.observe();game.check('ordinary escape keeps the same living character and earned XP without clear credit',returned.world==='Nexus'&&returned.lifecycle.alive&&returned.session.character===initial.state.view.session.character&&returned.character.experience===broken.state.view.character.experience&&(await game.inspect()).diagnostic.character.tombs===0);
 }

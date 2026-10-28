@@ -71,14 +71,14 @@ export async function run(game){
   for(let n=0;n<8;n++){await combat();if(!(await map()).entities.some(e=>e.kind===0xd29))break;}
   const awakened=await save('awakened'),bosses=awakened.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind));
   game.check('last real objective death replaces all three statues exactly once',!awakened.map.entities.some(e=>e.kind===0xd29)&&bosses.length===3&&new Set(bosses.map(e=>e.kind)).size===3&&statues.every(e=>!awakened.map.entities.some(x=>x.id===e.id)));
-  game.check('awakening does not grant completion credit',awakened.state.view.character.tombs===0);
+  game.check('awakening does not grant completion credit',awakened.state.diagnostic.character.tombs===0);
   const {worldSeed,...spec}=fixture;
   const late=await game.join({...spec,world:start.session.world,position:'spawn'});
   await api({op:'cheat',actor:late.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
   humans.push(late.actor);expiry.set(late.actor,(await game.observe()).game_ms+60000);
   await advance(1500,{name:'tomb-late-join-awakened',when:()=>true});
   const joined=await late.inspect();await writeFile(join(out,'late-join.json'),JSON.stringify(joined));
-  game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.diagnostic.entities.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.diagnostic.entities.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.view.character.tombs===0);
+  game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.diagnostic.entities.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.diagnostic.entities.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.diagnostic.character.tombs===0);
   const repeated=await save('after-late-join');game.check('late admission does not duplicate or replace awakened bosses',repeated.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3&&bosses.every(e=>repeated.map.entities.some(x=>x.id===e.id)));
   const nut=bosses.find(e=>e.kind===0xd26),phases=[];let artifact,modifier=0;
   for(let n=0;n<80;n++){
@@ -94,7 +94,7 @@ export async function run(game){
   await game.act({keys:[' '],duration_ms:200,target:{entity:artifact.id,camera_angle:-Math.PI/4,fire:false}},{name:'tomb-artifact-stasis',when:()=>true});
   const frozen=await save('artifact-stasis'),actual=frozen.state.diagnostic.entities.find(e=>e.id===artifact.id);
   game.check('native Orb Stasises a naturally spawned Tomb artifact without damage',actual?.statuses['22']&&actual.hp===artifact.hp);
-  game.check('artifact combat does not grant premature three-boss completion',frozen.state.view.character.tombs===0&&frozen.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3);
+  game.check('artifact combat does not grant premature three-boss completion',frozen.state.diagnostic.character.tombs===0&&frozen.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3);
   await game.act({keys:['Insert'],duration_ms:300});
-  const escaped=await game.observe();game.check('uncleared escape retains the same living character and zero completion',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===start.session.character&&escaped.character.tombs===0);
+  const escaped=await game.observe();game.check('uncleared escape retains the same living character and zero completion',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===start.session.character&&(await game.inspect()).diagnostic.character.tombs===0);
 }

@@ -48,7 +48,7 @@ export async function run(observer){
   await a.game.act({keys:[],duration_ms:2000},{name:'tomb-first-room-disabled',when:()=>true});
   const disabled=await save('both-disabled');
   observer.check('fresh uninterrupted pressure permanently disables all eight local traps',entity(disabled.a,a.room.id).stage===1&&a.traps.every(t=>!disabled.map.entities.some(e=>e.id===t.id)&&disabled.map.entities.some(e=>e.kind===0xd39&&e.pos.x===t.pos.x&&e.pos.y===t.pos.y)));
-  observer.check('trap activation does not awaken statues or grant clear credit',disabled.map.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind)).length===3&&disabled.arena.view.character.tombs===0&&disabled.a.view.character.tombs===0&&disabled.b.view.character.tombs===0);
+  observer.check('trap activation does not awaken statues or grant clear credit',disabled.map.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind)).length===3&&disabled.arena.diagnostic.character.tombs===0&&disabled.a.diagnostic.character.tombs===0&&disabled.b.diagnostic.character.tombs===0);
   await a.game.act({keys:['Insert'],duration_ms:300});
-  const escaped=await a.game.observe();observer.check('ordinary escape preserves the same living uncleared character',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===initial.a.view.session.character&&escaped.character.tombs===0);
+  const escaped=await a.game.observe();observer.check('ordinary escape preserves the same living uncleared character',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===initial.a.view.session.character&&(await a.game.inspect()).diagnostic.character.tombs===0);
 }

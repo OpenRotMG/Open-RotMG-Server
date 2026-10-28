@@ -63,8 +63,8 @@ export async function run(game){
       samples.push({target,observations});await writeFile(join(out,'encounters.json'),JSON.stringify(samples));
     }
     game.check('natural turret hits apply Slow, Paralyze and Armor Broken',[4,14,27].every(bit=>[...conditions].some(mask=>mask&(1<<(bit-1)))));
-    game.check('ordinary encounters never grant Tomb completion',(await game.observe()).character.tombs===0);
-    await act({keys:['Insert'],duration_ms:300});const escaped=await game.observe();game.check('ordinary escape preserves the same living character',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===initial.session.character&&escaped.character.tombs===0);
+    game.check('ordinary encounters never grant Tomb completion',(await game.inspect()).diagnostic.character.tombs===0);
+    await act({keys:['Insert'],duration_ms:300});const escaped=await game.observe();game.check('ordinary escape preserves the same living character',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===initial.session.character&&(await game.inspect()).diagnostic.character.tombs===0);
     await writeFile(join(out,'encounter-conditions.json'),JSON.stringify([...conditions]));
   }finally{connection.close();}
 }
