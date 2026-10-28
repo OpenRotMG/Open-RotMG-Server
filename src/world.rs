@@ -5967,6 +5967,7 @@ impl World {
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
+            // The comparator's 0.01 threshold tests integer damage, not an HP fraction: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
             0
         } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
@@ -6379,7 +6380,8 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
                 0x617 => 12.,
-                0x61a => 10.5,
+                // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
+                0x61a => 12.,
                 0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,

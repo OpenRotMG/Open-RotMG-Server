@@ -223,6 +223,54 @@ fn multihit_and_cover_flags_preserve_distinct_targets_and_once_only_hits() {
 }
 
 #[test]
+fn night_elf_selected_multihit_crosses_players_and_native_reports_commit_once() {
+    for (kind, damage, multi) in [
+        (0x64a, 36, false),
+        (0x64b, 40, false),
+        (0x64c, 40, true),
+        (0x64d, 52, true),
+        (0x64f, 60, false),
+        (0x650, 30, false),
+    ] {
+        let (mut w, first) = fixture(0x18, false);
+        let mut character = w.players[&first].character.clone();
+        character.account = 2;
+        character.id = 2;
+        let second = w.enter(character, None).unwrap();
+        for (id, x) in [(first, 10.), (second, 12.)] {
+            let p = w.players.get_mut(&id).unwrap();
+            p.pos = Pos { x, y: 8.5 };
+            p.controller = Controller::Qa;
+            p.lab_conditions = bit(condition::SICK);
+        }
+        let b = shot(&w, 999, kind, 0);
+        assert_eq!(
+            (b.damage, b.spec.multi_hit, b.spec.effects.is_empty()),
+            (damage, multi, true)
+        );
+        w.bullets.push(b.clone());
+        for _ in 0..30 {
+            w.step();
+        }
+        assert_eq!(w.players[&first].character.hp, 200 - damage);
+        assert_eq!(
+            w.players[&second].character.hp,
+            200 - if multi { damage } else { 0 }
+        );
+        for id in [first, second] {
+            let p = w.players.get_mut(&id).unwrap();
+            p.controller = Controller::Human;
+            p.character.hp = 200;
+            assert!(native_hits::expect_shoot_ack(p, vec![b.clone()], &w.clock));
+            w.acknowledge_shoot(id, 1500).unwrap();
+            w.native_player_hit(id, b.owner, b.id).unwrap();
+            w.native_player_hit(id, b.owner, b.id).unwrap();
+            assert_eq!(w.players[&id].character.hp, 200 - damage);
+        }
+    }
+}
+
+#[test]
 fn selected_rng_keeps_equal_bounds_and_half_open_damage_draws() {
     let (mut w, id) = fixture(0x18, false);
     let p = w.players.get_mut(&id).unwrap();
