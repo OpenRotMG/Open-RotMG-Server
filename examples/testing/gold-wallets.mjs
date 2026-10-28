@@ -56,7 +56,6 @@ print(json.dumps({'wallet':c.execute('SELECT credits,balance,earned FROM account
 `,out(),String(result.account)],{encoding:'utf8'}));
   try{
     const before=await game.inspect();
-    // Selected 123.5.1 keeps living Fame separate from the account wallet: https://github.com/OpenRotMG/Open-RotMG-Client/blob/39acbfbf3bf545c397d6ac94f0a9430d6d660ac2/client.swf
     game.check('prepared living Fame is not spendable account Fame',before.view.character.fame===18&&JSON.stringify(wallet().wallet)==='[175,0,0]');
     await game.act({keys:[],duration_ms:1500},{name:'wallet-rewarded',when:()=>true});
     const initial=wallet();
