@@ -22,9 +22,15 @@ export async function prepare(api){
   return {...spec,position:{x:root.pos.x-5,y:root.pos.y}};
 }
 export async function run(game){
-  const samples=[],shots=new Map();
+  const samples=[],shots=new Map();let serial=0,protectedUntil=0;
   const enemy=s=>s.diagnostic.entities.find(e=>e.id===root.id);
   async function act(input,capture){
+    const now=(await game.observe()).game_ms;
+    if(now>=protectedUntil-10000){
+      const path=output('protection.json');
+      await writeFile(path,JSON.stringify({id:'brain-protection-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+      execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);protectedUntil=now+60000;
+    }
     let pending,error;
     const record=s=>{samples.push(s);for(const p of s.view.projectiles.filter(p=>p.owner===root.id)){
       const born_ms=Math.round((s.view.time_ms-Math.hypot(p.position.x-p.start.x,p.position.y-p.start.y)/(p.speed/10)*1000)/50)*50;
@@ -37,9 +43,6 @@ export async function run(game){
   try{
     const arrival=await game.inspect();
     game.check('natural mountain Flying Brain admitted at selected 1000 HP',enemy(arrival)?.hp===1000&&arrival.view.session.world===1);
-    const path=output('protection.json');
-    await writeFile(path,JSON.stringify({id:'brain-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-    execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);
     await act({keys:[],duration_ms:1000},{name:'flying-brain-arrival',when:()=>true});
     await act({keys:[],duration_ms:3500},{name:'flying-brain-rings',when:()=>true});
     await act({keys:['d','w'],duration_ms:600});
