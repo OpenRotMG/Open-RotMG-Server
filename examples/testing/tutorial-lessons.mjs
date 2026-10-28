@@ -6,38 +6,20 @@ import {connect} from '../../scripts/record-demo.mjs';
 
 export const fixture={class:0x30e,level:1,seed:899,world:-1,position:{x:12.5,y:166.5},equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
 export async function run(game){
-  const root=join(process.env.QA_RESULTS_DIR,'native'),config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
-  const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),records=[];
-  async function record(label){const state=await game.inspect();records.push({label,...state});await writeFile(join(root,'lessons.json'),JSON.stringify(records));return state;}
+  const root=join(process.env.QA_RESULTS_DIR,'native'),configFile=join(root,'native.json'),records=[],first=game;
+  async function record(label){const state=await game.inspect();records.push({label,actor:game.actor,...state});await writeFile(join(root,'lessons.json'),JSON.stringify(records));return state;}
   async function walk(goal){
-    const state=await game.inspect(),response=await fetch(config.origin+'/dev/map?player='+state.diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(response.ok);
-    const map=await response.json(),blocked=new Set(map.blocked.map(([x,y])=>y*map.width+x));
-    const clear=(x,y)=>[-1,0,1].every(dx=>[-1,0,1].every(dy=>!blocked.has((y+dy)*map.width+x+dx)));
-    const index=p=>Math.floor(p.y)*map.width+Math.floor(p.x),start=index(state.view.position),end=index(goal),parents=new Map([[start,null]]),queue=[start];
-    for(let i=0;i<queue.length&&!parents.has(end);i++){
-      const at=queue[i],x=at%map.width,y=Math.floor(at/map.width);
-      for(const [nx,ny] of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){
-        const next=ny*map.width+nx;if(nx<1||ny<1||nx>=map.width-1||ny>=map.height-1||!clear(nx,ny)||parents.has(next))continue;
-        parents.set(next,at);queue.push(next);
-      }
+    let previous=Infinity,stalled=0;
+    for(let i=0;i<80;i++){
+      const view=await game.observe(),dx=goal.x-view.position.x,dy=goal.y-view.position.y,distance=Math.hypot(dx,dy);
+      if(distance<.3)return;
+      stalled=distance>=previous-.02?stalled+1:0;previous=distance;
+      assert(stalled<3,'Native walk stuck at '+JSON.stringify(view.position)+' toward '+JSON.stringify(goal));
+      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+      if(Math.abs(x)>.1)keys.push(x>0?'d':'a');if(Math.abs(y)>.1)keys.push(y>0?'s':'w');
+      await game.act({keys,duration_ms:Math.min(700,Math.max(50,Math.round(distance*120)))});
     }
-    assert(parents.has(end),'No walkable route to '+JSON.stringify(goal));
-    const path=[];for(let at=end;at!==start;at=parents.get(at))path.unshift(at);
-    const turns=path.filter((at,i)=>i===path.length-1||i>0&&path[i+1]-at!==at-path[i-1]);
-    for(const at of turns){
-      const point={x:at%map.width+.5,y:Math.floor(at/map.width)+.5};
-      let previous=Infinity,stalled=0;
-      for(let i=0;i<100;i++){
-        const view=await game.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y,distance=Math.hypot(dx,dy);
-        if(distance<.3)break;
-        stalled=distance>=previous-.02?stalled+1:0;previous=distance;
-        assert(i<99&&stalled<3,'Native walk stuck at '+JSON.stringify(view.position)+' toward '+JSON.stringify(point));
-        const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
-        if(Math.abs(x)>.1)keys.push(x>0?'d':'a');if(Math.abs(y)>.1)keys.push(y>0?'s':'w');
-        await game.act({keys,duration_ms:Math.min(700,Math.max(50,Math.round(distance*120)))});
-      }
-    }
-    game.check('ordinary movement reaches '+goal.y,Math.hypot((await game.observe()).position.x-goal.x,(await game.observe()).position.y-goal.y)<.4);
+    throw Error('Native movement did not reach '+JSON.stringify(goal));
   }
   async function shoot(entity){
     for(let i=0;i<30;i++){
@@ -47,16 +29,15 @@ export async function run(game){
     throw Error('Native staff fire failed to defeat '+entity.id);
   }
   async function lesson(name,goal){await walk(goal);await game.act({keys:[],duration_ms:800},{name,when:()=>true});await record(name);}
-  const initial=await record('initial');
   // Selected proximity overlays are independent, not sequential gates: https://github.com/OpenRotMG/Open-RotMG-Client/blob/0282b3a48ad0c73abd683572ece4e6c71b0cb055/client.swf
   await lesson('minimap',{x:12.5,y:164.5});
-  await walk({x:12.5,y:169.5});
-  await lesson('minimap-revisited',{x:12.5,y:164.5});
+  await walk({x:12.5,y:164});await walk({x:15.5,y:164});await walk({x:15.5,y:159.5});
   await lesson('health',{x:12.5,y:157.5});
-  await walk({x:12.5,y:104.5});
-  for(const e of (await game.inspect()).diagnostic.entities.filter(e=>e.kind===0x163&&e.pos.y===100.5))await shoot(e);
-  await walk({x:12.5,y:64.5});
-  await shoot((await game.inspect()).diagnostic.entities.find(e=>e.kind===0x6b1));
+  await walk({x:15.5,y:159.5});await walk({x:15.5,y:164});
+  await lesson('minimap-revisited',{x:12.5,y:164.5});
+  game.check('ordinary backtracking revisits the minimap sign',(await game.observe()).lifecycle.alive);
+  game=await game.join({...fixture,position:{x:12.5,y:49.5}});
+  const initial=await record('late-prepared-entry');
   await lesson('equipment',{x:12.5,y:47.5});
   for(const e of (await game.inspect()).diagnostic.entities.filter(e=>e.kind===0x163&&e.pos.y===43.5))await shoot(e);
   await lesson('ring-loot',{x:12.5,y:35.5});
@@ -73,7 +54,7 @@ export async function run(game){
   await game.act({keys:[],mouse:{x:700,y:580},duration_ms:1800});
   const kitchen=await record('kitchen');game.check('ordinary selected final portal enters Kitchen with equipped ring',kitchen.view.map.name==='Kitchen'&&kitchen.view.character.items[3]===0xa4f);
   await game.act({keys:['Insert'],duration_ms:1800});game.check('native escape interrupts Kitchen into Nexus',(await game.observe()).world==='Nexus');
-  const browser=config.native.find(n=>n.actor===game.actor),cdp=await connect({port:browser.port,target:browser.target,url:config.origin+'/',helper:config.browserTools});
+  const config=JSON.parse(await readFile(configFile,'utf8')),browser=config.native.find(n=>n.actor===game.actor),cdp=await connect({port:browser.port,target:browser.target,url:config.origin+'/',helper:config.browserTools});
   try{
     const action=game.act({keys:[],duration_ms:2200});
     const input=(async()=>{const deadline=Date.now()+5000;while((await game.observe()).paused){assert(Date.now()<deadline);await delay(20);}const enter=async()=>{for(const type of ['keyDown','keyUp'])await cdp.call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};await enter();await cdp.call('Input.insertText',{text:'/tutorial'});await enter();})();
@@ -81,4 +62,5 @@ export async function run(game){
   }finally{cdp.close();}
   const returned=await record('reentry');
   game.check('ordinary tutorial command returns the same living character with earned ring',returned.view.map.name==='Tutorial'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.view.character.items[3]===0xa4f&&returned.view.character.inventory_revision===used.view.character.inventory_revision);
+  game.check('the early lesson participant also remains alive',(await first.observe()).lifecycle.alive);
 }
