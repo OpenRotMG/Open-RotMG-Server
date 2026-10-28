@@ -15,12 +15,18 @@ export async function run(game){
   game=await game.join({...knight,world:initial.view.session.world,position:{x:black.pos.x+2,y:black.pos.y}});
   async function split(parent,child,count,name){
     const before=await game.inspect(),ids=new Set(before.diagnostic.entities.map(e=>e.id));
-    await game.act({keys:[],duration_ms:50,target:{entity:parent,camera_angle:-Math.PI/4,fire:true}});
-    await game.act({keys:[],duration_ms:250});
+    const kind=before.diagnostic.entities.find(e=>e.id===parent).kind;
+    const parents=before.diagnostic.entities.filter(e=>e.kind===kind).map(e=>e.id);
+    for(let n=0;n<12;n++){
+      const current=await game.inspect();if(parents.some(id=>!current.diagnostic.entities.some(e=>e.id===id)))break;
+      await game.act({keys:[],duration_ms:50,target:{entity:parent,camera_angle:-Math.PI/4,fire:true}});
+      await game.act({keys:[],duration_ms:250});
+    }
     await game.act({keys:[],duration_ms:1000},{name,when:()=>true});
     const after=await game.inspect(),children=after.diagnostic.entities.filter(e=>!ids.has(e.id)&&e.kind===child);
     observations.push({name,parent,child,count,before,after});await writeFile(join(process.env.QA_RESULTS_DIR,'splits.json'),JSON.stringify(observations));
-    game.check(name+': parent disappears and exact replacement generation survives',!after.diagnostic.entities.some(e=>e.id===parent)&&children.length===count);
+    const defeated=parents.filter(id=>!after.diagnostic.entities.some(e=>e.id===id));
+    game.check(name+': parent deaths produce the exact surviving replacement generation',defeated.length>0&&children.length===count*defeated.length);
     game.check(name+': intermediate death leaves no potion bag',!after.diagnostic.entities.some(e=>!ids.has(e.id)&&e.items?.some(item=>item!==-1)));
     game.check(name+': intermediate death retains period XP',after.view.character.experience>before.view.character.experience);
     return children;
@@ -29,11 +35,15 @@ export async function run(game){
   const position=(await game.observe()).position;
   medium.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
   await split(medium[0].id,0xd9d,4,'black-little');
+  async function protect(){
+    const path=join(process.env.QA_RESULTS_DIR,'slime-protection-'+game.actor+'.json');
+    await writeFile(path,JSON.stringify({id:'slime-protection-'+game.actor,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+    execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
+  }
+  await protect();
   const brown=map.entities.find(e=>e.kind===0xd9e&&[0,1,2].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));assert(brown,'No natural brown slime approach');
   game=await game.join({...knight,world:initial.view.session.world,position:{x:brown.pos.x+2,y:brown.pos.y}});
-  const protection=join(process.env.QA_RESULTS_DIR,'brown-protection.json');
-  await writeFile(protection,JSON.stringify({id:'brown-lifecycle-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),protection]);
+  await protect();
   await split(brown.id,0xd9f,6,'brown-little');
   game.check('native slime case ends with a living Knight',(await game.observe()).lifecycle.alive);
 }

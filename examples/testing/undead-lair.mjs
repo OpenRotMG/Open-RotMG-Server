@@ -3,6 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 
+process.env.RUST_LOG='info,openrotmg::world=debug';
 export const fixture={class:0x31e,level:20,seed:858,world:1,position:'spawn',equipment:[0xa84,0xb22,0xafc,0xacd],backpack:[0x701,...Array(7).fill(-1)],stats:[770,252,50,40,50,50,75,50]};
 export async function run(game){
   const out=process.env.QA_RESULTS_DIR,root=join(out,'native'),distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
@@ -65,13 +66,16 @@ export async function run(game){
     }
   }
   await sample({keys:[],duration_ms:900},{name:'lair-entry',when:()=>true});
+  async function emissions(id){
+    return (await readFile(join(root,'server.log'),'utf8')).split('\n').filter(line=>line.startsWith('{')).map(line=>JSON.parse(line)).filter(e=>e.fields?.message==='Lair trap detonated'&&e.fields.entity===id);
+  }
   for(const kind of [0xda2,0xda3]){
     const v=await game.observe(),trap=map.entities.filter(e=>e.kind===kind).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];assert(trap,'Natural lair trap missing');
     await walk(trap.pos,false);await sample({keys:[],duration_ms:1100},{name:'lair-trap-'+kind,when:()=>true});
-    const fired=[...shots.values()].filter(p=>p.owner===trap.id).length;
-    game.check(kind+': ordinary movement triggers a natural single-use trap',fired>0&&!(await game.inspect()).diagnostic.entities.some(e=>e.id===trap.id));
+    const fired=await emissions(trap.id);
+    game.check(kind+': ordinary movement triggers one logged volley and removal',fired.length===1&&fired[0].fields.shots>0&&!(await game.inspect()).diagnostic.entities.some(e=>e.id===trap.id));
     await sample({keys:[],duration_ms:1100});
-    game.check(kind+': removed trap never repeats its volley',[...shots.values()].filter(p=>p.owner===trap.id).length===fired);
+    game.check(kind+': removed trap never repeats its volley',(await emissions(trap.id)).length===1);
   }
   const boss=map.entities.find(e=>e.kind===0xd90);assert(boss,'Natural Septavius missing');
   await walk({x:boss.pos.x-6,y:boss.pos.y});
