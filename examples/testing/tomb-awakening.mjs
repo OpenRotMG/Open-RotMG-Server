@@ -91,6 +91,8 @@ export async function run(game){
     await game.act({keys:[],duration_ms:Math.min(1500,protection-now),target:{entity:nut.id,camera_angle:-Math.PI/4,fire:true}});
   }
   await writeFile(join(out,'nut-phases.json'),JSON.stringify(phases));assert(artifact,'Native combat did not reach Nut artifacts within the bound');
+  await advance(1700);
+  const drained=await game.inspect();artifact=drained.diagnostic.entities.filter(e=>e.kind>=0xd1c&&e.kind<=0xd1e).sort((a,b)=>Math.hypot(a.pos.x-drained.view.position.x,a.pos.y-drained.view.position.y)-Math.hypot(b.pos.x-drained.view.position.x,b.pos.y-drained.view.position.y))[0];assert(artifact,'A living artifact is required after friendly shots expire');
   await game.act({keys:[' '],duration_ms:200,target:{entity:artifact.id,camera_angle:-Math.PI/4,fire:false}},{name:'tomb-artifact-stasis',when:()=>true});
   const frozen=await save('artifact-stasis'),actual=frozen.state.diagnostic.entities.find(e=>e.id===artifact.id);
   game.check('native Orb Stasises a naturally spawned Tomb artifact without damage',actual?.statuses['22']&&actual.hp===artifact.hp);
