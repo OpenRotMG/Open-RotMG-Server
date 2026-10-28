@@ -10,7 +10,7 @@ export async function run(game){
   const token=(await readFile(output('native/state/control.token'),'utf8')).trim();
   async function save(name){const s=await game.inspect();samples.push({name,state:s});await writeFile(output('journey.json'),JSON.stringify(samples));return s;}
   async function protect(){
-    const response=await fetch(report.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}})});
+    const response=await fetch(report.origin+'/dev/testing',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}})});
     const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));
   }
   const entities=s=>s.diagnostic.entities;
@@ -22,8 +22,10 @@ export async function run(game){
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
       if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
+      const duration_ms=Math.max(50,Math.min(350,Math.round(d/(4+5.6*v.character.stats[4]/75)*1000)));
+      if(duration_ms<150)keys.splice(0,keys.length,Math.abs(x)>Math.abs(y)?(x>0?'d':'a'):(y>0?'s':'w'));
       const enemy=entities(s).filter(e=>e.kind>=0x21c&&e.kind<=0x220&&distance(e.pos,v.position)<7).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position))[0];
-      await game.act({keys,duration_ms:Math.max(50,Math.min(350,Math.round(d/(4+5.6*v.character.stats[4]/75)*1000))),...(fire&&enemy?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
+      await game.act({keys,duration_ms,...(fire&&enemy&&duration_ms>=150?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
     }
     throw Error('Native walk did not reach '+JSON.stringify(point));
   }
@@ -42,7 +44,7 @@ export async function run(game){
   const beforeTouch=await save('before-touch'),egg=entities(beforeTouch).find(e=>e.kind===0x21b&&distance(e.pos,{x:12.5,y:54.5})<.1);
   assert(egg,'First natural live sac was not preserved for touch test');
   const ids=new Set(entities(beforeTouch).map(e=>e.id));
-  await walk(egg.pos,false,.2);
+  await walk(egg.pos,false,.4);
   const touched=await save('hatched-by-touch'),children=entities(touched).filter(e=>e.kind===0x21c&&!ids.has(e.id));
   game.check('touching natural live sac removes it and hatches two to seven spiders without firing',!entities(touched).some(e=>e.id===egg.id)&&children.length>=2&&children.length<=7&&touched.diagnostic.character.shots===beforeTouch.diagnostic.character.shots);
   await game.act({keys:[],duration_ms:500},{name:'spider-hatchlings',when:()=>true});
@@ -70,7 +72,7 @@ export async function run(game){
   await walk({x:72.5,y:18.5});
   await game.act({keys:[],duration_ms:1500},{name:'arachna-slow',when:()=>true});
   const slowed=await save('web-contact');
-  game.check('native web contact applies Slowed through disclosed Invulnerable protection',slowed.view.character.conditions&(1<<3));
+  game.check('native web contact applies Slowed',slowed.view.character.conditions&(1<<3));
   for(let n=0;n<100;n++){
     const s=await game.inspect(),e=entities(s).find(e=>e.id===boss.id);if(!e)break;
     if(distance(s.view.position,e.pos)>6)await walk(e.pos,false,4);
