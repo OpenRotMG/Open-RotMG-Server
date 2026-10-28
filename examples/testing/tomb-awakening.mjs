@@ -67,7 +67,6 @@ export async function run(game){
   game.check('all but the last objective can die without awakening any statue',gated.map.entities.filter(e=>e.kind===0xd29).length===1&&gated.map.entities.some(e=>e.id===final.id)&&statues.every(e=>gated.map.entities.some(x=>x.id===e.id))&&!gated.map.entities.some(e=>[0xd26,0xd27,0xd28].includes(e.kind)));
   game.check('optional treasure remains outside the objective gate',gated.map.entities.some(e=>e.kind===0xd2c));
   await squad(final);
-  // The September 2012 guide gates awakening on sarcophagi, not optional treasure: https://geegamers.blogspot.com/2012/09/tomb-of-ancients-rotmg-guide-english.html
   for(let n=0;n<8;n++){await combat();if(!(await map()).entities.some(e=>e.kind===0xd29))break;}
   const awakened=await save('awakened'),bosses=awakened.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind));
   game.check('last real objective death replaces all three statues exactly once',!awakened.map.entities.some(e=>e.kind===0xd29)&&bosses.length===3&&new Set(bosses.map(e=>e.kind)).size===3&&statues.every(e=>!awakened.map.entities.some(x=>x.id===e.id)));
