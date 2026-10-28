@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x30e,level:20,seed:803,world:1,equipment:[0xa9f,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const spec={class:0x30e,level:20,seed:803,world:1,equipment:[0xa9f,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
 let sludge;
 export async function prepare(api){
@@ -28,9 +28,17 @@ export async function run(game){
   await game.act({keys:[],duration_ms:500},{name:'sludge-arrival',when:()=>true});
   const active=await save('activated');
   game.check('ordinary proximity activates the natural Sludge',parent(active)?.activated!==null);
-  const trace=[];
-  for(let n=0;n<24;n++){await game.act({keys:[],duration_ms:250});trace.push(await game.inspect());}
-  await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify(trace));
+  const path=join(process.env.QA_RESULTS_DIR,'protection.json'),trace=[];
+  let protectedAfterHit=false;
+  for(let n=0;n<24;n++){
+    await game.act({keys:[],duration_ms:250});const s=await game.inspect();trace.push(s);
+    await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify(trace));
+    if(!protectedAfterHit&&s.view.character.hp<hp&&(s.view.character.conditions&(1<<4))!==0){
+      await writeFile(path,JSON.stringify({id:'sludge-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+      execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);protectedAfterHit=true;
+    }
+  }
+  assert(protectedAfterHit,'No unprotected damage and Slowed observed before protection');
   game.check('selected parent spinner speed and lifetime reach the native session',trace.some(s=>s.view.projectiles.some(p=>p.owner===sludge.id&&p.speed===42&&p.lifetime_ms===3200)));
   game.check('native enemy attacks damage the prepared Wizard',trace.some(s=>s.view.character.hp<hp));
   game.check('native spinner applies selected Slowed status',trace.some(s=>(s.view.character.conditions&(1<<4))!==0));
@@ -40,9 +48,6 @@ export async function run(game){
   game.check('Sludget projectiles reach the native session',trace.some(s=>s.view.projectiles.some(p=>children(s).some(e=>e.id===p.owner)&&p.speed===70&&p.lifetime_ms===510)));
   game.check('activated parent wanders',trace.some(s=>parent(s)&&Math.hypot(parent(s).pos.x-sludge.pos.x,parent(s).pos.y-sludge.pos.y)>.1));
   game.check('Sludgets move after landing',trace.some(s=>children(s).some(e=>children(wave).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2))));
-  const path=join(process.env.QA_RESULTS_DIR,'protection.json');
-  await writeFile(path,JSON.stringify({id:'sludge-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
   await game.act({keys:[],duration_ms:500},{name:'sludge-wave',when:()=>true});
   const old=new Set(children(wave).map(e=>e.id));
   let replacement;
@@ -63,6 +68,7 @@ export async function run(game){
   }
   await defeat(children(replacement)[0].id);
   await defeat(sludge.id);
+  await game.act({keys:[],duration_ms:1500});
   const dead=await save('defeated'),survivors=new Set(children(dead).map(e=>e.id));
   await game.act({keys:[],duration_ms:10000});
   await game.act({keys:[],duration_ms:1500},{name:'sludge-defeated',when:()=>true});
