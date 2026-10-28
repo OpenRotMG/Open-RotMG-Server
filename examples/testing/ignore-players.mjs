@@ -61,6 +61,11 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
     game.check('normal reconnect retains account ignore row',durable().lists.some(r=>r[0]===owner&&r[2]===target)&&(await game.observe()).world==='Nexus'&&(await peer.observe()).world==='Nexus');
     await chat(peer,'Hidden after reconnect');await capture('ignore-reconnected');
     await chat(game,'/unignore '+name);await chat(peer,'After unignore visible');await chat(peer,'/yell After unignore yell');await chat(peer,'/g After unignore guild');await capture('ignore-after');
+    for(const [add,label] of [[true,'ignore'],[false,'unignore']]){
+      await game.act({keys:[],mouse:{x:650,y:518},duration_ms:300});await capture('ignore-menu-'+label);
+      await game.act({keys:[],mouse:{x:550,y:495},duration_ms:500});
+      game.check('native player menu persists '+label,JSON.stringify(durable().lists)===JSON.stringify(add?[[owner,1,target]]:[]));
+    }
     const final=durable();game.check('unignore deletes durable relation without corrupting account state',final.lists.length===0&&final.integrity==='ok'&&final.foreign_keys.length===0);
     const events=(await readFile(join(out,'server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
     const deliveries=events.filter(e=>e.message==='public chat delivered').map(e=>[e.account,e.recipients]);
