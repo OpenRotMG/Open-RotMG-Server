@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 process.env.RUST_LOG='info,openrotmg::world::named_births=debug,openrotmg::world::native_hits=debug';
 const out=process.env.QA_RESULTS_DIR,bit=n=>1<<(n-1);
-const spec={class:0x31d,level:20,seed:825,world:1,equipment:[0xb40,-1,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
+const spec={class:0x31d,level:20,seed:825,world:1,equipment:[0xb40,-1,0xafc,0xacd],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 let placement;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1});
@@ -88,6 +88,8 @@ export async function run(game){
   }
   state=await game.inspect();await approach(mystic,prisoner.id,5);await mystic.act({keys:[' '],duration_ms:150,target:{entity:prisoner.id,camera_angle:-Math.PI/4,fire:false}});
   state=await save('boss-immune');game.check('loaded Prisoner remains Stasis immune',!(flags(state,prisoner.id)&bit(22)));
+  const caster=(await mystic.observe()).session.character;await mystic.act({keys:['Insert'],duration_ms:250});
+  game.check('caster escapes normally after the Stasis checks',(await mystic.observe()).world==='Nexus'&&(await mystic.observe()).session.character===caster);
   for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==5;n++)await idle(500);
   state=await save('whoa');game.check('timed cycle reaches Whoa phase',entity(state,prisoner.id).stage===5);
   await approach(game,prisoner.id,1);
@@ -99,8 +101,11 @@ export async function run(game){
   for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==7;n++)await idle(500);
   await idle(3200);state=await save('cycle');game.check('full cycle returns to Daisy and old Clones decay',entity(state,prisoner.id).stage===1&&!clones.some(c=>entity(state,c.id)));
   const xp=state.view.character.experience;
-  await cheat(game,{kind:'stat_modifier',index:5,amount:100,duration_ms:60000});
-  for(let n=0;n<100&&entity(await game.inspect(),prisoner.id);n++)await fire(prisoner.id,500);
+  let rateUntil=0;
+  for(let n=0;n<100&&entity(await game.inspect(),prisoner.id);n++){
+    const now=(await game.observe()).game_ms;if(now>=rateUntil){await cheat(game,{kind:'stat_modifier',index:5,amount:100,duration_ms:60000});rateUntil=now+60000;}
+    await fire(prisoner.id,500);
+  }
   state=await save('defeated');game.check('native combat defeats Prisoner and grants eligible XP',!entity(state,prisoner.id)&&state.view.character.experience>xp);
   await idle(2000);state=await save('cleanup');game.check('defeat removes owned Steeds without respawning Crystal',!kinds(state,0x943).some(e=>e.quest===prisoner.quest)&&!kinds(state,0x935).length);
   const bag=state.diagnostic.entities.find(e=>e.items?.some(i=>i!==-1)&&e.extra_stats.some(([s,o])=>s===54&&o===state.view.session.account));assert(bag,'Observed private reward required');
@@ -108,7 +113,7 @@ export async function run(game){
   const before=await game.observe(),slot=bag.items.findIndex(i=>i!==-1),item=bag.items[slot];
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot%4*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}}});state=await save('picked');
   game.check('native pickup commits private reward once',state.view.character.items[4]===item&&state.view.character.inventory_revision===before.character.inventory_revision+1&&entity(state,bag.id).items[slot]===-1);
-  game.check('non-damaging Mystic cannot see the Warrior private reward',!(await mystic.inspect()).diagnostic.entities.some(e=>e.id===bag.id));
+  const safe=await mystic.observe();game.check('escaped caster stays alive without acquiring a reward',safe.world==='Nexus'&&safe.lifecycle.alive&&safe.session.character===caster&&safe.character.items.slice(4).every(i=>i===-1));
   const earned=state.view.character.experience;await idle(1000);game.check('Prisoner defeat XP is once only',(await game.observe()).character.experience===earned);
   await game.act({keys:['Insert'],duration_ms:250});const retained=await game.observe();game.check('Nexus reconnect retains living character and reward',retained.world==='Nexus'&&retained.session.character===state.view.session.character&&retained.character.items[4]===item&&retained.lifecycle.alive);
 }
