@@ -73,9 +73,13 @@ export async function run(game){
   if(index>0){
     const sequence=[{actor:game.actor,input:{keys:[],duration_ms:2000}},{actor:game.actor,input:{keys:[' '],duration_ms:250}}];
     for(const actor of [game,partner].filter(Boolean))if(actor!==game)sequence.push({actor:actor.actor,input:{keys:[' '],duration_ms:250}});
-    const burst=[0,700,2500,4000][index];
-    for(let ms=0;ms<burst;ms+=250){const input={keys:[],duration_ms:Math.min(250,burst-ms),target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}};sequence.push(partner?[{actor:game.actor,input},{actor:partner.actor,input}]:{actor:game.actor,input});}
     await game.act(sequence);
+    for(let ms=0;ms<[0,700,4500,5500][index];ms+=250){
+      if(entity(await game.inspect(),root.entity)?.stage>=3)break;
+      for(const actor of [game,partner].filter(Boolean))await approach(actor,root.entity,2.5);
+      const input={keys:[],duration_ms:250,target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}};
+      await game.act(partner?[[{actor:game.actor,input},{actor:partner.actor,input}]]:input);
+    }
   }
   for(let n=0;n<10&&entity(await game.inspect(),root.entity)?.stage<3;n++)await idle(1000);
   state=await save('selected');
