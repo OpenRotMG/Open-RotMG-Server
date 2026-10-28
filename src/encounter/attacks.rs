@@ -397,7 +397,7 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
                 })
                 .collect::<Vec<_>>();
             if kind == 0x61a {
-                attacks.push(fan(3, 1, 0., 1000, 12.));
+                attacks.push(fan(3, 1, 0., 1000, 10.));
             }
             attacks
         }

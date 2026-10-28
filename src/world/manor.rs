@@ -398,3 +398,119 @@ impl World {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arena() -> (World, i32) {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let map = manor::generate(&content, 12351).unwrap();
+        let mut world = World::new(content, Arc::new(map)).unwrap();
+        world.name = "Manor of the Immortals".into();
+        let boss = world.actors().find(|e| e.kind == BOSS).unwrap().id;
+        (world, boss)
+    }
+
+    fn cohort(world: &World, boss: i32) -> BTreeSet<i32> {
+        let roots: BTreeSet<_> = world
+            .actors()
+            .filter(|e| e.parent == Some(boss) && matches!(e.kind, SWARM | DECOY))
+            .map(|e| e.id)
+            .collect();
+        world
+            .actors()
+            .filter(|e| roots.contains(&e.id) || e.parent.is_some_and(|id| roots.contains(&id)))
+            .map(|e| e.id)
+            .collect()
+    }
+
+    #[test]
+    fn ruthven_return_clears_only_his_bats_once_per_cycle() {
+        let (mut world, boss) = arena();
+        let home = world.entities[&boss].home;
+        let other = world.spawn_entity(BOSS, home, vec![]).unwrap();
+        world.manor_mechanics(other, None, 16750).unwrap();
+        let foreign = cohort(&world, other);
+        world.entities.get_mut(&boss).unwrap().hp = 14000;
+        world
+            .entities
+            .get_mut(&boss)
+            .unwrap()
+            .damage
+            .insert(123, 1000);
+        for cycle in 0..2 {
+            let start = cycle * 21750 + 16750;
+            world.now = start;
+            let coffin = world
+                .manor_child(boss, CREATURE, home, Some(20000))
+                .unwrap();
+            world.manor_mechanics(boss, None, start).unwrap();
+            let bats = cohort(&world, boss);
+            assert_eq!(bats.len(), 49);
+            assert!(
+                bats.iter()
+                    .all(|id| world.content.objects[&world.entities[id].kind].xp_multiplier == 0.)
+            );
+            world.manor_mechanics(boss, None, start + 50).unwrap();
+            assert_eq!(cohort(&world, boss), bats);
+            world.now = start + 5000;
+            world.manor_mechanics(boss, None, start + 5000).unwrap();
+            assert!(cohort(&world, boss).is_empty());
+            assert!(bats.iter().all(|id| !world.entities.contains_key(id)));
+            assert_eq!(cohort(&world, other), foreign);
+            assert!(world.entities.contains_key(&coffin));
+            assert_eq!(world.entities[&boss].hp, 14000);
+            assert_eq!(world.entities[&boss].damage[&123], 1000);
+        }
+    }
+
+    #[test]
+    fn ruthven_death_cleans_descendants_and_cancels_only_his_pending_coffins() {
+        let (mut world, boss) = arena();
+        let home = world.entities[&boss].home;
+        let other = world.spawn_entity(BOSS, home, vec![]).unwrap();
+        world.manor_mechanics(boss, None, 16750).unwrap();
+        let mut owned = cohort(&world, boss);
+        let coffin = world.manor_child(boss, CREATURE, home, None).unwrap();
+        let defeated = world.remove_entity(coffin);
+        world.manor_death(&defeated).unwrap();
+        let brood: Vec<_> = world
+            .actors()
+            .filter(|e| e.parent == Some(boss) && e.kind == FERATU)
+            .map(|e| e.id)
+            .collect();
+        assert!((1..=4).contains(&brood.len()));
+        owned.extend(brood);
+        owned.insert(world.manor_child(boss, CREATURE, home, None).unwrap());
+        let foreign = world.manor_child(other, CREATURE, home, None).unwrap();
+        world.manor_toss(boss, CREATURE, home, 20000).unwrap();
+        world.manor_toss(other, CREATURE, home, 20000).unwrap();
+        let defeated = world.remove_entity(boss);
+        world.manor_death(&defeated).unwrap();
+        assert!(owned.iter().all(|id| !world.entities.contains_key(id)));
+        assert!(world.entities.contains_key(&foreign));
+        world.now = 1499;
+        world.manor_birth_step();
+        assert_eq!(world.manor_births.len(), 2);
+        world.now = 1500;
+        world.manor_birth_step();
+        assert!(world.manor_births.is_empty());
+        assert!(!world.actors().any(|e| e.parent == Some(boss)));
+        assert_eq!(
+            world
+                .actors()
+                .filter(|e| e.parent == Some(other) && e.kind == CREATURE)
+                .count(),
+            2
+        );
+        world.manor_birth_step();
+        assert_eq!(
+            world
+                .actors()
+                .filter(|e| e.parent == Some(other) && e.kind == CREATURE)
+                .count(),
+            2
+        );
+    }
+}
