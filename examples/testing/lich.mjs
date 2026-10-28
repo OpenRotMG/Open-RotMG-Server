@@ -15,7 +15,7 @@ export async function prepare(api){
   const roots=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x91b&&f.layout===world.realm_layout);
   assert(roots.length>=4,'Four ordinarily placed Liches required');root=roots[index];
   await writeFile(join(out,'placement.json'),JSON.stringify({world,roots,branch}));
-  return {...spec,...(index>=2?{equipment:[0xb0b,0xb29,0xa7b,0xacc],backpack:[0xb10,-1,-1,-1,-1,-1,-1,-1]}:{}),position:{x:root.x,y:root.y}};
+  return {...spec,...(index>=2?{class:0x307,stats:[700,252,75,25,50,50,40,50],equipment:[0xb02,0xb28,-1,0xacc],backpack:[0xb10,-1,-1,-1,-1,-1,-1,-1]}:{}),position:{x:root.x,y:root.y}};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -57,7 +57,7 @@ export async function run(game){
   game.check('ordinary movement works at the natural ruin',Math.hypot((await game.observe()).position.x-initial.view.position.x,(await game.observe()).position.y-initial.view.position.y)>.3);
   await approach(game,initial.view.position,.3);
   for(let n=0;n<index-1;n++){
-    const partner=await game.join({...spec,seed:794+n,class:n===1?0x31f:spec.class,stats:n===1?[770,252,50,25,50,50,40,75]:spec.stats,position:initial.view.position,equipment:[0xb0b,n===1?0xb26:0xb29,0xa7b,0xacc],backpack:[0xb10,-1,-1,-1,-1,-1,-1,-1]});
+    const partner=await game.join({...spec,seed:794+n,class:n===1?0x31f:spec.class,stats:n===1?[770,252,50,25,50,50,40,75]:spec.stats,position:initial.view.position,equipment:[0xb0b,n===1?0xb26:0xb29,0xa7b,0xacc]});
     partners.push(partner);await protect(partner);
   }
   if(index>0)for(const actor of [game,...partners])await cheat(actor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
@@ -67,14 +67,13 @@ export async function run(game){
   if(index>0){
     const target={entity:root.entity,camera_angle:-Math.PI/4,fire:true};
     const sequence=index===1?[{actor:game.actor,input:{keys:[],duration_ms:2000}}]:[];
-    sequence.push([game,...partners].map(actor=>({actor:actor.actor,input:{keys:index>=2?['1',' ']:[' '],duration_ms:index>=2?1000:250,target}})));
-    const interval=index>=2?1000:250;
-    for(let ms=0;ms<[0,700,4000,5000][index];ms+=interval){
-      const input={keys:[],duration_ms:Math.min(interval,[0,700,4000,5000][index]-ms),target};
-      sequence.push([game,...partners].map(actor=>({actor:actor.actor,input})));
+    sequence.push([game,...partners].map(actor=>({actor:actor.actor,input:{keys:index>=2?(actor===game?['1']:[' ']):[' '],duration_ms:index>=2?1000:250,target}})));
+    const interval=index>=2?1000:250,burst=[0,700,3000,2000][index];
+    for(let ms=0;ms<burst;ms+=interval){
+      sequence.push([game,...partners].map(actor=>({actor:actor.actor,input:{keys:index>=2&&actor===game?[' ']:[],duration_ms:Math.min(interval,burst-ms),target}})));
     }
     await game.act(sequence);
-    if(index>=2)game.check('native Dexterity effusion supplies the damage-evaluation fixture',(await game.observe()).character.stats.dexterity===88);
+    if(index>=2)game.check('one native Dexterity effusion supplies the evaluation fixture',(await game.observe()).character.stats.dexterity===93);
   }
   for(let n=0;n<10&&entity(await game.inspect(),root.entity)?.stage<3;n++)await idle(1000);
   state=await save('selected');
@@ -85,15 +84,29 @@ export async function run(game){
     game.check('owned bearer first wave matches branch',[2,3,5][index-1]===family(state).filter(e=>e.kind===0x91d).length);
     await idle(1000);state=await save('healed');
     game.check('living owned bearers restore their damaged Lich',entity(state,root.entity).hp===300000&&Object.values(entity(state,root.entity).damage).reduce((a,b)=>a+b,0)>4500);
-    if(index===1)await idle(Math.max(0,selected.activated+15000-(await game.observe()).game_ms));else await idle(5000);
-    state=await save('spirit-shield');const spirit=family(state).find(e=>e.kind===0x91e);assert(spirit,'Owned Haunted Spirit required');
-    game.check('summoned Spirit starts invulnerable',!!(spirit.condition&(1<<24)));
-    await idle(Math.max(0,spirit.activated+7500-(await game.observe()).game_ms));state=await save('spirit-vulnerable');
-    game.check('same Spirit becomes vulnerable during its attack window',!(entity(state,spirit.id).condition&(1<<24)));
+    if(index===1){
+      await idle(Math.max(0,selected.activated+15000-(await game.observe()).game_ms));
+      state=await save('spirit-shield');const spirit=family(state).find(e=>e.kind===0x91e);assert(spirit,'Owned Haunted Spirit required');
+      game.check('summoned Spirit starts invulnerable',!!(spirit.condition&(1<<24)));
+      await idle(Math.max(0,spirit.activated+7500-(await game.observe()).game_ms));state=await save('spirit-vulnerable');
+      game.check('same Spirit becomes vulnerable during its attack window',!(entity(state,spirit.id).condition&(1<<24)));
+    }
   }
   for(let n=0;n<9&&entity(await game.inspect(),root.entity);n++)await idle(5000);
   state=await save('actual');const actual=family(state).find(e=>e.kind===0x91c);assert(actual,'Actual Lich required');
   game.check('transformation preserves encounter ownership without XP',!entity(state,root.entity)&&actual.quest===root.entity&&state.view.character.experience===xp);
+  if(index>=2){
+    const births=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='bounded named quest followers spawned'&&f.quest===root.entity);
+    game.check('both owned Bearer waves are admitted',births.filter(f=>f.kind===0x91d).reduce((n,f)=>n+f.count,0)===(index===2?6:8));
+    game.check('owned Spirits respect the encounter live cap',family(state).filter(e=>e.kind===0x91e).length>0&&family(state).filter(e=>e.kind===0x91e).length<=(index===2?2:5));
+    await game.act({keys:[],duration_ms:750},{name:branch+'-actual',when:view=>view.nearby.some(e=>e.kind===0x91c)});
+    const bearer=family(await game.inspect()).find(e=>e.kind===0x91d);assert(bearer);
+    await fire(game,bearer.id,1000);state=await save('bearer-damaged');
+    game.check('ordinary native fire damages an owned bearer',entity(state,bearer.id)?.hp<6000);
+    game.check('native group remains alive after branch verification',(await Promise.all([game,...partners].map(actor=>actor.observe()))).every(view=>view.lifecycle.alive));
+    await writeFile(join(out,branch+'-branch.json'),JSON.stringify({branch,root,actual,births,state}));
+    return;
+  }
   await approach(game,actual.pos);
   await game.act({keys:[],duration_ms:750},{name:branch+'-actual',when:view=>view.nearby.some(e=>e.kind===0x91c)});
   await idle(16000);state=await save('mummies');
