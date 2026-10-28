@@ -58,7 +58,7 @@ export async function run(game){
     const dead=await game.inspect();
     const terminal=samples.filter(s=>enemy(s)?.hp>0&&enemy(s)?.hp<400&&enemy(s)?.expires!==null);
     game.check('native staff damage arms a single one-second shielded terminal deadline',terminal.length>0&&terminal[0].diagnostic.time_ms>=enemy(terminal[0]).expires-1000&&terminal[0].diagnostic.time_ms<=enemy(terminal[0]).expires-900&&terminal.every(s=>enemy(s).expires===enemy(terminal[0]).expires&&Boolean(enemy(s).condition&(1<<24))));
-    game.check('terminal Djinn releases twelve shots at thirty-degree intervals',samples.some(s=>!enemy(s)&&Array.from({length:12},(_,i)=>i*Math.PI/6).every(angle=>s.view.projectiles.some(p=>p.owner===root.id&&Math.abs(p.angle-angle)<.001))));
+    game.check('terminal Djinn releases twelve shots at thirty-degree intervals',samples.some(s=>enemy(s)?.expires===s.diagnostic.time_ms+50&&Array.from({length:12},(_,i)=>i).every(i=>s.view.projectiles.some(p=>p.owner===root.id&&p.id===(enemy(terminal[0]).bullet+1+i)%256&&Math.abs(p.angle-i*Math.PI/6)<.001))));
     game.check('ordinary native combat defeats natural Djinn and earns XP',!enemy(dead)&&dead.view.character.experience>=combat.view.character.experience+100);
     await act({keys:[],duration_ms:4000});const end=await game.inspect();
     game.check('defeated Djinn stays absent without repeated XP',!enemy(end)&&end.view.character.experience===dead.view.character.experience);
