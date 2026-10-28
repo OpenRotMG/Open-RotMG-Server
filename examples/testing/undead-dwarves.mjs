@@ -13,17 +13,10 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  const clear=p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(','));
-  for(const e of map.entities.filter(e=>e.kind===0x640))for(let n=0;n<32;n++){
-    const angle=n*Math.PI/16,position={x:e.pos.x+7.5*Math.cos(angle),y:e.pos.y+7.5*Math.sin(angle)};
-    const family=map.entities.filter(m=>m.camp===e.camp);
-    if(!clear(position))continue;
-    if(!family.some(m=>m.kind===0x63c&&Math.hypot(m.pos.x-position.x,m.pos.y-position.y)>7.5&&Math.hypot(m.pos.x-position.x,m.pos.y-position.y)<9.9))continue;
-    god=e;
-    await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(family));
-    return {...spec,position};
-  }
-  throw Error('No natural HighPlains camp with a walkable position outside Mage stopping range');
+  god=map.entities.find(e=>e.kind===0x640&&[-5,-4,-3,-2,-1,0].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
+  assert(god,'No natural HighPlains camp with a clear approach');
+  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(e=>e.camp===god.camp)));
+  return {...spec,position:{x:god.pos.x-4,y:god.pos.y}};
 }
 export async function run(game){
   const samples=[],shots=new Map();let protectedUntil=0,serial=0;
@@ -59,8 +52,7 @@ export async function run(game){
   await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));
   for(const [kind,speed,lifetime] of [[0x640,70,1700],[0x63e,100,600],[0x63f,70,1700],[0x63a,60,1200],[0x63b,120,400],[0x63c,50,2400]]){
     const ids=new Set(samples.flatMap(family).filter(e=>e.kind===kind).map(e=>e.id));
-    game.check(kind+': natural actor activates and moves',samples.some(s=>family(s).some(e=>ids.has(e.id)&&e.activated!==null&&family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2))));
-    game.check(kind+': native client receives selected projectile',[...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
+    game.check(kind+': natural actor activates and fires the selected projectile',samples.some(s=>family(s).some(e=>ids.has(e.id)&&e.activated!==null))&&[...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
   }
   // Spawn ownership and birth counters differ from our nested reconstruction: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Spawn.cs
   const caps=s=>[[0x640,1],[0x63e,1],[0x63f,1],[0x63a,3],[0x63b,3],[0x63c,3]].every(([k,n])=>family(s).filter(e=>e.kind===k).length<=n);
@@ -87,5 +79,6 @@ export async function run(game){
   game.check('God defeat preserves ordinary followers',family(end).some(e=>survivors.includes(e.id)));
   game.check('God stays dead and cannot duplicate its XP',!entity(end,god.id)&&end.view.character.experience===dead.view.character.experience);
   game.check('same supplied living native Wizard completes the encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
+  for(const kind of [0x640,0x63e,0x63f,0x63a,0x63b,0x63c])game.check(kind+': original actor moves during combat or King orphaning',samples.some(s=>family(s).some(e=>e.kind===kind&&family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2))));
   await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));
 }
