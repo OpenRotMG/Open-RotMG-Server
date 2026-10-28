@@ -86,11 +86,18 @@ export async function run(game) {
       const a=Math.floor(p.x),b=Math.floor(p.y);let aim={x,y};
       if(a!==goal[0]||b!==goal[1]) {
         const choices=queue.filter(([c,d])=>Math.abs(c-a)<=1&&Math.abs(d-b)<=1&&pass(c,b)&&pass(a,d)).sort((c,d)=>distance.get(c.join(','))-distance.get(d.join(',')));
-        assert(choices.length,'No native walking route');aim={x:choices[0][0]+.5,y:choices[0][1]+.5};
+        assert(choices.length,'No native walking route');
+        let [c,d]=choices[0];const dx=c-a,dy=d-b;
+        for(let n=0;n<7;n++) {
+          const e=c+dx,f=d+dy;
+          if(!pass(e,f)||!pass(e,d)||!pass(c,f)||!distance.has(e+','+f)||distance.get(e+','+f)>=distance.get(c+','+d))break;
+          c=e;d=f;
+        }
+        aim={x:c+.5,y:d+.5};
       }
       const dx=aim.x-p.x,dy=aim.y-p.y,sx=(dx-dy)/Math.SQRT2,sy=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(sx)>.08)keys.push(sx>0?'d':'a');if(Math.abs(sy)>.08)keys.push(sy>0?'s':'w');
-      await player.act({keys,duration_ms:Math.min(200,Math.max(50,Math.round(Math.hypot(dx,dy)*160)))});
+      await player.act({keys,duration_ms:Math.min(1000,Math.max(50,Math.round(Math.hypot(dx,dy)*160)))});
     }
     throw Error('Native walk failed: '+JSON.stringify({x,y,position:(await player.observe()).position}));
   }
