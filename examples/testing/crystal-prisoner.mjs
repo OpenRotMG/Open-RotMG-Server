@@ -38,7 +38,12 @@ export async function run(game){
       await actor.act({keys,duration_ms:Math.max(40,Math.min(200,Math.round(Math.hypot(dx,dy)/(4+5.6*v.character.stats.speed/75)*500)))});
     }throw Error('Native walk did not reach target');
   }
-  async function fire(id,ms=150){await approach(game,id,1);return game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
+  async function fire(id,ms=150){
+    for(const a of [game,mystic].filter(Boolean))await protect(a);
+    const p=entity(await game.inspect(),id)?.pos;assert(p,'Living native fire target required');const v=await game.observe(),dx=p.x-v.position.x,dy=p.y-v.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+    if(Math.hypot(dx,dy)>1&&!(v.character.conditions&bit(11))){if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');}
+    return game.act({keys,duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+  }
   await protect(game);let state=await save('initial');
   const crystal=kinds(state,0x935)[0];assert(crystal);
   game.check('one natural Mountains Crystal has selected million HP',kinds(state,0x935).length===1&&crystal.hp===1000000&&crystal.pos.x===placement.x+2.5&&crystal.pos.y===placement.y+2.5);
@@ -94,7 +99,8 @@ export async function run(game){
   for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==7;n++)await idle(500);
   await idle(3200);state=await save('cycle');game.check('full cycle returns to Daisy and old Clones decay',entity(state,prisoner.id).stage===1&&!clones.some(c=>entity(state,c.id)));
   const xp=state.view.character.experience;
-  for(let n=0;n<100&&entity(await game.inspect(),prisoner.id);n++)await fire(prisoner.id,250);
+  await cheat(game,{kind:'stat_modifier',index:5,amount:100,duration_ms:60000});
+  for(let n=0;n<100&&entity(await game.inspect(),prisoner.id);n++)await fire(prisoner.id,500);
   state=await save('defeated');game.check('native combat defeats Prisoner and grants eligible XP',!entity(state,prisoner.id)&&state.view.character.experience>xp);
   await idle(2000);state=await save('cleanup');game.check('defeat removes owned Steeds without respawning Crystal',!kinds(state,0x943).some(e=>e.quest===prisoner.quest)&&!kinds(state,0x935).length);
   const bag=state.diagnostic.entities.find(e=>e.items?.some(i=>i!==-1)&&e.extra_stats.some(([s,o])=>s===54&&o===state.view.session.account));assert(bag,'Observed private reward required');
