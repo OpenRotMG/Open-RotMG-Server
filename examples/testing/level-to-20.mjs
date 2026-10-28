@@ -95,4 +95,6 @@ export async function run(game){
   const capBefore=await snapshot('cap-before',capped),capOffset=await earn(capped);
   const capAfter=await snapshot('cap-after',capped),capAward=await awarded(capOffset,capBefore.view.session.player);
   game.check('level 20 earns further XP without level or stat growth',capAfter.view.character.experience-capBefore.view.character.experience===capAward&&capAfter.view.character.level===20&&JSON.stringify(capAfter.view.character.base_stats)===JSON.stringify(capBefore.view.character.base_stats));
+  const notices=(await lines()).filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='level twenty announced');
+  game.check('committed level20 announces once to both current-world players, not on lower levels reconnect or capped XP',notices.length===1&&notices[0].player===before.view.session.player&&notices[0].recipients===2);
 }
