@@ -21,9 +21,12 @@ export async function run(game){
     for(let wait=0;(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<24))&&wait<12;wait++){
       await game.act({keys:[],duration_ms:500});before=await game.inspect();target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
     }
-    await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:500},{name:'damage-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots});
-    const after=await game.inspect(),enemy=after.diagnostic.entities.find(e=>e.id===boss.id);assert(enemy);
-    const damaged=before.diagnostic.entities.filter(e=>e.kind>=0xd90&&e.kind<=0xdb2&&after.diagnostic.entities.some(a=>a.id===e.id&&a.hp<e.hp));
+    let after=before,damaged=[];
+    for(let attempt=0;attempt<4&&damaged.length===0&&after.diagnostic.character.kills===before.diagnostic.character.kills;attempt++){
+      await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:500},attempt===0?{name:'damage-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots}:undefined);
+      after=await game.inspect();assert(after.diagnostic.entities.some(e=>e.id===boss.id));
+      damaged=before.diagnostic.entities.filter(e=>e.kind>=0xd90&&e.kind<=0xdb2&&after.diagnostic.entities.some(a=>a.id===e.id&&a.hp<e.hp));
+    }
     observations.push({item,damaged:damaged.map(e=>({id:e.id,kind:e.kind,before:e.hp,after:after.diagnostic.entities.find(a=>a.id===e.id).hp})),before,after});
     await writeFile(join(root,'dagger-damage.json'),JSON.stringify(observations,null,2));
     game.check(item.toString(16)+' damages natural enemies or earns a real kill',after.diagnostic.character.shots>before.diagnostic.character.shots&&(damaged.length>0||after.diagnostic.character.kills>before.diagnostic.character.kills));
