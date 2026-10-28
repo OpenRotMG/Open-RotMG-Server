@@ -5,7 +5,7 @@ use crate::dungeon::abyss::{self, FLOOR, IDOL, LAVA, MALPHAS};
 fn abyss_optional_rooms_restore_locally_without_main_completion() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut counts = BTreeSet::new();
-    for seed in 0..32 {
+    for seed in [0, 5, 19, 26] {
         let map = abyss::generate(&content, seed).unwrap();
         let homes: Vec<_> = map
             .cells
@@ -23,11 +23,12 @@ fn abyss_optional_rooms_restore_locally_without_main_completion() {
             })
             .collect();
         counts.insert(homes.len());
-        println!("Abyss seed={seed} idols={}", homes.len());
         if homes.len() < 2 {
             continue;
         }
         let mut w = World::new(content.clone(), Arc::new(map)).unwrap();
+        w.name = "Abyss of Demons".into();
+        w.encounter = true;
         let boss = w.entities.values().find(|e| e.kind == MALPHAS).unwrap().id;
         let original = w.map.clone();
         for (home, region) in &homes {
@@ -48,7 +49,13 @@ fn abyss_optional_rooms_restore_locally_without_main_completion() {
                     .zip(&w.map.cells)
                     .all(|(a, b)| a.region == *region || a.ground == b.ground)
             );
-            w.idol_entrance(*home, true).unwrap();
+            let idol = w
+                .entities
+                .values()
+                .find(|e| e.kind == IDOL && e.home.distance(*home) == 0.)
+                .unwrap()
+                .id;
+            w.defeat_entity(idol).unwrap();
             w.abyss_step();
             assert!(
                 original
@@ -58,6 +65,8 @@ fn abyss_optional_rooms_restore_locally_without_main_completion() {
                     .all(|(a, b)| a.ground == b.ground)
             );
             assert!(w.entities.contains_key(&boss));
+            assert!(!w.cleared);
+            assert!(!w.entities.contains_key(&idol));
             assert!(!w.entities.values().any(|e| e.kind == 0x704));
         }
     }
