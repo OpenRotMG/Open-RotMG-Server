@@ -21,7 +21,7 @@ export async function run(game){
     game.check(`native Archer equips ${item.toString(16)}`,equipped.character.items[0]===item);
     await game.act({keys:[],duration_ms:2200});
     const before=await game.inspect();
-    await game.act({keys:[],mouse:{x:450,y:300},duration_ms:160},item===0xa1e?{name:'bows-golden',when:v=>v.verification.shots>before.diagnostic.character.shots}:undefined);
+    await game.act({keys:[],mouse:{x:450,y:300},duration_ms:160});
     const after=await game.inspect(),bullets=after.diagnostic.own_projectiles;
     observations.push({item,before,after});await save();
     game.check(`native ${item.toString(16)} admits one ${count}-arrow volley`,after.diagnostic.character.shots-before.diagnostic.character.shots===count);
@@ -38,7 +38,7 @@ export async function run(game){
       await game.act({keys:[],mouse:{x:450,y:300},duration_ms:3000});
       const end=await game.observe(),volleys=(end.verification.shots-start.verification.shots)/count;
       observations.push({cadence:item,start,end,volleys});await save();
-      game.check(`native ${item.toString(16)} individual firing rate`,Number.isInteger(volleys)&&Math.abs(volleys-3000*0.0015*rate)<=1.5);
+      game.check(`native ${item.toString(16)} individual firing rate`,Number.isInteger(volleys)&&volleys>0&&Math.abs(volleys-3000*0.0015*rate)<=1);
       await game.act({keys:[],duration_ms:700});
     }
   }
@@ -59,7 +59,7 @@ export async function run(game){
     assert(before,'bounded Septavius vulnerability');
     if(!(before.view.character.conditions&(1<<24)))await cheat(huntress.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
     const boss=before.diagnostic.entities.find(e=>e.kind===0xd90);
-    await huntress.act({keys:[],target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true},duration_ms:2300});
+    await huntress.act({keys:[],target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true},duration_ms:2300},item===0xa1e?{name:'bows-golden',when:v=>v.verification.shots>before.diagnostic.character.shots}:undefined);
     const after=await huntress.inspect();observations.push({combat:item,before,after});await save();
     game.check(`native ${item.toString(16)} damages living enemies`,after.diagnostic.entities.some(e=>{const old=before.diagnostic.entities.find(b=>b.id===e.id);return old&&e.hp<old.hp;})||before.diagnostic.entities.some(e=>!after.diagnostic.entities.some(b=>b.id===e.id)));
     game.check(`native ${item.toString(16)} preserves mana and item`,after.view.character.mp===before.view.character.mp&&after.view.character.items[0]===item&&after.view.lifecycle.alive);
