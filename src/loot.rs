@@ -1569,7 +1569,12 @@ mod tests {
     #[test]
     fn god_potion_damage_boundaries_preserve_gear() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for (kind, threshold, potion) in [(0x655, 180, 0xa20), (0x652, 360, 0xa1f)] {
+        for (kind, threshold, potion) in [
+            (0x655, 180, 0xa20),
+            (0x657, 180, 0xa1f),
+            (0x658, 180, 0xa20),
+            (0x652, 360, 0xa1f),
+        ] {
             assert_eq!(bonus(kind), &[(0.015, potion)]);
             let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
             let loot = god_loot(
