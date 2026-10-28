@@ -16,7 +16,7 @@ export async function prepare(api){
   roots=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x91b&&f.layout===world.realm_layout);
   assert(roots.length>=4,'Four ordinarily placed Liches required');root=roots[index];
   await writeFile(join(out,'placement.json'),JSON.stringify({world,roots,branch}));
-  return {...spec,position:{x:root.x,y:root.y}};
+  return {...spec,...(index>=2?{equipment:[0xb0b,0xb29,0xa7b,0xacc],backpack:[0xb10,0xb10,-1,-1,-1,-1,-1,-1]}:{}),position:{x:root.x,y:root.y}};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -61,7 +61,11 @@ export async function run(game){
   await game.act({keys:['s'],duration_ms:150});
   game.check('ordinary movement works at the natural ruin',Math.hypot((await game.observe()).position.x-initial.view.position.x,(await game.observe()).position.y-initial.view.position.y)>.3);
   await approach(game,initial.view.position,.3);
-  if(index===3){partner=await game.join({...spec,seed:794,position:initial.view.position});await protect(partner);}
+  if(index===3){partner=await game.join({...spec,seed:794,position:initial.view.position,equipment:[0xb0b,0xb29,0xa7b,0xacc]});await protect(partner);}
+  if(index>=2){
+    await game.act({keys:[i===indices[0]?'1':'2'],duration_ms:150});
+    game.check('native Dexterity effusion supplies the damage-evaluation fixture',(await game.observe()).character.stats.dexterity===88);
+  }
   if(index>0){
     await idle(Math.max(0,attackUntil-(await game.observe()).game_ms));
     for(const actor of [game,partner].filter(Boolean))await cheat(actor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
@@ -73,13 +77,11 @@ export async function run(game){
   if(index>0){
     const sequence=[{actor:game.actor,input:{keys:[],duration_ms:2000}},{actor:game.actor,input:{keys:[' '],duration_ms:250}}];
     for(const actor of [game,partner].filter(Boolean))if(actor!==game)sequence.push({actor:actor.actor,input:{keys:[' '],duration_ms:250}});
-    await game.act(sequence);
-    for(let ms=0;ms<[0,700,4500,5500][index];ms+=250){
-      if(entity(await game.inspect(),root.entity)?.stage>=3)break;
-      for(const actor of [game,partner].filter(Boolean))await approach(actor,root.entity,2.5);
+    for(let ms=0;ms<[0,700,4500,5000][index];ms+=250){
       const input={keys:[],duration_ms:250,target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}};
-      await game.act(partner?[[{actor:game.actor,input},{actor:partner.actor,input}]]:input);
+      sequence.push(partner?[{actor:game.actor,input},{actor:partner.actor,input}]:{actor:game.actor,input});
     }
+    await game.act(sequence);
   }
   for(let n=0;n<10&&entity(await game.inspect(),root.entity)?.stage<3;n++)await idle(1000);
   state=await save('selected');
