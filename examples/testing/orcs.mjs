@@ -78,10 +78,13 @@ export async function run(game){
     const before=await game.inspect();
     for(let n=0;n<100;n++){
       const s=await game.inspect(),victim=entity(s,id),boss=entity(s,king.id);if(!victim)break;
+      const p=s.view.position,dx=victim.pos.x-p.x,dy=victim.pos.y-p.y;
+      const move=async(x,y)=>act({keys:[[['d',1,-1],['s',1,1],['a',-1,1],['w',-1,-1]].sort((a,b)=>(b[1]-a[1])*x+(b[2]-a[2])*y)[0][0]],duration_ms:150});
+      if(Math.hypot(dx,dy)>4){await move(dx,dy);continue;}
       if(id!==king.id){
         assert(boss,'King must survive escort targeting');
-        const p=s.view.position,dx=victim.pos.x-p.x,dy=victim.pos.y-p.y,t=((boss.pos.x-p.x)*dx+(boss.pos.y-p.y)*dy)/(dx*dx+dy*dy);
-        if(t>=0&&t<=1&&Math.hypot(boss.pos.x-p.x-t*dx,boss.pos.y-p.y-t*dy)<.8){await act({keys:['s'],duration_ms:150});continue;}
+        const t=((boss.pos.x-p.x)*dx+(boss.pos.y-p.y)*dy)/(dx*dx+dy*dy);
+        if(t>=0&&t<=1&&Math.hypot(boss.pos.x-p.x-t*dx,boss.pos.y-p.y-t*dy)<.8){await move(-dy,dx);continue;}
       }
       await act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
       await act({keys:[],duration_ms:500});
