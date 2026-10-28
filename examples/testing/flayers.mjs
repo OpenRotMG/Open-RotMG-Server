@@ -6,22 +6,24 @@ const spec={class:0x30e,level:20,seed:835,world:1,equipment:[0xa9f,-1,-1,-1],bac
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let god;
 export async function prepare(api){
-  const info=await api({op:'world_info',world:spec.world}),[x,y]=info.spawn_points[0];
-  const scout=await api({op:'spawn',spec:{...spec,guid:'flayer-scout',position:{x,y},controller:'direct',profile:null}});
-  const state=await api({op:'inspect',actor:scout.result.actor});
   const report=JSON.parse(await readFile(join(root(),'result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
-  const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
-  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-map.json'),JSON.stringify(map));
-  for(const e of map.entities.filter(e=>e.kind===0x649))for(let dx=-9;dx<=9;dx++)for(let dy=-9;dy<=9;dy++){
-    const position={x:Math.floor(e.pos.x)+.5+dx,y:Math.floor(e.pos.y)+.5+dy},distance=Math.hypot(position.x-e.pos.x,position.y-e.pos.y);
-    if(distance<8||distance>9)continue;
-    if(Array.from({length:21},(_,i)=>({x:e.pos.x+(position.x-e.pos.x)*i/20,y:e.pos.y+(position.y-e.pos.y)*i/20})).every(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')))){
-      god=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify({world:spec.world,layout:info.realm_layout,members:map.entities.filter(m=>m.camp===e.camp)}));return {...spec,position};
+  for(const world of [-3,1]){
+    const info=await api({op:'world_info',world});assert.equal(info.name,'Realm');const [x,y]=info.spawn_points[0];
+    const scout=await api({op:'spawn',spec:{...spec,world,guid:'flayer-scout-'+world,position:{x,y},controller:'direct',profile:null}});
+    const state=await api({op:'inspect',actor:scout.result.actor});
+    const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
+    const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
+    await writeFile(join(process.env.QA_RESULTS_DIR,'natural-map-'+world+'.json'),JSON.stringify(map));
+    for(const e of map.entities.filter(e=>e.kind===0x649))for(let dx=-9;dx<=9;dx++)for(let dy=-9;dy<=9;dy++){
+      const position={x:Math.floor(e.pos.x)+.5+dx,y:Math.floor(e.pos.y)+.5+dy},distance=Math.hypot(position.x-e.pos.x,position.y-e.pos.y);
+      if(distance<8||distance>9)continue;
+      if(Array.from({length:21},(_,i)=>({x:e.pos.x+(position.x-e.pos.x)*i/20,y:e.pos.y+(position.y-e.pos.y)*i/20})).every(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')))){
+        god=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify({world,layout:info.realm_layout,members:map.entities.filter(m=>m.camp===e.camp)}));return {...spec,world,position};
+      }
     }
   }
-  throw Error('Sampled Realm has no natural Flayer God camp with a clear approach');
+  throw Error('Neither initial live Realm (-3 and 1) has a natural Flayer God camp with a clear approach');
 }
 export async function run(game){
   const samples=[],shots=new Map();let serial=0,protectedUntil=0;
