@@ -77,9 +77,9 @@ export async function run(game){
   const rage=await save('enraged');
   game.check('native damage triggers reconstructed rage and size 150',entity(rage,leader.id)?.hp<200&&entity(rage,leader.id).stage===1&&entity(rage,leader.id).size===150);
   const enraged=[];
-  for(let n=0;n<8;n++){await act({keys:[],duration_ms:250});enraged.push(await game.observe());}
+  for(let n=0;n<8;n++){await act({keys:[],duration_ms:250});enraged.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'rage-attacks.json'),JSON.stringify(enraged));
-  game.check('enraged Werewolf fires faster selected projectile',enraged.flatMap(s=>s.projectiles).some(p=>p.owner===leader.id&&p.speed===65&&p.lifetime_ms===2000));
+  game.check('enraged Werewolf fires faster selected projectile',enraged.flatMap(s=>s.view.projectiles).some(p=>p.owner===leader.id&&p.speed===65&&p.lifetime_ms===2000));
   const xp=(await game.observe()).character.experience;
   await shoot(leader.id);await act({keys:[],duration_ms:600},{name:'werewolf-defeated',when:()=>true});
   const dead=await save('defeated');
