@@ -36,7 +36,7 @@ export async function beforeNavigate(){
       const state=await api({op:'inspect',actor:scout}),target=state.diagnostic.entities.find(e=>(e.id===root.entity||e.quest===root.entity)&&[root.kind,0x91c].includes(e.kind));
       if(!target)break;
       await api({op:'cheat',actor:scout,change:{kind:'teleport',position:target.pos}});
-      const request=join(out,'command-'+serial+++'.json');await writeFile(request,JSON.stringify({id:randomUUID(),command:{op:'act',actor:scout,action:{command:'shoot',angle:0},duration_ms:1000}}));
+      const request=join(out,'command-'+serial+++'.json');await writeFile(request,JSON.stringify({id:randomUUID(),command:{op:'act',actor:scout,action:{command:'shoot',angle:0},duration_ms:2000}}));
       // The runner must keep draining backend logs while its controller awaits the server.
       await exec(process.execPath,[resolve('scripts/game.mjs'),config,request]);
     }
@@ -99,8 +99,9 @@ export async function run(spectator){
   const boss=entity(state,root);assert(boss);
   const partner=await game.join({...spec,seed:821,position:boss.pos});await protect(partner.actor);
   await game.act({keys:[' '],duration_ms:150});
-  for(const actor of [game,partner]){for(let n=0;n<8&&(entity(await game.inspect(),root).damage[actor.actor]??0)<600;n++)await fire(actor,root,150);}
-  state=await save('contributors');game.check('two native clients contribute above the 500-damage threshold',[game,partner].every(a=>entity(state,root).damage[a.actor]>500));
+  const players=(await Promise.all([game.inspect(),partner.inspect()])).map(s=>s.diagnostic.player);
+  for(const [i,actor] of [game,partner].entries()){for(let n=0;n<8&&(entity(await game.inspect(),root).damage[players[i]]??0)<600;n++)await fire(actor,root,150);}
+  state=await save('contributors');game.check('two native clients contribute above the 500-damage threshold',players.every(id=>entity(state,root).damage[id]>500));
   const xp=await Promise.all([game.observe(),partner.observe(),spectator.observe()]);
   for(let n=0;n<70&&entity(await game.inspect(),root);n++)await fire(game,root);
   state=await save('defeated');game.check('native sword combat defeats the admitted Cube God',!entity(state,root));
