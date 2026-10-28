@@ -8,7 +8,7 @@ pub(crate) struct Service {
     client: reqwest::Client,
     endpoint: String,
     from: String,
-    slots: tokio::sync::Semaphore,
+    slots: Arc<tokio::sync::Semaphore>,
 }
 impl Service {
     pub fn configured() -> Result<Option<Arc<Self>>> {
@@ -44,7 +44,7 @@ impl Service {
             client,
             endpoint: "https://api.resend.com/emails".into(),
             from,
-            slots: tokio::sync::Semaphore::new(4),
+            slots: Arc::new(tokio::sync::Semaphore::new(4)),
         })))
     }
     async fn send(&self, app: &App, account: i32, ip: IpAddr) -> Result<()> {
@@ -53,40 +53,58 @@ impl Service {
             .try_acquire()
             .context("Email service busy; retry shortly.")?;
         let (email, token) = app.store.issue_email_verification(account, ip).await?;
-        let attempt = format!("{:032x}", rand::random::<u128>());
         let link = format!("{}/verify-email/#{token}", app.origin);
         let text = format!(
             "Confirm this email address for your Open RotMG account:\n\n{link}\n\nThis link expires in 24 hours and works once. Open the page and choose Confirm email. A new verification request replaces the previous link.\n\nIf you did not request this, ignore this message. Your account and password have not been changed. We will never ask you to send us your password.\n\nOpen RotMG\nhttps://openrotmg.org/"
         );
+        self.deliver(
+            account,
+            &email,
+            "email-verification",
+            "Verify your Open RotMG email",
+            text,
+        )
+        .await
+    }
+    async fn deliver(
+        &self,
+        account: i32,
+        email: &str,
+        kind: &str,
+        subject: &str,
+        text: String,
+    ) -> Result<()> {
+        let attempt = format!("{:032x}", rand::random::<u128>());
         let result: Result<String> = async {
             let mut response = self.client.post(&self.endpoint)
-                .header("Idempotency-Key", format!("email-verification-{attempt}"))
-                .json(&serde_json::json!({"from":self.from,"to":[email],"subject":"Verify your Open RotMG email","text":text}))
-                .send().await.map_err(|e| anyhow::anyhow!("verification mail transport failed (timeout: {}); delivery is unconfirmed", e.is_timeout()))?;
-            ensure!(response.status().is_success(), "verification mail provider rejected the request (HTTP {}); delivery is unconfirmed", response.status().as_u16());
+                .header("Idempotency-Key", format!("{kind}-{attempt}"))
+                .json(&serde_json::json!({"from":self.from,"to":[email],"subject":subject,"text":text}))
+                .send().await.map_err(|e| anyhow::anyhow!("account mail transport failed (timeout: {}); delivery is unconfirmed", e.is_timeout()))?;
+            ensure!(response.status().is_success(), "account mail provider rejected the request (HTTP {}); delivery is unconfirmed", response.status().as_u16());
             let mut body = Vec::new();
-            while let Some(chunk) = response.chunk().await.context("read verification mail receipt")? {
-                ensure!(body.len()+chunk.len() <= 16384, "verification mail receipt exceeds 16 KiB");
+            while let Some(chunk) = response.chunk().await.context("read account mail receipt")? {
+                ensure!(body.len()+chunk.len() <= 16384, "account mail receipt exceeds 16 KiB");
                 body.extend_from_slice(&chunk);
             }
             #[derive(Deserialize)]
             struct Receipt { id: String }
-            let receipt: Receipt = serde_json::from_slice(&body).context("invalid verification mail receipt; delivery is unconfirmed")?;
-            ensure!(!receipt.id.is_empty() && receipt.id.len() <= 128 && receipt.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'), "invalid verification mail message ID");
+            let receipt: Receipt = serde_json::from_slice(&body).context("invalid account mail receipt; delivery is unconfirmed")?;
+            ensure!(!receipt.id.is_empty() && receipt.id.len() <= 128 && receipt.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'), "invalid account mail message ID");
             Ok(receipt.id)
         }.await;
         match result {
             Ok(message_id) => {
                 tracing::info!(
                     account,
+                    kind,
                     attempt,
                     message_id,
-                    "verification mail accepted by provider; inbox delivery not yet confirmed"
+                    "account mail accepted by provider; inbox delivery not yet confirmed"
                 );
                 Ok(())
             }
             Err(error) => {
-                tracing::warn!(account, attempt, error=%error, "verification mail delivery unconfirmed; reserved quota retained");
+                tracing::warn!(account, kind, attempt, error=%error, "account mail delivery unconfirmed; reserved quota retained");
                 Err(anyhow::anyhow!("Send unconfirmed. Check email first."))
             }
         }
@@ -98,6 +116,35 @@ pub(super) async fn send(app: &App, account: i32, ip: IpAddr) -> Result<()> {
         .context("Email delivery is not configured.")?
         .send(app, account, ip)
         .await
+}
+pub(super) fn request_reset(app: &App, email: String, ip: IpAddr) -> Result<()> {
+    let email = crate::store::validate_email(&email)?;
+    let service = app
+        .email
+        .clone()
+        .context("Email delivery is not configured.")?;
+    let permit = service
+        .slots
+        .clone()
+        .try_acquire_owned()
+        .context("Email service busy; retry shortly.")?;
+    let app = app.clone();
+    // Keep lookup/delivery off the response path to avoid account enumeration: https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html
+    tokio::spawn(async move {
+        let _permit = permit;
+        let result: Result<()> = async {
+            if let Some((account, email, token)) = app.store.issue_email_reset(email, ip).await? {
+                let link = format!("{}/recover/#{token}", app.origin);
+                let text = format!("Reset your Open RotMG password:\n\n{link}\n\nThis private link expires in 15 minutes and works once. Open it and choose a new password. A new request replaces the previous link.\n\nIf you did not request this, ignore this message. Your password has not been changed. We will never ask you to send us your password.\n\nOpen RotMG\nhttps://openrotmg.org/");
+                service.deliver(account, &email, "password-reset", "Reset your Open RotMG password", text).await?;
+            }
+            Ok(())
+        }.await;
+        if let Err(error) = result {
+            tracing::error!(error=%error, "email password reset request failed; client acknowledgement is not a delivery receipt");
+        }
+    });
+    Ok(())
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

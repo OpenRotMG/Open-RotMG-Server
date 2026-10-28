@@ -111,7 +111,7 @@ game.openrotmg.org {
         root * /opt/openrotmg/site
         file_server
     }
-    @backend path /game /client.swf /legacy-api/* /vendor/* /sfx/* /health /api/*
+    @backend path /game /client.swf /legacy-api/* /vendor/* /sfx/* /health /api/* /realmdex/stats
     handle @backend {
         reverse_proxy 127.0.0.1:18923 {
             header_up X-Forwarded-For {http.request.remote.host}

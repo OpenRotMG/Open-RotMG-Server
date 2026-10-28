@@ -9,8 +9,13 @@ fn reset_hash(token: &str) -> Result<String> {
     use sha2::{Digest, Sha256};
     Ok(format!("{:x}", Sha256::digest(token.as_bytes())))
 }
-fn reset_owner(db: &Connection, hash: &str, time: i64) -> Result<i32> {
-    db.query_row("SELECT p.account FROM password_resets p JOIN discord_recovery r ON r.account=p.account JOIN credentials c ON c.account=p.account JOIN accounts a ON a.id=p.account WHERE p.hash=?1 AND p.expires_at>?2 AND a.guid IS NOT NULL", params![hash,time], |r| r.get(0)).optional()?.context("invalid or expired reset link")
+fn reset_owner(db: &Connection, hash: &str, time: i64) -> Result<(i32, Option<String>)> {
+    let mut statement = db.prepare("SELECT p.account,NULL FROM password_resets p JOIN discord_recovery r ON r.account=p.account JOIN credentials c ON c.account=p.account JOIN accounts a ON a.id=p.account WHERE p.hash=?1 AND p.expires_at>?2 AND a.guid IS NOT NULL UNION ALL SELECT p.account,p.email FROM email_password_resets p JOIN credentials c ON c.account=p.account AND c.email=p.email JOIN accounts a ON a.id=p.account WHERE p.hash=?1 AND p.expires_at>?2 AND a.guid IS NOT NULL")?;
+    let owners = statement
+        .query_map(params![hash, time], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    ensure!(owners.len() == 1, "invalid or expired reset link");
+    owners.into_iter().next().context("reset owner missing")
 }
 fn replace_password(tx: &rusqlite::Transaction<'_>, account: i32, verifier: &str) -> Result<()> {
     ensure!(
@@ -20,7 +25,12 @@ fn replace_password(tx: &rusqlite::Transaction<'_>, account: i32, verifier: &str
         )? == 1,
         "registered credential missing"
     );
-    for table in ["password_resets", "recovery_codes", "discord_codes"] {
+    for table in [
+        "password_resets",
+        "email_password_resets",
+        "recovery_codes",
+        "discord_codes",
+    ] {
         tx.execute(&format!("DELETE FROM {table} WHERE account=?1"), [account])?;
     }
     Ok(())
@@ -132,7 +142,8 @@ impl Store {
     }
     pub async fn reset_account(&self, token: String) -> Result<i32> {
         let hash = reset_hash(&token)?;
-        self.call(move |db| reset_owner(db, &hash, now()?)).await
+        self.call(move |db| reset_owner(db, &hash, now()?).map(|(account, _)| account))
+            .await
     }
     pub async fn prepare_password(&self, password: String) -> Result<String> {
         accounts::password(&password)?;
@@ -152,8 +163,13 @@ impl Store {
         let account = self
             .call(move |db| {
                 let tx = db.transaction()?;
-                let account = reset_owner(&tx, &hash, now()?)?;
+                let time = now()?;
+                let (account, email) = reset_owner(&tx, &hash, time)?;
                 replace_password(&tx, account, &verifier)?;
+                if let Some(email) = email {
+                    tx.execute("INSERT INTO verified_emails(account,email,verified_at) VALUES(?1,?2,?3) ON CONFLICT(account) DO UPDATE SET email=excluded.email,verified_at=excluded.verified_at", params![account,email,time])?;
+                    tx.execute("DELETE FROM email_verifications WHERE account=?1", [account])?;
+                }
                 tx.commit()?;
                 Ok(account)
             })
