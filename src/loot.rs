@@ -1567,11 +1567,11 @@ mod tests {
     }
 
     #[test]
-    fn ent_and_ghost_god_potions_require_180_damage_without_erasing_gear() {
+    fn god_potion_roll_requires_180_damage_without_erasing_gear() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let owners = [(10, 179), (20, 180), (30, 181)];
         // Kithio's 18% threshold is inclusive, not the later 7.0 reward policy: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L88-L112
-        for (kind, potion) in [(0x655, 0xa20), (0x659, 0xa21)] {
+        for (kind, potion) in [(0x655, 0xa20), (0x658, 0xa20), (0x659, 0xa21)] {
             assert_eq!(bonus(kind), &[(0.015, potion)]);
             let loot = god_loot(
                 &content,
