@@ -81,6 +81,30 @@ fn native_hits_keep_effects_separate_from_hp_protection_and_consume_once() {
 }
 
 #[test]
+fn sprite_quiet_hit_drains_mp_without_damage_and_cannot_replay() {
+    let (mut w, id) = fixture(0x18, false);
+    w.now = 1000;
+    let b = shot(&w, 999, 0x652, 1);
+    assert_eq!(b.damage, 0);
+    assert_eq!(b.spec.effects, [(condition::QUIET, 10000)]);
+    assert!(native_hits::expect_shoot_ack(
+        w.players.get_mut(&id).unwrap(),
+        vec![b.clone()],
+        &w.clock
+    ));
+    w.acknowledge_shoot(id, 1000).unwrap();
+    w.native_player_hit(id, b.owner, b.id).unwrap();
+    let p = &w.players[&id];
+    assert_eq!((p.character.hp, p.character.mp), (200, 0));
+    assert_eq!(p.statuses[&condition::QUIET], (1000, 11000));
+    w.now = 1050;
+    w.native_player_hit(id, b.owner, b.id).unwrap();
+    assert_eq!(w.players[&id].statuses[&condition::QUIET], (1000, 11000));
+    w.now = 11000;
+    assert_eq!(w.players[&id].conditions(w.now) & bit(condition::QUIET), 0);
+}
+
+#[test]
 fn area_damage_has_strict_radius_defense_floor_and_protection() {
     for (flags, amount, expected) in [
         (0, 101, 76),
