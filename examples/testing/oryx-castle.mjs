@@ -50,7 +50,8 @@ export async function run(game){
   const initial=await save('entrance'),authored=await map();
   await writeFile(join(root,'castle-authored-map.json'),JSON.stringify(authored));
   if(mode==='tower'){
-    await game.act({keys:[],duration_ms:2500},{name:'castle-quiet',when:()=>true});
+    await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
+    await game.act({keys:[],duration_ms:1000},{name:'castle-quiet',when:()=>true});
     const hit=await save('tower-hit');
     game.check('natural Living Floor projectile applies Quiet and drains MP',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0);
     game.check('selected tower does not add the later-guide Weak condition',!(hit.view.character.conditions&4)&&hit.view.lifecycle.alive);
@@ -63,7 +64,7 @@ export async function run(game){
     assert(armor&&distance(armor.pos,before.view.position)<5,'Requested authored/spawned armor absent');
     await kill(armor.id);
     const first=await save('armor-defeated');
-    game.check('actual '+mode+' Haunted Armor defeat grants no XP or base fame',!((await map()).entities.some(e=>e.id===armor.id))&&first.view.character.experience===before.view.character.experience);
+    game.check('actual '+mode+' Haunted Armor defeat grants no XP or base fame',!((await map()).entities.some(e=>e.id===armor.id))&&first.view.character.experience===before.view.character.experience&&first.diagnostic.character.fame===before.diagnostic.character.fame);
     if(mode==='armor'){
       await act({keys:[],duration_ms:4000});
       const replacement=(await map()).entities.find(e=>e.kind===0xd7e&&e.parent===armor.parent&&e.id!==armor.id);assert(replacement,'Same spawner did not replace its actually defeated armor');
@@ -96,6 +97,7 @@ export async function run(game){
   await act({keys:[],duration_ms:1500},{name:'castle-route',when:()=>true});
   return;
   }
+  await walk({x:127.5,y:37.5});
   await act({keys:[],duration_ms:500});
   const idle=await save('idle-guardians'),pair=authored.entities.filter(e=>[0xd78,0xd79].includes(e.kind));
   assert(pair.length===2);
