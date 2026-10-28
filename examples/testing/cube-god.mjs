@@ -83,15 +83,17 @@ export async function run(spectator){
   }
   async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>2)await approach(actor,id);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await game.act({keys:[],duration_ms:750},{name:'cube-active',when:()=>true});
+  const census=await fetch(origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
+  const owned=(await census.json()).entities.filter(e=>e.quest===root),old=new Set(owned.filter(e=>e.kind===0xd5a).map(e=>e.id));await writeFile(join(out,'census.json'),JSON.stringify(owned));
+  game.check('global owned Cube census respects the existing 32-actor budget',owned.length<=32&&owned.some(e=>e.id===root)&&old.has(victim.id));
   const mana=(await game.observe()).character.mp;
   await game.act({keys:[' '],duration_ms:150});
   game.check('ordinary native helm spends mana and grants Speedy for pursuit',(await game.observe()).character.mp<mana&&((await game.observe()).character.conditions&(1<<14))!==0);
   for(let n=0;n<30&&entity(await game.inspect(),victim.id);n++)await fire(game,victim.id);
   game.check('native sword fire defeats an Overseer',!entity(await game.inspect(),victim.id));
-  const census=await fetch(origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
-  const old=new Set((await census.json()).entities.filter(e=>e.quest===root&&e.kind===0xd5a).map(e=>e.id));
   for(let n=0;n<15&&!family(await game.inspect()).some(e=>e.kind===0xd5a&&!old.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
-  state=await save('replenished');game.check('living Cube replenishes an owned Overseer',family(state).some(e=>e.kind===0xd5a&&!old.has(e.id)));
+  state=await save('replenished');const births=await fields(),removed=births.findIndex(f=>f.message==='enemy defeated'&&f.entity===victim.id);
+  game.check('living Cube replenishes an owned Overseer',family(state).some(e=>e.kind===0xd5a&&!old.has(e.id))&&removed>=0&&births.slice(removed+1).some(f=>f.message==='bounded named quest followers spawned'&&f.quest===root&&f.kind===0xd5a));
   const boss=entity(state,root);assert(boss);
   const partner=await game.join({...spec,seed:821,position:boss.pos});await protect(partner.actor);
   await game.act({keys:[' '],duration_ms:150});
