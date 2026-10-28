@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile} from 'node:fs/promises';
+import {readFile,readdir,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
@@ -35,7 +35,7 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
     const receipt=await response.json();assert(response.ok&&(command.op==='inspect'?receipt.diagnostic!==undefined:receipt.status==='succeeded'),JSON.stringify(receipt));return receipt;
   }
-  const scout=(await api({op:'spawn',spec:{...spec,world,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
+  const scout=(await api({op:'spawn',spec:{...spec,class:0x307,equipment:[0xc02,0xb28,0xaf9,0xac0],stats:[700,252,75,25,50,50,40,50],world,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
   const scoutName=(await api({op:'inspect',actor:scout})).diagnostic.character.name;
   async function prepareScout(change){
     for(let n=0;n<100;n++){
@@ -80,6 +80,8 @@ export async function run(game){
   }
   // Ordinary scout defeats preserve the director roll and reserve native receipts for the encounter.
   async function sourceFire(target){
+    const files=await readdir(join(config.state,'testing'));
+    assert(files.filter(f=>f.endsWith('.client.json')).length<80&&files.filter(f=>f.endsWith('.receipt.json')).length<600,'No natural Lord admission before the reserved combat command budget');
     await protect();let now=(await game.observe()).game_ms;
     while(Math.min(until,scoutUntil)-now<10000){await prepareScout({kind:'teleport',position:refuge});await idle(Math.min(until,scoutUntil)-now);await protect();now=(await game.observe()).game_ms;}
     assert(target.hp>0,'Ordinary admission target must be alive');
@@ -140,6 +142,7 @@ export async function run(game){
       const state=await api({op:'inspect',actor:scout}),root=entity(state,site.entity),family=state.diagnostic.entities.filter(e=>e.quest===site.entity);
       const target=family.find(e=>[0x91d,0x929].includes(e.kind))??root??family.find(e=>[0x6c2,0x6c1,0x920,0x91c,0x92d].includes(e.kind));if(!target)break;
       await sourceFire(target);
+      admitted=(await history()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd50);if(admitted)break;
     }
     await prepareScout({kind:'teleport',position:refuge});await idle(1000);await save('quest-'+site.entity);
     const events=(await history()).filter(f=>f.message==='quest defeat summoned a Realm event');
