@@ -209,7 +209,7 @@ export async function run(game){
       const targets=families.map((family,i)=>{
         const candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&!(e.condition&((1<<21)|(1<<23)|(1<<24))));
         candidates.sort((a,b)=>Math.hypot(a.pos.x-views[i].position.x,a.pos.y-views[i].position.y)-Math.hypot(b.pos.x-views[i].position.x,b.pos.y-views[i].position.y));
-        return candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0xd5e,0xd62].includes(e.kind));
+        return candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0xd51,0xd5e,0xd62].includes(e.kind));
       });
       if(kind===0xd5f){
         const towers=families[0].filter(e=>e.kind===0xd5e&&e.hp>0);
