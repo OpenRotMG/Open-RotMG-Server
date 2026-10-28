@@ -36,7 +36,7 @@ export async function run(game){
     const arrival=await game.inspect();
     game.check('natural mountain Djinn admitted at selected 1000 HP',enemy(arrival)?.hp===1000&&arrival.view.session.world===1);
     const path=output('protection.json');
-    await writeFile(path,JSON.stringify({id:'djinn-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+    await writeFile(path,JSON.stringify({id:'djinn-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);
     await act({keys:[],duration_ms:500},{name:'djinn-arrival',when:()=>true});
     game.check('Djinn does not fire outside seven-tile targeting radius',shots.size===0);
@@ -49,12 +49,13 @@ export async function run(game){
     game.check('Djinn alternates shielded pursuit and vulnerable ring phase',[true,false].every(shielded=>samples.some(s=>enemy(s)?.activated!==null&&enemy(s)&&Boolean(enemy(s).condition&(1<<24))===shielded)));
     // The period guide corroborates shielding and self-destruction, but its three-second delay conflicts with the retained reconstruction: https://web.archive.org/web/20120520004521id_/http://forums.wildshadow.com/wiki/realm-mad-god/djinn
     for(let n=0;n<125&&enemy(await game.inspect());n++){
-      const s=await game.inspect(),e=enemy(s),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
+      const s=await game.inspect(),e=enemy(s);if(e.expires!==null)break;
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>5;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
       await act({keys,duration_ms:200,target:{entity:root.id,camera_angle:-Math.PI/4,fire:!approach}});
     }
-    await act({keys:[],duration_ms:500},{name:'djinn-defeated',when:()=>true});
+    await act({keys:[],duration_ms:1500},{name:'djinn-defeated',when:()=>true});
     const dead=await game.inspect();
     const terminal=samples.filter(s=>enemy(s)?.hp>0&&enemy(s)?.hp<400&&enemy(s)?.expires!==null);
     game.check('native staff damage arms a single one-second shielded terminal deadline',terminal.length>0&&terminal[0].diagnostic.time_ms>=enemy(terminal[0]).expires-1000&&terminal[0].diagnostic.time_ms<=enemy(terminal[0]).expires-900&&terminal.every(s=>enemy(s).expires===enemy(terminal[0]).expires&&Boolean(enemy(s).condition&(1<<24))));
