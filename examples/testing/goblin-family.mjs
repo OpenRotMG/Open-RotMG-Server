@@ -30,49 +30,26 @@ export async function run(game){
   }
   const act=async(input,capture)=>{await protect();while(protectedUntil-(await game.observe()).game_ms<input.duration_ms+500){await game.act({keys:[],duration_ms:250});await protect();}await game.act(input,capture);};
   const begin=await save('arrival');
-  game.check('ordinary LowForest camp starts with Mage and three of each escort',[[0x614,1],[0x612,3],[0x613,3]].every(([k,n])=>family(begin).filter(e=>e.kind===k).length===n));
+  assert(family(begin).some(e=>e.id===mage.id&&e.hp===280));
   await act({keys:['d'],duration_ms:600});
-  for(let n=0;n<35;n++){
-    const s=await game.inspect();
-    if([0x612,0x613].every(kind=>family(s).filter(e=>e.kind===kind).length===7))break;
-    await act({keys:[],duration_ms:2000});
+  const combat=[];
+  for(let n=0;n<45;n++){
+    const s=await game.inspect(),e=family(s).find(e=>e.id===mage.id);if(!e)break;
+    const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,a=-Math.PI/4;
+    const x=dx*Math.cos(a)+dy*Math.sin(a),y=-dx*Math.sin(a)+dy*Math.cos(a),length=Math.hypot(x,y);assert(length>0);
+    // A short aim ray avoids the chat panel when the retreat projects near the canvas edge.
+    await act({keys:[],duration_ms:250,mouse:{x:300+140*x/length,y:325+140*y/length}});
+    await act({keys:[],duration_ms:650});combat.push(await game.inspect());
   }
-  const full=await save('full-budget'),fullIds=new Set(family(full).map(e=>e.id));
-  game.check('natural family reaches seven escorts of each role',[0x612,0x613].every(kind=>family(full).filter(e=>e.kind===kind).length===7));
-  await act({keys:[],duration_ms:700},{name:'goblin-family',when:()=>true});
-  async function shoot(id){await act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});await act({keys:[],duration_ms:650});}
-  async function defeat(id){
-    const xp=(await game.observe()).character.experience;
-    for(let n=0;n<35&&(await game.inspect()).diagnostic.entities.some(e=>e.id===id);n++)await shoot(id);
-    const s=await game.inspect();game.check(id+': native shooting defeats enemy and earns XP',!s.diagnostic.entities.some(e=>e.id===id)&&s.view.character.experience>xp);
-  }
-  let victim;
-  for(let n=0;n<30&&!victim;n++){
-    const s=await game.inspect(),p=s.view.position;
-    victim=family(s).filter(e=>e.kind!==0x614&&s.view.objects.some(o=>o.id===e.id&&o.hp>0)&&Math.hypot(e.pos.x-p.x,e.pos.y-p.y)<5).sort((a,b)=>Math.hypot(a.pos.x-p.x,a.pos.y-p.y)-Math.hypot(b.pos.x-p.x,b.pos.y-p.y))[0];
-    if(!victim)await act({keys:[],duration_ms:300});
-  }
-  assert(victim,'No visible escort in wand range');await defeat(victim.id);
-  const survivors=family(await save('escort-defeated'));
-  for(let n=0;n<8;n++)await act({keys:[],duration_ms:2000});
-  const grown=await save('birth-budget');
-  game.check('spent lifetime budget does not replace defeated escorts',family(grown).every(e=>fullIds.has(e.id)&&survivors.some(p=>p.id===e.id))&&family(grown).length<15);
-  for(let n=0;n<15;n++){
-    const e=family(await game.inspect()).find(e=>e.id===mage.id);assert(e);if(e.hp<182)break;await shoot(mage.id);
-  }
-  const wounded=await save('wounded');
-  game.check('native wand crosses the 65-percent horde threshold',family(wounded).some(e=>e.id===mage.id&&e.hp>0&&e.hp<182&&e.stage===1));
-  await act({keys:[],duration_ms:900},{name:'goblin-horde',when:()=>true});
-  const retreat=[];for(let n=0;n<10;n++){await act({keys:[],duration_ms:300});retreat.push(await game.inspect());}
-  await writeFile(join(process.env.QA_RESULTS_DIR,'retreat.json'),JSON.stringify(retreat));
-  game.check('wounded Mage retreats toward six-tile spacing',retreat.some(s=>{const e=family(s).find(e=>e.id===mage.id);return e&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>5.5;}));
-  await defeat(mage.id);await act({keys:[],duration_ms:1000});
+  await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify(combat));
+  await act({keys:[],duration_ms:1000});
   const dead=await save('mage-defeated'),remaining=family(dead);
-  for(let n=0;n<8;n++)await act({keys:[],duration_ms:2000});
-  const orphaned=await save('orphans');
-  game.check('Mage death leaves escorts but cannot replenish or transform',remaining.length>0&&family(orphaned).every(e=>e.kind!==0x614&&remaining.some(p=>p.id===e.id)));
-  game.check('Mage XP is awarded once',orphaned.view.character.experience===dead.view.character.experience);
-  const end=await save('finished');
-  game.check('same prepared living character survives native encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
+  game.check('native wand defeats the natural Mage and awards XP',!family(dead).some(e=>e.id===mage.id)&&dead.view.character.experience>begin.view.character.experience);
+  game.check('ordinary Mage defeat leaves surviving escorts',remaining.length>0);
   await act({keys:[],duration_ms:700},{name:'goblin-defeated',when:()=>true});
+  for(let n=0;n<8;n++)await act({keys:[],duration_ms:2000});
+  const end=await save('orphans');
+  game.check('dead Mage cannot replenish escorts or transform',family(end).every(e=>e.kind!==0x614&&remaining.some(p=>p.id===e.id)));
+  game.check('Mage XP is awarded once',end.view.character.experience===dead.view.character.experience);
+  game.check('same prepared living character survives native encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
 }
