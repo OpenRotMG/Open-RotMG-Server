@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x30e,level:20,seed:815,world:1,equipment:[0xa9f,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const spec={class:0x30e,level:20,seed:815,world:1,equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,10,0,50,75,40,60]};
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
 let queen;
 export async function prepare(api){
@@ -26,9 +26,12 @@ export async function run(game){
   const exposed=await save('exposed');
   game.check('unarmored native Wizard takes ordinary scorpion damage',exposed.view.character.hp<begin.view.character.hp);
   game.check('ordinary Green Magic causes no status effect',exposed.view.character.conditions===0);
-  const path=join(process.env.QA_RESULTS_DIR,'protection.json');
-  await writeFile(path,JSON.stringify({id:'scorpion-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
+  async function protect(id){
+    const path=join(process.env.QA_RESULTS_DIR,id+'.json');
+    await writeFile(path,JSON.stringify({id,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+    execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
+  }
+  await protect('scorpion-protection');
   for(let n=0;n<6;n++){await game.act({keys:[],duration_ms:700});samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'movement-and-attacks.json'),JSON.stringify(samples));
   game.check('Queen activates and wanders',samples.some(s=>s.diagnostic.entities.some(e=>e.id===queen.id&&e.activated!==null&&Math.hypot(e.pos.x-queen.pos.x,e.pos.y-queen.pos.y)>.1)));
@@ -39,9 +42,20 @@ export async function run(game){
   for(let n=0;n<55&&members(await game.inspect()).length<10;n++)await game.act({keys:[],duration_ms:1000});
   const full=await save('full-brood');
   game.check('living Queen fills the bounded ten-defender camp',members(full).length===10);
+  await protect('scorpion-protection-finish');
+  const captureStart=(await game.observe()).game_ms;
+  await game.act({keys:[],duration_ms:1000},{name:'scorpion-brood',when:v=>v.game_ms>=captureStart+500});
   async function defeat(id){
     const before=await game.observe();
-    for(let n=0;n<20&&(await game.inspect()).diagnostic.entities.some(e=>e.id===id);n++)await game.act({keys:[],duration_ms:250,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    for(let n=0;n<40;n++){
+      const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===id);if(!e)break;
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+      if(Math.hypot(dx,dy)>3||!s.view.objects.some(e=>e.id===id&&e.hp>0))await game.act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:200});
+      else{
+        await game.act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+        await game.act({keys:[],duration_ms:500});
+      }
+    }
     await game.act({keys:[],duration_ms:350});const after=await game.inspect();
     game.check(id+': native staff defeats target with XP',!after.diagnostic.entities.some(e=>e.id===id)&&after.view.character.experience>before.character.experience);
     return after;
@@ -52,9 +66,11 @@ export async function run(game){
   for(let n=0;n<12&&!members(await game.inspect()).some(e=>!ids.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
   const replenished=await save('replenished');
   game.check('living Queen replenishes a native-killed defender within cap',members(replenished).some(e=>!ids.has(e.id))&&members(replenished).length<=10);
+  await protect('scorpion-protection-queen');
   const dead=await defeat(queen.id);await save('queen-defeated');
   const surviving=new Set(members(dead).map(e=>e.id));
-  await game.act({keys:[],duration_ms:10000});await game.act({keys:[],duration_ms:1000},{name:'scorpion-defeated',when:()=>true});
+  const defeatStart=(await game.observe()).game_ms;
+  await game.act({keys:[],duration_ms:10000});await game.act({keys:[],duration_ms:1000},{name:'scorpion-defeated',when:v=>v.game_ms>=defeatStart+10500});
   const final=await save('final');
   game.check('dead Queen cannot replenish her camp',members(final).every(e=>surviving.has(e.id))&&!final.diagnostic.entities.some(e=>e.camp===queen.camp&&e.kind===0x604));
   game.check('Queen XP is not credited twice',final.view.character.experience===dead.view.character.experience);
