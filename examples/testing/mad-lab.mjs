@@ -81,7 +81,7 @@ export async function run(game){
   game.check('native movement and weapon fire traverse four populated rooms and earn ordinary kills',traversed.diagnostic.character.kills>=entered.diagnostic.character.kills+4&&traversed.view.character.experience>entered.view.character.experience);
   game.check('last ordinary room has no fabricated equipment bags',!traversed.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)));
   game.check('native traversal observes real robot and both acid turret projectiles',[0x990,0x991].every(kind=>[...shots.values()].some(p=>p.kind===kind))&&[...shots.values()].some(p=>p.kind>=0x979&&p.kind<=0x983));
-  await walk(56.5,23.5);await walk(58.5,23.5);await walk(58.5,20.5);await walk(60.5,20.5);await walk(62.5,12.5);
+  await walk(56.5,23.5);await walk(57.5,23.5);await walk(57.5,20.5);await walk(60.5,20.5);await walk(62.5,12.5);
   const boss=(await entities()).find(e=>e.kind===0x976);assert(boss);
   await defeat(boss.id);await walk(62.5,12.5);
   await act({keys:[],duration_ms:1000},{name:'lab-boss-defeated',when:()=>true});

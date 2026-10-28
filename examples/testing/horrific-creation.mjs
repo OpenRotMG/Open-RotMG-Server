@@ -155,4 +155,33 @@ export async function run(game) {
   game.check('DeHexxer restores invincibility without replacing the boss',restored.id===original.id&&restored.stage!==2&&(restored.condition&(1<<23))!==0);
   await save('creation-restored');
   game.check('both prepared native players remain alive',(await game.observe()).lifecycle.alive&&(await partner.observe()).lifecycle.alive);
+  await go(75.5,12.5);
+  const beforeFinal=await game.inspect();
+  for(let n=0;n<70;n++) {
+    const c=await creation();if(!c)break;
+    const now=(await game.observe()).game_ms,remaining=protections.get(game.actor).until-now;
+    if(c.stage===2) {
+      if((await game.observe()).character.conditions&(1<<27))await go(75.5,12.5);
+      const input={keys:[],duration_ms:1000,target:{entity:c.id,camera_angle:camera,fire:true}};
+      if(c.hp>15000&&remaining>5000)await act(Array.from({length:3},()=>({actor:game.actor,input})));
+      else await act(input);
+    } else if(c.stage===4&&remaining>7000) {
+      await act(Array.from({length:3},()=>({actor:game.actor,input:{keys:[],duration_ms:2000}})));
+    } else await wait();
+  }
+  const final=await game.inspect();
+  game.check('native weapon fire defeats the original Creation and earns kill and XP credit',!final.diagnostic.entities.some(e=>e.id===original.id)&&final.diagnostic.character.kills>beforeFinal.diagnostic.character.kills&&final.view.character.experience>beforeFinal.view.character.experience);
+  game.check('optional defeat does not duplicate Mad Lab clear credit',final.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
+  game.check('Creation does not invent unsupported equipment rewards',!final.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)&&Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<6));
+  await act({keys:[],duration_ms:1000},{name:'creation-defeated',when:()=>true});
+  await save('creation-defeated');
+  await go(64.5,12.5);
+  const exit=(await entities()).find(e=>e.kind===0x71d);
+  if(!exit)throw Error('Previously committed Dr Terrible exit is missing');
+  await go(exit.pos.x,exit.pos.y);await act({keys:[],duration_ms:900});
+  await act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
+  const returned=await game.inspect();
+  game.check('same living character can use the retained first-boss exit after Creation',returned.view.map.name==='Nexus'&&returned.view.session.character===beforeFinal.view.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
+  await act({keys:[],duration_ms:1000},{name:'creation-returned',when:()=>true});
+  await save('creation-returned');
 }
