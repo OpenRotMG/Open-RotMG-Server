@@ -6,7 +6,7 @@ import {join} from 'node:path';
 const part=process.env.JUNGLE_PART;
 assert(['foliage','camp','basilisk','totem'].includes(part),'Set JUNGLE_PART to foliage, camp, basilisk or totem');
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
-let center;
+let center,entry;
 export const fixture={class:0x310,level:20,seed:12351,world:'forbidden-jungle',worldSeed:12351,
   position(){
     const events=readFileSync(join(out,'server.log'),'utf8').split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l));
@@ -14,6 +14,10 @@ export const fixture={class:0x310,level:20,seed:12351,world:'forbidden-jungle',w
     const rooms=JSON.parse(generated.layout.replaceAll('(','[').replaceAll(')',']'));
     const index=part==='foliage'?0:rooms.findIndex((r,i)=>i>0&&i!==generated.boss_room&&i%3==={camp:0,totem:1,basilisk:2}[part]);
     assert(index>=0);const r=rooms[index];center={x:20+r[0]*20+.5,y:20+r[1]*20+.5};
+    if(part==='camp'){
+      const parent=rooms[r[2]],dx=parent[0]-r[0],dy=parent[1]-r[1];entry={x:center.x+4*dx,y:center.y+4*dy};
+      return {x:center.x+12*dx,y:center.y+12*dy};
+    }
     return {x:center.x,y:center.y+4};
   },equipment:[0xa3d,0xb25,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
 
@@ -64,8 +68,8 @@ export async function run(game){
     game.check('ordinary native movement crosses the destroyed plant tile',Math.floor(crossed.view.position.x)===Math.floor(plant.pos.x)&&Math.floor(crossed.view.position.y)===Math.floor(plant.pos.y));
     await capture('opened-foliage-path');
   }else if(part==='camp'){
-    const fire=near(start,0xdd3);assert(fire);
-    const tribe=start.diagnostic.entities.filter(e=>e.parent===fire.id);assert.equal(tribe.length,5);
+    await walk(entry);const arrived=await save('camp-entered'),fire=near(arrived,0xdd3);assert(fire);
+    const tribe=arrived.diagnostic.entities.filter(e=>e.parent===fire.id);assert.equal(tribe.length,5);
     game.check('generated camp binds all five tribes to its own Fire',tribe.filter(e=>e.kind===0xdd0).length===2);
     const hunter=tribe.find(e=>e.kind===0xdd2);assert(hunter);
     let previous;
