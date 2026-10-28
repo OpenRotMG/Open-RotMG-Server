@@ -2155,6 +2155,11 @@ async fn reconnect(
             };
             let world = &d.worlds[&destination];
             if world.occupancy() >= world.max_players {
+                tracing::info!(
+                    player = id,
+                    destination,
+                    "portal transfer refused: destination full"
+                );
                 let message = crate::world::chat_info("Destination is full.");
                 crate::world::send(
                     &d.worlds[&d.location(id)?].players[&id],
