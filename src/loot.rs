@@ -1577,6 +1577,7 @@ mod tests {
             (0x658, 180, 0.015, 0xa20),
             (0x6d8, 360, 0.025, 0xa20),
             (0x91a, 180, 0.015, 0xa21),
+            (0x652, 360, 0.015, 0xa1f),
         ] {
             assert_eq!(bonus(kind), &[(chance, potion)]);
             let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
