@@ -10,6 +10,7 @@ export async function run(game){
   assert(boss.pos.x===15.5&&boss.pos.y===120.5,'Seeded Septavius placement changed');
   const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:'dagger-damage-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
   const protection=await response.json();await writeFile(join(root,'protection.json'),JSON.stringify(protection,null,2));assert(response.ok&&protection.status==='succeeded',JSON.stringify(protection));
+  await game.act({keys:[],duration_ms:600});
   const start=await game.observe(),observations=[];
   for(const [i,item] of [0xa14,0xa17,0xc0a,0xb21,0xc22,0xc29].entries()){
     if(i){
@@ -17,7 +18,7 @@ export async function run(game){
       game.check(item.toString(16)+' equips for combat',(await game.observe()).character.items[0]===item);
     }
     let before=await game.inspect(),target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
-    for(let wait=0;(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<23))&&wait<12;wait++){
+    for(let wait=0;(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<24))&&wait<12;wait++){
       await game.act({keys:[],duration_ms:500});before=await game.inspect();target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
     }
     await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:500},{name:'damage-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots});
