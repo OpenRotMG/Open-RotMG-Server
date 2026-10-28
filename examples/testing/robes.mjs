@@ -1,5 +1,7 @@
 import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+const mode=process.env.ROBES_MODE??'roster';
+if(!['roster','eligibility'].includes(mode))throw Error('ROBES_MODE must be roster or eligibility');
 const groups=[
   [0x30e,[0xa5c,0xa7e,0xa5d,0xa7f,0xa80,0xa5e]],
   [0x310,[0xa5f,0xadc,0xa60,0xa94,0xa95,0xa96]],
@@ -8,7 +10,8 @@ const groups=[
   [0x325,[0xc32]],
 ];
 const spec=([classId,items])=>({class:classId,level:20,seed:876,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:[...items,...Array(8-items.length).fill(-1)],stats:classId===0x30e?[670,385,75,25,50,75,40,60]:null});
-export const fixture=spec(groups[0]);
+const selected=mode==='roster'?groups.slice(0,3):groups.slice(3);
+export const fixture=spec(selected[0]);
 const expected=new Map([
   [0xa5c,[0,0,0,2,0,0,0,0]],[0xa7e,[0,0,0,3,0,0,0,1]],
   [0xa5d,[0,10,0,4,0,0,0,1]],[0xa7f,[0,15,0,4,0,0,0,2]],
@@ -22,7 +25,7 @@ const expected=new Map([
 ]);
 export async function run(game){
   const observations=[];
-  for(const [n,group] of groups.entries()){
+  for(const [n,group] of selected.entries()){
     if(n)game=await game.join(spec(group));
     await game.act({keys:[],duration_ms:600});
     const initial=await game.inspect(),base=initial.view.character.base_stats;
@@ -42,6 +45,7 @@ export async function run(game){
       await writeFile(join(process.env.QA_RESULTS_DIR,'robes.json'),JSON.stringify(observations));
     }
   }
+  if(mode==='roster')return;
   game=await game.join({class:0x31e,level:20,seed:876,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xc32,0xa00,-1,-1,-1,-1,-1,-1],stats:null});
   await game.act({keys:[],duration_ms:600});
   const knight=await game.observe();
