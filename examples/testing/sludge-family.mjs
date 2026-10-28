@@ -57,7 +57,7 @@ export async function run(game){
   await game.act({keys:[],duration_ms:500},{name:'sludge-wave',when:()=>true});
   const beforeThrow=await game.inspect(),due=parent(beforeThrow).next_aux,wait=due-beforeThrow.view.time_ms;
   assert(wait>0&&wait<8000,'Next timed throw is outside the bounded capture window');
-  await game.act({keys:[],duration_ms:wait+700},{name:'sludge-throw',when:view=>view.time_ms>=due+250&&view.time_ms<due+1450});
+  await game.act({keys:[],duration_ms:wait+700},{name:'sludge-throw',when:view=>view.game_ms>=due+250&&view.game_ms<due+1450});
   const old=new Set(children(wave).map(e=>e.id));
   let replacement;
   for(let n=0;n<14;n++){
