@@ -272,6 +272,70 @@ fn selected_trajectory_modes_preserve_parity_rotation_and_return() {
 }
 
 #[test]
+fn selected_bows_keep_individual_projectiles_and_enemy_only_piercing() {
+    for (kind, min, max, speed, lifetime, count, rate) in [
+        (0xa1a, 10, 40, 160., 440., 1, 1.),
+        (0xa75, 15, 45, 160., 440., 1, 1.),
+        (0xa1b, 20, 50, 200., 375., 1, 1.),
+        (0xa76, 25, 55, 160., 440., 1, 1.),
+        (0xa77, 35, 65, 160., 440., 1, 1.),
+        (0xa1c, 45, 65, 160., 440., 1, 1.),
+        (0xa1d, 30, 50, 160., 440., 2, 1.),
+        (0xa3a, 50, 70, 150., 500., 1, 1.),
+        (0xa1e, 40, 60, 160., 440., 3, 1.),
+        (0xa8b, 40, 65, 160., 440., 3, 1.),
+        (0xa8c, 45, 65, 160., 440., 3, 1.),
+        (0xa8d, 45, 70, 160., 440., 3, 1.),
+        (0xb02, 50, 70, 160., 440., 3, 1.),
+        (0xb03, 50, 75, 160., 440., 3, 1.),
+        (0xb04, 55, 75, 160., 440., 3, 1.),
+        (0xc02, 400, 500, 140., 503., 1, 0.33),
+        (0xc10, 60, 80, 185., 420., 2, 1.25),
+        (0xc1b, 50, 70, 180., 400., 1, 2.5),
+    ] {
+        for cover in [false, true] {
+            let (mut w, id) = fixture(0x18, false);
+            let item = w.content.get(kind).unwrap();
+            let spec = &item.projectiles[&0];
+            assert_eq!(
+                (spec.min, spec.max, spec.speed, spec.lifetime),
+                (min, max, speed, lifetime)
+            );
+            assert_eq!((item.shots, item.rate, item.arc), (count, rate, 11.25));
+            assert!(item.bonuses.is_empty());
+            assert!(spec.multi_hit && !spec.armor_piercing && !spec.passes_cover);
+            let targets =
+                [10.5, 13.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+            for target in targets {
+                w.entities.get_mut(&target).unwrap().hp = 2000;
+            }
+            if cover {
+                w.spawn_entity(0x100, Pos { x: 9.5, y: 8.5 }, vec![])
+                    .unwrap();
+            }
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.shots = 1;
+            p.character.lifetime.shots = 1;
+            let mut b = shot(&w, id, kind, 0);
+            b.friendly = true;
+            b.damage = min;
+            w.bullets.push(b);
+            for _ in 0..12 {
+                w.step();
+            }
+            for target in targets {
+                assert_eq!(
+                    w.entities[&target].hp,
+                    2000 - if cover { 0 } else { min },
+                    "{kind:#x}"
+                );
+            }
+            assert!(w.bullets.iter().all(|b| !b.friendly));
+        }
+    }
+}
+
+#[test]
 fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
     for kind in [0xa00, 0xb0b, 0xa03, 0xc01, 0xc05, 0xaf4, 0xaf5, 0xb40] {
         let (mut w, id) = fixture(0x18, false);
