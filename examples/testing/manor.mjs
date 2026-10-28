@@ -9,18 +9,18 @@ export async function run(game){
   const report=JSON.parse(await readFile(out('native/result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(out('native/state/control.token'),'utf8')).trim(),'Content-Type':'application/json'};
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),entities=s=>s.diagnostic.entities;
-  let protectionUntil=0,map;
+  let map,reward=null;
   async function save(name){const s=await game.inspect();samples.push({name,state:s});await writeFile(out('journey.json'),JSON.stringify(samples));return s;}
   async function protect(){
-    const response=await fetch(report.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:20000}}})});
+    const response=await fetch(report.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
-    protectionUntil=(await game.observe()).game_ms+20000;protections.push(receipt);await writeFile(out('protection.json'),JSON.stringify(protections));
+    protections.push(receipt);await writeFile(out('protection.json'),JSON.stringify(protections));
   }
   async function refresh(){
     const s=await game.inspect(),response=await fetch(report.origin+'/dev/map?player='+s.diagnostic.player,{headers});assert(response.ok);
     map=await response.json();return map;
   }
-  async function step(input,capture){if((await game.observe()).game_ms>=protectionUntil)await protect();return game.act(input,capture);}
+  async function step(input,capture){if(!((await game.observe()).character.conditions&(1<<23)))await protect();return game.act(input,capture);}
   function route(start,goal,tolerance){
     const width=map.width,blocked=new Set(map.blocked.map(([x,y])=>y*width+x)),first=Math.floor(start.y)*width+Math.floor(start.x),previous=new Map([[first,null]]),queue=[first];
     for(let n=0;n<queue.length;n++){
@@ -88,7 +88,13 @@ export async function run(game){
       const bags=entities(dead).filter(e=>e.extra_stats.some(([stat,owner])=>stat===54&&owner===dead.view.session.account)&&distance(e.pos,coffin.pos)<1);
       game.check('genuine coffin defeat does not grant Manor clear credit',dead.diagnostic.character.manors===before.diagnostic.character.manors);
       outcomes.push({id:coffin.id,impostor:false,bags:bags.map(e=>e.items)});
-      if(bags.length){await walk(bags[0].pos);await step({keys:[],duration_ms:700},{name:'coffin-private-reward',when:()=>true});}
+      if(bags.length&&reward===null){
+        await refresh();await walk(bags[0].pos);await step({keys:[],duration_ms:700},{name:'coffin-private-reward',when:()=>true});
+        const beforePickup=await game.observe();
+        await step({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+        reward=await save('coffin-reward-collected');
+        game.check('ordinary loot drag commits genuine private coffin reward once',reward.view.character.items[4]>=0&&reward.view.character.inventory_revision===beforePickup.character.inventory_revision+1);
+      }
     }
     if(outcomes.some(o=>o.impostor)&&outcomes.some(o=>!o.impostor&&o.bags.length))break;
   }
@@ -108,6 +114,6 @@ export async function run(game){
   await step({keys:[],duration_ms:700},{name:'ruthven-after',when:()=>true});
   await walk(exit.pos);
   const returned=await enter(entry.view.session.world,'boss-exit');
-  game.check('earned exit returns the same living Wizard to Nexus with durable clear credit',returned.view.map.name==='Nexus'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.diagnostic.character.manors===defeated.diagnostic.character.manors);
+  game.check('earned exit returns the same living Wizard to Nexus with durable clear credit',returned.view.map.name==='Nexus'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.diagnostic.character.manors===defeated.diagnostic.character.manors&&(!reward||returned.view.character.items[4]===reward.view.character.items[4]));
   await step({keys:[],duration_ms:700},{name:'manor-return',when:()=>true});
 }
