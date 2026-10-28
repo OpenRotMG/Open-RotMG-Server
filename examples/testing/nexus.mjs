@@ -58,5 +58,9 @@ export async function run(game){
   const returned=await transfer(['Insert'],null,'realm-escape','Nexus');
   game.check('ordinary Realm entry and escape retain identity equipment and inventory',entered.lifecycle.alive&&returned.lifecycle.alive&&returned.session.character===initial.session.character&&returned.session.account===initial.session.account&&JSON.stringify(returned.character.items)===JSON.stringify(initial.character.items)&&returned.character.inventory_revision===initial.character.inventory_revision);
   game.check('escape returns inside a configured Nexus spawn cell',returned.position.x>=76&&returned.position.x<80&&returned.position.y>=72&&returned.position.y<76);
+  await game.act({keys:[],duration_ms:1500});
+  const landed=await game.observe();await game.act({keys:['d'],duration_ms:350});
+  const moved=await save('playable-return');
+  game.check('native movement remains playable after the final Nexus reconnect',Math.hypot(moved.position.x-landed.position.x,moved.position.y-landed.position.y)>1);
   await game.act({keys:[],duration_ms:1000},{name:'nexus-return',when:v=>v.world==='Nexus'&&v.lifecycle.alive});
 }
