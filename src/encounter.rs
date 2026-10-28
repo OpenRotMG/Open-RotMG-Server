@@ -373,7 +373,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
 pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
     match kind {
         0x609 => elapsed / 2000,
-        0x614 => u64::from(hp <= 182),
+        0x614 => u64::from(hp < 182),
         0x953 => u64::from(hp <= 80),
         0x61f => (elapsed / 2500) % 2,
         0x6c6 => (elapsed / 1000) % 2,

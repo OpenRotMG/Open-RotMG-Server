@@ -372,9 +372,11 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
         0x60c => vec![fan(0, 1, 0., 5000, 10.), fan(1, 1, 0., 400, 5.)],
         0x953 => vec![fan(0, 1, 0., 1000, 8.), grenade(2., 12, 2500, 5.)],
         0x614 => {
+            state = u64::from(hp < 182);
+            let prediction = if state == 1 { 0.25 } else { 0.35 };
             vec![
-                fan(0, 1, 0., 1000, 10.),
-                fan(1, 1, 0., if hp <= 182 { 1000 } else { 1300 }, 10.),
+                fan(0, 1, 0., 1050, 8.).predict(prediction),
+                fan(1, 1, 0., if state == 1 { 1050 } else { 1350 }, 8.).predict(prediction),
             ]
         }
         0x609 => {

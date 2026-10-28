@@ -84,6 +84,124 @@ fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
 }
 
 #[test]
+fn goblin_attacks_keep_independent_channels_and_phase_prediction() {
+    use crate::encounter::attacks::Prediction;
+    for (hp, stage, intervals, prediction) in [
+        (280, 0, [1050, 1350], 0.35),
+        (182, 0, [1050, 1350], 0.35),
+        (181, 1, [1050, 1050], 0.25),
+    ] {
+        assert_eq!(crate::encounter::stage(0x614, hp, 0), stage);
+        let schedule = crate::encounter::attacks::schedule(0x614, hp, 0).unwrap();
+        assert_eq!(schedule.state, stage);
+        for (attack, interval) in schedule.attacks.iter().zip(intervals) {
+            assert_eq!(attack.interval, Some(interval));
+            assert_eq!(attack.range, 8.);
+            assert!(matches!(attack.predict, Prediction::Lead(p) if p == prediction));
+        }
+    }
+    let (mut world, player) = fixture(0x18, false);
+    let target = world.players[&player].pos;
+    let previous = Pos {
+        x: target.x,
+        y: target.y - 0.5,
+    };
+    world
+        .players
+        .get_mut(&player)
+        .unwrap()
+        .white_demon_aim_history = [previous, target];
+    let pos = Pos {
+        x: target.x - 4.,
+        y: target.y,
+    };
+    let mage = world.spawn_entity(0x614, pos, vec![]).unwrap();
+    for (hp, factor) in [(280, 0.35), (181, 0.25)] {
+        let schedule = crate::encounter::attacks::schedule(0x614, hp, 0).unwrap();
+        let shots = world
+            .scheduled_attacks(mage, Some(target), &schedule)
+            .unwrap();
+        assert_eq!(shots.len(), 2);
+        for (index, angle) in shots {
+            let expected = -(previous.y - pos.y).atan2(previous.x - pos.x) / 0.1
+                * (world.content.objects[&0x614].projectiles[&index].speed / 100.)
+                * factor;
+            assert!((angle - expected).abs() < 0.00001);
+        }
+    }
+    for (age, count) in [(0, 2), (1050, 1), (1350, 1), (2100, 1)] {
+        assert_eq!(
+            crate::encounter::phased_attacks(0x614, 280, 0., age).len(),
+            count
+        );
+    }
+}
+
+#[test]
+fn goblin_birth_budget_survives_escort_deaths_and_parent_loss() {
+    let (mut world, player) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 10;
+    }
+    world.population_regions[10].limit = 100;
+    let family = super::population::FAMILIES
+        .iter()
+        .find(|f| f.leader == 0x614)
+        .unwrap();
+    let center = Pos { x: 16.5, y: 8.5 };
+    let positions = world.family_layout(center, family, &[]).unwrap();
+    world.place_camp(family, positions).unwrap();
+    let mage = world.camp_members(0).find(|e| e.kind == 0x614).unwrap().id;
+    let mut born: BTreeSet<_> = world.camp_members(0).map(|e| e.id).collect();
+    for turn in 1..=6 {
+        for kind in [0x612, 0x613] {
+            let victim = world.camp_members(0).find(|e| e.kind == kind).unwrap().id;
+            world.remove_entity(victim);
+        }
+        world.now = turn * 12000;
+        world.repopulate_families().unwrap();
+        born.extend(world.camp_members(0).map(|e| e.id));
+    }
+    assert_eq!(
+        born.len(),
+        15,
+        "Mage plus seven lifetime births of each escort"
+    );
+    assert_eq!(crate::encounter::stage(0x614, 182, 0), 0);
+    let escort = world.camp_members(0).find(|e| e.kind == 0x612).unwrap().id;
+    assert!(matches!(
+        world
+            .family_movement(escort, Some(world.players[&player].pos), 0)
+            .unwrap()
+            .0,
+        crate::encounter::Motion::Protect { .. } | crate::encounter::Motion::Wander
+    ));
+    assert!(matches!(
+        world
+            .family_movement(escort, Some(world.players[&player].pos), 1200)
+            .unwrap()
+            .0,
+        crate::encounter::Motion::Orbit { radius: 7., .. }
+    ));
+    world.entities.get_mut(&mage).unwrap().hp = 181;
+    assert!(matches!(
+        world
+            .family_movement(escort, Some(world.players[&player].pos), 1200)
+            .unwrap()
+            .0,
+        crate::encounter::Motion::Chase { stop: 1.5, .. }
+    ));
+    world.remove_entity(mage);
+    let survivors: BTreeSet<_> = world.camp_members(0).map(|e| e.id).collect();
+    world.now += 12000;
+    world.repopulate_families().unwrap();
+    assert_eq!(
+        world.camp_members(0).map(|e| e.id).collect::<BTreeSet<_>>(),
+        survivors
+    );
+}
+
+#[test]
 fn undead_hobbit_mage_has_separate_ring_activation_and_aimed_shot_ranges() {
     let (mut world, player) = fixture(0x18, false);
     world.encounter = true;

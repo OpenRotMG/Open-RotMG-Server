@@ -56,7 +56,7 @@ impl World {
                 }
                 0x604 => (Motion::Wander, 2.),
                 0x953 if e.hp <= 80 => (Motion::Retreat { distance: 5. }, 4.),
-                0x614 if e.hp <= 182 => (Motion::Retreat { distance: 6. }, 5.),
+                0x614 if e.hp < 182 => (Motion::Retreat { distance: 6. }, 5.),
                 0x601 | 0x953 | 0x60d | 0x617 | 0x61a | 0x614 => {
                     crate::encounter::movement(e.kind, e.hp, elapsed)
                 }
@@ -122,24 +122,24 @@ impl World {
                 8.5,
             ),
             0x615 | 0x616 | 0x618 | 0x619 => protect(6., 11.),
-            0x612 | 0x613 if leader.hp <= 182 => (
+            0x612 | 0x613 if leader.hp < 182 => (
                 Motion::Chase {
                     sight: 10.5,
                     stop: 1.5,
                 },
                 8.,
             ),
-            0x612 | 0x613 if elapsed % 3000 < 2500 => (
-                Motion::Chase {
-                    sight: 8.,
-                    stop: 2.,
+            0x612 | 0x613 if elapsed % 3600 < 1200 => (
+                Motion::Protect {
+                    anchor: Anchor::CampLeader,
+                    distance: 1.5,
                 },
                 8.,
             ),
             0x612 | 0x613 => (
                 Motion::Orbit {
                     anchor: Anchor::CampLeader,
-                    radius: 2.,
+                    radius: 7.,
                 },
                 8.,
             ),

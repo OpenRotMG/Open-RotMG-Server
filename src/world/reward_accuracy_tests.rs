@@ -37,6 +37,7 @@ async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor(
     let mut successes = 0;
     for kind in (0x669..=0x66b)
         .chain(0x605..=0x607)
+        .chain(0x612..=0x613)
         .chain(0x65f..=0x661)
         .chain(0x91d..=0x91e)
     {
