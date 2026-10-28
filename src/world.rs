@@ -4392,7 +4392,8 @@ impl World {
         };
         let condition = p.conditions(self.now);
         let origin = if native {
-            self.validate_native_position(id, center, time).map(|_| 0.)
+            // Terrain checks undo client prediction and recreate MOVE snap-backs: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/networking/handlers/PlayerShootPacketHandler.cs
+            self.validate_native_coordinates(id, center, time).map(|_| 0.)
         } else if !p.paused && p.pos.distance(center) > 0.001 {
             self.validate_move_at(id, center, time, received)
         } else {
