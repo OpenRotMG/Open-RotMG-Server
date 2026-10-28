@@ -21,7 +21,7 @@ export async function run(game){
   await act({keys:[],duration_ms:2000},{name:'sober',when:v=>v.game_ms>initial.game_ms+500});
   await act({keys:['2'],duration_ms:2000},{name:'mushroom',when:v=>Boolean(v.character.conditions&hallucinating)});
   game.check('Mushroom alone applies Hallucinating',samples.some(v=>v.character.conditions===hallucinating));
-  await act([step(['1'],100),step(['3'],100),step([],300),step(['4'],100)]);
+  await act([step(['1'],100),step(['3'],100),step(['4'],100)]);
   game.check('Rum and Ghost Rum coexist with Mushroom',samples.some(v=>v.character.conditions===(drunk|hallucinating|invisible)));
   game.check('second Ghost Rum is used while the first invisibility is active',useIndex(7)>0&&Boolean(samples[useIndex(7)-1].character.conditions&invisible)&&used(7).game_ms-used(6).game_ms>500);
   await until(used(7).game_ms+5000);
