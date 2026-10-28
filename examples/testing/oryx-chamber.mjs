@@ -56,10 +56,10 @@ export async function run(game){
     game.check(name+' emits its selected projectile',shot);
   }
   let rage=false;
-  for(let n=0;n<320;n++){
+  for(let n=0;n<160;n++){
     const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===boss.id);if(!e)break;
     if(!rage&&e.hp<=17000&&s.view.projectiles.some(p=>p.owner===boss.id&&p.speed===55&&p.lifetime_ms===3000)){rage=true;await save('rage');}
-    await game.act({keys:[],duration_ms:1500,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+    await game.act({keys:[],duration_ms:4000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
   }
   game.check('low-HP rage emits the selected Superblast projectile',rage);
   const defeated=await save('oryx-defeated');
