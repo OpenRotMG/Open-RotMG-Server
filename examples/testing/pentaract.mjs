@@ -78,7 +78,7 @@ async function admit(){
     for(let n=0;n<80;n++){e=(await api({op:'inspect',actor:admissionActor})).diagnostic.entities.find(e=>e.id===tower.id);assert(e&&e.hp>0,'Ordinary assistance must not defeat a tower');if(e.hp<=200)break;await direct(0,100);await api({op:'act',actor:admissionActor,action:{command:'stop'},duration_ms:400,pauseAfter:true});}
     assert(e.hp<=200,'Bounded ordinary assistance did not reach its declared health range');assistance.push({id:tower.id,hp:e.hp,damage:e.damage});
   }
-  await save('assistance',{method:'Before native LOAD, the direct admission participant ordinarily weakens four towers to 1–200 HP with Short Sword shots. The first tower stays at 5000 HP; native players observe its death/revival and deliver all five final defeats.',towers:assistance});
+  await save('assistance',{method:'Before native LOAD, the direct admission participant ordinarily weakens four towers to 1–200 HP with Short Sword shots. The first tower stays at 5000 HP; native input delivers all five final defeats. Revival is qualified separately by take 7e093a7f88954a20bbde45cfb4dfe4c1.',towers:assistance});
   await cheat(admissionActor,{kind:'teleport',position:safePosition});admitted=m;
 }
 export async function run(lobby){
