@@ -1563,6 +1563,14 @@ mod tests {
         let mut rng = rand::rngs::mock::StepRng::new(0, 0);
         let observed = [0x921, 0x922].map(|kind| rewards(&content, kind, &mut rng));
         assert_eq!(observed, [vec![0xb0c], vec![]]);
+        assert!(content.objects[&0xb0c].soulbound);
+        let mut no_drop = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(
+            [0x921, 0x922]
+                .map(|kind| rewards(&content, kind, &mut no_drop))
+                .iter()
+                .all(Vec::is_empty)
+        );
         assert!(matches!(table(0x921), [(chance, Pick::Item(0xb0c))] if *chance == 0.02));
     }
 

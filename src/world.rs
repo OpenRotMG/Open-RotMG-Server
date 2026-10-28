@@ -6103,6 +6103,18 @@ impl World {
                 }
             }
         }
+        // Split after existing rolls/dedup, retaining their odds/count: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L65-L70
+        if defeated.kind == 0x921
+            && let Some(shared) = drops.get_mut(&-1)
+            && let Some(index) = shared.iter().position(|item| *item == 0xb0c)
+        {
+            let item = shared.remove(index);
+            let owner = eligible
+                .choose(&mut self.rng)
+                .expect("nonempty Ent contributors")
+                .0;
+            drops.entry(owner).or_default().push(item);
+        }
         let required = match defeated.kind {
             crate::dungeon::trench::HERMIT => Some([0xa34, 0xa4c]),
             // Sphinx's 1%-threshold potion rolls also have required counts: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.Sphinx.cs

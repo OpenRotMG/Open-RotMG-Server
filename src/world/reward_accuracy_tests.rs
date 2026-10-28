@@ -32,6 +32,86 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 }
 
 #[tokio::test]
+async fn ent_tincture_death_preserves_rolls_and_has_one_eligible_owner() {
+    let (mut w, _store, owners) = reward_world().await;
+    assert!(w.content.objects[&0xb0c].soulbound);
+    assert!(
+        w.loot_bag(Pos { x: 3.5, y: 3.5 }, None, vec![0xb0c])
+            .is_err()
+    );
+    let mut successes = 0;
+    let mut misses = 0;
+    for kind in [0x921, 0x922] {
+        for contributors in [0usize, 1, 3, 5] {
+            for seed in 0..128 {
+                clear_bags(&mut w);
+                let mut expected_rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let mut expected = false;
+                for _ in 0..(contributors * 2).min(8) {
+                    let items = crate::loot::rewards(&w.content, kind, &mut expected_rng);
+                    assert!(items.iter().all(|item| *item == 0xb0c));
+                    expected |= !items.is_empty();
+                }
+                let id = w
+                    .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
+                    .unwrap();
+                w.entities.get_mut(&id).unwrap().damage = owners[..contributors]
+                    .iter()
+                    .map(|(_, character)| (*character, 1))
+                    .collect();
+                w.entities
+                    .get_mut(&id)
+                    .unwrap()
+                    .damage
+                    .insert(owners[5].1, 0);
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.defeat_entity(id).unwrap();
+                assert!(!w.entities.contains_key(&id));
+                assert_eq!(
+                    w.bag_expiry.len(),
+                    usize::from(expected),
+                    "seed={seed}, contributors={contributors}"
+                );
+                if expected {
+                    successes += 1;
+                    let bag = &w.entities[w.bag_expiry.keys().next().unwrap()];
+                    assert_eq!(
+                        bag.items
+                            .iter()
+                            .copied()
+                            .filter(|item| *item >= 0)
+                            .collect::<Vec<_>>(),
+                        [0xb0c]
+                    );
+                    assert_eq!(
+                        owners[..contributors]
+                            .iter()
+                            .filter(|(owner, _)| bag.accessible(*owner))
+                            .count(),
+                        1
+                    );
+                    assert!(
+                        owners[contributors..]
+                            .iter()
+                            .all(|(owner, _)| !bag.accessible(*owner))
+                    );
+                    assert_eq!(
+                        bag.extra_stats
+                            .iter()
+                            .filter(|(stat, _)| *stat == 54)
+                            .count(),
+                        1
+                    );
+                } else {
+                    misses += 1;
+                }
+            }
+        }
+    }
+    assert!(successes > 0 && misses > 0);
+}
+
+#[tokio::test]
 async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor() {
     let (mut w, _store, owners) = reward_world().await;
     let mut successes = 0;
