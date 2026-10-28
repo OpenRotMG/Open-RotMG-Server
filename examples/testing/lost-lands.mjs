@@ -191,12 +191,11 @@ export async function run(game){
   const hp=entity(state,lord.id).hp;await fire(lord.id,1000);state=await save('shield-rejects');
   game.check('shield rejects native sword damage',entity(state,lord.id).hp===hp);
   const protectionIds=crystals(state).map(e=>e.id);
-  // Intercept the orbit instead of spending crystal lifetime chasing a moving waypoint.
-  await walk(landings.find(p=>p.walkable).position,.5);
+  // Reported crystals may never reach a fixed intercept, so replan from their observed positions.
   for(let n=0;n<120&&crystals(await game.inspect()).length;n++){
     const s=await game.inspect(),distance=e=>Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y);
     const target=crystals(s).sort((a,b)=>distance(a)-distance(b))[0];
-    if(distance(target)<1.5)await fire(target.id);else await idle(250);
+    if(distance(target)>2)await walk(target.pos,1.5);else await fire(target.id);
   }
   await idle(500);state=await save('shield-released');
   const defeats=await history();
