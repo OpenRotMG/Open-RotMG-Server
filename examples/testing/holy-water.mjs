@@ -30,7 +30,7 @@ export async function run(game){
   const hpRegen=sample=>regen(sample,1+sample.before.character.stats.vitality/8);
   async function use(client,key,slot,name,capture=false){
     const before=await client.observe();
-    await client.act({keys:[key],duration_ms:200},capture?{name,when:v=>v.character.items[slot]===-1}:undefined);
+    await client.act({keys:[key],duration_ms:capture?1000:200},capture?{name,when:v=>v.character.items[slot]===-1}:undefined);
     const after=await client.observe();
     await appendFile(join(root,'holy-water-observations.jsonl'),JSON.stringify({name,before,after})+'\n');
     game.check(name+' consumes one item/revision only',after.character.items[slot]===-1&&after.character.inventory_revision===before.character.inventory_revision+1&&after.character.items.every((v,i)=>i===slot||v===before.character.items[i]));
@@ -64,7 +64,7 @@ export async function run(game){
   game.check('Transformation Potion applies Hexed',(await game.observe()).character.conditions&hexed);
   const transformed=await game.observe(),cooldown=transformed.character.ability_ready_ms-transformed.game_ms;
   if(cooldown>0)await game.act({keys:[],duration_ms:cooldown});
-  await game.act({keys:[' '],duration_ms:150},{name:'holy-water-hexed-before',when:v=>(v.character.conditions&(hexed|speedy|berserk))===(hexed|speedy|berserk)});
+  await game.act({keys:[' '],duration_ms:1000},{name:'holy-water-hexed-before',when:v=>(v.character.conditions&(hexed|speedy|berserk))===(hexed|speedy|berserk)});
   // Selected 123.5.1 0xc21 orders Heal, Hexed-gated Speedy clear, then cleanse; Kithio's NegativeEffs: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.UseItem.cs#L14-L86
   sample=await use(game,'1',4,'holy-water-hexed-after',true);
   game.check('Hexed and associated Speedy clear while Berserk survives',!(sample.after.character.conditions&(hexed|speedy))&&Boolean(sample.after.character.conditions&berserk));
