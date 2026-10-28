@@ -40,6 +40,7 @@ mod social;
 struct Profile {
     // Keep persisted registry keys independent of the names visible to players.
     identity: &'static str,
+    // Guest catalog selectors are not account-visible names.
     name: &'static str,
     recovery: f32,
     resources: f32,
@@ -53,6 +54,11 @@ struct Profile {
     knows_minimap: bool,
     stars: i32,
     role: persona::Role,
+}
+impl Profile {
+    fn is_guest(&self) -> bool {
+        self.identity.starts_with("guest:v1:")
+    }
 }
 #[cfg(test)]
 const ARCHETYPES: [Profile; 6] = [
@@ -395,7 +401,7 @@ impl Brain {
                 .objects
                 .iter()
                 .any(|o| o.id == actor && o.hp > 0 && !o.equipped.is_empty())
-            && text.eq_ignore_ascii_case(&format!("{} follow me", self.profile.name))
+            && text.eq_ignore_ascii_case(&format!("{} follow me", self.mind.market.name.as_str()))
         {
             self.companion = Some(actor);
             self.invitation_until = view.time_ms + 60000;
@@ -1924,17 +1930,26 @@ pub fn persona_count() -> usize {
     persona::PERSONAS.len()
 }
 pub fn profiles() -> Vec<&'static str> {
-    persona::PERSONAS.iter().map(|p| p.name).collect()
+    persona::PERSONAS
+        .iter()
+        .chain(persona::GUESTS.iter())
+        .map(|p| p.name)
+        .collect()
 }
 fn selected_profile(name: &str) -> Result<Profile> {
     persona::PERSONAS
         .iter()
+        .chain(persona::GUESTS.iter())
         .copied()
         .find(|p| p.name == name)
         .context("unknown actual gameplay profile")
 }
 pub fn validate_test_profile(profile: &str) -> Result<()> {
-    selected_profile(profile).map(|_| ())
+    ensure!(
+        !selected_profile(profile)?.is_guest(),
+        "guest profiles cannot use generic prepared Spawn; use Persona starting context"
+    );
+    Ok(())
 }
 pub async fn start_test_persona(
     app: &crate::server::App,

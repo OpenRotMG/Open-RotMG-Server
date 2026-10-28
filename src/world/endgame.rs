@@ -1137,15 +1137,16 @@ async fn realm_death_credit_survives_portal_reward_failure() {
         .set(Some(root), root, &mut world.quest_ids);
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
-    world
-        .enter(character, Some(Output { packets, lost }))
+    let player = world
+        .enter(character.clone(), Some(Output { packets, lost }))
         .unwrap();
     while inbox.try_recv().is_ok() {}
     directory.worlds.insert(-3, world);
-    directory.endgame.realms.remove(&-3);
+    let portal = directory.endgame.realms.remove(&-3).unwrap().portal;
     directory
         .bind_realm_heroes(-3, BTreeSet::from([root]))
         .unwrap();
+    directory.endgame.realms.get_mut(&-3).unwrap().portal = portal;
     let world = directory.worlds.get_mut(&-3).unwrap();
     let error = world.defeat_entity(root).unwrap_err();
     assert_eq!(error.to_string(), "Hermit has no reachable reward site");
@@ -1167,4 +1168,122 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     );
     assert!(!directory.worlds[&-3].admission_open);
     assert!(directory.endgame.realms[&-3].cycle.remaining.is_empty());
+    assert!(directory.issue(account.id, character.id, -3).is_err());
+    directory.tick = 2399;
+    directory.endgame_step(&[-3]);
+    assert!(directory.forced_transfer(player).unwrap().is_none());
+    assert!(inbox.try_recv().is_err());
+    directory.tick = 2400;
+    directory.endgame_step(&[-3]);
+    let notices: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok()).collect();
+    assert_eq!(notices.iter().filter(|p| p.id == wire::TEXT).count(), 3);
+    assert_eq!(
+        notices.iter().filter(|p| p.id == wire::SHOW_EFFECT).count(),
+        1
+    );
+    assert!(directory.forced_transfer(player).unwrap().is_none());
+    directory.tick = 2559;
+    directory.endgame_step(&[-3]);
+    assert!(directory.endgame.realms[&-3].castle.is_none());
+    directory.tick = 2560;
+    for _ in 0..1000 {
+        directory.endgame_step(&[-3]);
+        if directory.endgame.realms[&-3].castle.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let record = &directory.endgame.realms[&-3];
+    let castle = record
+        .castle
+        .expect("normal replacement construction completed");
+    let replacement = record.replacement.unwrap();
+    assert!(!directory.worlds[&replacement].admission_open);
+    assert!(directory.forced_transfer(player).unwrap().is_none());
+    let (owner, progress) = directory
+        .worlds
+        .get_mut(&-3)
+        .unwrap()
+        .pending_progress_where(|id, _| id == player)
+        .pop()
+        .expect("final Hermit XP must settle before transfer");
+    store.progress(progress.clone()).await.unwrap();
+    directory
+        .worlds
+        .get_mut(&-3)
+        .unwrap()
+        .finish_progress(owner, progress)
+        .unwrap();
+    let character = directory.worlds[&-3].players[&player].character.clone();
+    let transfer = directory.forced_transfer(player).unwrap().unwrap();
+    assert_eq!(transfer.destination, Some(castle));
+    assert_eq!(transfer.name, "Oryx's Castle");
+    assert_eq!(transfer.packet().id, 39);
+    assert!(directory.forced_transfer(player).unwrap().is_none());
+    assert!(
+        directory
+            .consume(account.id, castle, transfer.key_time, transfer.key.clone())
+            .is_err()
+    );
+    let mut reservation = directory.reserve_transfer(transfer.key.clone()).unwrap();
+    let snapshot = directory
+        .begin_source_departure(player, Some(&transfer.key))
+        .unwrap()
+        .unwrap();
+    directory
+        .accept_source_write(player, &transfer.key)
+        .unwrap();
+    let persisted = store.progress(snapshot.clone()).await;
+    directory
+        .worlds
+        .get_mut(&-3)
+        .unwrap()
+        .committed(player, persisted)
+        .unwrap();
+    directory
+        .finish_source_departure(player, snapshot, Some(transfer.key.clone()))
+        .unwrap();
+    reservation.disarm();
+    directory.realm_departed(-3, player);
+    let (id, arrival) = directory
+        .consume(account.id, castle, transfer.key_time, transfer.key.clone())
+        .unwrap();
+    assert_eq!(id, character.id);
+    directory
+        .admit_transfer(arrival, account.id, id, castle)
+        .unwrap();
+    let saved = store.load(account.id, id).await.unwrap();
+    assert_eq!(saved, character);
+    let arrived = directory
+        .worlds
+        .get_mut(&castle)
+        .unwrap()
+        .enter_admitted(
+            saved,
+            Some(transfer.output),
+            None,
+            store.presentation(account.id).await.unwrap(),
+            Some(transfer.key.clone()),
+        )
+        .unwrap();
+    let current = &directory.worlds[&castle].players[&arrived].character;
+    assert!(
+        current.tiles > character.tiles,
+        "Castle entry discovers new tiles"
+    );
+    let mut expected = character;
+    expected.lifetime.tiles += current.tiles - expected.tiles;
+    expected.tiles = current.tiles;
+    assert_eq!(*current, expected);
+    assert!(
+        directory
+            .consume(account.id, castle, transfer.key_time, transfer.key)
+            .is_err()
+    );
+    directory.tick = 2599;
+    directory.endgame_step(&[castle]);
+    assert!(!directory.worlds[&replacement].admission_open);
+    directory.tick = 2600;
+    directory.endgame_step(&[castle]);
+    assert!(directory.worlds[&replacement].admission_open);
 }

@@ -1277,7 +1277,8 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
     // Monster-page chest rates override the generic community-server pools.
     // https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant
     let (weapon, armor, tier_rates, ring, ring_rates, ability_rates) = match kind {
-        0x675 | 0x678 => (5, 5, [0.75, 0.375, 0.167], 1, [0.6, 0.15], [0.3, 0.075, 0.]),
+        0x675 => (5, 5, [0.75, 0.375, 0.167], 1, [0.6, 0.15], [0.3, 0.075, 0.]),
+        0x678 => (5, 4, [0.75, 0.375, 0.167], 1, [0.6, 0.15], [0.3, 0.075, 0.]),
         0x67d => (6, 6, [0.5, 0.25, 0.125], 2, [0.2, 0.05], [0.4, 0.1, 0.025]),
         0x668 => (7, 7, [0.5, 0.25, 0.125], 2, [0.4, 0.1], [0.8, 0.2, 0.05]),
         _ => unreachable!("selected landmark chest"),
@@ -1346,6 +1347,19 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn oasis_chest_armor_keeps_period_tiers() {
+        let armor: Vec<_> = chest_table(0x678)
+            .into_iter()
+            .filter_map(|(chance, pick)| match pick {
+                Pick::Tier(tier, slots) if slots == ARMOR => Some((tier, chance)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(armor, [(4, 0.75), (5, 0.375), (6, 0.167)]);
+        assert!(table(0x678).is_empty());
+    }
 
     #[test]
     fn elf_escorts_keep_their_distinct_public_potion_rolls() {

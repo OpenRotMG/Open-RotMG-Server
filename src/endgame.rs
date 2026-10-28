@@ -5,6 +5,7 @@ use crate::{
 use anyhow::{Result, ensure};
 use std::{collections::BTreeSet, f32::consts::TAU};
 
+// The January 2012 FAQ specifies a two-minute lockout, not later forks' 22 seconds: https://web.archive.org/web/20120106105406id_/http://forums.wildshadow.com/wiki/realm-mad-god/faq
 pub const CLOSE_DELAY_MS: u64 = 120_000;
 pub const EARTHQUAKE_MS: u64 = 8_000;
 pub const REPLACEMENT_DELAY_MS: u64 = 2_000;
