@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-const out=process.env.QA_RESULTS_DIR;
+import {promisify} from 'node:util';
+const exec=promisify(execFile),out=process.env.QA_RESULTS_DIR;
 const spec={class:0x31d,level:20,seed:820,world:1,equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,50]};
 let scout,roots,earned,origin,token,spawn;
 const protectedUntil=new Map();
@@ -36,7 +37,8 @@ export async function beforeNavigate(){
       if(!target)break;
       await api({op:'cheat',actor:scout,change:{kind:'teleport',position:target.pos}});
       const request=join(out,'command-'+serial+++'.json');await writeFile(request,JSON.stringify({id:randomUUID(),command:{op:'act',actor:scout,action:{command:'shoot',angle:0},duration_ms:1000}}));
-      execFileSync(process.execPath,[resolve('scripts/game.mjs'),config,request],{stdio:['ignore','pipe','pipe']});
+      // The runner must keep draining backend logs while its controller awaits the server.
+      await exec(process.execPath,[resolve('scripts/game.mjs'),config,request]);
     }
     earned=(await fields()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd59);
   }
