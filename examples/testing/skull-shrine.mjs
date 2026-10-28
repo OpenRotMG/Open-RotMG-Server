@@ -53,7 +53,7 @@ export async function run(observer){
     const position=[[1.5,0],[-1.5,0],[0,1.5],[0,-1.5],[1,1],[-1,1],[1,-1],[-1,-1]].map(([x,y])=>({x:point.x+x,y:point.y+y})).find(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')));
     assert(position,'No walkable prepared attack position beside the observed hero');return position;
   }
-  const order=[0x678,0x67d,0x668,0x91f,0x91b,0x675,0x928];
+  const order=[0x678,0x67d,0x668,0x675,0x928,0x91b];
   const candidates=initial.entities.filter(e=>order.includes(e.kind)).sort((a,b)=>order.indexOf(a.kind)-order.indexOf(b.kind));
   const events=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
   let admission;
@@ -62,7 +62,7 @@ export async function run(observer){
     for(let n=0;n<80;n++){
       await protect(observer);await protect({actor:admissionActor,observe:()=>api({op:'observe',actor:admissionActor})});
       const scene=await api({op:'inspect',actor:admissionActor});
-      const target=scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x924,0x91d].includes(e.kind))||scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
+      const target=scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x929,0x91d].includes(e.kind))||scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
       if(!target)break;
       const position=approachPoint(target.pos);
       await cheat({actor:admissionActor},{kind:'teleport',position});
