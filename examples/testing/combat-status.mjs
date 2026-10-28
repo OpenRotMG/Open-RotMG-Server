@@ -25,9 +25,9 @@ export async function run(game){
   const damaged=await save('unprotected-hit');
   game.check('actual hostile fire reduces HP after protection expires',damaged.view.character.hp<670&&!(damaged.view.character.conditions&bit(25)));
   game.check('ordinary boss Weak overlaps web Slowed',(damaged.view.character.conditions&(bit(3)|bit(4)))===(bit(3)|bit(4)));
-  await prepare({kind:'teleport',position:{x:12.5,y:74.5}});
+  await prepare({kind:'protection',condition:'invincible',duration_ms:10000});
   await game.act({keys:[],duration_ms:6000},{name:'combat-expired',when:v=>!(v.character.conditions&(bit(3)|bit(4)|bit(25)))});
   const expired=await save('expired');
-  game.check('overlapping Weak and Slowed expire away from hostile fire',!(expired.view.character.conditions&(bit(3)|bit(4)|bit(25))));
+  game.check('overlapping Weak and Slowed expire while Invincible prevents new hits',(expired.view.character.conditions&bit(24))&&!(expired.view.character.conditions&(bit(3)|bit(4)|bit(25))));
   game.check('combat preserves the same living Wizard and staff',expired.view.lifecycle.alive&&expired.view.session.character===initial.view.session.character&&expired.view.character.items[0]===0xa97);
 }
