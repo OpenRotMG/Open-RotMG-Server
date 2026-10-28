@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {join,resolve} from 'node:path';
+import {execFileSync} from 'node:child_process';
 
 export const fixture={class:0x31e,level:20,seed:858,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[0xa84,-1,0xafc,0xacd],backpack:Array(8).fill(-1),stats:[770,252,50,40,50,50,75,50]};
 export async function run(game){
@@ -31,6 +32,9 @@ export async function run(game){
   await split(medium[0].id,0xd9d,4,'black-little');
   const brown=map.entities.find(e=>e.kind===0xd9e&&[0,1,2].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));assert(brown,'No natural brown slime approach');
   game=await game.join({...knight,world:initial.view.session.world,position:{x:brown.pos.x+2,y:brown.pos.y}});
+  const protection=join(process.env.QA_RESULTS_DIR,'brown-protection.json');
+  await writeFile(protection,JSON.stringify({id:'brown-lifecycle-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),protection]);
   await split(brown.id,0xd9f,6,'brown-little');
   game.check('native slime case ends with a living Knight',(await game.observe()).lifecycle.alive);
 }
