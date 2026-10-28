@@ -4,6 +4,8 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 
 pub const BOSS: u16 = 0x917;
 pub const PET: u16 = 0x918;
+// Six tiles clear cover throughout the two-tile wander; period evidence specifies circling, not radius: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
+pub const PET_RADIUS: f32 = 6.;
 pub const SWARM: u16 = 0x919;
 pub const GUARD: u16 = 0xe26;
 pub const BUTTON: u16 = 0xe27;

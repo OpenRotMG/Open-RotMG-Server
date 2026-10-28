@@ -7558,6 +7558,8 @@ mod shop_tests;
 mod combat_tests;
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod snake_tests;
 
 #[cfg(test)]
 mod death_chat_tests;

@@ -25,7 +25,6 @@ export async function run(observer){
     try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
     if(error)throw error;
   }
-  // Period evidence establishes the three attack families, not exact timers: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
   for(let n=0;n<6;n++)await sample({keys:[],duration_ms:n===5?3500:6000},n===4?{name:'stheno-blind-ring',when:()=>true}:undefined);
   await writeFile(join(root,'stheno-phases.json'),JSON.stringify({boss,samples,shots:[...shots.values()]}));
   const stages=new Set(samples.map(s=>entity(s,boss.id)?.stage));
@@ -34,7 +33,7 @@ export async function run(observer){
   const active=samples.filter(s=>entity(s,boss.id)?.stage!==null);
   const radii=active.flatMap(s=>s.diagnostic.entities.filter(e=>e.kind===0x918&&e.parent===boss.id).map(e=>Math.hypot(e.pos.x-entity(s,boss.id).pos.x,e.pos.y-entity(s,boss.id).pos.y)));
   const pets=active.find(s=>s.diagnostic.entities.filter(e=>e.kind===0x918&&e.parent===boss.id).length===4)?.diagnostic.entities.filter(e=>e.kind===0x918&&e.parent===boss.id);
-  game.check('four moving guardians stay on their ten-tile orbit',pets?.every(p=>active.some(s=>{const e=entity(s,p.id);return e&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>1;}))&&radii.length>20&&radii.every(r=>Math.abs(r-10)<.35));
+  game.check('four moving guardians stay on their reconstructed six-tile orbit',pets?.every(p=>active.some(s=>{const e=entity(s,p.id);return e&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>1;}))&&radii.length>20&&radii.every(r=>Math.abs(r-6)<.35));
   game.check('swarm appears in its phase and is removed for blind rings',samples.some(s=>entity(s,boss.id)?.stage===1&&s.diagnostic.entities.some(e=>e.kind===0x919&&e.parent===boss.id))&&samples.some(s=>entity(s,boss.id)?.stage===2&&!s.diagnostic.entities.some(e=>e.kind===0x919&&e.parent===boss.id)));
   const masks=samples.map(s=>s.view.objects.find(e=>e.id===boss.id)?.condition_mask).filter(Number.isInteger);
   game.check('native Stheno alternates invulnerable and vulnerable',masks.some(m=>m&(1<<24))&&masks.some(m=>!(m&(1<<24))));
