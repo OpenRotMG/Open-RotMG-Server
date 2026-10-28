@@ -59,9 +59,9 @@ export async function run(game){
     const arrived=await game.observe();assert(Math.hypot(arrived.position.x-point.x,arrived.position.y-point.y)<.2,'Native teleport must reach direct scout');lastTeleport=arrived.game_ms;
     await api({op:'cheat',actor:scout,change:{kind:'teleport',position:refuge}});
   }
-  async function walk(point){
+  async function walk(point,range=1.5){
     for(let n=0;n<30;n++){
-      await protect();const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<1.5)return;
+      await protect();const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<range)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
       await game.act({keys,duration_ms:Math.max(50,Math.min(500,Math.round(Math.hypot(dx,dy)/10*1000)))});
@@ -112,7 +112,7 @@ export async function run(game){
   for(const crystal of crystals(state))for(let n=0;n<35&&entity(await game.inspect(),crystal.id);n++)await fire(crystal.id);
   await idle(500);state=await save('shield-released');
   game.check('defeating all crystals returns Lord to combat',!crystals(state).length&&entity(state,lord.id).stage!==8&&!(entity(state,lord.id).condition&(1<<24)));
-  const beforeFinalXp=state.view.character.experience;
+  const beforeFinalXp=state.view.character.experience,existingBags=new Set(state.diagnostic.entities.filter(e=>e.items).map(e=>e.id));
   for(let n=0;n<300&&entity(await game.inspect(),lord.id);n++){
     state=await game.inspect();
     const crystal=crystals(state)[0];
@@ -124,5 +124,26 @@ export async function run(game){
   game.check('defeat XP is once only',(await game.observe()).character.experience===xp);
   game.check('same living prepared character survives',state.view.lifecycle.alive&&state.view.session.character===initial.view.session.character);
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-defeated',when:()=>true});
+  state=await save('rewards');
+  // Verify an observed private roll, not historical rates: https://web.archive.org/web/20120521061126id_/http://forums.wildshadow.com/wiki/realm-mad-god/lord-lost-lands
+  const bag=state.diagnostic.entities.find(e=>!existingBags.has(e.id)&&e.items?.some(i=>i!==-1)&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===state.view.session.account));
+  assert(bag,'No natural Lord private item observed; pickup/reconnect not exercised');
+  await api({op:'cheat',actor:scout,change:{kind:'teleport',position:bag.pos}});
+  const observer=await api({op:'inspect',actor:scout});
+  game.check('nearby noncontributor cannot see the Lord private reward',!observer.diagnostic.entities.some(e=>e.id===bag.id));
+  await api({op:'cheat',actor:scout,change:{kind:'teleport',position:refuge}});
+  await walk(bag.pos,.5);
+  await game.act({keys:[],duration_ms:700},{name:'lost-lands-reward',when:()=>true});
+  const inventory=(await game.observe()).character,slot=bag.items.findIndex(i=>i!==-1),item=bag.items[slot],from={x:634+(slot%4)*44,y:528+Math.floor(slot/4)*44};
+  assert(inventory.items[4]===-1,'Empty prepared destination required');
+  await game.act({keys:[],duration_ms:350,drag:{from,to:{x:634,y:428}}});
+  const picked=await save('picked');
+  game.check('native drag commits one eligible Lord item',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===inventory.inventory_revision+1&&entity(picked,bag.id)?.items[slot]===-1);
+  await game.act({keys:[],duration_ms:350,drag:{from,to:{x:678,y:428}}});
+  game.check('empty-slot drag cannot duplicate the Lord reward',(await game.observe()).character.inventory_revision===picked.view.character.inventory_revision);
+  await game.act({keys:['Insert'],duration_ms:250});
+  const retained=await game.observe();
+  game.check('Nexus reconnect preserves the living character and Lord item',retained.world==='Nexus'&&retained.lifecycle.alive&&retained.session.character===picked.view.session.character&&JSON.stringify(retained.character.items)===JSON.stringify(picked.view.character.items)&&retained.character.inventory_revision===picked.view.character.inventory_revision);
+  await writeFile(join(out,'reward.json'),JSON.stringify({bag,observer,picked,retained}));
   }finally{connection.close();}
 }
