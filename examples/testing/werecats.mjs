@@ -23,10 +23,13 @@ export async function run(game){
   const samples=[],shots=new Map();
   const family=s=>s.diagnostic.entities.filter(e=>e.camp===lion.camp);
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
+  let sampling=true;
+  const record=s=>{samples.push(s);for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);};
   async function act(input,capture){
-    await game.act(input,capture);const s=await game.inspect();samples.push(s);
-    for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);
-    return s;
+    let pending,error;
+    const timer=setInterval(()=>{if(sampling&&!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},25);
+    try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
+    if(error)throw error;const s=await game.inspect();record(s);return s;
   }
   try{
     const begin=await save('arrival'),initial=family(begin);
@@ -47,8 +50,13 @@ export async function run(game){
     }
     game.check('Werelion alternates its second selected projectile',[...shots.values()].some(p=>p.owner===lion.id&&p.speed===60&&p.lifetime_ms===2500));
     game.check('Tiger and Leopard choose both current chase/orbit stages',[0x635,0x636].every(k=>[0,1].every(stage=>samples.some(s=>family(s).some(e=>e.kind===k&&e.stage===stage)))));
-    // Trapped's Planewalk reaches the selected player, not a random offset: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/movement/Planewalk.cs
-    game.check('Panther reaches the native player after its seven-second chase',samples.some(s=>s.view.time_ms>=7000&&family(s).some(e=>e.kind===0x639&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<.05)));
+    // Movement resumes in the teleport tick, so compare the spatial reset, not exact equality: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/movement/Planewalk.cs
+    game.check('Panther visibly relocates to the player on its seven-second clock',samples.some((s,i)=>i>0&&family(s).some(e=>{
+      if(e.kind!==0x639||e.next_aux!==e.activated+14000||s.view.time_ms-e.activated>7100)return false;
+      const before=samples[i-1],p=family(before).find(p=>p.id===e.id);
+      return p?.next_aux===0&&s.view.time_ms-before.view.time_ms<=100&&Math.hypot(p.pos.x-before.view.position.x,p.pos.y-before.view.position.y)>.8&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<.3;
+    })));
+    sampling=false;
     const victim=family(await game.inspect()).find(e=>e.kind===0x635);assert(victim);
     for(let n=0;n<20&&family(await game.inspect()).some(e=>e.id===victim.id);n++)await act({keys:[],duration_ms:200,target:{entity:victim.id,camera_angle:-Math.PI/4,fire:true}});
     game.check('native staff defeats a Tiger while owner lives',!family(await game.inspect()).some(e=>e.id===victim.id)&&family(await game.inspect()).some(e=>e.id===lion.id));
