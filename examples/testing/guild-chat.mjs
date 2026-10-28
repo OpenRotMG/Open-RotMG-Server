@@ -61,6 +61,7 @@ export async function run(game){
   await game.act({keys:[],duration_ms:1000},{name:'guild-before',when:()=>true});
   await chat(outsider,2,'/g outsiders cannot send');
   game.check('nonmember gets an explicit refusal without guild delivery',has(2,'You are not in a guild.')&&!has(0,'outsiders cannot send')&&!has(1,'outsiders cannot send'));
+  await outsider.act({keys:[],duration_ms:500},{name:'guild-refused',when:()=>true});
   await api({op:'cheat',actor:game.actor,change:{kind:'guild',name:'Chat Research',members:[peer.actor]}});
   await game.act({keys:[],duration_ms:1000});
   const initial=await game.inspect(),name=initial.diagnostic.character.name;
