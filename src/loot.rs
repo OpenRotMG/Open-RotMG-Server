@@ -1571,11 +1571,13 @@ mod tests {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         // Kithio's 18% threshold is inclusive, not the later 7.0 reward policy: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L88-L112
         for (kind, threshold, chance, potion) in [
+            (0x651, 180, 0.01, 0xa1f),
             (0x655, 180, 0.015, 0xa20),
             (0x656, 270, 0.01, 0xa20),
             (0x657, 180, 0.015, 0xa1f),
             (0x658, 180, 0.015, 0xa20),
             (0x659, 180, 0.015, 0xa21),
+            (0x6d8, 360, 0.025, 0xa20),
             (0x91a, 180, 0.015, 0xa21),
         ] {
             assert_eq!(bonus(kind), &[(chance, potion)]);
@@ -1606,6 +1608,7 @@ mod tests {
             assert!(empty.shared.is_empty() && empty.private.is_empty());
         }
         assert_eq!(crate::dungeon::portal_drop(0x659), Some((0x71a, 0.17)));
+        assert_eq!(crate::dungeon::portal_drop(0x6d8), None);
     }
 
     #[test]
