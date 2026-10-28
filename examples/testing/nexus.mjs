@@ -52,7 +52,7 @@ export async function run(game){
   game.check('Vault portal isolates accounts and retains the living character',stayed.world==='Nexus'&&arrived.lifecycle.alive&&arrived.session.character===initial.session.character&&arrived.session.account===initial.session.account);
   await transfer(['Insert'],null,'vault-escape','Nexus');
   await walk({x:78.5,y:42.5});
-  const realm=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x700);assert(realm,'Realm portal missing');
+  const realm=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x712);assert(realm,'Realm portal missing');
   await walk(realm.pos);
   const entered=await transfer([],{x:700,y:575},'realm','Realm');
   const returned=await transfer(['Insert'],null,'realm-escape','Nexus');
