@@ -7582,6 +7582,8 @@ mod shop_tests;
 #[cfg(test)]
 mod combat_tests;
 #[cfg(test)]
+mod cooperative_tests;
+#[cfg(test)]
 mod movement_tests;
 #[cfg(test)]
 mod snake_tests;

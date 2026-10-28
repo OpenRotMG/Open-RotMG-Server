@@ -39,6 +39,7 @@ impl Directory {
         let world = self.resolve(Target::Player(id))?;
         let position = world.teleport_destination(id, target)?;
         let account = world.players[&id].character.account;
+        // The selected client's teleportTo uses 10000ms: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as
         if let Some(last) = self.teleports.get(&account) {
             ensure!(
                 received
