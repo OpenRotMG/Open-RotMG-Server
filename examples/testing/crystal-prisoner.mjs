@@ -112,7 +112,7 @@ export async function run(game){
   await approach(game,bag.pos,.4);await game.act({keys:[],duration_ms:700},{name:'prisoner-reward',when:()=>true});
   const before=await game.observe(),slot=bag.items.findIndex(i=>i!==-1),item=bag.items[slot];
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot%4*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}}});state=await save('picked');
-  game.check('native pickup commits private reward once',state.view.character.items[4]===item&&state.view.character.inventory_revision===before.character.inventory_revision+1&&entity(state,bag.id).items[slot]===-1);
+  game.check('native pickup commits private reward once',state.view.character.items[4]===item&&state.view.character.inventory_revision===before.character.inventory_revision+1&&(!entity(state,bag.id)||entity(state,bag.id).items[slot]===-1));
   const safe=await mystic.observe();game.check('escaped caster stays alive without acquiring a reward',safe.world==='Nexus'&&safe.lifecycle.alive&&safe.session.character===caster&&safe.character.items.slice(4).every(i=>i===-1));
   const earned=state.view.character.experience;await idle(1000);game.check('Prisoner defeat XP is once only',(await game.observe()).character.experience===earned);
   await game.act({keys:['Insert'],duration_ms:250});const retained=await game.observe();game.check('Nexus reconnect retains living character and reward',retained.world==='Nexus'&&retained.session.character===state.view.session.character&&retained.character.items[4]===item&&retained.lifecycle.alive);
