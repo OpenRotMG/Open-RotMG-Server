@@ -23,7 +23,8 @@ export async function run(game){
   async function fire(actor,id,ms=500){await protect(actor);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   const initial=await map();await writeFile(join(out,'initial-map.json'),JSON.stringify(initial));
   game.check('no Skull Shrine is active before an earned event',!initial.entities.some(e=>e.kind===0xd56));
-  const candidates=initial.entities.filter(e=>[0x678,0x67d,0x668,0x91f,0x91b,0x675,0x928].includes(e.kind));
+  const order=[0x678,0x67d,0x668,0x91f,0x91b,0x675,0x928];
+  const candidates=initial.entities.filter(e=>order.includes(e.kind)).sort((a,b)=>order.indexOf(a.kind)-order.indexOf(b.kind));
   let shrine;
   for(const candidate of candidates){
     await protect(game);await cheat(game,{kind:'teleport',position:candidate.pos});
@@ -82,11 +83,32 @@ export async function run(game){
   const after=await Promise.all([game.inspect(),peer.inspect(),outsider.inspect()]);
   game.check('native sword fire defeats shrine',!root(after[0]));
   game.check('both contributors receive defeat XP',after[0].view.character.experience>before[0].character.experience&&after[1].view.character.experience>before[1].character.experience);
+  const orphaned=(await map()).entities.filter(e=>e.quest===shrine.id&&[0xd57,0xd58].includes(e.kind));
+  const bag=after[1].diagnostic.entities.find(e=>e.extra_stats.some(([stat,account])=>stat===54&&account===after[1].view.session.account)&&e.items?.some(item=>item!==-1));
+  assert(bag,'Observed shrine roll must supply a peer reward for the pickup check');
+  game.check('noncontributor cannot see the peer private reward',!after[2].diagnostic.entities.some(e=>e.id===bag.id));
+  await cheat(outsider,{kind:'teleport',position:bag.pos});
+  await outsider.act({keys:[],duration_ms:500},{name:'shrine-ineligible-reward',when:()=>true});
+  const outsiderRevision=(await outsider.observe()).character.inventory_revision;
+  await outsider.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+  game.check('noncontributor cannot acquire the private reward',(await outsider.observe()).character.inventory_revision===outsiderRevision&&(await peer.inspect()).diagnostic.entities.find(e=>e.id===bag.id)?.items[0]===bag.items[0]);
+  await cheat(peer,{kind:'teleport',position:bag.pos});
+  await peer.act({keys:[],duration_ms:500},{name:'shrine-eligible-reward',when:()=>true});
+  const inventory=(await peer.observe()).character,item=bag.items[0];assert(item!==-1);
+  await peer.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+  const picked=await peer.inspect();
+  game.check('native pickup commits one eligible reward',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===inventory.inventory_revision+1);
+  await peer.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
+  game.check('repeated empty-slot drag cannot duplicate reward',(await peer.observe()).character.inventory_revision===picked.view.character.inventory_revision);
+  await peer.act({keys:['Insert'],duration_ms:250});
+  const retained=await peer.observe();
+  game.check('normal Nexus reconnect preserves acquired reward',retained.world==='Nexus'&&retained.session.character===picked.view.session.character&&retained.character.items[4]===item&&retained.character.inventory_revision===picked.view.character.inventory_revision);
   await game.act({keys:[],duration_ms:3000});
   const end=await map(),xp=(await game.observe()).character.experience;
-  game.check('defeated shrine does not respawn or replenish skulls',!end.entities.some(e=>e.id===shrine.id)&&end.entities.filter(e=>e.quest===shrine.id&&[0xd57,0xd58].includes(e.kind)).every(e=>children.some(c=>c.id===e.id)||replenished.some(c=>c.id===e.id)));
+  game.check('defeated shrine does not respawn or replenish skulls',!end.entities.some(e=>e.id===shrine.id)&&end.entities.filter(e=>e.quest===shrine.id&&[0xd57,0xd58].includes(e.kind)).every(e=>orphaned.some(c=>c.id===e.id)));
+  game.check('owned orphan skulls survive shrine defeat',end.entities.some(e=>orphaned.some(c=>c.id===e.id)));
   await game.act({keys:[],duration_ms:2000});
   game.check('defeat XP cannot repeat',(await game.observe()).character.experience===xp);
-  await writeFile(join(out,'rewards.json'),JSON.stringify({before,contributions,after,end}));
+  await writeFile(join(out,'rewards.json'),JSON.stringify({before,contributions,after,orphaned,end,picked,retained}));
   await save('finished');
 }
