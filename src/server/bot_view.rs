@@ -161,7 +161,7 @@ async fn slow_cursor_does_not_starve_queued_native_packets_or_close() {
                 id: wire::NEW_TICK,
                 body: vec![],
             })
-            .unwrap();
+            .unwrap_or_else(|_| panic!("native receiver missing"));
     }
     let mut ticks = tokio::time::interval(Duration::from_millis(50));
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
