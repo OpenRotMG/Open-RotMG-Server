@@ -6,69 +6,56 @@ fn abyss_optional_rooms_restore_locally_without_main_completion() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut counts = BTreeSet::new();
     for seed in [0, 5, 19, 26] {
-        let map = abyss::generate(&content, seed).unwrap();
-        let homes: Vec<_> = map
-            .cells
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.object == Some(IDOL))
-            .map(|(i, c)| {
-                (
-                    Pos {
-                        x: (i as i32 % map.width) as f32 + 0.5,
-                        y: (i as i32 / map.width) as f32 + 0.5,
-                    },
-                    c.region,
-                )
-            })
-            .collect();
-        counts.insert(homes.len());
-        if homes.len() < 2 {
-            continue;
-        }
-        let mut w = World::new(content.clone(), Arc::new(map)).unwrap();
+        let original = Arc::new(abyss::generate(&content, seed).unwrap());
+        let mut w = World::new(content.clone(), original.clone()).unwrap();
         w.name = "Abyss of Demons".into();
         w.encounter = true;
         let boss = w.entities.values().find(|e| e.kind == MALPHAS).unwrap().id;
-        let original = w.map.clone();
-        for (home, region) in &homes {
-            let entrance: Vec<_> = original
-                .cells
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.region == *region && c.ground == FLOOR)
-                .map(|(i, _)| i)
-                .collect();
-            assert!(!entrance.is_empty());
-            w.idol_entrance(*home, false).unwrap();
-            assert!(entrance.iter().all(|i| w.map.cells[*i].ground == LAVA));
+        let idols: Vec<_> = w
+            .entities
+            .values()
+            .filter(|e| e.kind == IDOL)
+            .map(|e| (e.id, e.home, w.map.cell(e.home.x, e.home.y).unwrap().region))
+            .collect();
+        counts.insert(idols.len());
+        for (_, home, region) in &idols {
+            let before = w.map.clone();
             assert!(
-                original
+                before
                     .cells
                     .iter()
-                    .zip(&w.map.cells)
-                    .all(|(a, b)| a.region == *region || a.ground == b.ground)
+                    .any(|c| c.region == *region && c.ground == FLOOR)
             );
-            let idol = w
-                .entities
-                .values()
-                .find(|e| e.kind == IDOL && e.home.distance(*home) == 0.)
-                .unwrap()
-                .id;
-            w.defeat_entity(idol).unwrap();
+            w.idol_entrance(*home, false).unwrap();
+            assert!(before.cells.iter().zip(&w.map.cells).all(|(a, b)| b.ground
+                == if a.region == *region && a.ground == FLOOR {
+                    LAVA
+                } else {
+                    a.ground
+                }));
+        }
+        for (id, _, region) in &idols {
+            let before = w.map.clone();
+            w.defeat_entity(*id).unwrap();
             w.abyss_step();
             assert!(
                 original
                     .cells
                     .iter()
+                    .zip(&before.cells)
                     .zip(&w.map.cells)
-                    .all(|(a, b)| a.ground == b.ground)
+                    .all(|((original, before), after)| after.ground
+                        == if after.region == *region {
+                            original.ground
+                        } else {
+                            before.ground
+                        })
             );
+            assert!(!w.entities.contains_key(id));
             assert!(w.entities.contains_key(&boss));
             assert!(!w.cleared);
-            assert!(!w.entities.contains_key(&idol));
             assert!(!w.entities.values().any(|e| e.kind == 0x704));
         }
     }
-    assert!(counts.contains(&0) && counts.contains(&1) && counts.iter().any(|n| *n >= 2));
+    assert_eq!(counts, BTreeSet::from([0, 1, 2, 3]));
 }
