@@ -1264,6 +1264,7 @@ async fn realm_death_credit_survives_portal_reward_failure() {
             None,
             store.presentation(account.id).await.unwrap(),
             Some(transfer.key.clone()),
+            Controller::Human,
         )
         .unwrap();
     let current = &directory.worlds[&castle].players[&arrived].character;
