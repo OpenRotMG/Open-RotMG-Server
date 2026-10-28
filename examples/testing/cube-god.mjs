@@ -92,9 +92,9 @@ export async function run(game){
     await fire(game,target.id);killed=(await fields()).find(f=>f.message==='enemy defeated'&&f.kind===0xd5a&&old.has(f.entity));
   }
   game.check('native staff fire defeats an Overseer',Boolean(killed));
-  for(let n=0;n<15&&!family(await game.inspect()).some(e=>!old.has(e.id));n++){await protect(game.actor);await game.act({keys:[],duration_ms:1000});}
-  state=await save('replenished');const births=await fields(),removed=births.findIndex(f=>f.message==='enemy defeated'&&f.entity===killed.entity);
-  game.check('owned Cube population replenishes after native combat',family(state).some(e=>!old.has(e.id))&&removed>=0&&births.slice(removed+1).some(f=>f.message==='bounded named quest followers spawned'&&f.quest===root&&f.kind>=0xd5a&&f.kind<=0xd5c));
+  async function reproduced(){const rows=await fields(),death=rows.findIndex(f=>f.message==='enemy defeated'&&f.entity===killed.entity);return death>=0&&rows.slice(death+1).some(f=>f.message==='bounded named quest followers spawned'&&f.quest===root&&f.kind>=0xd5a&&f.kind<=0xd5c);}
+  for(let n=0;n<15&&(!family(await game.inspect()).some(e=>!old.has(e.id))||!await reproduced());n++){await protect(game.actor);await game.act({keys:[],duration_ms:1000});}
+  state=await save('replenished');game.check('owned Cube population replenishes after native combat',family(state).some(e=>!old.has(e.id))&&await reproduced());
   assert(entity(state,root));
   const partner=await game.join({...spec,seed:821,position:state.view.position});await protect(partner.actor);
   const players=(await Promise.all([game.inspect(),partner.inspect()])).map(s=>s.diagnostic.player);
