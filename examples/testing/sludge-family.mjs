@@ -33,7 +33,7 @@ export async function run(game){
   for(let n=0;n<8&&!protectedAfterHit;n++){
     await game.act({keys:[],duration_ms:500});const s=await game.inspect();trace.push(s);
     await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify(trace));
-    if(!protectedAfterHit&&s.view.character.hp<hp&&(s.view.character.conditions&(1<<3))!==0){
+    if(trace.some(s=>s.view.character.hp<hp)&&trace.some(s=>(s.view.character.conditions&(1<<3))!==0)){
       await writeFile(path,JSON.stringify({id:'sludge-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
       execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);protectedAfterHit=true;
     }
