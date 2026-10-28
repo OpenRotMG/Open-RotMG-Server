@@ -1567,14 +1567,15 @@ mod tests {
     }
 
     #[test]
-    fn defense_god_thresholds_do_not_erase_gear() {
+    fn realm_god_potion_thresholds_do_not_erase_gear() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for (kind, rate, threshold) in [
-            (0x655, 0.015, 180),
-            (0x658, 0.015, 180),
-            (0x6d8, 0.025, 360),
+        for (kind, potion, rate, threshold) in [
+            (0x655, 0xa20, 0.015, 180),
+            (0x657, 0xa1f, 0.015, 180),
+            (0x658, 0xa20, 0.015, 180),
+            (0x6d8, 0xa20, 0.025, 360),
         ] {
-            assert_eq!(bonus(kind), &[(rate, 0xa20)]);
+            assert_eq!(bonus(kind), &[(rate, potion)]);
             let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
             let loot = god_loot(
                 &content,
@@ -1584,7 +1585,7 @@ mod tests {
             );
             assert!(!loot.private.contains_key(&10));
             for owner in [20, 30] {
-                assert_eq!(loot.private[&owner], [0xa20]);
+                assert_eq!(loot.private[&owner], [potion]);
             }
             assert_eq!(loot.shared_owners, [10, 20, 30]);
             let expected: Vec<_> = table(kind)
@@ -1592,7 +1593,7 @@ mod tests {
                 .flat_map(|(_, pick)| candidates(&content, *pick))
                 .collect();
             assert_eq!(loot.shared, expected);
-            assert!(!loot.shared.contains(&0xa20));
+            assert!(!loot.shared.contains(&potion));
             let empty = god_loot(
                 &content,
                 kind,
