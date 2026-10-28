@@ -47,10 +47,12 @@ export async function run(game){
     return step(input,capture);
   }
   async function defeat(id){
-    const xp=(await game.observe()).character.experience;
-    for(let n=0;n<100;n++){
+    const xp=(await game.observe()).character.experience;let lastHp,stalled=0;
+    for(let n=0;n<60;n++){
       const s=await game.inspect(),e=family(s).find(e=>e.id===id);if(!e)break;
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+      stalled=e.hp===lastHp?stalled+1:0;lastHp=e.hp;
+      if(stalled===4){await act({keys:[Math.abs(y)>Math.abs(x)?(y>0?'a':'d'):(x>0?'s':'w')],duration_ms:600});stalled=0;continue;}
       if(Math.hypot(dx,dy)>4||!s.view.objects.some(o=>o.id===id&&o.hp>0))await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:250});
       else await act({keys:[],duration_ms:250,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
       await act({keys:[],duration_ms:250});
