@@ -60,7 +60,10 @@ fn capability_is_ip_bound_exclusive_closed_and_weakly_registered() {
     assert!(lease.view.acquire(lease.view.ip).is_err());
     let ip = lease.view.ip;
     let _second = Viewer::join(&cctv, "A", ip, true).unwrap();
-    assert!(Viewer::join(&cctv, "A", ip, true).is_err(), "draining native data must still own its admission");
+    assert!(
+        Viewer::join(&cctv, "A", ip, true).is_err(),
+        "draining native data must still own its admission"
+    );
     drop(lease);
     assert!(weak.upgrade().is_none());
     let _replacement = Viewer::join(&cctv, "A", ip, true).unwrap();
@@ -98,7 +101,10 @@ fn reconnect_reuses_admission_and_late_lease_cannot_remove_replacement() {
     assert!(owner.view.acquire(owner.view.ip).is_err());
     first.release();
     owner.view.close_socket(Some(first.id));
-    assert!(!first.closed(), "a released socket cannot close the view during its reconnect gap");
+    assert!(
+        !first.closed(),
+        "a released socket cannot close the view during its reconnect gap"
+    );
     let replacement = owner.view.acquire(owner.view.ip).unwrap();
     assert_eq!((replacement.bot.as_str(), replacement.generation), ("B", 1));
     owner.view.close_socket(Some(first.id));
@@ -257,14 +263,32 @@ async fn attachment_notifications_coalesce_during_a_fast_switch() {
     app.cctv = cctv;
     let mut first = owner.view.acquire(owner.view.ip).unwrap();
     let (_, receiver) = tokio::sync::broadcast::channel(1);
-    let mut attached = Attachment {world:1,account:11,player:1,character:101,map:vec![],snapshot:vec![],receiver};
+    let mut attached = Attachment {
+        world: 1,
+        account: 11,
+        player: 1,
+        character: 101,
+        map: vec![],
+        snapshot: vec![],
+        receiver,
+    };
     assert!(first.attached(&app, &attached));
-    owner.view.commit(1, "B", None).unwrap();first.release();
+    owner.view.commit(1, "B", None).unwrap();
+    first.release();
     let replacement = owner.view.acquire(owner.view.ip).unwrap();
-    attached.account = 22;attached.player = 2;attached.character = 202;
-    assert!(replacement.attached(&app, &attached), "latest attachment must replace the unconsumed older one");
-    assert_eq!(replies.borrow_and_update().clone(), Some(json!({"type":"attached","bot":"B","generation":1,"player":2,"character":202})));
-    drop((first, replacement, owner, app));std::fs::remove_dir_all(dir).unwrap();
+    attached.account = 22;
+    attached.player = 2;
+    attached.character = 202;
+    assert!(
+        replacement.attached(&app, &attached),
+        "latest attachment must replace the unconsumed older one"
+    );
+    assert_eq!(
+        replies.borrow_and_update().clone(),
+        Some(json!({"type":"attached","bot":"B","generation":1,"player":2,"character":202}))
+    );
+    drop((first, replacement, owner, app));
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

@@ -197,7 +197,8 @@ impl Stream {
                 absent = true;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-        }).await;
+        })
+        .await;
         match result {
             Ok(attached) => attached.map(Some),
             Err(_) if absent => Ok(None),
@@ -231,8 +232,12 @@ impl Stream {
         let mut attached = match attached {
             Some(attached) => attached,
             None => {
-                let lease = lease.context("bot has no living session; it may be replacing a dead character or offline")?;
-                if !lease.unavailable() { return Ok(None); }
+                let lease = lease.context(
+                    "bot has no living session; it may be replacing a dead character or offline",
+                )?;
+                if !lease.unavailable() {
+                    return Ok(None);
+                }
                 let mut poll = tokio::time::interval(Duration::from_secs(1));
                 poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
@@ -306,7 +311,9 @@ impl Stream {
         mut lease: Option<&mut control::Lease>,
     ) -> Result<()> {
         let mut changes = lease.as_ref().map(|lease| lease.changed.clone());
-        let bootstrap = self.bootstrap(a, name, &mut changes, lease.as_deref()).await?;
+        let bootstrap = self
+            .bootstrap(a, name, &mut changes, lease.as_deref())
+            .await?;
         let Some((mut attached, mut projection)) = bootstrap else {
             if *self.shutdown.borrow() {
                 return Ok(());

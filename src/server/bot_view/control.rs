@@ -125,7 +125,9 @@ impl View {
                 "native perspective attachment changed"
             );
         }
-        state.viewer.retarget(bot, source.map(|(_, binding)| binding.0))?;
+        state
+            .viewer
+            .retarget(bot, source.map(|(_, binding)| binding.0))?;
         state.bot = bot.to_owned();
         state.generation = generation;
         state.attached = None;
@@ -202,8 +204,10 @@ impl Lease {
             return false;
         }
         state.attached = Some((attached.player, attached.character));
-        self.view.replies.send_replace(Some(json!({"type":"attached","bot":self.bot,"generation":self.generation,
-            "player":attached.player,"character":attached.character})));
+        self.view.replies.send_replace(Some(
+            json!({"type":"attached","bot":self.bot,"generation":self.generation,
+            "player":attached.player,"character":attached.character}),
+        ));
         true
     }
     pub(super) fn unavailable(&self) -> bool {
@@ -212,7 +216,9 @@ impl Lease {
             return false;
         }
         state.attached = None;
-        self.view.replies.send_replace(Some(json!({"type":"unavailable","bot":self.bot,"generation":self.generation})));
+        self.view.replies.send_replace(Some(
+            json!({"type":"unavailable","bot":self.bot,"generation":self.generation}),
+        ));
         true
     }
 }

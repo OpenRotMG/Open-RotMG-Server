@@ -115,8 +115,11 @@ impl Cctv {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(Arc::downgrade(view));
                 Ok(token)
-            },
-            std::collections::hash_map::Entry::Occupied(_) => Err((StatusCode::SERVICE_UNAVAILABLE, "native view identifier collision".into())),
+            }
+            std::collections::hash_map::Entry::Occupied(_) => Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "native view identifier collision".into(),
+            )),
         }
     }
     pub(crate) fn view(&self, token: &str) -> Option<Arc<crate::server::bot_view::control::View>> {
@@ -356,7 +359,14 @@ impl Viewer {
 impl Viewer {
     pub(crate) fn retarget(&mut self, name: &str, source: Option<i32>) -> Result<()> {
         let mut registry = self.cctv.lock();
-        ensure!(source.is_none_or(|source| registry.feeds.get(&self.name).and_then(|feed| feed.session).is_some_and(|(player, _)| player == source)), "native perspective source changed");
+        ensure!(
+            source.is_none_or(|source| registry
+                .feeds
+                .get(&self.name)
+                .and_then(|feed| feed.session)
+                .is_some_and(|(player, _)| player == source)),
+            "native perspective source changed"
+        );
         ensure!(
             registry
                 .feeds
@@ -479,7 +489,7 @@ mod tests {
     #[test]
     fn perspective_retargets_recheck_source_at_commit() {
         let cctv = Cctv::test_catalogue();
-        let mut viewer = Viewer::join(&cctv, "A", IpAddr::from([127,0,0,1]), true).unwrap();
+        let mut viewer = Viewer::join(&cctv, "A", IpAddr::from([127, 0, 0, 1]), true).unwrap();
         cctv.entered("A", 3, 11);
         assert!(viewer.retarget("B", Some(1)).is_err());
         assert_eq!(cctv.lock().feeds["A"].viewers, 1);
