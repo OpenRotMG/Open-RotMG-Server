@@ -1574,6 +1574,7 @@ mod tests {
             (0x656, 270, 0.01, 0xa20),
             (0x657, 180, 0.015, 0xa1f),
             (0x658, 180, 0.015, 0xa20),
+            (0x6d8, 360, 0.025, 0xa20),
             (0x91a, 180, 0.015, 0xa21),
         ] {
             assert_eq!(bonus(kind), &[(chance, potion)]);
@@ -1603,6 +1604,7 @@ mod tests {
             );
             assert!(empty.shared.is_empty() && empty.private.is_empty());
         }
+        assert_eq!(crate::dungeon::portal_drop(0x6d8), None);
     }
 
     #[test]
