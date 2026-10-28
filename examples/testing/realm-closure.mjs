@@ -14,8 +14,7 @@ export async function prepare(api){
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},protection=new Map(),records=[];
-  let attackUntil=0,blocked,full,stalled=0;
-  const fullKinds=new Set([...((await readFile('data/objects.xml','utf8')).matchAll(/<Object\s+type="([^"]+)"[^>]*>([\s\S]*?)<\/Object>/g))].filter(m=>m[2].includes('<FullOccupy')).map(m=>Number(m[1])));
+  let attackUntil=0,blocked,stalled=0;
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)}),value=await response.json();
     assert(response.ok&&value.status==='succeeded',JSON.stringify(value));return value;
@@ -25,7 +24,7 @@ export async function run(game){
   async function map(){
     const response=await fetch(config.origin+'/dev/map?player='+(await game.observe()).session.player,{headers,signal:AbortSignal.timeout(30000)});
     assert(response.ok,'Privileged map observation failed');const value=await response.json();
-    if(blocked){blocked.fill(0);full.fill(0);for(const [x,y] of value.blocked)blocked[y*value.width+x]=1;for(const e of value.entities)if(fullKinds.has(e.kind))full[Math.floor(e.pos.y)*value.width+Math.floor(e.pos.x)]=1;}
+    if(blocked){blocked.fill(0);for(const [x,y] of value.blocked)blocked[y*value.width+x]=1;}
     return value;
   }
   async function save(label){const value={label,main:await game.inspect(),peer:await peer.observe()};records.push(value);await writeFile(join(out,'closure.json'),JSON.stringify(records));return value;}
@@ -45,19 +44,8 @@ export async function run(game){
     return result;
   }
   const opening=await map(),width=opening.width,total=width*opening.height,original=opening.entities.filter(e=>roots.has(e.kind)&&(e.quest===e.id||[0x668,0x67d].includes(e.kind)));
-  blocked=new Uint8Array(total);full=new Uint8Array(total);
-  for(const [x,y] of opening.blocked)blocked[y*width+x]=1;
-  for(const e of opening.entities)if(fullKinds.has(e.kind))full[Math.floor(e.pos.y)*width+Math.floor(e.pos.x)]=1;
+  blocked=new Uint8Array(total);for(const [x,y] of opening.blocked)blocked[y*width+x]=1;
   opening.blocked.length=0;opening.entities.length=0;
-  const clear=(a,b)=>{
-    const steps=Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)*4);
-    for(let n=0;n<=steps;n++){
-      const px=a.x+(b.x-a.x)*n/Math.max(1,steps),py=a.y+(b.y-a.y)*n/Math.max(1,steps),x=Math.floor(px),y=Math.floor(py),dx=Math.sign(px-x-.5),dy=Math.sign(py-y-.5);
-      if(x<0||x>=width||y<0||y>=opening.height||blocked[y*width+x])return false;
-      for(const [nx,ny] of [[x+dx,y],[x,y+dy],[x+dx,y+dy]])if((nx!==x||ny!==y)&&full[ny*width+nx])return false;
-    }
-    return true;
-  };
   async function walk(anchor,range){
     const before=await game.observe(),start=Math.floor(before.position.y)*width+Math.floor(before.position.x),parent=new Int32Array(total).fill(-1),queue=new Int32Array(total);
     parent[start]=start;queue[0]=start;let head=0,tail=1,goal;
@@ -67,15 +55,15 @@ export async function run(game){
       for(const n of [i-width,i-1,i+1,i+width])if(n>=0&&n<total&&Math.abs(n%width-i%width)<=1&&!blocked[n]&&parent[n]===-1){parent[n]=i;queue[tail++]=n;}
     }
     assert.notEqual(goal,undefined,'No walkable route to the living encounter: '+JSON.stringify({anchor,range,position:before.position,visited:head}));
-    const path=[];for(let i=goal;i!==start;i=parent[i])path.push({x:i%width+.5,y:Math.floor(i/width)+.5});
-    path.push({x:start%width+.5,y:Math.floor(start/width)+.5});
-    const point=path.find(p=>{const dx=Math.abs(p.x-before.position.x),dy=Math.abs(p.y-before.position.y);return Math.hypot(dx,dy)<45&&Math.min(dx,dy,Math.abs(dx-dy))<.6&&clear(before.position,p);});
-    assert(point,'No unobstructed next route segment: '+JSON.stringify({anchor,range,position:before.position,path:path.slice(-4)}));
-    const dx=point.x-before.position.x,dy=point.y-before.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
-    if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
-    if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
-    const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
-    const duration_ms=Math.max(200,Math.min(5000,Math.round(distance*850/(4+5.6*before.character.stats.speed/75))));
+    const path=[goal];for(let i=goal;i!==start;)path.push(i=parent[i]);path.reverse();
+    let ahead=path.length-1;
+    for(let i=1;i<path.length-1;i++)if(path[i]-path[i-1]!==path[i+1]-path[i]){ahead=i+1;break;}
+    const point={x:path[ahead]%width+.5,y:Math.floor(path[ahead]/width)+.5},dx=point.x-before.position.x,dy=point.y-before.position.y;
+    const horizontal=Math.abs(dx)>.2||Math.abs(dx)>=Math.abs(dy),vertical=Math.abs(dy)>.2||Math.abs(dy)>Math.abs(dx);
+    const keys=horizontal&&vertical?[dy>0?(dx>0?'s':'a'):(dx>0?'d':'w')]:horizontal?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
+    const distance=horizontal&&vertical?Math.min(Math.abs(dx),Math.abs(dy))*Math.SQRT2:Math.max(Math.abs(dx),Math.abs(dy));
+    assert(distance>0,'Route requires a nonzero client movement');
+    const duration_ms=Math.max(100,Math.min(5000,Math.round(distance*850/(4+5.6*before.character.stats.speed/75))));
     await act({keys,duration_ms});
     const after=await game.observe(),trace={anchor,range,point,keys,duration_ms,before:before.position,after:after.position,game_ms:after.game_ms};
     await appendFile(join(out,'routes.jsonl'),JSON.stringify(trace)+'\n');
