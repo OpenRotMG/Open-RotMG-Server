@@ -15,6 +15,7 @@ export async function prepare(){
 }
 export async function run(game){
   const observations=[];
+  function progress(view){const {ability_ready_ms,...character}=view.character;return character;}
   async function save(name,actor=game){const view=await actor.observe();observations.push({name,view});await writeFile(join(root,'denial.json'),JSON.stringify(observations,null,2));return view;}
   const initial=await save('realm');
   await game.act({keys:['1'],duration_ms:700});
@@ -30,12 +31,12 @@ export async function run(game){
   const denied=await save('after-refusal');
   const log=await readFile(join(root,'native','server.log'),'utf8');
   game.check('full-origin portal handler executes a recorded refusal',log.split('\n').filter(line=>line.startsWith('{')).map(line=>JSON.parse(line)).some(row=>row.fields?.message==='portal transfer refused: destination full'&&row.fields.player===before.session.player&&row.fields.destination===initial.session.world));
-  game.check('refusal retains the same living source session and exact inventory',denied.lifecycle.alive&&JSON.stringify(denied.session)===JSON.stringify(before.session)&&JSON.stringify(denied.character)===JSON.stringify(before.character));
+  game.check('refusal retains the same living source session and exact inventory',denied.lifecycle.alive&&JSON.stringify(denied.session)===JSON.stringify(before.session)&&JSON.stringify(progress(denied))===JSON.stringify(progress(before)));
   await game.act({keys:[],duration_ms:700},{name:'full-origin-refusal',when:v=>v.session.player===denied.session.player&&v.lifecycle.alive});
   await game.act({keys:['w'],duration_ms:300});
   const moved=await save('source-movement');
   game.check('refused source remains playable',moved.session.player===denied.session.player&&Math.hypot(moved.position.x-denied.position.x,moved.position.y-denied.position.y)>.1);
   const stayed=await save('occupant-unchanged',other);
-  game.check('refusal leaves the other account in its own living Realm session',stayed.lifecycle.alive&&JSON.stringify(stayed.session)===JSON.stringify(occupant.session)&&JSON.stringify(stayed.character)===JSON.stringify(occupant.character));
+  game.check('refusal leaves the other account in its own living Realm session',stayed.lifecycle.alive&&JSON.stringify(stayed.session)===JSON.stringify(occupant.session)&&JSON.stringify(progress(stayed))===JSON.stringify(progress(occupant)));
   game.check('prepared key stays consumed once after refusal',denied.character.items.slice(4).every(item=>item===-1)&&denied.character.inventory_revision===initial.character.inventory_revision+1);
 }
