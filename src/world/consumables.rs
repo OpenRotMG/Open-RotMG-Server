@@ -1,6 +1,9 @@
 use super::*;
 use crate::content::{ConsumableEffect, Object};
 
+#[cfg(test)]
+mod tincture_tests;
+
 #[derive(Clone)]
 pub(super) struct Boost {
     source: (i32, i32),
@@ -12,12 +15,26 @@ pub(super) struct Boost {
 impl Player {
     pub(super) fn effective(&self, content: &Content, now: u64) -> Result<[i32; 8]> {
         let mut values = self.character.effective(content)?;
-        for boost in &self.boosts {
-            if boost.until.is_some_and(|until| until > now) {
-                values[boost.index] = values[boost.index]
-                    .checked_add(boost.amount)
-                    .context("temporary stat overflow")?;
-            }
+        let mut boosts: Vec<_> = self
+            .boosts
+            .iter()
+            .filter(|boost| boost.until.is_some_and(|until| until > now))
+            .collect();
+        // Period evidence requires halving; strongest-first ordering remains reconstructed: https://web.archive.org/web/20120529033324id_/http://forums.wildshadow.com/wiki/realm-mad-god/tinctures-and-effusions
+        boosts.sort_unstable_by_key(|boost| std::cmp::Reverse(boost.amount));
+        let mut ranks = [0u32; 8];
+        for boost in boosts {
+            let amount = if boost.source == (0, 0) {
+                boost.amount
+            } else {
+                let rank = &mut ranks[boost.index];
+                let amount = boost.amount >> (*rank).min(31);
+                *rank += 1;
+                amount
+            };
+            values[boost.index] = values[boost.index]
+                .checked_add(amount)
+                .context("temporary stat overflow")?;
         }
         Ok(values)
     }
