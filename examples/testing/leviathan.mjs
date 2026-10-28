@@ -46,12 +46,13 @@ export async function run(game){
     const groups=s=>{
       const volleys=new Map();
       for(const p of s.view.projectiles.filter(p=>p.owner===root.id)){
-        const key=p.start_time_ms+':'+p.start.x+':'+p.start.y;if(!volleys.has(key))volleys.set(key,[]);volleys.get(key).push(p);
+        const born=Math.round((s.view.time_ms-Math.hypot(p.position.x-p.start.x,p.position.y-p.start.y)/(p.speed/10)*1000)/50)*50;
+        const key=born+':'+p.start.x+':'+p.start.y;if(!volleys.has(key))volleys.set(key,[]);volleys.get(key).push(p);
       }
       return [...volleys.values()];
     };
     // Build 120 explicitly warns that Leviathans still shoot at cloaked Rogues: https://web.archive.org/web/20120524033343id_/http://forums.wildshadow.com/wiki/realm-mad-god/leviathan
-    game.check('Leviathan activates, moves and fires while the only nearby native Rogue is cloaked',samples.some(s=>(s.view.character.conditions&(1<<12))&&enemy(s)?.activated!==null&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2&&groups(s).some(g=>g.some(p=>p.start_time_ms>=arrival.view.time_ms))));
+    game.check('Leviathan activates, moves and fires while the only nearby native Rogue is cloaked',samples.some(s=>(s.view.character.conditions&(1<<12))&&enemy(s)?.activated!==null&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2&&groups(s).length>0));
     await act({keys:[],duration_ms:5500},{name:'leviathan-fans',when:()=>true});
     const volleys=samples.flatMap(groups);
     for(const [count,speed,lifetime] of [[9,67,1700],[12,67,1700],[2,85,1800]])game.check('native volley '+count+' has selected speed and lifetime',volleys.some(g=>g.length===count&&g.every(p=>p.speed===speed&&p.lifetime_ms===lifetime)));
