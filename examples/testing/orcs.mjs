@@ -47,6 +47,7 @@ export async function run(game){
     await protect();while(protectedUntil-(await game.observe()).game_ms<input.duration_ms+500){await step({keys:[],duration_ms:100});await protect();}
     return step(input,capture);
   }
+  try{
   const begin=await save('arrival');
   game.check('natural MidPlains camp contains selected King240, Warriors90, Mage80 and Queen130',[[0x62c,1,240],[0x629,2,90],[0x62a,1,80],[0x62b,1,130]].every(([k,n,hp])=>family(begin).filter(e=>e.kind===k&&e.hp===hp).length===n));
   await step({keys:[],duration_ms:500},{name:'orcs-arrival',when:()=>true});
@@ -94,5 +95,5 @@ export async function run(game){
   game.check('King XP cannot be duplicated after death',end.view.character.experience===dead.view.character.experience);
   game.check('same supplied living native Wizard completes encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
   game.check('bounded natural camp caps hold throughout',samples.every(caps));
-  await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));
+  }finally{await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));}
 }
