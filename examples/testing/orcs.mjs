@@ -60,7 +60,9 @@ export async function run(game){
     game.check(kind+': natural actor activates, moves and fires selected projectiles',samples.some(s=>family(s).some(e=>ids.has(e.id)&&e.activated!==null&&family(begin).some(p=>p.id===e.id&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2)))&&[...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
   }
   const queens=new Set(samples.flatMap(family).filter(e=>e.kind===0x62b).map(e=>e.id));
-  game.check('support Queen moves without firing',samples.some(s=>family(s).some(e=>e.kind===0x62b&&family(begin).some(p=>p.id===e.id&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2)))&&![...shots.values()].some(p=>queens.has(p.owner)));
+  game.check('support Queen activates without firing inside its seven-tile chase stop',samples.some(s=>family(s).some(e=>e.kind===0x62b&&e.activated!==null&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<=7.05))&&![...shots.values()].some(p=>queens.has(p.owner)));
+  const mages=new Set(samples.flatMap(family).filter(e=>e.kind===0x62a).map(e=>e.id));
+  game.check('native Mage fires three-shot fifteen-degree fans',samples.some(s=>s.view.projectiles.some(p=>mages.has(p.owner)&&[Math.PI/12,Math.PI/6].every(gap=>s.view.projectiles.some(q=>q.owner===p.owner&&Math.hypot(p.start.x-q.start.x,p.start.y-q.start.y)<.01&&Math.abs(Math.atan2(Math.sin(q.angle-p.angle),Math.cos(q.angle-p.angle))-gap)<.001)))));
   const caps=s=>[[0x62c,1],[0x629,3],[0x62a,2],[0x62b,2]].every(([k,n])=>family(s).filter(e=>e.kind===k).length<=n);
   game.check('current King-owned roles fill to 3/2/2 within caps',[[0x629,3],[0x62a,2],[0x62b,2]].every(([k,n])=>family(samples.at(-1)).filter(e=>e.kind===k).length===n));
   // The 300 in Kithio is a cooldown, not HP; this case verifies our older 100-HP reconstruction, not fidelity: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Heal.cs
@@ -75,7 +77,15 @@ export async function run(game){
   await cheat({kind:'stats',values:[670,385,75,0,50,75,40,60]});
   async function defeat(id){
     const before=await game.inspect();
-    for(let n=0;n<100&&entity(await game.inspect(),id);n++)await act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    for(let n=0;n<100;n++){
+      const s=await game.inspect(),victim=entity(s,id),boss=entity(s,king.id);if(!victim)break;
+      if(id!==king.id){
+        assert(boss,'King must survive escort targeting');
+        const p=s.view.position,dx=victim.pos.x-p.x,dy=victim.pos.y-p.y,t=((boss.pos.x-p.x)*dx+(boss.pos.y-p.y)*dy)/(dx*dx+dy*dy);
+        if(t>=0&&t<=1&&Math.hypot(boss.pos.x-p.x-t*dx,boss.pos.y-p.y-t*dy)<.8){await act({keys:['s'],duration_ms:150});continue;}
+      }
+      await act({keys:[],duration_ms:100,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    }
     const after=await game.inspect();
     game.check(id+': native staff defeats target and earns XP',!entity(after,id)&&after.view.character.experience>before.view.character.experience);
     return after;
@@ -92,6 +102,7 @@ export async function run(game){
   for(let n=0;n<12;n++)await act({keys:[],duration_ms:1000});
   const end=await save('survivors');
   game.check('King defeat preserves followers but stops all replacement births',family(end).length>0&&family(end).every(e=>family(dead).some(p=>p.id===e.id))&&!entity(end,king.id));
+  game.check('surviving support Queen wanders after losing its King',family(end).some(e=>e.kind===0x62b&&family(dead).some(p=>p.id===e.id&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2)));
   game.check('King XP cannot be duplicated after death',end.view.character.experience===dead.view.character.experience);
   game.check('same supplied living native Wizard completes encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
   game.check('bounded natural camp caps hold throughout',samples.every(caps));
