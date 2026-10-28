@@ -63,6 +63,21 @@ async function admit(){
     admission.push({target:e.id,kind:e.kind,survived:m.entities.some(t=>t.id===e.id),events:m.entities.filter(t=>[0xd56,0xd59,0xd5f].includes(t.kind))});await save('admission',admission);
   }
   assert(rootEntity,'Bounded ordinary direct hero defeats did not admit Pentaract');await save('admitted',m);
+  await cheat(admissionActor,{kind:'teleport',position:safePosition});
+  const expire=async()=>{while((await api({op:'observe',actor:admissionActor})).game_ms<until)await direct(0,Math.min(7000,until-(await api({op:'observe',actor:admissionActor})).game_ms+50));};
+  await expire();await cheat(admissionActor,{kind:'item',slot:0,item:0xa00});
+  const stats=(await api({op:'observe',actor:admissionActor})).character.stats;
+  assert(stats.dexterity===50&&Math.ceil(90*(.5+1.5*stats.attack/75))<200,'Short Sword preparation must leave a safe positive-health margin');
+  const assistance=[];
+  for(const tower of m.entities.filter(e=>e.quest===rootEntity.id&&e.kind===0xd5e).slice(1)){
+    const now=(await api({op:'observe',actor:admissionActor})).game_ms;
+    if(now+40000>=until){await cheat(admissionActor,{kind:'teleport',position:safePosition});await expire();await cheat(admissionActor,{kind:'protection',condition:'invulnerable',duration_ms:60000});until=(await api({op:'observe',actor:admissionActor})).game_ms+60000;}
+    await cheat(admissionActor,{kind:'teleport',position:{x:tower.pos.x-.1,y:tower.pos.y}});
+    let e;
+    for(let n=0;n<80;n++){e=(await api({op:'inspect',actor:admissionActor})).diagnostic.entities.find(e=>e.id===tower.id);assert(e&&e.hp>0,'Ordinary assistance must not defeat a tower');if(e.hp<=200)break;await direct(0,100);await api({op:'act',actor:admissionActor,action:{command:'stop'},duration_ms:400,pauseAfter:true});}
+    assert(e.hp<=200,'Bounded ordinary assistance did not reach its declared health range');assistance.push({id:tower.id,hp:e.hp,damage:e.damage});
+  }
+  await save('assistance',{method:'Before native LOAD, the direct admission participant ordinarily weakens four towers to 1–200 HP with Short Sword shots. The first tower stays at 5000 HP; native players observe its death/revival and deliver all five final defeats.',towers:assistance});
   await cheat(admissionActor,{kind:'teleport',position:safePosition});admitted=m;
 }
 export async function run(lobby){
@@ -114,7 +129,7 @@ export async function run(lobby){
     return chosen.map(s=>({actor:game.actor,input:{keys:s.keys,duration_ms:Math.round(Math.hypot(s.x,s.y)/speed*1000)}}));
   }
   // Per-action synchronization consumes encounter time, so the race uses one existing bounded transaction.
-  for(const tower of tour){sequence.push(...route(at,tower.pos));sequence.push({actor:game.actor,input:{keys:[' '],duration_ms:1000,target:{entity:tower.id,camera_angle:-Math.PI/4,fire:true}}});at=tower.pos;}
+  for(const tower of tour){sequence.push(...route(at,tower.pos));if(tower!==tour[0])sequence.push({actor:game.actor,input:{keys:[],duration_ms:50}});sequence.push({actor:game.actor,input:{keys:[' '],duration_ms:1000,target:{entity:tower.id,camera_angle:-Math.PI/4,fire:true}}});at=tower.pos;}
   await save('race-plan',{tour,sequence,input_ms:sequence.reduce((sum,s)=>sum+s.input.duration_ms,0)});
   assert(sequence.reduce((sum,s)=>sum+s.input.duration_ms,0)<=10000,'Native tower circuit exceeds the unchanged ten-second input budget');
   await game.act(sequence);
