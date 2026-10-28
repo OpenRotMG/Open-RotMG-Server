@@ -110,6 +110,9 @@ enum Command {
         world: i32,
         position: Pos,
     },
+    Retire {
+        actor: i32,
+    },
     World {
         template: String,
         #[serde(default)]
@@ -1103,6 +1106,14 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed.map(|seed|seed.to_string()),"privileged":true,"damaging_ground":w.map.cells.iter().enumerate().filter(|(_,c)|w.content.hazards.contains_key(&c.ground)).map(|(i,_)|Pos{x:(i as i32%w.map.width) as f32+0.5,y:(i as i32/w.map.width) as f32+0.5}).filter(|p|w.walkable(*p)).take(16).collect::<Vec<_>>(),"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0x67d|crate::dungeon::pirate::BOSS|0xd05|0xd06|0xd7a|0xd7b|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
         Command::Spawn{spec} => spawn(a,t,spec).await,
         Command::Persona{profile,world,position} => prepare_persona(a,t,profile,world,position).await,
+        Command::Retire{actor} => {
+            let registered=t.registration(actor)?;
+            ensure!(matches!(registered.controller,Controller::GameBot)&&registered.profile.is_some(),"retirement requires a registered prepared persona");
+            ensure!(a.world.clock.paused(),"retirement requires a paused prepared test session");
+            let player=resolve(a,actor).await?;
+            super::depart(a,player).await?;
+            Ok(json!({"actor":actor,"player":player,"retired":true,"provenance":"prepared ordinary departure"}))
+        },
         Command::World{template,seed} => { let world=a.world.directory(move |d|match seed { Some(seed)=>d.prepared_instance_with_seed(&template,seed), None=>d.prepared_instance(&template) }).await?; Ok(json!({"world":world,"provenance":"prepared"})) },
         Command::Observe{actor} => {t.registration(actor)?;snapshot(a,actor,false).await},
         Command::Inspect{actor} => {t.registration(actor)?;snapshot(a,actor,true).await},
@@ -1252,5 +1263,28 @@ pub async fn command(State(a): State<App>, headers: HeaderMap, Json(raw): Json<V
             Json(json!({"status":"failed","error":format!("{e:#}")})),
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod retire_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn retirement_requires_registered_persona_and_paused_fixture() {
+        let (dir, app) = super::super::test_app();
+        write_json(&dir.join("testing.json"), &json!({"schema":1,"provenance":"prepared"})).unwrap();
+        let testing = Testing::open(&dir).unwrap().unwrap();
+        app.world.clock.set_paused(true);
+        assert!(execute(&app, &testing, "missing", Command::Retire {actor:1}).await.unwrap_err().to_string().contains("not spawned"));
+        for (controller, profile) in [(Controller::Native,Some("Acrobat".into())),(Controller::Direct,None),(Controller::GameBot,None)] {
+            fs::write(testing.path("actor-1", "spawn"), serde_json::to_vec(&Registration {guid:"fixture".into(),controller,profile}).unwrap()).unwrap();
+            assert!(execute(&app, &testing, "protected", Command::Retire {actor:1}).await.unwrap_err().to_string().contains("registered prepared persona"));
+        }
+        fs::write(testing.path("actor-1", "spawn"), serde_json::to_vec(&Registration {guid:"fixture".into(),controller:Controller::GameBot,profile:Some("Acrobat".into())}).unwrap()).unwrap();
+        app.world.clock.set_paused(false);
+        assert!(execute(&app, &testing, "running", Command::Retire {actor:1}).await.unwrap_err().to_string().contains("paused"));
+        drop((testing, app));
+        fs::remove_dir_all(dir).unwrap();
     }
 }
