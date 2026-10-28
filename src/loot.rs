@@ -1375,6 +1375,30 @@ mod tests {
     }
 
     #[test]
+    fn shore_cubes_keep_independent_public_potions_and_pirate_cave_eligibility() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in 0x60e..=0x610 {
+            assert!(
+                matches!(table(kind), [(hp, Pick::Item(0xa22)), (mp, Pick::Item(0xa23))] if *hp == 0.04 && *mp == 0.04)
+            );
+            assert!(period_surface(kind) && !private(kind));
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                vec![0xa22, 0xa23]
+            );
+            assert!(
+                rewards(
+                    &content,
+                    kind,
+                    &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+                )
+                .is_empty()
+            );
+            assert_eq!(crate::dungeon::portal_drop(kind), Some((0x717, 0.01)));
+        }
+    }
+
+    #[test]
     fn night_elves_only_roll_one_public_health_potion() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for kind in [0x64a, 0x64b, 0x64c, 0x64d, 0x64f] {
