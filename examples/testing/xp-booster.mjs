@@ -38,12 +38,14 @@ export async function run(game){
   }
   await game.act({keys:[],duration_ms:800},{name:'booster-expired',when:v=>v.character.level===20});
   const crossed=await snapshot('crossed'),ch=crossed.diagnostic.character;
-  const kills=(await lines()).slice(offset).filter(s=>s.startsWith('{')).map(s=>JSON.parse(s).fields).filter(f=>f.message==='enemy defeated'&&f.owner===before.view.session.player);
+  const events=(await lines()).slice(offset).filter(s=>s.startsWith('{')).map(s=>JSON.parse(s).fields);
+  const kills=events.filter(f=>f.message==='enemy defeated'&&f.owner===before.view.session.player);
   assert(kills.length&&kills.every(k=>[0x6b4,0x926].includes(k.kind)),JSON.stringify(kills));
   const earned=kills.reduce((sum,k)=>sum+(k.kind===0x926?21:1),0);
-  await writeFile(join(root(),'booster-kills.json'),JSON.stringify({kills,earned},null,2));
+  const commits=events.filter(f=>f.message==='progress committed'&&f.player===before.view.session.player&&f.experience>18049),first=commits[0];assert(first);
+  await writeFile(join(root(),'booster-kills.json'),JSON.stringify({kills,earned,commits},null,2));
   // The selected item promises a lifetime, not last-kill rounding; whole-award doubling is reconstruction: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
-  game.check('native defeat doubles the whole crossing award then expires',ch.level===20&&!ch.xp_boost.active&&ch.xp_boost.bonus_exp===earned&&ch.exp-18049===2*earned);
+  game.check('native defeat doubles the crossing award but not later awards',ch.level===20&&!ch.xp_boost.active&&first.bonus_experience>0&&first.experience-18049===2*first.bonus_experience&&ch.xp_boost.bonus_exp===first.bonus_experience&&ch.exp-18049===earned+first.bonus_experience);
   game.check('crossing bonus never contributes to Fame',ch.fame===Math.floor((ch.exp-ch.xp_boost.bonus_exp)/1000));
   await game.act({keys:['2'],duration_ms:300});const capped=await snapshot('level-20-refusal');
   game.check('expired level-20 character cannot consume another booster',capped.view.character.items[5]===0xc42&&capped.view.character.inventory_revision===crossed.view.character.inventory_revision&&!capped.diagnostic.character.xp_boost.active);
