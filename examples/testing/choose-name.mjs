@@ -100,7 +100,8 @@ export async function run(game) {
   game.check('ordinary Vault entry reconnects the same living character',(await game.observe()).world==='Vault'&&(await game.observe()).session.character===original.session.character);
   await game.act({keys:['Insert'],duration_ms:1000});
   for(let i=0;i<8&&(await game.observe()).world!=='Nexus';i++)await game.act({keys:[],duration_ms:500});
-  await game.act({keys:[],duration_ms:3000},{name:'renamed-after-reconnect',when:v=>v.world==='Nexus'&&v.game_ms>original.game_ms+1000});
+  const returned=await game.observe();
+  await game.act({keys:[],duration_ms:5000},{name:'renamed-after-reconnect',when:v=>v.world==='Nexus'&&v.game_ms>=returned.game_ms+3500});
   const final=await game.observe(),identity=(await game.inspect()).diagnostic.character.name;
   game.check('normal reconnect retains renamed account, wallet, character and inventory',final.world==='Nexus'&&final.lifecycle.alive&&final.session.account===account&&final.session.character===original.session.character&&identity==='NextName'&&JSON.stringify(final.character.items)===JSON.stringify(original.character.items)&&JSON.stringify(await db('SELECT name,credits FROM accounts WHERE id=?'))===JSON.stringify([['NextName',0]]));
   await writeFile(join(root,'name-choice.json'),JSON.stringify({preparedWallet:1000,original,final,identity},null,2));
