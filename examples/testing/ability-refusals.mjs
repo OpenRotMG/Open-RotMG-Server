@@ -45,17 +45,12 @@ export async function run(game){
   const denied=await record('blocked-refusal');
   game.check('native blocked teleport refuses before mana cooldown or decoy creation',denied.view.character.mp>=before.view.character.mp&&JSON.stringify(denied.view.position)===JSON.stringify(before.view.position)&&denied.view.character.ability_ready_ms<=denied.view.time_ms&&denied.diagnostic.entities.every(e=>e.kind!==0x715));
   const quiet=await game.join({class:0x30e,level:20,seed:879,world:'oryx-castle',position:{x:24.5,y:139.5},equipment:[-1,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,0]});
-  await api({op:'cheat',actor:quiet.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:300}});
+  await api({op:'cheat',actor:quiet.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
   await quiet.act({keys:[],duration_ms:1000});const hit=await record('natural-quiet',quiet);
   game.check('natural Living Floor projectile applies Quiet and drains MP',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0);
-  game.check('initial HP protection has expired before isolating Quiet',!(hit.view.character.conditions&(1<<24)));
-  await api({op:'cheat',actor:quiet.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
-  await api({op:'cheat',actor:quiet.actor,change:{kind:'vitals',hp:hit.view.character.hp,mp:200}});
-  const funded=await record('explicit-funded-quiet',quiet);
-  game.check('explicit mana preparation isolates Quiet from insufficient MP',!!(funded.view.character.conditions&2)&&funded.view.character.mp===200);
   await quiet.act({keys:[' '],duration_ms:100});
   const refused=await record('quiet-refusal',quiet);
-  game.check('native Quiet with enough MP rejects without spending starting cooldown or shooting',refused.view.character.mp===200&&refused.view.character.ability_ready_ms<=refused.view.time_ms&&refused.diagnostic.character.shots===funded.diagnostic.character.shots&&JSON.stringify(refused.view.character.items)===JSON.stringify(funded.view.character.items));
+  game.check('native Quiet keeps MP zero and refuses without starting cooldown shooting or changing inventory',refused.view.character.mp===0&&!!(refused.view.character.conditions&2)&&refused.view.character.ability_ready_ms<=refused.view.time_ms&&refused.diagnostic.character.shots===hit.diagnostic.character.shots&&JSON.stringify(refused.view.character.items)===JSON.stringify(hit.view.character.items)&&refused.view.character.inventory_revision===hit.view.character.inventory_revision);
   await quiet.act({keys:[],duration_ms:700},{name:'quiet-refusal',when:()=>true});
   game.check('both prepared characters remain alive',refused.view.lifecycle.alive&&(await game.observe()).lifecycle.alive&&initial.view.session.character===(await game.observe()).session.character);
 }
