@@ -28,14 +28,48 @@ export async function run(game){
   async function save(label){const value={label,main:await game.inspect(),peer:await peer.observe()};records.push(value);await writeFile(join(out,'closure.json'),JSON.stringify(records));return value;}
   const initial=await game.observe(),origin=initial.session.world,peer=await game.join({...spec,seed:788,world:origin,position:initial.position}),peerInitial=await peer.observe();
   async function act(input,capture){
-    const now=(await game.observe()).game_ms;
-    for(const client of [game,peer])if(now+input.duration_ms>=(protection.get(client.actor)??0)){
-      await cheat(client,{kind:'protection',condition:'invulnerable',duration_ms:60000});protection.set(client.actor,now+60000);
+    let remaining=input.duration_ms,result;
+    while(remaining>0){
+      const now=(await game.observe()).game_ms;
+      for(const client of [game,peer])if(now>=(protection.get(client.actor)??0)){
+        await cheat(client,{kind:'protection',condition:'invincible',duration_ms:60000});protection.set(client.actor,now+60000);
+      }
+      if(now>=attackUntil){await cheat(game,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});attackUntil=now+60000;}
+      const duration_ms=Math.min(remaining,...[...protection.values()].map(until=>until-now));
+      assert(duration_ms>0,'Protection deadline must advance');
+      result=await game.act({...input,duration_ms},capture);remaining-=duration_ms;capture=undefined;
     }
-    if(now>=attackUntil){await cheat(game,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});attackUntil=now+60000;}
-    return game.act(input,capture);
+    return result;
   }
-  const opening=await map(),blocked=new Set(opening.blocked.map(([x,y])=>x+','+y)),original=opening.entities.filter(e=>roots.has(e.kind)&&(e.quest===e.id||[0x668,0x67d].includes(e.kind)));
+  const opening=await map(),width=opening.width,total=width*opening.height,blocked=new Uint8Array(total),original=opening.entities.filter(e=>roots.has(e.kind)&&(e.quest===e.id||[0x668,0x67d].includes(e.kind)));
+  for(const [x,y] of opening.blocked)blocked[y*width+x]=1;
+  const clear=(a,b)=>{
+    const steps=Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)*4);
+    for(let n=0;n<=steps;n++)for(const [dx,dy] of [[-.3,-.3],[-.3,.3],[.3,-.3],[.3,.3]]){
+      const x=Math.floor(a.x+(b.x-a.x)*n/Math.max(1,steps)+dx),y=Math.floor(a.y+(b.y-a.y)*n/Math.max(1,steps)+dy);
+      if(x<0||x>=width||y<0||y>=opening.height||blocked[y*width+x])return false;
+    }
+    return true;
+  };
+  async function walk(anchor,range){
+    const before=await game.observe(),start=Math.floor(before.position.y)*width+Math.floor(before.position.x),parent=new Int32Array(total).fill(-1),queue=new Int32Array(total);
+    parent[start]=start;queue[0]=start;let head=0,tail=1,goal;
+    while(head<tail){
+      const i=queue[head++],point={x:i%width+.5,y:Math.floor(i/width)+.5};
+      if(Math.hypot(point.x-anchor.x,point.y-anchor.y)<range&&clear(point,anchor)){goal=i;break;}
+      for(const n of [i-width,i-1,i+1,i+width])if(n>=0&&n<total&&Math.abs(n%width-i%width)<=1&&!blocked[n]&&parent[n]===-1){parent[n]=i;queue[tail++]=n;}
+    }
+    assert.notEqual(goal,undefined,'No walkable route to the living encounter');
+    const path=[];for(let i=goal;i!==start;i=parent[i])path.push({x:i%width+.5,y:Math.floor(i/width)+.5});
+    const point=path.find(p=>{const dx=Math.abs(p.x-before.position.x),dy=Math.abs(p.y-before.position.y);return Math.hypot(dx,dy)<45&&Math.min(dx,dy,Math.abs(dx-dy))<.6&&clear(before.position,p);});
+    assert(point,'No unobstructed next route segment');
+    const dx=point.x-before.position.x,dy=point.y-before.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+    if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
+    if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
+    const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
+    await act({keys,duration_ms:Math.max(50,Math.min(5000,Math.round(distance*850/(4+5.6*before.character.stats.speed/75))))});
+    const after=await game.observe();assert(Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y)>.02,'Native route input made no progress');
+  }
   assert(original.length>20,'Full ordinary roster required, not a prepared final encounter');
   await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial}));
   await act({keys:[],duration_ms:500},{name:'realm-opening',when:()=>true});
@@ -45,10 +79,11 @@ export async function run(game){
     const log=await events(),credits=log.filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin),defeated=new Set(credits.map(e=>e.hero));
     const current=await map();
     for(const e of current.entities)if(roots.has(e.kind)&&e.quest===e.id)seen.set(e.id,e);
-    const next=[...seen.keys()].find(id=>!defeated.has(id));
+    const position=(await game.observe()).position;
+    const next=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y))[0];
     if(next===undefined){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
     let completed=false;
-    for(let step=0;step<100;step++){
+    for(let step=0;step<200;step++){
       const log=await events();if(log.some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next)){completed=true;break;}
       const state=await map(),family=state.entities.filter(e=>e.id===next||e.quest===next);
       if(!family.length){await act({keys:[],duration_ms:1000});continue;}
@@ -57,17 +92,12 @@ export async function run(game){
       const target=healer??vulnerable.find(e=>roots.has(e.kind)||[0x920,0x91c,0x92d,0x6c1,0x929,0xd5e,0xd62].includes(e.kind));
       const anchor=target??family.find(e=>roots.has(e.kind)||[0x920,0x91c,0x92d,0x6c1,0x6c2].includes(e.kind));assert(anchor,'Encounter has no living leader or required combat target');
       const view=await game.observe();
-      if(Math.hypot(anchor.pos.x-view.position.x,anchor.pos.y-view.position.y)>3){
-        const position=Array.from({length:8},(_,n)=>({x:anchor.pos.x+1.5*Math.cos(n*Math.PI/4),y:anchor.pos.y+1.5*Math.sin(n*Math.PI/4)})).find(p=>!blocked.has(Math.floor(p.x)+','+Math.floor(p.y)));
-        assert(position,'No walkable prepared observation point');
-        for(const client of [game,peer])await cheat(client,{kind:'teleport',position});
-        await act({keys:[],duration_ms:100});
-        continue;
-      }
+      const range=anchor.kind===0xd5e?12:3;
+      if(Math.hypot(anchor.pos.x-view.position.x,anchor.pos.y-view.position.y)>range||!clear(view.position,anchor.pos)){await walk(anchor.pos,range);continue;}
       if(target){
         const nearby=(await game.inspect()).view.objects.some(e=>e.id===target.id);assert(nearby,'Combat target must be visible to the native client');
-        await act({keys:[],duration_ms:2000,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
-      }else await act({keys:[],duration_ms:5000});
+        await act({keys:[],duration_ms:target.stage===2&&[0x91f,0x91b,0x928].includes(target.kind)?4000:2000,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
+      }else await act({keys:[],duration_ms:anchor.stage===1&&[0x91f,0x91b,0x928].includes(anchor.kind)?1000:10000});
     }
     assert(completed||(await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next),'Native combat did not finish counted encounter '+next);
     const receipt={root:next,kind:seen.get(next).kind,view:await game.observe()};
