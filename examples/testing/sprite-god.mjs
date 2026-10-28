@@ -41,8 +41,8 @@ export async function run(game){
     for(let n=0;n<100;n++){
       const s=await game.inspect(),e=enemy(s,id);if(!e)return;
       if((await game.observe()).game_ms>=protectionUntil)await protect('invulnerable',60000);
-      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>4.5;
-      await act({keys:approach?[Math.abs(x)>.2?(x>0?'d':'a'):null,Math.abs(y)>.2?(y>0?'s':'w'):null].filter(Boolean):[],duration_ms:250,target:{entity:id,camera_angle:-Math.PI/4,fire:!approach}});
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,distance=Math.hypot(dx,dy),approach=distance>(id===root.id?1:4.5);
+      await act({keys:approach?[Math.abs(x)>.2?(x>0?'d':'a'):null,Math.abs(y)>.2?(y>0?'s':'w'):null].filter(Boolean):[],duration_ms:approach?Math.min(250,Math.max(50,Math.round(distance*60))):250,target:{entity:id,camera_angle:-Math.PI/4,fire:!approach}});
     }
     assert.fail('Native fire did not defeat '+id);
   }
