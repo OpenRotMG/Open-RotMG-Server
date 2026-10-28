@@ -145,7 +145,7 @@ export async function run(game){
       await sourceFire(target);
       admitted=(await history()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd50);if(admitted)break;
     }
-    await prepareScout({kind:'teleport',position:refuge});await idle(1000);await save('quest-'+site.entity);
+    await prepareScout({kind:'teleport',position:refuge});await save('quest-'+site.entity);
     const events=(await history()).filter(f=>f.message==='quest defeat summoned a Realm event');
     admitted=events.find(f=>f.kind===0xd50);
     if(admitted)break;
