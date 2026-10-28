@@ -18,7 +18,7 @@ export async function beforeNavigate({browser,signal}) {
   signal.addEventListener('abort',()=>c.close(),{once:true});clients.push(c);
 }
 async function rejected(message) {
-  assert((await readFile(join(root,'server.log'),'utf8')).includes(message),'Expected server refusal: '+message);
+  assert((await readFile(join(root,'state/server.log'),'utf8')).includes(message),'Expected server refusal: '+message);
 }
 async function click(c,x,y) {
   const r=await c.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y};})()');
@@ -119,6 +119,7 @@ export async function run(game) {
     game.check('ordinary client chooses its account name '+index,(await player.inspect()).diagnostic.character.name===(index===0?'GuildOwner':'GuildGuest'));
     await player.act({keys:[],mouse:{x:300,y:300},duration_ms:200});
     await walk(player,73.9,75.5);await walk(player,109.5,43.2);
+    await player.act({keys:['d','w'],duration_ms:250});
   }
   await ui(game,0,'guild-register',async()=>{});
   await ui(game,0,'create-cancel-dialog',c=>click(c,700,580));
