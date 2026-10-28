@@ -14,9 +14,10 @@ export async function run(game){
   const map=async()=>{const v=await game.observe(),r=await fetch(config.origin+'/dev/map?player='+v.session.player,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);return r.json();};
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),samples=[];
   async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(join(root,'castle-journey.json'),JSON.stringify(samples));console.log(name,JSON.stringify(state.view.position));return state;}
-  let until=0;
+  let until=0,boosted=false;
   async function act(input,capture){
     const v=await game.observe();
+    if(!boosted){await api({op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});boosted=true;}
     if(v.game_ms>=until){await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});until=(await game.observe()).game_ms+60000;}
     input.duration_ms=Math.min(input.duration_ms,until-(await game.observe()).game_ms);
     assert(input.duration_ms>0);
@@ -34,7 +35,8 @@ export async function run(game){
     for(let n=0;n<200;n++){
       const m=await map(),e=m.entities.find(e=>e.id===id);if(!e)return;
       const v=await game.observe();
-      if(distance(v.position,e.pos)>6){await walk(e.pos,4);continue;}
+      const moving=[0xd78,0xd79,0xd7c].includes(e.kind);
+      if(distance(v.position,e.pos)>(moving?2:6)){await walk(e.pos,moving?1.2:4);continue;}
       await act({keys:[],duration_ms:350,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
     }
     throw Error('Native damage did not defeat '+id);
@@ -86,7 +88,7 @@ export async function run(game){
     let end=0;const dx=route[0].x-Math.floor(v.position.x)-.5,dy=route[0].y-Math.floor(v.position.y)-.5;
     while(end+1<route.length&&end<5&&route[end+1].x-route[end].x===dx&&route[end+1].y-route[end].y===dy&&!m.entities.some(e=>[0xd70,0xd71].includes(e.kind)&&distance(e.pos,route[end+1])<.2))end++;
     const enemy=m.entities.filter(e=>e.kind>=0xd7e&&e.kind<=0xd87&&distance(e.pos,v.position)<5).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position))[0];
-    if(enemy)await kill(enemy.id);
+    if(enemy)await act({keys:[],duration_ms:250,target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}});
     await walk(route[end]);
     if(n%10===0)await save('route-'+n);
   }
