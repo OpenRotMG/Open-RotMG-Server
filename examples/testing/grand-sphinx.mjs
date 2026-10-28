@@ -6,9 +6,8 @@ import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;let refuge;
 const spec={class:0x323,level:20,seed:818,world:1,equipment:[0xb0a,0xb2d,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]};
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),root=world.encounter_markers.find(e=>e.kind===0x67d);assert(root,'Ordinary Cyclops God required');
-  const spawn=world.spawn_points[0];assert(spawn?.length===2);refuge={x:spawn[0],y:spawn[1]};
-  return {...spec,position:root.position};
+  const world=await api({op:'world_info',world:1}),spawn=world.spawn_points[0];assert(spawn?.length===2);refuge={x:spawn[0],y:spawn[1]};
+  return {...spec,position:refuge};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -20,7 +19,7 @@ export async function run(game){
   const cheat=change=>api({op:'cheat',actor:game.actor,change});
   const scout=(await api({op:'spawn',spec:{...spec,guid:'sphinx-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
   const scoutName=(await api({op:'inspect',actor:scout})).diagnostic.character.name;
-  const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});let scoutProtection=0,lastTeleport=-10000;
+  const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});let scoutProtection=0,scoutModifier=0;
   try{
   async function prepareScout(change){
     for(let n=0;n<100;n++){
@@ -29,19 +28,21 @@ export async function run(game){
     }
     throw Error('Scout persistence did not finish before the next prepared mutation');
   }
+  async function playing(){
+    for(let n=0;n<100;n++){if(!(await game.observe()).paused)return;await new Promise(ok=>setTimeout(ok,10));}
+    throw Error('Native action did not establish its active bounded window');
+  }
   async function travel(point){
-    const now=(await game.observe()).game_ms;
-    if(now-lastTeleport<10000)await idle(10000-(now-lastTeleport));
     await protect();
     await prepareScout({kind:'teleport',position:point});
     const action=game.act({keys:[],duration_ms:2000});
     const typing=(async()=>{
-      for(let n=0;n<100&&(await game.observe()).paused;n++)await new Promise(ok=>setTimeout(ok,10));
+      await playing();
       async function enter(){try{await connection.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}finally{await connection.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}}
       await enter();await connection.call('Input.insertText',{text:'/teleport '+scoutName});await enter();
     })();
     const results=await Promise.allSettled([action,typing]);for(const r of results)if(r.status==='rejected')throw r.reason;
-    const arrived=await game.observe();assert(Math.hypot(arrived.position.x-point.x,arrived.position.y-point.y)<.2,'Ordinary native chat teleport must reach the prepared scout');lastTeleport=arrived.game_ms;
+    const arrived=await game.observe();assert(Math.hypot(arrived.position.x-point.x,arrived.position.y-point.y)<.2,'Ordinary native chat teleport must reach the prepared scout');
     await prepareScout({kind:'teleport',position:refuge});
   }
   async function protect(){
@@ -55,7 +56,7 @@ export async function run(game){
   async function map(){
     const view=await game.observe(),response=await fetch(config.origin+'/dev/map?player='+view.session.player,{headers});assert(response.ok);return response.json();
   }
-  async function save(label){const state=await game.inspect();observations.push({label,state});await writeFile(join(out,'sphinx.json'),JSON.stringify(observations));return state;}
+  async function save(label){const state=await game.inspect();observations.push({label,state,scout:(await api({op:'inspect',actor:scout})).view});await writeFile(join(out,'sphinx.json'),JSON.stringify(observations));return state;}
   const entity=(state,id)=>state.diagnostic.entities.find(e=>e.id===id);
   async function walk(point,range=.4){
     for(let n=0;n<100;n++){
@@ -73,6 +74,24 @@ export async function run(game){
     const now=(await game.observe()).game_ms;if(now>=modifier){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifier=now+60000;}
     await game.act({keys:[],duration_ms:Math.min(ms,protection-now,scoutProtection-now),target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
+  async function sourceFire(target){
+    const id=target.id;
+    await protect();const now=(await game.observe()).game_ms,remaining=Math.min(protection-now,scoutProtection-now);
+    if(remaining<6100){await prepareScout({kind:'teleport',position:refuge});await idle(remaining);return;}
+    assert(target.hp>0,'Ordinary admission target must be alive');
+    await prepareScout({kind:'teleport',position:target.pos});
+    if(now>=scoutModifier){await prepareScout({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});scoutModifier=now+60000;}
+    const action=game.act({keys:[],duration_ms:6000});
+    const firing=(async()=>{
+      await playing();
+      for(let n=0;n<4;n++){
+        const state=(await api({op:'inspect',actor:scout})),enemy=entity(state,id);if(!enemy)break;
+        if((await game.observe()).game_ms>now+4500)break;
+        await api({op:'act',actor:scout,action:{command:'shoot',angle:Math.atan2(enemy.pos.y-state.view.position.y,enemy.pos.x-state.view.position.x)},duration_ms:1000,pauseAfter:false});
+      }
+    })();
+    const results=await Promise.allSettled([action,firing]);for(const r of results)if(r.status==='rejected')throw r.reason;
+  }
   await protect();await game.act({keys:[],duration_ms:100});
   const attempted=new Set();let sphinx;
   for(let n=0;n<100;n++){
@@ -81,15 +100,15 @@ export async function run(game){
     const rank=e=>Math.hypot(e.pos.x-here.x,e.pos.y-here.y)+(e.kind===0x928?scene.width+scene.height:0);
     const root=scene.entities.filter(e=>[0x678,0x67d,0x668,0xd56,0xd59,0x928,0x91b,0x675].includes(e.kind)&&!attempted.has(e.id)).sort((a,b)=>rank(a)-rank(b))[0];
     assert(root,'No unattempted qualifying Realm source remains');attempted.add(root.id);
-    await travel(root.pos);await protect();
-    for(let hit=0;hit<100;hit++){
-      const state=await game.inspect(),target=state.diagnostic.entities.filter(e=>(e.id===root.id||e.quest===root.id&&[0x92d,0x91c,0x6c1,0x91d,0x929].includes(e.kind))&&!(e.kind===0x929&&e.stage===3)).sort((a,b)=>Number(![0x91d,0x929].includes(a.kind))-Number(![0x91d,0x929].includes(b.kind)))[0];
-      if(!target)break;await fire(target.id);
+    await prepareScout({kind:'teleport',position:root.pos});await protect();
+    for(let hit=0;hit<30;hit++){
+      const scene=await map(),target=scene.entities.filter(e=>(e.id===root.id||e.quest===root.id&&[0x92d,0x91c,0x6c1,0x91d,0x929].includes(e.kind))&&!(e.kind===0x929&&e.stage===3)).sort((a,b)=>Number(![0x91d,0x929].includes(a.kind))-Number(![0x91d,0x929].includes(b.kind)))[0];
+      if(!target)break;await sourceFire(target);
     }
     await game.act({keys:[],duration_ms:200});await save('admission-source-'+root.id);
   }
   assert(sphinx,'Ordinary quest deaths did not admit a Sphinx within the bounded search');
-  await writeFile(join(out,'admission.json'),JSON.stringify({attempted:[...attempted],sphinx}));
+  await writeFile(join(out,'admission.json'),JSON.stringify({attempted:[...attempted],preparation_actor:scout,sphinx}));
   await travel(sphinx.pos);await game.act({keys:[],duration_ms:500},{name:'sphinx-entry',when:()=>true});
   const initial=await save('entry'),boss=entity(initial,sphinx.id);assert(boss);
   game.check('unmodified full-health Sphinx admitted by ordinary Realm quest deaths',boss.hp===55000);
