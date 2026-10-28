@@ -34,7 +34,7 @@ export async function run(observer){
   await a.game.act({keys:[],duration_ms:300},{name:'tomb-active-traps',when:()=>true});
   const initial=await save('initial');
   observer.check('two different generated rooms each have eight live traps',a.traps.length===8&&b.traps.length===8&&a.room.id!==b.room.id);
-  await walk(a.game,a.room.pos,.8);await a.game.act({keys:[],duration_ms:1400});
+  await walk(a.game,a.room.pos,.8);
   const pressed=await save('partial-pressure');
   observer.check('native pressure starts without early activation',entity(pressed.a,a.room.id).tomb.press_since!==null&&entity(pressed.a,a.room.id).stage===0);
   await walk(a.game,{x:a.room.pos.x+2,y:a.room.pos.y});
@@ -44,11 +44,11 @@ export async function run(observer){
   await b.game.act({keys:[],duration_ms:3500},{name:'tomb-second-room-disabled',when:v=>v.game_ms>=secondAt+3100});
   const local=await save('second-room-disabled');
   observer.check('another player disables only their own room',entity(local.b,b.room.id).stage===1&&entity(local.a,a.room.id).stage===0&&a.traps.every(t=>local.map.entities.some(e=>e.id===t.id&&e.kind===0xd38))&&b.traps.every(t=>!local.map.entities.some(e=>e.id===t.id)&&local.map.entities.some(e=>e.kind===0xd39&&e.pos.x===t.pos.x&&e.pos.y===t.pos.y)));
-  await walk(a.game,a.room.pos,.8);await a.game.act({keys:[],duration_ms:1400});
+  await walk(a.game,a.room.pos,.8);
   const restarted=await save('restarted-pressure');
-  observer.check('interrupted time is not accumulated across visits',entity(restarted.a,a.room.id).stage===0);
+  observer.check('interrupted time is not accumulated across visits',entity(restarted.a,a.room.id).stage===0&&entity(restarted.a,a.room.id).tomb.press_since>entity(pressed.a,a.room.id).tomb.press_since);
   const firstAt=(await a.game.observe()).game_ms;
-  await a.game.act({keys:[],duration_ms:2000},{name:'tomb-first-room-disabled',when:v=>v.game_ms>=firstAt+1700});
+  await a.game.act({keys:[],duration_ms:3500},{name:'tomb-first-room-disabled',when:v=>v.game_ms>=firstAt+3100});
   const disabled=await save('both-disabled');
   observer.check('fresh uninterrupted pressure permanently disables all eight local traps',entity(disabled.a,a.room.id).stage===1&&a.traps.every(t=>!disabled.map.entities.some(e=>e.id===t.id)&&disabled.map.entities.some(e=>e.kind===0xd39&&e.pos.x===t.pos.x&&e.pos.y===t.pos.y)));
   observer.check('trap activation does not awaken statues or grant clear credit',disabled.map.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind)).length===3&&disabled.arena.diagnostic.character.tombs===0&&disabled.a.diagnostic.character.tombs===0&&disabled.b.diagnostic.character.tombs===0);
