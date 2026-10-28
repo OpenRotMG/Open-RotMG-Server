@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 
 const base=[100,100,12,0,10,15,0,0];
-export const fixture={class:0x30e,level:20,seed:891,world:'ocean-trench',
+export const fixture={class:0x30e,level:20,seed:891,world:'ocean-trench',worldSeed:12351,
   position:w=>({x:w.spawn_points[0][0],y:w.spawn_points[0][1]+2}),
   equipment:[0xa97,0xa2e,-1,-1],backpack:[0xb3e,0xb3e,0xa22,-1,-1,-1,-1,-1],stats:base};
 export async function run(game){
@@ -24,9 +24,10 @@ export async function run(game){
   game.check('native equip grants exactly twenty HP MP and two other stats',equipped.character.items[3]===0xb3e&&equipped.character.items[4]===-1&&equipped.character.inventory_revision===start.character.inventory_revision+1&&same(stats(equipped),base.map((n,i)=>n+(i<2?20:2))));
   await game.act({keys:[' '],duration_ms:250});
   game.check('native spell spends mana before resurrection',(await game.observe()).character.mp<equipped.character.mp);
-  const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'spawn',spec:{...fixture,position:start.position,world:start.session.world,guid:'amulet-backpack-control',controller:'direct',profile:null}}})});
+  const {worldSeed,...controlFixture}=fixture;
+  const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'spawn',spec:{...controlFixture,position:start.position,world:start.session.world,guid:'amulet-backpack-control',controller:'direct',profile:null}}})});
   const control=await r.json();assert(r.ok&&control.status==='succeeded',JSON.stringify(control));
-  await game.act({keys:[],duration_ms:9000},{name:'amulet-suffocation',when:v=>v.world==='Ocean Trench'&&v.character.hp<60});
+  await game.act({keys:[],duration_ms:9000,mouse:{x:790,y:590}},{name:'amulet-suffocation',when:v=>v.world==='Ocean Trench'&&v.character.hp<60});
   const restored=await game.observe();
   game.check('fatal native suffocation returns same living character to Nexus',restored.world==='Nexus'&&restored.session.world!==start.session.world&&restored.lifecycle.alive&&restored.session.character===start.session.character);
   const retained=[...equipped.character.items];retained[3]=-1;
