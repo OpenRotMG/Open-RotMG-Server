@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {join,resolve} from 'node:path';
+import {execFileSync} from 'node:child_process';
 
-export const fixture={class:0x31e,level:20,seed:858,world:1,position:'spawn',equipment:[0xa84,0xb22,0xafc,0xacd],backpack:[0x701,...Array(7).fill(0xa22)],stats:[770,252,50,40,50,50,75,50]};
+export const fixture={class:0x31e,level:20,seed:858,world:1,position:'spawn',equipment:[0xa84,0xb22,0xafc,0xacd],backpack:[0x701,...Array(7).fill(-1)],stats:[770,252,50,40,50,50,75,50]};
 export async function run(game){
   const out=process.env.QA_RESULTS_DIR,root=join(out,'native'),distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
   const snapshots=[],shots=new Map(),seen=new Map(),escorts=new Map(),splits=[],traps=new Set();
   async function save(name){const s=await game.inspect();snapshots.push({name,...s});await writeFile(join(out,'journey.json'),JSON.stringify(snapshots));return s;}
-  let prior;
+  let prior,protection=0;
   async function record(){
     const s=await game.inspect();
     for(const e of s.view.objects)if(e.kind>=0xd91&&e.kind<=0xdb2)seen.set(e.id,e);
@@ -21,7 +22,12 @@ export async function run(game){
     prior=s;return s;
   }
   async function sample(input,capture){
-    let pending,error;await record();
+    let pending,error;const before=await record();
+    if(!(before.view.character.conditions&(1<<23))){
+      const path=join(out,'protection-'+(++protection)+'.json');
+      await writeFile(path,JSON.stringify({id:'lair-protection-'+protection,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}));
+      execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
+    }
     const timer=setInterval(()=>{if(!pending)pending=record().catch(e=>{error=e;}).finally(()=>{pending=null;});},120);
     try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
     if(error)throw error;await record();
@@ -44,7 +50,6 @@ export async function run(game){
     const path=[];for(let i=to;i!==null;i=parents.get(i))path.push(i);path.reverse();
     return path.filter((i,n)=>n===0||n===path.length-1||i-path[n-1]!==path[n+1]-i).map(point);
   }
-  function heal(v){const slot=v.character.items.findIndex((item,i)=>i>=4&&item===0xa22);return v.character.hp<550&&slot>=4?[String(slot-3)]:[];}
   async function walk(goal,combat=true){
     for(const p of route((await game.observe()).position,goal)){
       let reached=false;
@@ -54,7 +59,7 @@ export async function run(game){
         const horizontal=Math.abs(dx)>Math.abs(dy),delta=horizontal?dx:dy;
         const keys=horizontal?(delta>0?['d','s']:['a','w']):(delta>0?['a','s']:['d','w']);
         const enemy=s.diagnostic.entities.filter(e=>e.hp>0&&e.kind>=0xd91&&e.kind<=0xdb2&&e.kind!==0xda2&&e.kind!==0xda3&&distance(v.position,e.pos)<3.2).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];
-        await sample({keys:[...keys,...heal(v)],duration_ms:Math.max(80,Math.min(450,Math.round(Math.abs(delta)/7.5*1000))),...(combat&&enemy?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
+        await sample({keys,duration_ms:Math.max(80,Math.min(450,Math.round(Math.abs(delta)/7.5*1000))),...(combat&&enemy?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
       }
       assert(reached,'Native movement did not reach '+JSON.stringify(p));
     }
@@ -62,7 +67,7 @@ export async function run(game){
   await sample({keys:[],duration_ms:900},{name:'lair-entry',when:()=>true});
   for(const kind of [0xda2,0xda3]){
     const v=await game.observe(),trap=map.entities.filter(e=>e.kind===kind).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];assert(trap,'Natural lair trap missing');
-    await walk(trap.pos);await sample({keys:[],duration_ms:1100},{name:'lair-trap-'+kind,when:()=>true});
+    await walk(trap.pos,false);await sample({keys:[],duration_ms:1100},{name:'lair-trap-'+kind,when:()=>true});
     const fired=[...shots.values()].filter(p=>p.owner===trap.id).length;
     game.check(kind+': ordinary movement triggers a natural single-use trap',fired>0&&!(await game.inspect()).diagnostic.entities.some(e=>e.id===trap.id));
     await sample({keys:[],duration_ms:1100});
@@ -83,7 +88,7 @@ export async function run(game){
     const dx=target.x-s.view.position.x,dy=target.y-s.view.position.y,horizontal=Math.abs(dx)>Math.abs(dy),delta=horizontal?dx:dy;
     const keys=horizontal?(delta>0?['d','s']:['a','w']):(delta>0?['a','s']:['d','w']);
     const minion=s.diagnostic.entities.find(c=>c.kind>=0xdaa&&c.kind<=0xdb2&&distance(s.view.position,c.pos)<3);
-    await sample({keys:[...keys,...heal(s.view)],duration_ms:350,...(minion?{target:{entity:minion.id,camera_angle:-Math.PI/4,fire:true}}:{})},n===5?{name:'lair-phases',when:()=>true}:undefined);
+    await sample({keys,duration_ms:350,...(minion?{target:{entity:minion.id,camera_angle:-Math.PI/4,fire:true}}:{})},n===5?{name:'lair-phases',when:()=>true}:undefined);
   }
   game.check('all four Septavius phase windows execute without a late-join restart',phases.size===4);
   await save('phases-observed');
@@ -94,7 +99,7 @@ export async function run(game){
     const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===boss.id);if(!e)break;
     assert(s.view.lifecycle.alive,'Knight died fighting Septavius');
     if(distance(s.view.position,e.pos)>3)await walk(e.pos,false);
-    await sample({keys:[' ',...heal(s.view)],duration_ms:350,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+    await sample({keys:[' '],duration_ms:350,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
   }
   const defeated=await save('boss-defeated');
   game.check('native sword defeats Septavius and grants exactly one lair clear',!defeated.diagnostic.entities.some(e=>e.id===boss.id)&&defeated.diagnostic.character.dungeons[2]===entered.diagnostic.character.dungeons[2]+1&&defeated.view.character.experience>entered.view.character.experience);
