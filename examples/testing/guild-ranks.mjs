@@ -8,10 +8,14 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
 
 export const fixture={class:0x30e,level:5,seed:913,world:-2,position:{x:76.5,y:76.5},equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:null};
-const clients=[],exec=promisify(execFile),out=process.env.QA_RESULTS_DIR,root=join(out,'native');
+const clients=[],rosters=[],exec=promisify(execFile),out=process.env.QA_RESULTS_DIR,root=join(out,'native');
 export async function beforeNavigate({browser,signal}){
-  const c=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
-  await c.call('Emulation.setFocusEmulationEnabled',{enabled:true});signal.addEventListener('abort',()=>c.close(),{once:true});clients.push(c);
+  const index=clients.length,requests=new Set();rosters.push(0);
+  const c=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:e=>{
+    if(e.method==='Network.responseReceived'&&e.params.response.url.endsWith('/guild/listMembers')&&e.params.response.status===200)requests.add(e.params.requestId);
+    if(e.method==='Network.loadingFinished'&&requests.delete(e.params.requestId))rosters[index]++;
+  }});
+  await c.call('Network.enable');await c.call('Emulation.setFocusEmulationEnabled',{enabled:true});signal.addEventListener('abort',()=>c.close(),{once:true});clients.push(c);
 }
 async function rows(){
   const {stdout}=await exec('python3',['-c',"import sqlite3,json,sys; c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True); print(json.dumps(c.execute('SELECT a.id,a.name,m.rank FROM guild_members m JOIN accounts a ON a.id=m.account ORDER BY m.rank DESC,m.fame DESC,a.name COLLATE NOCASE').fetchall()))",join(root,'state/game.db')]);
@@ -28,7 +32,7 @@ export async function run(game){
   const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'guild',name:'Rank Research',members:[peer.actor,target.actor]}}})});
   const prepared=await response.json();assert(response.ok&&prepared.status==='succeeded',JSON.stringify(prepared));
   const names=await Promise.all(players.map(async p=>(await p.inspect()).diagnostic.character.name)),records=[];
-  async function record(label){records.push({label,members:await rows(),states:await Promise.all(players.map(p=>p.observe()))});await writeFile(join(out,'guild-ranks-observations.json'),JSON.stringify({preparedGuild:true,records},null,2));}
+  async function record(label){records.push({label,rosters:[...rosters],members:await rows(),states:await Promise.all(players.map(p=>p.observe()))});await writeFile(join(out,'guild-ranks-observations.json'),JSON.stringify({preparedGuild:true,records},null,2));}
   async function ui(index,name,work,capture=true){
     const log=join(root,'controller.stderr'),offset=(await readFile(log,'utf8')).length;let done=false;
     const action=players[index].act({keys:[],duration_ms:2500},capture?{name,when:()=>done}:undefined);
@@ -46,7 +50,7 @@ export async function run(game){
   }
   async function walk(index,point){
     for(let i=0;i<100;i++){
-      const v=await players[index].observe(),dx=point.x-v.position.x,dy=point.y-v.position.y,d=Math.hypot(dx,dy);if(d<.65)return;
+      const v=await players[index].observe(),dx=point.x-v.position.x,dy=point.y-v.position.y,d=Math.hypot(dx,dy);if(d<.2)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];if(Math.abs(x)>.1)keys.push(x>0?'d':'a');if(Math.abs(y)>.1)keys.push(y>0?'s':'w');
       await players[index].act({keys,duration_ms:Math.min(350,Math.max(50,Math.round(d*100)))});
     }
@@ -56,9 +60,9 @@ export async function run(game){
     await walk(index,{x:76.5,y:77.5});
     await ui(index,'hall-entry-'+index,()=>click(index,700,575),false);
     game.check('ordinary Guild Hall admission '+index,(await players[index].observe()).world==='Guild Hall');
-    await walk(index,{x:14.5,y:8.5});
+    await walk(index,{x:14.5,y:8.2});
   }
-  const open=(index,name)=>ui(index,name,()=>click(index,700,575));
+  const open=async(index,name)=>{const before=rosters[index];await ui(index,name,()=>click(index,700,575));game.check('Chronicle roster completed: '+name,rosters[index]>before);};
   const close=index=>ui(index,'close-roster-'+index,()=>click(index,400,545));
   async function change(index,targetIndex,direction,rank,cancel=false){
     const before=await rows(),row=before.findIndex(r=>r[1]===names[targetIndex]);assert(row>=0);
@@ -87,7 +91,7 @@ export async function run(game){
   await open(0,'founder-restores-leader');for(const rank of [10,20,30])await change(0,2,'promote',rank);await close(0);
   const original=await game.observe();await game.act({keys:['Insert'],duration_ms:700});await game.act({keys:[],duration_ms:500});
   game.check('ordinary Nexus reconnect keeps Founder and living character',(await game.observe()).world==='Nexus'&&(await game.observe()).session.character===original.session.character&&(await rows()).find(r=>r[1]===names[0])[2]===40);
-  await walk(0,{x:78.5,y:41.5});await walk(0,{x:109.5,y:42.5});await ui(0,'renounce-dialog',()=>click(0,700,575));await ui(0,'renounce-cancel',()=>click(0,325,338));
+  await walk(0,{x:78.5,y:41.5});await walk(0,{x:109.5,y:42.2});await ui(0,'renounce-dialog',()=>click(0,700,575));await ui(0,'renounce-cancel',()=>click(0,325,338));
   game.check('cancelled renunciation preserves Founder',(await rows()).find(r=>r[1]===names[0])[2]===40);
   await ui(0,'renounce-confirm',()=>click(0,700,575));await ui(0,'founder-renounced',()=>click(0,475,338));
   const remaining=await rows();game.check('Founder departure leaves both Leaders without automatic succession',remaining.length===2&&remaining.every(r=>r[2]===30));
