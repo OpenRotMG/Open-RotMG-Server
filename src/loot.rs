@@ -1570,6 +1570,7 @@ mod tests {
     fn realm_god_potion_boundaries_preserve_equipment() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for (kind, threshold, chance, potion) in [
+            (0x651, 180, 0.01, 0xa1f),
             (0x655, 180, 0.015, 0xa20),
             (0x656, 270, 0.01, 0xa20),
             (0x657, 180, 0.015, 0xa1f),
