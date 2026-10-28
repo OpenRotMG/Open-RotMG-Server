@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x310,level:20,seed:835,world:1,equipment:[0xa07,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const spec={class:0x310,level:20,seed:835,world:1,equipment:[0xa07,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,50,0,50,50,40,75]};
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let god;
 export async function prepare(api){
