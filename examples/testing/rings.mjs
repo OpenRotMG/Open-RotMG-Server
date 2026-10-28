@@ -24,6 +24,7 @@ export async function run(game){
   const stats=v=>['max_hp','max_mp','attack','defense','speed','dexterity','vitality','wisdom'].map(k=>v.character.stats[k]);
   const drag=async(from,to,capture)=>game.act({keys:[],duration_ms:450,drag:{from,to}},capture);
   const pack={x:634,y:428},ring={x:766,y:385};
+  await game.act({keys:[],duration_ms:2500},{name:'rings-before',when:v=>v.game_ms>=1600});
   for(const [id,boost] of rings){
     let before=await game.observe();
     if(before.character.items[4]!==id){
