@@ -1050,7 +1050,10 @@ mod tests {
                 .unwrap();
             let root = *world.quest_ids.iter().next().unwrap();
             world.ghost_wave(root, tier, company).unwrap();
-            assert_eq!(world.pending_named(root, None), expected.iter().sum::<usize>());
+            assert_eq!(
+                world.pending_named(root, None),
+                expected.iter().sum::<usize>()
+            );
             world.now += 1500;
             world.named_birth_step();
             assert_eq!(world.pending_named(root, None), 0);
