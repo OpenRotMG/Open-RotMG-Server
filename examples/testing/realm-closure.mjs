@@ -12,9 +12,10 @@ let scout,spawnPoints;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),boss=world.encounter_markers.find(e=>e.kind===0x67d);
   assert(boss,'An ordinarily populated Cyclops encounter is required');
-  assert(world.spawn_points.length,'Ordinary Realm shore spawns are required');spawnPoints=world.spawn_points;
+  assert(Array.isArray(world.spawn_points)&&world.spawn_points.length&&world.spawn_points.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite)),'World spawn_points must contain coordinate pairs');
+  spawnPoints=world.spawn_points.map(([x,y])=>({x,y}));
   scout=(await api({op:'spawn',spec:{...spec,guid:'closure-scout-'+randomUUID(),position:{x:Math.floor(boss.position.x)+.5,y:Math.floor(boss.position.y)+.5},controller:'direct',profile:null}})).result;
-  await writeFile(join(out,'scout-preparation.json'),JSON.stringify(scout));
+  await writeFile(join(out,'scout-preparation.json'),JSON.stringify({...scout,spawnPoints}));
   return {...spec,position:boss.position};
 }
 export async function run(game){
