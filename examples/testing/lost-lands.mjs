@@ -6,11 +6,14 @@ import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
 const spec={class:0x31d,level:20,seed:817,world:1,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 const history=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
-let sites;
+let sites,refuge,reserved;
 export async function prepare(api){
   const info=await api({op:'world_info',world:1}),events=await history();
   const end=events.findLastIndex(f=>f.message==='Realm simulation populated'&&f.layout===info.realm_layout),start=events.slice(0,end).findLastIndex(f=>f.message==='Realm simulation populated');
   assert(end>=0);
+  const [x,y]=info.spawn_points[0];refuge={x,y};
+  reserved=events.slice(start+1,end).filter(f=>f.message==='Realm event reserved outside active indexes'&&f.kind===0xd50);
+  assert(reserved.length===1,'One Lord reserve per ordinary Realm required');
   sites=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&[0x675,0x678,0x668,0x67d].includes(f.kind));
   assert(sites.length,'Ordinary quest sites required for event admission');
   sites.sort((a,b)=>[0x675,0x678,0x668,0x67d].indexOf(a.kind)-[0x675,0x678,0x668,0x67d].indexOf(b.kind));
@@ -25,7 +28,7 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
     const receipt=await response.json();assert(response.ok&&(command.op==='inspect'?receipt.diagnostic!==undefined:receipt.status==='succeeded'),JSON.stringify(receipt));return receipt;
   }
-  const start=await game.observe(),scout=(await api({op:'spawn',spec:{...spec,guid:'lost-lands-scout',position:start.position,controller:'direct',profile:null}})).result.actor;
+  const scout=(await api({op:'spawn',spec:{...spec,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
   const scoutName=(await api({op:'inspect',actor:scout})).diagnostic.character.name;
   try{
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
@@ -50,6 +53,7 @@ export async function run(game){
     })();
     for(const r of await Promise.allSettled([action,typing]))if(r.status==='rejected')throw r.reason;
     const arrived=await game.observe();assert(Math.hypot(arrived.position.x-point.x,arrived.position.y-point.y)<.2,'Native teleport must reach direct scout');lastTeleport=arrived.game_ms;
+    await api({op:'cheat',actor:scout,change:{kind:'teleport',position:refuge}});
   }
   async function walk(point){
     for(let n=0;n<30;n++){
@@ -67,7 +71,7 @@ export async function run(game){
     await game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
   const initial=await save('before-admission');
-  game.check('Lord is reserved, not active at startup',!initial.diagnostic.entities.some(e=>e.kind===0xd50));
+  game.check('startup reserves one Lord outside active indexes',reserved.length===1);
   let admitted;
   for(const site of sites){
     await at({x:site.x,y:site.y});
@@ -85,7 +89,7 @@ export async function run(game){
   await at({x:admitted.x,y:admitted.y});
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-waiting',when:()=>true});
   const entry=await save('entry'),lord=entity(entry,admitted.entity);assert(lord?.hp===70000&&lord.stage===0);
-  game.check('ordinary quest defeat admits one untouched Lord',lord.kind===0xd50&&lord.quest===lord.id);
+  game.check('ordinary quest defeat admits the untouched reserved Lord',lord.id===reserved[0].entity&&lord.kind===0xd50&&lord.quest===lord.id);
   await fire(lord.id,500);await idle(4000);
   let state=await save('activated');
   const family=s=>s.diagnostic.entities.filter(e=>e.quest===lord.id),crystals=s=>family(s).filter(e=>e.kind===0xd51);

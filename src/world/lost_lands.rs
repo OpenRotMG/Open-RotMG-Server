@@ -222,8 +222,9 @@ fn lost_lands_activation_protection_and_final_credit() {
     let root = w
         .spawn_entity(0xd50, Pos { x: 12.5, y: 12.5 }, vec![])
         .unwrap();
-    let target = Some(Pos { x: 15., y: 12.5 });
-    w.players.get_mut(&player).unwrap().pos = target.unwrap();
+    let point = Pos { x: 15., y: 12.5 };
+    w.players.get_mut(&player).unwrap().pos = point;
+    let target = Some(point);
     w.landmark_mechanics(root, target, 50).unwrap();
     assert_eq!(w.entities[&root].hp, 70000);
     assert_eq!(w.entities[&root].stage, Some(0));
