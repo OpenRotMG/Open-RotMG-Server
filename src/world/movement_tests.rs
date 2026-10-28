@@ -60,6 +60,25 @@ fn native(
 }
 
 #[test]
+fn lair_slime_children_start_on_the_defeated_parents_floor() {
+    for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
+        let (mut world, _) = fixture(0x18, true);
+        world.encounter = true;
+        let pos = Pos { x: 8.9, y: 8.5 };
+        assert!(world.walkable(pos));
+        let id = world.spawn_entity(parent, pos, vec![]).unwrap();
+        world.defeat_entity(id).unwrap();
+        let children: Vec<_> = world.actors().filter(|e| e.kind == child).collect();
+        assert_eq!(children.len(), count);
+        assert!(
+            children
+                .iter()
+                .all(|e| e.pos.x == pos.x && e.pos.y == pos.y && world.walkable(e.pos))
+        );
+    }
+}
+
+#[test]
 fn lair_traps_retire_after_one_volley_and_late_joins_keep_owned_escorts() {
     for kind in [0xda2, 0xda3] {
         let (mut world, _) = fixture(0x18, false);
