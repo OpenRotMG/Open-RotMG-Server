@@ -38,6 +38,43 @@ fn fatal(ch: &mut Character, fame: i32) {
 }
 
 #[tokio::test]
+async fn robes_keep_caps_separate_and_only_equipped_fame_counts() {
+    let (_, content, _, mut ch) = setup().await;
+    ch.base = content.classes[&WIZARD].caps;
+    let base = ch.base;
+    for (kind, fame) in [
+        (0xa5c, 0),
+        (0xa7e, 0),
+        (0xa5d, 0),
+        (0xa7f, 0),
+        (0xa80, 0),
+        (0xa5e, 0),
+        (0xa5f, 0),
+        (0xadc, 1),
+        (0xa60, 1),
+        (0xa94, 2),
+        (0xa95, 3),
+        (0xa96, 4),
+        (0xb05, 4),
+        (0xb06, 5),
+        (0xb07, 6),
+        (0xc14, 2),
+        (0xc1f, 3),
+        (0xc32, 5),
+    ] {
+        ch.items.fill(-1);
+        ch.items[2] = kind;
+        let effective = ch.effective(&content).unwrap();
+        assert_eq!(equipment_percent(&ch, &content).unwrap(), fame);
+        assert_eq!(ch.base, base);
+        assert!(effective[1] > base[1] || effective[3] > base[3]);
+        ch.items.swap(2, 4);
+        assert_eq!(ch.effective(&content).unwrap(), base);
+        assert_eq!(equipment_percent(&ch, &content).unwrap(), 0);
+    }
+}
+
+#[tokio::test]
 async fn class_stars_retain_live_deleted_and_committed_death_bests_not_wallets() {
     let (path, content, store, mut ch) = setup().await;
     ch.level = 20;
