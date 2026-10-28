@@ -262,8 +262,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 let shelf = cell(&mut map, cx + dx, cy - r.radius);
                 shelf.object = Some(BOOKCASE);
                 // Early Manor distinguished its hidden doors by accepting damage only on those shelves.
+                // https://wikiwiki.jp/rmd/Manor%20of%20the%20Immortals
                 shelf.config = format!(
-                    "eff:{:x}",
+                    "eff:{}",
                     crate::condition::bit(crate::condition::INVINCIBLE)
                 );
             }
