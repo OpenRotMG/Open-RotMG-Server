@@ -8,7 +8,8 @@ export async function verify(game,directions){
   game.check('white entrance remains stationary',Math.hypot(idle.position.x-before.position.x,idle.position.y-before.position.y)<.05);
   const detail=await game.inspect(),tiles=detail.view.tiles,at=(x,y)=>tiles.find(t=>t.x===x&&t.y===y)?.ground,samples=[];
   for(const [kind,dx,dy] of directions){
-    const tile=tiles.find(t=>t.ground===kind&&at(t.x+dx,t.y+dy)===kind&&!detail.view.objects.some(o=>Math.hypot(o.position.x-t.x-.5,o.position.y-t.y-.5)<1.5));
+    const runway=t=>{let n=0;while(at(t.x+n*dx,t.y+n*dy)===kind)n++;return n;};
+    const tile=tiles.filter(t=>t.ground===kind&&runway(t)>=2&&!detail.view.objects.some(o=>Math.hypot(o.position.x-t.x-.5,o.position.y-t.y-.5)<1.5)).sort((a,b)=>runway(b)-runway(a))[0];
     assert(tile,'Seeded entrance must expose a clear conveyor '+kind.toString(16));
     const {worldSeed,...prepared}=fixture;
     const peer=await game.join({...prepared,world:before.session.world,seed:12352+samples.length,position:{x:tile.x+.5,y:tile.y+.5}});
