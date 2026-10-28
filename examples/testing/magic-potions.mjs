@@ -14,6 +14,9 @@ export async function run(game){
   async function snapshot(name){const state=await game.inspect();observations.push({name,state});return state;}
   const initial=await snapshot('initial');
   await game.act({keys:[],duration_ms:1200},{name:'magic-potions-before',when:()=>true});
+  await game.act({keys:['d'],duration_ms:800});
+  const moved=await game.observe();
+  game.check('native movement leaves the entrance portal so dropped bags can open',Math.hypot(moved.position.x-initial.view.position.x,moved.position.y-initial.view.position.y)>2);
   try{
     for(const [kind,amount] of [[0xadd,50],[0xa23,100],[0xaec,200]]){
       for(const mp of [10,380,385]){
