@@ -4,7 +4,7 @@ import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 let camp,leader;
 export async function prepare(api){
-  const spec={class:0x30e,level:20,seed:840,world:1,equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,30,75,0,0]};
+  const spec={class:0x30e,level:20,seed:840,world:1,equipment:[0xb08,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,30,10,0,0]};
   const root=process.env.QA_RESULTS_DIR,report=JSON.parse(await readFile(join(root,'native/result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(root,'native/state/control.token'),'utf8')).trim()};
   const world=await api({op:'world_info',world:spec.world}),[x,y]=world.spawn_points[0];
@@ -47,7 +47,7 @@ export async function run(game){
       const s=await game.inspect(),e=entity(s,id);if(!e)return;
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>4;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
-      await act({keys,duration_ms:250,target:{entity:id,camera_angle:camera,fire:!approach}});
+      await act({keys,duration_ms:100,target:{entity:id,camera_angle:camera,fire:!approach}});
     }
     assert.fail('Native shots failed to defeat '+id);
   }
