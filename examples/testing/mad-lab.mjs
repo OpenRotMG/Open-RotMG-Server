@@ -73,7 +73,7 @@ export async function run(game){
     await walk(x,y);
     const room=(await entities()).filter(e=>e.kind>=0x979&&e.kind<=0x983&&distance(e.pos,{x,y})<12);
     assert(room.length,'No natural robots encountered in room '+x+','+y);
-    await act({keys:[],duration_ms:1000},{name:'lab-room-'+x+'-'+y,when:()=>true});
+    await act({keys:[],duration_ms:1000},{name:'lab-room-'+Math.floor(x)+'-'+Math.floor(y),when:()=>true});
     for(const e of room)await defeat(e.id);
     await walk(x,y);
   }
