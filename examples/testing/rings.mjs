@@ -21,6 +21,7 @@ export async function run(game){
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const initial=await game.observe();
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const stats=v=>['max_hp','max_mp','attack','defense','speed','dexterity','vitality','wisdom'].map(k=>v.character.stats[k]);
   const drag=async(from,to,capture)=>game.act({keys:[],duration_ms:450,drag:{from,to}},capture);
   const pack={x:634,y:428},ring={x:766,y:385};
   for(const [id,boost] of rings){
@@ -30,24 +31,24 @@ export async function run(game){
       const receipt=await r.json();assert(r.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
       await game.act({keys:[],duration_ms:250});before=await game.observe();
     }
-    game.check(id.toString(16)+' backpack grants no stats',same(before.character.stats,base)&&before.character.items[3]===-1);
+    game.check(id.toString(16)+' backpack grants no stats',same(stats(before),base)&&before.character.items[3]===-1);
     // The target buff is not the rolled-back prototype: https://wikiwiki.jp/rmd/test/build123.5.1
     await drag(pack,ring);
     const equipped=await game.observe();
-    game.check(id.toString(16)+' native equip commits exact bonuses once',equipped.character.items[3]===id&&equipped.character.items[4]===-1&&equipped.character.inventory_revision===before.character.inventory_revision+1&&same(equipped.character.stats,base.map((n,i)=>n+boost[i])));
+    game.check(id.toString(16)+' native equip commits exact bonuses once',equipped.character.items[3]===id&&equipped.character.items[4]===-1&&equipped.character.inventory_revision===before.character.inventory_revision+1&&same(stats(equipped),base.map((n,i)=>n+boost[i])));
     if(id===0xc31||id===0xc20)await game.act({keys:[],duration_ms:1200},{name:'ring-'+id.toString(16),when:v=>v.game_ms>=equipped.game_ms+700});
     if(id===0xc31){
       await drag(ring,{x:634,y:385});const denied=await game.observe();
-      game.check('ring refuses weapon slot atomically',same(denied.character.items,equipped.character.items)&&same(denied.character.stats,equipped.character.stats)&&denied.character.inventory_revision===equipped.character.inventory_revision);
+      game.check('ring refuses weapon slot atomically',same(denied.character.items,equipped.character.items)&&same(stats(denied),stats(equipped))&&denied.character.inventory_revision===equipped.character.inventory_revision);
     }
     await drag(ring,pack);const removed=await game.observe();
-    game.check(id.toString(16)+' native removal reverses bonuses once',removed.character.items[3]===-1&&removed.character.items[4]===id&&removed.character.inventory_revision===equipped.character.inventory_revision+1&&same(removed.character.stats,base)&&removed.character.mp<=base[1]&&removed.character.hp<=base[0]);
+    game.check(id.toString(16)+' native removal reverses bonuses once',removed.character.items[3]===-1&&removed.character.items[4]===id&&removed.character.inventory_revision===equipped.character.inventory_revision+1&&same(stats(removed),base)&&removed.character.mp<=base[1]&&removed.character.hp<=base[0]);
     await appendFile(join(out,'rings.jsonl'),JSON.stringify({id,boost,before,equipped,removed})+'\n');
   }
   await drag(pack,ring);const beforeSwap=await game.observe();
   await drag({x:678,y:428},ring);const beforeExit=await game.observe();
-  game.check('direct ring replacement removes old bonuses without stacking',beforeExit.character.items[3]===0xc20&&beforeExit.character.items[5]===0xacb&&beforeExit.character.inventory_revision===beforeSwap.character.inventory_revision+1&&same(beforeExit.character.stats,base.map((n,i)=>n+(i>=6?5:0))));
+  game.check('direct ring replacement removes old bonuses without stacking',beforeExit.character.items[3]===0xc20&&beforeExit.character.items[5]===0xacb&&beforeExit.character.inventory_revision===beforeSwap.character.inventory_revision+1&&same(stats(beforeExit),base.map((n,i)=>n+(i>=6?5:0))));
   await game.act({keys:['Insert'],duration_ms:1200},{name:'rings-retained',when:v=>v.world==='Nexus'});
   const after=await game.observe();
-  game.check('Nexus reconnect preserves ring stats inventory and living identity',after.world==='Nexus'&&after.session.world!==beforeExit.session.world&&after.lifecycle.alive&&after.session.character===initial.session.character&&same(after.character.items,beforeExit.character.items)&&same(after.character.stats,beforeExit.character.stats)&&after.character.inventory_revision===beforeExit.character.inventory_revision);
+  game.check('Nexus reconnect preserves ring stats inventory and living identity',after.world==='Nexus'&&after.session.world!==beforeExit.session.world&&after.lifecycle.alive&&after.session.character===initial.session.character&&same(after.character.items,beforeExit.character.items)&&same(stats(after),stats(beforeExit))&&after.character.inventory_revision===beforeExit.character.inventory_revision);
 }
