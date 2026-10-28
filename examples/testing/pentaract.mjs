@@ -56,7 +56,7 @@ async function admit(){
       await cheat(admissionActor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
       until=now+60000;
     }
-    const e=m.entities.find(e=>[0x668,0x67d,0x678,0xd56,0xd59].includes(e.kind));assert(e,'No bounded admission target remains');
+    const e=m.entities.find(e=>[0x928,0x668,0x67d,0x678,0xd56,0xd59].includes(e.kind));assert(e,'No bounded admission target remains');
     const position=[[1,0],[-1,0],[0,1],[0,-1]].map(([x,y])=>({x:e.pos.x+x,y:e.pos.y+y})).find(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')));assert(position);
     await cheat(admissionActor,{kind:'teleport',position});
     await direct(Math.atan2(e.pos.y-position.y,e.pos.x-position.x));m=await map();
