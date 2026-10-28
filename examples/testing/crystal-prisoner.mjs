@@ -30,7 +30,7 @@ export async function run(game){
   }
   async function approach(actor,id,range=4){
     for(let n=0;n<80;n++){
-      await protect(actor);const p=typeof id==='number'?entity(await actor.inspect(),id)?.pos:id;assert(p,'Living walking target required');
+      for(const a of [game,mystic].filter(Boolean))await protect(a);const p=typeof id==='number'?entity(await actor.inspect(),id)?.pos:id;assert(p,'Living walking target required');
       const v=await actor.observe(),dx=p.x-v.position.x,dy=p.y-v.position.y;if(Math.hypot(dx,dy)<range)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
