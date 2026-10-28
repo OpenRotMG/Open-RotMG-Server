@@ -28,7 +28,7 @@ impl State {
         self.active.contains_key(entity)
     }
 }
-// Firecrackers expire after their last pulse; drake lifetimes come from the period eggs table.
+// Drake numbers follow the May 2012 table, not modern pets: https://web.archive.org/web/20120531235024id_/http://forums.wildshadow.com/wiki/realm-mad-god/drake-eggs
 fn duration(kind: u16) -> Result<Option<u64>> {
     match kind {
         0x1401 => Ok(Some(60_000)),
