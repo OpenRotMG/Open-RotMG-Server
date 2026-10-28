@@ -6,13 +6,13 @@ export async function run(game){
   await game.act({keys:[],duration_ms:400,drag:{from:{x:634,y:428},to:{x:300,y:300}}});
   const dropped=await game.inspect(),privateBag=dropped.diagnostic.entities.find(e=>e.items?.includes(0xb0c));
   game.check('native Soulbound drop removes exactly one supplied tincture',dropped.view.character.items[4]===-1&&dropped.view.character.inventory_revision===before.character.inventory_revision+1&&!!privateBag);
-  game.check('owner sees the private bag but another native account does not',dropped.view.objects.some(e=>e.id===privateBag.id)&&!(await other.observe()).objects.some(e=>e.id===privateBag.id));
+  game.check('owner sees the private bag but another native account does not',dropped.view.objects.some(e=>e.id===privateBag.id)&&!(await other.inspect()).view.objects.some(e=>e.id===privateBag.id));
   const hen=dropped.diagnostic.entities.find(e=>e.kind===0x6b2);
   game.check('authored Tutorial hen exists',!!hen);
   for(let i=0;i<20&&(await game.inspect()).diagnostic.entities.some(e=>e.id===hen.id);i++)await game.act({keys:[],duration_ms:400,target:{entity:hen.id,camera_angle:-Math.PI/4,fire:true}});
   const killed=await game.inspect(),publicBag=killed.diagnostic.entities.find(e=>e.kind===0x500&&e.items?.includes(0xab0));
   game.check('ordinary staff combat earns one public hen reward',!killed.diagnostic.entities.some(e=>e.id===hen.id)&&!!publicBag);
-  game.check('noncontributor native account sees public loot',(await other.observe()).objects.some(e=>e.id===publicBag.id));
+  game.check('noncontributor native account sees public loot',(await other.inspect()).view.objects.some(e=>e.id===publicBag.id));
   async function approach(client,goal){
     for(let i=0;i<40;i++){
       const v=await client.observe(),dx=goal.x-v.position.x,dy=goal.y-v.position.y;
@@ -35,7 +35,7 @@ export async function run(game){
   // Both comparators schedule removal, not public conversion: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L142
   for(let i=0;i<7;i++){
     await game.act({keys:[],duration_ms:10000});
-    game.check('private loot never becomes visible to the other native account at sample '+i,!(await other.observe()).objects.some(e=>e.id===privateBag.id));
+    game.check('private loot never becomes visible to the other native account at sample '+i,!(await other.inspect()).view.objects.some(e=>e.id===privateBag.id));
   }
   const expired=await game.inspect();
   game.check('nonempty private loot expires without becoming public',!expired.diagnostic.entities.some(e=>e.id===privateBag.id));
