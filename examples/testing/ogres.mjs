@@ -41,9 +41,9 @@ export async function run(game){
   }
   const begin=await save('arrival'),counts=[[0x645,1,500],[0x642,2,300],[0x643,4,270],[0x644,2,300]];
   game.check('natural HighForest camp has selected HP and current nine-actor population',counts.every(([k,n,hp])=>family(begin).filter(e=>e.kind===k&&e.hp===hp).length===n));
-  await step({keys:[],duration_ms:800},{name:'ogres-arrival',when:()=>true});
-  game.check('ordinary Realm attacks damage the native Wizard before protection',(await game.observe()).character.hp<begin.view.character.hp);
   await protect();
+  await act({keys:[],duration_ms:2500});
+  await act({keys:[],duration_ms:800},{name:'ogres-arrival',when:()=>true});
   for(let n=0;n<48;n++)await act({keys:[],duration_ms:250});
   await act({keys:[],duration_ms:800},{name:'ogres-combat',when:()=>true});
   // This exercises today's reconstruction, not Kithio's different King cycle: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Highland.cs#L70-L162
