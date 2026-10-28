@@ -66,12 +66,24 @@ export async function run(game){
   }
   async function walk(point,range=1.5){
     for(let n=0;n<30;n++){
-      await protect();const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<range)return;
-      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+      await protect();const s=await game.inspect(),v=s.view;if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
+      const key=(x,y)=>x+','+y,cell=p=>key(Math.floor(p.x),Math.floor(p.y));
+      const blocked=new Set(v.objects.filter(e=>e.blocks).map(e=>cell(e.position)));
+      const clear=new Set(v.tiles.filter(t=>t.ground_speed>0&&!blocked.has(cell(t))&&Math.abs(t.x-v.position.x)<12&&Math.abs(t.y-v.position.y)<12).map(cell));
+      const start=cell(v.position),goal=cell(point),queue=[start],parents=new Map([[start,null]]);
+      for(let i=0;i<queue.length&&!parents.has(goal);i++){
+        const [x,y]=queue[i].split(',').map(Number);
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const next=key(x+dx,y+dy);if(clear.has(next)&&!parents.has(next)){parents.set(next,queue[i]);queue.push(next);}}
+      }
+      assert(parents.has(goal),'No visible walkable route to observed target '+JSON.stringify(point));
+      let next=goal;while(parents.get(next)!==start&&next!==start)next=parents.get(next);
+      const [tx,ty]=next.split(',').map(Number),waypoint=next===goal?point:{x:tx+.5,y:ty+.5};
+      const dx=waypoint.x-v.position.x,dy=waypoint.y-v.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
-      await game.act({keys,duration_ms:Math.max(50,Math.min(500,Math.round(Math.hypot(dx,dy)/10*1000)))});
+      const distance=Math.hypot(dx,dy),speed=(4+5.6*v.character.stats.speed/75)*((v.character.conditions&8)?0.5:1);
+      await game.act({keys,duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000)))});
     }
-    throw Error('Native walk did not reach target');
+    throw Error('Native walk did not reach target '+JSON.stringify({point,range,position:(await game.observe()).position}));
   }
   async function fire(id,ms=500){
     await protect();const state=await game.inspect(),target=entity(state,id);assert(target,'Living target required');
