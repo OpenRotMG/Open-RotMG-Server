@@ -51,7 +51,7 @@ export async function run(game){
   const stunner=await game.join({...fixture,seed:866,world:entry.view.session.world,position:{x:69.5,y:66.5},equipment:[0xb0b,0xa08,0xafc,0xacb],backpack:Array(8).fill(0xa23)});
   const wizard=await game.join({class:0x30e,level:20,seed:867,world:entry.view.session.world,position:{x:70.5,y:68.5},equipment:[0xb08,0xa2e,0xb05,0xacb],backpack:Array(8).fill(0xa23),stats:[670,385,75,25,50,75,40,60]});
   const party=[game,stunner,wizard],target={entity:boss.id,camera_angle:-Math.PI/4,fire:true};
-  let stunned=false,broken=false;
+  let stunned=false,broken=false,suppressed=false;
   for(let n=0;n<50;n++){
     const state=await save('combat-'+n),enemy=entities(state).find(e=>e.id===boss.id);if(!enemy)break;
     const inputs=[];
@@ -61,12 +61,16 @@ export async function run(game){
       inputs.push({actor:actor.actor,input:{keys,duration_ms:1000,target}});
     }
     await game.act([inputs]);
-    const e=entities(await save('after-volley-'+n)).find(e=>e.id===boss.id);
-    if(e){stunned||=!!(e.condition&(1<<6));broken||=!!(e.condition&(1<<26));}
+    const after=await save('after-volley-'+n),e=entities(after).find(e=>e.id===boss.id);
+    if(e){
+      const active=e.statuses['7']?.[1]>after.view.time_ms;
+      stunned||=active;broken||=e.statuses['27']?.[1]>after.view.time_ms;
+      suppressed||=active&&e.next_aux<=after.view.time_ms&&e.hp<30000;
+    }
   }
   await game.act({keys:[],duration_ms:700},{name:'party-god-defeated',when:()=>true});
   const defeated=await save('defeated');
-  game.check('ordinary cooperative sword, shield and spell combat defeats Party God',!entities(defeated).some(e=>e.id===boss.id)&&stunned&&broken);
+  game.check('ordinary cooperative sword, shield and spell combat defeats Party God',!entities(defeated).some(e=>e.id===boss.id)&&stunned&&broken&&suppressed);
   for(const actor of party){const s=await save('clear-credit',actor);game.check('participating character receives exactly one Beachzone clear '+actor.actor,s.diagnostic.character.beaches===1&&s.view.lifecycle.alive);}
   const exit=entities(defeated).find(e=>e.kind===0x704);assert(exit,'No committed Realm exit');
   const drinks=[0xc39,0xc3a,0xc3b,0xc3c];
