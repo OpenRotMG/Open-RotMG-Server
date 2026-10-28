@@ -41,7 +41,7 @@ export async function run(observer){
   await game.act({keys:[],duration_ms:500});
   const defeated=await save('stheno-defeated'),cleared=await map(defeated.view.session.player);
   game.check('ordinary native staff defeats Stheno and grants XP',!cleared.entities.some(e=>e.id===boss.id)&&defeated.view.character.experience>initial.view.character.experience);
-  const bag=cleared.entities.find(e=>e.items?.includes(0xa21)&&e.bag_owners?.includes(defeated.view.session.account));assert(bag,'No eligible private Speed reward');
+  const bag=cleared.entities.find(e=>e.items?.includes(0xa21)&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===defeated.view.session.account));assert(bag,'No eligible private Speed reward');
   const toward=(a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;return [Math.abs(x)>.15&&Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>.15&&Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean);};
   async function walk(point){
     for(let n=0;n<60;n++){const v=await game.observe(),d=Math.hypot(point.x-v.position.x,point.y-v.position.y);if(d<.4)return;await game.act({keys:toward(v.position,point),duration_ms:Math.max(50,Math.min(200,Math.round(d/(4+5.6*v.character.stats.speed/75)*1000)))});}
@@ -67,6 +67,6 @@ export async function run(observer){
   const final=await save('stheno-final');
   game.check('return admission finishes and movement works',Math.hypot(final.view.position.x-returned.view.position.x,final.view.position.y-returned.view.position.y)>.1);
   game.check('Stheno XP is not awarded repeatedly',final.view.character.experience===defeated.view.character.experience);
-  game.check('successful exit commits exactly one Snake Pit clear',defeated.view.character.snake_pits===initial.view.character.snake_pits&&returned.view.character.snake_pits===initial.view.character.snake_pits+1&&final.view.character.snake_pits===returned.view.character.snake_pits);
+  game.check('committed boss clear is counted once and survives the exit',defeated.view.character.snake_pits===initial.view.character.snake_pits+1&&picked.view.character.snake_pits===defeated.view.character.snake_pits&&returned.view.character.snake_pits===defeated.view.character.snake_pits&&final.view.character.snake_pits===returned.view.character.snake_pits);
   await writeFile(join(root,'stheno-outcome.json'),JSON.stringify({boss,bag,portal,initial,defeated,picked,returned,final,observer:await observer.inspect()}));
 }
