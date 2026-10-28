@@ -220,11 +220,11 @@ export async function run(game){
       if(views.some((view,i)=>anchors[i]&&Math.hypot(view.position.x-anchors[i].pos.x,view.position.y-anchors[i].pos.y)>range)){
         await approach(anchors.map((e,i)=>e?e.pos:views[i].position),range);continue;
       }
-      const states=await Promise.all(clients.map(c=>c.inspect())),group=[];
+      // The existing target input acquires aim after resume, not from a stale paused-world position.
+      const group=[];
       for(let i=0;i<clients.length;i++)if(targets[i]){
-        const target=targets[i],known=states[i].view.objects.find(e=>e.id===target.id&&e.hp>0);assert(known,'A living target must be known to its actual native fighter');
-        const dx=known.position.x-states[i].view.position.x,dy=known.position.y-states[i].view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy)),duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:targets.filter(Boolean).length===1?10000:4000;
-        group.push({actor:clients[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}});
+        const target=targets[i],duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:targets.filter(Boolean).length===1?10000:4000;
+        group.push({actor:clients[i].actor,input:{keys:[],duration_ms,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}}});
       }
       if(group.length)await act(game,[group]);else await act(game,{keys:[],duration_ms:10000});
     }
