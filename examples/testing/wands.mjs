@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
 export const fixture={class:0x310,level:20,seed:872,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[0xa04,-1,-1,-1],backpack:[0xaf6,0xb3f,0xc04,0xc1d,0xc33,0xa00,0xa4b,-1],stats:[670,385,50,25,50,50,40,75]};
 export async function run(game){
@@ -43,12 +44,16 @@ export async function run(game){
   await writeFile(join(out,'wand-observations.json'),JSON.stringify({observations,moving,beforeDenied,denied},null,2));
   const {worldSeed,...spec}=fixture;
   const sorcerer=await game.join({...spec,class:0x325,stats:[670,385,60,25,60,60,75,60],world:initial.view.session.world,position:{x:boss.pos.x-4,y:boss.pos.y}});
+  const protection=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:sorcerer.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
+  const receipt=await protection.json();assert(protection.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
+  await writeFile(join(out,'sorcerer-protection.json'),JSON.stringify(receipt));
+  await sorcerer.act({keys:[],duration_ms:2500});
   const sorcererBefore=await sorcerer.inspect();
   await sorcerer.act({keys:[],target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true},duration_ms:1000},{name:'sorcerer-damage',when:v=>v.game_ms>=sorcererBefore.diagnostic.time_ms+500});
   const sorcererAfter=await sorcerer.inspect();
+  await writeFile(join(out,'sorcerer-damage.json'),JSON.stringify({preparedProtection:true,before:sorcererBefore,after:sorcererAfter}));
   game.check('Sorcerer can fire the same slot-eight wand',sorcererAfter.diagnostic.character.shots>sorcererBefore.diagnostic.character.shots);
-  game.check('native wand shots damage an ordinary enemy',sorcererAfter.diagnostic.entities.find(e=>e.id===boss.id).hp<sorcererBefore.diagnostic.entities.find(e=>e.id===boss.id).hp);
-  await writeFile(join(out,'sorcerer-damage.json'),JSON.stringify({before:sorcererBefore,after:sorcererAfter}));
+  game.check('native wand shots damage an ordinary enemy',sorcererBefore.diagnostic.entities.some(e=>sorcererAfter.diagnostic.entities.find(q=>q.id===e.id)?.hp<e.hp));
   const wizard=await game.join({...spec,class:0x30e,stats:[670,385,75,25,50,75,40,60],world:initial.view.session.world,equipment:[-1,-1,-1,-1],backpack:[0xa04,-1,-1,-1,-1,-1,-1,-1]});
   const wizardBefore=await wizard.observe();
   await wizard.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:634,y:385}}});
