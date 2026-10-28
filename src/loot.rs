@@ -645,6 +645,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xd07..=0xd0a
         | 0xda2
         | 0xda3
+        | 0xd9b
+        | 0xd9c
+        | 0xd9e
         | 0x918
         | 0x919
         | crate::dungeon::snake::BUTTON
@@ -664,7 +667,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xd91..=0xd94
         | 0xd96
         | 0xd97
-        | 0xd9b..=0xd9f
+        | 0xd9d
+        | 0xd9f
         | 0xda4..=0xda6
         | 0xdb0..=0xdb2 => &[(0.05, Item(0xa22)), (0.03, Item(0xa23))],
         0x60d => &[

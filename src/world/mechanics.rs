@@ -701,8 +701,10 @@ impl World {
         if crate::endgame::ROSTER.contains(&defeated.kind) {
             return self.finale_death(defeated);
         }
+        // The period guide retains the medium generation and excludes intermediate drops: https://web.archive.org/web/20120420155929id_/http://forums.wildshadow.com/wiki/realm-mad-god/black-slimes
         let (kind, count) = match defeated.kind {
-            0xd9b | 0xd9c => (0xd9d, 4),
+            0xd9b => (0xd9c, 4),
+            0xd9c => (0xd9d, 4),
             0xd9e => (0xd9f, 6),
             _ => return Ok(()),
         };

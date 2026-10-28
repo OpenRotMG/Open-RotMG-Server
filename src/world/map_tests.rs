@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn lair_generated_rooms_keep_coherent_families_and_reachable_enemies() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    for seed in [0, 1, 2, 3, 858, 12351, 54321, u64::MAX] {
+        let map = crate::dungeon::undead::generate(&content, seed).unwrap();
+        let mut families = BTreeMap::<u8, BTreeSet<u8>>::new();
+        for cell in &map.cells {
+            let family = match cell.object {
+                Some(0xd91..=0xd95) => 0,
+                Some(0xd96..=0xd98) => 1,
+                Some(0xd99..=0xd9a) => 2,
+                Some(0xd9b | 0xd9e) => 3,
+                Some(0xda4) => 4,
+                Some(0xda5 | 0xda6) => 5,
+                _ => continue,
+            };
+            families.entry(cell.region).or_default().insert(family);
+        }
+        assert!(families.len() >= 30);
+        assert!(families.values().all(|kinds| kinds.len() == 1));
+        let (x, y) = map.spawns[0];
+        let start = y as i32 * map.width + x as i32;
+        let world = World::new(content.clone(), Arc::new(map)).unwrap();
+        let mut visited = BTreeSet::from([start]);
+        let mut queue = vec![start];
+        let point = |i| Pos {
+            x: (i % world.map.width) as f32 + 0.5,
+            y: (i / world.map.width) as f32 + 0.5,
+        };
+        let mut i = 0;
+        while i < queue.len() {
+            for next in [
+                queue[i] - 1,
+                queue[i] + 1,
+                queue[i] - world.map.width,
+                queue[i] + world.map.width,
+            ] {
+                if world.walkable(point(next)) && visited.insert(next) {
+                    queue.push(next);
+                }
+            }
+            i += 1;
+        }
+        assert!(
+            world
+                .actors()
+                .filter(|e| world.content.objects[&e.kind].enemy)
+                .all(|e| visited.contains(&(e.pos.y as i32 * world.map.width + e.pos.x as i32))),
+            "unreachable enemy in lair seed {seed}"
+        );
+    }
+}
+
+#[test]
 fn serialized_development_map_preserves_schema_and_private_visibility() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Map {
