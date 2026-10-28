@@ -141,7 +141,6 @@ impl World {
             6 | 7 | 9 | 11 => age % 5000 < 2000,
             _ => false,
         };
-        // The later table shields Phase2 through its parent, which makes its damage transition unreachable.
         self.landmark_shield(id, shield);
         self.landmark_texture(
             id,
@@ -157,6 +156,7 @@ impl World {
             radius: 2.,
             direction: -1.,
         });
+        // 123.4.4 removes respawning skull XP; first-wave eligibility is unproven: https://wikiwiki.jp/rmd/version/build123.4.4
         if matches!(stage, 3..=6 | 9) && self.now >= self.entities[&id].reaction_until {
             let born = self.landmark_birth(id, 0xe39, 4, 1, 1.)?;
             for child in born {

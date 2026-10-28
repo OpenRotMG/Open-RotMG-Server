@@ -5624,7 +5624,7 @@ impl World {
         self.leave(id)?;
         Ok(())
     }
-    pub fn inspect_map(&self, player: Option<i32>) -> Result<serde_json::Value> {
+    pub fn inspect_map(&self, player: Option<i32>) -> Result<Vec<u8>> {
         let account = match player {
             Some(id) => {
                 self.players
@@ -5649,9 +5649,21 @@ impl World {
             .values()
             .filter(|e| e.accessible(account))
             .collect();
-        Ok(
-            serde_json::json!({"width":self.map.width,"height":self.map.height,"blocked":blocked,"entities":entities}),
-        )
+        // A full Realm's JSON value tree dwarfs the actual map and pins allocator memory.
+        #[derive(Serialize)]
+        struct Snapshot<'a> {
+            width: i32,
+            height: i32,
+            blocked: Vec<(i32, i32)>,
+            entities: Vec<&'a Entity>,
+        }
+        serde_json::to_vec(&Snapshot {
+            width: self.map.width,
+            height: self.map.height,
+            blocked,
+            entities,
+        })
+        .context("serialize development world map")
     }
     pub fn observe(&self, id: i32) -> Result<serde_json::Value> {
         let p = self.players.get(&id).context("player missing")?;
@@ -7580,7 +7592,9 @@ mod assassin_tests;
 mod mystic_tests;
 
 #[cfg(test)]
+mod ghost_ship_tests;
+#[cfg(test)]
 mod quest_tests;
 
 #[cfg(test)]
-impl World {}
+mod map_tests;
