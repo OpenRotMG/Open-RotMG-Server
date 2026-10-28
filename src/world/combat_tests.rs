@@ -317,6 +317,57 @@ fn multihit_and_cover_flags_preserve_distinct_targets_and_once_only_hits() {
 }
 
 #[test]
+fn daggers_keep_selected_piercing_cover_range_and_spirit_parity() {
+    for kind in [0xa14, 0xa17, 0xc0a, 0xb21, 0xc22, 0xc29] {
+        for cover in [false, true] {
+            let (mut w, id) = fixture(0x18, false);
+            let targets =
+                [10.5, 11.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+            for target in targets {
+                w.entities.get_mut(&target).unwrap().hp = 2000;
+            }
+            if cover {
+                w.spawn_entity(0x100, Pos { x: 9.5, y: 8.5 }, vec![])
+                    .unwrap();
+            }
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.shots = 1;
+            p.character.lifetime.shots = 1;
+            let mut b = shot(&w, id, kind, 0);
+            b.friendly = true;
+            assert_eq!(b.spec.multi_hit, kind == 0xc22);
+            assert!(!b.spec.passes_cover && !b.spec.armor_piercing);
+            if kind == 0xc29 {
+                for bullet in [0, 1] {
+                    let (x, y) = b.spec.offset(bullet, 0., 200.);
+                    assert!((x - 2.6).abs() < 0.0001);
+                    let expected = 0.2 * (std::f32::consts::PI * 0.2).sin();
+                    assert!((y - if bullet == 0 { expected } else { -expected }).abs() < 0.0001);
+                }
+            }
+            let damage = b.damage;
+            w.bullets.push(b);
+            for _ in 0..16 {
+                w.step();
+            }
+            for (index, target) in targets.into_iter().enumerate() {
+                let hit = !cover && (index == 0 || kind == 0xc22);
+                assert_eq!(
+                    w.entities[&target].hp,
+                    2000 - if hit { damage } else { 0 },
+                    "{kind:#x}, cover={cover}, target={index}"
+                );
+            }
+            assert!(w.bullets.iter().all(|b| b.owner != id));
+            assert_eq!(
+                w.players[&id].character.lifetime.projectile_hits,
+                u64::from(!cover)
+            );
+        }
+    }
+}
+
+#[test]
 fn night_elf_selected_multihit_crosses_players_and_native_reports_commit_once() {
     for (kind, damage, multi) in [
         (0x64a, 36, false),
