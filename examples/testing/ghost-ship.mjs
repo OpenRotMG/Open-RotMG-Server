@@ -20,7 +20,7 @@ export async function prepare(api){
   await writeFile(join(out,'placement.json'),JSON.stringify({world,roots}));
   return {...spec,position:roots[0].pos};
 }
-export async function run(game){
+export async function run(game,{finishOnly=false}={}){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   let protectedUntil=0,scoutProtectedUntil=0,lastTeleport=0;const records=[];
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
@@ -72,20 +72,23 @@ export async function run(game){
   game.check('qualifying native combat admits the reserved Ghost Ship',!!ship);
   const initialPosition={x:ship.x,y:ship.y};await relocate(initialPosition);
   let state=await save('ship-idle');const id=ship.entity,initial=entity(state,id);assert(initial?.kind===0xe37);
+  const xp=state.view.character.experience;
+  if(!finishOnly){
   game.check('new ship has selected 50000 HP and encounter-owned anchor',initial.hp===50000&&state.diagnostic.entities.some(e=>e.kind===0xe38&&e.quest===id));
   await game.act({keys:[],duration_ms:800},{name:'ghost-ship-idle',when:()=>true});
   for(let n=0;n<20&&entity(await game.inspect(),id).stage===0;n++)await fire(id);
   state=await save('activated');game.check('native damage activates the shielded introduction',entity(state,id).stage===1&&!!(entity(state,id).condition&(1<<24)));
   await idle(3500);state=await save('battle');game.check('introduction opens the battle',entity(state,id).stage===3);
   await idle(8500);state=await save('skulls');const spirit=state.diagnostic.entities.find(e=>e.kind===0xe39&&e.quest===id);assert(spirit,'Owned Vengeful Spirit required');
-  const xp=state.view.character.experience;
   for(let n=0;n<10&&entity(await game.inspect(),spirit.id);n++)await fire(spirit.id,750);
   state=await save('skull-defeated');game.check('summoned skull defeat grants no XP',!entity(state,spirit.id)&&state.view.character.experience===xp);
   await idle(5000);state=await save('skull-replacement');game.check('skull replenishment retains ownership and no-XP policy',state.diagnostic.entities.some(e=>e.kind===0xe39&&e.quest===id&&e.id!==spirit.id));
+  }
   const stages=new Set(),samples=[];
   for(let n=0;n<150;n++){
     state=await game.inspect();const e=entity(state,id);if(!e)break;stages.add(e.stage);
-    if(!samples.some(s=>entity(s,id)?.stage===e.stage)){samples.push(state);await writeFile(join(out,'phases.json'),JSON.stringify(samples));}
+    const newShot=state.view.projectiles.some(p=>p.owner===id&&!samples.some(s=>s.view.projectiles.some(q=>q.owner===id&&q.speed===p.speed)));
+    if(newShot||!samples.some(s=>entity(s,id)?.stage===e.stage)){samples.push(state);await writeFile(join(out,'phases.json'),JSON.stringify(samples));}
     if(e.condition&(1<<24))await idle(1000);else await fire(id,750);
     if(e.stage===9&&!records.some(r=>r.label==='tempest')){await save('tempest');await game.act({keys:[],duration_ms:800},{name:'ghost-ship-tempest',when:()=>true});}
   }
