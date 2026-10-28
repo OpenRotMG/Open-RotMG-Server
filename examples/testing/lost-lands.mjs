@@ -4,21 +4,25 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
-const spec={class:0x31d,level:20,seed:817,world:1,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
+const spec={class:0x31d,level:20,seed:817,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 const history=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
-let sites,refuge,reserved;
+let sites,refuge,reserved,world;
 export async function prepare(api){
-  const info=await api({op:'world_info',world:1}),events=await history();
-  const end=events.findLastIndex(f=>f.message==='Realm simulation populated'&&f.layout===info.realm_layout),start=events.slice(0,end).findLastIndex(f=>f.message==='Realm simulation populated');
-  assert(end>=0);
-  const [x,y]=info.spawn_points[0];refuge={x,y};
-  reserved=events.slice(start+1,end).filter(f=>f.message==='Realm event reserved outside active indexes'&&f.kind===0xd50);
+  const events=await history(),ends=events.flatMap((f,i)=>f.message==='Realm simulation populated'?[i]:[]),candidates=[];
+  assert(ends.length===2,'Two initial ordinary Realms required');
+  for(const [index,id] of [-3,1].entries()){
+    const info=await api({op:'world_info',world:id}),batch=events.slice(index===0?0:ends[index-1]+1,ends[index]);
+    assert(info.realm_layout===events[ends[index]].layout,'World and population log must agree');
+    candidates.push({world:id,info,sites:batch.filter(f=>f.message==='finite named Realm quest placed'&&[0x675,0x678,0x668,0x67d].includes(f.kind)),reserved:batch.filter(f=>f.message==='Realm event reserved outside active indexes'&&f.kind===0xd50)});
+  }
+  candidates.sort((a,b)=>b.sites.length-a.sites.length);
+  ({sites,reserved,world}=candidates[0]);
+  const [x,y]=candidates[0].info.spawn_points[0];refuge={x,y};
   assert(reserved.length===1,'One Lord reserve per ordinary Realm required');
-  sites=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&[0x675,0x678,0x668,0x67d].includes(f.kind));
   assert(sites.length,'Ordinary quest sites required for event admission');
   sites.sort((a,b)=>[0x675,0x678,0x668,0x67d].indexOf(a.kind)-[0x675,0x678,0x668,0x67d].indexOf(b.kind));
-  await writeFile(join(out,'sites.json'),JSON.stringify({info,sites}));
-  return {...spec,position:{x:sites[0].x,y:sites[0].y}};
+  await writeFile(join(out,'sites.json'),JSON.stringify({candidates,world,sites}));
+  return {...spec,world,position:{x:sites[0].x,y:sites[0].y}};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -28,7 +32,7 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
     const receipt=await response.json();assert(response.ok&&(command.op==='inspect'?receipt.diagnostic!==undefined:receipt.status==='succeeded'),JSON.stringify(receipt));return receipt;
   }
-  const scout=(await api({op:'spawn',spec:{...spec,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
+  const scout=(await api({op:'spawn',spec:{...spec,world,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
   const scoutName=(await api({op:'inspect',actor:scout})).diagnostic.character.name;
   try{
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
