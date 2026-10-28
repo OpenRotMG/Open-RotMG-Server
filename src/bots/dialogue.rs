@@ -274,6 +274,7 @@ impl Service {
             b.daily += 1;
         }
         let market_generation = payload["market_generation"] == true;
+        let reply_limit = if market_generation { 128 } else { 90 };
         let schema = reply_schema(payload)?;
         let prompt = if market_generation {
             market::PROMPT
