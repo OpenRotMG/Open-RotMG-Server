@@ -24,6 +24,7 @@ fn command_schema_is_strict_and_generation_is_unsigned() {
     }
     for invalid in [
         r#"{"generation":-1,"target":{"kind":"bot","bot":"A"}}"#,
+        r#"{"generation":4294967296,"target":{"kind":"bot","bot":"A"}}"#,
         r#"{"generation":1,"target":{"kind":"bot","bot":"A","source":1}}"#,
         r#"{"generation":1,"target":{"kind":"human","source":1,"target":2}}"#,
         r#"{"generation":1,"target":{"kind":"player","source":1,"target":2,"bot":"B"}}"#,
@@ -57,11 +58,12 @@ fn capability_is_ip_bound_exclusive_closed_and_weakly_registered() {
     drop(owner);
     assert!(cctv.view(&token).is_none());
     assert!(lease.view.acquire(lease.view.ip).is_err());
-    // A late data guard cannot retain admission after the control lifetime ends.
-    let _one = Viewer::join(&cctv, "A", lease.view.ip, true).unwrap();
-    let _two = Viewer::join(&cctv, "A", lease.view.ip, true).unwrap();
+    let ip = lease.view.ip;
+    let _second = Viewer::join(&cctv, "A", ip, true).unwrap();
+    assert!(Viewer::join(&cctv, "A", ip, true).is_err(), "draining native data must still own its admission");
     drop(lease);
     assert!(weak.upgrade().is_none());
+    let _replacement = Viewer::join(&cctv, "A", ip, true).unwrap();
 }
 
 #[test]
@@ -243,6 +245,22 @@ async fn protocol_ready_switch_reconnect_and_control_close_cancel_bootstrap() {
         drop(app);
         std::fs::remove_dir_all(dir).unwrap();
     }).await.unwrap();
+}
+
+#[tokio::test]
+async fn attachment_notifications_coalesce_during_a_fast_switch() {
+    let (dir, mut app) = crate::server::test_app();
+    let (cctv, owner, _replies) = fixture();
+    app.cctv = cctv;
+    let mut first = owner.view.acquire(owner.view.ip).unwrap();
+    let (_, receiver) = tokio::sync::broadcast::channel(1);
+    let mut attached = Attachment {world:1,account:11,player:1,character:101,map:vec![],snapshot:vec![],receiver};
+    assert!(first.attached(&app, &attached).unwrap());
+    owner.view.commit(1, "B", None).unwrap();first.release();
+    let replacement = owner.view.acquire(owner.view.ip).unwrap();
+    attached.account = 22;attached.player = 2;attached.character = 202;
+    assert!(replacement.attached(&app, &attached).unwrap(), "latest attachment must replace the unconsumed older one");
+    drop((first, replacement, owner, app));std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
