@@ -336,6 +336,67 @@ fn selected_bows_keep_individual_projectiles_and_enemy_only_piercing() {
 }
 
 #[test]
+fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
+    for kind in [0xa00, 0xb0b, 0xa03, 0xc01, 0xc05, 0xaf4, 0xaf5, 0xb40] {
+        let (mut w, id) = fixture(0x18, false);
+        w.now = 1000;
+        let targets = [9.5, 10.5].map(|x| {
+            let target = w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap();
+            w.entities.get_mut(&target).unwrap().hp = 10000;
+            target
+        });
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.class = 0x31e;
+        p.character.items[0] = kind as i32;
+        p.character.base = [770, 252, 50, 40, 50, 50, 75, 50];
+        let item = w.content.get(kind).unwrap().clone();
+        let count = if kind == 0xc01 { 2 } else { 1 };
+        assert_eq!(item.shots, count);
+        assert_eq!(item.arc, if count == 2 { 40. } else { 11.25 });
+        assert_eq!(item.rate, if kind == 0xc05 { 0.6 } else { 1. });
+        let start = Pos { x: 8.8, y: 8.5 };
+        for bullet in 0..count as u8 {
+            let angle = if count == 2 {
+                (f32::from(bullet) * 40. - 20.).to_radians()
+            } else {
+                0.
+            };
+            w.shoot(id, 1000, bullet + 1, kind, start, angle).unwrap();
+        }
+        let damage: i32 = w.bullets.iter().map(|b| b.damage).sum();
+        for b in &w.bullets {
+            assert!(
+                (item.projectiles[&0].min * 3 / 2..=item.projectiles[&0].max * 3 / 2)
+                    .contains(&b.damage)
+            );
+            assert!(!b.spec.multi_hit && !b.spec.passes_cover && !b.spec.armor_piercing);
+            assert!(!b.spec.wavy && !b.spec.parametric && !b.spec.boomerang);
+        }
+        let admitted = w.players[&id].character.shots;
+        let period = if kind == 0xc05 { 285 } else { 171 };
+        let angle = -item.arc.to_radians() * (count - 1) as f32 / 2.;
+        assert!(
+            w.shoot(id, 1000 + period - 3, count as u8 + 1, kind, start, angle)
+                .is_err()
+        );
+        assert_eq!(w.players[&id].character.shots, admitted);
+        for _ in 0..16 {
+            w.step();
+        }
+        assert_eq!(w.entities[&targets[0]].hp, 10000 - damage);
+        assert_eq!(w.entities[&targets[1]].hp, 10000);
+        assert_eq!(
+            w.players[&id].character.lifetime.projectile_hits,
+            count as u64
+        );
+        assert!(w.bullets.iter().all(|b| b.owner != id));
+        w.shoot(id, 1000 + period, count as u8 + 1, kind, start, angle)
+            .unwrap();
+        assert_eq!(w.players[&id].character.shots, admitted + 1);
+    }
+}
+
+#[test]
 fn multihit_and_cover_flags_preserve_distinct_targets_and_once_only_hits() {
     for (multi_hit, cover, passes_cover, expected) in [
         (false, None, false, [true, false]),
@@ -377,6 +438,57 @@ fn multihit_and_cover_flags_preserve_distinct_targets_and_once_only_hits() {
             w.players[&id].character.lifetime.projectile_hits,
             u64::from(expected[0])
         );
+    }
+}
+
+#[test]
+fn daggers_keep_selected_piercing_cover_range_and_spirit_parity() {
+    for kind in [0xa14, 0xa17, 0xc0a, 0xb21, 0xc22, 0xc29] {
+        for cover in [false, true] {
+            let (mut w, id) = fixture(0x18, false);
+            let targets =
+                [10.5, 11.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+            for target in targets {
+                w.entities.get_mut(&target).unwrap().hp = 2000;
+            }
+            if cover {
+                w.spawn_entity(0x100, Pos { x: 9.5, y: 8.5 }, vec![])
+                    .unwrap();
+            }
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.shots = 1;
+            p.character.lifetime.shots = 1;
+            let mut b = shot(&w, id, kind, 0);
+            b.friendly = true;
+            assert_eq!(b.spec.multi_hit, kind == 0xc22);
+            assert!(!b.spec.passes_cover && !b.spec.armor_piercing);
+            if kind == 0xc29 {
+                for bullet in [0, 1] {
+                    let (x, y) = b.spec.offset(bullet, 0., 200.);
+                    assert!((x - 2.6).abs() < 0.0001);
+                    let expected = 0.2 * (std::f32::consts::PI * 0.2).sin();
+                    assert!((y - if bullet == 0 { expected } else { -expected }).abs() < 0.0001);
+                }
+            }
+            let damage = b.damage;
+            w.bullets.push(b);
+            for _ in 0..16 {
+                w.step();
+            }
+            for (index, target) in targets.into_iter().enumerate() {
+                let hit = !cover && (index == 0 || kind == 0xc22);
+                assert_eq!(
+                    w.entities[&target].hp,
+                    2000 - if hit { damage } else { 0 },
+                    "{kind:#x}, cover={cover}, target={index}"
+                );
+            }
+            assert!(w.bullets.iter().all(|b| b.owner != id));
+            assert_eq!(
+                w.players[&id].character.lifetime.projectile_hits,
+                u64::from(!cover)
+            );
+        }
     }
 }
 

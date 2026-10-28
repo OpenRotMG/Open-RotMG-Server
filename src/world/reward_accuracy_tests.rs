@@ -32,6 +32,86 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 }
 
 #[tokio::test]
+async fn ent_tincture_death_preserves_rolls_and_has_one_eligible_owner() {
+    let (mut w, _store, owners) = reward_world().await;
+    assert!(w.content.objects[&0xb0c].soulbound);
+    assert!(
+        w.loot_bag(Pos { x: 3.5, y: 3.5 }, None, vec![0xb0c])
+            .is_err()
+    );
+    let mut successes = 0;
+    let mut misses = 0;
+    for kind in [0x921, 0x922] {
+        for contributors in [0usize, 1, 3, 5] {
+            for seed in 0..128 {
+                clear_bags(&mut w);
+                let mut expected_rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let mut expected = false;
+                for _ in 0..(contributors * 2).min(8) {
+                    let items = crate::loot::rewards(&w.content, kind, &mut expected_rng);
+                    assert!(items.iter().all(|item| *item == 0xb0c));
+                    expected |= !items.is_empty();
+                }
+                let id = w
+                    .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
+                    .unwrap();
+                w.entities.get_mut(&id).unwrap().damage = owners[..contributors]
+                    .iter()
+                    .map(|(_, character)| (*character, 1))
+                    .collect();
+                w.entities
+                    .get_mut(&id)
+                    .unwrap()
+                    .damage
+                    .insert(owners[5].1, 0);
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.defeat_entity(id).unwrap();
+                assert!(!w.entities.contains_key(&id));
+                assert_eq!(
+                    w.bag_expiry.len(),
+                    usize::from(expected),
+                    "seed={seed}, contributors={contributors}"
+                );
+                if expected {
+                    successes += 1;
+                    let bag = &w.entities[w.bag_expiry.keys().next().unwrap()];
+                    assert_eq!(
+                        bag.items
+                            .iter()
+                            .copied()
+                            .filter(|item| *item >= 0)
+                            .collect::<Vec<_>>(),
+                        [0xb0c]
+                    );
+                    assert_eq!(
+                        owners[..contributors]
+                            .iter()
+                            .filter(|(owner, _)| bag.accessible(*owner))
+                            .count(),
+                        1
+                    );
+                    assert!(
+                        owners[contributors..]
+                            .iter()
+                            .all(|(owner, _)| !bag.accessible(*owner))
+                    );
+                    assert_eq!(
+                        bag.extra_stats
+                            .iter()
+                            .filter(|(stat, _)| *stat == 54)
+                            .count(),
+                        1
+                    );
+                } else {
+                    misses += 1;
+                }
+            }
+        }
+    }
+    assert!(successes > 0 && misses > 0);
+}
+
+#[tokio::test]
 async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor() {
     let (mut w, _store, owners) = reward_world().await;
     let mut successes = 0;
@@ -106,6 +186,47 @@ async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor(
         }
     }
     assert!(successes > 0);
+}
+
+#[tokio::test]
+async fn lair_slime_splits_leave_potion_rolls_to_terminal_forms() {
+    let (mut world, _store, owners) = reward_world().await;
+    for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
+        for seed in 0..64 {
+            for id in world.entities.keys().copied().collect::<Vec<_>>() {
+                world.remove_entity(id);
+            }
+            let id = world
+                .spawn_entity(parent, Pos { x: 3.5, y: 3.5 }, vec![])
+                .unwrap();
+            world
+                .entities
+                .get_mut(&id)
+                .unwrap()
+                .damage
+                .insert(owners[0].1, 1);
+            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.defeat_entity(id).unwrap();
+            assert!(!world.entities.contains_key(&id));
+            assert_eq!(world.actors().filter(|e| e.kind == child).count(), count);
+            assert!(
+                world.bag_expiry.is_empty(),
+                "intermediate {parent:#x}, seed {seed} rolled loot"
+            );
+        }
+    }
+    for kind in [0xd9d, 0xd9f] {
+        let outcomes: BTreeSet<_> = (0..256)
+            .map(|seed| {
+                crate::loot::rewards(
+                    &world.content,
+                    kind,
+                    &mut rand::rngs::StdRng::seed_from_u64(seed),
+                )
+            })
+            .collect();
+        assert_eq!(outcomes, BTreeSet::from([vec![], vec![0xa22], vec![0xa23]]));
+    }
 }
 
 #[test]

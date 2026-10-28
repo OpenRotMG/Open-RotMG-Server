@@ -701,8 +701,10 @@ impl World {
         if crate::endgame::ROSTER.contains(&defeated.kind) {
             return self.finale_death(defeated);
         }
+        // The period guide retains the medium generation and excludes intermediate drops: https://web.archive.org/web/20120420155929id_/http://forums.wildshadow.com/wiki/realm-mad-god/black-slimes
         let (kind, count) = match defeated.kind {
-            0xd9b | 0xd9c => (0xd9d, 4),
+            0xd9b => (0xd9c, 4),
+            0xd9c => (0xd9d, 4),
             0xd9e => (0xd9f, 6),
             _ => return Ok(()),
         };
@@ -716,13 +718,8 @@ impl World {
                 <= 512,
             "slime split budget exhausted"
         );
-        for i in 0..count {
-            let angle = i as f32 * std::f32::consts::TAU / count as f32;
-            let pos = Pos {
-                x: defeated.pos.x + 0.2 * angle.cos(),
-                y: defeated.pos.y + 0.2 * angle.sin(),
-            };
-            self.spawn_entity(kind, pos, vec![])?;
+        for _ in 0..count {
+            self.spawn_entity(kind, defeated.pos, vec![])?;
         }
         Ok(())
     }

@@ -60,6 +60,84 @@ fn native(
 }
 
 #[test]
+fn lair_slime_children_start_on_the_defeated_parents_floor() {
+    for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
+        let (mut world, _) = fixture(0x18, true);
+        world.encounter = true;
+        let pos = Pos { x: 8.9, y: 8.5 };
+        assert!(world.walkable(pos));
+        let id = world.spawn_entity(parent, pos, vec![]).unwrap();
+        world.defeat_entity(id).unwrap();
+        let children: Vec<_> = world.actors().filter(|e| e.kind == child).collect();
+        assert_eq!(children.len(), count);
+        assert!(
+            children
+                .iter()
+                .all(|e| e.pos.x == pos.x && e.pos.y == pos.y && world.walkable(e.pos))
+        );
+    }
+}
+
+#[test]
+fn lair_traps_retire_after_one_volley_and_late_joins_keep_owned_escorts() {
+    for kind in [0xda2, 0xda3] {
+        let (mut world, _) = fixture(0x18, false);
+        world.encounter = true;
+        let trap = world
+            .spawn_entity(kind, Pos { x: 10.5, y: 8.5 }, vec![])
+            .unwrap();
+        world.npc_step();
+        let volley = world.bullets.iter().filter(|b| b.owner == trap).count();
+        assert!(volley > 0);
+        assert_eq!(*world.entities[&trap].expires, Some(world.now + 50));
+        world.step();
+        assert!(!world.entities.contains_key(&trap));
+        assert_eq!(
+            world.bullets.iter().filter(|b| b.owner == trap).count(),
+            volley
+        );
+    }
+    let (mut world, _) = fixture(0x18, false);
+    world.encounter = true;
+    let boss = world
+        .spawn_entity(0xd90, Pos { x: 14.5, y: 8.5 }, vec![])
+        .unwrap();
+    world.npc_step();
+    let activated = world.entities[&boss].activated;
+    assert!(activated.is_some());
+    assert_eq!(world.actors().filter(|e| e.parent == Some(boss)).count(), 9);
+    world.now += 42000;
+    world
+        .encounter_mechanics(boss, Some(Pos { x: 8.5, y: 8.5 }), 42000)
+        .unwrap();
+    let escorts: Vec<_> = world
+        .actors()
+        .filter(|e| e.parent == Some(boss))
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(escorts.len(), 15);
+    let mut character =
+        Character::fresh(world.content.get(crate::content::WIZARD).unwrap()).unwrap();
+    character.id = 2;
+    character.account = 2;
+    world.enter(character, None).unwrap();
+    world.npc_step();
+    assert_eq!(world.entities[&boss].activated, activated);
+    assert_eq!(world.entities[&boss].stage, Some(3));
+    assert_eq!(
+        world
+            .actors()
+            .filter(|e| e.parent == Some(boss))
+            .map(|e| e.id)
+            .collect::<Vec<_>>(),
+        escorts
+    );
+    world.remove_entity(boss);
+    world.step();
+    assert!(escorts.iter().all(|id| !world.entities.contains_key(id)));
+}
+
+#[test]
 fn native_entry_uses_ingress_time_and_keeps_monotonic_moves() {
     let (mut world, id) = fixture(0x18, false);
     let character = world.players.remove(&id).unwrap().character;
