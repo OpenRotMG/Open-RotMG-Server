@@ -63,7 +63,9 @@ print(json.dumps({'wallet':c.execute('SELECT credits,balance,earned FROM account
     game.check('blue rank pays and notifies once on native load',initial.rewards.length===1&&initial.rewards[0][0]==='class_star_blue'&&initial.rewards[0][1]>0);
     await c.call('Page.enable');
     await game.act({keys:[],duration_ms:800,mouse:{x:700,y:576}});
+    await game.act({keys:[],duration_ms:1200});
     await reply;
+    await writeFile(join(out(),'gold-dialogs.json'),JSON.stringify(dialogs,null,2));
     game.check('Get Gold invokes the local guide confirmation',dialogs.length===1&&dialogs[0].type==='confirm'&&dialogs[0].message.includes(config.origin+'/gold/'));
     const after=await game.inspect();
     game.check('cancelling Gold navigation retains inventory and living identity',after.view.lifecycle.alive&&after.view.session.character===before.view.session.character&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&after.view.character.inventory_revision===before.view.character.inventory_revision);
