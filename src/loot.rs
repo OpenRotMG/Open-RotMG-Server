@@ -1567,15 +1567,17 @@ mod tests {
     }
 
     #[test]
-    fn god_potion_damage_boundaries_preserve_gear() {
+    fn realm_god_potion_boundaries_preserve_equipment() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for (kind, threshold, potion) in [
-            (0x655, 180, 0xa20),
-            (0x657, 180, 0xa1f),
-            (0x658, 180, 0xa20),
-            (0x652, 360, 0xa1f),
+        for (kind, threshold, chance, potion) in [
+            (0x655, 180, 0.015, 0xa20),
+            (0x656, 270, 0.01, 0xa20),
+            (0x657, 180, 0.015, 0xa1f),
+            (0x658, 180, 0.015, 0xa20),
+            (0x91a, 180, 0.015, 0xa21),
+            (0x652, 360, 0.015, 0xa1f),
         ] {
-            assert_eq!(bonus(kind), &[(0.015, potion)]);
+            assert_eq!(bonus(kind), &[(chance, potion)]);
             let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
             let loot = god_loot(
                 &content,
@@ -1583,16 +1585,16 @@ mod tests {
                 &owners,
                 &mut rand::rngs::mock::StepRng::new(0, 0),
             );
-            assert!(!loot.private.contains_key(&10));
+            assert!(!loot.private.contains_key(&10), "{kind:#x}");
             for owner in [20, 30] {
-                assert_eq!(loot.private[&owner], [potion]);
+                assert_eq!(loot.private[&owner], [potion], "{kind:#x}");
             }
             assert_eq!(loot.shared_owners, [10, 20, 30]);
             let expected: Vec<_> = table(kind)
                 .iter()
                 .flat_map(|(_, pick)| candidates(&content, *pick))
                 .collect();
-            assert_eq!(loot.shared, expected);
+            assert_eq!(loot.shared, expected, "{kind:#x}");
             assert!(!loot.shared.contains(&potion));
             let empty = god_loot(
                 &content,
