@@ -34,6 +34,8 @@ export async function run(game){
     throw Error('Native action did not establish its active bounded window within 15 seconds');
   }
   async function travel(point){
+    await prepareScout({kind:'teleport',position:refuge});
+    await idle(Math.min(protection,scoutProtection)-(await game.observe()).game_ms);
     await protect();
     await prepareScout({kind:'teleport',position:point});
     const action=game.act({keys:[],duration_ms:2000});
@@ -67,7 +69,7 @@ export async function run(game){
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
       const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
-      await game.act({keys,duration_ms:Math.max(50,Math.min(2000,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
+      await game.act({keys,duration_ms:Math.min(protection-view.game_ms,scoutProtection-view.game_ms,Math.max(50,Math.min(2000,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000))))});
     }
     throw Error('Native walking did not reach the observed target');
   }
