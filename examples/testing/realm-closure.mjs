@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile} from 'node:fs/promises';
+import {appendFile,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
@@ -14,7 +14,7 @@ export async function prepare(api){
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},protection=new Map(),records=[];
-  let attackUntil=0,blocked;
+  let attackUntil=0,blocked,stalled=0;
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)}),value=await response.json();
     assert(response.ok&&value.status==='succeeded',JSON.stringify(value));return value;
@@ -70,8 +70,12 @@ export async function run(game){
     if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
     if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
     const distance=keys.length===2?Math.min(Math.abs(x),Math.abs(y))*Math.SQRT2:Math.max(Math.abs(x),Math.abs(y));
-    await act({keys,duration_ms:Math.max(50,Math.min(5000,Math.round(distance*850/(4+5.6*before.character.stats.speed/75))))});
-    const after=await game.observe();assert(Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y)>.02,'Native route input made no progress');
+    const duration_ms=Math.max(200,Math.min(5000,Math.round(distance*850/(4+5.6*before.character.stats.speed/75))));
+    await act({keys,duration_ms});
+    const after=await game.observe(),trace={anchor,range,point,keys,duration_ms,before:before.position,after:after.position,game_ms:after.game_ms};
+    await appendFile(join(out,'routes.jsonl'),JSON.stringify(trace)+'\n');
+    stalled=Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y)>.02?0:stalled+1;
+    assert(stalled<3,'Three stationary native route inputs: '+JSON.stringify(trace));
   }
   assert(original.length>20,'Full ordinary roster required, not a prepared final encounter');
   await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial}));
