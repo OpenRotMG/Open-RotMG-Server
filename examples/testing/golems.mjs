@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const roots=[0x62f,0x631,0x62d,0x62e,0x632,0x633];
+const selected=Number(process.env.GOLEM_KIND);
+assert([0x62f,0x631,0x62d,0x62e,0x632,0x633].includes(selected),'Set GOLEM_KIND to one of 0x62f/0x631/0x62d/0x62e/0x632/0x633');
 const spec={class:0x30e,level:20,seed:838,world:1,equipment:[0xb08,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
 const output=name=>join(process.env.QA_RESULTS_DIR,name);
 const native=name=>output('native/'+name);
@@ -16,7 +17,7 @@ export async function prepare(api){
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   await writeFile(output('natural-map.json'),JSON.stringify(map));
-  camps=roots.map(kind=>{
+  camps=[selected].map(kind=>{
     for(const root of map.entities.filter(e=>e.kind===kind)){
       for(let dx=-3;dx<=3;dx++)for(let dy=-3;dy<=3;dy++){
         if(Math.hypot(dx,dy)<2||Math.hypot(dx,dy)>3)continue;
@@ -51,13 +52,12 @@ export async function run(game){
     return step(input,capture);
   }
   try{
-    for(const {root,position,members} of camps){
+    for(const {root,members} of camps){
       const tag=root.kind.toString(16),camp=root.camp,start=samples.length;
-      if(root.kind!==roots[0])await command({kind:'teleport',position});
       const arrival=await game.inspect();
       game.check(tag+': natural root and four satellites admitted',family(arrival,camp).some(e=>e.id===root.id&&e.hp===220)&&members.filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7).length===4);
-      await act({keys:[],duration_ms:2000},{name:'golem-'+tag,when:()=>true});
-      await act({keys:[],duration_ms:4500});
+      await act({keys:[],duration_ms:2000});
+      await act({keys:[],duration_ms:4500},{name:'golem-'+tag,when:view=>view.game_ms>=arrival.view.time_ms+4000});
       const combat=samples.slice(start),ids=new Set(members.map(e=>e.id));
       game.check(tag+': root activates and moves',combat.some(s=>family(s,camp).some(e=>e.id===root.id&&e.activated!==null&&Math.hypot(e.pos.x-root.pos.x,e.pos.y-root.pos.y)>.2)));
       const speeds={0x62f:[55],0x631:[55],0x62d:[75],0x62e:[10],0x632:[45,60],0x633:[120,70]};
