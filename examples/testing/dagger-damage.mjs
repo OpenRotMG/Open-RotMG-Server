@@ -21,6 +21,7 @@ export async function run(game){
     for(let wait=0;(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<24))&&wait<12;wait++){
       await game.act({keys:[],duration_ms:500});before=await game.inspect();target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
     }
+    assert(!(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<24)),'Septavius did not become vulnerable');
     let after=before,damaged=[];
     for(let attempt=0;attempt<4&&damaged.length===0&&after.diagnostic.character.kills===before.diagnostic.character.kills;attempt++){
       await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:500},attempt===0?{name:'damage-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots}:undefined);
