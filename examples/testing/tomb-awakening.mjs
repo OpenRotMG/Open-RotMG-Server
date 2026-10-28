@@ -27,7 +27,7 @@ export async function run(game){
   async function advance(ms,capture){
     while(ms>0){await protect();const step=Math.min(ms,10000,protection-(await game.observe()).game_ms);await game.act({keys:[],duration_ms:step},capture);capture=undefined;ms-=step;}
   }
-  const wizard={class:0x30e,level:20,seed:860,world:start.session.world,equipment:[0xb08,0xa2e,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60],controller:'game_bot',profile:'Pixl'};
+  const wizard={class:0x30e,level:20,seed:860,world:start.session.world,equipment:[0xb08,0xa2e,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60],controller:'game_bot',profile:'Bugmaster'};
   async function squad(objective){
     for(let n=0;n<6;n++){
       const actor=(await api({op:'spawn',spec:{...wizard,guid:'tomb-squad-'+objective.id+'-'+n,position:{x:objective.pos.x-1+(n%3),y:objective.pos.y-2+Math.floor(n/3)}}})).result.actor;
