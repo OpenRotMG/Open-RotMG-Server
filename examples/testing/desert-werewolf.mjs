@@ -35,12 +35,12 @@ export async function run(game){
   const begin=await save('arrival');
   game.check('natural MidSand leader has selected HP and size',entity(begin,leader.id).hp===320&&entity(begin,leader.id).size===135);
   for(const kind of [0x620,0x622])game.check(kind+': one to three natural initial Wargs',family(begin).filter(e=>e.kind===kind).length>=1&&family(begin).filter(e=>e.kind===kind).length<=3);
-  await game.act({keys:[],duration_ms:2000,target:{entity:leader.id,camera_angle:-Math.PI/4,fire:false}},{name:'werewolf-unharmed',when:()=>true});
+  await game.act({keys:[],duration_ms:2000,target:{entity:leader.id,camera_angle:-Math.PI/4,fire:false}});
   const exposed=await save('exposed');
   game.check('unprotected native Wizard takes encounter damage',exposed.view.character.hp<begin.view.character.hp);
-  game.check('level-five native player receives the Werewolf quest',exposed.view.quest===leader.id);
+  game.check('level-five native player receives a visible Werewolf quest',entity(exposed,exposed.view.quest)?.kind===0x623);
   const samples=[];
-  for(let n=0;n<40;n++){await act({keys:[],duration_ms:500});samples.push(await game.inspect());}
+  for(let n=0;n<40;n++){await act({keys:[],duration_ms:500},n===39?{name:'werewolf-unharmed',when:()=>true}:undefined);samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify(samples));
   game.check('Werewolf activates and wanders',samples.some(s=>{const e=entity(s,leader.id);return e.activated!==null&&Math.hypot(e.pos.x-leader.pos.x,e.pos.y-leader.pos.y)>.2;}));
   for(const kind of [0x620,0x622])game.check(kind+': living population reaches its reconstructed cap of three',family(samples.at(-1)).filter(e=>e.kind===kind).length===3&&samples.every(s=>family(s).filter(e=>e.kind===kind).length<=3));
