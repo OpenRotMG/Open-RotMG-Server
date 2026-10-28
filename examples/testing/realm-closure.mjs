@@ -37,7 +37,7 @@ export async function prepare(api){
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},protection=new Map(),modifiers=new Map(),jumps=new Map(),records=[],stalled=new Map();
-  let blocked,peer,combatAnchor;
+  let blocked,peer;const combatAnchors=new Map();
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)}),value=await response.json();
     const valid=command.op==='observe'?value.actor===command.actor:command.op==='inspect'?value.view?.session.character===command.actor:value.status==='succeeded';
@@ -92,7 +92,7 @@ export async function run(game){
     try{return db.prepare('SELECT count(*) AS n FROM account_lists WHERE account=? AND list_id=0 AND target=?').get(account,scout.account).n===1;}finally{db.close();}
   }
   const menu=(client,y)=>[{actor:client.actor,input:{keys:[],mouse:{x:650,y:520},duration_ms:250}},{actor:client.actor,input:{keys:[],mouse:{x:550,y},duration_ms:350}}];
-  const menus=y=>[0,1].map(i=>clients.map(client=>menu(client,y)[i]));
+  const menus=(y,selected=clients)=>[0,1].map(i=>selected.map(client=>menu(client,y)[i]));
   await act(game,{keys:[],duration_ms:800});await act(game,menus(432));
   for(const client of clients)game.check('native party lock persists for scout and account '+(await client.observe()).session.account,locked((await client.observe()).session.account));
   await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout,assistance:{attack_bonus:attackBonus,protection_ms:60000,resting_spawn:restPoint,evaluation:'minimal native trigger then wait; no variant-matrix acceptance'}}));
@@ -121,7 +121,7 @@ export async function run(game){
     }
     assert.fail('Native movement did not clear the interaction panel for party-menu travel');
   }
-  async function travel(anchor,tail=()=>[]){
+  async function travel(anchor,tail=()=>[],selected=clients){
     await clearPartyPanel();const points=[];
     for(let y=-5;y<=5;y++)for(let x=-5;x<=5;x++){
       const p={x:Math.floor(anchor.x)+x+.5,y:Math.floor(anchor.y)+y+.5},d=Math.hypot(p.x-anchor.x,p.y-anchor.y);
@@ -130,13 +130,13 @@ export async function run(game){
     points.sort((a,b)=>Math.abs(Math.hypot(a.x-anchor.x,a.y-anchor.y)-2.5)-Math.abs(Math.hypot(b.x-anchor.x,b.y-anchor.y)-2.5));
     assert(points.length,'No legal prepared scout position');
     await ready();
-    for(const client of clients){
+    for(const client of selected){
       let now=(await client.observe()).game_ms;
       while(jumps.has(client.actor)&&now-jumps.get(client.actor)<11000){await act(game,{keys:[],duration_ms:Math.min(10000,11000-now+jumps.get(client.actor))});now=(await client.observe()).game_ms;}
     }
     await cheat(scout.actor,{kind:'teleport',position:points[0]});
-    const movement=await act(game,[...menus(400),...tail(await ready())]);
-    for(const client of clients){
+    const movement=await act(game,[...menus(400,selected),...tail(await ready())]);
+    for(const client of selected){
       const after=await client.observe(),arrival=movement.steps.filter(s=>s.actor===client.actor)[1];
       assert(after.session.world===origin&&after.lifecycle.alive&&Math.hypot(arrival.position.x-points[0].x,arrival.position.y-points[0].y)<.2,'Native menu did not complete the actual scout teleport: '+JSON.stringify({actor:client.actor,expected:points[0],position:arrival.position,world:after.session.world,origin}));
       jumps.set(client.actor,arrival.game_ms);await appendFile(join(out,'travel.jsonl'),JSON.stringify({actor:client.actor,anchor,position:arrival.position,game_ms:arrival.game_ms})+'\n');
@@ -162,51 +162,73 @@ export async function run(game){
     while(now<until){await act(game,{keys:[],duration_ms:Math.min(10000,until-now)});now=(await game.observe()).game_ms;}
     await ready();
     await appendFile(join(out,'renewals.jsonl'),JSON.stringify({before_ms:before.game_ms,renewed_ms:now,restPoint,returnToCombat})+'\n');
-    if(returnToCombat)await travel(combatAnchor);
+    if(returnToCombat)for(const client of clients)await travel(combatAnchors.get(client.actor),()=>[],[client]);
   }
   const seen=new Map(original.map(e=>[e.quest??e.id,e]));
   for(let encounter=0;encounter<100;encounter++){
     const log=await events(),credits=log.filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin),defeated=new Set(credits.map(e=>e.hero)),current=await map();
     for(const e of current.entities)if(roots.has(e.kind)&&e.quest===e.id)seen.set(e.id,e);
     current.blocked.length=0;current.entities.length=0;
-    const position=(await game.observe()).position,next=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y))[0];
-    if(next===undefined){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
-    if(await ready()<30000)await renewOnShore(false);
-    const fighter=clients[encounter%clients.length],kind=seen.get(next).kind,tail=[];
+    const position=(await game.observe()).position,pending=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y));
+    if(!pending.length){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
+    const first=pending[0],kind=seen.get(first).kind,batch=[first];
     if(kind!==0xd5f){
-      tail.push({actor:fighter.actor,input:{keys:[],duration_ms:evaluations.has(kind)?500:8800,target:{entity:next,camera_angle:-Math.PI/4,fire:true}}});
-      if(evaluations.has(kind))tail.push({actor:game.actor,input:{keys:[],duration_ms:8300}});
+      const others=pending.slice(1).filter(id=>seen.get(id).kind!==0xd5f);
+      others.sort((a,b)=>Number(seen.get(a).kind!==kind)-Number(seen.get(b).kind!==kind)||Math.hypot(seen.get(a).pos.x-seen.get(first).pos.x,seen.get(a).pos.y-seen.get(first).pos.y)-Math.hypot(seen.get(b).pos.x-seen.get(first).pos.x,seen.get(b).pos.y-seen.get(first).pos.y));
+      if(others.length)batch.push(others[0]);
     }
-    combatAnchor=seen.get(next).pos;
-    await travel(combatAnchor,()=>tail);
-    if(kind===0xd5f&&await ready()<50000)await renewOnShore(true);
-    let completed=false;const towerAssignments=new Map();
+    // Independent native fights share phase time instead of spending a receipt per waiting encounter.
+    const roles=clients.map((client,i)=>batch.length===1?first:batch[i]);
+    clients.forEach((client,i)=>combatAnchors.set(client.actor,seen.get(roles[i]).pos));
+    if(await ready()<50000)await renewOnShore(false);
+    const enter=async(client,id,selected)=>{
+      const tail=[],entry=seen.get(id).kind;
+      if(entry!==0xd5f){
+        tail.push({actor:client.actor,input:{keys:[],duration_ms:evaluations.has(entry)?500:8800,target:{entity:id,camera_angle:-Math.PI/4,fire:true}}});
+        if(evaluations.has(entry))tail.push({actor:client.actor,input:{keys:[],duration_ms:8300}});
+      }
+      await travel(seen.get(id).pos,()=>tail,selected);
+    };
+    if(batch.length===1)await enter(game,first,clients);
+    else for(let i=0;i<clients.length;i++)await enter(clients[i],roles[i],[clients[i]]);
+    const towerAssignments=new Map();let completed=false;
     for(let step=0;step<100;step++){
-      if((await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next)){completed=true;break;}
+      const dead=new Set((await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin).map(e=>e.hero));
+      if(batch.every(id=>dead.has(id))){completed=true;break;}
+      if(batch.length===2)for(let i=0;i<clients.length;i++)if(dead.has(roles[i])){
+        const other=roles[1-i];assert(!dead.has(other),'A live partner encounter is required');
+        roles[i]=other;combatAnchors.set(clients[i].actor,seen.get(other).pos);
+        await travel(seen.get(other).pos,()=>[],[clients[i]]);
+      }
       if(await ready()<(kind===0xd5f?30000:20000)){await renewOnShore(true);continue;}
-      // A held burst spans Ent's cycling shield, but must not damage an assessment window.
-      const state=await api({op:'inspect',actor:scout.actor}),family=state.diagnostic.entities.filter(e=>e.id===next||e.quest===next),candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&(!(e.condition&((1<<21)|(1<<23)|(1<<24)))||e.kind===0x920));
-      const views=await Promise.all(clients.map(c=>c.observe())),position=views[0].position;
-      candidates.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
-      const target=candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0x92a,0x92b,0x92c,0xd5e,0xd62].includes(e.kind));
-      const anchor=target??family.find(e=>leaders.has(e.kind));
-      const aims=target?.kind===0xd5e?towerPair(candidates.filter(e=>e.kind===0xd5e),views,towerAssignments):clients.map(()=>anchor);
-      await appendFile(join(out,'combat.jsonl'),JSON.stringify({root:next,step,game_ms:state.diagnostic.time_ms,target:target?.id,pair:[...towerAssignments.values()],family:family.map(({id,kind,pos,hp,condition,stage,activated})=>({id,kind,pos,hp,condition,stage,activated}))})+'\n');
-      if(!anchor){await act(game,{keys:[],duration_ms:1000});continue;}
-      const range=target?.kind===0xd5e?6.5:5.5;
-      if(views.some((v,i)=>Math.hypot(v.position.x-aims[i].pos.x,v.position.y-aims[i].pos.y)>range)){await approach(aims.map(e=>e.pos),range);continue;}
-      if(target){
-        const firing=evaluations.has(target.kind)?[fighter]:clients,duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:4000,states=await Promise.all(firing.map(c=>c.inspect()));
-        const group=states.map((s,i)=>{
-          const aim=target.kind===0xd5e?aims[i]:target,known=s.view.objects.find(e=>e.id===aim.id&&e.hp>0);assert(known,'A living target must be known to each actual native client');
-          const dx=known.position.x-s.view.position.x,dy=known.position.y-s.view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy));
-          return {actor:firing[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}};
-        });
-        await act(game,[group]);
-      }else await act(game,{keys:[],duration_ms:anchor.stage===1&&evaluations.has(anchor.kind)?1000:anchor.kind===0x928&&anchor.stage===3?2000:10000});
+      const views=await Promise.all(clients.map(c=>c.observe()));
+      const snapshots=kind===0xd5f?[await api({op:'inspect',actor:scout.actor})]:await Promise.all(clients.map(c=>api({op:'inspect',actor:c.actor})));
+      const families=clients.map((_,i)=>snapshots[kind===0xd5f?0:i].diagnostic.entities.filter(e=>e.id===roles[i]||e.quest===roles[i]));
+      const targets=families.map((family,i)=>{
+        const candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&!(e.condition&((1<<21)|(1<<23)|(1<<24))));
+        candidates.sort((a,b)=>Math.hypot(a.pos.x-views[i].position.x,a.pos.y-views[i].position.y)-Math.hypot(b.pos.x-views[i].position.x,b.pos.y-views[i].position.y));
+        return candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0xd5e,0xd62].includes(e.kind));
+      });
+      if(kind===0xd5f){
+        const towers=families[0].filter(e=>e.kind===0xd5e&&e.hp>0);
+        if(towers.length)targets.splice(0,targets.length,...towerPair(towers,views,towerAssignments));
+      }
+      const anchors=targets.map((target,i)=>target??families[i].find(e=>leaders.has(e.kind))),range=kind===0xd5f?6.5:5.5;
+      await appendFile(join(out,'combat.jsonl'),JSON.stringify({batch,roles,step,game_ms:views[0].game_ms,targets:targets.map(e=>e?.id),pair:[...towerAssignments.values()],families:families.map(f=>f.map(({id,kind,pos,hp,condition,stage,activated})=>({id,kind,pos,hp,condition,stage,activated})))})+'\n');
+      if(views.some((view,i)=>anchors[i]&&Math.hypot(view.position.x-anchors[i].pos.x,view.position.y-anchors[i].pos.y)>range)){
+        await approach(anchors.map((e,i)=>e?e.pos:views[i].position),range);continue;
+      }
+      const states=await Promise.all(clients.map(c=>c.inspect())),group=[];
+      for(let i=0;i<clients.length;i++)if(targets[i]){
+        const target=targets[i],known=states[i].view.objects.find(e=>e.id===target.id&&e.hp>0);assert(known,'A living target must be known to its actual native fighter');
+        const dx=known.position.x-states[i].view.position.x,dy=known.position.y-states[i].view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy)),duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:4000;
+        group.push({actor:clients[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}});
+      }
+      if(group.length)await act(game,[group]);else await act(game,{keys:[],duration_ms:10000});
     }
-    assert(completed||(await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next),'Native combat did not finish counted encounter '+next);
-    await writeFile(join(out,'root-'+next+'.json'),JSON.stringify({root:next,kind:seen.get(next).kind,main:await game.observe(),peer:await peer.observe()}));
+    const finalDead=new Set((await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin).map(e=>e.hero));
+    assert(completed||batch.every(id=>finalDead.has(id)),'Native combat did not finish counted encounter batch '+JSON.stringify(batch));
+    for(const id of batch)await writeFile(join(out,'root-'+id+'.json'),JSON.stringify({root:id,kind:seen.get(id).kind,main:await game.observe(),peer:await peer.observe()}));
   }
   const credits=(await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin);
   game.check('ordinary roster plus admitted events earns once-only closure credit',credits.length===seen.size&&new Set(credits.map(e=>e.hero)).size===credits.length&&credits.at(-1)?.remaining===0);
