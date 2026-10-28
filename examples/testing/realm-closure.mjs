@@ -198,7 +198,9 @@ export async function run(game){
       if(batch.length===2)for(let i=0;i<clients.length;i++)if(dead.has(roles[i])){
         const other=roles[1-i];assert(!dead.has(other),'A live partner encounter is required');
         roles[i]=other;combatAnchors.set(clients[i].actor,seen.get(other).pos);
-        await travel(seen.get(other).pos,()=>[],[clients[i]]);
+        // Resetting teleport cooldown with a short buffer would block the next shore departure.
+        if(await ready()<30000)await renewOnShore(true);
+        else await travel(seen.get(other).pos,()=>[],[clients[i]]);
       }
       if(await ready()<(kind===0xd5f?30000:20000)){await renewOnShore(true);continue;}
       const views=await Promise.all(clients.map(c=>c.observe()));
@@ -221,7 +223,7 @@ export async function run(game){
       const states=await Promise.all(clients.map(c=>c.inspect())),group=[];
       for(let i=0;i<clients.length;i++)if(targets[i]){
         const target=targets[i],known=states[i].view.objects.find(e=>e.id===target.id&&e.hp>0);assert(known,'A living target must be known to its actual native fighter');
-        const dx=known.position.x-states[i].view.position.x,dy=known.position.y-states[i].view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy)),duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:4000;
+        const dx=known.position.x-states[i].view.position.x,dy=known.position.y-states[i].view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy)),duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:targets.filter(Boolean).length===1?10000:4000;
         group.push({actor:clients[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}});
       }
       if(group.length)await act(game,[group]);else await act(game,{keys:[],duration_ms:10000});
