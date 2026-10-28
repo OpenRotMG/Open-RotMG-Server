@@ -47,8 +47,10 @@ export async function run(game){
     const {after}=await use(game,key,slot,'capped-'+amount);
     game.check('native potion respects effective equipped maximum '+amount,after.character.hp===810&&after.character.stats.max_hp===810);
   }
+  // Preserve ineffective-use consumption: selected 123.5.1 attemptUse has no full-HP/Sick gate (https://openrotmg.org/restoration/reference-data/client-123.5.1.swf).
   for(const [key,slot,item] of [['1',4,0xab0],['2',5,0xa22],['3',6,0xaeb]]){
     await prepare(game.actor,{kind:'item',slot,item});
+    await game.act({keys:[],duration_ms:200});
     const {after}=await use(game,key,slot,'full-'+item);
     game.check('full HP consumes without overheal '+item,after.character.hp===810);
   }
@@ -56,13 +58,10 @@ export async function run(game){
   game.check('ordinary Blue Paradise raises effective HP above ring ceiling',(await game.observe()).character.stats.max_hp===860);
   const {after:boosted}=await use(game,'7',10,'boosted-heal');
   game.check('potion fills temporary maximum above equipment maximum',boosted.character.hp===860);
-  // Selected 123.5.1 slot attemptUse has no full-HP/Sick gate: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
 
   for(let n=0;n<11;n++)await game.act({keys:[],duration_ms:2000});
   game.check('temporary ceiling expires and clamps to equipped maximum',(await game.observe()).character.hp===810&&(await game.observe()).character.stats.max_hp===810);
-  await prepare(game.actor,{kind:'item',slot:10,item:0xa22});
-  const {after:full}=await use(game,'7',10,'full-hp');
-  game.check('full HP potion is consumed without overheal',full.character.hp===810);
+  const full=await game.observe();
   await game.act({keys:['Insert'],duration_ms:500});
   const escaped=await game.observe();
   game.check('Nexus reconnect preserves consumed inventory and character',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===full.session.character&&escaped.character.items.slice(4).every(v=>v===-1));
