@@ -67,7 +67,7 @@ export async function run(game){
     }
     await act({keys:[],duration_ms:3000},{name:'leviathan-defeated',when:()=>true});
     const dead=await game.inspect();
-    game.check('ordinary native dagger defeats the same natural Leviathan and earns XP',!enemy(dead)&&dead.view.character.experience>=combat.view.character.experience+200);
+    game.check('ordinary native dagger defeats the same Leviathan and earns level-20 capped 195 XP',!enemy(dead)&&dead.view.character.experience===combat.view.character.experience+195);
     await act({keys:[],duration_ms:3000});const end=await game.inspect();
     game.check('defeated Leviathan stays absent without repeated XP',!enemy(end)&&end.view.character.experience===dead.view.character.experience);
     game.check('same prepared living Rogue retains supplied equipment',end.view.lifecycle.alive&&end.view.session.character===arrival.view.session.character&&JSON.stringify(end.view.character.items)===JSON.stringify(arrival.view.character.items));
