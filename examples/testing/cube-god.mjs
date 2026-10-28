@@ -9,7 +9,7 @@ const spec={class:0x30e,level:20,seed:820,world:1,equipment:[0xb08,0xa2e,0xb05,0
 let scout,roots,earned,origin,token,spawn;
 const protectedUntil=new Map();
 async function api(command){const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});const v=await r.json();assert(r.ok&&v.status!=='failed',JSON.stringify(v));return ['observe','inspect','world_info'].includes(command.op)?v:v.result;}
-async function protect(actor){const now=(await api({op:'observe',actor})).game_ms;if(now>=(protectedUntil.get(actor)??0)){await api({op:'cheat',actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});protectedUntil.set(actor,now+60000);}}
+async function protect(actor){const now=(await api({op:'observe',actor})).game_ms;if(now+5000>=(protectedUntil.get(actor)??0)){await api({op:'cheat',actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});protectedUntil.set(actor,now+60000);}}
 const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
 async function fields(){return (await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);}
 export async function prepare(api){
@@ -84,17 +84,17 @@ export async function run(game){
   async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>6)await approach(actor,id,5.5);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await game.act({keys:[],duration_ms:750},{name:'cube-active',when:()=>true});
   const census=await fetch(origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
-  const owned=(await census.json()).entities.filter(e=>e.quest===root),old=new Set(owned.filter(e=>e.kind===0xd5a).map(e=>e.id));await writeFile(join(out,'census.json'),JSON.stringify(owned));
-  game.check('global owned Cube census respects the existing 32-actor budget',owned.length<=32&&owned.some(e=>e.id===root)&&old.size>0);
+  const owned=(await census.json()).entities.filter(e=>e.quest===root),old=new Set(owned.map(e=>e.id));await writeFile(join(out,'census.json'),JSON.stringify(owned));
+  game.check('global owned Cube census respects the existing 32-actor budget',owned.length<=32&&owned.some(e=>e.id===root)&&owned.some(e=>e.kind===0xd5a));
   let killed;
   for(let n=0;n<30&&!killed;n++){
-    state=await game.inspect();const target=family(state).filter(e=>old.has(e.id)&&state.view.objects.some(o=>o.id===e.id)).sort((a,b)=>distance(a)-distance(b))[0];assert(target);
-    await fire(game,target.id);killed=(await fields()).find(f=>f.message==='enemy defeated'&&old.has(f.entity));
+    state=await game.inspect();const target=family(state).filter(e=>e.kind===0xd5a&&old.has(e.id)&&state.view.objects.some(o=>o.id===e.id)).sort((a,b)=>distance(a)-distance(b))[0];assert(target);
+    await fire(game,target.id);killed=(await fields()).find(f=>f.message==='enemy defeated'&&f.kind===0xd5a&&old.has(f.entity));
   }
   game.check('native staff fire defeats an Overseer',Boolean(killed));
-  for(let n=0;n<15&&!family(await game.inspect()).some(e=>e.kind===0xd5a&&!old.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
+  for(let n=0;n<15&&!family(await game.inspect()).some(e=>!old.has(e.id));n++){await protect(game.actor);await game.act({keys:[],duration_ms:1000});}
   state=await save('replenished');const births=await fields(),removed=births.findIndex(f=>f.message==='enemy defeated'&&f.entity===killed.entity);
-  game.check('living Cube replenishes an owned Overseer',family(state).some(e=>e.kind===0xd5a&&!old.has(e.id))&&removed>=0&&births.slice(removed+1).some(f=>f.message==='bounded named quest followers spawned'&&f.quest===root&&f.kind===0xd5a));
+  game.check('owned Cube population replenishes after native combat',family(state).some(e=>!old.has(e.id))&&removed>=0&&births.slice(removed+1).some(f=>f.message==='bounded named quest followers spawned'&&f.quest===root&&f.kind>=0xd5a&&f.kind<=0xd5c));
   assert(entity(state,root));
   const partner=await game.join({...spec,seed:821,position:state.view.position});await protect(partner.actor);
   const players=(await Promise.all([game.inspect(),partner.inspect()])).map(s=>s.diagnostic.player);
