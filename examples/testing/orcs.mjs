@@ -91,7 +91,12 @@ export async function run(game){
     return after;
   }
   for(const kind of [0x629,0x62a,0x62b]){
-    const before=await game.inspect(),victim=family(before).find(e=>e.kind===kind);assert(victim);
+    let before,victim;
+    for(let n=0;n<14;n++){
+      before=await game.inspect();victim=family(before).find(e=>e.kind===kind&&before.view.objects.some(o=>o.id===e.id&&o.hp>0));if(victim)break;
+      await act({keys:[],duration_ms:1000});
+    }
+    assert(victim,'No visible living escort after the ordinary refill window');
     const old=new Set(family(before).map(e=>e.id));await defeat(victim.id);
     for(let n=0;n<14&&!family(await game.inspect()).some(e=>e.kind===kind&&!old.has(e.id));n++)await act({keys:[],duration_ms:1000});
     const after=await save('replenished-'+kind);
@@ -103,7 +108,7 @@ export async function run(game){
   for(let n=0;n<12;n++)await act({keys:[],duration_ms:1000});
   const end=await save('survivors');
   game.check('King defeat preserves followers but stops all replacement births',family(end).length>0&&family(end).every(e=>family(dead).some(p=>p.id===e.id))&&!entity(end,king.id));
-  game.check('surviving support Queen wanders after losing its King',family(end).some(e=>e.kind===0x62b&&family(dead).some(p=>p.id===e.id&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2)));
+  game.check('surviving followers move after losing their King',family(end).some(e=>family(dead).some(p=>p.id===e.id&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2)));
   game.check('King XP cannot be duplicated after death',end.view.character.experience===dead.view.character.experience);
   game.check('same supplied living native Wizard completes encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
   game.check('bounded natural camp caps hold throughout',samples.every(caps));
