@@ -4,12 +4,12 @@ mod tests;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{net::IpAddr, sync::Mutex};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
-    generation: u64,
+    generation: u32,
     target: Target,
 }
 #[derive(Deserialize)]
@@ -19,9 +19,10 @@ enum Target {
     Player { source: i32, target: i32 },
 }
 struct ViewState {
-    viewer: Option<Viewer>,
+    viewer: Viewer,
+    closed: bool,
     bot: String,
-    generation: u64,
+    generation: u32,
     next_socket: u64,
     active: Option<u64>,
     attached: Option<(i32, i32)>,
@@ -31,18 +32,19 @@ pub(crate) struct View {
     ip: IpAddr,
     state: Mutex<ViewState>,
     changed: watch::Sender<()>,
-    replies: mpsc::Sender<Value>,
+    replies: watch::Sender<Option<Value>>,
     lifetime: tokio::sync::Notify,
 }
 impl View {
-    fn new(viewer: Viewer, bot: String, ip: IpAddr) -> (Arc<Self>, mpsc::Receiver<Value>) {
+    fn new(viewer: Viewer, bot: String, ip: IpAddr) -> (Arc<Self>, watch::Receiver<Option<Value>>) {
         let (changed, _) = watch::channel(());
-        let (replies, receiver) = mpsc::channel(1);
+        let (replies, receiver) = watch::channel(None);
         (
             Arc::new(Self {
                 ip,
                 state: Mutex::new(ViewState {
-                    viewer: Some(viewer),
+                    viewer,
+                    closed: false,
                     bot,
                     generation: 0,
                     next_socket: 0,
@@ -64,24 +66,20 @@ impl View {
         self.close_socket(None);
     }
     fn close_socket(&self, socket: Option<u64>) {
-        let viewer = {
-            let mut state = self.lock();
-            if socket.is_some_and(|socket| state.next_socket != socket) {
-                return;
-            }
-            state.attached = None;
-            let viewer = state.viewer.take();
-            self.changed.send_replace(());
-            self.lifetime.notify_one();
-            viewer
-        };
-        // Viewer::drop takes the registry lock; never drop it while a view/registry lookup is locked.
-        drop(viewer);
+        let mut state = self.lock();
+        if socket.is_some_and(|socket| state.active != Some(socket)) {
+            return;
+        }
+        // Draining data leases retain admission until their bounded sends and cleanup finish.
+        state.closed = true;
+        state.attached = None;
+        self.changed.send_replace(());
+        self.lifetime.notify_one();
     }
     fn acquire(self: &Arc<Self>, ip: IpAddr) -> Result<Lease> {
         let mut state = self.lock();
         ensure!(ip == self.ip, "native view belongs to another address");
-        ensure!(state.viewer.is_some(), "native view is closed");
+        ensure!(!state.closed, "native view is closed");
         ensure!(
             state.active.is_none(),
             "native view already has a data socket"
@@ -104,33 +102,30 @@ impl View {
             changed: self.changed.subscribe(),
         })
     }
-    fn selection(&self) -> (String, u64) {
+    fn selection(&self) -> (String, u32) {
         let state = self.lock();
         (state.bot.clone(), state.generation)
     }
     fn commit(
         &self,
-        generation: u64,
+        generation: u32,
         bot: &str,
         source: Option<(u64, (i32, i32))>,
     ) -> Result<Value> {
         let mut state = self.lock();
-        ensure!(state.viewer.is_some(), "native view is closed");
+        ensure!(!state.closed, "native view is closed");
         ensure!(
             state.generation.checked_add(1) == Some(generation),
             "stale switch generation"
         );
+        ensure!(state.bot != bot, "bot is already selected");
         if let Some((socket, source)) = source {
             ensure!(
                 state.active == Some(socket) && state.attached == Some(source),
                 "native perspective attachment changed"
             );
         }
-        state
-            .viewer
-            .as_mut()
-            .context("native view is closed")?
-            .retarget(bot)?;
+        state.viewer.retarget(bot, source.map(|(_, binding)| binding.0))?;
         state.bot = bot.to_owned();
         state.generation = generation;
         state.attached = None;
@@ -140,7 +135,7 @@ impl View {
     async fn select(&self, a: &App, request: &Request) -> Result<Value> {
         let (bot, generation, active, attached) = {
             let state = self.lock();
-            ensure!(state.viewer.is_some(), "native view is closed");
+            ensure!(!state.closed, "native view is closed");
             ensure!(
                 state.generation.checked_add(1) == Some(request.generation),
                 "stale switch generation"
@@ -181,12 +176,12 @@ pub(super) struct Lease {
     view: Arc<View>,
     id: u64,
     pub(super) bot: String,
-    generation: u64,
+    generation: u32,
     pub(super) changed: watch::Receiver<()>,
 }
 impl Lease {
     pub(super) fn closed(&self) -> bool {
-        self.view.lock().viewer.is_none()
+        self.view.lock().closed
     }
     pub(super) fn release(&mut self) {
         let mut state = self.view.lock();
@@ -197,24 +192,28 @@ impl Lease {
             self.view.lifetime.notify_one();
         }
     }
-    pub(super) fn attached(&self, a: &App, attached: &Attachment) -> Result<bool> {
+    pub(super) fn attached(&self, a: &App, attached: &Attachment) -> bool {
         let mut state = self.view.lock();
-        if state.viewer.is_none()
+        if state.closed
             || state.active != Some(self.id)
             || state.generation != self.generation
             || a.cctv.binding(&self.bot) != Some((attached.player, attached.account))
         {
-            return Ok(false);
+            return false;
         }
         state.attached = Some((attached.player, attached.character));
-        self.view
-            .replies
-            .try_send(
-                json!({"type":"attached","bot":self.bot,"generation":self.generation,
-            "player":attached.player,"character":attached.character}),
-            )
-            .context("native control reply queue is full or closed")?;
-        Ok(true)
+        self.view.replies.send_replace(Some(json!({"type":"attached","bot":self.bot,"generation":self.generation,
+            "player":attached.player,"character":attached.character})));
+        true
+    }
+    pub(super) fn unavailable(&self) -> bool {
+        let mut state = self.view.lock();
+        if state.closed || state.active != Some(self.id) || state.generation != self.generation {
+            return false;
+        }
+        state.attached = None;
+        self.view.replies.send_replace(Some(json!({"type":"unavailable","bot":self.bot,"generation":self.generation})));
+        true
     }
 }
 impl Drop for Lease {
@@ -229,11 +228,11 @@ struct Owner {
 }
 impl Drop for Owner {
     fn drop(&mut self) {
-        self.view.close();
         self.cctv.forget_view(&self.token);
+        self.view.close();
     }
 }
-fn native_ip(
+pub(super) fn native_ip(
     a: &App,
     headers: &HeaderMap,
     peer: SocketAddr,
@@ -249,6 +248,7 @@ fn native_ip(
         ));
     }
     let mut headers = headers.clone();
+    // The spectator iframe is separate from the ordinary player's approved origin.
     headers.remove("origin");
     request_ip(a, &headers, peer).map_err(|e| (StatusCode::FORBIDDEN, e.to_string()))
 }
@@ -303,9 +303,11 @@ pub(in crate::server) async fn socket(
         })
 }
 async fn send(socket: &mut WebSocket, value: Value) -> Result<()> {
+    let text = value.to_string();
+    ensure!(text.len() <= 512, "native control reply exceeded 512 bytes");
     tokio::time::timeout(
         Duration::from_secs(2),
-        socket.send(Message::Text(value.to_string().into())),
+        socket.send(Message::Text(text.into())),
     )
     .await
     .context("native control viewer is too slow")??;
@@ -315,7 +317,7 @@ async fn run(
     a: &App,
     owner: &Owner,
     socket: &mut WebSocket,
-    mut replies: mpsc::Receiver<Value>,
+    mut replies: watch::Receiver<Option<Value>>,
 ) -> Result<()> {
     let (bot, generation) = owner.view.selection();
     send(socket, json!({"type":"ready","view":owner.token,"bot":bot,"generation":generation,"parent_origin":a.origin})).await?;
@@ -324,10 +326,11 @@ async fn run(
     let mut last_pong = Instant::now();
     let mut window = Instant::now();
     let mut commands = 0;
+    let mut frames = 0;
     loop {
         let deadline = {
             let state = owner.view.lock();
-            ensure!(state.viewer.is_some(), "native view is closed");
+            ensure!(!state.closed, "native view is closed");
             state.active.is_none().then_some(state.deadline)
         };
         tokio::select! {
@@ -347,13 +350,20 @@ async fn run(
                 tokio::time::timeout(Duration::from_secs(2), socket.send(Message::Ping(vec![].into())))
                     .await.context("native control ping timed out")??;
             },
-            Some(reply) = replies.recv() => send(socket, reply).await?,
-            message = socket.recv() => match message {
+            changed = replies.changed() => {
+                changed.context("native attachment notifier closed")?;
+                let reply = replies.borrow_and_update().clone();
+                if let Some(reply) = reply { send(socket, reply).await?; }
+            },
+            message = socket.recv() => {
+                if window.elapsed() >= Duration::from_secs(1) { window = Instant::now(); commands = 0; frames = 0; }
+                frames += 1;
+                ensure!(frames <= 8, "native control frame rate exceeded");
+                match message {
                 None | Some(Ok(Message::Close(_))) => return Ok(()),
                 Some(Ok(Message::Pong(_))) => last_pong = Instant::now(),
                 Some(Ok(Message::Ping(_))) => {},
                 Some(Ok(Message::Text(text))) => {
-                    if window.elapsed() >= Duration::from_secs(1) { window = Instant::now(); commands = 0; }
                     commands += 1;
                     ensure!(commands <= 4, "native control command rate exceeded");
                     let request: Request = serde_json::from_str(&text).context("invalid native control command")?;
@@ -367,6 +377,7 @@ async fn run(
                 },
                 Some(Ok(Message::Binary(_))) => bail!("native control requires JSON text"),
                 Some(Err(error)) => return Err(error.into()),
+                }
             }
         }
     }

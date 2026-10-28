@@ -23,25 +23,7 @@ pub(super) async fn socket(
         Ok(cursor) => cursor,
         Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     };
-    let Some(origin) = &a.bot_view_origin else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "bot_view_origin must be configured for native bot viewing",
-        )
-            .into_response();
-    };
-    if headers.get("origin").and_then(|v| v.to_str().ok()) != Some(origin.as_str()) {
-        return (
-            StatusCode::FORBIDDEN,
-            "native bot view origin is not approved",
-        )
-            .into_response();
-    }
-    let mut forwarded = headers.clone();
-    // The native iframe has its own origin; preserve the existing player's origin policy on every other route.
-    forwarded.remove("origin");
-    let admitted = request_ip(&a, &forwarded, peer)
-        .map_err(|e| (StatusCode::FORBIDDEN, e.to_string()))
+    let admitted = control::native_ip(&a, &headers, peer)
         .and_then(|ip| Viewer::join(&a.cctv, &name, ip, true));
     let viewer = match admitted {
         Ok(v) => v,
@@ -202,25 +184,32 @@ impl Stream {
             }
         }
     }
-    async fn attach(a: &App, name: &str) -> Result<Attachment> {
-        tokio::time::timeout(Duration::from_secs(10), async {
+    async fn attach(a: &App, name: &str) -> Result<Option<Attachment>> {
+        let mut absent = false;
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
+                absent = false;
                 if let Some((player, account)) = a.cctv.binding(name)
                     && let Some(attached) = a.world.spectate(player, account).await?
                 {
                     return Ok::<_, anyhow::Error>(attached);
                 }
+                absent = true;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-        })
-        .await
-        .context("bot has no living session; it may be replacing a dead character or offline")?
+        }).await;
+        match result {
+            Ok(attached) => attached.map(Some),
+            Err(_) if absent => Ok(None),
+            Err(_) => bail!("bot attachment world lookup timed out"),
+        }
     }
     async fn bootstrap(
         &mut self,
         a: &App,
         name: &str,
         changes: &mut Option<tokio::sync::watch::Receiver<()>>,
+        lease: Option<&control::Lease>,
     ) -> Result<Option<(Attachment, Projection)>> {
         let mut stop = self.shutdown.clone();
         let hello = tokio::select! {
@@ -233,11 +222,37 @@ impl Stream {
             hello.id == wire::HELLO && Reader::new(&hello.body).utf()? == "123.5.1",
             "native bot viewer requires a 123.5.1 HELLO"
         );
-        let mut attached = tokio::select! {
+        let attached = tokio::select! {
             biased;
             _ = async { let _ = stop.wait_for(|stop| *stop).await; } => return Ok(None),
             _ = view_changed(changes) => return Ok(None),
             result = Self::attach(a,name) => result?,
+        };
+        let mut attached = match attached {
+            Some(attached) => attached,
+            None => {
+                let lease = lease.context("bot has no living session; it may be replacing a dead character or offline")?;
+                if !lease.unavailable() { return Ok(None); }
+                let mut poll = tokio::time::interval(Duration::from_secs(1));
+                poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = async { let _ = stop.wait_for(|stop| *stop).await; } => return Ok(None),
+                        _ = view_changed(changes) => return Ok(None),
+                        packet = self.input() => {
+                            packet?.context("viewer closed while source unavailable")?;
+                            self.ignored += 1;
+                        },
+                        _ = poll.tick() => {
+                            if let Some((player, account)) = a.cctv.binding(name)
+                                && let Some(attached) = tokio::time::timeout(Duration::from_secs(2), a.world.spectate(player, account))
+                                    .await.context("bot source availability lookup timed out")??
+                            { break attached; }
+                        }
+                    }
+                }
+            }
         };
         self.output(wire::MAP_INFO, std::mem::take(&mut attached.map))
             .await?;
@@ -291,7 +306,7 @@ impl Stream {
         mut lease: Option<&mut control::Lease>,
     ) -> Result<()> {
         let mut changes = lease.as_ref().map(|lease| lease.changed.clone());
-        let bootstrap = self.bootstrap(a, name, &mut changes).await?;
+        let bootstrap = self.bootstrap(a, name, &mut changes, lease.as_deref()).await?;
         let Some((mut attached, mut projection)) = bootstrap else {
             if *self.shutdown.borrow() {
                 return Ok(());
@@ -299,7 +314,7 @@ impl Stream {
             return self.transition(&mut lease).await;
         };
         if let Some(current) = &lease
-            && !current.attached(a, &attached)?
+            && !current.attached(a, &attached)
         {
             return self.transition(&mut lease).await;
         }

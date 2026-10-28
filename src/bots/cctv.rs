@@ -110,14 +110,13 @@ impl Cctv {
                 "native view registry is full; retry shortly".into(),
             ));
         }
-        loop {
-            let token = format!("{:032x}", rand::random::<u128>());
-            if let std::collections::hash_map::Entry::Vacant(entry) =
-                registry.views.entry(token.clone())
-            {
+        let token = format!("{:032x}", rand::random::<u128>());
+        match registry.views.entry(token.clone()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(Arc::downgrade(view));
-                return Ok(token);
-            }
+                Ok(token)
+            },
+            std::collections::hash_map::Entry::Occupied(_) => Err((StatusCode::SERVICE_UNAVAILABLE, "native view identifier collision".into())),
         }
     }
     pub(crate) fn view(&self, token: &str) -> Option<Arc<crate::server::bot_view::control::View>> {
@@ -355,8 +354,9 @@ impl Viewer {
     }
 }
 impl Viewer {
-    pub(crate) fn retarget(&mut self, name: &str) -> Result<()> {
+    pub(crate) fn retarget(&mut self, name: &str, source: Option<i32>) -> Result<()> {
         let mut registry = self.cctv.lock();
+        ensure!(source.is_none_or(|source| registry.feeds.get(&self.name).and_then(|feed| feed.session).is_some_and(|(player, _)| player == source)), "native perspective source changed");
         ensure!(
             registry
                 .feeds
@@ -453,11 +453,11 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         for _ in 0..20 {
-            viewers[0].retarget("B").unwrap();
-            viewers[0].retarget("A").unwrap();
+            viewers[0].retarget("B", None).unwrap();
+            viewers[0].retarget("A", None).unwrap();
         }
-        viewers[0].retarget("B").unwrap();
-        assert!(viewers[0].retarget("missing").is_err());
+        viewers[0].retarget("B", None).unwrap();
+        assert!(viewers[0].retarget("missing", None).is_err());
         {
             let registry = cctv.lock();
             assert_eq!(registry.ips.values().sum::<usize>(), 32);
@@ -474,6 +474,17 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS
         );
         assert!(Viewer::join(&cctv, "A", ip, false).is_ok());
+    }
+
+    #[test]
+    fn perspective_retargets_recheck_source_at_commit() {
+        let cctv = Cctv::test_catalogue();
+        let mut viewer = Viewer::join(&cctv, "A", IpAddr::from([127,0,0,1]), true).unwrap();
+        cctv.entered("A", 3, 11);
+        assert!(viewer.retarget("B", Some(1)).is_err());
+        assert_eq!(cctv.lock().feeds["A"].viewers, 1);
+        viewer.retarget("B", Some(3)).unwrap();
+        assert_eq!(cctv.lock().feeds["B"].viewers, 1);
     }
 
     #[test]

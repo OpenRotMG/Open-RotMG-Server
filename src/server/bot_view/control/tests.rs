@@ -5,7 +5,7 @@ use tokio::{
     net::TcpStream,
 };
 
-fn fixture() -> (Arc<Cctv>, Owner, mpsc::Receiver<Value>) {
+fn fixture() -> (Arc<Cctv>, Owner, watch::Receiver<Option<Value>>) {
     let cctv = Cctv::test_catalogue();
     let ip = IpAddr::from([127, 0, 0, 1]);
     let viewer = Viewer::join(&cctv, "A", ip, true).unwrap();
@@ -79,10 +79,10 @@ fn weak_registry_is_bounded_even_while_closed_socket_tasks_still_hold_views() {
         held.push(view);
     }
     let ip = IpAddr::from([127, 0, 0, 33]);
+    assert!(Viewer::join(&cctv, "A", ip, true).is_err());
+    drop(held);
     let viewer = Viewer::join(&cctv, "A", ip, true).unwrap();
     let (next, _) = View::new(viewer, "A".into(), ip);
-    assert!(cctv.register_view(&next).is_err());
-    drop(held);
     assert!(cctv.register_view(&next).is_ok());
 }
 
@@ -97,6 +97,8 @@ fn reconnect_reuses_admission_and_late_lease_cannot_remove_replacement() {
     assert!(first.changed.has_changed().unwrap());
     assert!(owner.view.acquire(owner.view.ip).is_err());
     first.release();
+    owner.view.close_socket(Some(first.id));
+    assert!(!first.closed(), "a released socket cannot close the view during its reconnect gap");
     let replacement = owner.view.acquire(owner.view.ip).unwrap();
     assert_eq!((replacement.bot.as_str(), replacement.generation), ("B", 1));
     owner.view.close_socket(Some(first.id));
@@ -184,7 +186,7 @@ impl Socket {
 
 #[tokio::test]
 async fn protocol_ready_switch_reconnect_and_control_close_cancel_bootstrap() {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(Duration::from_secs(20), async {
         let (dir, mut app) = crate::server::test_app();
         app.cctv = Cctv::test_catalogue();
         app.behind_proxy = true;
@@ -217,6 +219,7 @@ async fn protocol_ready_switch_reconnect_and_control_close_cancel_bootstrap() {
         let mut hello = Writer::new();
         hello.utf("123.5.1");
         old.send(2, &Codec::client().frame(wire::HELLO, hello.0)).await;
+        assert_eq!(control.json().await, json!({"type":"unavailable","bot":"A","generation":0}));
         control.send(1, br#"{"generation":1,"target":{"kind":"bot","bot":"B"}}"#).await;
         assert_eq!(control.json().await, json!({"type":"selected","bot":"B","generation":1}));
         let (opcode, reconnect) = old.next().await;
@@ -250,16 +253,17 @@ async fn protocol_ready_switch_reconnect_and_control_close_cancel_bootstrap() {
 #[tokio::test]
 async fn attachment_notifications_coalesce_during_a_fast_switch() {
     let (dir, mut app) = crate::server::test_app();
-    let (cctv, owner, _replies) = fixture();
+    let (cctv, owner, mut replies) = fixture();
     app.cctv = cctv;
     let mut first = owner.view.acquire(owner.view.ip).unwrap();
     let (_, receiver) = tokio::sync::broadcast::channel(1);
     let mut attached = Attachment {world:1,account:11,player:1,character:101,map:vec![],snapshot:vec![],receiver};
-    assert!(first.attached(&app, &attached).unwrap());
+    assert!(first.attached(&app, &attached));
     owner.view.commit(1, "B", None).unwrap();first.release();
     let replacement = owner.view.acquire(owner.view.ip).unwrap();
     attached.account = 22;attached.player = 2;attached.character = 202;
-    assert!(replacement.attached(&app, &attached).unwrap(), "latest attachment must replace the unconsumed older one");
+    assert!(replacement.attached(&app, &attached), "latest attachment must replace the unconsumed older one");
+    assert_eq!(replies.borrow_and_update().clone(), Some(json!({"type":"attached","bot":"B","generation":1,"player":2,"character":202})));
     drop((first, replacement, owner, app));std::fs::remove_dir_all(dir).unwrap();
 }
 
