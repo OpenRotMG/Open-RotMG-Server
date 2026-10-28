@@ -14,10 +14,10 @@ export async function prepare(api){
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   const enemies=new Set(JSON.parse(execFileSync('python3',['-c',"import json,xml.etree.ElementTree as E; print(json.dumps([int(e.attrib['type'],0) for e in E.parse('data/objects.xml').getroot() if e.find('Enemy') is not None]))"],{encoding:'utf8'})));
   const candidates=map.entities.filter(e=>e.kind===0x6d8).map(entity=>({entity,clearance:Math.min(...map.entities.filter(e=>e.id!==entity.id&&enemies.has(e.kind)).map(e=>Math.hypot(e.pos.x-entity.pos.x,e.pos.y-entity.pos.y)))})).filter(({entity:e})=>{
-    for(let dx=-8;dx<=8;dx++)for(let dy=-8;dy<=8;dy++)if(blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))return false;
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)if(blocked.has([Math.floor(e.pos.x)-5+dx,Math.floor(e.pos.y)+dy].join(',')))return false;
     return true;
   }).sort((a,b)=>b.clearance-a.clearance);
-  assert(candidates.length,'No natural Leviathan has a walkable observation area');root=candidates[0].entity;
+  assert(candidates.length,'No natural Leviathan has a walkable arrival');root=candidates[0].entity;
   await writeFile(output('natural-placement.json'),JSON.stringify({layout:info.realm_layout,root,candidates}));
   return {...spec,position:{x:root.pos.x-5,y:root.pos.y}};
 }
