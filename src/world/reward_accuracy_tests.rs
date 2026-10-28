@@ -112,6 +112,92 @@ async fn ent_tincture_death_preserves_rolls_and_has_one_eligible_owner() {
 }
 
 #[tokio::test]
+async fn private_loot_reentry_deadline_and_committed_pickup() {
+    let (mut w, store, owners) = reward_world().await;
+    let (account, character) = owners[0];
+    let player = w
+        .players
+        .iter()
+        .find(|(_, p)| p.character.id == character)
+        .unwrap()
+        .0
+        .to_owned();
+    let outsider = *w
+        .players
+        .iter()
+        .find(|(_, p)| p.character.id == owners[1].1)
+        .unwrap()
+        .0;
+    let pos = w.players[&player].pos;
+    let bag = w.loot_bag(pos, Some(account), vec![0xb0c, 0xb0c]).unwrap();
+    let deadline = w.bag_expiry[&bag];
+    let source = Slot {
+        object: bag,
+        slot: 0,
+        kind: 0xb0c,
+    };
+    let destination = |id| Slot {
+        object: id,
+        slot: 4,
+        kind: -1,
+    };
+    assert!(w.swap(outsider, source, destination(outsider)).is_err());
+    assert_eq!(w.entities[&bag].items[0], 0xb0c);
+    assert!(!w.entities[&bag].reserved);
+    w.leave(player).unwrap();
+    let loaded = store.load(account, character).await.unwrap();
+    let reentered = w.enter(loaded, None).unwrap();
+    assert_ne!(reentered, player);
+    assert_eq!(w.bag_expiry[&bag], deadline);
+    assert!(w.entities[&bag].accessible(account));
+    assert!(!w.entities[&bag].accessible(owners[1].0));
+    w.now = deadline - 50;
+    let plan = w.swap(reentered, source, destination(reentered)).unwrap();
+    w.step();
+    assert_eq!(w.now, deadline);
+    assert!(w.entities[&bag].reserved);
+    assert_eq!(w.players[&reentered].character.items[4], -1);
+    let revisions = store
+        .exchange_collected(
+            vec![crate::store::InventoryWrite {
+                id: plan.character,
+                account: plan.account,
+                revision: plan.revision,
+                items: plan.items.clone(),
+            }],
+            plan.vaults.clone(),
+            plan.collected,
+        )
+        .await
+        .unwrap();
+    w.finish_inventory(plan, Ok(revisions[0])).unwrap();
+    assert!(
+        w.swap(
+            reentered,
+            source,
+            Slot {
+                object: reentered,
+                slot: 5,
+                kind: -1
+            }
+        )
+        .is_err()
+    );
+    w.step();
+    assert!(!w.entities.contains_key(&bag));
+    assert!(!w.bag_expiry.contains_key(&bag));
+    assert_eq!(
+        store.load(account, character).await.unwrap().items[4],
+        0xb0c
+    );
+    let saved = w.leave(reentered).unwrap();
+    let mut restarted = World::new(w.content.clone(), w.map.clone()).unwrap();
+    let id = restarted.enter(saved, None).unwrap();
+    assert_eq!(restarted.players[&id].character.items[4], 0xb0c);
+    assert!(restarted.bag_expiry.is_empty());
+}
+
+#[tokio::test]
 async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor() {
     let (mut w, _store, owners) = reward_world().await;
     let mut successes = 0;
