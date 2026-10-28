@@ -48,7 +48,6 @@ export async function run(game){
   for(const s of samples)for(const p of s.view.projectiles.filter(p=>p.owner===sprite.id)){
     const key=s.view.time_ms+':'+p.start.x+':'+p.start.y;if(!volleys.has(key))volleys.set(key,new Map());volleys.get(key).set(p.id,p);
   }
-  // Kithio supplies fan counts and nominal cadence, not authenticated original timing: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Midland.cs#L15-L50
   game.check('selected projectile speed and lifetime reach the native session',[...volleys.values()].some(v=>[...v.values()].every(p=>p.speed===speed&&p.lifetime_ms===lifetime)));
   game.check('complete reconstructed fan has '+count+' rays spaced seven degrees',[...volleys.values()].some(v=>{const a=[...v.values()].map(p=>p.angle).sort((a,b)=>a-b);return a.length===count&&a.slice(1).every((n,i)=>Math.abs(n-a[i]-7*Math.PI/180)<.001);}));
   const deadlines=[...new Set(samples.map(s=>entity(s)?.next_shot).filter(Number.isFinite))].sort((a,b)=>a-b);

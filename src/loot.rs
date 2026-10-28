@@ -1173,7 +1173,8 @@ pub(crate) fn god_loot(
 }
 
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if potion_damage(kind).is_some() || matches!(kind, 0x91d | 0x91e) {
+    let mut items = if potion_damage(kind).is_some() || matches!(kind, 0x624..=0x626 | 0x91d | 0x91e) {
+        // Sprite tier candidates roll independently, not as an exclusive choice: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L77-L86
         god_equipment(content, kind, rng)
     } else if independent(kind) {
         let mut items = Vec::new();
