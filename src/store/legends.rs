@@ -57,8 +57,10 @@ impl Store {
             let tx = db.transaction()?;
             let mut xml = format!("<FameList timespan=\"{span}\">");
             let mut mine_listed = false;
+            // Seeded/legacy bot lives lack a provable zero-fame baseline: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1049
+            let eligible = "(NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=json_extract(snapshot,'$.account')) OR json_extract(snapshot,'$.lifetime.completeness')='complete')";
             {
-                let mut q = tx.prepare("SELECT snapshot,receipt FROM deaths WHERE died_at>?1 AND died_at<=?2 ORDER BY json_extract(receipt,'$.total') DESC,died_at ASC,character ASC LIMIT 20")?;
+                let mut q = tx.prepare(&format!("SELECT snapshot,receipt FROM deaths WHERE died_at>?1 AND died_at<=?2 AND {eligible} ORDER BY json_extract(receipt,'$.total') DESC,died_at ASC,character ASC LIMIT 20"))?;
                 for row in q.query_map(params![cutoff,now],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))? {
                     let (raw, paid) = row?;
                     let receipt=death_awards::decode_receipt(&paid)?;
@@ -68,7 +70,7 @@ impl Store {
                 }
             }
             if !mine_listed && account > 0 && character > 0 {
-                let mut q = tx.prepare("SELECT snapshot,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2 AND died_at>?3 AND died_at<=?4")?;
+                let mut q = tx.prepare(&format!("SELECT snapshot,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2 AND died_at>?3 AND died_at<=?4 AND {eligible}"))?;
                 for row in q.query_map(params![account,character,cutoff,now],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))? {
                     let (raw, paid) = row?;
                     let receipt=death_awards::decode_receipt(&paid)?;
@@ -134,49 +136,102 @@ mod tests {
         preset.lifetime = FameLifetime::known_only();
         preset.exp = 1_000_000;
         preset.fame = 1000;
-        let bot = store.persona_character("persona:v1:LegendBot".into(), vec![preset], vec![[-1;8]], 0, None).await.unwrap().account;
+        let bot = store
+            .persona_character(
+                "persona:v1:LegendBot".into(),
+                vec![preset],
+                vec![[-1; 8]],
+                0,
+                None,
+            )
+            .await
+            .unwrap()
+            .account;
         let mut seeded = Vec::new();
         for _ in 0..21 {
-            let mut ch = store.create(bot, content.get(WIZARD).unwrap()).await.unwrap();
+            let mut ch = store
+                .create(bot, content.get(WIZARD).unwrap())
+                .await
+                .unwrap();
             ch.lifetime = FameLifetime::known_only();
             ch.exp = 1_000_000;
             ch.fame = 1000;
             let raw = serde_json::to_string(&ch).unwrap();
             let id = ch.id;
-            store.call(move |db| {
-                db.execute("UPDATE characters SET stats=?1 WHERE id=?2", params![raw,id])?;
-                Ok(())
-            }).await.unwrap();
-            ch.gain_experience(&content, 1000, &mut rand::thread_rng()).unwrap();
+            store
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE characters SET stats=?1 WHERE id=?2",
+                        params![raw, id],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            ch.gain_experience(&content, 1000, &mut rand::thread_rng())
+                .unwrap();
             ch.alive = false;
             ch.hp = 0;
             store.death(ch, "fixture".into()).await.unwrap();
             seeded.push(id);
         }
         let now = 2_000_000_000;
-        let mut earned = store.create(bot, content.get(WIZARD).unwrap()).await.unwrap();
-        earned.gain_experience(&content, 100_000, &mut rand::thread_rng()).unwrap();
+        let mut earned = store
+            .create(bot, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        earned
+            .gain_experience(&content, 100_000, &mut rand::thread_rng())
+            .unwrap();
         earned.alive = false;
         earned.hp = 0;
         store.death(earned.clone(), "fixture".into()).await.unwrap();
         let human = death(&store, &content, human, now).await;
         let human_id = human.id;
-        store.call(move |db| {
-            let raw: String = db.query_row("SELECT snapshot FROM deaths WHERE character=?1", [human_id], |r|r.get(0))?;
-            let mut ch: Character = serde_json::from_str(&raw)?;
-            ch.lifetime = FameLifetime::known_only();
-            let receipt = death_awards::DeathFameReceipt::paid(&ch, 0, death_awards::ReceiptPolicy::LegacyPaid)?;
-            db.execute("UPDATE deaths SET snapshot=?1,receipt=?2 WHERE character=?3", params![serde_json::to_string(&ch)?,serde_json::to_string(&receipt)?,human_id])?;
-            db.execute("UPDATE deaths SET died_at=?1", [now])?;
-            Ok(())
-        }).await.unwrap();
+        store
+            .call(move |db| {
+                let raw: String = db.query_row(
+                    "SELECT snapshot FROM deaths WHERE character=?1",
+                    [human_id],
+                    |r| r.get(0),
+                )?;
+                let mut ch: Character = serde_json::from_str(&raw)?;
+                ch.lifetime = FameLifetime::known_only();
+                let receipt = death_awards::DeathFameReceipt::paid(
+                    &ch,
+                    0,
+                    death_awards::ReceiptPolicy::LegacyPaid,
+                )?;
+                db.execute(
+                    "UPDATE deaths SET snapshot=?1,receipt=?2 WHERE character=?3",
+                    params![
+                        serde_json::to_string(&ch)?,
+                        serde_json::to_string(&receipt)?,
+                        human_id
+                    ],
+                )?;
+                db.execute("UPDATE deaths SET died_at=?1", [now])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         let archived = store.fame(bot, seeded[0]).await.unwrap();
         for span in ["week", "month", "all"] {
-            let xml = store.legends_at(span.into(), bot, seeded[0], now).await.unwrap();
+            let xml = store
+                .legends_at(span.into(), bot, seeded[0], now)
+                .await
+                .unwrap();
             let rows = ids(&xml, "FameListElem");
-            assert_eq!(rows.len(), 2, "{span}: seeded rows must not consume the top twenty");
+            assert_eq!(
+                rows.len(),
+                2,
+                "{span}: seeded rows must not consume the top twenty"
+            );
             assert!(rows.contains(&earned.id) && rows.contains(&human.id));
-            assert!(ids(&xml, "MyFameListElem").is_empty(), "seeded own-row must also stay excluded");
+            assert!(
+                ids(&xml, "MyFameListElem").is_empty(),
+                "seeded own-row must also stay excluded"
+            );
         }
         assert_eq!(store.fame(bot, seeded[0]).await.unwrap(), archived);
     }
