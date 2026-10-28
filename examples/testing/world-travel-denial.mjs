@@ -29,7 +29,7 @@ export async function run(game){
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1000});
   const denied=await save('after-refusal');
   const log=await readFile(join(root,'native','server.log'),'utf8');
-  game.check('full-origin portal handler executes a recorded refusal',log.split('\n').filter(Boolean).map(line=>JSON.parse(line)).some(row=>row.fields?.message==='portal transfer refused: destination full'&&row.fields.player===before.session.player&&row.fields.destination===initial.session.world));
+  game.check('full-origin portal handler executes a recorded refusal',log.split('\n').filter(line=>line.startsWith('{')).map(line=>JSON.parse(line)).some(row=>row.fields?.message==='portal transfer refused: destination full'&&row.fields.player===before.session.player&&row.fields.destination===initial.session.world));
   game.check('refusal retains the same living source session and exact inventory',denied.lifecycle.alive&&JSON.stringify(denied.session)===JSON.stringify(before.session)&&JSON.stringify(denied.character)===JSON.stringify(before.character));
   await game.act({keys:[],duration_ms:700},{name:'full-origin-refusal',when:v=>v.session.player===denied.session.player&&v.lifecycle.alive});
   await game.act({keys:['w'],duration_ms:300});
