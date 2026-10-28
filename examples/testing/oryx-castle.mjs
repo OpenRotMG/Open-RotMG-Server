@@ -25,7 +25,8 @@ export async function run(game){
   }
   await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
   await api({op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
-  await game.act({keys:[],duration_ms:1500},{name:'castle-armor',when:()=>true});
+  if(mode==='armor')await game.act({keys:[],duration_ms:1500},{name:'castle-armor',when:()=>true});
+  else await game.act({keys:[],duration_ms:100});
   const before=await save('armor-before'),population=await map();
   const armor=population.entities.filter(e=>e.kind===0xd7e&&(mode==='armor'?e.parent!==null:e.parent===null)).sort((a,b)=>distance(a.pos,before.view.position)-distance(b.pos,before.view.position))[0];
   assert(armor&&distance(armor.pos,before.view.position)<5,'Requested authored/spawned armor absent');
