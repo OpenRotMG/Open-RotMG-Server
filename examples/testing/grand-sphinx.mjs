@@ -98,7 +98,7 @@ export async function run(game){
   for(let n=0;n<100;n++){
     const scene=await map();sphinx=scene.entities.find(e=>e.kind===0xd54);if(sphinx)break;
     const here=(await game.observe()).position;
-    const rank=e=>Math.hypot(e.pos.x-here.x,e.pos.y-here.y)+(e.kind===0x928?scene.width+scene.height:0);
+    const rank=e=>Math.hypot(e.pos.x-here.x,e.pos.y-here.y)+([0x928,0x91b].includes(e.kind)?scene.width+scene.height:0);
     const root=scene.entities.filter(e=>[0x678,0x67d,0x668,0xd56,0xd59,0x928,0x91b,0x675].includes(e.kind)&&!attempted.has(e.id)).sort((a,b)=>rank(a)-rank(b))[0];
     assert(root,'No unattempted qualifying Realm source remains');attempted.add(root.id);
     await prepareScout({kind:'teleport',position:root.pos});await protect();
