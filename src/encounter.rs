@@ -317,7 +317,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0x918 => (
             Orbit {
                 anchor: Anchor::Parent,
-                radius: 10.,
+                radius: crate::dungeon::snake::PET_RADIUS,
             },
             nr_speed(7.5),
             1000,
