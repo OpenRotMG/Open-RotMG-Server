@@ -36,7 +36,7 @@ export async function run(game){
     }
     async function key(page,key,code,vk){for(const type of ['keyDown','keyUp'])await page.call('Input.dispatchKeyEvent',{type,key,code,windowsVirtualKeyCode:vk});}
     async function say(index,text,viewer,name,recipients){
-      const before=(await game.observe()).game_ms;
+      const before=(await game.observe()).game_ms,offset=(await readFile(join(root(),'server.log'),'utf8')).length;
       const action=viewer.act({keys:[],duration_ms:2800},{name,when:v=>v.game_ms>=before+1900});
       const input=(async()=>{
         const deadline=Date.now()+10000;while((await game.observe()).paused){assert(Date.now()<deadline,'Native action did not unpause');await delay(20);}
@@ -45,10 +45,10 @@ export async function run(game){
         }else await key(pages[index],...text);
       })();
       const results=await Promise.allSettled([action,input]);for(const r of results)if(r.status==='rejected')throw r.reason;
-      const events=(await readFile(join(root(),'server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l));
+      const events=(await readFile(join(root(),'server.log'),'utf8')).slice(offset).split('\n').slice(0,-1).filter(l=>l.startsWith('{')).map(l=>JSON.parse(l));
       const published=events.filter(e=>e.fields?.message==='public chat delivered'),delivered=published.at(-1);
-      if(recipients!==undefined)game.check(name+' server audience',delivered?.fields.recipients===recipients);
-      if(text==='')game.check('empty chat closes without publication',published.length===observations.at(-1).published);
+      if(recipients!==undefined)game.check(name+' server audience',published.length===1&&delivered.fields.recipients===recipients);
+      if(text==='')game.check('empty chat closes without publication',published.length===0);
       observations.push({name,text,published:published.length,delivered,speaker:await game.inspect(),listener:await peer.inspect()});
       await writeFile(join(root(),'chat-observations.json'),JSON.stringify(observations,null,2));
     }
@@ -59,7 +59,7 @@ export async function run(game){
     await game.act({keys:[],duration_ms:600},{name:'yell-speaker',when:()=>true});
     if(dungeon){
       await say(0,'/who',game,'dungeon-who');
-      await say(0,['Insert','Insert',45],game,'nexus-escape');
+      await game.act({keys:['Insert'],duration_ms:2800});
       game.check('ordinary Insert escape transfers only speaker to Nexus',(await game.inspect()).view.session.world===-2&&(await peer.inspect()).view.session.world===initial.view.session.world);
       await say(0,'separate904',peer,'different-world-listener',1);
       await game.act({keys:[],duration_ms:600},{name:'different-world-speaker',when:()=>true});
