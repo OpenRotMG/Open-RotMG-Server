@@ -1,7 +1,7 @@
 import {writeSync} from 'node:fs';
 import {readFile, writeFile, readdir, rename, open} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {nativeClock} from './native-clock.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
@@ -69,12 +69,20 @@ async function eachClient(selected, action) {
 async function connect(spec) {
   if (!config.browserTools) throw new Error('Native control requires the installed managed browser helper path');
   if(!Number.isInteger(spec.port)||spec.port<1024||spec.port>65535||typeof spec.target!=='string'||!Number.isInteger(spec.actor))throw new Error('Each native target requires an explicit local port, target id and durable actor id');
-  const {managedCDP, scriptOwner} = await import(pathToFileURL(config.browserTools).href);
-  let send;const spans=new AsyncLocalStorage();
-  const managed=await managedCDP(spec.port,spec.target,scriptOwner(),(method,params)=>{
+  const helper=pathToFileURL(config.browserTools),{scriptOwner}=await import(helper.href);
+  const registry=await import(new URL('./tabs.mjs',helper).href),owner=scriptOwner();
+  const tab={...await registry.browserIdentity(spec.port),target:spec.target};
+  await registry.ensureTarget(tab);registry.assertOwner(tab,owner);
+  for(const notice of registry.takeNotices(owner))console.error(notice);
+  const activity='native:'+randomUUID();let activityOpen=false,send;const spans=new AsyncLocalStorage();
+  const methods=new Set(['Network.enable','Runtime.evaluate','Emulation.setFocusEmulationEnabled','Input.dispatchKeyEvent','Input.dispatchMouseEvent']);
+  const activityUse=(operation,work)=>{const start=performance.now();try{return work();}finally{console.error(JSON.stringify({event:'native_browser_activity',operation,wall_ms:performance.now()-start}));}};
+  const managed=(method,params)=>{
+    if(!methods.has(method))throw Error('Unsupported native CDP method: '+method);
+    registry.assertOwner(tab,owner);
     const span=spans.getStore();if(span)span.rawStart=performance.now();
     return send(method,params).finally(()=>{if(span)span.rawEnd=performance.now();});
-  });
+  };
   const call=(method,params={})=>{
     const span={start:performance.now()};
     return spans.run(span,async()=>{try{return await managed(method,params);}finally{
@@ -125,9 +133,11 @@ async function connect(spec) {
     const noDispatch=setTimeout(()=>{if(!holdState.started)rejectRelease(Error('Native DOWN was not dispatched before its deadline'));},10000);
     try{await released;return {down,started:holdState.started,released:releasedAt};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);holdState=null;}
   }
-  try { await call('Network.enable'); }
-  catch(error) { closing=true;ws.close();throw error; }
-  return {...spec,call,evaluate,clock,frames,hold,abort:error=>holdState?.abort(error),close:()=>{closing=true;ws.close();}};
+  const close=async()=>{closing=true;ws.close();if(activityOpen){activityOpen=false;activityUse('end',()=>registry.finishUse(activity));}};
+  // Registry fsync belongs outside the finite native operation, where it cannot freeze lease renewal or input release.
+  try {activityUse('begin',()=>registry.beginUse(tab,activity));activityOpen=true;await call('Network.enable');}
+  catch(error) {try{await close();}catch(cleanup){throw new AggregateError([error,cleanup],'Native connection and activity cleanup failed');}throw error;}
+  return {...spec,call,evaluate,clock,frames,hold,abort:error=>holdState?.abort(error),close};
 }
 let leaseStarted=false, leaseTimer, leaseRenewal, leaseError;
 async function startLease(){
@@ -340,4 +350,4 @@ try {
   try {await save(failed);} catch(e){failed.evidence_error=String(e);}
   console.error(JSON.stringify(failed));
   process.exitCode=1;
-} finally {clearInterval(leaseTimer);for(const c of clients)c.close();}
+} finally {clearInterval(leaseTimer);await eachClient(clients,c=>c.close());}
