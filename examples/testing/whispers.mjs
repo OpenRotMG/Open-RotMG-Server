@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile} from 'node:fs/promises';
+import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
@@ -7,22 +7,35 @@ export const fixture={class:0x30e,level:20,seed:905,world:-2,position:'spawn',eq
 const clients=[],events=[];
 async function until(test,label){const end=Date.now()+30000;while(!await test()){assert(Date.now()<end,label);await delay(30);}}
 function textPacket(bytes){
-  let i=5;const utf=()=>{const n=bytes.readUInt16BE(i);i+=2;const s=bytes.toString('utf8',i,i+n);i+=n;return s;};
+  let i=0;const utf=()=>{const n=bytes.readUInt16BE(i);i+=2;const s=bytes.toString('utf8',i,i+n);i+=n;return s;};
   const name=utf();i+=9;return {name,recipient:utf(),text:utf()};
 }
 export async function beforeNavigate({browser,signal}){
-  const client={browser,name:['Whispa','Whispb','Whispc'][clients.length],texts:[],sent:[],lists:0};assert(client.name);
+  const client={browser,name:['Whispa','Whispb','Whispc'][clients.length],texts:[],sent:[],lists:0},streams=new Map();assert(client.name);
   client.cdp=await connect({port:browser.port,target:browser.target,url:'about:blank',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
     if(e.method==='Network.requestWillBeSent'&&e.params.request.url.endsWith('/legacy-api/char/list')){client.request=e.params.requestId;client.lists++;}
     if(!['Network.webSocketFrameReceived','Network.webSocketFrameSent'].includes(e.method)||e.params.response.opcode!==2)return;
-    const b=Buffer.from(e.params.response.payloadData,'base64');
-    if(e.method.endsWith('Received')&&b[4]===25)client.texts.push(textPacket(b));
-    if(e.method.endsWith('Sent')&&b[4]===69)client.sent.push(b.toString('utf8',7,7+b.readUInt16BE(5)));
+    try{
+      const incoming=e.method.endsWith('Received'),stream=e.params.requestId+incoming;
+      if(!streams.has(stream)){
+        const key=Buffer.from(incoming?'72c5583cafb6818995cbd74b80':'311f80691451c71b09a13a2a6e','hex'),s=Array.from({length:256},(_,i)=>i);let j=0;
+        for(let i=0;i<256;i++){j=(j+s[i]+key[i%key.length])&255;[s[i],s[j]]=[s[j],s[i]];}
+        streams.set(stream,{s,i:0,j:0,buffer:Buffer.alloc(0)});
+      }
+      const state=streams.get(stream);state.buffer=Buffer.concat([state.buffer,Buffer.from(e.params.response.payloadData,'base64')]);assert(state.buffer.length<=2097152);
+      while(state.buffer.length>=5){
+        const n=state.buffer.readInt32BE();assert(n>=5&&n<=1048576);if(state.buffer.length<n)break;
+        const id=state.buffer[4],body=Buffer.from(state.buffer.subarray(5,n));state.buffer=state.buffer.subarray(n);
+        for(let k=0;k<body.length;k++){state.i=(state.i+1)&255;state.j=(state.j+state.s[state.i])&255;[state.s[state.i],state.s[state.j]]=[state.s[state.j],state.s[state.i]];body[k]^=state.s[(state.s[state.i]+state.s[state.j])&255];}
+        if(incoming&&id===25)client.texts.push(textPacket(body));
+        if(!incoming&&id===69)client.sent.push(body.toString('utf8',2,2+body.readUInt16BE(0)));
+      }
+    }catch(error){client.error=String(error);}
   }});signal.addEventListener('abort',()=>client.cdp.close(),{once:true});clients.push(client);
-  await client.cdp.call('Network.enable');
+  await client.cdp.call('Network.enable',{maxPostDataSize:65536});
 }
 export async function enter({browser}){
-  const c=clients.find(c=>c.browser.target===browser.target),cdp=c.cdp;assert(c.request,'Observed char/list request required');
+  const c=clients.find(c=>c.browser.target===browser.target),cdp=c.cdp;await until(()=>c.request,'Observed char/list request required');
   const {postData}=await cdp.call('Network.getRequestPostData',{requestId:c.request});c.guid=new URLSearchParams(postData).get('guid');assert(c.guid,'Observed disposable guest GUID required');
   const named=await cdp.eval(`fetch('/legacy-api/account/setName',{method:'POST',body:new URLSearchParams(${JSON.stringify({guid:c.guid,password:'',name:c.name})})}).then(async r=>({ok:r.ok,text:await r.text()}))`);
   assert(named.ok&&named.text.includes('<Success'),JSON.stringify(named));
@@ -56,6 +69,7 @@ export async function run(game){
       try{await work();finished=true;}finally{c.inputOpen=false;}
     })();
     const results=await Promise.allSettled([action,typing]);for(const r of results)if(r.status==='rejected')throw r.reason;
+    for(const c of clients)assert(!c.error,c.error);
     events.push({label,actor:g.actor,sent:[...c.sent],texts:clients.map(c=>({name:c.name,texts:[...c.texts]}))});
   }
   const say=(g,c,text,label)=>input(g,c,async()=>{await key(c,'Enter','Enter',13);await send(c,'Input.insertText',{text});await key(c,'Enter','Enter',13);},label);
