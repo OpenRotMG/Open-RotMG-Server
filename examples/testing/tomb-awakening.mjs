@@ -10,7 +10,7 @@ export async function run(game){
   const api=async command=>{const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:'tomb-awakening-'+(++serial),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok&&s.status!=='failed',JSON.stringify(s));return s;};
   const start=await game.observe();
   const map=async()=>{const r=await fetch(config.origin+'/dev/map?player='+start.session.player,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);return r.json();};
-  const layout=await map(),objectives=layout.entities.filter(e=>e.kind===0xd29),statues=layout.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind));assert(objectives.length>=3&&statues.length===3);
+  const layout=await map(),objectives=layout.entities.filter(e=>e.kind===0xd29),statues=layout.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind));assert(objectives.length===3&&statues.length===3,'Seed12 must have three required objectives and three statues');
   const records=[],support=[],expiry=new Map(),humans=[game.actor];let protection=0;
   const save=async label=>{const s={label,state:await game.inspect(),map:await map()};records.push(s);await writeFile(join(out,'awakening.json'),JSON.stringify(records));return s;};
   async function protect(){
@@ -27,10 +27,12 @@ export async function run(game){
   async function advance(ms,capture){
     while(ms>0){await protect();const step=Math.min(ms,10000,protection-(await game.observe()).game_ms);await game.act({keys:[],duration_ms:step},capture);capture=undefined;ms-=step;}
   }
-  const wizard={class:0x30e,level:20,seed:860,world:start.session.world,equipment:[0xb08,0xa2e,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60],controller:'game_bot',profile:'Bugmaster'};
+  const profiles=['DrFlux','GHZD','DrtySausge','Kryz','TKGP','HighTech','TheDezaq','Nutzz','RobbyHobby','FnSjeZZe','Cronus','Demoted','Vkm','WhiteBad','Cody','LPZ','BRUTUS','JayTheBig'];
+  const wizard={class:0x30e,level:20,seed:860,world:start.session.world,equipment:[0xb08,0xa2e,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60],controller:'game_bot'};
   async function squad(objective){
     for(let n=0;n<6;n++){
-      const actor=(await api({op:'spawn',spec:{...wizard,guid:'tomb-squad-'+objective.id+'-'+n,position:{x:objective.pos.x-1+(n%3),y:objective.pos.y-2+Math.floor(n/3)}}})).result.actor;
+      const profile=profiles[support.length];assert(profile,'Prepared support roster exhausted');
+      const actor=(await api({op:'spawn',spec:{...wizard,profile,guid:'tomb-squad-'+objective.id+'-'+n,position:{x:objective.pos.x-1+(n%3),y:objective.pos.y-2+Math.floor(n/3)}}})).result.actor;
       support.push(actor);
       await api({op:'cheat',actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
       await api({op:'cheat',actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
