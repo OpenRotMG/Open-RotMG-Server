@@ -12,7 +12,7 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  leader=map.entities.find(e=>e.kind===0x623&&Array.from({length:7},(_,i)=>!blocked.has([Math.floor(e.pos.x)-i,Math.floor(e.pos.y)].join(','))).every(Boolean));
+  leader=map.entities.find(e=>e.kind===0x623&&[-3,-2,-1,0,1,2,3].every(dx=>[-3,-2,-1,0,1,2,3].every(dy=>!blocked.has([Math.floor(e.pos.x)-3+dx,Math.floor(e.pos.y)+dy].join(',')))));
   assert(leader,'No natural Desert Werewolf with a clear approach');
   await writeFile(join(process.env.QA_RESULTS_DIR,'natural-family.json'),JSON.stringify(map.entities.filter(e=>e.camp===leader.camp)));
   return {...spec,position:{x:leader.pos.x-3,y:leader.pos.y}};
@@ -47,10 +47,16 @@ export async function run(game){
   const shots=samples.flatMap(s=>s.view.projectiles),ids=kind=>new Set(samples.flatMap(family).filter(e=>e.kind===kind).map(e=>e.id));
   game.check('unharmed Werewolf fires selected speed/lifetime',shots.some(p=>p.owner===leader.id&&p.speed===60&&p.lifetime_ms===2000));
   for(const [kind,lifetime] of [[0x620,600],[0x622,2000]])game.check(kind+': Wargs move and fire selected speed/lifetime',samples.some(s=>family(s).some(e=>e.kind===kind&&family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.1)))&&shots.some(p=>ids(kind).has(p.owner)&&p.speed===60&&p.lifetime_ms===lifetime));
+  const origin=(await game.observe()).position;
+  await act({keys:['d'],duration_ms:200});const right=(await game.observe()).position;
+  await act({keys:['s'],duration_ms:200});const down=(await game.observe()).position;
+  const ux=right.x-origin.x,uy=right.y-origin.y,vx=down.x-right.x,vy=down.y-right.y,det=ux*vy-uy*vx;
+  game.check('native movement supplies a non-collinear observed input basis',Math.abs(det)>.05);
+  await writeFile(join(process.env.QA_RESULTS_DIR,'movement-basis.json'),JSON.stringify({origin,right,down,det}));
   async function shoot(id,stop){
     for(let n=0;n<160;n++){
       const s=await game.inspect(),e=entity(s,id);if(!e||stop?.(e))return;
-      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,a=-Math.PI/4,x=dx*Math.cos(a)+dy*Math.sin(a),y=-dx*Math.sin(a)+dy*Math.cos(a);
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,a=-Math.PI/4,x=(dx*vy-dy*vx)/det,y=(ux*dy-uy*dx)/det;
       const approach=Math.hypot(dx,dy)>5;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
       await act({keys,duration_ms:250,target:{entity:id,camera_angle:a,fire:!approach}});
