@@ -27,6 +27,7 @@ export async function run(observer){
   }
   // Period evidence establishes the three attack families, not exact timers: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
   for(let n=0;n<6;n++)await sample({keys:[],duration_ms:n===5?3500:6000},n===4?{name:'stheno-blind-ring',when:()=>true}:undefined);
+  await writeFile(join(root,'stheno-phases.json'),JSON.stringify({boss,samples,shots:[...shots.values()]}));
   const stages=new Set(samples.map(s=>entity(s,boss.id)?.stage));
   game.check('Stheno runs silver swarm blind-ring and repeat stages',[0,1,2,3].every(n=>stages.has(n)));
   game.check('native client sees both selected Stheno projectile families',[...shots.values()].some(p=>p.owner===boss.id&&p.speed===70&&p.lifetime_ms===1500)&&[...shots.values()].some(p=>p.owner===boss.id&&p.speed===62&&p.lifetime_ms===2000));
@@ -37,7 +38,6 @@ export async function run(observer){
   game.check('swarm appears in its phase and is removed for blind rings',samples.some(s=>entity(s,boss.id)?.stage===1&&s.diagnostic.entities.some(e=>e.kind===0x919&&e.parent===boss.id))&&samples.some(s=>entity(s,boss.id)?.stage===2&&!s.diagnostic.entities.some(e=>e.kind===0x919&&e.parent===boss.id)));
   const masks=samples.map(s=>s.view.objects.find(e=>e.id===boss.id)?.condition_mask).filter(Number.isInteger);
   game.check('native Stheno alternates invulnerable and vulnerable',masks.some(m=>m&(1<<24))&&masks.some(m=>!(m&(1<<24))));
-  await writeFile(join(root,'stheno-phases.json'),JSON.stringify({boss,samples,shots:[...shots.values()]}));
   for(let n=0;n<24&&entity(await game.inspect(),boss.id);n++)await game.act({keys:[],duration_ms:1000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
   await game.act({keys:[],duration_ms:500});
   const defeated=await save('stheno-defeated'),cleared=await map(defeated.view.session.player);
