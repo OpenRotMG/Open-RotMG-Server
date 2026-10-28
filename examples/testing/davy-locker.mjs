@@ -16,6 +16,7 @@ export async function run(game){
   async function save(name,client=game){const state=await client.inspect();samples.push({name,state});await writeFile(join(out,'davy-observations.json'),JSON.stringify(samples));return state;}
   async function scene(){const v=await game.observe(),r=await fetch(config.origin+'/dev/map?player='+v.session.player,{headers:{Authorization:'Bearer '+token}});assert(r.ok);const m=await r.json();assert(m.width===132&&m.height===132);return m;}
   async function protect(client){const v=await client.observe(),old=protections.get(client.actor);if(old?.player===v.session.player&&v.game_ms<old.until)return;await api({op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protections.set(client.actor,{player:v.session.player,until:v.game_ms+60000});}
+  async function add(spec){const p=guarded(await game.join(spec));participants.push(p);await protect(p);return p;}
   function route(m,from,to,mask){
     const blocked=new Set(m.blocked.map(([x,y])=>y*m.width+x));
     for(const e of m.entities){const c=DOORS.findIndex(k=>e.kind===k||e.kind===k+1);if(c>=0&&(mask&(1<<c)))blocked.delete(Math.floor(e.pos.y)*m.width+Math.floor(e.pos.x));}
@@ -46,7 +47,7 @@ export async function run(game){
   game.check('ordinary admission key is consumed and same Wizard enters Locker',entry.view.map.name==="Davy Jones's Locker"&&entry.view.session.character===initial.view.session.character&&entry.view.character.items[4]===-1);
   await protect(game);await game.act({keys:[],duration_ms:800},{name:'locker-entry',when:()=>true});
   const original=await scene(),purple=original.entities.find(e=>e.kind===KEYS[0]);assert(purple);await writeFile(join(out,'davy-initial-map.json'),JSON.stringify(original));
-  const peer=guarded(await game.join({...fixture,world:entry.view.session.world,position:{x:purple.pos.x+1.5,y:purple.pos.y},backpack:[-1,...Array(7).fill(0xa23)]}));participants.push(peer);await protect(peer);
+  const peer=await add({...fixture,world:entry.view.session.world,position:{x:purple.pos.x+1.5,y:purple.pos.y},backpack:[-1,...Array(7).fill(0xa23)]});
   await peer.act({keys:['a','w'],duration_ms:120});
   game.check('prepared peer collects natural purple key through native movement',!(await scene()).entities.some(e=>e.id===purple.id));
   await save('peer-purple-discovery',peer);
@@ -103,5 +104,5 @@ export async function run(game){
   await game.act({keys:[],duration_ms:1500},{name:'locker-captain-reached',when:()=>true});const reached=await save('captain-reached');
   game.check('populated four-color route reveals actual captain on approach',reached.view.lifecycle.alive&&reached.diagnostic.entities.some(e=>e.id===marker.id&&e.stage===1));
   await writeFile(join(out,'davy-map.json'),JSON.stringify(await scene()));
-  return {game,peer,walk,scene,mask,route,reserve};
+  return {game,peer,walk,scene,mask,route,reserve,add};
 }
