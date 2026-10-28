@@ -42,7 +42,13 @@ export async function run(game){
   const d=Math.hypot(boss.pos.x-s.view.position.x,boss.pos.y-s.view.position.y);
   if(d>9.7){await move({x:boss.pos.x-9,y:boss.pos.y});continue;}
   if(d<7.5&&boss.stage!==6){await move({x:boss.pos.x-9,y:boss.pos.y});continue;}
-  await heal();await game.act({keys:[],duration_ms:1000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+  let movement=[];
+  if(boss.stage===6){
+   const center={x:20+bx*20+.5,y:20+by*20+.5},angle=Math.atan2(s.view.position.y-center.y,s.view.position.x-center.x)+.6;
+   movement=keys(s.view.position,{x:center.x+8.5*Math.cos(angle),y:center.y+8.5*Math.sin(angle)});
+   if(s.view.character.hp<650&&s.view.character.mp>=90)movement.push(' ');
+  }else await heal();
+  await game.act({keys:movement,duration_ms:boss.stage===6?500:1000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
  }
  const clear=await log('defeat');
  game.check('ordinary native shots defeat Mixcoatl after actual phases',!clear.diagnostic.entities.some(e=>e.kind===0xdc3)&&stages.has(1)&&stages.has(6));
