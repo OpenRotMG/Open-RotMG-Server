@@ -32,10 +32,14 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 }
 
 #[tokio::test]
-async fn demon_and_elf_minion_deaths_roll_public_loot_once_not_per_contributor() {
+async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor() {
     let (mut w, _store, owners) = reward_world().await;
     let mut successes = 0;
-    for kind in (0x669..=0x66b).chain(0x605..=0x607) {
+    for kind in (0x669..=0x66b)
+        .chain(0x605..=0x607)
+        .chain(0x65f..=0x661)
+        .chain(0x91d..=0x91e)
+    {
         for seed in 0..64 {
             let expected = crate::loot::rewards(
                 &w.content,
@@ -56,12 +60,42 @@ async fn demon_and_elf_minion_deaths_roll_public_loot_once_not_per_contributor()
                 w.defeat_entity(id).unwrap();
                 let mut actual = Vec::new();
                 for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
-                    assert!(bag.bag_owners.is_empty());
-                    actual.extend(bag.items.iter().copied().filter(|item| *item >= 0));
+                    let follower = matches!(kind, 0x91d | 0x91e);
+                    assert_eq!(
+                        bag.bag_owners.len(),
+                        if follower && bag.kind == 0x500 {
+                            contributors
+                        } else {
+                            0
+                        }
+                    );
+                    for item in bag.items.iter().copied().filter(|item| *item >= 0) {
+                        let bound = w.content.objects[&(item as u16)].soulbound;
+                        let owned = bound || (follower && bag.kind != 0x500);
+                        assert_eq!(!bag.extra_stats.is_empty(), owned);
+                        if owned {
+                            assert!(
+                                owners[..contributors]
+                                    .iter()
+                                    .any(|(owner, _)| bag.extra_stats.contains(&(54, *owner)))
+                            );
+                            assert!(!bag.accessible(owners[5].0));
+                        } else if follower {
+                            assert!(
+                                owners[..contributors]
+                                    .iter()
+                                    .all(|(owner, _)| bag.accessible(*owner))
+                            );
+                            assert!(!bag.accessible(owners[5].0));
+                        }
+                        actual.push(item);
+                    }
                 }
+                actual.sort_unstable();
+                let mut expected: Vec<_> = expected.iter().map(|id| i32::from(*id)).collect();
+                expected.sort_unstable();
                 assert_eq!(
-                    actual,
-                    expected.iter().map(|id| i32::from(*id)).collect::<Vec<_>>(),
+                    actual, expected,
                     "kind={kind:#x}, seed={seed}, contributors={contributors}"
                 );
                 assert!(!w.entities.contains_key(&id));
