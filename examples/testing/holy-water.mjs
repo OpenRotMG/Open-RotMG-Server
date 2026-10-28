@@ -4,10 +4,9 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const root=process.env.QA_RESULTS_DIR;
 const base={class:0x31d,level:20,seed:887,world:'pirate-cave',position:'spawn',equipment:[-1,0xb29,-1,-1],backpack:[0xc21,0xc21,0xc21,0xc21,0xa50,0xa51,0xc41,0xc21],stats:[670,252,50,25,50,50,0,0]};
-let grave,realmSpawn;
+let grave;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
-  realmSpawn={x,y};
   const scout=await api({op:'spawn',spec:{...base,world:1,position:{x,y},guid:'holy-water-scout',controller:'direct',profile:null}});
   const state=await api({op:'inspect',actor:scout.result.actor});
   const report=JSON.parse(await readFile(join(root,'native/result.json'),'utf8'));
@@ -78,7 +77,6 @@ export async function run(game){
   }
   for(let n=0;n<40&&!((await sick.observe()).character.conditions&bit(5));n++)await sick.act({keys:[],duration_ms:200});
   game.check('natural Kage mine applies Sick',(await sick.observe()).character.conditions&bit(5));
-  await prepare(sick.actor,{kind:'teleport',position:realmSpawn});
   await prepare(sick.actor,{kind:'vitals',hp:100,mp:252});
   sample=await use(sick,'1',4,'holy-water-sick-first',true);
   game.check('first Holy Water consumes and cures Sick without its 100 HP heal',Boolean(sample.before.character.conditions&bit(5))&&!(sample.after.character.conditions&bit(5))&&sample.after.character.hp>=100&&sample.after.character.hp<=100+hpRegen(sample));
