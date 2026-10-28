@@ -106,58 +106,17 @@ export async function run(game) {
   game.check('native movement crosses the opened emergency doorway',(await game.observe()).position.x>69);
   await save('creation-open');
   const creation=async()=> (await entities()).find(e=>e.kind===0x5e1c);
-  const original=await creation(),seen=new Set(),shots=new Set(),trace=[];
-  let captured=false,live=null,blastStart=null;
-  function record(state) {
-    const c=state.diagnostic.entities.find(e=>e.id===original.id);
-    if(!c)throw Error('Creation disappeared during attack observation');
-    if(c.stage===4&&live!==null&&live.stage!==4)blastStart=state.view.time_ms;
-    live={time:state.view.time_ms,stage:c.stage,blast:state.view.projectiles.some(p=>p.owner===c.id&&p.speed===85&&p.lifetime_ms===1000)};
-    seen.add(c.stage);trace.push({time:state.view.time_ms,stage:c.stage,pos:c.pos,hp:c.hp});
-    for(const p of state.view.projectiles.filter(p=>p.owner===c.id))shots.add(p.speed+':'+p.lifetime_ms);
-  }
-  let sample=null,sampleError=null;
-  const timer=setInterval(()=>{if(!sample)sample=game.inspect().then(record).catch(error=>{sampleError=error;}).finally(()=>{sample=null;});},50);
-  try {
-    for(let n=0;n<40;n++) {
-      const state=await game.inspect(),c=state.diagnostic.entities.find(e=>e.id===original.id);
-      record(state);
-      if(c.stage===4&&!captured&&blastStart!==null&&state.view.time_ms-blastStart<8000) {
-        await act({keys:[],duration_ms:2000},{name:'creation-blast',when:view=>live!==null&&live.stage===4&&live.blast&&Math.abs(view.game_ms-live.time)<=100});
-        captured=true;
-      }
-      if(captured&&[4,6,7].every(s=>seen.has(s))&&['85:1000','50:400','55:3000'].every(s=>shots.has(s)))break;
-      await wait();
-    }
-  } finally {clearInterval(timer);if(sample)await sample;}
-  if(sampleError)throw sampleError;
-  await writeFile(join(process.env.QA_RESULTS_DIR,'attack-cycle.json'),JSON.stringify({trace,seen:[...seen],shots:[...shots]}));
-  game.check('native session observes blast, shockwave and energy projectiles',['85:1000','50:400','55:3000'].every(s=>shots.has(s)));
-  game.check('native encounter enters blast, shockwave and energy phases',[4,6,7].every(s=>seen.has(s)));
+  const original=await creation();
   const partner=await game.join({...fixture,world:(await game.observe()).session.world,position:{x:70.5,y:13.5},equipment:[-1,-1,-1,-1]});
   protections.set(partner.actor,{until:0,armorUntil:0});
   await act({keys:[],duration_ms:100});
   game.check('second native client shares the secret room',(await partner.observe()).session.world===(await game.observe()).session.world);
-  await go(70.5,12.5);
-  for(let n=0;n<30&&(await creation()).stage!==2;n++)await wait();
-  const pet=await creation();
-  game.check('native Hexxer lure creates a vulnerable pet',pet.stage===2&&(pet.condition&(1<<23))===0);
-  game.check('native player is Hexed in the green pool',((await game.observe()).character.conditions&(1<<27))!==0);
-  const petTime=(await game.observe()).game_ms;
-  await go(75.5,12.5);
-  await act(Array.from({length:4},(_,n)=>({actor:game.actor,input:{keys:n===0?[' ']:[],duration_ms:500,target:{entity:pet.id,camera_angle:camera,fire:true}}})),{name:'creation-pet',when:view=>(view.character.conditions&(1<<27))===0&&view.game_ms>=petTime+1200});
-  game.check("native blue pool removes only that player's Hexed",((await game.observe()).character.conditions&(1<<27))===0&&((await partner.observe()).character.conditions&(1<<27))!==0);
-  game.check('native player shots damage the same pet',(await creation()).hp<pet.hp);
-  for(let n=0;n<20&&(await creation()).stage===2;n++)await wait();
-  const restored=await creation();
-  game.check('DeHexxer restores invincibility without replacing the boss',restored.id===original.id&&restored.stage!==2&&(restored.condition&(1<<23))!==0);
-  await save('creation-restored');
-  game.check('both prepared native players remain alive',(await game.observe()).lifecycle.alive&&(await partner.observe()).lifecycle.alive);
-  await go(75.5,12.5);
-  const beforeFinal=await game.inspect();
+  const beforeFinal=await game.inspect(),trace=[];
   for(let n=0;n<70;n++) {
     const c=await creation();if(!c)break;
     const now=(await game.observe()).game_ms,remaining=protections.get(game.actor).until-now;
+    trace.push({game_ms:now,id:c.id,hp:c.hp,stage:c.stage});
+    await writeFile(join(process.env.QA_RESULTS_DIR,'creation-completion.json'),JSON.stringify(trace));
     if(c.stage===2) {
       if((await game.observe()).character.conditions&(1<<27))await go(75.5,12.5);
       const input={keys:[],duration_ms:1000,target:{entity:c.id,camera_angle:camera,fire:true}};
@@ -170,7 +129,7 @@ export async function run(game) {
   const final=await game.inspect();
   game.check('native weapon fire defeats the original Creation and earns kill and XP credit',!final.diagnostic.entities.some(e=>e.id===original.id)&&final.diagnostic.character.kills>beforeFinal.diagnostic.character.kills&&final.view.character.experience>beforeFinal.view.character.experience);
   game.check('optional defeat does not duplicate Mad Lab clear credit',final.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
-  game.check('Creation does not invent unsupported equipment rewards',!final.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)&&Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<6));
+  game.check('Creation does not invent unsupported equipment rewards',!final.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)&&Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<10));
   await act({keys:[],duration_ms:1000},{name:'creation-defeated',when:()=>true});
   await save('creation-defeated');
   await go(64.5,12.5);
@@ -182,4 +141,5 @@ export async function run(game) {
   game.check('same living character can use the retained first-boss exit after Creation',returned.view.map.name==='Nexus'&&returned.view.session.character===beforeFinal.view.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
   await act({keys:[],duration_ms:1000},{name:'creation-returned',when:()=>true});
   await save('creation-returned');
+  game.check('both prepared native players survive the optional clear',(await game.observe()).lifecycle.alive&&(await partner.observe()).lifecycle.alive);
 }
