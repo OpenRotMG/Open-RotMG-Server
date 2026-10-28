@@ -3426,6 +3426,7 @@ impl World {
                 } else {
                     Controller::Human
                 },
+                last_move_at: if tx.is_some() { 0 } else { self.now },
                 tx,
                 known: BTreeSet::new(),
                 tick_stats: tick_stats::Cache::default(),
@@ -3472,7 +3473,6 @@ impl World {
                 attack_count: 0,
                 attack_suppressed: None,
                 last_move: 0,
-                last_move_at: self.now,
                 motion: ObservedMotion {
                     position: pos,
                     time: 0,
