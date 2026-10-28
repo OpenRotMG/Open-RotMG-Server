@@ -248,8 +248,22 @@ impl Directory {
         let kind = e.kind;
         let dungeon = e.name.clone();
         self.portals.get_mut(&opened).unwrap().expires = self.tick + portal.lifetime();
-        if locked.is_none() {
-            let name = w.players[&player].character.name.clone();
+        let name = &w.players[&player].character.name;
+        if locked.is_some() {
+            // Period unlock feedback belongs after commit, never reservation: https://www.youtube.com/watch?v=H44UToO5faY&t=9
+            let mut note = Writer::new();
+            note.i32(player)
+                .utf(&format!("Unlocked by {name}"))
+                .u32(0xff00ff00);
+            for p in w
+                .players
+                .values()
+                .filter(|p| !p.departing && p.persistence_failure.is_none())
+            {
+                send(p, wire::NOTIFICATION, note.0.clone());
+            }
+            w.broadcast_text("", &format!("{dungeon} unlocked by {name}"));
+        } else {
             w.broadcast_text("", &format!("{dungeon} opened by {name}!"));
         }
         let p = &w.players[&player];
