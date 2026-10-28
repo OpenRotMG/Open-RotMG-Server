@@ -65,12 +65,12 @@ export async function run(game){
   for(let n=0;n<100;n++){
     const scene=await map();sphinx=scene.entities.find(e=>e.kind===0xd54);if(sphinx)break;
     const here=(await game.observe()).position;
-    const root=scene.entities.filter(e=>[0x678,0x67d,0x668,0xd56,0xd59,0x91f,0x91b,0x675].includes(e.kind)&&!attempted.has(e.id)).sort((a,b)=>Math.hypot(a.pos.x-here.x,a.pos.y-here.y)-Math.hypot(b.pos.x-here.x,b.pos.y-here.y))[0];
+    const root=scene.entities.filter(e=>[0x678,0x67d,0x668,0xd56,0xd59,0x928,0x91b,0x675].includes(e.kind)&&!attempted.has(e.id)).sort((a,b)=>Math.hypot(a.pos.x-here.x,a.pos.y-here.y)-Math.hypot(b.pos.x-here.x,b.pos.y-here.y))[0];
     assert(root,'No unattempted qualifying Realm source remains');attempted.add(root.id);
     await travel(root.pos);await protect();
     const now=(await game.observe()).game_ms;if(now>=modifier){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifier=now+60000;}
     for(let hit=0;hit<100;hit++){
-      const state=await game.inspect(),target=state.diagnostic.entities.filter(e=>e.id===root.id||e.quest===root.id&&[0x920,0x91c,0x6c1,0x91d,0x924].includes(e.kind)).sort((a,b)=>Number(![0x91d,0x924].includes(a.kind))-Number(![0x91d,0x924].includes(b.kind)))[0];
+      const state=await game.inspect(),target=state.diagnostic.entities.filter(e=>e.id===root.id||e.quest===root.id&&[0x92d,0x91c,0x6c1,0x91d,0x929].includes(e.kind)).sort((a,b)=>Number(![0x91d,0x929].includes(a.kind))-Number(![0x91d,0x929].includes(b.kind)))[0];
       if(!target)break;await fire(target.id);
     }
     await game.act({keys:[],duration_ms:200});await save('admission-source-'+root.id);
