@@ -297,7 +297,7 @@ fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
             } else {
                 0.
             };
-            w.shoot(id, 1000, bullet, kind, start, angle).unwrap();
+            w.shoot(id, 1000, bullet + 1, kind, start, angle).unwrap();
         }
         let damage: i32 = w.bullets.iter().map(|b| b.damage).sum();
         for b in &w.bullets {
@@ -309,7 +309,12 @@ fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
             assert!(!b.spec.wavy && !b.spec.parametric && !b.spec.boomerang);
         }
         let admitted = w.players[&id].character.shots;
-        assert!(w.shoot(id, 1001, count as u8, kind, start, 0.).is_err());
+        let period = if kind == 0xc05 { 285 } else { 171 };
+        let angle = -item.arc.to_radians() * (count - 1) as f32 / 2.;
+        assert!(
+            w.shoot(id, 1000 + period - 3, count as u8 + 1, kind, start, angle)
+                .is_err()
+        );
         assert_eq!(w.players[&id].character.shots, admitted);
         for _ in 0..16 {
             w.step();
@@ -321,6 +326,9 @@ fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
             count as u64
         );
         assert!(w.bullets.iter().all(|b| b.owner != id));
+        w.shoot(id, 1000 + period, count as u8 + 1, kind, start, angle)
+            .unwrap();
+        assert_eq!(w.players[&id].character.shots, admitted + 1);
     }
 }
 

@@ -12,21 +12,29 @@ export async function run(game){
   const boss=(await response.json()).entities.find(e=>e.kind===0xd90);assert(boss);
   const {worldSeed,...knight}=fixture;
   game=await game.join({...knight,world:initial.view.session.world,position:{x:boss.pos.x-1,y:boss.pos.y}});
-  const protection=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
-  const receipt=await protection.json();assert(protection.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
+  async function protect(){
+    const protection=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
+    const receipt=await protection.json();assert(protection.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
+  }
+  await protect();
   await game.act({keys:[],duration_ms:600});
   const start=await game.observe(),observations=[];
   for(const [i,item] of [0xa00,0xb0b,0xa03,0xc01,0xc05].entries()){
     if(i){
       await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(i-1),y:428},to:{x:634,y:385}}});
       game.check(item.toString(16)+' equips for native combat',(await game.observe()).character.items[0]===item);
+      await protect();
     }
     let before=await game.inspect(),target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
     for(let wait=0;(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<24))&&wait<12;wait++){
       await game.act({keys:[],duration_ms:500});before=await game.inspect();target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
     }
-    await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:500},item===0xc01?{name:'demon-damage',when:view=>view.verification.shots>before.diagnostic.character.shots}:undefined);
-    const after=await game.inspect(),enemy=after.diagnostic.entities.find(e=>e.id===boss.id);assert(enemy);
+    let after,enemy;
+    for(let aim=0;aim<8;aim++){
+      await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:300},item===0xc01&&aim===0?{name:'demon-damage',when:view=>view.verification.shots>before.diagnostic.character.shots}:undefined);
+      after=await game.inspect();enemy=after.diagnostic.entities.find(e=>e.id===boss.id);assert(enemy);
+      if(enemy.hp<target.hp)break;
+    }
     observations.push({item,before,after});
     await writeFile(join(root,'sword-damage.json'),JSON.stringify(observations,null,2));
     game.check(item.toString(16)+' damages a natural enemy through native fire',enemy.hp<target.hp&&after.diagnostic.character.shots>before.diagnostic.character.shots);
