@@ -56,18 +56,18 @@ export async function run(game){
       let reached=false;
       for(let n=0;n<80;n++){
         const s=await game.inspect(),v=s.view;assert(v.lifecycle.alive,'Knight died during lair traversal');
-        const dx=p.x-v.position.x,dy=p.y-v.position.y;if(Math.max(Math.abs(dx),Math.abs(dy))<.6){reached=true;break;}
+        const dx=p.x-v.position.x,dy=p.y-v.position.y;if(Math.max(Math.abs(dx),Math.abs(dy))<.3){reached=true;break;}
         const horizontal=Math.abs(dx)>Math.abs(dy),delta=horizontal?dx:dy;
         const keys=horizontal?(delta>0?['d','s']:['a','w']):(delta>0?['a','s']:['d','w']);
         const enemy=s.diagnostic.entities.filter(e=>e.hp>0&&e.kind>=0xd91&&e.kind<=0xdb2&&e.kind!==0xda2&&e.kind!==0xda3&&distance(v.position,e.pos)<3.2).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];
-        await sample({keys,duration_ms:Math.max(80,Math.min(450,Math.round(Math.abs(delta)/7.5*1000))),...(combat&&enemy?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
+        await sample({keys,duration_ms:Math.max(50,Math.min(450,Math.round(Math.abs(delta)/7.5*1000))),...(combat&&enemy?{target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}}:{})});
       }
       assert(reached,'Native movement did not reach '+JSON.stringify(p));
     }
   }
   await sample({keys:[],duration_ms:900},{name:'lair-entry',when:()=>true});
   async function emissions(id){
-    return (await readFile(join(root,'server.log'),'utf8')).split('\n').filter(line=>line.startsWith('{')).map(line=>JSON.parse(line)).filter(e=>e.fields?.message==='Lair trap detonated'&&e.fields.entity===id);
+    return (await readFile(join(root,'server.log'),'utf8')).split('\n').slice(0,-1).filter(line=>line.startsWith('{')).map(line=>JSON.parse(line)).filter(e=>e.fields?.message==='Lair trap detonated'&&e.fields.entity===id);
   }
   for(const kind of [0xda2,0xda3]){
     const v=await game.observe(),trap=map.entities.filter(e=>e.kind===kind).sort((a,b)=>distance(v.position,a.pos)-distance(v.position,b.pos))[0];assert(trap,'Natural lair trap missing');
