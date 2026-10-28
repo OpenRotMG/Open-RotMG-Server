@@ -2,7 +2,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import assert from 'node:assert/strict';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x300,level:20,seed:870,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[0xa14,-1,-1,-1],backpack:[0xa17,0xc0a,0xb21,0xc22,0xc29,-1,-1,-1],stats:[720,252,50,40,50,50,40,50]};
+export const fixture={class:0x300,level:20,seed:870,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[0xa14,-1,-1,-1],backpack:[0xa17,0xc0a,0xb21,0xc22,0xc29,-1,-1,-1],stats:[720,252,50,25,50,50,40,50]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
