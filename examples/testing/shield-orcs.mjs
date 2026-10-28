@@ -13,12 +13,13 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
+  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-map.json'),JSON.stringify(map));
   for(const e of map.entities.filter(e=>e.kind===0x900)){
     const king=map.entities.find(m=>m.camp===e.camp&&m.kind===0x901);assert(king);
     for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
       const position={x:Math.floor(king.pos.x)+dx+.5,y:Math.floor(king.pos.y)+dy+.5};
       if(Math.hypot(dx,dy)<1)continue;
-      if([-1,0,1].every(x=>[-1,0,1].every(y=>!blocked.has([Math.floor(position.x)+x,Math.floor(position.y)+y].join(','))))){
+      if(!blocked.has([Math.floor(position.x),Math.floor(position.y)].join(','))){
         queen=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(m=>m.camp===e.camp)));
         return {...spec,position};
       }
