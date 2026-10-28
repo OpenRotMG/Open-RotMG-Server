@@ -27,6 +27,8 @@ export async function run(game){
   game.check('unarmored native Wizard takes ordinary scorpion damage',exposed.view.character.hp<begin.view.character.hp);
   game.check('ordinary Green Magic causes no status effect',exposed.view.character.conditions===0);
   async function protect(id){
+    for(let n=0;n<65&&((await game.observe()).character.conditions&(1<<24));n++)await game.act({keys:[],duration_ms:1000});
+    assert(!((await game.observe()).character.conditions&(1<<24)),'Previous prepared protection did not expire');
     const path=join(process.env.QA_RESULTS_DIR,id+'.json');
     await writeFile(path,JSON.stringify({id,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
