@@ -2,16 +2,14 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import assert from 'node:assert/strict';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x300,level:20,seed:870,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[0xa14,-1,-1,-1],backpack:[0xa17,0xc0a,0xb21,0xc22,0xc29,-1,-1,-1],stats:[720,252,50,25,50,50,40,50]};
+export const fixture={class:0x300,level:20,seed:870,world:'undead-lair',worldSeed:12351,position:{x:14.5,y:120.5},equipment:[0xa14,-1,-1,-1],backpack:[0xa17,0xc0a,0xb21,0xc22,0xc29,-1,-1,-1],stats:[720,252,50,25,50,50,40,50]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const initial=await game.inspect();
-  const response=await fetch(config.origin+'/dev/map?player='+initial.diagnostic.player,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});assert(response.ok);
-  const boss=(await response.json()).entities.find(e=>e.kind===0xd90);assert(boss);
-  const {worldSeed,...rogue}=fixture;
-  game=await game.join({...rogue,world:initial.view.session.world,position:{x:boss.pos.x-1,y:boss.pos.y}});
-  await game.act({keys:[],duration_ms:600});
+  const initial=await game.inspect(),boss=initial.diagnostic.entities.find(e=>e.kind===0xd90);assert(boss);
+  assert(boss.pos.x===15.5&&boss.pos.y===120.5,'Seeded Septavius placement changed');
+  const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:'dagger-damage-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
+  const protection=await response.json();await writeFile(join(root,'protection.json'),JSON.stringify(protection,null,2));assert(response.ok&&protection.status==='succeeded',JSON.stringify(protection));
   const start=await game.observe(),observations=[];
   for(const [i,item] of [0xa14,0xa17,0xc0a,0xb21,0xc22,0xc29].entries()){
     if(i){
