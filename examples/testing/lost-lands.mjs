@@ -153,6 +153,10 @@ export async function run(game){
   }
   assert(admitted,'Bounded ordinary quest defeats did not admit a Lord; do not substitute a spawned fixture');
   await writeFile(join(out,'admission.json'),JSON.stringify({...admitted,preparation_actor:scout,attempted:records.filter(r=>r.label.startsWith('quest-')).map(r=>r.label)}));
+  // Let the old finite protection expire at the prepared refuge, not midway through combat.
+  assert(Math.hypot((await game.observe()).position.x-refuge.x,(await game.observe()).position.y-refuge.y)<.2,'Prepared refuge required before protection boundary');
+  while((await game.observe()).game_ms<until)await game.act({keys:[],duration_ms:Math.min(10000,until-(await game.observe()).game_ms)});
+  await protect();
   await at({x:admitted.x,y:admitted.y});
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-waiting',when:()=>true});
   const entry=await save('entry'),lord=entity(entry,admitted.entity);assert(lord?.hp===70000&&lord.stage===0);
@@ -168,6 +172,7 @@ export async function run(game){
   try{
     while((await game.observe()).game_ms<attackEnds){
       const current=entity(await game.inspect(),lord.id);
+      if(current.stage===8)break;
       // Contact during Vortex avoids making status coverage depend on a lucky firing angle.
       if(current.stage===6)await walk(current.pos,.5,lord.id);
       const remaining=attackEnds-(await game.observe()).game_ms;
