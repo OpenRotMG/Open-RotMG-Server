@@ -15,11 +15,8 @@ export async function run(game){
   game=await game.join({...knight,world:initial.view.session.world,position:{x:black.pos.x+2,y:black.pos.y}});
   async function split(parent,child,count,name){
     const before=await game.inspect(),ids=new Set(before.diagnostic.entities.map(e=>e.id));
-    for(let n=0;n<12;n++){
-      if(!(await game.inspect()).diagnostic.entities.some(e=>e.id===parent))break;
-      await game.act({keys:[],duration_ms:50,target:{entity:parent,camera_angle:-Math.PI/4,fire:true}});
-      await game.act({keys:[],duration_ms:250});
-    }
+    await game.act({keys:[],duration_ms:50,target:{entity:parent,camera_angle:-Math.PI/4,fire:true}});
+    await game.act({keys:[],duration_ms:250});
     await game.act({keys:[],duration_ms:1000},{name,when:()=>true});
     const after=await game.inspect(),children=after.diagnostic.entities.filter(e=>!ids.has(e.id)&&e.kind===child);
     observations.push({name,parent,child,count,before,after});await writeFile(join(process.env.QA_RESULTS_DIR,'splits.json'),JSON.stringify(observations));
@@ -29,6 +26,8 @@ export async function run(game){
     return children;
   }
   const medium=await split(black.id,0xd9c,4,'black-medium');
+  const position=(await game.observe()).position;
+  medium.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
   await split(medium[0].id,0xd9d,4,'black-little');
   const brown=map.entities.find(e=>e.kind===0xd9e&&[0,1,2].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));assert(brown,'No natural brown slime approach');
   game=await game.join({...knight,world:initial.view.session.world,position:{x:brown.pos.x+2,y:brown.pos.y}});
