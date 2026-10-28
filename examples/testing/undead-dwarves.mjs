@@ -13,10 +13,10 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  god=map.entities.find(e=>e.kind===0x640&&[-5,-4,-3,-2,-1,0].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
+  god=map.entities.find(e=>e.kind===0x640&&[-9,-8,-7,-6,-5,-4,-3,-2,-1,0].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
   assert(god,'No natural HighPlains camp with a clear approach');
   await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(e=>e.camp===god.camp)));
-  return {...spec,position:{x:god.pos.x-4,y:god.pos.y}};
+  return {...spec,position:{x:god.pos.x-8,y:god.pos.y}};
 }
 export async function run(game){
   const samples=[],shots=new Map();let protectedUntil=0,serial=0;
