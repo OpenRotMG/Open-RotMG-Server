@@ -138,9 +138,10 @@ async fn private_loot_reentry_deadline_and_committed_pickup() {
     };
     let destination = |id| Slot {
         object: id,
-        slot: 4,
+        slot: 11,
         kind: -1,
     };
+    assert_eq!(w.players[&outsider].character.items[11], -1);
     assert!(w.swap(outsider, source, destination(outsider)).is_err());
     assert_eq!(w.entities[&bag].items[0], 0xb0c);
     assert!(!w.entities[&bag].reserved);
@@ -152,11 +153,12 @@ async fn private_loot_reentry_deadline_and_committed_pickup() {
     assert!(w.entities[&bag].accessible(account));
     assert!(!w.entities[&bag].accessible(owners[1].0));
     w.now = deadline - 50;
+    assert_eq!(w.players[&reentered].character.items[11], -1);
     let plan = w.swap(reentered, source, destination(reentered)).unwrap();
     w.step();
     assert_eq!(w.now, deadline);
     assert!(w.entities[&bag].reserved);
-    assert_eq!(w.players[&reentered].character.items[4], -1);
+    assert_eq!(w.players[&reentered].character.items[11], -1);
     let revisions = store
         .exchange_collected(
             vec![crate::store::InventoryWrite {
@@ -177,7 +179,7 @@ async fn private_loot_reentry_deadline_and_committed_pickup() {
             source,
             Slot {
                 object: reentered,
-                slot: 5,
+                slot: 10,
                 kind: -1
             }
         )
@@ -187,13 +189,13 @@ async fn private_loot_reentry_deadline_and_committed_pickup() {
     assert!(!w.entities.contains_key(&bag));
     assert!(!w.bag_expiry.contains_key(&bag));
     assert_eq!(
-        store.load(account, character).await.unwrap().items[4],
+        store.load(account, character).await.unwrap().items[11],
         0xb0c
     );
     let saved = w.leave(reentered).unwrap();
     let mut restarted = World::new(w.content.clone(), w.map.clone()).unwrap();
     let id = restarted.enter(saved, None).unwrap();
-    assert_eq!(restarted.players[&id].character.items[4], 0xb0c);
+    assert_eq!(restarted.players[&id].character.items[11], 0xb0c);
     assert!(restarted.bag_expiry.is_empty());
 }
 
