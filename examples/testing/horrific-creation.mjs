@@ -144,10 +144,8 @@ export async function run(game) {
   game.check('native Hexxer lure creates a vulnerable pet',pet.stage===2&&(pet.condition&(1<<23))===0);
   game.check('native player is Hexed in the green pool',((await game.observe()).character.conditions&(1<<27))!==0);
   const petTime=(await game.observe()).game_ms;
-  await act([
-    {actor:game.actor,input:{keys:['d','s'],duration_ms:400}},
-    ...Array.from({length:4},(_,n)=>({actor:game.actor,input:{keys:n===0?[' ']:[],duration_ms:500,target:{entity:pet.id,camera_angle:camera,fire:true}}})),
-  ],{name:'creation-pet',when:view=>(view.character.conditions&(1<<27))===0&&view.game_ms>=petTime+1200});
+  await go(75.5,12.5);
+  await act(Array.from({length:4},(_,n)=>({actor:game.actor,input:{keys:n===0?[' ']:[],duration_ms:500,target:{entity:pet.id,camera_angle:camera,fire:true}}})),{name:'creation-pet',when:view=>(view.character.conditions&(1<<27))===0&&view.game_ms>=petTime+1200});
   game.check("native blue pool removes only that player's Hexed",((await game.observe()).character.conditions&(1<<27))===0&&((await partner.observe()).character.conditions&(1<<27))!==0);
   game.check('native player shots damage the same pet',(await creation()).hp<pet.hp);
   for(let n=0;n<20&&(await creation()).stage===2;n++)await wait();

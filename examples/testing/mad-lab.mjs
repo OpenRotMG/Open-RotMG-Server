@@ -57,8 +57,16 @@ export async function run(game){
         assert(blue,'No reachable local blue pool for the transformed fighter');
         await walk(blue.pos.x,blue.pos.y);continue;
       }
-      if(distance(e.pos,v.position)>6.5)await walk(e.pos.x-1,e.pos.y+1);
-      else await act({keys:[],duration_ms:2000,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+      const target={entity:id,camera_angle:-Math.PI/4,fire:true};
+      if(distance(e.pos,v.position)>(e.kind===0x976?3:6.5))await walk(e.pos.x-1,e.pos.y+1);
+      else if(e.kind===0x976){
+        await prepare({kind:'vitals',hp:v.character.stats.max_hp,mp:v.character.stats.max_mp});
+        if(e.hp>30000&&protectedUntil-v.game_ms>10000)await act(Array.from({length:3},()=>[
+          {actor:game.actor,input:{keys:[' '],duration_ms:500,target}},
+          {actor:game.actor,input:{keys:[],duration_ms:800,target}},
+        ]).flat());
+        else await act({keys:[' '],duration_ms:1000,target});
+      } else await act({keys:[],duration_ms:2000,target});
     }
     await save('failed-fight');throw Error('Native fight exceeded its bound: '+id);
   }
