@@ -116,3 +116,88 @@ fn creation_attacks_and_pool_cycle_preserve_identity_and_damage() {
     assert_eq!(w.entities[&id].hp, hp);
     assert_eq!(w.entities[&id].damage[&123], 500);
 }
+
+#[test]
+fn lab_pool_remedy_is_actor_driven_source_aware_and_player_local() {
+    let (mut w, first) = super::movement_tests::fixture(0xa7, false);
+    let pool = condition::bit(condition::HEXED) | condition::bit(condition::SPEEDY) | STUNNED;
+    let mut other = w.players[&first].character.clone();
+    other.id = 2;
+    other.account = 2;
+    let second = w.enter(other, None).unwrap();
+    w.players.get_mut(&second).unwrap().pos.x = 12.5;
+    w.players.get_mut(&first).unwrap().lab_conditions = pool;
+    w.lab_step();
+    assert_eq!(w.players[&first].lab_conditions, pool);
+    w.players.get_mut(&first).unwrap().lab_conditions = 0;
+    let green = w.players[&first].pos;
+    w.spawn_entity(lab::HEXXER, green, vec![]).unwrap();
+    w.lab_step();
+    assert_eq!(w.players[&first].conditions(w.now), pool);
+    assert_eq!(w.players[&second].conditions(w.now), 0);
+    w.players.get_mut(&first).unwrap().pos.x = 12.5;
+    w.lab_step();
+    assert_eq!(w.players[&first].lab_conditions, pool);
+    let blue = w.players[&first].pos;
+    w.spawn_entity(lab::DEHEXXER, blue, vec![]).unwrap();
+    w.players.get_mut(&second).unwrap().pos = green;
+    for effect in [
+        condition::HEXED,
+        condition::STUNNED,
+        condition::SPEEDY,
+        condition::QUIET,
+    ] {
+        w.players
+            .get_mut(&first)
+            .unwrap()
+            .statuses
+            .insert(effect, (0, 1000));
+    }
+    w.lab_step();
+    let cured = &w.players[&first];
+    assert_eq!(cured.lab_conditions, 0);
+    assert!(!cured.statuses.contains_key(&condition::HEXED));
+    assert_eq!(
+        cured.conditions(w.now),
+        STUNNED | condition::bit(condition::SPEEDY) | condition::bit(condition::QUIET)
+    );
+    assert_eq!(w.players[&second].lab_conditions, pool);
+    w.now = 1000;
+    w.lab_step();
+    assert_eq!(w.players[&first].conditions(w.now), 0);
+    assert_eq!(w.players[&second].conditions(w.now), pool);
+}
+
+#[test]
+fn lab_pool_blue_precedence_pause_and_terminal_player_cleanup() {
+    let (mut w, id) = super::movement_tests::fixture(0xa9, false);
+    let pool = condition::bit(condition::HEXED) | condition::bit(condition::SPEEDY) | STUNNED;
+    let position = w.players[&id].pos;
+    w.lab_step();
+    assert_eq!(w.players[&id].conditions(w.now), 0);
+    w.spawn_entity(lab::HEXXER, position, vec![]).unwrap();
+    let blue = w.spawn_entity(lab::DEHEXXER, position, vec![]).unwrap();
+    w.lab_step();
+    assert_eq!(w.players[&id].conditions(w.now), 0);
+    w.remove_entity(blue);
+    w.players.get_mut(&id).unwrap().paused = true;
+    w.lab_step();
+    assert_eq!(w.players[&id].lab_conditions, 0);
+    w.players.get_mut(&id).unwrap().paused = false;
+    w.lab_step();
+    assert_eq!(w.players[&id].lab_conditions, pool);
+    for terminal in 0..3 {
+        let player = w.players.get_mut(&id).unwrap();
+        player.lab_conditions = pool;
+        player.character.alive = terminal != 0;
+        player.death_pending = terminal == 1;
+        player.departing = terminal == 2;
+        player.statuses.insert(condition::QUIET, (0, 1000));
+        w.lab_step();
+        assert_eq!(w.players[&id].lab_conditions, 0);
+        assert_eq!(
+            w.players[&id].conditions(w.now),
+            condition::bit(condition::QUIET)
+        );
+    }
+}
