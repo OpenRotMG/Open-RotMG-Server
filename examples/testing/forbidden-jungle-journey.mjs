@@ -47,6 +47,9 @@ export async function run(game){
  const clear=await log('defeat');
  game.check('ordinary native shots defeat Mixcoatl after actual phases',!clear.diagnostic.entities.some(e=>e.kind===0xdc3)&&stages.has(1)&&stages.has(6));
  game.check('one Jungle clear is committed',clear.diagnostic.character.jungles===1);
+ await game.act({keys:[],duration_ms:2200});const retired=await log('boss-totems-retired'),totems=retired.diagnostic.entities.filter(e=>e.kind===0xdc4);
+ game.check('four Boss Totems remain and stop firing after their own boss dies',totems.length===4&&!retired.view.projectiles.some(p=>totems.some(e=>e.id===p.owner))&&retired.diagnostic.character.jungles===1);
+ await writeFile(join(out,'boss-phases.json'),JSON.stringify([...stages]));
  const bag=clear.diagnostic.entities.find(e=>e.items?.includes(0xc1a));assert(bag);await heal();await move(bag.pos);
  await capture('earned-rewards');const before=await game.observe(),slot=bag.items.indexOf(0xc1a);
  const drag={from:{x:634+(slot%4)*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}};
