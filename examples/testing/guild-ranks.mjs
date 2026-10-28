@@ -53,6 +53,7 @@ export async function run(game){
     assert.fail('Native walk failed: '+JSON.stringify({index,point,view:await players[index].observe()}));
   }
   async function enter(index){
+    await walk(index,{x:76.5,y:77.5});
     await ui(index,'hall-entry-'+index,()=>click(index,700,575));
     game.check('ordinary Guild Hall admission '+index,(await players[index].observe()).world==='Guild Hall');
     await walk(index,{x:14.5,y:8.5});
