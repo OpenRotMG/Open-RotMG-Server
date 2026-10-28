@@ -50,6 +50,7 @@ export async function run(game){
   const entry=await enter(initial.view.session.world,'key-entry');
   game.check('native Manor key is consumed and admits the same living Wizard',entry.view.map.name==='Manor of the Immortals'&&entry.view.character.items[4]===-1&&entry.view.session.character===initial.view.session.character&&entry.view.lifecycle.alive);
   await refresh();await writeFile(out('entry-map.json'),JSON.stringify(map));
+  game.check('key-created Manor retains its ordinary vampire-room population',map.entities.some(e=>e.kind>=0x1727&&e.kind<=0x172c));
   await step({keys:[],duration_ms:700},{name:'manor-entrance',when:()=>true});
   const shelves=map.entities.filter(e=>e.kind===0x181a),secret=shelves.find(e=>!(e.condition&(1<<23))),ordinary=shelves.find(e=>e.condition&(1<<23));
   assert(secret&&ordinary,'Generated Manor must offer both shelf types for this case');
@@ -68,9 +69,13 @@ export async function run(game){
   for(const coffin of coffins){
     await refresh();await walk(coffin.pos,4);
     const before=await save('coffin-'+coffin.id+'-before'),known=new Set(entities(before).map(e=>e.id));
-    await step({keys:[],duration_ms:100,target:{entity:coffin.id,camera_angle:-Math.PI/4,fire:true}});
+    for(let n=0;n<20;n++){
+      const e=entities(await game.inspect()).find(e=>e.id===coffin.id);if(!e||e.hp<20000)break;
+      await step({keys:[],duration_ms:150,target:{entity:coffin.id,camera_angle:-Math.PI/4,fire:true}});
+    }
     await step({keys:[],duration_ms:150});
     const opened=await game.inspect(),impostor=entities(opened).find(e=>e.kind===0x1722&&!known.has(e.id)&&distance(e.pos,coffin.pos)<.1);
+    assert(impostor||entities(opened).find(e=>e.id===coffin.id)?.hp<20000,'Native shot must resolve the coffin opening');
     if(impostor){
       await shoot(impostor.id);const dead=await save('impostor-'+coffin.id);
       const brood=entities(dead).filter(e=>e.kind===0x1738&&!known.has(e.id));
