@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x30e,level:20,seed:835,world:1,equipment:[0xa9f,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const spec={class:0x310,level:20,seed:835,world:1,equipment:[0xa07,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let god;
 export async function prepare(api){
@@ -51,11 +51,11 @@ export async function run(game){
     for(let n=0;n<100;n++){
       const s=await game.inspect(),e=family(s).find(e=>e.id===id);if(!e)break;
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
-      if(Math.hypot(dx,dy)>1.2||!s.view.objects.some(o=>o.id===id&&o.hp>0))await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:250});
+      if(Math.hypot(dx,dy)>4||!s.view.objects.some(o=>o.id===id&&o.hp>0))await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:250});
       else await act({keys:[],duration_ms:250,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
       await act({keys:[],duration_ms:250});
     }
-    const dead=await save('defeated-'+id);game.check(id+': ordinary native staff defeats actor and earns XP',!family(dead).some(e=>e.id===id)&&dead.view.character.experience>xp);return dead;
+    const dead=await save('defeated-'+id);game.check(id+': ordinary native wand defeats actor and earns XP',!family(dead).some(e=>e.id===id)&&dead.view.character.experience>xp);return dead;
   }
   try{
     const begin=await save('arrival');
@@ -86,6 +86,6 @@ export async function run(game){
     const end=await save('end');
     game.check('God remains dead without duplicate XP',!family(end).some(e=>e.kind===0x649)&&end.view.character.experience===dead.view.character.experience);
     game.check('ordinary followers survive God defeat without further births',family(end).length>0&&family(end).every(e=>survivors.includes(e.id)));
-    game.check('same supplied living native Wizard completes encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
+    game.check('same supplied living native Priest completes encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
   }finally{await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));}
 }
