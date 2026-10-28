@@ -24,6 +24,7 @@ export async function run(game){
   }
   await game.act({keys:[],duration_ms:1000},{name:'stat-potions-capped',when:()=>true});
   for(let i=0;i<8;i++)await prepare({kind:'item',slot:i+4,item:kinds[i]});
+  await game.act({keys:[],duration_ms:500});
   const capped=await snapshot('refilled-at-cap');
   game.check('class cap excludes the equipped Defense ring bonus',capped.character.stats.defense===26&&capped.character.base_stats[3]===25&&capped.character.items[3]===0xa4f);
   for(let i=0;i<8;i++){
@@ -31,20 +32,23 @@ export async function run(game){
     const after=await snapshot('refused-'+i);
     game.check(kinds[i]+': cap refusal preserves all items, base stats and revision',JSON.stringify(after.character.items)===JSON.stringify(capped.character.items)&&JSON.stringify(after.character.base_stats)===JSON.stringify(caps)&&after.character.inventory_revision===capped.character.inventory_revision);
   }
+  await game.act({keys:[],duration_ms:1000},{name:'stat-potions-refused',when:()=>true});
   await prepare({kind:'item',slot:4,item:0xa22});
   await prepare({kind:'item',slot:5,item:0xa23});
   await prepare({kind:'vitals',hp:660,mp:375});
+  await game.act({keys:[],duration_ms:500});
   await game.act({keys:['1'],duration_ms:1000},{name:'partial-health',when:view=>view.character.items[4]===-1});
   await game.act({keys:['2'],duration_ms:1000},{name:'partial-mana',when:view=>view.character.items[5]===-1});
   const restored=await snapshot('partially-restored');
   game.check('native restorative potions fill, but never exceed, actual maxima',restored.character.hp===670&&restored.character.mp===385&&restored.character.items[4]===-1&&restored.character.items[5]===-1);
   await prepare({kind:'item',slot:4,item:0xc3a});
+  await game.act({keys:[],duration_ms:500});
   await game.act({keys:['1'],duration_ms:150});
   const boosted=await snapshot('boosted');
   game.check('native Blue Paradise adds temporary maxima without modifying capped base stats',boosted.character.stats.max_hp===720&&boosted.character.stats.max_mp===435&&JSON.stringify(boosted.character.base_stats)===JSON.stringify(caps)&&boosted.character.items[4]===-1);
   for(let i=0;i<16;i++)await game.act({keys:[],duration_ms:2000});
   const expired=await snapshot('expired');
-  game.check('temporary maxima expire without removing permanent gains',expired.character.stats.max_hp===670&&expired.character.stats.max_mp===385&&JSON.stringify(expired.character.base_stats)===JSON.stringify(caps));
+  game.check('temporary maxima expire without removing permanent gains',expired.character.stats.max_hp===670&&expired.character.stats.max_mp===385&&expired.character.hp===670&&expired.character.mp===385&&JSON.stringify(expired.character.base_stats)===JSON.stringify(caps));
   const retained=await snapshot('before-reconnect');
   await game.act({keys:['Insert'],duration_ms:500});
   const reconnected=await snapshot('reconnected');
