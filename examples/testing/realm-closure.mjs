@@ -8,10 +8,11 @@ const out=process.env.QA_RESULTS_DIR,attackBonus=100;
 const spec={class:0x307,level:20,seed:787,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 const roots=new Set([0x668,0x67d,0x91f,0x91b,0x928,0x675,0x678,0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37]);
 const leaders=new Set([...roots,0x920,0x91c,0x92d,0x6c1,0x6c2]);
-let scout;
+let scout,spawnPoints;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),boss=world.encounter_markers.find(e=>e.kind===0x67d);
   assert(boss,'An ordinarily populated Cyclops encounter is required');
+  assert(world.spawn_points.length,'Ordinary Realm shore spawns are required');spawnPoints=world.spawn_points;
   scout=(await api({op:'spawn',spec:{...spec,guid:'closure-scout-'+randomUUID(),position:{x:Math.floor(boss.position.x)+.5,y:Math.floor(boss.position.y)+.5},controller:'direct',profile:null}})).result;
   await writeFile(join(out,'scout-preparation.json'),JSON.stringify(scout));
   return {...spec,position:boss.position};
@@ -38,6 +39,9 @@ export async function run(game){
   blocked=new Uint8Array(width*opening.height);for(const [x,y] of opening.blocked)blocked[y*width+x]=1;
   const original=opening.entities.filter(e=>roots.has(e.kind)&&(e.quest===e.id||[0x668,0x67d].includes(e.kind)));
   assert(original.length>20,'Full ordinary roster required, not a prepared final encounter');
+  const distance=p=>Math.min(...original.map(e=>Math.hypot(p.x-e.pos.x,p.y-e.pos.y)));
+  const restPoint=[...spawnPoints].sort((a,b)=>distance(b)-distance(a))[0];
+  assert(distance(restPoint)>30,'Protection renewal requires a shore spawn away from counted encounters');
   const scoutStart=await api({op:'observe',actor:scout.actor}),peerPoints=[];
   for(let y=-15;y<=15;y++)for(let x=-15;x<=15;x++){
     const p={x:Math.floor(initial.position.x)+x+.5,y:Math.floor(initial.position.y)+y+.5},d=Math.hypot(p.x-initial.position.x,p.y-initial.position.y);
@@ -74,7 +78,7 @@ export async function run(game){
   const menus=y=>[0,1].map(i=>clients.map(client=>menu(client,y)[i]));
   await act(game,{keys:[],duration_ms:800});await act(game,menus(432));
   for(const client of clients)game.check('native party lock persists for scout and account '+(await client.observe()).session.account,locked((await client.observe()).session.account));
-  await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout,assistance:{attack_bonus:attackBonus,protection_ms:60000}}));
+  await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout,assistance:{attack_bonus:attackBonus,protection_ms:60000,resting_spawn:restPoint}}));
   opening.blocked.length=0;opening.entities.length=0;
   await act(game,{keys:[],duration_ms:500},{name:'realm-opening',when:()=>true});await save('opening');
   async function clearPartyPanel(){
@@ -130,6 +134,15 @@ export async function run(game){
     for(let i=0;i<clients.length;i++)if(group[i].input.keys.length){const count=Math.hypot(after[i].position.x-before[i].position.x,after[i].position.y-before[i].position.y)>.02?0:(stalled.get(clients[i].actor)??0)+1;stalled.set(clients[i].actor,count);assert(count<3,'Three stationary local native approach inputs: '+JSON.stringify({point,before:before[i].position,after:after[i].position,group}));}
     await appendFile(join(out,'approach.jsonl'),JSON.stringify({point,group,before:before.map(v=>v.position),after:after.map(v=>v.position)})+'\n');
   }
+  async function recharge(returnToCombat){
+    const before=await api({op:'observe',actor:scout.actor}),until=Math.min(...protection.values());
+    await travel(restPoint);
+    let now=(await game.observe()).game_ms;
+    while(now<until){await act(game,{keys:[],duration_ms:Math.min(10000,until-now)});now=(await game.observe()).game_ms;}
+    await ready();
+    await appendFile(join(out,'renewals.jsonl'),JSON.stringify({before_ms:before.game_ms,renewed_ms:now,restPoint,returnToCombat})+'\n');
+    if(returnToCombat)await travel(before.position);
+  }
   const seen=new Map(original.map(e=>[e.quest??e.id,e]));
   for(let encounter=0;encounter<100;encounter++){
     const log=await events(),credits=log.filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin),defeated=new Set(credits.map(e=>e.hero)),current=await map();
@@ -137,11 +150,13 @@ export async function run(game){
     current.blocked.length=0;current.entities.length=0;
     const position=(await game.observe()).position,next=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y))[0];
     if(next===undefined){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
+    if(await ready()<30000)await recharge(false);
     await travel(seen.get(next).pos);
-    if(seen.get(next).kind===0xd5f){while(await ready()<25000)await act(game,{keys:[],duration_ms:Math.min(10000,await ready())});}
+    if(seen.get(next).kind===0xd5f&&await ready()<50000)await recharge(true);
     let completed=false;
     for(let step=0;step<100;step++){
       if((await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next)){completed=true;break;}
+      if(await ready()<30000){await recharge(true);continue;}
       const state=await api({op:'inspect',actor:scout.actor}),family=state.diagnostic.entities.filter(e=>e.id===next||e.quest===next),vulnerable=family.filter(e=>e.hp>0&&!(e.condition&((1<<21)|(1<<23)|(1<<24))));
       const views=await Promise.all(clients.map(c=>c.observe())),position=views[0].position;
       vulnerable.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
@@ -151,10 +166,10 @@ export async function run(game){
       const range=target?.kind===0xd5e?6.5:5.5;
       if(views.some(v=>Math.hypot(v.position.x-anchor.pos.x,v.position.y-anchor.pos.y)>range)){await approach(anchor.pos,range);continue;}
       if(target){
-        const duration_ms=target.kind===0xd5e?1000:1500,states=await Promise.all(clients.map(c=>c.inspect()));
+        const duration_ms=target.kind===0xd5e?1000:4000,states=await Promise.all(clients.map(c=>c.inspect()));
         const group=states.map((s,i)=>{
           const known=s.view.objects.find(e=>e.id===target.id&&e.hp>0);assert(known,'A living target must be known to each actual native client');
-          const dx=known.position.x-s.view.position.x,dy=known.position.y-s.view.position.y,scale=Math.min(50,270/Math.hypot(dx,dy));
+          const dx=known.position.x-s.view.position.x,dy=known.position.y-s.view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy));
           return {actor:clients[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}};
         });
         await act(game,[group]);
@@ -165,6 +180,7 @@ export async function run(game){
   }
   const credits=(await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin);
   game.check('ordinary roster plus admitted events earns once-only closure credit',credits.length===seen.size&&new Set(credits.map(e=>e.hero)).size===credits.length&&credits.at(-1)?.remaining===0);
+  await travel(restPoint);
   const closing=await save('closed');game.check('both native fighters remain in the closed Realm',closing.main.session.world===origin&&closing.peer.session.world===origin);
   await act(game,{keys:[],duration_ms:700},{name:'realm-closed',when:()=>true});
   // Reconnect retains charId rather than creating a successor: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/GameServerConnection.as#L1635-L1690
