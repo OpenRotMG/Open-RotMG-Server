@@ -165,6 +165,8 @@ async fn slow_cursor_does_not_starve_queued_native_packets_or_close() {
     }
     let mut ticks = tokio::time::interval(Duration::from_millis(50));
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    ticks.tick().await;
+    tokio::time::sleep(Duration::from_millis(60)).await;
     let mut received = 0;
     let mut closed = false;
     for _ in 0..64 {
