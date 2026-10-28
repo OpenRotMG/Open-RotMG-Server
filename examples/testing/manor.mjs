@@ -121,6 +121,7 @@ export async function run(game){
   await step({keys:[],duration_ms:700},{name:'ruthven-after',when:()=>true});
   await walk(exit.pos);
   const returned=await enter(entry.view.session.world,'boss-exit');
-  game.check('earned exit returns the same living Wizard to Nexus with durable clear credit',returned.view.map.name==='Nexus'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.diagnostic.character.manors===defeated.diagnostic.character.manors&&(!reward||returned.view.character.items[4]===reward.view.character.items[4]));
+  game.check('earned exit returns the same living Wizard to Nexus with durable clear credit',returned.view.map.name==='Nexus'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.diagnostic.character.manors===defeated.diagnostic.character.manors);
+  if(reward)game.check('collected private coffin reward persists through the earned exit',returned.view.character.items[4]===reward.view.character.items[4]);
   await step({keys:[],duration_ms:700},{name:'manor-return',when:()=>true});
 }
