@@ -216,7 +216,6 @@ pub fn profile(kind: u16) -> Option<Profile> {
             1000,
             8.,
         ),
-        // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
         0x61a => (
             Chase {
                 sight: 10.5,
@@ -224,7 +223,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
             },
             7.5,
             200,
-            12.,
+            10.5,
         ),
         0x60e => (Wander, 4., 1000, 5.),
         0x60f => (Wander, 4., 600, 5.),

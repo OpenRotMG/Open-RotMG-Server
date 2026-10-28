@@ -6377,7 +6377,8 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
                 0x617 => 12.,
-                0x61a => 10.5,
+                // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
+                0x61a => 12.,
                 0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
