@@ -64,9 +64,11 @@ export async function run(game){
     const arrived=await game.observe();assert(Math.hypot(arrived.position.x-point.x,arrived.position.y-point.y)<.2,'Native teleport must reach direct scout');lastTeleport=arrived.game_ms;
     await api({op:'cheat',actor:scout,change:{kind:'teleport',position:refuge}});
   }
-  async function walk(point,range=1.5){
+  async function walk(point,range=1.5,follow=null){
     for(let n=0;n<30;n++){
-      await protect();const s=await game.inspect(),v=s.view;if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
+      await protect();const s=await game.inspect(),v=s.view;
+      if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>f.message==='enemy defeated'&&f.entity===follow),'Chased target vanished without defeat');return;}point=target.pos;}
+      if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
       const key=(x,y)=>x+','+y,cell=p=>key(Math.floor(p.x),Math.floor(p.y));
       const blocked=new Set(v.objects.filter(e=>e.blocks).map(e=>cell(e.position)));
       const clear=new Set(v.tiles.filter(t=>t.ground_speed>0&&!blocked.has(cell(t))&&Math.abs(t.x-v.position.x)<12&&Math.abs(t.y-v.position.y)<12).map(cell));
@@ -80,14 +82,15 @@ export async function run(game){
       const [tx,ty]=next.split(',').map(Number),waypoint=next===goal?point:{x:tx+.5,y:ty+.5};
       const dx=waypoint.x-v.position.x,dy=waypoint.y-v.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
-      const distance=Math.hypot(dx,dy),speed=(4+5.6*v.character.stats.speed/75)*((v.character.conditions&8)?0.5:1);
+      const distance=Math.hypot(dx,dy),speed=(4+5.6*v.character.stats[4]/75)*((v.character.conditions&8)?0.5:1);
+      assert(Number.isFinite(speed)&&speed>0,'Observed movement speed must be finite and positive');
       await game.act({keys,duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000)))});
     }
     throw Error('Native walk did not reach target '+JSON.stringify({point,range,position:(await game.observe()).position}));
   }
   async function fire(id,ms=500){
     await protect();const state=await game.inspect(),target=entity(state,id);assert(target,'Living target required');
-    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2)await walk(target.pos);
+    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2){await walk(target.pos,1.5,id);if(!entity(await game.inspect(),id))return;}
     const now=(await game.observe()).game_ms;if(now>=modifiedUntil){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifiedUntil=now+60000;}
     await game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
