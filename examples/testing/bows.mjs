@@ -12,7 +12,7 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:'bows-'+(++serial),command:{op:'cheat',actor,change}}),signal:AbortSignal.timeout(10000)});
     const result=await response.json();assert(response.ok&&result.status!=='failed',JSON.stringify(result));
   };
-  // Default 11.25-degree spacing is client logic, not a missing XML value: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/objects/Player.as#L987-L1013
+  // Pause synchronization can outlive arrows; SHOOT traces retain the client fan: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/objects/Player.as#L987-L1013
   for(const [item,count] of [[0xa1a,1],[0xa75,1],[0xa1b,1],[0xa76,1],[0xa77,1],[0xa1c,1],[0xa1d,2],[0xa3a,1],[0xa1e,3],[0xa8b,3],[0xa8c,3],[0xa8d,3],[0xb02,3],[0xb03,3],[0xb04,3],[0xc02,1],[0xc10,2],[0xc1b,1]]){
     await cheat(game.actor,{kind:'item',slot:4,item});
     await game.act({keys:[],duration_ms:200});
@@ -20,12 +20,14 @@ export async function run(game){
     const equipped=await game.observe();
     game.check(`native Archer equips ${item.toString(16)}`,equipped.character.items[0]===item);
     await game.act({keys:[],duration_ms:2200});
-    const before=await game.inspect();
+    const before=await game.inspect(),logBefore=await readFile(join(root,'server.log'),'utf8');
     await game.act({keys:[],mouse:{x:450,y:175},duration_ms:160});
-    const after=await game.inspect(),bullets=after.diagnostic.own_projectiles;
-    observations.push({item,before,after});await save();
+    const after=await game.inspect(),logAfter=await readFile(join(root,'server.log'),'utf8');
+    assert(logAfter.startsWith(logBefore),'native log must not rotate during a volley');
+    const bullets=logAfter.slice(logBefore.lastIndexOf('\n')+1).split('\n').slice(0,-1).filter(l=>l.startsWith('{')).map(l=>JSON.parse(l)).filter(r=>r.fields?.message==='native SHOOT ingress'&&r.fields.kind===item).map(r=>r.fields);
+    observations.push({item,before,after,bullets});await save();
     game.check(`native ${item.toString(16)} admits one ${count}-arrow volley`,after.diagnostic.character.shots-before.diagnostic.character.shots===count);
-    game.check(`native ${item.toString(16)} retains ${count} live arrows`,bullets.length===count);
+    game.check(`native ${item.toString(16)} traces ${count} arrows (requires RUST_LOG=openrotmg=info,openrotmg::world=debug)`,bullets.length===count);
     const angles=bullets.map(b=>b.angle).sort((a,b)=>a-b);
     game.check(`native ${item.toString(16)} spread`,angles.every((a,i)=>!i||Math.abs(a-angles[i-1]-Math.PI/16)<0.0001));
     game.check(`native ${item.toString(16)} is free and has no stat bonus`,after.view.character.mp===before.view.character.mp&&JSON.stringify(after.view.character.stats)===JSON.stringify(before.view.character.stats));
