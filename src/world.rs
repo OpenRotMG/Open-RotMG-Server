@@ -6005,7 +6005,9 @@ impl World {
             // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
             return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
-        if crate::loot::potion_damage(defeated.kind).is_some() {
+        if crate::loot::potion_damage(defeated.kind).is_some()
+            || matches!(defeated.kind, 0x91d | 0x91e)
+        {
             let loot =
                 crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
             return self.god_loot_bags(defeated.pos, loot);
