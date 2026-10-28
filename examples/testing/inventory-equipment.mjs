@@ -12,6 +12,7 @@ export async function run(game){
   const record=async label=>{const state=await game.inspect();records.push({label,...state});await writeFile(join(root,'inventory-observations.json'),JSON.stringify(records));return state.view;};
   const drag=(from,to)=>game.act({keys:[],duration_ms:350,drag:{from,to}});
   const double=async mouse=>{await game.act([{actor:game.actor,input:{keys:[],duration_ms:40,mouse}},{actor:game.actor,input:{keys:[],duration_ms:40,mouse}},{actor:game.actor,input:{keys:[],duration_ms:450}}]);};
+  await game.act({keys:['d'],duration_ms:500});
   const initial=await record('initial');
   await game.act({keys:[],duration_ms:700},{name:'inventory-before',when:()=>true});
   game.check('prepared inventory has four equipment and eight occupied carried slots',initial.character.items.length===12&&initial.character.items.slice(4).every(x=>x!==-1));
@@ -79,5 +80,5 @@ export async function run(game){
   const retained=await record('before-transfer');
   await game.act({keys:['Insert'],duration_ms:700});
   const reconnected=await record('reconnected');
-  game.check('ordinary Nexus reconnect preserves equipment stats inventory revision and living identity',reconnected.world==='Nexus'&&reconnected.lifecycle.alive&&reconnected.session.character===initial.session.character&&JSON.stringify(reconnected.character.items)===JSON.stringify(retained.character.items)&&JSON.stringify(reconnected.character.base_stats)===JSON.stringify(retained.character.base_stats)&&reconnected.character.inventory_revision===retained.character.inventory_revision);
+  game.check('ordinary Nexus reconnect preserves equipment stats inventory revision and living identity',reconnected.map.name==='Nexus'&&reconnected.lifecycle.alive&&reconnected.session.character===initial.session.character&&JSON.stringify(reconnected.character.items)===JSON.stringify(retained.character.items)&&JSON.stringify(reconnected.character.base_stats)===JSON.stringify(retained.character.base_stats)&&reconnected.character.inventory_revision===retained.character.inventory_revision);
 }

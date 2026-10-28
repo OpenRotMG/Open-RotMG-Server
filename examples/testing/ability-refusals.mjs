@@ -37,13 +37,13 @@ export async function run(game){
     await pauseChat();const paused=await record('native-pause');
     game.check('ordinary native chat enters player Paused state',!!(paused.view.character.conditions&(1<<20)));
     await game.act({keys:[' '],duration_ms:200});const denied=await record('paused-refusal');
-    game.check('native Paused ability refuses without spend movement or deployment',denied.view.character.mp>=paused.view.character.mp&&JSON.stringify(denied.view.position)===JSON.stringify(paused.view.position)&&denied.diagnostic.entities.every(e=>e.kind!==0x715)&&denied.view.character.ability_ready_ms<=denied.view.game_ms);
+    game.check('native Paused ability refuses without spend movement or deployment',denied.view.character.mp>=paused.view.character.mp&&JSON.stringify(denied.view.position)===JSON.stringify(paused.view.position)&&denied.diagnostic.entities.every(e=>e.kind!==0x715)&&denied.view.character.ability_ready_ms<=denied.view.time_ms);
     await pauseChat();game.check('ordinary native chat exits player Paused state',!((await game.observe()).character.conditions&(1<<20)));
   }finally{cdp.close();}
   const before=await record('blocked-before'),dx=blocked.x-before.view.position.x,dy=blocked.y-before.view.position.y,a=-Math.PI/4;
   await game.act({keys:[' '],duration_ms:200,mouse:{x:300+50*(dx*Math.cos(a)+dy*Math.sin(a)),y:325+50*(-dx*Math.sin(a)+dy*Math.cos(a))}});
   const denied=await record('blocked-refusal');
-  game.check('native blocked teleport refuses before mana cooldown or decoy creation',denied.view.character.mp>=before.view.character.mp&&JSON.stringify(denied.view.position)===JSON.stringify(before.view.position)&&denied.view.character.ability_ready_ms<=denied.view.game_ms&&denied.diagnostic.entities.every(e=>e.kind!==0x715));
+  game.check('native blocked teleport refuses before mana cooldown or decoy creation',denied.view.character.mp>=before.view.character.mp&&JSON.stringify(denied.view.position)===JSON.stringify(before.view.position)&&denied.view.character.ability_ready_ms<=denied.view.time_ms&&denied.diagnostic.entities.every(e=>e.kind!==0x715));
   const quiet=await game.join({class:0x30e,level:20,seed:879,world:'oryx-castle',position:{x:24.5,y:139.5},equipment:[-1,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,0]});
   await api({op:'cheat',actor:quiet.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
   await quiet.act({keys:[],duration_ms:1000});const hit=await record('natural-quiet',quiet);
@@ -53,7 +53,7 @@ export async function run(game){
   game.check('explicit mana preparation isolates Quiet from insufficient MP',!!(funded.view.character.conditions&2)&&funded.view.character.mp===200);
   await quiet.act({keys:[' '],duration_ms:100});
   const refused=await record('quiet-refusal',quiet);
-  game.check('native Quiet with enough MP rejects without spending starting cooldown or shooting',refused.view.character.mp===200&&refused.view.character.ability_ready_ms<=refused.view.game_ms&&refused.diagnostic.character.shots===funded.diagnostic.character.shots&&JSON.stringify(refused.view.character.items)===JSON.stringify(funded.view.character.items));
+  game.check('native Quiet with enough MP rejects without spending starting cooldown or shooting',refused.view.character.mp===200&&refused.view.character.ability_ready_ms<=refused.view.time_ms&&refused.diagnostic.character.shots===funded.diagnostic.character.shots&&JSON.stringify(refused.view.character.items)===JSON.stringify(funded.view.character.items));
   await quiet.act({keys:[],duration_ms:700},{name:'quiet-refusal',when:()=>true});
   game.check('both prepared characters remain alive',refused.view.lifecycle.alive&&(await game.observe()).lifecycle.alive&&initial.view.session.character===(await game.observe()).session.character);
 }
