@@ -5,7 +5,7 @@ export const fixture={class:0x300,level:20,seed:888,world:'mad-lab',worldSeed:12
 const HEXED=1<<27,INVISIBLE=1<<12,SPEEDY=1<<14,STUNNED=1<<6;
 export async function run(game){
   const samples=[];
-  async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(join(process.env.QA_RESULTS_DIR,'transformation.json'),JSON.stringify(samples,null,2));return state.view;}
+  async function save(name){const state=await game.inspect(),view=await game.observe();samples.push({name,state,view});await writeFile(join(process.env.QA_RESULTS_DIR,'transformation.json'),JSON.stringify(samples,null,2));return view;}
   async function use(key,name){
     const before=await game.observe();
     await game.act({keys:[key],duration_ms:800},{name,when:v=>v.character.inventory_revision===before.character.inventory_revision+1});
@@ -33,14 +33,14 @@ export async function run(game){
   game.check('empty slot cannot consume again',(await game.observe()).character.inventory_revision===transformed.character.inventory_revision);
   await game.act({keys:[],mouse:{x:500,y:300},duration_ms:800});
   game.check('potion Hexed alone still permits native weapon fire',(await game.observe()).verification.shots>transformed.verification.shots);
-  // The selected 123.5.1 potion is timed, unlike the persistent pool source: https://wikiwiki.jp/rmd/Transformation%20Potion
+  // Pool permanence must not leak into the potion timer: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
   while((await game.observe()).game_ms<transformed.game_ms+28000)await game.act({keys:[],duration_ms:1000});
   const near=await save('before-expiry');
   game.check('Hexed survives through at least 28 seconds',Boolean(near.character.conditions&HEXED));
   while((await game.observe()).game_ms<transformed.game_ms+31000)await game.act({keys:[],duration_ms:500});
   await game.act({keys:[],duration_ms:800},{name:'transformation-expired',when:v=>!(v.character.conditions&HEXED)});
   game.check('Hexed expires after the selected 30 seconds',!((await save('expired')).character.conditions&HEXED));
-  await use('2','transformation-second');
+  game.check('second potion applies Hexed before the blue cure',Boolean((await use('2','transformation-second')).character.conditions&HEXED));
   await walk('x',75.5);await walk('y',12.5);
   await game.act({keys:[],duration_ms:800},{name:'transformation-blue',when:v=>!(v.character.conditions&HEXED)});
   const blue=await save('blue');
