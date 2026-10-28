@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const kinds=[0xae9,0xaea,0xa1f,0xa20,0xa21,0xa4c,0xa34,0xa35];
 const caps=[670,385,75,25,50,75,40,60];
-export const fixture={class:0x30e,level:20,seed:882,world:'pirate-cave',position:'spawn',equipment:[-1,-1,-1,-1],backpack:kinds,stats:caps.map((cap,i)=>cap-(i<2?2:1))};
+export const fixture={class:0x30e,level:20,seed:882,world:'pirate-cave',position:'spawn',equipment:[-1,-1,-1,0xa4f],backpack:kinds,stats:caps.map((cap,i)=>cap-(i<2?2:1))};
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(root,'native/native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),observations=[];
@@ -25,6 +25,7 @@ export async function run(game){
   await game.act({keys:[],duration_ms:1000},{name:'stat-potions-capped',when:()=>true});
   for(let i=0;i<8;i++)await prepare({kind:'item',slot:i+4,item:kinds[i]});
   const capped=await snapshot('refilled-at-cap');
+  game.check('class cap excludes the equipped Defense ring bonus',capped.character.stats.defense===26&&capped.character.base_stats[3]===25&&capped.character.items[3]===0xa4f);
   for(let i=0;i<8;i++){
     await game.act({keys:[String(i+1)],duration_ms:150});
     const after=await snapshot('refused-'+i);
