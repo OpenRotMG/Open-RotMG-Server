@@ -67,14 +67,20 @@ export async function run(game){
       const hub=members.find(e=>e.kind>=0x6d2&&e.kind<=0x6d4);assert(hub);
       game.check(tag+': colored hub orbits its own root',combat.some(s=>{const f=family(s,camp),h=f.find(e=>e.id===hub.id),r=f.find(e=>e.id===root.id);return h&&r&&Math.abs(Math.hypot(h.pos.x-r.pos.x,h.pos.y-r.pos.y)-3)<.15;}));
       game.check(tag+': gray satellites move around owned hub',combat.some(s=>{const f=family(s,camp),h=f.find(e=>e.id===hub.id);return h&&f.some(e=>e.kind>=0x6d5&&e.kind<=0x6d7&&Math.abs(Math.hypot(e.pos.x-h.pos.x,e.pos.y-h.pos.y)-1)<.15);}));
-      for(let n=0;n<25&&family(await game.inspect(),camp).some(e=>e.id===root.id);n++)await act({keys:[],duration_ms:300,target:{entity:root.id,camera_angle:-Math.PI/4,fire:true}});
+      for(let n=0;n<25&&family(await game.inspect(),camp).some(e=>e.id===root.id);n++){
+        await act({keys:[],duration_ms:300,target:{entity:root.id,camera_angle:-Math.PI/4,fire:true}});
+        await act({keys:[],duration_ms:500});
+      }
       const defeated=await game.inspect();
       game.check(tag+': ordinary native fire defeats root',!family(defeated,camp).some(e=>e.id===root.id));
       const survivors=family(defeated,camp).filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7);
       game.check(tag+': satellites survive root death with bounded cleanup',survivors.length>0&&survivors.every(e=>e.expires>defeated.view.time_ms&&e.expires<=defeated.view.time_ms+30000));
       const target=survivors.find(e=>e.id===hub.id);assert(target,'Colored satellite must survive root defeat');
       const xp=defeated.view.character.experience,awardStart=(await awards()).length;
-      for(let n=0;n<40&&family(await game.inspect(),camp).some(e=>e.id===target.id);n++)await act({keys:[],duration_ms:250,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
+      for(let n=0;n<30&&family(await game.inspect(),camp).some(e=>e.id===target.id);n++){
+        await act({keys:[],duration_ms:250,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
+        await act({keys:[],duration_ms:500});
+      }
       const satelliteDead=await game.inspect(),remaining=family(satelliteDead,camp).filter(e=>survivors.some(p=>p.id===e.id));
       // The September 7, 2012 page supports ten XP, not an exact decay delay: https://wikiwiki.jp/rmd/?cmd=read&page=Gray%20Satellite%202
       game.check(tag+': native satellite defeat queues ten XP and advances client XP (requires world debug logs)',!remaining.some(e=>e.id===target.id)&&satelliteDead.view.character.experience>=xp+10&&(await awards()).slice(awardStart).some(row=>row.fields.player===satelliteDead.diagnostic.player&&row.fields.enemy===target.kind&&row.fields.amount===10));
