@@ -16,6 +16,7 @@ export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const records=[],protectedUntil=new Map();let mystic;
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id),kinds=(s,k)=>s.diagnostic.entities.filter(e=>e.kind===k);
+  function flags(s,id){const mask=s.view.objects.find(e=>e.id===id)?.condition_mask;assert(Number.isInteger(mask),'Published target conditions required');return mask;}
   async function save(label){const state=await game.inspect();records.push({label,state});await writeFile(join(out,'encounter.json'),JSON.stringify(records));return state;}
   async function cheat(actor,change){
     const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:actor.actor,change}}),signal:AbortSignal.timeout(10000)});
@@ -65,13 +66,14 @@ export async function run(game){
   game.check('clone phase admits four spawned and four tossed owned Clones',clones.length===8&&clones.every(e=>e.hp===15000));
   mystic=await game.join({class:0x323,level:20,seed:826,world:1,position:state.view.position,equipment:[-1,0xb2d,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]});await protect(mystic);
   for(const kind of [0x942,0x943]){
-    state=await game.inspect();const child=kinds(state,kind).find(e=>!(e.condition&(bit(22)|bit(23)))) ;assert(child,'Susceptible living child required');
+    state=await game.inspect();const child=kinds(state,kind).find(e=>!(flags(state,e.id)&bit(23))) ;assert(child,'Susceptible living child required');
     await approach(mystic,child.id,5);
     await mystic.act({keys:[' '],duration_ms:150,target:{entity:child.id,camera_angle:-Math.PI/4,fire:false}});
-    state=await save('stasis-'+kind);game.check(kind+': native orb applies Stasis to loaded minion',!!(entity(state,child.id).condition&bit(22)));
+    state=await save('stasis-'+kind);const frozen=entity(state,child.id);game.check(kind+': native orb publishes eight-second Stasis on loaded minion',!!(flags(state,child.id)&bit(22))&&frozen.statuses['22'][1]-frozen.statuses['22'][0]===8000);
+    await idle(500);game.check(kind+': Stasis freezes movement',JSON.stringify(entity(await game.inspect(),child.id).pos)===JSON.stringify(frozen.pos));
   }
   state=await game.inspect();await approach(mystic,prisoner.id,5);await mystic.act({keys:[' '],duration_ms:150,target:{entity:prisoner.id,camera_angle:-Math.PI/4,fire:false}});
-  state=await save('boss-immune');game.check('loaded Prisoner remains Stasis immune',!(entity(state,prisoner.id).condition&bit(22)));
+  state=await save('boss-immune');game.check('loaded Prisoner remains Stasis immune',!(flags(state,prisoner.id)&bit(22)));
   for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==5;n++)await idle(500);
   state=await save('whoa');game.check('timed cycle reaches Whoa phase',entity(state,prisoner.id).stage===5);
   await approach(game,prisoner.id,1);
