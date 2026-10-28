@@ -118,6 +118,109 @@ fn creation_attacks_and_pool_cycle_preserve_identity_and_damage() {
 }
 
 #[test]
+fn lab_ordinary_variants_use_selected_projectiles_and_bounded_bursts() {
+    let (mut w, _) = arena();
+    let target = Pos { x: 32.5, y: 30.5 };
+    for (kind, counts) in [
+        (0x979, vec![(0, 2)]),
+        (0x981, vec![(0, 1)]),
+        (0x982, vec![(0, 3), (1, 4)]),
+        (0x990, vec![(0, 1)]),
+        (0x991, vec![(0, 1)]),
+    ] {
+        let id = w.spawn_entity(kind, target, vec![]).unwrap();
+        let shots = w.lab_shots(id, target);
+        assert_eq!(shots.len(), counts.iter().map(|(_, n)| n).sum::<usize>());
+        for (index, count) in counts {
+            assert_eq!(shots.iter().filter(|(i, _)| *i == index).count(), count);
+            assert!(w.content.objects[&kind].projectiles.contains_key(&index));
+        }
+        w.remove_entity(id);
+    }
+    let enforcer = w.spawn_entity(0x980, target, vec![]).unwrap();
+    for (elapsed, stage, index, count) in [
+        (10000, 1, 1, 1),
+        (3000, 2, 1, 1),
+        (0, 3, 0, 0),
+        (2000, 4, 2, 8),
+    ] {
+        if stage == 3 {
+            w.entities.get_mut(&enforcer).unwrap().hp = 1;
+        }
+        w.lab_mechanics(enforcer, Some(target), elapsed).unwrap();
+        assert_eq!(w.entities[&enforcer].stage, Some(stage));
+        let shots = w.lab_shots(enforcer, target);
+        assert_eq!(shots.len(), count);
+        assert!(shots.iter().all(|(i, _)| *i == index));
+    }
+    assert_eq!(*w.entities[&enforcer].expires, Some(w.now + 50));
+}
+
+#[tokio::test]
+async fn lab_cage_children_do_not_duplicate_boss_rewards_or_clear() {
+    let (mut w, _) = arena();
+    w.name = "Mad Lab".into();
+    w.encounter = true;
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &w.content).unwrap();
+    let boss = w.actors().find(|e| e.kind == lab::BOSS).unwrap().id;
+    let home = w.entities[&boss].home;
+    let mut players = Vec::new();
+    for name in ["contributor", "bystander"] {
+        let account = store.list(name.into()).await.unwrap();
+        let character = store
+            .create(account.id, w.content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        let id = w.enter(character, None).unwrap();
+        w.players.get_mut(&id).unwrap().pos = home;
+        players.push(id);
+    }
+    w.lab_mechanics(boss, Some(home), 0).unwrap();
+    w.lab_mechanics(boss, Some(home), 12000).unwrap();
+    w.lab_mechanics(boss, Some(home), 10000).unwrap();
+    let children: Vec<_> = w
+        .actors()
+        .filter(|e| e.parent == Some(boss) && matches!(e.kind, 0x1e23..=0x1e25))
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(children.len(), 12);
+    w.lab_mechanics(boss, Some(home), 0).unwrap();
+    assert_eq!(
+        w.actors()
+            .filter(|e| matches!(e.kind, 0x1e23..=0x1e25))
+            .count(),
+        12
+    );
+    let contributor = &w.players[&players[0]].character;
+    let owner = contributor.account;
+    w.entities
+        .get_mut(&boss)
+        .unwrap()
+        .damage
+        .insert(contributor.id, 1);
+    // Comparator threshold is integer damage, not 32% HP: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
+    w.defeat_entity(boss).unwrap();
+    assert!(w.cleared);
+    assert_eq!(w.players[&players[0]].clears_queued.iter().sum::<u64>(), 1);
+    assert_eq!(w.players[&players[1]].clears_queued.iter().sum::<u64>(), 0);
+    let exit = w.clear_exit.unwrap();
+    assert!(!w.entities[&exit].published);
+    let bags: Vec<_> = w.bag_expiry.keys().copied().collect();
+    assert!(bags.iter().any(|id| w.entities[id].items.contains(&0xa35)));
+    assert!(
+        bags.iter()
+            .all(|id| w.entities[id].extra_stats.contains(&(54, owner)))
+    );
+    for id in children {
+        assert_eq!(*w.entities[&id].parent, None);
+        w.defeat_entity(id).unwrap();
+    }
+    assert_eq!(w.bag_expiry.len(), bags.len());
+    assert_eq!(w.clear_exit, Some(exit));
+    assert_eq!(w.players[&players[0]].clears_queued.iter().sum::<u64>(), 1);
+}
+
+#[test]
 fn lab_pool_remedy_is_actor_driven_source_aware_and_player_local() {
     let (mut w, first) = super::movement_tests::fixture(0xa7, false);
     let pool = condition::bit(condition::HEXED) | condition::bit(condition::SPEEDY) | STUNNED;

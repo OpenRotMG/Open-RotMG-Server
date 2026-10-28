@@ -32,12 +32,93 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 }
 
 #[tokio::test]
+async fn ent_tincture_death_preserves_rolls_and_has_one_eligible_owner() {
+    let (mut w, _store, owners) = reward_world().await;
+    assert!(w.content.objects[&0xb0c].soulbound);
+    assert!(
+        w.loot_bag(Pos { x: 3.5, y: 3.5 }, None, vec![0xb0c])
+            .is_err()
+    );
+    let mut successes = 0;
+    let mut misses = 0;
+    for kind in [0x921, 0x922] {
+        for contributors in [0usize, 1, 3, 5] {
+            for seed in 0..128 {
+                clear_bags(&mut w);
+                let mut expected_rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let mut expected = false;
+                for _ in 0..(contributors * 2).min(8) {
+                    let items = crate::loot::rewards(&w.content, kind, &mut expected_rng);
+                    assert!(items.iter().all(|item| *item == 0xb0c));
+                    expected |= !items.is_empty();
+                }
+                let id = w
+                    .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
+                    .unwrap();
+                w.entities.get_mut(&id).unwrap().damage = owners[..contributors]
+                    .iter()
+                    .map(|(_, character)| (*character, 1))
+                    .collect();
+                w.entities
+                    .get_mut(&id)
+                    .unwrap()
+                    .damage
+                    .insert(owners[5].1, 0);
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                w.defeat_entity(id).unwrap();
+                assert!(!w.entities.contains_key(&id));
+                assert_eq!(
+                    w.bag_expiry.len(),
+                    usize::from(expected),
+                    "seed={seed}, contributors={contributors}"
+                );
+                if expected {
+                    successes += 1;
+                    let bag = &w.entities[w.bag_expiry.keys().next().unwrap()];
+                    assert_eq!(
+                        bag.items
+                            .iter()
+                            .copied()
+                            .filter(|item| *item >= 0)
+                            .collect::<Vec<_>>(),
+                        [0xb0c]
+                    );
+                    assert_eq!(
+                        owners[..contributors]
+                            .iter()
+                            .filter(|(owner, _)| bag.accessible(*owner))
+                            .count(),
+                        1
+                    );
+                    assert!(
+                        owners[contributors..]
+                            .iter()
+                            .all(|(owner, _)| !bag.accessible(*owner))
+                    );
+                    assert_eq!(
+                        bag.extra_stats
+                            .iter()
+                            .filter(|(stat, _)| *stat == 54)
+                            .count(),
+                        1
+                    );
+                } else {
+                    misses += 1;
+                }
+            }
+        }
+    }
+    assert!(successes > 0 && misses > 0);
+}
+
+#[tokio::test]
 async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor() {
     let (mut w, _store, owners) = reward_world().await;
     let mut successes = 0;
     for kind in (0x669..=0x66b)
         .chain(0x605..=0x607)
         .chain(0x612..=0x613)
+        .chain(0x60e..=0x610)
         .chain(0x65f..=0x661)
         .chain(0x91d..=0x91e)
         .chain([0x6c6])
@@ -123,6 +204,37 @@ fn septavius_stages_a_realm_exit_until_clear_commit() {
     assert!(!exit.published);
     assert_eq!(world.actors().filter(|e| e.kind == 0x704).count(), 1);
     assert!(!world.actors().any(|e| e.kind == 0x71d));
+}
+
+#[tokio::test]
+async fn flying_brain_death_requests_only_the_realm_lab_portal() {
+    let (mut w, _store, _owners) = reward_world().await;
+    assert_eq!(crate::dungeon::portal_drop(0x657), Some((0x890, 0.17)));
+    let mut successes = 0;
+    for name in ["Realm", "Tutorial"] {
+        w.name = name.into();
+        for kind in [0x657, 0x658] {
+            for seed in 0..32 {
+                clear_bags(&mut w);
+                w.portal_requests.clear();
+                let pos = Pos { x: 3.5, y: 3.5 };
+                let id = w.spawn_entity(kind, pos, vec![]).unwrap();
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let expected = name == "Realm"
+                    && kind == 0x657
+                    && rand::rngs::StdRng::seed_from_u64(seed).gen_bool(0.17);
+                w.defeat_entity(id).unwrap();
+                assert!(!w.entities.contains_key(&id));
+                assert_eq!(w.portal_requests.len(), usize::from(expected));
+                if expected {
+                    successes += 1;
+                    assert_eq!(w.portal_requests[0].0, 0x890);
+                    assert!(w.portal_requests[0].1.distance(pos) < 0.01);
+                }
+            }
+        }
+    }
+    assert!((1..32).contains(&successes));
 }
 
 fn clear_bags(w: &mut World) {

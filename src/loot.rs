@@ -1166,7 +1166,9 @@ pub(crate) fn god_loot(
 }
 
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if potion_damage(kind).is_some() || matches!(kind, 0x91d | 0x91e) {
+    // Sprite tier candidates roll independently, not as an exclusive choice: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L77-L86
+    let per_item = potion_damage(kind).is_some() || matches!(kind, 0x624..=0x626 | 0x91d | 0x91e);
+    let mut items = if per_item {
         god_equipment(content, kind, rng)
     } else if independent(kind) {
         let mut items = Vec::new();
@@ -1355,6 +1357,35 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
+    fn realm_sprites_keep_distinct_independent_public_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, tier, slots, chance) in [
+            (0x624, 5, WEAPONS, 0.02),
+            (0x625, 2, ABILITIES, 0.04),
+            (0x626, 6, ARMOR, 0.01),
+        ] {
+            assert!(
+                matches!(table(kind), [(p, Pick::Tier(t, s)), (q, Pick::Item(0xa23))]
+                if *p == chance && *t == tier && *s == slots && *q == 0.05)
+            );
+            assert!(period_surface(kind) && !private(kind));
+            let pool = candidates(&content, Pick::Tier(tier, slots));
+            assert!(!pool.is_empty());
+            let all = rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0));
+            assert_eq!(all.len(), pool.len() + 1);
+            assert!(pool.iter().all(|item| all.contains(item)) && all.contains(&0xa23));
+            assert!(
+                rewards(
+                    &content,
+                    kind,
+                    &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+                )
+                .is_empty()
+            );
+        }
+    }
+
+    #[test]
     fn nomad_has_one_public_four_percent_magic_potion_roll() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         assert!(matches!(table(0x6c6), [(p, Pick::Item(0xa23))] if *p == 0.04));
@@ -1384,6 +1415,30 @@ mod tests {
             .collect();
         assert_eq!(armor, [(4, 0.75), (5, 0.375), (6, 0.167)]);
         assert!(table(0x678).is_empty());
+    }
+
+    #[test]
+    fn shore_cubes_keep_independent_public_potions_and_pirate_cave_eligibility() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in 0x60e..=0x610 {
+            assert!(
+                matches!(table(kind), [(hp, Pick::Item(0xa22)), (mp, Pick::Item(0xa23))] if *hp == 0.04 && *mp == 0.04)
+            );
+            assert!(period_surface(kind) && !private(kind));
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                vec![0xa22, 0xa23]
+            );
+            assert!(
+                rewards(
+                    &content,
+                    kind,
+                    &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+                )
+                .is_empty()
+            );
+            assert_eq!(crate::dungeon::portal_drop(kind), Some((0x717, 0.01)));
+        }
     }
 
     #[test]
@@ -1508,7 +1563,61 @@ mod tests {
         let mut rng = rand::rngs::mock::StepRng::new(0, 0);
         let observed = [0x921, 0x922].map(|kind| rewards(&content, kind, &mut rng));
         assert_eq!(observed, [vec![0xb0c], vec![]]);
+        assert!(content.objects[&0xb0c].soulbound);
+        let mut no_drop = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(
+            [0x921, 0x922]
+                .map(|kind| rewards(&content, kind, &mut no_drop))
+                .iter()
+                .all(Vec::is_empty)
+        );
         assert!(matches!(table(0x921), [(chance, Pick::Item(0xb0c))] if *chance == 0.02));
+    }
+
+    #[test]
+    fn realm_god_potion_boundaries_preserve_equipment() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        // Kithio's 18% threshold is inclusive, not the later 7.0 reward policy: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L88-L112
+        for (kind, threshold, chance, potion) in [
+            (0x651, 180, 0.01, 0xa1f),
+            (0x655, 180, 0.015, 0xa20),
+            (0x656, 270, 0.01, 0xa20),
+            (0x657, 180, 0.015, 0xa1f),
+            (0x658, 180, 0.015, 0xa20),
+            (0x659, 180, 0.015, 0xa21),
+            (0x6d8, 360, 0.025, 0xa20),
+            (0x91a, 180, 0.015, 0xa21),
+            (0x652, 360, 0.015, 0xa1f),
+        ] {
+            assert_eq!(bonus(kind), &[(chance, potion)]);
+            let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
+            let loot = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(0, 0),
+            );
+            assert!(!loot.private.contains_key(&10), "{kind:#x}");
+            for owner in [20, 30] {
+                assert_eq!(loot.private[&owner], [potion], "{kind:#x}");
+            }
+            assert_eq!(loot.shared_owners, [10, 20, 30]);
+            let expected: Vec<_> = table(kind)
+                .iter()
+                .flat_map(|(_, pick)| candidates(&content, *pick))
+                .collect();
+            assert_eq!(loot.shared, expected, "{kind:#x}");
+            assert!(!loot.shared.contains(&potion));
+            let empty = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0),
+            );
+            assert!(empty.shared.is_empty() && empty.private.is_empty());
+        }
+        assert_eq!(crate::dungeon::portal_drop(0x659), Some((0x71a, 0.17)));
+        assert_eq!(crate::dungeon::portal_drop(0x6d8), None);
     }
 
     #[test]

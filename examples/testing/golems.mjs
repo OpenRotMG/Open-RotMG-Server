@@ -1,0 +1,103 @@
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {execFileSync} from 'node:child_process';
+const selected=Number(process.env.GOLEM_KIND);
+assert([0x62f,0x631,0x62d,0x62e,0x632,0x633].includes(selected),'Set GOLEM_KIND to one of 0x62f/0x631/0x62d/0x62e/0x632/0x633');
+const spec={class:0x30e,level:20,seed:838,world:1,equipment:[0xb08,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const output=name=>join(process.env.QA_RESULTS_DIR,name);
+const native=name=>output('native/'+name);
+let camps;
+export async function prepare(api){
+  const report=JSON.parse(await readFile(native('result.json'),'utf8'));
+  const info=await api({op:'world_info',world:spec.world}),[x,y]=info.spawn_points[0];
+  const scout=await api({op:'spawn',spec:{...spec,guid:'golem-scout',position:{x,y},controller:'direct',profile:null}});
+  const state=await api({op:'inspect',actor:scout.result.actor});
+  const token=(await readFile(native('state/control.token'),'utf8')).trim();
+  const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(response.ok);
+  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
+  await writeFile(output('natural-map.json'),JSON.stringify(map));
+  camps=[selected].map(kind=>{
+    for(const root of map.entities.filter(e=>e.kind===kind)){
+      for(let dx=-3;dx<=3;dx++)for(let dy=-3;dy<=3;dy++){
+        if(Math.hypot(dx,dy)<2||Math.hypot(dx,dy)>3)continue;
+        const position={x:Math.floor(root.pos.x)+dx+.5,y:Math.floor(root.pos.y)+dy+.5};
+        if(!blocked.has([Math.floor(position.x),Math.floor(position.y)].join(',')))return {root,position,members:map.entities.filter(e=>e.camp===root.camp)};
+      }
+    }
+    throw Error('No walkable natural camp for '+kind.toString(16));
+  });
+  await writeFile(output('natural-camps.json'),JSON.stringify({world:spec.world,layout:info.realm_layout,camps}));
+  return {...spec,position:camps[0].position};
+}
+export async function run(game){
+  const samples=[],shots=new Map(),encounters=[];let serial=0,protectedUntil=0;
+  const command=async change=>{
+    const path=output('mutation-'+serial+'.json');
+    await writeFile(path,JSON.stringify({id:'golem-'+serial++,command:{op:'cheat',actor:game.actor,change}}));
+    execFileSync(process.execPath,[resolve('scripts/game.mjs'),native('native.json'),path]);
+  };
+  const family=(s,camp)=>s.diagnostic.entities.filter(e=>e.camp===camp);
+  const awards=async()=>(await readFile(native('server.log'),'utf8')).split('\n').filter(line=>line.startsWith('{')&&line.endsWith('}')).map(line=>JSON.parse(line)).filter(row=>row.fields?.message==='experience queued');
+  async function step(input,capture){
+    let pending,error;
+    const record=s=>{samples.push(s);for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);};
+    const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
+    try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
+    if(error)throw error;const s=await game.inspect();record(s);return s;
+  }
+  async function act(input,capture){
+    async function protect(){if((await game.observe()).game_ms>=protectedUntil){await command({kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil=(await game.observe()).game_ms+60000;}}
+    await protect();
+    while(protectedUntil-(await game.observe()).game_ms<input.duration_ms+500){await step({keys:[],duration_ms:500});await protect();}
+    return step(input,capture);
+  }
+  try{
+    for(const {root,members} of camps){
+      const tag=root.kind.toString(16),camp=root.camp,start=samples.length;
+      const arrival=await game.inspect();
+      game.check(tag+': natural root and four satellites admitted',family(arrival,camp).some(e=>e.id===root.id&&e.hp===220)&&members.filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7).length===4);
+      await act({keys:[],duration_ms:2000});
+      await act({keys:[],duration_ms:4500},{name:'golem-'+tag,when:view=>view.game_ms>=arrival.view.time_ms+4000});
+      const combat=samples.slice(start),ids=new Set(members.map(e=>e.id));
+      game.check(tag+': root activates and moves',combat.some(s=>family(s,camp).some(e=>e.id===root.id&&e.activated!==null&&Math.hypot(e.pos.x-root.pos.x,e.pos.y-root.pos.y)>.2)));
+      const speeds={0x62f:[55],0x631:[55],0x62d:[75],0x62e:[10],0x632:[45,60],0x633:[120,70]};
+      for(const speed of speeds[root.kind])game.check(tag+': native root projectile speed '+speed,[...shots.values()].some(p=>p.owner===root.id&&p.speed===speed));
+      for(const kind of [0x6d5,0x6d6,0x6d7])game.check(tag+': gray '+kind.toString(16)+' fires selected missile',[...shots.values()].some(p=>members.some(e=>e.id===p.owner&&e.kind===kind)&&p.speed===65&&p.lifetime_ms===2500));
+      const hub=members.find(e=>e.kind>=0x6d2&&e.kind<=0x6d4);assert(hub);
+      game.check(tag+': colored hub orbits its own root',combat.some(s=>{const f=family(s,camp),h=f.find(e=>e.id===hub.id),r=f.find(e=>e.id===root.id);return h&&r&&Math.abs(Math.hypot(h.pos.x-r.pos.x,h.pos.y-r.pos.y)-3)<.15;}));
+      game.check(tag+': gray satellites move around owned hub',combat.some(s=>{const f=family(s,camp),h=f.find(e=>e.id===hub.id);return h&&f.some(e=>e.kind>=0x6d5&&e.kind<=0x6d7&&Math.abs(Math.hypot(e.pos.x-h.pos.x,e.pos.y-h.pos.y)-1)<.15);}));
+      for(let n=0;n<25&&family(await game.inspect(),camp).some(e=>e.id===root.id);n++){
+        await act({keys:[],duration_ms:300,target:{entity:root.id,camera_angle:-Math.PI/4,fire:true}});
+        await act({keys:[],duration_ms:500});
+      }
+      const defeated=await game.inspect();
+      game.check(tag+': ordinary native fire defeats root',!family(defeated,camp).some(e=>e.id===root.id));
+      const survivors=family(defeated,camp).filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7);
+      game.check(tag+': satellites survive root death with bounded cleanup',survivors.length>0&&survivors.every(e=>e.expires>defeated.view.time_ms&&e.expires<=defeated.view.time_ms+30000));
+      const target=survivors.find(e=>e.id===hub.id);assert(target,'Colored satellite must survive root defeat');
+      for(let n=0;n<20;n++){
+        const s=await game.inspect(),e=family(s,camp).find(e=>e.id===target.id);assert(e,'Satellite expired before native approach');
+        const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;if(Math.hypot(dx,dy)<=1.5)break;
+        const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+        await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:250});
+      }
+      const approached=await game.inspect(),subject=family(approached,camp).find(e=>e.id===target.id);
+      game.check(tag+': ordinary native movement reaches satellite through scenery',subject&&Math.hypot(subject.pos.x-approached.view.position.x,subject.pos.y-approached.view.position.y)<=1.5);
+      const xp=approached.view.character.experience,awardStart=(await awards()).length;
+      for(let n=0;n<30&&family(await game.inspect(),camp).some(e=>e.id===target.id);n++){
+        await act({keys:[],duration_ms:250,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
+        await act({keys:[],duration_ms:500});
+      }
+      const satelliteDead=await game.inspect(),remaining=family(satelliteDead,camp).filter(e=>survivors.some(p=>p.id===e.id));
+      // The September 7, 2012 page supports ten XP, not an exact decay delay: https://wikiwiki.jp/rmd/?cmd=read&page=Gray%20Satellite%202
+      game.check(tag+': native satellite defeat queues ten XP and advances client XP (requires world debug logs)',!remaining.some(e=>e.id===target.id)&&satelliteDead.view.character.experience>=xp+10&&(await awards()).slice(awardStart).some(row=>row.fields.player===satelliteDead.diagnostic.player&&row.fields.enemy===target.kind&&row.fields.amount===10));
+      const cleanupXp=satelliteDead.view.character.experience;
+      for(let n=0;n<4;n++)await act({keys:[],duration_ms:10000});
+      const end=await game.inspect();
+      game.check(tag+': orphan cleanup removes satellites without kill XP',!family(end,camp).some(e=>ids.has(e.id)&&e.kind>=0x6d2&&e.kind<=0x6d7)&&end.view.character.experience===cleanupXp);
+      game.check(tag+': same prepared living Wizard completes encounter',end.view.lifecycle.alive&&end.view.session.character===arrival.view.session.character);
+      encounters.push({kind:root.kind,arrival,defeated,satelliteDead,end});
+    }
+  }finally{await writeFile(output('combat.json'),JSON.stringify({encounters,samples,shots:[...shots.values()]}));}
+}
