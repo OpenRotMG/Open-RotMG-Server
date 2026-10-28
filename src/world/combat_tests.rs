@@ -81,6 +81,76 @@ fn native_hits_keep_effects_separate_from_hp_protection_and_consume_once() {
 }
 
 #[test]
+fn ruthven_leech_requires_actual_damage_an_ack_and_a_living_owner() {
+    for (flags, living, ack) in [
+        (0, true, 1000),
+        (bit(condition::INVULNERABLE), true, 1000),
+        (0, false, 1000),
+        (0, true, -1),
+    ] {
+        let (mut w, player) = fixture(0x18, false);
+        w.now = 1000;
+        let kind = crate::dungeon::manor::BOSS;
+        let boss = w
+            .spawn_entity(kind, w.players[&player].pos, vec![])
+            .unwrap();
+        w.entities.get_mut(&boss).unwrap().hp = 14000;
+        let p = w.players.get_mut(&player).unwrap();
+        p.character.base[3] = 25;
+        p.lab_conditions = flags;
+        let b = shot(&w, boss, kind, 0);
+        assert!(native_hits::expect_shoot_ack(
+            w.players.get_mut(&player).unwrap(),
+            vec![b.clone()],
+            &w.clock
+        ));
+        w.native_player_hit(player, boss, b.id).unwrap();
+        assert_eq!(w.players[&player].character.hp, 200);
+        assert_eq!(w.entities[&boss].hp, 14000);
+        w.acknowledge_shoot(player, ack).unwrap();
+        if !living {
+            w.remove_entity(boss);
+        }
+        w.native_player_hit(player, boss, b.id).unwrap();
+        let hp = w.players[&player].character.hp;
+        assert_eq!(hp, if flags == 0 && ack >= 0 { 125 } else { 200 });
+        // The period guide specifies damage received, not announced projectile damage: https://web.archive.org/web/20120509113243id_/http://forums.wildshadow.com/wiki/realm-mad-god/lord-ruthven
+        if living {
+            assert_eq!(w.entities[&boss].hp, 14000 + 200 - hp);
+        }
+        w.native_player_hit(player, boss, b.id).unwrap();
+        assert_eq!(w.players[&player].character.hp, hp);
+        if living {
+            assert_eq!(w.entities[&boss].hp, 14000 + 200 - hp);
+        }
+    }
+}
+
+#[test]
+fn sprite_quiet_hit_drains_mp_without_damage_and_cannot_replay() {
+    let (mut w, id) = fixture(0x18, false);
+    w.now = 1000;
+    let b = shot(&w, 999, 0x652, 1);
+    assert_eq!(b.damage, 0);
+    assert_eq!(b.spec.effects, [(condition::QUIET, 10000)]);
+    assert!(native_hits::expect_shoot_ack(
+        w.players.get_mut(&id).unwrap(),
+        vec![b.clone()],
+        &w.clock
+    ));
+    w.acknowledge_shoot(id, 1000).unwrap();
+    w.native_player_hit(id, b.owner, b.id).unwrap();
+    let p = &w.players[&id];
+    assert_eq!((p.character.hp, p.character.mp), (200, 0));
+    assert_eq!(p.statuses[&condition::QUIET], (1000, 11000));
+    w.now = 1050;
+    w.native_player_hit(id, b.owner, b.id).unwrap();
+    assert_eq!(w.players[&id].statuses[&condition::QUIET], (1000, 11000));
+    w.now = 11000;
+    assert_eq!(w.players[&id].conditions(w.now) & bit(condition::QUIET), 0);
+}
+
+#[test]
 fn beholder_zero_damage_star_blinds_once_for_five_seconds() {
     let (mut w, id) = fixture(0x18, false);
     w.now = 1000;

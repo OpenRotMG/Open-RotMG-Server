@@ -629,6 +629,38 @@ impl World {
                 "Pentaract completed after all five towers fell"
             );
         } else {
+            if self.now.is_multiple_of(250) {
+                // Corpse endpoints keep the revival warning connected: https://web.archive.org/web/20120611050120id_/http://forums.wildshadow.com/wiki/realm-mad-god/pentaract
+                let points: Vec<_> = towers
+                    .iter()
+                    .chain(&corpses)
+                    .map(|id| (*id, self.entities[id].pos))
+                    .collect();
+                let color = if corpses.is_empty() {
+                    0xffff0000
+                } else {
+                    0xffffff00
+                };
+                for (index, (from, start)) in points.iter().enumerate() {
+                    for (to, end) in &points[index + 1..] {
+                        let mut out = Writer::new();
+                        out.u8(3)
+                            .i32(*from)
+                            .f32(start.x)
+                            .f32(start.y)
+                            .f32(end.x)
+                            .f32(end.y)
+                            .u32(color);
+                        for p in self
+                            .players
+                            .values()
+                            .filter(|p| p.known.contains(from) || p.known.contains(to))
+                        {
+                            send(p, wire::SHOW_EFFECT, out.0.clone());
+                        }
+                    }
+                }
+            }
             for corpse in corpses {
                 let e = &self.entities[&corpse];
                 if e.conditions(self.now) & condition::bit(condition::STASIS) != 0 {

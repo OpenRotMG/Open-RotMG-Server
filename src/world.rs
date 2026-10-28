@@ -89,6 +89,8 @@ mod tracked;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+#[cfg(test)]
+mod abyss_tests;
 
 mod beach;
 mod coil;
@@ -7569,6 +7571,8 @@ mod shop_tests;
 mod combat_tests;
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod snake_tests;
 
 #[cfg(test)]
 mod death_chat_tests;
@@ -7604,6 +7608,8 @@ mod mystic_tests;
 
 #[cfg(test)]
 mod ghost_ship_tests;
+#[cfg(test)]
+mod pentaract_tests;
 #[cfg(test)]
 mod quest_tests;
 
