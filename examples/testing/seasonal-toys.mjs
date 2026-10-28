@@ -57,17 +57,20 @@ export async function run(game){
   const outside=await peer.observe();
   game.check('recipient walked outside reconstructed three-tile range',Math.hypot(outside.position.x-initial.position.x,outside.position.y-initial.position.y)>3);
   await change(peer.actor,{kind:'vitals',hp:100,mp:100});
-  await game.act({keys:[],duration_ms:1500});
-  game.check('out-of-range player receives no Castle healing',(await peer.observe()).character.hp===100);
+  const rangeStart=await peer.observe();await game.act({keys:[],duration_ms:1500});
+  const rangeEnd=await peer.observe();
+  game.check('out-of-range player receives only passive regeneration',rangeEnd.character.hp-100<=Math.ceil((rangeEnd.game_ms-rangeStart.game_ms)/1000)+1);
   const current=await castles();
   game.check('Castles remain at their summon positions',fixed.every(e=>current.some(c=>c.id===e.id&&c.pos.x===e.pos.x&&c.pos.y===e.pos.y)));
   await change(game.actor,{kind:'vitals',hp:669,mp:100});
-  await game.act({keys:[],duration_ms:1200});
-  game.check('Castle healing caps at effective maximum without restoring MP',(await game.observe()).character.hp===670&&(await game.observe()).character.mp===100);
+  const capStart=await game.observe();await game.act({keys:[],duration_ms:1200});
+  const capEnd=await game.observe();
+  game.check('Castle healing caps at effective maximum without restoring MP',capEnd.character.hp===670&&capEnd.character.mp-100<=Math.ceil((capEnd.game_ms-capStart.game_ms)*0.0006)+1);
   await game.act({keys:[],duration_ms:10000});await game.act({keys:[],duration_ms:10000});await game.act({keys:[],duration_ms:10000});
   game.check('all Castles expire after reconstructed lifetime',(await castles()).length===0);
-  await change(game.actor,{kind:'vitals',hp:100,mp:100});await game.act({keys:[],duration_ms:1200});
-  game.check('expired Castles stop healing',(await game.observe()).character.hp===100);
+  await change(game.actor,{kind:'vitals',hp:100,mp:100});const expiredStart=await game.observe();await game.act({keys:[],duration_ms:1200});
+  const expiredEnd=await game.observe();
+  game.check('expired Castles leave only passive regeneration',expiredEnd.character.hp-100<=Math.ceil((expiredEnd.game_ms-expiredStart.game_ms)/1000)+1);
   const fire=await game.join({...base,world:1,position:{x:target.pos.x+1,y:target.pos.y+1},backpack:[0xc2b,0xc2c,0xc34,-1,-1,-1,-1,-1]});
   await change(fire.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
   for(const [key,slot,kind] of [['1',4,0x1407],['2',5,0x1408]]){
