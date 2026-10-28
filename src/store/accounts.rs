@@ -2,6 +2,9 @@ use super::*;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use rusqlite::OptionalExtension;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn hash(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut rand::rngs::OsRng);
     Argon2::default()
@@ -133,6 +136,7 @@ fn name_choice_check(
     if !registered {
         return Ok(Err("register before choosing a name"));
     }
+    // 123.5.1's NameChanger panel advertises 1000 Gold; this is reconstruction, not recovered server policy: https://github.com/OpenRotMG/Open-RotMG-Client/blob/0282b3a48ad0c73abd683572ece4e6c71b0cb055/client.swf
     let price = if name_chosen(account, &current) {
         1000
     } else {
