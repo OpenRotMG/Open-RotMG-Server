@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x30e,level:20,seed:831,world:1,equipment:[0xb08,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const spec={class:0x30e,level:20,seed:831,world:1,equipment:[0xb08,0xb24,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let queen;
 export async function prepare(api){
@@ -67,12 +67,16 @@ export async function run(game){
   await act({keys:[],duration_ms:2000});
   // Kithio heals to full, unlike our 250-HP reconstruction: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Heal.cs#L40-L47
   game.check('current wounded-King reconstruction heals while Queen lives',samples.some((s,i)=>{const e=family(s).find(e=>e.id===king.id),p=i&&family(samples[i-1]).find(e=>e.id===king.id);return e&&p&&p.hp<1000&&e.hp>p.hp;}));
-  for(let n=0;n<30&&family(await game.inspect()).some(e=>e.id===king.id);n++)await act({keys:[],duration_ms:500,target:{entity:king.id,camera_angle:-Math.PI/4,fire:true}});
+  for(let n=0;n<4&&family(await game.inspect()).some(e=>e.id===king.id);n++){
+    await act({keys:[],duration_ms:150,target:{entity:king.id,camera_angle:-Math.PI/4,fire:false}});
+    await act({keys:[' '],duration_ms:150});
+    await act({keys:[],duration_ms:350});
+  }
   const followerDead=await save('king-defeated');
-  game.check('ordinary staff defeats King without killing Queen',!family(followerDead).some(e=>e.id===king.id)&&family(followerDead).some(e=>e.id===queen.id));
+  game.check('ordinary native spells defeat King without killing Queen',!family(followerDead).some(e=>e.id===king.id)&&family(followerDead).some(e=>e.id===queen.id));
   await act({keys:[],duration_ms:10000});
   const unreplaced=await save('king-not-replaced');
-  game.check('current once-only camp does not replace a dead King',!family(unreplaced).some(e=>e.kind===0x901));
+  game.check('living Queen does not replace the dead King in ten seconds',family(unreplaced).some(e=>e.id===queen.id&&e.stage!==2)&&!family(unreplaced).some(e=>e.kind===0x901));
   const xp=unreplaced.view.character.experience;
   for(let n=0;n<60;n++){
     const q=family(await game.inspect()).find(e=>e.id===queen.id);if(!q||q.stage===2)break;
