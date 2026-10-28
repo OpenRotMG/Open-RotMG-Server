@@ -22,9 +22,9 @@ export async function run(observer){
   const [a,b]=clients,records=[];
   const save=async label=>{const state={label,a:await a.game.inspect(),b:await b.game.inspect(),arena:await observer.inspect(),map:await map()};records.push(state);await writeFile(join(out,'switches.json'),JSON.stringify(records));return state;};
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
-  async function walk(game,point){
+  async function walk(game,point,range=.25){
     for(let n=0;n<25;n++){
-      const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<.25)return;
+      const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<range)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
       await game.act({keys,duration_ms:Math.max(50,Math.min(150,Math.round(Math.hypot(dx,dy)/(4+5.6*v.character.stats.speed/75)*1000)))});
@@ -34,17 +34,17 @@ export async function run(observer){
   await a.game.act({keys:[],duration_ms:300},{name:'tomb-active-traps',when:()=>true});
   const initial=await save('initial');
   observer.check('two different generated rooms each have eight live traps',a.traps.length===8&&b.traps.length===8&&a.room.id!==b.room.id);
-  await walk(a.game,a.room.pos);await a.game.act({keys:[],duration_ms:1400});
+  await walk(a.game,a.room.pos,.8);await a.game.act({keys:[],duration_ms:1400});
   const pressed=await save('partial-pressure');
   observer.check('native pressure starts without early activation',entity(pressed.a,a.room.id).tomb.press_since!==null&&entity(pressed.a,a.room.id).stage===0);
   await walk(a.game,{x:a.room.pos.x+2,y:a.room.pos.y});
   const interrupted=await save('interrupted');
   observer.check('leaving the switch resets uninterrupted pressure',entity(interrupted.a,a.room.id).tomb.press_since===null&&entity(interrupted.a,a.room.id).stage===0);
-  await walk(b.game,b.room.pos);const secondAt=(await b.game.observe()).game_ms;
+  await walk(b.game,b.room.pos,.8);const secondAt=(await b.game.observe()).game_ms;
   await b.game.act({keys:[],duration_ms:3500},{name:'tomb-second-room-disabled',when:v=>v.game_ms>=secondAt+3100});
   const local=await save('second-room-disabled');
   observer.check('another player disables only their own room',entity(local.b,b.room.id).stage===1&&entity(local.a,a.room.id).stage===0&&a.traps.every(t=>local.map.entities.some(e=>e.id===t.id&&e.kind===0xd38))&&b.traps.every(t=>!local.map.entities.some(e=>e.id===t.id)&&local.map.entities.some(e=>e.kind===0xd39&&e.pos.x===t.pos.x&&e.pos.y===t.pos.y)));
-  await walk(a.game,a.room.pos);await a.game.act({keys:[],duration_ms:1400});
+  await walk(a.game,a.room.pos,.8);await a.game.act({keys:[],duration_ms:1400});
   const restarted=await save('restarted-pressure');
   observer.check('interrupted time is not accumulated across visits',entity(restarted.a,a.room.id).stage===0);
   const firstAt=(await a.game.observe()).game_ms;

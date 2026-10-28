@@ -28,12 +28,28 @@ export async function run(observer){
   game.check('ordinary damage produces eight jars of four selected kinds',jars.length===8&&new Set(jars.map(e=>e.kind)).size===4&&spawned.map.entities.some(e=>e.id===treasure.id&&e.hp<49500));
   for(let n=0;n<15&&(await map()).entities.some(e=>e.id===treasure.id);n++)await game.act({keys:[],duration_ms:1500,target:{entity:treasure.id,camera_angle:-Math.PI/4,fire:true}});
   const defeated=await save('treasure-defeated');
-  game.check('native staff defeats the optional treasure and earns XP',!defeated.map.entities.some(e=>e.id===treasure.id)&&defeated.state.view.character.experience>initial.state.view.character.experience);
-  const target=jars.reduce((a,b)=>Math.hypot(a.pos.x-initial.state.view.position.x,a.pos.y-initial.state.view.position.y)<Math.hypot(b.pos.x-initial.state.view.position.x,b.pos.y-initial.state.view.position.y)?a:b);
+  game.check('native staff defeats the optional treasure without inventing XP',!defeated.map.entities.some(e=>e.id===treasure.id)&&defeated.state.diagnostic.character.kills>initial.state.diagnostic.character.kills&&defeated.state.view.character.experience===initial.state.view.character.experience);
+  const remaining=defeated.map.entities.filter(e=>e.kind>=0xd2d&&e.kind<=0xd30);assert(remaining.length,'A surviving jar is required');
+  const target=remaining.reduce((a,b)=>Math.hypot(a.pos.x-initial.state.view.position.x,a.pos.y-initial.state.view.position.y)<Math.hypot(b.pos.x-initial.state.view.position.x,b.pos.y-initial.state.view.position.y)?a:b);
   await game.act({keys:[],duration_ms:700,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
   const broken=await save('jar-broken');
-  game.check('native fire breaks a real jar and produces its Scarab',!broken.map.entities.some(e=>e.id===target.id)&&broken.map.entities.some(e=>e.kind===0xd1b&&e.tomb?.producer===target.id));
+  game.check('native fire breaks a real jar and records its kill',!broken.map.entities.some(e=>e.id===target.id)&&broken.state.diagnostic.character.kills>defeated.state.diagnostic.character.kills);
+  const bag=broken.state.diagnostic.entities.find(e=>e.items?.some(i=>i!==-1)&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===broken.state.view.session.account));assert(bag,'This seeded treasure must produce an eligible private reward');
+  for(let n=0;n<25;n++){
+    const v=await game.observe(),dx=bag.pos.x-v.position.x,dy=bag.pos.y-v.position.y;if(Math.hypot(dx,dy)<.8)break;
+    const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+    if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
+    await game.act({keys,duration_ms:100});
+  }
+  const atBag=await game.observe();assert(Math.hypot(atBag.position.x-bag.pos.x,atBag.position.y-bag.pos.y)<.8,'Native reward approach failed');
+  await game.act({keys:[],duration_ms:800},{name:'tomb-optional-reward',when:()=>true});
+  const slot=bag.items.findIndex(i=>i!==-1),item=bag.items[slot],revision=(await game.observe()).character.inventory_revision;
+  const from={x:634+(slot%4)*44,y:528+Math.floor(slot/4)*44};
+  await game.act({keys:[],duration_ms:350,drag:{from,to:{x:634,y:428}}});
+  const picked=await save('picked');game.check('native drag commits the optional reward once',picked.state.view.character.items[4]===item&&picked.state.view.character.inventory_revision===revision+1);
+  await game.act({keys:[],duration_ms:350,drag:{from,to:{x:678,y:428}}});
+  game.check('empty optional reward slot cannot duplicate its item',(await game.observe()).character.inventory_revision===revision+1);
   game.check('treasure and jar rewards do not awaken bosses or count completion',broken.map.entities.filter(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind)).length===3&&broken.map.entities.filter(e=>e.kind===0xd29).length===layout.entities.filter(e=>e.kind===0xd29).length&&broken.state.diagnostic.character.tombs===0&&broken.arena.diagnostic.character.tombs===0);
   await game.act({keys:['Insert'],duration_ms:300});
-  const returned=await game.observe();game.check('ordinary escape keeps the same living character and earned XP without clear credit',returned.world==='Nexus'&&returned.lifecycle.alive&&returned.session.character===initial.state.view.session.character&&returned.character.experience===broken.state.view.character.experience&&(await game.inspect()).diagnostic.character.tombs===0);
+  const returned=await game.observe();game.check('ordinary escape keeps the same living character and optional item without clear credit',returned.world==='Nexus'&&returned.lifecycle.alive&&returned.session.character===initial.state.view.session.character&&returned.character.items[4]===item&&returned.character.inventory_revision===revision+1&&(await game.inspect()).diagnostic.character.tombs===0);
 }
