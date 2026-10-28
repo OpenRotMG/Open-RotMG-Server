@@ -79,15 +79,18 @@ export async function run(game){
   await act({keys:[],duration_ms:10000});
   const unreplaced=await save('king-not-replaced');
   game.check('living Queen does not replace the dead King in ten seconds',family(unreplaced).some(e=>e.id===queen.id&&e.stage!==2)&&!family(unreplaced).some(e=>e.kind===0x901));
-  const xp=unreplaced.view.character.experience;
   await act({keys:[],duration_ms:500,drag:{from:{x:634,y:428},to:{x:634,y:385}}});
   game.check('native inventory equips the supplied low-damage staff for withdrawal',(await game.observe()).character.items[0]===0xa97);
   pollMs=25;
   for(let n=0;n<60;n++){
-    const q=family(await game.inspect()).find(e=>e.id===queen.id);if(!q||q.stage===2)break;
+    const s=await game.inspect(),q=family(s).find(e=>e.id===queen.id);if(!q||q.stage===2)break;
+    const dx=q.pos.x-s.view.position.x,dy=q.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+    if(Math.hypot(dx,dy)>4){await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:200});continue;}
     await act({keys:[],duration_ms:50,target:{entity:queen.id,camera_angle:-Math.PI/4,fire:true}});
     await act({keys:[],duration_ms:500});
   }
+  const armed=await save('queen-armed'),commander=family(armed).find(e=>e.id===queen.id),xp=armed.view.character.experience;
+  game.check('Queen remains alive at the armed withdrawal deadline',commander?.stage===2&&commander.hp>0&&commander.expires>armed.view.time_ms);
   await act({keys:[],duration_ms:1500},{name:'shield-orcs-withdrawn',when:()=>true});
   const dead=await save('queen-withdrawn');
   game.check('wounded Queen telegraphs and withdraws',samples.some(s=>family(s).some(e=>e.id===queen.id&&e.stage===2&&e.hp<500))&&!family(dead).some(e=>e.id===queen.id));
