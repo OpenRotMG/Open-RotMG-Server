@@ -27,7 +27,7 @@ export async function prepare(api){
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,lastTeleport=-10000;
+  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,lastTeleport=-10000,companion,companionUntil=0;
   const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
@@ -42,7 +42,11 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change}})});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
-  async function protect(){const now=(await game.observe()).game_ms;if(now>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}}
+  async function protect(){
+    const now=(await game.observe()).game_ms;
+    if(now>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}
+    if(companion&&now>=companionUntil){await api({op:'cheat',actor:companion.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});companionUntil=now+60000;}
+  }
   async function idle(ms){while(ms>0){await protect();const step=Math.min(ms,5000,until-(await game.observe()).game_ms);await game.act({keys:[],duration_ms:step});ms-=step;}}
   async function at(point){
     const now=(await game.observe()).game_ms;
@@ -97,8 +101,13 @@ export async function run(game){
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-waiting',when:()=>true});
   const entry=await save('entry'),lord=entity(entry,admitted.entity);assert(lord?.hp===70000&&lord.stage===0);
   game.check('ordinary quest defeat admits the untouched reserved Lord',lord.id===reserved[0].entity&&lord.kind===0xd50&&lord.quest===lord.id);
-  await fire(lord.id,500);await idle(4000);
+  companion=await game.join({...spec,world,seed:818,position:lord.pos});await protect();
+  const peerBefore=await companion.observe(),peerCharacter=peerBefore.session.character;
+  for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[peerCharacter]??0)<=700;n++)await companion.act({keys:[],duration_ms:500,target:{entity:lord.id,camera_angle:-Math.PI/4,fire:true}});
+  for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[initial.view.session.character]??0)<=700;n++)await fire(lord.id,500);
+  await idle(4000);
   let state=await save('activated');
+  game.check('two native players each contribute above the Lord private threshold',[peerCharacter,initial.view.session.character].every(id=>entity(state,lord.id).damage[id]>700));
   const family=s=>s.diagnostic.entities.filter(e=>e.quest===lord.id),crystals=s=>family(s).filter(e=>e.kind===0xd51);
   game.check('native damage activates Lord and summons Guardians and Knights',entity(state,lord.id).hp<69300&&[0xd52,0xd53].every(k=>family(state).some(e=>e.kind===k)));
   const samples=[];let pending,error;
@@ -107,12 +116,24 @@ export async function run(game){
   await writeFile(join(out,'attacks.json'),JSON.stringify(samples));state=await save('protected');
   game.check('Lord uses White Beam and Bleeding Vortex projectiles',[83,35].every(speed=>samples.some(s=>s.view.projectiles.some(p=>p.owner===lord.id&&p.speed===speed))));
   game.check('Lord moves during its attack',samples.some(s=>{const e=entity(s,lord.id);return e&&Math.hypot(e.pos.x-lord.pos.x,e.pos.y-lord.pos.y)>.2;}));
-  game.check('eight owned protection crystals shield Lord',crystals(state).length===8&&entity(state,lord.id).stage===8&&!!(entity(state,lord.id).condition&(1<<24)));
+  game.check('native encounter applies Bleeding and Slowed despite prepared Invulnerable',[32768,8].every(mask=>samples.some(s=>(s.view.character.conditions&mask)!==0)));
+  const tossState=samples.find(s=>entity(s,lord.id)?.stage===7);assert(tossState,'Native protection toss must be observed');
+  const center=entity(tossState,lord.id).pos,landings=Array.from({length:8},(_,n)=>{
+    const position={x:center.x+4*Math.cos(n*Math.PI/4),y:center.y+4*Math.sin(n*Math.PI/4)},x=Math.floor(position.x),y=Math.floor(position.y);
+    const tile=tossState.view.tiles.find(t=>t.x===x&&t.y===y);assert(tile,'Every requested crystal landing must be visible');
+    const blockers=tossState.view.objects.filter(e=>e.blocks&&Math.floor(e.position.x)===x&&Math.floor(e.position.y)===y);
+    return {position,tile,blockers,walkable:tile.ground_speed>0&&!blockers.length};
+  });
+  await writeFile(join(out,'protection-landings.json'),JSON.stringify(landings));
+  const expected=landings.filter(p=>p.walkable).length,births=(await history()).filter(f=>f.message==='bounded named quest followers spawned'&&f.quest===lord.id&&f.kind===0xd51).reduce((n,f)=>n+f.count,0);
+  game.check('all walkable radial crystal landings spawn owned protection',expected>0&&expected===births&&crystals(state).length===expected&&entity(state,lord.id).stage===8&&!!(entity(state,lord.id).condition&(1<<24)));
   const hp=entity(state,lord.id).hp;await fire(lord.id,1000);state=await save('shield-rejects');
   game.check('shield rejects native sword damage',entity(state,lord.id).hp===hp);
-  for(const crystal of crystals(state))for(let n=0;n<35&&entity(await game.inspect(),crystal.id);n++)await fire(crystal.id);
+  const protectionIds=crystals(state).map(e=>e.id);
+  for(const id of protectionIds)for(let n=0;n<35&&entity(await game.inspect(),id);n++)await fire(id);
   await idle(500);state=await save('shield-released');
-  game.check('defeating all crystals returns Lord to combat',!crystals(state).length&&entity(state,lord.id).stage!==8&&!(entity(state,lord.id).condition&(1<<24)));
+  const defeats=await history();
+  game.check('native crystal defeats release the shield without waiting for decay',protectionIds.every(id=>defeats.some(f=>f.message==='enemy defeated'&&f.entity===id))&&!crystals(state).length&&entity(state,lord.id).stage!==8&&!(entity(state,lord.id).condition&(1<<24)));
   const beforeFinalXp=state.view.character.experience,existingBags=new Set(state.diagnostic.entities.filter(e=>e.items).map(e=>e.id));
   for(let n=0;n<300&&entity(await game.inspect(),lord.id);n++){
     state=await game.inspect();
@@ -121,6 +142,9 @@ export async function run(game){
   }
   await idle(1000);state=await save('defeated');
   game.check('native combat completes timed Lord defeat and earns XP',!entity(state,lord.id)&&state.view.character.experience>=beforeFinalXp+2100&&(await history()).some(f=>f.message==='timed enemy defeat'&&f.entity===lord.id));
+  const peerAfter=await companion.inspect();
+  game.check('both native contributors receive final Lord XP',peerAfter.view.character.experience>=peerBefore.character.experience+2100);
+  await writeFile(join(out,'multiplayer.json'),JSON.stringify({peerBefore,peerAfter,damage:records.find(r=>r.label==='activated').state}));
   const xp=state.view.character.experience;await idle(2000);
   game.check('defeat XP is once only',(await game.observe()).character.experience===xp);
   game.check('same living prepared character survives',state.view.lifecycle.alive&&state.view.session.character===initial.view.session.character);
@@ -130,8 +154,9 @@ export async function run(game){
   const bag=state.diagnostic.entities.find(e=>!existingBags.has(e.id)&&e.items?.some(i=>i!==-1)&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===state.view.session.account));
   assert(bag,'No natural Lord private item observed; pickup/reconnect not exercised');
   await api({op:'cheat',actor:scout,change:{kind:'teleport',position:bag.pos}});
-  const observer=await api({op:'inspect',actor:scout});
+  const observer=await api({op:'inspect',actor:scout}),peerReward=await companion.inspect();
   game.check('nearby noncontributor cannot see the Lord private reward',!observer.diagnostic.entities.some(e=>e.id===bag.id));
+  game.check('nearby native contributor cannot see another account private reward',Math.hypot(peerReward.view.position.x-bag.pos.x,peerReward.view.position.y-bag.pos.y)<12&&!peerReward.diagnostic.entities.some(e=>e.id===bag.id));
   await api({op:'cheat',actor:scout,change:{kind:'teleport',position:refuge}});
   await walk(bag.pos,.5);
   await game.act({keys:[],duration_ms:700},{name:'lost-lands-reward',when:()=>true});
