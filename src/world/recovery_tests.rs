@@ -142,3 +142,114 @@ async fn recovery_persists_vitals_not_fractions_or_temporary_effects() {
     );
     assert_eq!(p.conditions(w.now), 0);
 }
+
+#[test]
+fn dungeon_drinks_commit_once_and_gate_each_resource_independently() {
+    for (item, heal, mana) in [
+        (0x707, 150, 0),
+        (0xc12, 100, 100),
+        (0xa3f, 100, 0),
+        (0xc1a, 0, 100),
+        (0xb36, 150, 0),
+        (0xb37, 0, 150),
+    ] {
+        for (sick, quiet, full) in [
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (true, true, false),
+            (false, false, true),
+        ] {
+            let (mut w, id) = fixture();
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.items[4] = item;
+            if full {
+                p.character.hp = 670;
+                p.character.mp = 385;
+            }
+            if sick {
+                w.apply_condition(id, SICK, 1000).unwrap();
+            }
+            if quiet {
+                w.apply_condition(id, QUIET, 1000).unwrap();
+            }
+            let before = w.players[&id].character.clone();
+            let slot = Slot {
+                object: id,
+                slot: 4,
+                kind: item,
+            };
+            let plan = w.use_item(id, slot, w.players[&id].pos).unwrap().unwrap();
+            let p = &w.players[&id];
+            assert_eq!((p.character.hp, p.character.mp), (before.hp, before.mp));
+            assert_eq!(p.character.items, before.items);
+            assert!(w.use_item(id, slot, w.players[&id].pos).is_err());
+            let replay = plan.clone();
+            w.finish_inventory(plan, Ok(before.revision + 1)).unwrap();
+            let p = &w.players[&id];
+            let expected = (
+                (before.hp + if sick { 0 } else { heal }).min(670),
+                (before.mp + if quiet { 0 } else { mana }).min(385),
+            );
+            assert_eq!(
+                (p.character.hp, p.character.mp),
+                expected,
+                "{item:#x} {sick}/{quiet}/{full}"
+            );
+            assert_eq!(p.character.items[4], -1);
+            assert_eq!(p.character.revision, before.revision + 1);
+            assert!(w.finish_inventory(replay, Ok(before.revision + 1)).is_err());
+            assert_eq!(
+                (w.players[&id].character.hp, w.players[&id].character.mp),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn dungeon_drink_refusals_and_failed_commit_publish_no_effects() {
+    for state in 0..5 {
+        let (mut w, id) = fixture();
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.items[4] = 0xc3a;
+        match state {
+            0 => p.paused = true,
+            1 => p.pending = true,
+            2 => p.character.hp = 0,
+            _ => {}
+        }
+        let before = p.character.clone();
+        let slot = Slot {
+            object: id,
+            slot: 4,
+            kind: if state == 3 { 0xc12 } else { 0xc3a },
+        };
+        let result = w.use_item(id, slot, w.players[&id].pos);
+        if state < 4 {
+            assert!(result.is_err());
+        } else {
+            let plan = result.unwrap().unwrap();
+            assert_eq!(
+                w.players[&id].effective(&w.content, w.now).unwrap(),
+                before.base
+            );
+            assert!(
+                w.finish_inventory(plan, Err(anyhow::anyhow!("injected commit failure")))
+                    .is_err()
+            );
+            assert!(w.players[&id].persistence_failure.is_some());
+        }
+        let p = &w.players[&id];
+        assert_eq!(
+            (p.character.hp, p.character.mp, p.character.revision),
+            (before.hp, before.mp, before.revision)
+        );
+        assert_eq!(p.character.items, before.items);
+        assert_eq!(p.effective(&w.content, w.now).unwrap(), before.base);
+        assert_eq!(
+            p.conditions(w.now) & crate::condition::bit(crate::condition::DRUNK),
+            0
+        );
+    }
+}
