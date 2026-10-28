@@ -16,7 +16,7 @@ export async function run(game){
     for(let n=0;n<80;n++){
       const v=await game.observe(),dx=goal.x-v.position.x,dy=goal.y-v.position.y;if(Math.hypot(dx,dy)<.55)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
-      await game.act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:Math.max(50,Math.min(300,Math.round(Math.hypot(dx,dy)/7.5*1000)))});
+      await game.act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:Math.max(50,Math.min(800,Math.round(Math.hypot(dx,dy)/7.5*1000)))});
     }
     throw Error('Native walking did not reach '+JSON.stringify(goal));
   }
