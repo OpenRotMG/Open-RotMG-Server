@@ -22,7 +22,7 @@ export async function run(game){
     const receipt=await r.json();assert(r.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
   async function protect(actor){const now=(await actor.observe()).game_ms;if(now>=(protectedUntil.get(actor.actor)??0)){await cheat(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil.set(actor.actor,now+60000);}}
-  async function idle(ms){while(ms>0){for(const a of [game,mystic].filter(Boolean))await protect(a);const now=(await game.observe()).game_ms,step=Math.min(ms,5000,...[...protectedUntil.values()].map(t=>t-now));assert(step>0);await game.act({keys:[],duration_ms:step});ms-=step;}}
+  async function idle(ms){assert(Number.isFinite(ms)&&ms>=0);const end=(await game.observe()).game_ms+ms;while((await game.observe()).game_ms<end){for(const a of [game,mystic].filter(Boolean))await protect(a);const now=(await game.observe()).game_ms,step=Math.min(end-now,5000,...[...protectedUntil.values()].map(t=>t-now));assert(step>0);await game.act({keys:[],duration_ms:step});}}
   async function approach(actor,id,range=4){
     for(let n=0;n<80;n++){
       await protect(actor);const p=typeof id==='number'?entity(await actor.inspect(),id)?.pos:id;assert(p,'Living walking target required');
@@ -43,10 +43,11 @@ export async function run(game){
   await fire(crystal.id);state=await save('damaged');game.check('Crystal takes native damage during evaluation',entity(state,crystal.id).hp<1000000);
   await idle(5100);state=await save('healed');game.check('five-second evaluation heal restores Crystal',entity(state,crystal.id).hp===1000000);
   const evaluation=entity(state,crystal.id).activated;
-  await idle(Math.max(0,evaluation+60200-state.view.game_ms));state=await save('failed');
+  await idle(Math.max(0,evaluation+60200-state.view.time_ms));state=await save('failed');
   game.check('insufficient damage reaches failure without releasing Prisoner',entity(state,crystal.id).stage===6&&!kinds(state,0x941).length);
   game.check('failure emits selected Quiet projectiles',state.view.projectiles.some(p=>p.owner===crystal.id&&p.speed===10&&p.lifetime_ms===6000));
   await idle(5100);state=await save('reset');game.check('failed Crystal resets healed and vulnerable',entity(state,crystal.id).stage===1&&entity(state,crystal.id).hp===1000000&&!(entity(state,crystal.id).condition&bit(25)));
+  game.check('native failure-ring hit applies Quiet',!!(state.view.character.conditions&bit(2))&&state.view.character.mp===0);
   for(let n=0;n<20&&entity(await game.inspect(),crystal.id)?.stage!==4;n++)await fire(crystal.id,500);
   state=await save('cracked');game.check('native burst crosses five-percent threshold into shielded break',entity(state,crystal.id)?.stage===4&&!!(entity(state,crystal.id).condition&bit(25)));
   await idle(4300);state=await save('released');const prisoner=kinds(state,0x941)[0];assert(prisoner);
@@ -54,7 +55,7 @@ export async function run(game){
   await idle(1000);state=await save('steeds');game.check('Prisoner produces three owned Steeds',kinds(state,0x943).filter(e=>e.quest===prisoner.quest).length===3);
   await approach(game,prisoner.id,5);await game.act({keys:[],duration_ms:700},{name:'prisoner-released',when:v=>v.nearby.some(e=>e.kind===0x941)});
   const samples=[];
-  for(let n=0;n<46;n++){await idle(400);samples.push(await game.inspect());}
+  while((await game.observe()).game_ms<prisoner.activated+21500){await idle(200);samples.push(await game.inspect());}
   await writeFile(join(out,'daisy.json'),JSON.stringify(samples));
   game.check('Daisy moves and alternates shield/vulnerability',samples.some(s=>entity(s,prisoner.id)?.stage===1&&!(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>entity(s,prisoner.id)?.stage===1&&(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>Math.hypot(entity(s,prisoner.id).pos.x-prisoner.pos.x,entity(s,prisoner.id).pos.y-prisoner.pos.y)>.2));
   for(const [owner,speed] of [[prisoner.id,80],[prisoner.id,47]])game.check('Daisy projectile speed '+speed,samples.some(s=>s.view.projectiles.some(p=>p.owner===owner&&p.speed===speed)));
@@ -74,7 +75,7 @@ export async function run(game){
   for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==5;n++)await idle(500);
   state=await save('whoa');game.check('timed cycle reaches Whoa phase',entity(state,prisoner.id).stage===5);
   await approach(game,prisoner.id,1);
-  const late=[];for(let n=0;n<26;n++){await idle(500);late.push(await game.inspect());}
+  const late=[],until=entity(state,prisoner.id).activated+13000;while((await game.observe()).game_ms<until){await idle(300);late.push(await game.inspect());}
   await writeFile(join(out,'late-attacks.json'),JSON.stringify(late));
   game.check('late phases fire selected star-speed projectiles',late.some(s=>s.view.projectiles.some(p=>p.owner===prisoner.id&&p.speed===60&&p.lifetime_ms===1700)));
   for(const [condition,name] of [[4,'Slowed'],[11,'Confused']])game.check('native star hits apply '+name,late.some(s=>s.view.character.conditions&bit(condition)));
@@ -90,6 +91,7 @@ export async function run(game){
   const before=await game.observe(),slot=bag.items.findIndex(i=>i!==-1),item=bag.items[slot];
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot%4*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}}});state=await save('picked');
   game.check('native pickup commits private reward once',state.view.character.items[4]===item&&state.view.character.inventory_revision===before.character.inventory_revision+1&&entity(state,bag.id).items[slot]===-1);
+  game.check('non-damaging Mystic cannot see the Warrior private reward',!(await mystic.inspect()).diagnostic.entities.some(e=>e.id===bag.id));
   const earned=state.view.character.experience;await idle(1000);game.check('Prisoner defeat XP is once only',(await game.observe()).character.experience===earned);
   await game.act({keys:['Insert'],duration_ms:250});const retained=await game.observe();game.check('Nexus reconnect retains living character and reward',retained.world==='Nexus'&&retained.session.character===state.view.session.character&&retained.character.items[4]===item&&retained.lifecycle.alive);
 }
