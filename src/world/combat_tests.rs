@@ -313,6 +313,9 @@ fn selected_bows_keep_individual_projectiles_and_enemy_only_piercing() {
                 w.spawn_entity(0x100, Pos { x: 9.5, y: 8.5 }, vec![])
                     .unwrap();
             }
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.shots = 1;
+            p.character.lifetime.shots = 1;
             let mut b = shot(&w, id, kind, 0);
             b.friendly = true;
             b.damage = min;
