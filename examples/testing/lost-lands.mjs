@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
+const questKinds=[0x675,0x678,0x668,0x67d,0x91f,0x91b,0x928];
 const spec={class:0x31d,level:20,seed:817,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 const history=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
 let sites,refuge,reserved,world;
@@ -13,14 +14,14 @@ export async function prepare(api){
   for(const [index,id] of [-3,1].entries()){
     const info=await api({op:'world_info',world:id}),batch=events.slice(index===0?0:ends[index-1]+1,ends[index]);
     assert(info.realm_layout===events[ends[index]].layout,'World and population log must agree');
-    candidates.push({world:id,info,sites:batch.filter(f=>f.message==='finite named Realm quest placed'&&[0x675,0x678,0x668,0x67d].includes(f.kind)),reserved:batch.filter(f=>f.message==='Realm event reserved outside active indexes'&&f.kind===0xd50)});
+    candidates.push({world:id,info,sites:batch.filter(f=>f.message==='finite named Realm quest placed'&&questKinds.includes(f.kind)),reserved:batch.filter(f=>f.message==='Realm event reserved outside active indexes'&&f.kind===0xd50)});
   }
   candidates.sort((a,b)=>b.sites.length-a.sites.length);
   ({sites,reserved,world}=candidates[0]);
   const [x,y]=candidates[0].info.spawn_points[0];refuge={x,y};
   assert(reserved.length===1,'One Lord reserve per ordinary Realm required');
   assert(sites.length,'Ordinary quest sites required for event admission');
-  sites.sort((a,b)=>[0x675,0x678,0x668,0x67d].indexOf(a.kind)-[0x675,0x678,0x668,0x67d].indexOf(b.kind));
+  sites.sort((a,b)=>questKinds.indexOf(a.kind)-questKinds.indexOf(b.kind));
   await writeFile(join(out,'sites.json'),JSON.stringify({candidates,world,sites}));
   return {...spec,world,position:{x:sites[0].x,y:sites[0].y}};
 }
@@ -80,8 +81,8 @@ export async function run(game){
   for(const site of sites){
     await at({x:site.x,y:site.y});
     for(let n=0;n<120;n++){
-      const state=await game.inspect(),root=entity(state,site.entity),final=state.diagnostic.entities.find(e=>e.quest===site.entity&&[0x6c2,0x6c1].includes(e.kind));
-      const target=root??final;if(!target)break;
+      const state=await game.inspect(),root=entity(state,site.entity),family=state.diagnostic.entities.filter(e=>e.quest===site.entity);
+      const target=family.find(e=>[0x91d,0x929].includes(e.kind))??root??family.find(e=>[0x6c2,0x6c1,0x920,0x91c,0x92d].includes(e.kind));if(!target)break;
       await fire(target.id,2000);
     }
     await idle(1000);await save('quest-'+site.entity);
