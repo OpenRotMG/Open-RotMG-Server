@@ -156,19 +156,41 @@ async fn next_visual(
 async fn slow_cursor_does_not_starve_queued_native_packets_or_close() {
     let (sender, mut receiver) = tokio::sync::broadcast::channel(4);
     for _ in 0..4 {
-        sender.send(Packet { id: wire::NEW_TICK, body: vec![] }).unwrap();
+        sender
+            .send(Packet {
+                id: wire::NEW_TICK,
+                body: vec![],
+            })
+            .unwrap();
     }
     let mut ticks = tokio::time::interval(Duration::from_millis(50));
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut received = 0;
     let mut closed = false;
     for _ in 0..64 {
-        match next_visual(async {
-            if received == 4 { Ok(None) } else { std::future::pending().await }
-        }, &mut receiver, &mut ticks, true).await {
+        match next_visual(
+            async {
+                if received == 4 {
+                    Ok(None)
+                } else {
+                    std::future::pending().await
+                }
+            },
+            &mut receiver,
+            &mut ticks,
+            true,
+        )
+        .await
+        {
             VisualEvent::Cursor => tokio::time::sleep(Duration::from_millis(60)).await,
-            VisualEvent::Packet(Ok(packet)) => { assert_eq!(packet.id, wire::NEW_TICK); received += 1; },
-            VisualEvent::Input(Ok(None)) => { closed = true; break; },
+            VisualEvent::Packet(Ok(packet)) => {
+                assert_eq!(packet.id, wire::NEW_TICK);
+                received += 1;
+            }
+            VisualEvent::Input(Ok(None)) => {
+                closed = true;
+                break;
+            }
             _ => panic!("unexpected native view event"),
         }
     }
