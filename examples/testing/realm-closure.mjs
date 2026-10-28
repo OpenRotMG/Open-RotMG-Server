@@ -4,10 +4,10 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 
-const out=process.env.QA_RESULTS_DIR,attackBonus=100;
+const out=process.env.QA_RESULTS_DIR,defenseBonus=100,defenseDelay=30000;
 const spec={class:0x307,level:20,seed:787,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 const roots=new Set([0x668,0x67d,0x91f,0x91b,0x928,0x675,0x678,0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37]);
-const leaders=new Set([...roots,0x920,0x91c,0x92d,0x6c1,0x6c2]);
+const leaders=new Set([...roots,0x920,0x91c,0x92d,0x6c1,0x6c2]),evaluations=new Set([0x91f,0x91b,0x928]);
 let scout,spawnPoints;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),boss=world.encounter_markers.find(e=>e.kind===0x67d);
@@ -20,7 +20,7 @@ export async function prepare(api){
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},protection=new Map(),attack=new Map(),jumps=new Map(),records=[],stalled=new Map();
+  const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},protection=new Map(),modifiers=new Map(),jumps=new Map(),records=[],stalled=new Map();
   let blocked,peer;
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)}),value=await response.json();
@@ -56,8 +56,9 @@ export async function run(game){
     for(const actor of [game.actor,peer.actor,scout.actor])if(now>=(protection.get(actor)??0)){
       await cheat(actor,{kind:'protection',condition:'invincible',duration_ms:60000});protection.set(actor,now+60000);
     }
-    for(const client of clients)if(now>=(attack.get(client.actor)??0)){
-      await cheat(client.actor,{kind:'stat_modifier',index:2,amount:attackBonus,duration_ms:60000});attack.set(client.actor,now+60000);
+    // Stagger defense so protection expiry does not leave every prepared buffer expired together.
+    for(const actor of [game.actor,peer.actor,scout.actor])if(now>=initial.game_ms+defenseDelay&&now>=(modifiers.get(actor)??0)){
+      await cheat(actor,{kind:'stat_modifier',index:3,amount:defenseBonus,duration_ms:60000});modifiers.set(actor,now+60000);
     }
     return Math.min(...protection.values())-now;
   }
@@ -79,7 +80,7 @@ export async function run(game){
   const menus=y=>[0,1].map(i=>clients.map(client=>menu(client,y)[i]));
   await act(game,{keys:[],duration_ms:800});await act(game,menus(432));
   for(const client of clients)game.check('native party lock persists for scout and account '+(await client.observe()).session.account,locked((await client.observe()).session.account));
-  await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout,assistance:{attack_bonus:attackBonus,protection_ms:60000,resting_spawn:restPoint}}));
+  await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout,assistance:{defense_bonus:defenseBonus,defense_stagger_ms:defenseDelay,protection_ms:60000,resting_spawn:restPoint,evaluation:'minimal native trigger then wait; no variant-matrix acceptance'}}));
   opening.blocked.length=0;opening.entities.length=0;
   await act(game,{keys:[],duration_ms:500},{name:'realm-opening',when:()=>true});await save('opening');
   async function clearPartyPanel(){
@@ -102,7 +103,7 @@ export async function run(game){
     }
     assert.fail('Native movement did not clear the interaction panel for party-menu travel');
   }
-  async function travel(anchor){
+  async function travel(anchor,tail=[]){
     await clearPartyPanel();const points=[];
     for(let y=-5;y<=5;y++)for(let x=-5;x<=5;x++){
       const p={x:Math.floor(anchor.x)+x+.5,y:Math.floor(anchor.y)+y+.5},d=Math.hypot(p.x-anchor.x,p.y-anchor.y);
@@ -115,11 +116,11 @@ export async function run(game){
       let now=(await client.observe()).game_ms;
       while(jumps.has(client.actor)&&now-jumps.get(client.actor)<11000){await act(game,{keys:[],duration_ms:Math.min(10000,11000-now+jumps.get(client.actor))});now=(await client.observe()).game_ms;}
     }
-    await act(game,menus(400));
+    const movement=await act(game,[...menus(400),...tail]);
     for(const client of clients){
-      const after=await client.observe();
-      assert(after.session.world===origin&&after.lifecycle.alive&&Math.hypot(after.position.x-points[0].x,after.position.y-points[0].y)<.2,'Native menu did not complete the actual scout teleport: '+JSON.stringify({actor:client.actor,expected:points[0],position:after.position,world:after.session.world,origin}));
-      jumps.set(client.actor,after.game_ms);await appendFile(join(out,'travel.jsonl'),JSON.stringify({actor:client.actor,anchor,position:after.position,game_ms:after.game_ms})+'\n');
+      const after=await client.observe(),arrival=movement.steps.filter(s=>s.actor===client.actor)[1];
+      assert(after.session.world===origin&&after.lifecycle.alive&&Math.hypot(arrival.position.x-points[0].x,arrival.position.y-points[0].y)<.2,'Native menu did not complete the actual scout teleport: '+JSON.stringify({actor:client.actor,expected:points[0],position:arrival.position,world:after.session.world,origin}));
+      jumps.set(client.actor,arrival.game_ms);await appendFile(join(out,'travel.jsonl'),JSON.stringify({actor:client.actor,anchor,position:arrival.position,game_ms:arrival.game_ms})+'\n');
     }
   }
   async function approach(point,range){
@@ -135,14 +136,14 @@ export async function run(game){
     for(let i=0;i<clients.length;i++)if(group[i].input.keys.length){const count=Math.hypot(after[i].position.x-before[i].position.x,after[i].position.y-before[i].position.y)>.02?0:(stalled.get(clients[i].actor)??0)+1;stalled.set(clients[i].actor,count);assert(count<3,'Three stationary local native approach inputs: '+JSON.stringify({point,before:before[i].position,after:after[i].position,group}));}
     await appendFile(join(out,'approach.jsonl'),JSON.stringify({point,group,before:before.map(v=>v.position),after:after.map(v=>v.position)})+'\n');
   }
-  async function recharge(returnToCombat){
+  async function renewForRelay(){
     const before=await api({op:'observe',actor:scout.actor}),until=Math.min(...protection.values());
     await travel(restPoint);
     let now=(await game.observe()).game_ms;
     while(now<until){await act(game,{keys:[],duration_ms:Math.min(10000,until-now)});now=(await game.observe()).game_ms;}
     await ready();
-    await appendFile(join(out,'renewals.jsonl'),JSON.stringify({before_ms:before.game_ms,renewed_ms:now,restPoint,returnToCombat})+'\n');
-    if(returnToCombat)await travel(before.position);
+    await appendFile(join(out,'renewals.jsonl'),JSON.stringify({before_ms:before.game_ms,renewed_ms:now,restPoint,reason:'pentaract relay'})+'\n');
+    await travel(before.position);
   }
   const seen=new Map(original.map(e=>[e.quest??e.id,e]));
   for(let encounter=0;encounter<100;encounter++){
@@ -151,30 +152,35 @@ export async function run(game){
     current.blocked.length=0;current.entities.length=0;
     const position=(await game.observe()).position,next=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y))[0];
     if(next===undefined){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
-    if(await ready()<30000)await recharge(false);
-    await travel(seen.get(next).pos);
-    if(seen.get(next).kind===0xd5f&&await ready()<50000)await recharge(true);
+    const fighter=clients[encounter%clients.length],kind=seen.get(next).kind,tail=[];
+    if(kind!==0xd5f){
+      tail.push({actor:fighter.actor,input:{keys:[],duration_ms:evaluations.has(kind)?500:8800,target:{entity:next,camera_angle:-Math.PI/4,fire:true}}});
+      if(evaluations.has(kind))tail.push({actor:game.actor,input:{keys:[],duration_ms:8300}});
+    }
+    await travel(seen.get(next).pos,tail);
+    if(kind===0xd5f&&await ready()<25000)await renewForRelay();
     let completed=false;
     for(let step=0;step<100;step++){
       if((await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next)){completed=true;break;}
-      if(await ready()<30000){await recharge(true);continue;}
-      const state=await api({op:'inspect',actor:scout.actor}),family=state.diagnostic.entities.filter(e=>e.id===next||e.quest===next),vulnerable=family.filter(e=>e.hp>0&&!(e.condition&((1<<21)|(1<<23)|(1<<24))));
+      // A held burst spans Ent's cycling shield, but must not damage an assessment window.
+      const state=await api({op:'inspect',actor:scout.actor}),family=state.diagnostic.entities.filter(e=>e.id===next||e.quest===next),candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&(!(e.condition&((1<<21)|(1<<23)|(1<<24)))||e.kind===0x920));
       const views=await Promise.all(clients.map(c=>c.observe())),position=views[0].position;
-      vulnerable.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
-      const target=vulnerable.find(e=>e.kind===0x91d)??vulnerable.find(e=>leaders.has(e.kind))??vulnerable.find(e=>[0x929,0xd5e,0xd62].includes(e.kind));
+      candidates.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
+      const target=candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>[0x929,0xd5e,0xd62].includes(e.kind));
+      await appendFile(join(out,'combat.jsonl'),JSON.stringify({root:next,step,game_ms:state.diagnostic.time_ms,target:target?.id,family:family.map(({id,kind,pos,hp,condition,stage,activated})=>({id,kind,pos,hp,condition,stage,activated}))})+'\n');
       const anchor=target??family.find(e=>leaders.has(e.kind));
       if(!anchor){await act(game,{keys:[],duration_ms:1000});continue;}
       const range=target?.kind===0xd5e?6.5:5.5;
       if(views.some(v=>Math.hypot(v.position.x-anchor.pos.x,v.position.y-anchor.pos.y)>range)){await approach(anchor.pos,range);continue;}
       if(target){
-        const duration_ms=target.kind===0xd5e?1000:4000,states=await Promise.all(clients.map(c=>c.inspect()));
+        const firing=target.kind===0xd5e?clients:[fighter],duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:10000,states=await Promise.all(firing.map(c=>c.inspect()));
         const group=states.map((s,i)=>{
           const known=s.view.objects.find(e=>e.id===target.id&&e.hp>0);assert(known,'A living target must be known to each actual native client');
           const dx=known.position.x-s.view.position.x,dy=known.position.y-s.view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy));
-          return {actor:clients[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}};
+          return {actor:firing[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}};
         });
         await act(game,[group]);
-      }else await act(game,{keys:[],duration_ms:anchor.stage===1&&[0x91f,0x91b,0x928].includes(anchor.kind)?1000:10000});
+      }else await act(game,{keys:[],duration_ms:anchor.stage===1&&evaluations.has(anchor.kind)?1000:anchor.kind===0x928&&anchor.stage===3?2000:10000});
     }
     assert(completed||(await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next),'Native combat did not finish counted encounter '+next);
     await writeFile(join(out,'root-'+next+'.json'),JSON.stringify({root:next,kind:seen.get(next).kind,main:await game.observe(),peer:await peer.observe()}));

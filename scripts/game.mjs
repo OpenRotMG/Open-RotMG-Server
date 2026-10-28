@@ -48,17 +48,18 @@ if(mutating) {
 }
 const save=async result=>{if(ownsIntent){await writeFile(`${path}.tmp`,JSON.stringify({command,status:'complete',result}),{flag:'wx',mode:0o600,flush:true});await rename(`${path}.tmp`,path);await syncDirectory();}};
 const api = async (value, requestId=`${id}-ctl${++sequence}`) => {
-  const started=performance.now();
+  const started=performance.now();let succeeded=false,httpStatus=null,responseStatus=null;
+  if(value.op==='native_lease')console.error(JSON.stringify({event:'native_lease_attempt',pid:process.pid,request:requestId,operation:value.operation,monotonic_ms:started}));
   try {
     const response = await fetch(new URL('/dev/testing', origin), {
       method: 'POST', headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
       body: JSON.stringify({id:requestId, command:value}),
       signal: AbortSignal.timeout(value.op==='run'?660000:value.op==='native_sync'?45000:value.op==='native_lease'&&value.operation==='renew'?500:10000),
     });
-    const result = await response.json();
+    httpStatus=response.status;const result = await response.json();responseStatus=result.status??null;
     if (!response.ok || result.status === 'failed') throw new Error(JSON.stringify(result));
-    return result;
-  } finally {console.error(JSON.stringify({event:'native_http_timing',op:value.op,wall_ms:performance.now()-started}));}
+    succeeded=true;return result;
+  } finally {const completed=performance.now();console.error(JSON.stringify({event:'native_http_timing',pid:process.pid,request:requestId,op:value.op,operation:value.operation,started_monotonic_ms:started,completed_monotonic_ms:completed,wall_ms:completed-started,succeeded,http_status:httpStatus,response_status:responseStatus}));}
 };
 const clients = [];
 async function eachClient(selected, action) {
@@ -78,8 +79,8 @@ async function connect(spec) {
   if(typeof managed.withActivity!=='function')throw Error('Native control requires managed browser helpers with finite withActivity scopes');
   const call=(method,params={})=>{
     const span={start:performance.now()};
-    return spans.run(span,async()=>{try{return await managed(method,params);}finally{
-      const end=performance.now();console.error(JSON.stringify({event:'native_cdp_timing',method,wall_ms:end-span.start,before_raw_ms:span.rawStart===undefined?null:span.rawStart-span.start,raw_roundtrip_ms:span.rawEnd===undefined?null:span.rawEnd-span.rawStart,after_raw_ms:span.rawEnd===undefined?null:end-span.rawEnd}));
+    return spans.run(span,async()=>{let succeeded=false;try{const value=await managed(method,params);succeeded=true;return value;}finally{
+      const end=performance.now();console.error(JSON.stringify({event:'native_cdp_timing',pid:process.pid,actor:spec.actor,target:spec.target,cdp_id:span.cdpId,method,started_monotonic_ms:span.start,completed_monotonic_ms:end,succeeded,wall_ms:end-span.start,before_raw_ms:span.rawStart===undefined?null:span.rawStart-span.start,raw_roundtrip_ms:span.rawEnd===undefined?null:span.rawEnd-span.rawStart,after_raw_ms:span.rawEnd===undefined?null:end-span.rawEnd}));
     }});
   };
   const pages = await (await fetch(`http://127.0.0.1:${spec.port}/json/list`,{signal:AbortSignal.timeout(5000)})).json();
@@ -105,6 +106,7 @@ async function connect(spec) {
       if(!holdState.started)holdState.start();
     }
     const n=++serial, timer=setTimeout(() => {pending.delete(n);reject(new Error(`CDP deadline: ${method}`));},10000);
+    const span=spans.getStore();if(span)span.cdpId=n;
     pending.set(n,{resolve,reject,timer}); ws.send(JSON.stringify({id:n,method,params}));
   });
   const evaluate=async expression => {
@@ -133,8 +135,11 @@ async function connect(spec) {
 let leaseStarted=false, leaseTimer, leaseRenewal, leaseError;
 async function startLease(){
   if(leaseStarted)return;
+  console.error(JSON.stringify({event:'native_controller_identity',pid:process.pid,request:id,time_origin_ms:performance.timeOrigin,targets:config.native.map(({actor,port,target})=>({actor,port,target}))}));
   await api({op:'native_lease',owner:id,operation:'begin',actors:clients.map(c=>c.actor)});leaseStarted=true;
+  let previousTick=performance.now();
   leaseTimer=setInterval(()=>{
+    const now=performance.now();console.error(JSON.stringify({event:'native_renewal_tick',pid:process.pid,monotonic_ms:now,event_loop_timer_lag_ms:Math.max(0,now-previousTick-250),renewal_inflight:!!leaseRenewal,lease_error:!!leaseError}));previousTick=now;
     if(leaseRenewal||leaseError)return;
     leaseRenewal=api({op:'native_lease',owner:id,operation:'renew'}).catch(e=>{leaseError=e;for(const c of clients)c.abort(e);}).finally(()=>{leaseRenewal=null;});
   },250);
