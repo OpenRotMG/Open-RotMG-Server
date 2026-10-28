@@ -64,11 +64,13 @@ export async function run(game){
   await walk(secret.pos,.3);
   await step({keys:[],duration_ms:700},{name:'secret-shelf-after',when:()=>true});
   const coffins=map.entities.filter(e=>e.kind===0x1737).sort((a,b)=>distance(a.pos,secret.pos)-distance(b.pos,secret.pos));
-  game.check('secret passage leads toward a paired treasure-coffin room',coffins.length>=2&&distance(coffins[0].pos,coffins[1].pos)===4);
+  const pair=coffins.find(a=>coffins.some(b=>a.id!==b.id&&distance(a.pos,b.pos)===4));assert(pair,'No generated paired-coffin room');
+  const mate=coffins.find(e=>e.id!==pair.id&&distance(e.pos,pair.pos)===4);
   const outcomes=[];
-  for(const coffin of coffins){
+  for(const coffin of [pair,mate,...coffins.filter(e=>e.id!==pair.id&&e.id!==mate.id)]){
     await refresh();await walk(coffin.pos,4);
     const before=await save('coffin-'+coffin.id+'-before'),known=new Set(entities(before).map(e=>e.id));
+    if(coffin.id===pair.id)game.check('opened secret passage admits native walking to its paired coffins',distance(before.view.position,pair.pos)<=4&&entities(before).some(e=>e.id===mate.id));
     for(let n=0;n<20;n++){
       const e=entities(await game.inspect()).find(e=>e.id===coffin.id);if(!e||e.hp<20000)break;
       await step({keys:[],duration_ms:150,target:{entity:coffin.id,camera_angle:-Math.PI/4,fire:true}});
