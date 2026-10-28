@@ -85,3 +85,46 @@ impl Directory {
         }
     }
 }
+
+#[cfg(test)]
+#[test]
+fn realm_portal_counts_reservations_and_retires_closed_entrances() {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path).unwrap());
+    let mut d = Directory::test_with_seed(path, content, 1, 901).unwrap();
+    let portal = d.endgame.realms[&-3].portal.unwrap();
+    let other = d.endgame.realms[&1].portal.unwrap();
+    let names: BTreeSet<_> = d.endgame.realms.values().map(|r| r.name).collect();
+    assert_eq!(names.len(), 2);
+    assert_eq!(d.worlds[&-2].entities[&portal].extra_stats, vec![(37, 1)]);
+    assert!(d.worlds[&-2].entities[&portal].name.ends_with("(0/1)"));
+    d.issue(1, 1, -3).unwrap();
+    d.sync_realm_portal();
+    let entrance = &d.worlds[&-2].entities[&portal];
+    assert!(entrance.published);
+    assert!(entrance.name.ends_with("(1/1)"));
+    assert_eq!(entrance.extra_stats, vec![(37, 0)]);
+    assert!(d.worlds[&-2].entities[&other].name.ends_with("(0/1)"));
+    assert_eq!(d.worlds[&-2].entities[&other].extra_stats, vec![(37, 1)]);
+    assert!(d.issue(2, 2, -3).unwrap_err().to_string().contains("full"));
+    d.worlds.get_mut(&-3).unwrap().admission_open = false;
+    d.sync_realm_portal();
+    // Closed Realms disappear in the primary comparator; LockedPortal is a different client definition.
+    // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/RealmPortalMonitor.cs#L80-L89
+    assert!(!d.worlds[&-2].entities[&portal].published);
+    assert!(d.worlds[&-2].entities[&other].published);
+    assert!(
+        d.issue(2, 2, -3)
+            .unwrap_err()
+            .to_string()
+            .contains("closed")
+    );
+    d.tick += 2400;
+    d.retire_transfer_grants();
+    d.worlds.get_mut(&-3).unwrap().admission_open = true;
+    d.sync_realm_portal();
+    let entrance = &d.worlds[&-2].entities[&portal];
+    assert!(entrance.published);
+    assert!(entrance.name.ends_with("(0/1)"));
+    assert_eq!(entrance.extra_stats, vec![(37, 1)]);
+}
