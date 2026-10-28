@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x30e,level:20,seed:873,world:'undead-lair',worldSeed:12351,position:world=>{const boss=world.encounter_markers.find(e=>e.kind===0xd90);assert(boss,'Septavius marker required');return{x:boss.position.x-1,y:boss.position.y};},equipment:[0xa97,-1,-1,-1],backpack:[0xb08,0xc03,0xc15,0xc24,-1,-1,-1,-1],stats:[600,200,50,25,30,50,40,30]};
+export const fixture={class:0x30e,level:20,seed:873,world:'undead-lair',worldSeed:12351,position:{x:14.5,y:120.5},equipment:[0xa97,-1,-1,-1],backpack:[0xb08,0xc03,0xc15,0xc24,-1,-1,-1,-1],stats:[600,200,50,25,30,50,40,30]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
