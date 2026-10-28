@@ -1654,6 +1654,7 @@ async fn handle_inner(
                             prepared.map(|(_, pos)| pos),
                             presentation,
                             ticket,
+                            crate::world::Controller::Human,
                         )?;
                         bind(id)?;
                         w.sync_account_lists(id, Some(lists))?;

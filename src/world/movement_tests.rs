@@ -82,6 +82,18 @@ fn native_entry_uses_ingress_time_and_keeps_monotonic_moves() {
             .to_string()
             .contains("native ingress clock regressed")
     );
+    let player = world.players.remove(&id).unwrap();
+    let id = world
+        .enter_admitted(
+            player.character,
+            player.tx,
+            None,
+            player.presentation,
+            None,
+            Controller::Autonomous,
+        )
+        .unwrap();
+    assert_eq!(world.players[&id].last_move_at, 1050);
     let character = world.players.remove(&id).unwrap().character;
     let id = world.enter(character, None).unwrap();
     assert_eq!(world.players[&id].last_move_at, 1050);

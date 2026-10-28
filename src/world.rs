@@ -3330,7 +3330,12 @@ impl World {
         position: Option<Pos>,
         presentation: AccountPresentation,
     ) -> Result<i32> {
-        self.enter_admitted(ch, tx, position, presentation, None)
+        let controller = if tx.is_some() {
+            Controller::Human
+        } else {
+            Controller::Qa
+        };
+        self.enter_admitted(ch, tx, position, presentation, None, controller)
     }
     pub(crate) fn reserved_slots(&self) -> usize {
         self.admissions
@@ -3345,6 +3350,7 @@ impl World {
         position: Option<Pos>,
         presentation: AccountPresentation,
         admission: Option<Vec<u8>>,
+        controller: Controller,
     ) -> Result<i32> {
         if let Some(key) = &admission {
             let reserved = self
@@ -3402,7 +3408,7 @@ impl World {
                 .context("world has no spawn cells")?;
             Pos { x, y }
         };
-        let last_move_at = if tx.is_some() {
+        let last_move_at = if controller == Controller::Human {
             self.clock
                 .now()
                 .checked_duration_since(self.attack_epoch)
@@ -3430,11 +3436,7 @@ impl World {
                 presentation,
                 paused: false,
                 native_update_acked: false,
-                controller: if tx.is_none() {
-                    Controller::Qa
-                } else {
-                    Controller::Human
-                },
+                controller,
                 tx,
                 known: BTreeSet::new(),
                 tick_stats: tick_stats::Cache::default(),
