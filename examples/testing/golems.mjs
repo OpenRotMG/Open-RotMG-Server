@@ -38,6 +38,7 @@ export async function run(game){
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),native('native.json'),path]);
   };
   const family=(s,camp)=>s.diagnostic.entities.filter(e=>e.camp===camp);
+  const awards=async()=>(await readFile(native('server.log'),'utf8')).split('\n').filter(line=>line.startsWith('{')&&line.endsWith('}')).map(line=>JSON.parse(line)).filter(row=>row.fields?.message==='experience queued');
   async function step(input,capture){
     let pending,error;
     const record=s=>{samples.push(s);for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);};
@@ -72,11 +73,11 @@ export async function run(game){
       const survivors=family(defeated,camp).filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7);
       game.check(tag+': satellites survive root death with bounded cleanup',survivors.length>0&&survivors.every(e=>e.expires>defeated.view.time_ms&&e.expires<=defeated.view.time_ms+30000));
       const target=survivors.find(e=>e.id===hub.id);assert(target,'Colored satellite must survive root defeat');
-      const xp=defeated.view.character.experience;
+      const xp=defeated.view.character.experience,awardStart=(await awards()).length;
       for(let n=0;n<40&&family(await game.inspect(),camp).some(e=>e.id===target.id);n++)await act({keys:[],duration_ms:250,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
       const satelliteDead=await game.inspect(),remaining=family(satelliteDead,camp).filter(e=>survivors.some(p=>p.id===e.id));
       // The September 7, 2012 page supports ten XP, not an exact decay delay: https://wikiwiki.jp/rmd/?cmd=read&page=Gray%20Satellite%202
-      game.check(tag+': native satellite defeat awards ten XP each',!remaining.some(e=>e.id===target.id)&&satelliteDead.view.character.experience-xp===10*(survivors.length-remaining.length));
+      game.check(tag+': native satellite defeat queues ten XP and advances client XP (requires world debug logs)',!remaining.some(e=>e.id===target.id)&&satelliteDead.view.character.experience>=xp+10&&(await awards()).slice(awardStart).some(row=>row.fields.player===satelliteDead.diagnostic.player&&row.fields.enemy===target.kind&&row.fields.amount===10));
       const cleanupXp=satelliteDead.view.character.experience;
       for(let n=0;n<4;n++)await act({keys:[],duration_ms:10000});
       const end=await game.inspect();
