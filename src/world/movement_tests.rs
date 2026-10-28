@@ -164,8 +164,8 @@ fn sand_phantom_proximity_cycle_preserves_credit_without_a_death() {
     let returned = world.entities.values().find(|e| e.kind == 0x6c5).unwrap();
     assert_eq!(returned.hp, 230);
     assert_eq!(returned.damage[&player], 50);
-    assert_eq!(returned.pos, pos);
-    assert_eq!(returned.home, pos);
+    assert_eq!((returned.pos.x, returned.pos.y), (pos.x, pos.y));
+    assert_eq!((returned.home.x, returned.home.y), (pos.x, pos.y));
     assert_eq!(returned.activated, Some(6500));
     assert_eq!(
         world

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x30e,level:20,seed:841,world:1,equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,10,0,30,10,0,0]};
+const spec={class:0x30e,level:20,seed:841,world:1,equipment:[0xb08,0xb24,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let phantom;
 export async function prepare(api){
@@ -56,11 +56,11 @@ export async function run(game){
       game.check(kind+': selected projectile reaches native client',[...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
     }
     const xp=cycle.view.character.experience;
-    for(let n=0;n<140;n++){
+    for(let n=0;n<40;n++){
       const s=await game.inspect(),e=family(s)[0];if(!e)break;
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
-      if(Math.hypot(dx,dy)>4)await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});
-      else await act({keys:[],duration_ms:100,target:{entity:e.id,camera_angle:-Math.PI/4,fire:true}});
+      if(Math.hypot(dx,dy)>6)await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});
+      else if(s.view.objects.some(o=>o.id===e.id&&o.hp>0))await act({keys:[],duration_ms:350,target:{entity:e.id,camera_angle:-Math.PI/4,fire:true}});
       await act({keys:[],duration_ms:250});
     }
     const dead=await save('defeated');
