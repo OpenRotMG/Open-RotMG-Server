@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import {connect} from '../../scripts/record-demo.mjs';
 
 export const fixture={class:0x323,level:20,seed:860,world:'tomb-of-the-ancients',worldSeed:12,position:'spawn',equipment:[0xb0a,0xb2d,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]};
 export async function run(game){
@@ -18,7 +20,7 @@ export async function run(game){
     if(now<protection)return;
     for(const actor of [...humans,...support]){
       if((expiry.get(actor)??0)>now)continue;
-      await api({op:'cheat',actor,change:{kind:'protection',condition:humans.includes(actor)?'invulnerable':'invincible',duration_ms:60000}});
+      await api({op:'cheat',actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
       if(!humans.includes(actor))await api({op:'cheat',actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
       expiry.set(actor,now+60000);
     }
@@ -56,24 +58,44 @@ export async function run(game){
   game.check('awakening does not grant completion credit',awakened.state.diagnostic.character.tombs===0);
   const {worldSeed,...spec}=fixture;
   const late=await game.join({...spec,world:start.session.world,position:'spawn'});
-  await api({op:'cheat',actor:late.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
+  await api({op:'cheat',actor:late.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
   humans.push(late.actor);expiry.set(late.actor,(await game.observe()).game_ms+60000);
   await advance(3000);
   await advance(500,{name:'tomb-late-join-awakened',when:()=>true});
   const joined=await late.inspect();await writeFile(join(out,'late-join.json'),JSON.stringify(joined));
-  game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.diagnostic.entities.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.diagnostic.entities.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.diagnostic.character.tombs===0);
+  game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.view.objects.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.view.objects.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.diagnostic.character.tombs===0);
   const repeated=await save('after-late-join');game.check('late admission does not duplicate or replace awakened bosses',repeated.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3&&bosses.every(e=>repeated.map.entities.some(x=>x.id===e.id)));
   const nut=bosses.find(e=>e.kind===0xd26),phases=[];let artifact,modifier=0;
-  for(let n=0;n<80;n++){
+  const browser=config.native.find(n=>n.actor===game.actor);assert(browser,'Native combat browser missing');
+  const connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});
+  const rect=await connection.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y};})()');
+  try{for(let n=0;n<80;n++){
     await protect();const now=(await game.observe()).game_ms;
     if(now>=modifier){await api({op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});modifier=now+60000;}
     const s=await game.inspect();phases.push(s);
     artifact=s.diagnostic.entities.filter(e=>e.kind>=0xd1c&&e.kind<=0xd1e).sort((a,b)=>Math.hypot(a.pos.x-s.view.position.x,a.pos.y-s.view.position.y)-Math.hypot(b.pos.x-s.view.position.x,b.pos.y-s.view.position.y))[0];
     if(artifact)break;
-    assert(s.diagnostic.entities.some(e=>e.id===nut.id),'Nut disappeared before artifact acceptance');
-    await game.act({keys:[],duration_ms:Math.min(1500,protection-now),target:{entity:nut.id,camera_angle:-Math.PI/4,fire:true}});
-  }
-  await writeFile(join(out,'nut-phases.json'),JSON.stringify(phases));assert(artifact,'Native combat did not reach Nut artifacts within the bound');
+    let active=true;
+    const firing=game.act({keys:[],duration_ms:Math.min(1500,protection-now),target:{entity:nut.id,camera_angle:-Math.PI/4,fire:true}}).finally(()=>active=false);
+    const tracking=(async()=>{
+      for(let i=0;active&&(await game.observe()).paused;i++){assert(i<250,'Native combat did not unpause');await delay(20);}
+      let previous;
+      while(active){
+        const frame=await game.inspect();phases.push(frame);if(!active)break;
+        const target=frame.view.objects.find(e=>e.id===nut.id&&e.hp>0);assert(target,'Nut left the native combat neighborhood');
+        if(previous&&frame.view.time_ms>previous.time){
+          const dt=(frame.view.time_ms-previous.time)/1000,vx=(target.position.x-previous.pos.x)/dt,vy=(target.position.y-previous.pos.y)/dt;
+          let t=Math.hypot(target.position.x-frame.view.position.x,target.position.y-frame.view.position.y)/18;
+          t=Math.hypot(target.position.x+vx*t-frame.view.position.x,target.position.y+vy*t-frame.view.position.y)/18;
+          const dx=target.position.x+vx*t-frame.view.position.x,dy=target.position.y+vy*t-frame.view.position.y,a=-Math.PI/4,x=50*(dx*Math.cos(a)+dy*Math.sin(a)),y=50*(-dx*Math.sin(a)+dy*Math.cos(a)),scale=Math.max(1,Math.hypot(x,y)/270);
+          await connection.call('Input.dispatchMouseEvent',{type:'mouseMoved',buttons:1,x:rect.x+300+x/scale,y:rect.y+325+y/scale});
+        }
+        previous={time:frame.view.time_ms,pos:target.position};await delay(100);
+      }
+    })();
+    const results=await Promise.allSettled([firing,tracking]);for(const r of results)if(r.status==='rejected')throw r.reason;
+  }}finally{connection.close();await writeFile(join(out,'nut-phases.json'),JSON.stringify(phases));}
+  assert(artifact,'Native combat did not reach Nut artifacts within the bound');
   await advance(1700);await protect();
   const remaining=protection-(await game.observe()).game_ms;
   if(remaining<500){await advance(remaining);await protect();}
