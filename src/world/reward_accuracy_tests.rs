@@ -126,6 +126,37 @@ fn septavius_stages_a_realm_exit_until_clear_commit() {
     assert!(!world.actors().any(|e| e.kind == 0x71d));
 }
 
+#[tokio::test]
+async fn flying_brain_death_requests_only_the_realm_lab_portal() {
+    let (mut w, _store, _owners) = reward_world().await;
+    assert_eq!(crate::dungeon::portal_drop(0x657), Some((0x890, 0.17)));
+    let mut successes = 0;
+    for name in ["Realm", "Tutorial"] {
+        w.name = name.into();
+        for kind in [0x657, 0x658] {
+            for seed in 0..32 {
+                clear_bags(&mut w);
+                w.portal_requests.clear();
+                let pos = Pos { x: 3.5, y: 3.5 };
+                let id = w.spawn_entity(kind, pos, vec![]).unwrap();
+                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let expected = name == "Realm"
+                    && kind == 0x657
+                    && rand::rngs::StdRng::seed_from_u64(seed).gen_bool(0.17);
+                w.defeat_entity(id).unwrap();
+                assert!(!w.entities.contains_key(&id));
+                assert_eq!(w.portal_requests.len(), usize::from(expected));
+                if expected {
+                    successes += 1;
+                    assert_eq!(w.portal_requests[0].0, 0x890);
+                    assert!(w.portal_requests[0].1.distance(pos) < 0.01);
+                }
+            }
+        }
+    }
+    assert!((1..32).contains(&successes));
+}
+
 fn clear_bags(w: &mut World) {
     for id in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
         w.remove_entity(id);

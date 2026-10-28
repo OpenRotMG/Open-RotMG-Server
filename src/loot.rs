@@ -1567,11 +1567,11 @@ mod tests {
     }
 
     #[test]
-    fn defense_god_roll_requires_180_damage_without_erasing_gear() {
+    fn realm_god_potions_require_180_damage_without_erasing_gear() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for kind in [0x655, 0x658] {
-            assert_eq!(bonus(kind), &[(0.015, 0xa20)]);
-            let owners = [(10, 179), (20, 180), (30, 181)];
+        let owners = [(10, 179), (20, 180), (30, 181)];
+        for (kind, potion) in [(0x655, 0xa20), (0x657, 0xa1f), (0x658, 0xa20)] {
+            assert_eq!(bonus(kind), &[(0.015, potion)]);
             let loot = god_loot(
                 &content,
                 kind,
@@ -1580,7 +1580,7 @@ mod tests {
             );
             assert!(!loot.private.contains_key(&10));
             for owner in [20, 30] {
-                assert_eq!(loot.private[&owner], [0xa20]);
+                assert_eq!(loot.private[&owner], [potion]);
             }
             assert_eq!(loot.shared_owners, [10, 20, 30]);
             let expected: Vec<_> = table(kind)
@@ -1588,7 +1588,7 @@ mod tests {
                 .flat_map(|(_, pick)| candidates(&content, *pick))
                 .collect();
             assert_eq!(loot.shared, expected);
-            assert!(!loot.shared.contains(&0xa20));
+            assert!(!loot.shared.contains(&potion));
             let empty = god_loot(
                 &content,
                 kind,
