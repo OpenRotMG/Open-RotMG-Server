@@ -86,7 +86,7 @@ export async function run(game){
   await open(0,'founder-restores-leader');for(const rank of [10,20,30])await change(0,2,'promote',rank);await close(0);
   const original=await game.observe();await game.act({keys:['Insert'],duration_ms:700});await game.act({keys:[],duration_ms:500});
   game.check('ordinary Nexus reconnect keeps Founder and living character',(await game.observe()).world==='Nexus'&&(await game.observe()).session.character===original.session.character&&(await rows()).find(r=>r[1]===names[0])[2]===40);
-  await walk(0,{x:109.5,y:42.5});await ui(0,'renounce-dialog',()=>click(0,700,575));await ui(0,'renounce-cancel',()=>click(0,325,338));
+  await walk(0,{x:78.5,y:41.5});await walk(0,{x:109.5,y:42.5});await ui(0,'renounce-dialog',()=>click(0,700,575));await ui(0,'renounce-cancel',()=>click(0,325,338));
   game.check('cancelled renunciation preserves Founder',(await rows()).find(r=>r[1]===names[0])[2]===40);
   await ui(0,'renounce-confirm',()=>click(0,700,575));await ui(0,'founder-renounced',()=>click(0,475,338));
   const remaining=await rows();game.check('Founder departure leaves both Leaders without automatic succession',remaining.length===2&&remaining.every(r=>r[2]===30));
