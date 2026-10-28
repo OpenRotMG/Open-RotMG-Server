@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const out=process.env.QA_RESULTS_DIR,mode=process.env.LICH_BRANCH;
 const branches=['Solo','SmallGroup','Mob','HugeMob'];
-let branch=mode==='Remaining'?'SmallGroup':mode,index=branches.indexOf(branch),roots;
+let branch=mode==='Remaining'?'Mob':mode,index=branches.indexOf(branch),roots;
 const spec={class:0x31d,level:20,seed:793,world:1,equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 let root;
 export async function prepare(api){
@@ -37,7 +37,8 @@ export async function run(game){
   async function save(label){const state=await game.inspect();records.push({branch,label,state});await writeFile(join(out,'encounters.json'),JSON.stringify(records));return state;}
   async function approach(actor,point,range=1.5){
     for(let n=0;n<60;n++){
-      await protect(actor);const view=await actor.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y;if(Math.hypot(dx,dy)<range)return;
+      await protect(actor);const goal=typeof point==='number'?entity(await actor.inspect(),point)?.pos:point;assert(goal,'Living approach target required');
+      const view=await actor.observe(),dx=goal.x-view.position.x,dy=goal.y-view.position.y;if(Math.hypot(dx,dy)<range)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
       if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
@@ -48,10 +49,10 @@ export async function run(game){
   }
   async function fire(actor,id,ms=150){
     await protect(actor);const target=entity(await actor.inspect(),id);assert(target,'Living native target required');
-    await approach(actor,target.pos);
+    await approach(actor,id,3.5);
     return actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
-  const indices=mode==='Remaining'?[1,2,3]:[index];
+  const indices=mode==='Remaining'?[2,3]:[index];
   for(const i of indices){
   index=i;branch=branches[i];root=roots[i];
   if(i!==indices[0]){await cheat(game,{kind:'teleport',position:{x:root.x,y:root.y}});await game.act({keys:[],duration_ms:100});}
