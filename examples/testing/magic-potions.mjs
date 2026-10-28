@@ -53,6 +53,6 @@ export async function run(game){
     await game.act({keys:['Insert'],duration_ms:700});
     await game.act({keys:[],duration_ms:1200},{name:'magic-potions-reconnected',when:v=>v.world==='Nexus'});
     const after=await snapshot('reconnected');
-    game.check('ordinary Nexus reconnect retains same living character and spent inventory',after.view.world==='Nexus'&&after.view.lifecycle.alive&&after.view.session.character===initial.view.session.character&&JSON.stringify(after.view.character.items)===JSON.stringify(retained.view.character.items)&&after.view.character.inventory_revision===retained.view.character.inventory_revision);
+    game.check('ordinary Nexus reconnect retains same living character and spent inventory',after.view.map.name==='Nexus'&&after.view.lifecycle.alive&&after.view.session.character===initial.view.session.character&&JSON.stringify(after.view.character.items)===JSON.stringify(retained.view.character.items)&&after.view.character.inventory_revision===retained.view.character.inventory_revision);
   }finally{await writeFile(output('potion-observations.json'),JSON.stringify({preparedItemsStatsVitals:true,quietEvidence:'PR132; not reverified by this case',observations},null,2));}
 }
