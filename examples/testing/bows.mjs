@@ -65,7 +65,7 @@ export async function run(game){
     game.check(`native ${item.toString(16)} damages living enemies`,after.diagnostic.entities.some(e=>{const old=before.diagnostic.entities.find(b=>b.id===e.id);return old&&e.hp<old.hp;})||after.diagnostic.character.kills>before.diagnostic.character.kills);
     game.check(`native ${item.toString(16)} preserves inventory and life`,after.view.character.inventory_revision===before.view.character.inventory_revision&&after.view.character.items[0]===item&&after.view.lifecycle.alive);
   }
-  const wizard=await game.join({...fixture,class:0x30e,seed:873,equipment:[-1,-1,-1,-1],backpack:[0xc02,-1,-1,-1,-1,-1,-1,-1]});
+  const wizard=await game.join({...fixture,class:0x30e,seed:873,stats:null,equipment:[-1,-1,-1,-1],backpack:[0xc02,-1,-1,-1,-1,-1,-1,-1]});
   const before=await wizard.observe();
   await wizard.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:634,y:384}}});
   const after=await wizard.observe();observations.push({refusal:{before,after}});await save();
