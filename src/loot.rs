@@ -1567,34 +1567,36 @@ mod tests {
     }
 
     #[test]
-    fn ent_god_defense_roll_requires_180_damage_without_erasing_gear() {
+    fn ent_god_and_beholder_defense_thresholds_preserve_equipment() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        assert_eq!(bonus(0x655), &[(0.015, 0xa20)]);
-        let owners = [(10, 179), (20, 180), (30, 181)];
-        let loot = god_loot(
-            &content,
-            0x655,
-            &owners,
-            &mut rand::rngs::mock::StepRng::new(0, 0),
-        );
-        assert!(!loot.private.contains_key(&10));
-        for owner in [20, 30] {
-            assert_eq!(loot.private[&owner], [0xa20]);
+        for (kind, threshold, chance) in [(0x655, 180, 0.015), (0x656, 270, 0.01)] {
+            assert_eq!(bonus(kind), &[(chance, 0xa20)]);
+            let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
+            let loot = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(0, 0),
+            );
+            assert!(!loot.private.contains_key(&10), "{kind:#x}");
+            for owner in [20, 30] {
+                assert_eq!(loot.private[&owner], [0xa20], "{kind:#x}");
+            }
+            assert_eq!(loot.shared_owners, [10, 20, 30]);
+            let expected: Vec<_> = table(kind)
+                .iter()
+                .flat_map(|(_, pick)| candidates(&content, *pick))
+                .collect();
+            assert_eq!(loot.shared, expected, "{kind:#x}");
+            assert!(!loot.shared.contains(&0xa20));
+            let empty = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0),
+            );
+            assert!(empty.shared.is_empty() && empty.private.is_empty());
         }
-        assert_eq!(loot.shared_owners, [10, 20, 30]);
-        let expected: Vec<_> = table(0x655)
-            .iter()
-            .flat_map(|(_, pick)| candidates(&content, *pick))
-            .collect();
-        assert_eq!(loot.shared, expected);
-        assert!(!loot.shared.contains(&0xa20));
-        let empty = god_loot(
-            &content,
-            0x655,
-            &owners,
-            &mut rand::rngs::mock::StepRng::new(u64::MAX, 0),
-        );
-        assert!(empty.shared.is_empty() && empty.private.is_empty());
     }
 
     #[test]
