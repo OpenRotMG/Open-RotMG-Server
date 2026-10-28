@@ -60,6 +60,46 @@ fn native(
 }
 
 #[test]
+fn native_entry_uses_ingress_time_and_keeps_monotonic_moves() {
+    let (mut world, id) = fixture(0x18, false);
+    let character = world.players.remove(&id).unwrap().character;
+    world.clock.set_paused(true);
+    world.attack_epoch = world.clock.now() - Duration::from_millis(1000);
+    world.now = 1050;
+    let (packets, _packets) = mpsc::channel(128);
+    let (lost, _lost) = watch::channel(None);
+    let id = world
+        .enter(character, Some(Output { packets, lost }))
+        .unwrap();
+    assert_eq!(world.players[&id].last_move_at, 1000);
+    assert_eq!(
+        native(&mut world, id, 8.5, 8.5, 10, 1001).unwrap(),
+        NativeInput::Applied
+    );
+    assert!(
+        native(&mut world, id, 8.5, 8.5, 11, 1000)
+            .unwrap_err()
+            .to_string()
+            .contains("native ingress clock regressed")
+    );
+    let player = world.players.remove(&id).unwrap();
+    let id = world
+        .enter_admitted(
+            player.character,
+            player.tx,
+            None,
+            player.presentation,
+            None,
+            Controller::Autonomous,
+        )
+        .unwrap();
+    assert_eq!(world.players[&id].last_move_at, 1050);
+    let character = world.players.remove(&id).unwrap().character;
+    let id = world.enter(character, None).unwrap();
+    assert_eq!(world.players[&id].last_move_at, 1050);
+}
+
+#[test]
 fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
     let (mut world, player) = fixture(0x18, false);
     world.encounter = true;
