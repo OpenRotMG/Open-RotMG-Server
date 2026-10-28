@@ -69,6 +69,8 @@ export async function run(game){
   game.check('Cube God wanders rather than remaining at its birth point',trace.some(t=>{const e=t.entities.find(e=>e.id===root);return e&&Math.hypot(e.pos.x-earned.x,e.pos.y-earned.y)>.2;}));
   game.check('owned followers move around their encounter', [0xd5a,0xd5b,0xd5c].every(k=>trace.some((t,n)=>t.entities.some(e=>e.kind===k&&trace.slice(0,n).some(p=>p.entities.some(old=>old.id===e.id&&Math.hypot(e.pos.x-old.pos.x,e.pos.y-old.pos.y)>.2))))));
   game.check('native session sees root and every dependent attack',[0xd59,0xd5a,0xd5b,0xd5c].every(k=>trace.some(t=>t.projectiles.some(p=>t.entities.some(e=>e.kind===k&&e.id===p.owner)))));
+  // The existing temporary attack fixture keeps minion combat within the protection window.
+  await api({op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});
   // Reproduce is a nearby density cap, not a per-parent lifetime budget: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/Reproduce.cs
   const distance=e=>Math.hypot(e.pos.x-state.view.position.x,e.pos.y-state.view.position.y);
   async function approach(actor,destination,range=1.5){
