@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
 
-export const fixture={class:0x30e,level:5,seed:914,world:-2,position:{x:76.5,y:76.5},equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:null};
+export const fixture={class:0x30e,level:5,seed:914,world:-2,position:{x:76.5,y:77.1},equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:null};
 const clients=[];
 export async function beforeNavigate({browser,signal}){
   const responses=[],pending=new Map(),credentials={};let c;
@@ -59,8 +59,8 @@ export async function run(game){
     }
     throw Error(`Walk to ${x},${y} failed: ${JSON.stringify((await player.observe()).position)}`);
   }
-  await walk(game,11.5,12.5);await walk(game,11.5,9.7);
-  await walk(peer,11.5,12.5);await walk(peer,11.5,9.7);
+  await walk(game,11.5,12.5);await walk(game,11.5,9.2);
+  await walk(peer,11.5,12.5);await walk(peer,11.5,9.2);
   await ui(game,0,'board-founder-empty',()=>click(0,700,575));
   await ui(peer,1,'board-member-empty',()=>click(1,700,575));
   game.check('both members load the same initially empty board',clients.every(c=>c.responses.some(r=>r.op==='getBoard'&&r.text==='')));
@@ -102,9 +102,9 @@ export async function run(game){
   await game.act({keys:['Insert'],duration_ms:1000});
   await game.act({keys:[],duration_ms:1000});
   game.check('ordinary Nexus reconnect preserves the same living character',(await game.observe()).world==='Nexus'&&(await game.observe()).lifecycle.alive&&(await game.observe()).session.character===beforeReconnect.session.character);
-  await walk(game,76.5,76.5);
+  await walk(game,76.5,77.1);
   await ui(game,0,'board-hall-reentry',()=>click(0,700,575));
-  await walk(game,11.5,12.5);await walk(game,11.5,9.7);
+  await walk(game,11.5,12.5);await walk(game,11.5,9.2);
   await ui(game,0,'board-after-reconnect',()=>click(0,700,575));
   game.check('reconnect and hall reentry retain saved board',clients[0].responses.at(-1).text===text);
   game.check('both ordinary native participants remain alive',(await game.observe()).lifecycle.alive&&(await peer.observe()).lifecycle.alive);
