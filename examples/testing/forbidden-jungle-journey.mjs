@@ -1,0 +1,92 @@
+import assert from 'node:assert/strict';
+import {readFile,writeFile,appendFile} from 'node:fs/promises';
+import {join} from 'node:path';
+export const fixture={class:0x310,level:20,seed:12351,world:1,position:'spawn',equipment:[0xaf6,0xc09,0xb05,0xacd],backpack:[0xc19,0xc21,0xc21,0xc21,0xa23,0xa23,0xa23,0xa23],stats:[670,385,50,25,50,50,40,75]};
+export async function run(game){
+ const out=process.argv[process.argv.indexOf('--run-dir')+1];
+ const log=async label=>{const s=await game.inspect();await appendFile(join(out,'journey.jsonl'),JSON.stringify({label,...s})+'\n');return s;};
+ const capture=async name=>{await game.act({keys:[],duration_ms:700},{name,when:()=>true});};
+ const aim=(a,b)=>{const x=35.355*(b.x-a.x-b.y+a.y),y=35.355*(b.x-a.x+b.y-a.y),scale=Math.max(1,Math.hypot(x,y)/270);return {x:300+x/scale,y:325+y/scale};};
+ const keys=(a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,x=dx-dy,y=dx+dy;return [Math.abs(x)>.1&&Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>.1&&Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean);};
+ async function move(point){
+  for(let n=0;n<90;n++){
+   await heal();const v=await game.observe(),d=Math.hypot(point.x-v.position.x,point.y-v.position.y);if(d<.4)return;
+   await game.act({keys:keys(v.position,point),duration_ms:Math.max(50,Math.min(500,Math.round(d*100)))});
+  }
+  assert.fail('Native route blocked '+JSON.stringify(point));
+ }
+ async function heal(){
+  let v=await game.observe();
+  if(v.character.conditions&258){
+   const slot=v.character.items.findIndex((k,i)=>i>=5&&k===0xc21);
+   if(slot>=5){await log('before-holy-water');await game.act({keys:[String(slot-3)],duration_ms:150});await log('after-holy-water');v=await game.observe();}
+  }
+  if((v.character.hp<650||(v.character.conditions&256))&&!(v.character.conditions&2)){
+   if(v.character.mp<100){const slot=v.character.items.findIndex((k,i)=>i>=8&&k===0xa23);if(slot>=8){await game.act({keys:[String(slot-3)],duration_ms:150});v=await game.observe();}}
+   if(v.character.mp>=100)await game.act({keys:[' '],duration_ms:350});
+  }
+ }
+ const priority=[0xdd3,0xdd0,0xdcd,0xdcf,0xdd2,0xdd1,0xdce,0xdcc];let roomsCleared=0;
+ async function clearRoom(center,dx,dy){
+  for(let n=0;n<45;n++){
+   const s=await game.inspect(),enemies=s.diagnostic.entities.filter(e=>priority.includes(e.kind)&&Math.hypot(e.home.x-center.x,e.home.y-center.y)<8);
+   if(n===0)assert(enemies.length>0,'Generated room has no ordinary population');
+   if(!enemies.length){roomsCleared++;await log('room-cleared');return;}
+   const targets=enemies.filter(e=>Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<9.7).sort((a,b)=>priority.indexOf(a.kind)-priority.indexOf(b.kind));
+   if(!targets.length){await move({x:center.x-6*dx,y:center.y-6*dy});continue;}
+   await log('room-shot-'+targets[0].id);await heal();await game.act({keys:[],duration_ms:1200,mouse:aim(s.view.position,targets[0].pos)});
+  }
+  assert.fail('Native ranged fire did not clear the ordinary room');
+ }
+ const initial=await log('realm');
+ await game.act({keys:['1'],duration_ms:900});const opened=await log('key-consumed'),portal=opened.diagnostic.entities.find(e=>e.kind===0x733);assert(portal);
+ game.check('one supplied Totem Key commits one usable entrance',opened.view.character.items[4]===-1&&portal.published);
+ await move(portal.pos);await capture('key-portal');await game.act({keys:[],mouse:{x:700,y:580},duration_ms:1000});
+ game.check('normal portal interaction enters Jungle',(await game.observe()).world==='Forbidden Jungle');
+ await game.act({keys:[],duration_ms:2500});await capture('jungle-arrival');
+ const entries=(await readFile(join(out,'server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l));
+ const generated=entries.findLast(e=>e.fields?.message==='generated branching Forbidden Jungle').fields;
+ const rooms=JSON.parse(generated.layout.replaceAll('(','[').replaceAll(')',']')),path=[];
+ for(let i=generated.boss_room;i!==0;i=rooms[i][2])path.unshift(i);
+ await writeFile(join(out,'route.json'),JSON.stringify({generated,path}));
+ let previous=0;
+ for(const i of path){
+  const [x,y]=rooms[i],[px,py]=rooms[previous],dx=x-px,dy=y-py,from={x:20+px*20+.5,y:20+py*20+.5},to={x:20+x*20+.5,y:20+y*20+.5};
+  await heal();await move({x:from.x-4*dy,y:from.y+4*dx});await move({x:from.x+4*dx,y:from.y+4*dy});
+  await move({x:to.x-9.5*dx,y:to.y-9.5*dy});if(i!==generated.boss_room)await clearRoom(to,dx,dy);
+  await move({x:to.x-4*dx,y:to.y-4*dy});await heal();await log('room-'+i);previous=i;
+ }
+ game.check('ordinary native fire clears each populated room on the boss route',roomsCleared===path.length-1);
+ const [bx,by]=rooms[generated.boss_room];await move({x:20+bx*20+.5-9,y:20+by*20+.5});
+ await capture('boss-arrival');const stages=new Set();
+ for(let n=0;n<90;n++){
+  const s=await log('boss-'+n),boss=s.diagnostic.entities.find(e=>e.kind===0xdc3);if(!boss)break;stages.add(boss.stage);
+  const d=Math.hypot(boss.pos.x-s.view.position.x,boss.pos.y-s.view.position.y);
+  if(d>9.7){await move({x:boss.pos.x-9,y:boss.pos.y});continue;}
+  if(d<7.5&&boss.stage!==6){await move({x:boss.pos.x-9,y:boss.pos.y});continue;}
+  let movement=[];
+  if(boss.stage===6){
+   const center={x:20+bx*20+.5,y:20+by*20+.5},angle=Math.atan2(s.view.position.y-center.y,s.view.position.x-center.x)+.6;
+   movement=keys(s.view.position,{x:center.x+8.5*Math.cos(angle),y:center.y+8.5*Math.sin(angle)});
+   if(s.view.character.hp<650&&s.view.character.mp>=100)movement.push(' ');
+  }else await heal();
+  await game.act({keys:movement,duration_ms:boss.stage===6?500:1000,mouse:aim(s.view.position,boss.pos)});
+ }
+ const clear=await log('defeat');
+ game.check('ordinary native shots defeat Mixcoatl after actual phases',!clear.diagnostic.entities.some(e=>e.kind===0xdc3)&&stages.has(1)&&stages.has(6));
+ game.check('one Jungle clear is committed',clear.diagnostic.character.jungles===1);
+ await game.act({keys:[],duration_ms:2200});const retired=await log('boss-totems-retired'),totems=retired.diagnostic.entities.filter(e=>e.kind===0xdc4);
+ game.check('four Boss Totems remain and stop firing after their own boss dies',totems.length===4&&!retired.view.projectiles.some(p=>totems.some(e=>e.id===p.owner))&&retired.diagnostic.character.jungles===1);
+ await writeFile(join(out,'boss-phases.json'),JSON.stringify([...stages]));
+ const bag=clear.diagnostic.entities.find(e=>e.items?.includes(0xc1a)&&Math.hypot(e.pos.x-(20+bx*20+.5),e.pos.y-(20+by*20+.5))<13);assert(bag);await heal();await move(bag.pos);
+ await capture('earned-rewards');const before=await game.observe(),slot=bag.items.indexOf(0xc1a);
+ const drag={from:{x:634+(slot%4)*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}};
+ await game.act({keys:[],duration_ms:350,drag});const picked=await log('pollen-picked');
+ game.check('native drag picks up earned Pollen exactly once',picked.view.character.items[4]===0xc1a&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
+ await game.act({keys:[],duration_ms:350,drag:{from:drag.from,to:{x:678,y:428}}});
+ game.check('empty earned bag slot cannot duplicate Pollen',(await game.observe()).character.inventory_revision===picked.view.character.inventory_revision);
+ const exit=picked.diagnostic.entities.find(e=>e.kind===0x704&&e.published);assert(exit);await heal();await move(exit.pos);await capture('completion-exit');
+ await game.act({keys:[],duration_ms:1000,mouse:{x:700,y:580}});await game.act({keys:[],duration_ms:2000});const final=await log('returned');
+ game.check('same living character returns through completion exit with loot and one clear',final.view.map.name==='Realm'&&final.view.session.world===initial.view.session.world&&final.view.session.character===initial.view.session.character&&final.view.lifecycle.alive&&final.diagnostic.character.jungles===1&&final.view.character.items[4]===0xc1a);
+ await capture('realm-return');
+}

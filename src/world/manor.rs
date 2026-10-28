@@ -426,6 +426,54 @@ mod tests {
     }
 
     #[test]
+    fn generated_bookshelves_protect_only_ordinary_walls() {
+        let content = arena().0.content;
+        let map = manor::generate(&content, 13166792894241567768).unwrap();
+        let world = World::new(content, Arc::new(map)).unwrap();
+        let mut counts = [0, 0];
+        for e in world.actors().filter(|e| e.kind == BOOKCASE) {
+            let secret = world.map.cells
+                [(e.pos.y as i32 * world.map.width + e.pos.x as i32) as usize]
+                .region
+                == 250;
+            counts[usize::from(secret)] += 1;
+            assert_eq!(
+                e.condition,
+                if secret {
+                    0
+                } else {
+                    condition::bit(condition::INVINCIBLE)
+                }
+            );
+        }
+        assert!(counts.iter().all(|count| *count > 0));
+    }
+
+    #[test]
+    fn genuine_coffin_threshold_waves_do_not_repeat() {
+        let (mut world, boss) = arena();
+        let id = world
+            .spawn_entity(COFFIN, world.entities[&boss].home, vec![])
+            .unwrap();
+        world.entities.get_mut(&id).unwrap().next_aux = 1;
+        for (hp, bats, vampires) in [(14999, 15, 0), (7999, 23, 2)] {
+            world.entities.get_mut(&id).unwrap().hp = hp;
+            for _ in 0..2 {
+                world.manor_mechanics(id, None, 0).unwrap();
+                for (kind, count) in [(BAT, bats), (0x1728, vampires)] {
+                    assert_eq!(
+                        world
+                            .actors()
+                            .filter(|e| e.parent == Some(id) && e.kind == kind)
+                            .count(),
+                        count
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ruthven_return_clears_only_his_bats_once_per_cycle() {
         let (mut world, boss) = arena();
         let home = world.entities[&boss].home;
