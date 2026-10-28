@@ -8,7 +8,7 @@ export async function run(game){
   const out=process.env.QA_RESULTS_DIR,root=join(out,'native'),distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
   const initial=await game.observe(),initialCount=(await game.inspect()).diagnostic.character.abysses,report=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
   const token=(await readFile(join(root,'state/control.token'),'utf8')).trim();
-  const snapshots=[],seen=new Set();let serial=0,protectedUntil=0;
+  const snapshots=[],seen=new Set(),renewals=[];let serial=0,protectedUntil=0;
   async function command(command){
     const path=join(out,'request.json');await writeFile(path,JSON.stringify({id:'abyss-'+serial++,command}));
     return JSON.parse(execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path],{encoding:'utf8'}));
@@ -16,10 +16,19 @@ export async function run(game){
   async function map(){const s=await game.inspect(),r=await fetch(report.origin+'/dev/map?player='+s.diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(r.ok);return r.json();}
   async function save(name){const s=await game.inspect();snapshots.push({name,...s});await writeFile(join(out,'journey.json'),JSON.stringify(snapshots));return s;}
   async function act(input,capture){
-    const v=await game.observe();assert(v.lifecycle.alive,'Abyss character died');
-    if(v.game_ms>=protectedUntil){await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;}
+    let v=await game.observe();assert(v.lifecycle.alive,'Abyss character died');
+    if(protectedUntil&&protectedUntil-v.game_ms<15000){
+      const position=v.position,[x,y]=originalSpawn;
+      await command({op:'cheat',actor:game.actor,change:{kind:'teleport',position:{x,y}}});
+      while(v.game_ms<protectedUntil){await game.act({keys:[],duration_ms:Math.min(10000,protectedUntil-v.game_ms)});v=await game.observe();assert(v.lifecycle.alive,'Safe protection renewal failed');}
+      await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;
+      await command({op:'cheat',actor:game.actor,change:{kind:'teleport',position}});renewals.push({game_ms:v.game_ms,position});
+      await writeFile(join(out,'protection-renewals.json'),JSON.stringify(renewals));
+    }
+    if(!protectedUntil){await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;}
     const result=await game.act(input,capture);for(const e of (await game.observe()).nearby)seen.add(e.kind);return result;
   }
+  const originalSpawn=[initial.position.x,initial.position.y];
   const original=await map(),idols=original.entities.filter(e=>e.kind===0xe1d),boss=original.entities.find(e=>e.kind===0x90a);assert(boss);
   await writeFile(join(out,'generated-map.json'),JSON.stringify(original));
   game.check('generated Abyss has natural Malphas and ordinary demons',boss.hp===10000&&original.entities.some(e=>e.kind>=0x66d&&e.kind<=0x672));
@@ -96,5 +105,5 @@ export async function run(game){
   await act({keys:[],duration_ms:800},{name:'abyss-exit',when:()=>true});await act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
   const returned=await save('returned');
   game.check('completion exit preserves living character and rewards',returned.view.map.name==='Realm'&&returned.view.session.character===initial.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.abysses===dead.diagnostic.character.abysses&&returned.view.character.items.filter(i=>i===0xa20).length===idols.length+1);
-  await writeFile(join(out,'coverage.json'),JSON.stringify({seed:fixture.worldSeed,idols:idols.length,seen:[...seen],phases,scope:'Prepared generated dungeon spawn, supplied level/gear and timed invincibility; ordinary native traversal/combat/loot/exit, not earned entry or survival difficulty.'}));
+  await writeFile(join(out,'coverage.json'),JSON.stringify({seed:fixture.worldSeed,idols:idols.length,seen:[...seen],phases,renewals,scope:'Prepared generated dungeon spawn, supplied level/gear, timed invincibility and explicit safe-spawn/return placements for nonoverlapping renewal. Native walking/combat/loot/exit between placements, not uninterrupted earned traversal or survival difficulty.'}));
 }
