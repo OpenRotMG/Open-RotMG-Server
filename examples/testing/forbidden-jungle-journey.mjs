@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile,appendFile} from 'node:fs/promises';
 import {join} from 'node:path';
-export const fixture={class:0x310,level:20,seed:12351,world:1,position:'spawn',equipment:[0xaf6,0xb25,0xb05,0xacd],backpack:[0xc19,0xa22,0xa22,0xa22,0xa23,0xa23,0xa23,0xa23],stats:[670,385,50,25,50,50,40,75]};
+export const fixture={class:0x310,level:20,seed:12351,world:1,position:'spawn',equipment:[0xaf6,0xc09,0xb05,0xacd],backpack:[0xc19,0xc21,0xc21,0xc21,0xa23,0xa23,0xa23,0xa23],stats:[670,385,50,25,50,50,40,75]};
 export async function run(game){
  const out=process.argv[process.argv.indexOf('--run-dir')+1];
  const log=async label=>{const s=await game.inspect();await appendFile(join(out,'journey.jsonl'),JSON.stringify({label,...s})+'\n');return s;};
@@ -9,15 +9,22 @@ export async function run(game){
  const keys=(a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,x=dx-dy,y=dx+dy;return [Math.abs(x)>.1&&Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>.1&&Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean);};
  async function move(point){
   for(let n=0;n<90;n++){
-   const v=await game.observe(),d=Math.hypot(point.x-v.position.x,point.y-v.position.y);if(d<.4)return;
+   await heal();const v=await game.observe(),d=Math.hypot(point.x-v.position.x,point.y-v.position.y);if(d<.4)return;
    await game.act({keys:keys(v.position,point),duration_ms:Math.max(50,Math.min(500,Math.round(d*100)))});
   }
   assert.fail('Native route blocked '+JSON.stringify(point));
  }
- async function heal(){const v=await game.observe();if(v.character.hp<650&&!(v.character.conditions&2)){
-  if(v.character.mp>=90)await game.act({keys:[' '],duration_ms:350});
-  else{const slot=v.character.items.findIndex((k,i)=>i>=8&&k===0xa23);if(slot>=8)await game.act({keys:[String(slot-3)],duration_ms:350});}
- }}
+ async function heal(){
+  let v=await game.observe();
+  if(v.character.conditions&258){
+   const slot=v.character.items.findIndex((k,i)=>i>=5&&k===0xc21);
+   if(slot>=5){await log('before-holy-water');await game.act({keys:[String(slot-3)],duration_ms:150});await log('after-holy-water');v=await game.observe();}
+  }
+  if((v.character.hp<650||(v.character.conditions&256))&&!(v.character.conditions&2)){
+   if(v.character.mp<100){const slot=v.character.items.findIndex((k,i)=>i>=8&&k===0xa23);if(slot>=8){await game.act({keys:[String(slot-3)],duration_ms:150});v=await game.observe();}}
+   if(v.character.mp>=100)await game.act({keys:[' '],duration_ms:350});
+  }
+ }
  const initial=await log('realm');
  await game.act({keys:['1'],duration_ms:900});const opened=await log('key-consumed'),portal=opened.diagnostic.entities.find(e=>e.kind===0x733);assert(portal);
  game.check('one supplied Totem Key commits one usable entrance',opened.view.character.items[4]===-1&&portal.published);
@@ -46,7 +53,7 @@ export async function run(game){
   if(boss.stage===6){
    const center={x:20+bx*20+.5,y:20+by*20+.5},angle=Math.atan2(s.view.position.y-center.y,s.view.position.x-center.x)+.6;
    movement=keys(s.view.position,{x:center.x+8.5*Math.cos(angle),y:center.y+8.5*Math.sin(angle)});
-   if(s.view.character.hp<650&&s.view.character.mp>=90)movement.push(' ');
+   if(s.view.character.hp<650&&s.view.character.mp>=100)movement.push(' ');
   }else await heal();
   await game.act({keys:movement,duration_ms:boss.stage===6?500:1000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
  }
