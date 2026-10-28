@@ -101,16 +101,22 @@ impl Cctv {
     pub(crate) fn register_view(
         &self,
         view: &Arc<crate::server::bot_view::control::View>,
-    ) -> String {
+    ) -> Result<String, (StatusCode, String)> {
         let mut registry = self.lock();
         registry.views.retain(|_, view| view.strong_count() != 0);
+        if registry.views.len() >= VIEWERS {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "native view registry is full; retry shortly".into(),
+            ));
+        }
         loop {
             let token = format!("{:032x}", rand::random::<u128>());
             if let std::collections::hash_map::Entry::Vacant(entry) =
                 registry.views.entry(token.clone())
             {
                 entry.insert(Arc::downgrade(view));
-                return token;
+                return Ok(token);
             }
         }
     }

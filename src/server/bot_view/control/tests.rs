@@ -10,7 +10,7 @@ fn fixture() -> (Arc<Cctv>, Owner, mpsc::Receiver<Value>) {
     let ip = IpAddr::from([127, 0, 0, 1]);
     let viewer = Viewer::join(&cctv, "A", ip, true).unwrap();
     let (view, replies) = View::new(viewer, "A".into(), ip);
-    let token = cctv.register_view(&view);
+    let token = cctv.register_view(&view).unwrap();
     (cctv.clone(), Owner { view, token, cctv }, replies)
 }
 
@@ -62,6 +62,26 @@ fn capability_is_ip_bound_exclusive_closed_and_weakly_registered() {
     let _two = Viewer::join(&cctv, "A", lease.view.ip, true).unwrap();
     drop(lease);
     assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn weak_registry_is_bounded_even_while_closed_socket_tasks_still_hold_views() {
+    let cctv = Cctv::test_catalogue();
+    let mut held = Vec::new();
+    for ip in 1..=32 {
+        let ip = IpAddr::from([127, 0, 0, ip]);
+        let viewer = Viewer::join(&cctv, "A", ip, true).unwrap();
+        let (view, _) = View::new(viewer, "A".into(), ip);
+        cctv.register_view(&view).unwrap();
+        view.close();
+        held.push(view);
+    }
+    let ip = IpAddr::from([127, 0, 0, 33]);
+    let viewer = Viewer::join(&cctv, "A", ip, true).unwrap();
+    let (next, _) = View::new(viewer, "A".into(), ip);
+    assert!(cctv.register_view(&next).is_err());
+    drop(held);
+    assert!(cctv.register_view(&next).is_ok());
 }
 
 #[test]

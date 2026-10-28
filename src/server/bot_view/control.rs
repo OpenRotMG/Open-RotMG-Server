@@ -271,7 +271,10 @@ pub(in crate::server) async fn socket(
         Err(error) => return rejected_response(error),
     };
     let (view, replies) = View::new(viewer, bot, ip);
-    let token = a.cctv.register_view(&view);
+    let token = match a.cctv.register_view(&view) {
+        Ok(token) => token,
+        Err(error) => return rejected_response(error),
+    };
     let owner = Owner {
         view,
         token,
