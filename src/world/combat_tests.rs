@@ -226,6 +226,59 @@ fn selected_trajectory_modes_preserve_parity_rotation_and_return() {
 }
 
 #[test]
+fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
+    for kind in [0xa00, 0xb0b, 0xa03, 0xc01, 0xc05, 0xaf4, 0xaf5, 0xb40] {
+        let (mut w, id) = fixture(0x18, false);
+        w.now = 1000;
+        let targets = [9.5, 10.5].map(|x| {
+            let target = w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap();
+            w.entities.get_mut(&target).unwrap().hp = 10000;
+            target
+        });
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.class = 0x31e;
+        p.character.items[0] = kind as i32;
+        p.character.base[2] = 50;
+        p.character.base[5] = 50;
+        let item = w.content.get(kind).unwrap().clone();
+        let count = if kind == 0xc01 { 2 } else { 1 };
+        assert_eq!(item.shots, count);
+        assert_eq!(item.rate, if kind == 0xc05 { 0.6 } else { 1. });
+        let start = Pos { x: 8.8, y: 8.5 };
+        for bullet in 0..count as u8 {
+            let angle = if count == 2 {
+                (f32::from(bullet) * 40. - 20.).to_radians()
+            } else {
+                0.
+            };
+            w.shoot(id, 1000, bullet, kind, start, angle).unwrap();
+        }
+        let damage: i32 = w.bullets.iter().map(|b| b.damage).sum();
+        for b in &w.bullets {
+            assert!(
+                (item.projectiles[&0].min * 3 / 2..=item.projectiles[&0].max * 3 / 2)
+                    .contains(&b.damage)
+            );
+            assert!(!b.spec.multi_hit && !b.spec.passes_cover && !b.spec.armor_piercing);
+            assert!(!b.spec.wavy && !b.spec.parametric && !b.spec.boomerang);
+        }
+        let admitted = w.players[&id].character.shots;
+        assert!(w.shoot(id, 1001, count as u8, kind, start, 0.).is_err());
+        assert_eq!(w.players[&id].character.shots, admitted);
+        for _ in 0..16 {
+            w.step();
+        }
+        assert_eq!(w.entities[&targets[0]].hp, 10000 - damage);
+        assert_eq!(w.entities[&targets[1]].hp, 10000);
+        assert_eq!(
+            w.players[&id].character.lifetime.projectile_hits,
+            count as u64
+        );
+        assert!(w.bullets.iter().all(|b| b.owner != id));
+    }
+}
+
+#[test]
 fn multihit_and_cover_flags_preserve_distinct_targets_and_once_only_hits() {
     for (multi_hit, cover, passes_cover, expected) in [
         (false, None, false, [true, false]),
