@@ -14,8 +14,14 @@ export async function prepare(){
 export async function run(game){
   const observations=[];
   async function save(name,client=game){
-    const view=await client.observe();observations.push({name,view});
+    const view=await client.observe();
+    view.entrances=(await client.inspect()).view.objects.filter(o=>o.kind===0x712);
+    observations.push({name,view});
     await writeFile(join(process.env.QA_RESULTS_DIR,'portals.json'),JSON.stringify(observations,null,2));return view;
+  }
+  async function capture(name){
+    await game.act({keys:[],duration_ms:350});
+    await game.act({keys:[],duration_ms:700},{name,when:()=>true});
   }
   async function walk(pos){
     for(let i=0;i<80;i++){
@@ -46,22 +52,22 @@ export async function run(game){
   }
   assert.equal(portals.length,2,'Walking north did not reveal both Realm entrances');
   await walk(portals[0].pos);
-  await game.act({keys:[],duration_ms:700},{name:'realm-portals-open',when:()=>true});
+  await capture('realm-portals-open');
   const open=await save('open');
-  const entrances=open.nearby.filter(o=>o.kind===0x712);
+  const entrances=open.entrances;
   game.check('two differently named available entrances are visible',entrances.length===2&&new Set(entrances.map(o=>o.name.split(' (')[0])).size===2&&entrances.every(o=>o.usable));
   const occupant=await game.join({...spec,seed:902,world:-3});
   const filled=await save('occupant',occupant);
-  await game.act({keys:[],duration_ms:700},{name:'realm-portals-full',when:()=>true});
+  await capture('realm-portals-full');
   const full=await save('full');
-  const unavailable=full.nearby.find(o=>o.id===portals[0].id),available=full.nearby.find(o=>o.id===portals[1].id);
+  const unavailable=full.entrances.find(o=>o.id===portals[0].id),available=full.entrances.find(o=>o.id===portals[1].id);
   game.check('live population binds Full only to its occupied Realm',unavailable?.name.endsWith('(1/1)')&&!unavailable.usable&&available?.name.endsWith('(0/85)')&&available.usable);
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
   const denied=await save('denied');
   game.check('full entrance click retains the exact living Nexus session and inventory',denied.lifecycle.alive&&JSON.stringify(denied.session)===JSON.stringify(full.session)&&JSON.stringify(denied.character.items)===JSON.stringify(initial.character.items));
   await escape(occupant);
-  await game.act({keys:[],duration_ms:700},{name:'realm-portals-reopened',when:()=>true});
-  const reopened=await save('reopened'),entrance=reopened.nearby.find(o=>o.id===portals[0].id);
+  await capture('realm-portals-reopened');
+  const reopened=await save('reopened'),entrance=reopened.entrances.find(o=>o.id===portals[0].id);
   game.check('departure restores the same empty available entrance',entrance?.name.endsWith('(0/1)')&&entrance.usable);
   const first=await enter();await save('entered-first');
   game.check('reopened entrance reaches its exact Realm',first.session.world===filled.session.world);
