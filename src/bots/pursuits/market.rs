@@ -3,7 +3,10 @@ use rand::seq::IteratorRandom;
 use std::time::{Duration, Instant};
 
 mod incoming;
+mod replies;
 use incoming::Incoming;
+pub(in crate::bots) use replies::PendingTrade;
+use replies::{BoundReply, ReplyKind};
 
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
@@ -125,6 +128,10 @@ pub(crate) struct Market {
     #[serde(skip)]
     pub(in crate::bots) incoming: Option<Incoming>,
     #[serde(skip)]
+    reply: Option<BoundReply>,
+    #[serde(skip)]
+    pub(in crate::bots) pending_trade: Option<PendingTrade>,
+    #[serde(skip)]
     pub(in crate::bots) revoke_trade: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,6 +200,8 @@ impl Market {
         self.session = None;
         self.session_used = false;
         self.incoming = None;
+        self.reply = None;
+        self.pending_trade = None;
         self.outgoing = None;
         self.trade = None;
         self.next_ad = 0;
@@ -461,6 +470,9 @@ impl Market {
         c: &Content,
         future: Option<u16>,
     ) -> Result<bool> {
+        if let Some(current) = self.response_current(message, v, c, future)? {
+            return Ok(current);
+        }
         if let Some(q) = parse_quote(&message.text, c) {
             Ok(v.map.name == "Nexus"
                 && self.incoming.is_none()
@@ -564,7 +576,13 @@ impl Market {
         let body = text
             .strip_prefix(&format!("{}, ", self.name))
             .unwrap_or(&text);
-        let Some(q) = parse_quote(body, c) else {
+        let ad = if let Some(counter) = counter_body(&body.trim().to_ascii_lowercase()) {
+            parse_advertisement(counter, |s| parse_goods(s, c))
+                .filter(|ad| matches!(ad, Advertisement::Quote(_)))
+        } else {
+            parse_advertisement(body, |s| parse_goods(s, c))
+        };
+        let Some(ad) = ad else {
             return Ok(false);
         };
         if v.map.name != "Nexus"
@@ -577,9 +595,41 @@ impl Market {
         {
             return Ok(true);
         }
+        let Some(objective) = self.quote(v, c, future)? else {
+            return Ok(true);
+        };
+        let related = match &ad {
+            Advertisement::Quote(q) => {
+                objective[0].kind == q[1].kind && objective[1].kind == q[0].kind
+            }
+            Advertisement::Buying(g) => g.kind == objective[0].kind,
+            Advertisement::Selling(g) => g.kind == objective[1].kind,
+        };
+        // Interest alone supplies neither a peer price nor permission to open a trade.
+        let Advertisement::Quote(q) = ad else {
+            if related
+                && self.outgoing.is_none()
+                && v.elapsed_ms >= self.next_message_ms
+                && let Some(account) = peer.account
+                && v.character
+                    .items
+                    .iter()
+                    .skip(4)
+                    .filter(|k| **k == objective[0].kind)
+                    .count()
+                    >= usize::from(objective[0].quantity)
+            {
+                self.respond(
+                    v,
+                    (peer.id, account, name),
+                    ReplyKind::Counter(objective),
+                    c,
+                )?;
+            }
+            return Ok(true);
+        };
         // Ads are invitations to inspect a WINDOW, never evidence of consent or payment.
-        if let Some(objective) = self.quote(v, c, future)?
-            && objective[0].kind == q[1].kind
+        if objective[0].kind == q[1].kind
             && objective[1].kind == q[0].kind
             && q[1].quantity <= objective[0].quantity
             && q[0].quantity >= objective[1].quantity
@@ -596,6 +646,24 @@ impl Market {
                 name,
                 [q[1].clone(), q[0].clone()],
             ));
+        } else if related
+            && self.outgoing.is_none()
+            && v.elapsed_ms >= self.next_message_ms
+            && let Some(account) = peer.account
+            && v.character
+                .items
+                .iter()
+                .skip(4)
+                .filter(|k| **k == objective[0].kind)
+                .count()
+                >= usize::from(objective[0].quantity)
+        {
+            self.respond(
+                v,
+                (peer.id, account, name),
+                ReplyKind::Counter(objective),
+                c,
+            )?;
         }
         let _ = channel;
         Ok(true)
@@ -924,13 +992,14 @@ impl Market {
         if self.trade.is_some() {
             return Ok(Some(d));
         }
-        if self.session.is_none() && self.session_used {
+        if !self.preparing && self.session.is_none() && self.session_used {
             return Ok(None);
         }
-        if self
-            .session
-            .as_ref()
-            .is_some_and(|s| v.elapsed_ms >= s.until)
+        if !self.preparing
+            && self
+                .session
+                .as_ref()
+                .is_some_and(|s| v.elapsed_ms >= s.until)
         {
             self.end_session(v, "elapsed");
             return Ok(None);
@@ -940,9 +1009,9 @@ impl Market {
             return Ok(None);
         };
         self.quote = Some(quote.clone());
-        if self.session.is_none() {
+        if self.session.is_none() && !self.preparing {
             self.session_used = true;
-            let admitted = self.preparing || self.trader || rng.gen_ratio(1, 5);
+            let admitted = self.trader || rng.gen_ratio(1, 5);
             tracing::info!(
                 account = v.session.account,
                 admitted,
@@ -1010,10 +1079,13 @@ impl Market {
             return Ok(None);
         }
         self.preparing = false;
-        let s = self
-            .session
-            .as_mut()
-            .expect("market session just initialized");
+        let Some(s) = self.session.as_mut() else {
+            return Ok(None);
+        };
+        if v.elapsed_ms >= s.until {
+            self.end_session(v, "elapsed");
+            return Ok(None);
+        }
         if v.position.distance(center(s.anchor)) > 1.5 {
             d.movement = grid.towards(v.position, center(s.anchor));
             return Ok(Some(d));
@@ -1075,6 +1147,7 @@ impl Market {
                 let peer = r.utf()?;
                 let (theirs, _) = read_items(&mut r)?;
                 r.done()?;
+                self.pending_trade = None;
                 self.trade = Some(SessionTrade {
                     binding: [v.session.world, v.session.player, v.session.character],
                     peer,
@@ -1092,6 +1165,7 @@ impl Market {
                 r.done()?;
                 if let Some(t) = &mut self.trade {
                     if t.offers[1] != values {
+                        self.pending_trade = None;
                         t.empty_offer_until = v.clock_at + Duration::from_secs(20);
                     }
                     t.offers[1] = values;
@@ -1109,6 +1183,9 @@ impl Market {
                 let reason = r.utf()?;
                 r.done()?;
                 self.trade = None;
+                if result != 0 {
+                    self.pending_trade = None;
+                }
                 if self.incoming.is_some() {
                     self.end_incoming(v);
                 }
@@ -1203,6 +1280,12 @@ pub(in crate::bots) fn parse_goods(s: &str, c: &Content) -> Option<Goods> {
     Some(Goods { kind, quantity })
 }
 
+pub(in crate::bots) fn counter_body(text: &str) -> Option<&str> {
+    ["nty ", "nah ", "can do ", "no thx ", "sry "]
+        .into_iter()
+        .find_map(|p| text.strip_prefix(p))
+}
+
 // Templates and human chat share the same shapes; the caller supplies literal slots or real goods.
 pub(in crate::bots) fn parse_advertisement(
     text: &str,
@@ -1293,6 +1376,9 @@ pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
     }
     Ok(a)
 }
+
+#[cfg(test)]
+mod interaction_tests;
 
 #[cfg(test)]
 mod tests {

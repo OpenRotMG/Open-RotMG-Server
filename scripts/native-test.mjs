@@ -237,7 +237,7 @@ export async function runCase(scenario, options) {
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
     await bounded('prepareBuildStart',async()=>{
       const began=performance.now();let buildStart,buildEnd,ready;
-      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots','--release'];if(archive)args.push('--dev-control');args.push(...clientArgs);
+      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots','--release'];if(archive)args.push('--dev-control');args.push(...clientArgs);if(options.botLlm)args.push('--bot-llm');
       const server=launch('server',join(root,'run.sh'),args,['ignore','pipe','pipe'],{...process.env,CARGO_TERM_COLOR:'never'});
       for(const [stream,name] of [[server.child.stdout,'server.log'],[server.child.stderr,'build.log']]){
         const fd=await log(name);let pending='';
@@ -396,11 +396,11 @@ export async function runCase(scenario, options) {
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){
-    console.log('Usage: node scripts/native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY\nLinux: Node22.15+, Xvfb, xauth, Openbox and managed browser helpers.\nSet PI_BROWSER_TOOLS and PI_NATIVE_TEST_CHROME, or --browser-tools and --chrome.\nOptional --chrome-args JSON, --client ABSOLUTE_CHECKOUT or --client-manifest ABSOLUTE_MANIFEST, --timeout-ms (default900000; includes120000 cleanup reserve).\nFresh prepared fixtures only. Existing directories are refused; state/logs are preserved.');
+    console.log('Usage: node scripts/native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY\nLinux: Node22.15+, Xvfb, xauth, Openbox and managed browser helpers.\nSet PI_BROWSER_TOOLS and PI_NATIVE_TEST_CHROME, or --browser-tools and --chrome.\nOptional --bot-llm (real provider, default OFF), --chrome-args JSON, --client ABSOLUTE_CHECKOUT or --client-manifest ABSOLUTE_MANIFEST, --timeout-ms (default900000; includes120000 cleanup reserve).\nFresh prepared fixtures only. Existing directories are refused; state/logs are preserved.');
   }else try {
-    const {values,positionals}=parseArgs({allowPositionals:true,options:{'run-dir':{type:'string'},'browser-tools':{type:'string'},chrome:{type:'string'},'chrome-args':{type:'string'},client:{type:'string'},'client-manifest':{type:'string'},'timeout-ms':{type:'string',default:'900000'}}});
+    const {values,positionals}=parseArgs({allowPositionals:true,options:{'run-dir':{type:'string'},'browser-tools':{type:'string'},chrome:{type:'string'},'chrome-args':{type:'string'},client:{type:'string'},'client-manifest':{type:'string'},'bot-llm':{type:'boolean',default:false},'timeout-ms':{type:'string',default:'900000'}}});
     assert.equal(positionals.length,1,'Usage: native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY');
-    const result=await runCase(positionals[0],{runDir:values['run-dir'],browserTools:values['browser-tools']??process.env.PI_BROWSER_TOOLS,chrome:values.chrome??process.env.PI_NATIVE_TEST_CHROME,chromeArgs:JSON.parse(values['chrome-args']??process.env.PI_NATIVE_TEST_CHROME_ARGS??'[]'),client:values.client,clientManifest:values['client-manifest'],timeoutMs:Number(values['timeout-ms'])});
+    const result=await runCase(positionals[0],{runDir:values['run-dir'],browserTools:values['browser-tools']??process.env.PI_BROWSER_TOOLS,chrome:values.chrome??process.env.PI_NATIVE_TEST_CHROME,chromeArgs:JSON.parse(values['chrome-args']??process.env.PI_NATIVE_TEST_CHROME_ARGS??'[]'),client:values.client,clientManifest:values['client-manifest'],botLlm:values['bot-llm'],timeoutMs:Number(values['timeout-ms'])});
     console.log(JSON.stringify({status:result.status,assertions:result.assertions,phases:result.phases,wallMs:result.wallMs,browserDiagnostics:result.browserDiagnostics,report:result.report}));
   }catch(error){console.error(String(error));process.exitCode=1;}
 }
