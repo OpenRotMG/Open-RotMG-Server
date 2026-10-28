@@ -5,7 +5,7 @@ import {execFileSync} from 'node:child_process';
 const output=name=>join(process.env.QA_RESULTS_DIR,name);
 let root;
 export async function prepare(api){
-  const spec={class:0x30e,level:20,seed:851,world:1,equipment:[0xb08,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,50,30,10,0,0]};
+  const spec={class:0x30e,level:20,seed:851,world:1,equipment:[0xb08,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,30,10,0,0]};
   const report=JSON.parse(await readFile(output('native/result.json'),'utf8'));
   const info=await api({op:'world_info',world:1}),[x,y]=info.spawn_points[0];
   const scout=await api({op:'spawn',spec:{...spec,guid:'white-demon-scout',position:{x,y},controller:'direct',profile:null}});
