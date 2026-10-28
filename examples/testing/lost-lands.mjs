@@ -6,6 +6,7 @@ import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
 const questKinds=[0x675,0x678,0x668,0x67d,0x91f,0x91b,0x928];
 const spec={class:0x31d,level:20,seed:817,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
+const cappedQuestXp=(50+(spec.level-1)*100)/2;
 const history=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
 let sites,refuge,reserved,world;
 export async function prepare(api){
@@ -157,9 +158,9 @@ export async function run(game){
     await fire(crystal?.id??lord.id,1000);
   }
   await idle(1000);state=await save('defeated');
-  game.check('native combat completes timed Lord defeat and earns XP',!entity(state,lord.id)&&state.view.character.experience>=beforeFinalXp+2100&&(await history()).some(f=>f.message==='timed enemy defeat'&&f.entity===lord.id));
+  game.check('native combat completes timed Lord defeat and earns XP',!entity(state,lord.id)&&state.view.character.experience>=beforeFinalXp+cappedQuestXp&&(await history()).some(f=>f.message==='timed enemy defeat'&&f.entity===lord.id));
   const peerAfter=await companion.inspect();
-  game.check('both native contributors receive final Lord XP',peerAfter.view.character.experience>=peerBefore.character.experience+2100);
+  game.check('both native contributors receive final Lord XP',peerAfter.view.character.experience>=peerBefore.character.experience+cappedQuestXp);
   await writeFile(join(out,'multiplayer.json'),JSON.stringify({peerBefore,peerAfter,damage:records.find(r=>r.label==='activated').state}));
   const xp=state.view.character.experience;await idle(2000);
   game.check('defeat XP is once only',(await game.observe()).character.experience===xp);
