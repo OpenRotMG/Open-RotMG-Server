@@ -45,7 +45,7 @@ export async function run(game){
     await appendFile(join(out,'rings.jsonl'),JSON.stringify({id,boost,before,equipped,removed})+'\n');
   }
   await drag(pack,ring);const beforeExit=await game.observe();
-  await game.act({keys:['r'],duration_ms:1200},{name:'rings-retained',when:v=>v.world==='Nexus'});
+  await game.act({keys:['Insert'],duration_ms:1200},{name:'rings-retained',when:v=>v.world==='Nexus'});
   const after=await game.observe();
   game.check('Nexus reconnect preserves ring stats inventory and living identity',after.world==='Nexus'&&after.session.world!==beforeExit.session.world&&after.lifecycle.alive&&after.session.character===initial.session.character&&same(after.character.items,beforeExit.character.items)&&same(after.character.stats,beforeExit.character.stats)&&after.character.inventory_revision===beforeExit.character.inventory_revision);
 }
