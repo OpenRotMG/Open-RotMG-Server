@@ -653,7 +653,11 @@ impl World {
             0x6c2 => {
                 self.quest_shield(id, t < 2000);
                 self.entities.get_mut(&id).unwrap().size =
-                    if (t / 800) % 2 == 0 { 150 } else { 130 };
+                    if t >= 2000 && ((t - 2000) / 800) % 2 == 0 {
+                        150
+                    } else {
+                        130
+                    };
             }
             _ => {}
         }
@@ -962,16 +966,17 @@ impl World {
             0x675 if t.is_multiple_of(600) => fan(0, 4, 7.),
             0x676 | 0x677 | 0x65f..=0x661 if t.is_multiple_of(1000) => fan(0, 1, 0.),
             0x669 if t.is_multiple_of(250) => fan(0, 1, 0.),
+            // Even-count fixedAngle fans are centered, not first-ray offsets: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Shoot.cs#L99-L107
             0x6c1 => {
                 let cycle = if t < 1800 { t } else { (t - 1800) % 7300 };
                 if t < 1800 && [500, 1000].contains(&t) {
-                    ring(0, 12, if t == 500 { 10f32 } else { 25. }.to_radians())
+                    quest::fan(0, 12, 30., if t == 500 { 10f32 } else { 25. }.to_radians())
                 } else if t >= 1800 && cycle < 2800 && cycle.is_multiple_of(600) {
                     fan(1, 4, 7.)
                 } else if t >= 1800 && cycle >= 2800 {
                     let x = cycle - 2800;
                     let mut out = if [500, 1000].contains(&x) {
-                        ring(0, 12, if x == 500 { 10f32 } else { 25. }.to_radians())
+                        quest::fan(0, 12, 30., if x == 500 { 10f32 } else { 25. }.to_radians())
                     } else {
                         vec![]
                     };
@@ -998,7 +1003,9 @@ impl World {
             }
             _ => 0.,
         };
-        self.predict_enemy_shots(id, target, &mut shots, |_| factor)?;
+        self.predict_enemy_shots(id, target, &mut shots, |index| {
+            if k == 0x6c1 && index == 0 { 0. } else { factor }
+        })?;
         Ok(shots)
     }
 }
@@ -1160,6 +1167,96 @@ fn ghost_volleys_use_primary_centered_fixed_angles() {
             assert!(world.quest_shots(id, home, time).unwrap().is_empty());
         }
         world.remove_entity(id);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn phoenix_egg_pulses_only_after_its_shield_expires() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut map = Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap();
+    for cell in &mut map.cells {
+        cell.ground = 0x61;
+        cell.object = None;
+    }
+    let mut world = World::new(content, Arc::new(map)).unwrap();
+    world.now = 5000;
+    let mut character = Character::fresh(world.content.get(0x30e).unwrap()).unwrap();
+    character.id = 1;
+    character.account = 1;
+    let player = world.enter(character, None).unwrap();
+    world
+        .spawn_named_quest(0x675, Pos { x: 12.5, y: 12.5 })
+        .unwrap();
+    let lord = *world.quest_ids.iter().next().unwrap();
+    world
+        .damage_enemy(player, lord, 10000, false, &[], None)
+        .unwrap();
+    let egg = world
+        .quest_actors(lord)
+        .find(|e| e.kind == 0x6c2)
+        .unwrap()
+        .id;
+    assert!(!world.entities.contains_key(&lord));
+    for (elapsed, size) in [
+        (0, 130),
+        (750, 130),
+        (800, 130),
+        (1500, 130),
+        (1950, 130),
+        (2000, 150),
+        (2750, 150),
+        (2800, 130),
+        (3550, 130),
+        (3600, 150),
+    ] {
+        world.now = 5000 + elapsed;
+        world.quest_mechanics(egg).unwrap();
+        let e = &world.entities[&egg];
+        assert_eq!(e.size, size, "elapsed={elapsed}");
+        assert_eq!(
+            e.condition & condition::bit(condition::INVULNERABLE) != 0,
+            elapsed < 2000
+        );
+        assert_eq!(*e.quest, Some(lord));
+        assert_eq!(
+            world
+                .damage_enemy(player, egg, 10, false, &[], None)
+                .unwrap(),
+            if elapsed < 2000 { 0 } else { 10 }
+        );
+    }
+    world
+        .damage_enemy(player, egg, 10000, false, &[], None)
+        .unwrap();
+    assert!(!world.entities.contains_key(&egg));
+    let reborn = world.quest_actors(lord).find(|e| e.kind == 0x6c1).unwrap();
+    assert_eq!(reborn.hp, 4200);
+    assert_eq!(reborn.size, 100);
+    assert_eq!(reborn.damage[&1], 8000);
+    assert_eq!(world.players[&player].character.exp, 0);
+    assert!(world.critical_deaths.is_empty());
+    let reborn = reborn.id;
+    let p = world.players.get_mut(&player).unwrap();
+    p.pos = Pos { x: 14.5, y: 12.5 };
+    p.motion.at = world.now;
+    p.motion.velocity = Pos { x: 0., y: 2. };
+    for (time, center) in [(500, 10f32), (1000, 25.), (5100, 10.), (5600, 25.)] {
+        let shots = world
+            .quest_shots(reborn, Pos { x: 14.5, y: 12.5 }, time)
+            .unwrap();
+        assert_eq!(shots.len(), 12);
+        for (n, (index, angle)) in shots.iter().enumerate() {
+            assert_eq!(*index, 0);
+            assert!((*angle - (center - 165. + 30. * n as f32).to_radians()).abs() < 0.00001);
+        }
+    }
+    for (time, count) in [(1800, 4), (2400, 4), (4600, 1), (4950, 1)] {
+        let shots = world
+            .quest_shots(reborn, Pos { x: 14.5, y: 12.5 }, time)
+            .unwrap();
+        assert_eq!(shots.len(), count);
+        assert!(shots.iter().all(|(index, _)| *index == 1));
     }
 }
 
