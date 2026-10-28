@@ -15,7 +15,7 @@ export async function run(game){
     if(slot>=0)await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:428+44*Math.floor(slot/4)},to:{x:634,y:385}}});
     const before=await game.inspect();
     game.check(name+' native equip and bonuses',before.view.character.items[0]===item&&[3,6,7].every((s,i)=>before.view.character.stats[s]===bonuses[i]));
-    await game.act({keys:[],mouse:{x:500,y:325},duration_ms:1800},{name,when:v=>v.time_ms>=before.view.time_ms+500});
+    await game.act({keys:[],mouse:{x:500,y:325},duration_ms:1800},{name,when:v=>v.game_ms>=before.diagnostic.time_ms+500});
     const after=await game.inspect();observations.push({name,before,after});
     game.check(name+' native fire admits shots without spending mana',after.diagnostic.character.shots>before.diagnostic.character.shots&&after.view.character.mp===before.view.character.mp);
     await game.act({keys:[],duration_ms:1000});
@@ -44,7 +44,7 @@ export async function run(game){
   const {worldSeed,...spec}=fixture;
   const sorcerer=await game.join({...spec,class:0x325,stats:[670,385,60,25,60,60,75,60],world:initial.view.session.world,position:{x:boss.pos.x-4,y:boss.pos.y}});
   const sorcererBefore=await sorcerer.inspect();
-  await sorcerer.act({keys:[],target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true},duration_ms:1000},{name:'sorcerer-damage',when:v=>v.time_ms>=sorcererBefore.view.time_ms+500});
+  await sorcerer.act({keys:[],target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true},duration_ms:1000},{name:'sorcerer-damage',when:v=>v.game_ms>=sorcererBefore.diagnostic.time_ms+500});
   const sorcererAfter=await sorcerer.inspect();
   game.check('Sorcerer can fire the same slot-eight wand',sorcererAfter.diagnostic.character.shots>sorcererBefore.diagnostic.character.shots);
   game.check('native wand shots damage an ordinary enemy',sorcererAfter.diagnostic.entities.find(e=>e.id===boss.id).hp<sorcererBefore.diagnostic.entities.find(e=>e.id===boss.id).hp);
