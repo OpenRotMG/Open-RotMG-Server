@@ -8,16 +8,21 @@ export async function run(game){
   const output=name=>join(process.env.QA_RESULTS_DIR,name),samples=[],shots=new Map();
   const report=JSON.parse(await readFile(output('native/result.json'),'utf8'));
   const token=(await readFile(output('native/state/control.token'),'utf8')).trim();
-  let protectedUntil=0;
+  let protectedUntil=0,armoredUntil=0;
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
   const entities=async()=>(await game.inspect()).diagnostic.entities;
   async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(output('lab-journey.json'),JSON.stringify(samples));return state;}
+  async function prepare(change){
+    const response=await fetch(report.origin+'/dev/testing',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change}})});
+    const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));
+  }
   async function act(input,capture){
     const now=(await game.observe()).game_ms;
     if(now>=protectedUntil){
-      const response=await fetch(report.origin+'/dev/testing',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
-      const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));
-      protectedUntil=now+60000;
+      await prepare({kind:'protection',condition:'invincible',duration_ms:60000});protectedUntil=now+60000;
+    }
+    if(protectedUntil-now<=5000&&now>=armoredUntil){
+      await prepare({kind:'stat_modifier',index:3,amount:100,duration_ms:60000});armoredUntil=now+60000;
     }
     let pending=null,error=null;
     const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(s=>{
