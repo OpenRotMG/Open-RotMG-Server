@@ -7580,6 +7580,8 @@ mod assassin_tests;
 mod mystic_tests;
 
 #[cfg(test)]
+mod ghost_ship_tests;
+#[cfg(test)]
 mod quest_tests;
 
 #[cfg(test)]
