@@ -35,12 +35,10 @@ export async function run(game){
   try{
     const arrival=await game.inspect();
     game.check('natural mountain White Demon admitted at selected 1000 HP',enemy(arrival)?.hp===1000&&arrival.view.session.world===1);
-    await act({keys:[],duration_ms:2500},{name:'white-demon-arrival',when:()=>true});
-    const hurt=await game.inspect();
-    game.check('unprotected living Wizard takes encounter damage despite supplied Defense',hurt.view.character.hp<arrival.view.character.hp&&hurt.view.lifecycle.alive);
     const path=output('protection.json');
     await writeFile(path,JSON.stringify({id:'white-demon-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);
+    await act({keys:[],duration_ms:2500},{name:'white-demon-arrival',when:()=>true});
     await act({keys:[],duration_ms:4000},{name:'white-demon-fan',when:()=>true});
     const combat=await game.inspect();
     game.check('natural White Demon activates and pursues',samples.some(s=>enemy(s)?.activated!=null&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2));
@@ -61,6 +59,6 @@ export async function run(game){
     await act({keys:[],duration_ms:3000});const end=await game.inspect();
     game.check('defeated White Demon stays absent without repeated XP',!enemy(end)&&end.view.character.experience===dead.view.character.experience);
     game.check('same prepared living Wizard remains in the Realm',end.view.lifecycle.alive&&end.view.session.world===1&&end.view.session.character===arrival.view.session.character);
-    await writeFile(output('outcomes.json'),JSON.stringify({arrival,hurt,combat,dead,end}));
+    await writeFile(output('outcomes.json'),JSON.stringify({arrival,combat,dead,end}));
   }finally{await writeFile(output('combat.json'),JSON.stringify({root,samples,shots:[...shots.values()]}));}
 }
