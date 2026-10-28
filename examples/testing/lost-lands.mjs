@@ -78,11 +78,13 @@ export async function run(game){
     for(let n=0;n<120;n++){
       const state=await game.inspect(),root=entity(state,site.entity),final=state.diagnostic.entities.find(e=>e.quest===site.entity&&[0x6c2,0x6c1].includes(e.kind));
       const target=root??final;if(!target)break;
-      await fire(target.id,1000);
+      await fire(target.id,2000);
     }
     await idle(1000);await save('quest-'+site.entity);
-    admitted=(await history()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd50);
+    const events=(await history()).filter(f=>f.message==='quest defeat summoned a Realm event');
+    admitted=events.find(f=>f.kind===0xd50);
     if(admitted)break;
+    for(const event of events.filter(f=>[0xd56,0xd59].includes(f.kind)))if(!sites.some(s=>s.entity===event.entity))sites.push(event);
   }
   assert(admitted,'Bounded ordinary quest defeats did not admit a Lord; do not substitute a spawned fixture');
   await writeFile(join(out,'admission.json'),JSON.stringify(admitted));
