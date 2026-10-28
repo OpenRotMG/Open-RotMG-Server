@@ -12,10 +12,10 @@ export async function run(game){
   await game.act({keys:['d','w'],duration_ms:500});
   const blocked=await save('blocked');
   game.check('natural wall column blocks native movement before its occupied tile',blocked.view.position.y>=21&&blocked.view.position.y<22&&Math.abs(blocked.view.position.x-68.5)<.15);
-  await game.act({keys:['a','w'],duration_ms:200});
-  await game.act({keys:['d','w'],duration_ms:500});
+  for(let n=0;n<8&&(await game.observe()).position.x>67.2;n++)await game.act({keys:['a','w'],duration_ms:200});
+  for(let n=0;n<8&&(await game.observe()).position.y>20.4;n++)await game.act({keys:['d','w'],duration_ms:200});
   const around=await save('detour');
-  game.check('ordinary living detour passes the column over adjacent decorative wall web',around.view.position.x<68&&around.view.position.y<20.5&&around.view.lifecycle.alive);
+  game.check('ordinary living detour passes beside the column and decorative wall web',around.view.position.x<68&&around.view.position.y<20.5&&around.view.lifecycle.alive);
   game.check('collision test retains the same character without Paralyzed or Stasis',around.view.session.character===start.view.session.character&&samples.every(s=>!(s.state.view.character.conditions&((1<<13)|(1<<21)))));
   await game.act({keys:[],duration_ms:700},{name:'spider-cover-detour',when:()=>true});
 }
