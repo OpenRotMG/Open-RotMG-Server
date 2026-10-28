@@ -1574,6 +1574,7 @@ mod tests {
             (0x655, 0.015, 0xa20),
             (0x657, 0.015, 0xa1f),
             (0x658, 0.015, 0xa20),
+            (0x91a, 0.015, 0xa21),
             (0x651, 0.01, 0xa1f),
         ] {
             assert_eq!(bonus(kind), &[(chance, potion)]);
