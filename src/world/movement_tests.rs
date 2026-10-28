@@ -84,6 +84,39 @@ fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
 }
 
 #[test]
+fn undead_hobbit_mage_has_separate_ring_activation_and_aimed_shot_ranges() {
+    let (mut world, player) = fixture(0x18, false);
+    world.encounter = true;
+    let mage = world
+        .spawn_entity(0x61a, Pos { x: 20.5, y: 8.5 }, vec![])
+        .unwrap();
+    world.npc_step();
+    assert!(world.entities[&mage].activated.is_none());
+    for (age, distance, aimed) in [(0, 11., false), (1000, 9., true), (2000, 11., false)] {
+        world.now = age;
+        let pos = world.entities[&mage].pos;
+        let target = Pos {
+            x: pos.x - distance,
+            y: pos.y,
+        };
+        let schedule = crate::encounter::attacks::schedule(0x61a, 270, age).unwrap();
+        let shots = world
+            .scheduled_attacks(mage, Some(target), &schedule)
+            .unwrap();
+        assert_eq!(
+            shots.iter().filter(|(p, _)| *p == 3).count(),
+            usize::from(aimed)
+        );
+        if age == 0 {
+            assert_eq!(shots.iter().filter(|(p, _)| *p == 0).count(), 15);
+        }
+    }
+    world.players.get_mut(&player).unwrap().pos.x = 9.;
+    world.npc_step();
+    assert!(world.entities[&mage].activated.is_some());
+}
+
+#[test]
 fn swarm_directed_shots_use_constant_angular_prediction_and_cooldown() {
     let (mut world, player) = fixture(0x18, false);
     let target = world.players[&player].pos;
