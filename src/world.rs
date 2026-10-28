@@ -999,9 +999,19 @@ impl Directory {
             .map(|p| p.character.clone())
             .collect()
     }
+    pub fn human_player_count(&self) -> usize {
+        self.worlds
+            .summaries()
+            .map(|(_, w)| {
+                w.players
+                    .values()
+                    .filter(|p| p.controller == Controller::Human)
+                    .count()
+            })
+            .sum()
+    }
     pub fn health(&self, started: Instant) -> serde_json::Value {
         let worlds: Vec<_> = self.worlds.summaries().collect();
-        let players: usize = worlds.iter().map(|(_, w)| w.players.len()).sum();
         let qa_actors = worlds
             .iter()
             .flat_map(|(_, w)| w.players.values())
@@ -1014,7 +1024,7 @@ impl Directory {
             .count();
         serde_json::json!({
             "status":"development","uptime_seconds":started.elapsed().as_secs(),
-            "worlds":worlds.len(),"players":players-qa_actors-bots,"bots":bots,"qa_actors":qa_actors,
+            "worlds":worlds.len(),"players":self.human_player_count(),"bots":bots,"qa_actors":qa_actors,
             "entities":worlds.iter().map(|(_,w)|w.entities).sum::<usize>(),
             "projectiles":worlds.iter().map(|(_,w)|w.bullets).sum::<usize>(),
             "tick":self.tick,"max_tick_us":self.max_tick_us,"tick_scope":"coordinator, not world simulation",
@@ -4392,7 +4402,9 @@ impl World {
         };
         let condition = p.conditions(self.now);
         let origin = if native {
-            self.validate_native_position(id, center, time).map(|_| 0.)
+            // Terrain checks undo client prediction and recreate MOVE snap-backs: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/networking/handlers/PlayerShootPacketHandler.cs
+            self.validate_native_coordinates(id, center, time)
+                .map(|_| 0.)
         } else if !p.paused && p.pos.distance(center) > 0.001 {
             self.validate_move_at(id, center, time, received)
         } else {

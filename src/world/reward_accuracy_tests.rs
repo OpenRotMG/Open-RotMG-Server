@@ -35,7 +35,11 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor() {
     let (mut w, _store, owners) = reward_world().await;
     let mut successes = 0;
-    for kind in (0x669..=0x66b).chain(0x65f..=0x661).chain(0x91d..=0x91e) {
+    for kind in (0x669..=0x66b)
+        .chain(0x605..=0x607)
+        .chain(0x65f..=0x661)
+        .chain(0x91d..=0x91e)
+    {
         for seed in 0..64 {
             let expected = crate::loot::rewards(
                 &w.content,
