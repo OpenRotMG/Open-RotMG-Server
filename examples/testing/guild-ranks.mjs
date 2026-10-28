@@ -29,9 +29,9 @@ export async function run(game){
   const prepared=await response.json();assert(response.ok&&prepared.status==='succeeded',JSON.stringify(prepared));
   const names=await Promise.all(players.map(async p=>(await p.inspect()).diagnostic.character.name)),records=[];
   async function record(label){records.push({label,members:await rows(),states:await Promise.all(players.map(p=>p.observe()))});await writeFile(join(out,'guild-ranks-observations.json'),JSON.stringify({preparedGuild:true,records},null,2));}
-  async function ui(index,name,work){
+  async function ui(index,name,work,capture=true){
     const log=join(root,'controller.stderr'),offset=(await readFile(log,'utf8')).length;let done=false;
-    const action=players[index].act({keys:[],duration_ms:2500},{name,when:()=>done});
+    const action=players[index].act({keys:[],duration_ms:2500},capture?{name,when:()=>done}:undefined);
     const input=(async()=>{
       const deadline=Date.now()+10000;
       while(true){
@@ -54,7 +54,7 @@ export async function run(game){
   }
   async function enter(index){
     await walk(index,{x:76.5,y:77.5});
-    await ui(index,'hall-entry-'+index,()=>click(index,700,575));
+    await ui(index,'hall-entry-'+index,()=>click(index,700,575),false);
     game.check('ordinary Guild Hall admission '+index,(await players[index].observe()).world==='Guild Hall');
     await walk(index,{x:14.5,y:8.5});
   }
