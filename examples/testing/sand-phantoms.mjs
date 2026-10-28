@@ -51,6 +51,14 @@ export async function run(game){
     const returned=samples.find(s=>s.view.time_ms>first.time&&family(s).some(e=>e.kind===0x6c5&&e.id!==phantom.id));
     game.check('Wisp returns after the bounded 6.5-second reconstruction',returned&&returned.view.time_ms-first.activated>=6500&&returned.view.time_ms-first.activated<=6700);
     game.check('transformations keep a single population member and award no kill XP',samples.every(s=>family(s).length===1)&&cycle.view.character.experience===begin.view.character.experience);
+    for(let n=0;n<48;n++){
+      const ids=new Set(samples.flatMap(family).filter(e=>e.kind===0x6c5).map(e=>e.id));
+      if([...shots.values()].some(p=>ids.has(p.owner)))break;
+      const s=await game.inspect(),e=family(s)[0];assert(e);
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,distance=Math.hypot(dx,dy),sign=distance<6?-1:1;
+      const x=sign*(dx-dy)/Math.SQRT2,y=sign*(dx+dy)/Math.SQRT2;
+      await act({keys:distance<6||distance>8?[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean):[],duration_ms:250});
+    }
     for(const [kind,speed,lifetime] of [[0x6c5,70,1700],[0x7f22,65,2000]]){
       const ids=new Set(samples.flatMap(family).filter(e=>e.kind===kind).map(e=>e.id));
       game.check(kind+': selected projectile reaches native client',[...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
