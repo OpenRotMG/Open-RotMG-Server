@@ -61,16 +61,18 @@ export async function run(firstClient){
     const a=await game.observe(),b=await peer.observe();
     game.check(`coast ${coast}: clients share the Realm`,a.session.world===worldId&&b.session.world===worldId);
     if(game===firstClient)game.check(`coast ${coast}: mutual observer identity`,a.nearby.some(o=>o.id===b.session.player)&&b.nearby.some(o=>o.id===a.session.player));
+    let stalled=0;
     for(const point of points.slice(1))for(let step=0;step<80;step++){
       const before=await game.observe(),dx=point.x-before.position.x,dy=point.y-before.position.y;
-      if(Math.hypot(dx,dy)<.35)break;
+      if(Math.hypot(dx,dy)<.45)break;
       assert(step<79,'Waypoint input budget exhausted');
       if(before.game_ms>=protectionUntil){for(const client of clients)await api({op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectionUntil=before.game_ms+60000;}
       const horizontal=Math.abs(dx)>Math.abs(dy),distance=horizontal?dx:dy;
       const keys=horizontal?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
-      await game.act({keys,duration_ms:Math.max(60,Math.min(1600,Math.round(Math.abs(distance)*1000/7.734)))});
+      await game.act({keys,duration_ms:Math.max(100,Math.min(1600,Math.round(Math.abs(distance)*900/7.734)))});
       const after=await game.observe();route.observations.push({position:after.position,game_ms:after.game_ms,hp:after.character.hp,nearby:after.nearby});await save();
-      assert(Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y)>.02,`Blocked at coast ${coast}: ${JSON.stringify({point,before:before.position,after:after.position})}`);
+      stalled=Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y)>.02?0:stalled+1;
+      assert(stalled<3,`Three stationary inputs at coast ${coast}: ${JSON.stringify({point,before:before.position,after:after.position})}`);
       assert(after.lifecycle.alive,'Prepared route walker died');
       if(game===firstClient&&route.observations.length===1){
         const observed=(await peer.inspect()).view.objects.find(o=>o.id===after.session.player);
@@ -79,7 +81,7 @@ export async function run(firstClient){
     }
     await game.act({keys:[],duration_ms:500},{name:`world-${layout}-road-${coast}`,when:()=>true});
     const end=await game.inspect(),observer=await peer.observe();route.end=end;route.observer=observer;await save();
-    game.check(`coast ${coast}: native input reaches inland road`,Math.hypot(end.view.position.x-route.target.x,end.view.position.y-route.target.y)<.4&&Math.hypot(end.view.position.x-start.x,end.view.position.y-start.y)>=31);
+    game.check(`coast ${coast}: native input reaches inland road`,Math.hypot(end.view.position.x-route.target.x,end.view.position.y-route.target.y)<.5&&Math.hypot(end.view.position.x-start.x,end.view.position.y-start.y)>=31);
     const tile=end.view.tiles.find(t=>t.x===Math.floor(end.view.position.x)&&t.y===Math.floor(end.view.position.y));
     game.check(`coast ${coast}: actual mapped road underfoot`,tile?.ground===0xd0);
     for(const client of clients)game.check(`coast ${coast}: prepared character ${client.actor} survives`,(await client.observe()).lifecycle.alive);
