@@ -71,23 +71,13 @@ export async function run(lobby){
   let m=admitted;
   const members=(m,kind)=>m.entities.filter(e=>e.quest===rootEntity.id&&e.kind===kind),towers=members(m,0xd5e);
   lobby.check('ordinary admission retains five owned towers and an invisible controller',towers.length===5&&rootEntity.size===0);
-  const game=await lobby.join({...spec,position:{x:towers[0].pos.x-3,y:towers[0].pos.y}});
+  await save('accepted-prerequisites',{take:'fce508e0d2f4451ea3664e8fee571f63',source:'5666cecd29f1479066494a80b9f8736e506c350c',scope:'Eleven accepted partial checks retain activation, Eyes, projectiles, unprotected damage, red/yellow signals and contribution transfer. This fresh case exercises the missing revival/completion/reward checks.'});
+  const game=await lobby.join({...spec,position:{x:towers[0].pos.x-3,y:towers[0].pos.y},equipment:[0xc03,0xa2e,0xb05,0xac9]});
+  await cheat(game.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
+  await cheat(game.actor,{kind:'stat_modifier',index:4,amount:100,duration_ms:60000});
   const observer=await lobby.join({...spec,position:rootEntity.pos,equipment:[-1,-1,0xb05,0xac0]});
   await cheat(observer.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
   const observerStart=await observer.inspect();await save('observer-before',observerStart);
-  const before=await game.inspect(),samples=[];let done=false;
-  const action=game.act({keys:[],duration_ms:7000},{name:'pentaract-standing',when:v=>v.game_ms>=before.view.time_ms+3000}).finally(()=>done=true);
-  const sampling=(async()=>{while(!done){samples.push(await game.inspect());await new Promise(ok=>setTimeout(ok,60));}})();
-  for(const r of await Promise.allSettled([action,sampling]))if(r.status==='rejected')throw r.reason;
-  await save('attacks',samples);await save('standing-packets',packets);m=await map(game.actor);
-  game.check('tower activates and spawns five owned Eyes',members(m,0xd5d).filter(e=>e.parent===towers[0].id).length===5);
-  game.check('Eyes leave their birth tower',samples.some(s=>s.diagnostic.entities.some(e=>e.kind===0xd5d&&e.parent===towers[0].id&&Math.hypot(e.pos.x-towers[0].pos.x,e.pos.y-towers[0].pos.y)>1.5)));
-  game.check('Eyes publish speed-150, 500ms projectiles',samples.some(s=>s.view.projectiles.some(p=>members(m,0xd5d).some(e=>e.id===p.owner)&&p.speed===150&&p.lifetime_ms===500)));
-  game.check('unprotected native character takes encounter damage',(await game.observe()).character.hp<before.view.character.hp);
-  game.check('living towers publish red connections',packets.some(p=>p.effect===3&&p.color===0xffff0000&&towers.some(t=>t.id===p.owner)));
-  game.check('tower throws its grenade',packets.some(p=>p.effect===4&&p.owner===towers[0].id));
-  await cheat(game.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
-  await cheat(game.actor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
   async function approach(point){
     for(let n=0;n<150;n++){
       const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<.35)return;
@@ -99,22 +89,35 @@ export async function run(lobby){
   }
   async function kill(tower){
     await approach(tower.pos);m=await map(game.actor);
-    for(let n=0;n<12&&m.entities.some(e=>e.id===tower.id);n++){await game.act({keys:[],duration_ms:150,target:{entity:tower.id,camera_angle:-Math.PI/4,fire:true}});m=await map(game.actor);}
+    for(let n=0;n<6&&m.entities.some(e=>e.id===tower.id);n++){await game.act({keys:[' '],duration_ms:1000,target:{entity:tower.id,camera_angle:-Math.PI/4,fire:true}});m=await map(game.actor);}
     assert(!m.entities.some(e=>e.id===tower.id),'Tower survived bounded native fire');
   }
   await kill(towers[0]);const downAt=(await game.observe()).game_ms;
-  await game.act({keys:[],duration_ms:500},{name:'pentaract-one-down',when:v=>v.game_ms>=downAt+250});await save('one-down',m);
-  const corpse=members(m,0xd60)[0];
-  game.check('one fallen tower changes connections to yellow',packets.some(p=>p.effect===3&&p.color===0xffffff00));
-  game.check('one corpse does not complete the encounter',members(m,0xd5e).length===4&&!!corpse&&m.entities.some(e=>e.id===rootEntity.id));
-  game.check('contribution reaches corpse and controller',Object.values(corpse.damage).some(n=>n>0)&&Object.values(m.entities.find(e=>e.id===rootEntity.id).damage).some(n=>n>0));
-  const beforeRevive=corpse.activated+14900;
-  while((await game.observe()).game_ms<beforeRevive)await game.act({keys:[],duration_ms:Math.min(7000,beforeRevive-(await game.observe()).game_ms)});
-  m=await map(game.actor);game.check('corpse remains before 15 seconds',members(m,0xd60).some(e=>e.id===corpse.id));
-  await game.act({keys:[],duration_ms:500},{name:'pentaract-revived',when:()=>true});m=await map(game.actor);await save('revived',m);
+  const corpse=members(m,0xd60)[0];await save('one-down',{game_ms:downAt,corpse,towers:members(m,0xd5e)});
+  game.check('corpse is observed before its 15-second revival',!!corpse&&members(m,0xd5e).length===4&&downAt>=corpse.activated&&downAt<corpse.activated+15000);
+  const reviveAt=corpse.activated+15000;
+  while((await game.observe()).game_ms<reviveAt)await game.act({keys:[],duration_ms:Math.min(7000,reviveAt-(await game.observe()).game_ms+50)});
+  await game.act({keys:[],duration_ms:500},{name:'pentaract-revived',when:v=>v.game_ms>=reviveAt});m=await map(game.actor);await save('revived',m);
   game.check('corpse revives at full HP in its original position',members(m,0xd60).length===0&&members(m,0xd5e).length===5&&members(m,0xd5e).some(e=>e.hp===5000&&e.pos.x===corpse.pos.x&&e.pos.y===corpse.pos.y));
-  const packetStart=packets.length,start=await game.inspect();
-  for(const tower of members(m,0xd5e))await kill(tower);
+  const packetStart=packets.length,start=await game.inspect(),v=await game.observe();
+  assert.equal(v.character.stats.speed,158,'Prepared speed window expired before the bounded tower race');
+  const solid=new Set(m.blocked.filter(([x,y])=>Math.abs(x-rootEntity.pos.x)<25&&Math.abs(y-rootEntity.pos.y)<25).map(p=>p.join(',')));
+  const alive=members(m,0xd5e),tour=towers.map(t=>alive.find(e=>e.pos.x===t.pos.x&&e.pos.y===t.pos.y));assert(tour.every(Boolean));
+  const sequence=[];let at=v.position;const speed=4+5.6*v.character.stats.speed/75;
+  function route(from,to){
+    const dx=to.x-from.x,dy=to.y-from.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,d=Math.min(Math.abs(x),Math.abs(y)),sx=Math.sign(x)*d,sy=Math.sign(y)*d;
+    const diagonal={keys:[x>0?'d':'a',y>0?'s':'w'],x:(sx+sy)/Math.SQRT2,y:(sy-sx)/Math.SQRT2};
+    const axis={keys:[Math.abs(x)>Math.abs(y)?(x>0?'d':'a'):(y>0?'s':'w')],x:dx-diagonal.x,y:dy-diagonal.y};
+    const parts=[diagonal,axis].filter(s=>Math.hypot(s.x,s.y)>.01);
+    const clear=parts=>{let p=from;for(const s of parts){const steps=Math.ceil(Math.hypot(s.x,s.y)*8);for(let n=0;n<=steps;n++)for(const ox of [-.4,.4])for(const oy of [-.4,.4])if(solid.has([Math.floor(p.x+s.x*n/steps+ox),Math.floor(p.y+s.y*n/steps+oy)].join(',')))return false;p={x:p.x+s.x,y:p.y+s.y};}return true;};
+    const chosen=[parts,[...parts].reverse()].find(clear);assert(chosen,'No clear two-direction native circuit leg: '+JSON.stringify({from,to}));
+    return chosen.map(s=>({actor:game.actor,input:{keys:s.keys,duration_ms:Math.round(Math.hypot(s.x,s.y)/speed*1000)}}));
+  }
+  // Per-action synchronization consumes encounter time, so the race uses one existing bounded transaction.
+  for(const tower of tour){sequence.push(...route(at,tower.pos));sequence.push({actor:game.actor,input:{keys:[' '],duration_ms:1000,target:{entity:tower.id,camera_angle:-Math.PI/4,fire:true}}});at=tower.pos;}
+  await save('race-plan',{tour,sequence,input_ms:sequence.reduce((sum,s)=>sum+s.input.duration_ms,0)});
+  assert(sequence.reduce((sum,s)=>sum+s.input.duration_ms,0)<=10000,'Native tower circuit exceeds the unchanged ten-second input budget');
+  await game.act(sequence);
   await game.act({keys:[],duration_ms:500},{name:'pentaract-defeated',when:()=>true});m=await map(game.actor);await save('defeated',m);
   game.check('all-five completion removes controller, towers, corpses and Eyes',!m.entities.some(e=>e.quest===rootEntity.id));
   game.check('no Ultra central tower appears',!m.entities.some(e=>e.kind===0xe01));
