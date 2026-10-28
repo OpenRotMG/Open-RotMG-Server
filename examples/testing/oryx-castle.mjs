@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
 const mode=process.env.CASTLE_MODE??'route';
-const positions={route:'spawn',left:{x:127.5,y:39.5},right:{x:127.5,y:39.5},tower:{x:127.5,y:61.5},armor:{x:114.5,y:39.5},ordinary:{x:94.5,y:110.5}};
+const positions={route:'spawn',left:{x:127.5,y:39.5},right:{x:127.5,y:39.5},tower:{x:24.5,y:139.5},armor:{x:114.5,y:39.5},ordinary:{x:94.5,y:110.5}};
 assert(Object.hasOwn(positions,mode),'Unknown CASTLE_MODE');
 export const fixture={class:0x307,level:20,seed:866,world:'oryx-castle',position:positions[mode],equipment:[0xc02,0xb28,-1,0xac5],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 export async function run(game){
@@ -23,11 +23,12 @@ export async function run(game){
     assert(input.duration_ms>0);
     return game.act(input,capture);
   }
-  async function walk(point,tolerance=.45){
+  async function walk(point,tolerance=.45,client=game){
     for(let n=0;n<100;n++){
-      const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<tolerance)return;
+      const v=await client.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<tolerance)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[Math.abs(x)>.12&&Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>.12&&Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean);
-      await act({keys,duration_ms:Math.max(50,Math.min(350,Math.round(Math.hypot(dx,dy)/(4+5.6*v.character.stats.speed/75)*1000)))});
+      const input={keys,duration_ms:Math.max(50,Math.min(350,Math.round(Math.hypot(dx,dy)/(4+5.6*v.character.stats.speed/75)*1000)))};
+      if(client===game)await act(input);else await client.act(input);
     }
     throw Error('Native walk stalled '+JSON.stringify(point));
   }
@@ -61,6 +62,7 @@ export async function run(game){
   }
   const initial=await save('entrance'),authored=await map();
   await writeFile(join(root,'castle-authored-map.json'),JSON.stringify(authored));
+  const peer=['left','right'].includes(mode)?await game.join({...fixture,world:initial.view.session.world,position:{x:127.5,y:42.5}}):null;
   if(mode==='tower'){
     await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
     await game.act({keys:[],duration_ms:1000},{name:'castle-quiet',when:()=>true});
@@ -98,7 +100,8 @@ export async function run(game){
     let end=0;const dx=route[0].x-Math.floor(v.position.x)-.5,dy=route[0].y-Math.floor(v.position.y)-.5;
     while(end+1<route.length&&end<5&&route[end+1].x-route[end].x===dx&&route[end+1].y-route[end].y===dy&&!m.entities.some(e=>[0xd70,0xd71].includes(e.kind)&&distance(e.pos,route[end+1])<.2))end++;
     const enemy=m.entities.filter(e=>e.kind>=0xd7e&&e.kind<=0xd87&&distance(e.pos,v.position)<5).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position))[0];
-    if(enemy)await act({keys:[],duration_ms:250,target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}});
+    if(enemy?.kind===0xd87)await kill(enemy.id);
+    else if(enemy)await act({keys:[],duration_ms:250,target:{entity:enemy.id,camera_angle:-Math.PI/4,fire:true}});
     await walk(route[end]);
     if(n%10===0)await save('route-'+n);
   }
@@ -141,12 +144,12 @@ export async function run(game){
   await act({keys:[],duration_ms:350,drag:{from:{x:634+(slot%4)*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}}});
   const picked=await save('defense-picked');
   game.check('ordinary loot drag commits earned Defense once',picked.view.character.items[4]===0xa20&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
-  const peer=await game.join({...fixture,world:initial.view.session.world,position:portals[0].pos});
   await walk(portals[0].pos);
   await act({keys:[],duration_ms:700},{name:'castle-chamber-portal',when:()=>true});
   await act({keys:[],mouse:{x:700,y:575},duration_ms:700});
   for(let n=0;n<12&&(await game.observe()).session.world===initial.view.session.world;n++)await act({keys:[],duration_ms:500});
   const entered=await save('chamber-admitted');
+  await walk(portals[0].pos,.45,peer);
   await peer.act({keys:[],duration_ms:700});
   await peer.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
   for(let n=0;n<12&&(await peer.observe()).session.world===initial.view.session.world;n++)await peer.act({keys:[],duration_ms:500});
