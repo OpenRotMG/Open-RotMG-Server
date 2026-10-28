@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x307,level:20,seed:871,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:[-1,-1,-1,-1,-1,-1,-1,-1],stats:[700,100,0,25,50,0,40,50]};
+export const fixture={class:0x307,level:20,seed:871,world:-2,position:{x:78,y:72.5},equipment:[-1,-1,-1,-1],backpack:[-1,-1,-1,-1,-1,-1,-1,-1],stats:[700,100,0,25,50,0,40,50]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -21,7 +21,7 @@ export async function run(game){
     game.check(`native Archer equips ${item.toString(16)}`,equipped.character.items[0]===item);
     await game.act({keys:[],duration_ms:2200});
     const before=await game.inspect();
-    await game.act({keys:[],mouse:{x:450,y:300},duration_ms:160});
+    await game.act({keys:[],mouse:{x:450,y:175},duration_ms:160});
     const after=await game.inspect(),bullets=after.diagnostic.own_projectiles;
     observations.push({item,before,after});await save();
     game.check(`native ${item.toString(16)} admits one ${count}-arrow volley`,after.diagnostic.character.shots-before.diagnostic.character.shots===count);
@@ -35,7 +35,7 @@ export async function run(game){
     if(rate!==undefined){
       await game.act({keys:[],duration_ms:2200});
       const start=await game.observe();
-      await game.act({keys:[],mouse:{x:450,y:300},duration_ms:3000});
+      await game.act({keys:[],mouse:{x:450,y:175},duration_ms:3000});
       const end=await game.observe(),volleys=(end.verification.shots-start.verification.shots)/count;
       observations.push({cadence:item,start,end,volleys});await save();
       game.check(`native ${item.toString(16)} individual firing rate`,Number.isInteger(volleys)&&volleys>0&&Math.abs(volleys-3000*0.0015*rate)<=1);
