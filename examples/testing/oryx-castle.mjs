@@ -32,8 +32,14 @@ export async function run(game){
     throw Error('Native walk stalled '+JSON.stringify(point));
   }
   async function kill(id){
+    const before=await game.inspect(),original=(await map()).entities.find(e=>e.id===id);assert(original);
     for(let n=0;n<200;n++){
-      const m=await map(),e=m.entities.find(e=>e.id===id);if(!e)return;
+      const m=await map(),e=m.entities.find(e=>e.id===id);
+      if(!e){
+        const after=await game.inspect();
+        assert(after.diagnostic.character.kills>before.diagnostic.character.kills&&(original.expires===null||after.view.time_ms<original.expires),'Target disappeared without a credited native defeat before expiry');
+        await writeFile(join(root,'defeat-'+id+'.json'),JSON.stringify({original,before,after}));return;
+      }
       const v=await game.observe();
       const moving=[0xd78,0xd79,0xd7c].includes(e.kind);
       if(distance(v.position,e.pos)>6){await walk([0xd78,0xd79].includes(e.kind)?e.home:e.pos,2);continue;}
