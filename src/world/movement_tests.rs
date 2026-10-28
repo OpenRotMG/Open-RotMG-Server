@@ -2,11 +2,15 @@ use super::*;
 use std::time::Duration;
 
 fn fixture(ground: u8, wall: bool) -> (World, i32) {
+    fixture_map(ground, wall.then_some((9, 8)), 32)
+}
+
+fn fixture_map(ground: u8, wall: Option<(usize, usize)>, size: usize) -> (World, i32) {
     let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let content = Arc::new(Content::load(&data).unwrap());
     let mut map = Map {
-        width: 32,
-        height: 32,
+        width: size as i32,
+        height: size as i32,
         cells: vec![
             crate::content::Cell {
                 ground,
@@ -15,12 +19,12 @@ fn fixture(ground: u8, wall: bool) -> (World, i32) {
                 terrain: 0,
                 region: 0,
             };
-            32 * 32
+            size * size
         ],
         spawns: vec![(8.5, 8.5)],
     };
-    if wall {
-        map.cells[8 * 32 + 9].ground = 255;
+    if let Some((x, y)) = wall {
+        map.cells[y * size + x].ground = 255;
     }
     let mut world = World::new(content, Arc::new(map)).unwrap();
     let character: Character = serde_json::from_value(serde_json::json!({
@@ -203,6 +207,75 @@ fn ocean_trench_advertises_player_teleports_without_enabling_restricted_worlds()
         r.i32().unwrap();
         r.i32().unwrap();
         assert_eq!(r.u8().unwrap(), u8::from(allowed), "{name} MAPINFO");
+    }
+}
+
+#[test]
+fn native_shots_trust_client_placement_without_moving_the_player() {
+    for start in [
+        Pos {
+            x: 49.52554,
+            y: 22.446217,
+        },
+        Pos { x: 49.8, y: 23.5 },
+    ] {
+        let (mut world, id) = fixture_map(0x18, Some((49, 23)), 64);
+        world.now = 9000;
+        let p = world.players.get_mut(&id).unwrap();
+        p.pos = Pos {
+            x: 50.370243,
+            y: 22.5,
+        };
+        p.last_move = 10214295;
+        p.last_move_at = 8931;
+        let kind = p.character.items[0] as u16;
+        assert!(world.player_step_valid(
+            world.players[&id].pos,
+            Pos {
+                x: 49.820675,
+                y: 22.5
+            }
+        ));
+        assert!(
+            world
+                .shoot(id, 10214371, 1, kind, start, -2.9613369)
+                .is_err()
+        );
+        for (time, bullet) in [(10214371, 1), (10215371, 2)] {
+            assert_eq!(
+                world
+                    .native_shoot_received(
+                        id,
+                        (time, world.attack_epoch + Duration::from_millis(9000)),
+                        bullet,
+                        kind,
+                        start,
+                        -2.9613369,
+                    )
+                    .unwrap(),
+                NativeInput::Applied
+            );
+        }
+        let p = &world.players[&id];
+        assert_eq!(
+            (
+                p.pos.x,
+                p.pos.y,
+                p.last_move,
+                p.last_move_at,
+                p.movement_credit
+            ),
+            (50.370243, 22.5, 10214295, 8931, 0.78)
+        );
+        assert_eq!(p.character.shots, 2);
+        assert!(p.goto_acks.is_empty());
+        assert_eq!(world.bullets.len(), 2);
+        assert!(
+            world
+                .bullets
+                .iter()
+                .all(|b| b.owner == id && b.start.x == start.x && b.start.y == start.y)
+        );
     }
 }
 

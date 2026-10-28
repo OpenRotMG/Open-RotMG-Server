@@ -9,7 +9,7 @@ pub(super) fn hash(password: &str) -> Result<String> {
         .map(|v| v.to_string())
         .map_err(|_| anyhow::anyhow!("password hashing failed"))
 }
-fn email(value: &str) -> Result<String> {
+pub(crate) fn email(value: &str) -> Result<String> {
     // HELLO credentials must fit the server's 2048-bit PKCS#1 v1.5 block.
     ensure!(
         value.len() <= 245 && value.is_ascii(),
@@ -155,6 +155,47 @@ fn name_choice_check(
 }
 
 impl Store {
+    pub(crate) async fn guest_persona_character(
+        &self,
+        identity: String,
+        class: &Object,
+    ) -> Result<Character> {
+        ensure!(
+            identity
+                .strip_prefix("guest:v1:")
+                .is_some_and(|slot| slot.parse::<u32>().is_ok_and(|n| n > 0)),
+            "invalid guest persona registry slot"
+        );
+        let guid = self.call(move |db| {
+            let tx = db.transaction()?;
+            let existing: Option<String> = tx.query_row(
+                "SELECT guid FROM accounts JOIN shore_bots ON accounts.id=shore_bots.account WHERE shore_bots.name=?1",
+                [&identity], |r| r.get(0),
+            ).optional()?;
+            let guid = match existing {
+                Some(guid) => guid,
+                None => {
+                    let guid = format!("bot-guest-{:032x}", rand::random::<u128>());
+                    let account = guest(&tx, &guid, true, false)?;
+                    tx.execute("INSERT INTO shore_bots(name,account) VALUES(?1,?2)", params![identity, account])?;
+                    tracing::info!(account, identity, "ordinary guest persona account provisioned");
+                    guid
+                }
+            };
+            let account = guest(&tx, &guid, false, false)?;
+            let name: String = tx.query_row("SELECT name FROM accounts WHERE id=?1", [account], |r| r.get(0))?;
+            ensure!(!name_chosen(account, &name), Rejected("guest persona is no longer an unnamed guest"));
+            tx.commit()?;
+            Ok(guid)
+        }).await?;
+        let mut account = self.list(guid).await?;
+        if account.characters.is_empty() {
+            self.create(account.id, class).await
+        } else {
+            Ok(account.characters.remove(0))
+        }
+    }
+
     #[cfg(test)]
     pub async fn choose_name(&self, account: i32, name: String) -> Result<()> {
         match self.claim_name_choice(account, name, false, vec![]).await? {

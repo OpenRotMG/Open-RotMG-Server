@@ -254,7 +254,7 @@ async fn all_death_fame_phase2_schema17_roundtrip_corruption() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        20
+        21
     );
     let original: String = db
         .query_row(
