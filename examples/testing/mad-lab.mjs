@@ -45,6 +45,11 @@ export async function run(game){
       const e=(await entities()).find(e=>e.id===id);if(!e)return;
       if(e.condition&(1<<23)){await act({keys:[],duration_ms:2000});continue;}
       const v=await game.observe();
+      if(v.character.conditions&(1<<27)){
+        const blue=(await entities()).filter(p=>p.kind===0x1e16&&distance(p.pos,v.position)<15).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position))[0];
+        assert(blue,'No reachable local blue pool for the transformed fighter');
+        await walk(blue.pos.x,blue.pos.y);continue;
+      }
       if(distance(e.pos,v.position)>6.5)await walk(e.pos.x-1,e.pos.y+1);
       else await act({keys:[],duration_ms:2000,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
     }
