@@ -52,11 +52,13 @@ export async function run(game){
   await refresh();await writeFile(out('entry-map.json'),JSON.stringify(map));
   game.check('key-created Manor retains its ordinary vampire-room population',map.entities.some(e=>e.kind>=0x1727&&e.kind<=0x172c));
   await step({keys:[],duration_ms:700},{name:'manor-entrance',when:()=>true});
-  const shelves=map.entities.filter(e=>e.kind===0x181a),secret=shelves.find(e=>!(e.condition&(1<<23))),ordinary=shelves.find(e=>e.condition&(1<<23));
+  const shelves=map.entities.filter(e=>e.kind===0x181a).sort((a,b)=>distance(a.pos,entry.view.position)-distance(b.pos,entry.view.position)),secret=shelves.find(e=>e.condition===0),ordinary=shelves.find(e=>e.condition!==0);
   assert(secret&&ordinary,'Generated Manor must offer both shelf types for this case');
   await walk(ordinary.pos,4);
   await step({keys:[],duration_ms:500,target:{entity:ordinary.id,camera_angle:-Math.PI/4,fire:true}});
-  await refresh();game.check('ordinary bookshelf survives native staff damage',map.entities.some(e=>e.id===ordinary.id&&e.hp===ordinary.hp));
+  await step({keys:[],duration_ms:700},{name:'ordinary-shelf',when:()=>true});
+  await refresh();await writeFile(out('ordinary-shelf.json'),JSON.stringify({before:ordinary,after:map.entities.find(e=>e.id===ordinary.id)}));
+  game.check('ordinary bookshelf survives native staff damage',map.entities.some(e=>e.id===ordinary.id&&e.hp===ordinary.hp));
   await walk(secret.pos,3);
   await step({keys:[],duration_ms:700},{name:'secret-shelf-before',when:()=>true});
   await shoot(secret.id);
