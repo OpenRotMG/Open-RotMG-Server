@@ -1,6 +1,6 @@
 import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-export const fixture={class:0x307,level:20,seed:879,world:-2,position:'spawn',equipment:[-1,0xc07,-1,-1],backpack:[0xa61,0xa23,-1,-1,-1,-1,-1,-1],stats:[700,385,75,25,50,50,40,0]};
+export const fixture={class:0x307,level:20,seed:879,world:-2,position:'spawn',equipment:[-1,0xc07,-1,-1],backpack:[0xa61,0xa23,-1,0xa2e,-1,-1,-1,-1],stats:[700,385,75,25,50,50,40,0]};
 export async function run(game){
   const records=[];
   const record=async label=>{const v=await game.inspect();records.push({label,...v});await writeFile(join(process.env.QA_RESULTS_DIR,'ability-observations.json'),JSON.stringify(records));return v.view;};
@@ -21,6 +21,9 @@ export async function run(game){
   game.check('after original deadline new quiver spends 50 MP and starts its own 500ms cooldown',cast.character.mp<=ready.character.mp-49&&cast.character.ability_ready_ms-cast.game_ms>0&&cast.character.ability_ready_ms-cast.game_ms<=500);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:678,y:384},to:{x:722,y:428}}});
   const empty=await record('empty');
+  await game.act({keys:[],duration_ms:350,drag:{from:{x:766,y:428},to:{x:678,y:384}}});
+  const incompatible=await record('incompatible-ability');
+  game.check('native Archer cannot equip a Wizard spell even into an empty ability slot',JSON.stringify(incompatible.character.items)===JSON.stringify(empty.character.items)&&incompatible.character.inventory_revision===empty.character.inventory_revision);
   await game.act({keys:[' '],duration_ms:200});
   const refused=await record('empty-refusal');
   game.check('empty equipped slot refuses without spending or inventory change',empty.character.items[1]===-1&&refused.character.mp>=empty.character.mp&&JSON.stringify(refused.character.items)===JSON.stringify(empty.character.items)&&refused.character.inventory_revision===empty.character.inventory_revision);
