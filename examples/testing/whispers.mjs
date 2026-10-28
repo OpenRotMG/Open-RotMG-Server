@@ -13,7 +13,7 @@ function textPacket(bytes){
 export async function beforeNavigate({browser,signal}){
   const client={browser,name:['Whispa','Whispb','Whispc'][clients.length],texts:[],sent:[],lists:0};assert(client.name);
   client.cdp=await connect({port:browser.port,target:browser.target,url:'about:blank',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
-    if(e.method==='Network.requestWillBeSent'&&e.params.request.url.endsWith('/legacy-api/char/list')){client.guid=new URLSearchParams(e.params.request.postData).get('guid');client.lists++;}
+    if(e.method==='Network.requestWillBeSent'&&e.params.request.url.endsWith('/legacy-api/char/list')){client.request=e.params.requestId;client.lists++;}
     if(!['Network.webSocketFrameReceived','Network.webSocketFrameSent'].includes(e.method)||e.params.response.opcode!==2)return;
     const b=Buffer.from(e.params.response.payloadData,'base64');
     if(e.method.endsWith('Received')&&b[4]===25)client.texts.push(textPacket(b));
@@ -22,11 +22,13 @@ export async function beforeNavigate({browser,signal}){
   await client.cdp.call('Network.enable');
 }
 export async function enter({browser}){
-  const c=clients.find(c=>c.browser.target===browser.target),cdp=c.cdp;assert(c.guid);
+  const c=clients.find(c=>c.browser.target===browser.target),cdp=c.cdp;assert(c.request,'Observed char/list request required');
+  const {postData}=await cdp.call('Network.getRequestPostData',{requestId:c.request});c.guid=new URLSearchParams(postData).get('guid');assert(c.guid,'Observed disposable guest GUID required');
   const named=await cdp.eval(`fetch('/legacy-api/account/setName',{method:'POST',body:new URLSearchParams(${JSON.stringify({guid:c.guid,password:'',name:c.name})})}).then(async r=>({ok:r.ok,text:await r.text()}))`);
   assert(named.ok&&named.text.includes('<Success'),JSON.stringify(named));
   const lists=c.lists,guid=c.guid;await cdp.call('Page.reload');
-  await until(()=>c.lists>lists,'same guest reload');assert.equal(c.guid,guid);
+  await until(()=>c.lists>lists,'same guest reload');
+  const reloaded=await cdp.call('Network.getRequestPostData',{requestId:c.request});assert.equal(new URLSearchParams(reloaded.postData).get('guid'),guid);
   await until(()=>cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'named menu reload');
   await cdp.eval('(()=>{const m=document.querySelector("ruffle-player").shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();})()');
   await cdp.call('Emulation.setFocusEmulationEnabled',{enabled:true});
@@ -39,38 +41,41 @@ export async function enter({browser}){
 }
 export async function run(game){
   const out=process.env.QA_RESULTS_DIR;
-  const other=await game.join({...fixture,world:1}),third=await game.join(fixture);
+  const other=await game.join({...fixture,world:-1}),third=await game.join(fixture);
   const [a,b,c]=clients;let serial=0;
-  const key=async(c,key,code,n,modifiers=0)=>{try{await c.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:n,modifiers});}finally{await c.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:n,modifiers});}};
+  const send=async(c,method,params)=>{assert(c.inputOpen&&Date.now()<c.deadline,'Native input outside its bounded action');const view=await c.game.observe();assert(!view.paused&&view.game_ms<c.endGameMs,'Native input missed its active window');return c.cdp.call(method,params);};
+  const key=async(c,key,code,n,modifiers=0)=>{try{await send(c,'Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:n,modifiers});}finally{await c.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:n,modifiers});}};
   async function input(g,c,work,label){
-    let finished=false;const before=await g.observe();
-    const action=g.act({keys:[],duration_ms:3000},{name:label+'-'+serial++,when:v=>finished&&v.game_ms>before.game_ms+1800});
+    let finished=false,done=false;const before=await g.observe();
+    const action=g.act({keys:[],duration_ms:6000},{name:label+'-'+serial++,when:v=>finished&&v.game_ms>before.game_ms+1800});
+    const closed=()=>{done=true;c.inputOpen=false;};action.then(closed,closed);
     const typing=(async()=>{
       await until(async()=>!(await g.observe()).paused&&await c.cdp.eval('document.querySelector("ruffle-player").ruffle().isPlaying'),'bounded native resume');
+      assert(!done,'Native action ended before input');c.game=g;c.inputOpen=true;c.deadline=Date.now()+4000;c.endGameMs=before.game_ms+5000;
       await c.cdp.eval('document.querySelector("ruffle-player").focus({preventScroll:true})');
-      await work();finished=true;
+      try{await work();finished=true;}finally{c.inputOpen=false;}
     })();
     const results=await Promise.allSettled([action,typing]);for(const r of results)if(r.status==='rejected')throw r.reason;
     events.push({label,actor:g.actor,sent:[...c.sent],texts:clients.map(c=>({name:c.name,texts:[...c.texts]}))});
   }
-  const say=(g,c,text,label)=>input(g,c,async()=>{await key(c,'Enter','Enter',13);await c.cdp.call('Input.insertText',{text});await key(c,'Enter','Enter',13);},label);
+  const say=(g,c,text,label)=>input(g,c,async()=>{await key(c,'Enter','Enter',13);await send(c,'Input.insertText',{text});await key(c,'Enter','Enter',13);},label);
   try{
     const initial=await game.observe(),initialOther=await other.observe();
     game.check('ordinary clients occupy distinct worlds with a living bystander',initial.world==='Nexus'&&initialOther.world!=='Nexus'&&initial.lifecycle.alive&&initialOther.lifecycle.alive&&(await third.observe()).lifecycle.alive);
-    await input(game,a,async()=>{await key(a,'Enter','Enter',13);await a.cdp.call('Input.insertText',{text:'/tell Whispb cancelled'});await key(a,'a','KeyA',65,2);await key(a,'Backspace','Backspace',8);await key(a,'Enter','Enter',13);},'cancelled-composition');
+    await input(game,a,async()=>{await key(a,'Enter','Enter',13);await send(a,'Input.insertText',{text:'/tell Whispb cancelled'});await key(a,'a','KeyA',65,2);await key(a,'Backspace','Backspace',8);await key(a,'Enter','Enter',13);},'cancelled-composition');
     game.check('clearing a composition sends no private message',!a.sent.some(t=>t.includes('cancelled'))&&!b.texts.some(t=>t.text==='cancelled'));
     await say(game,a,'/tell wHiSpB private-one','sender-echo');
     game.check('case insensitive cross-world tell reaches recipient and echoes once',[a,b].every(c=>c.texts.filter(t=>t.name==='Whispa'&&t.recipient==='Whispb'&&t.text==='private-one').length===1));
-    await input(other,b,async()=>{await key(b,'Tab','Tab',9);await b.cdp.call('Input.insertText',{text:'reply-two'});await key(b,'Enter','Enter',13);},'recipient-tab-reply');
+    await input(other,b,async()=>{await key(b,'Tab','Tab',9);await send(b,'Input.insertText',{text:'reply-two'});await key(b,'Enter','Enter',13);},'recipient-tab-reply');
     game.check('native Tab replies to incoming counterpart',b.sent.includes('/tell Whispa reply-two')&&a.texts.some(t=>t.name==='Whispb'&&t.recipient==='Whispa'&&t.text==='reply-two'));
     await say(game,a,'/tell Whispc private-third','same-world-tell');
     game.check('same-world tell remains private to sender and recipient',c.texts.some(t=>t.name==='Whispa'&&t.recipient==='Whispc'&&t.text==='private-third')&&!b.texts.some(t=>t.text==='private-third')&&!c.texts.some(t=>t.text==='private-one'||t.text==='reply-two'));
     // The selected TextBox clamps both history directions: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf (§_-4D§.§_-03z§).
     await input(game,a,async()=>{await key(a,'Tab','Tab',9);await key(a,'Tab','Tab',9);await key(a,'Tab','Tab',9);},'history-oldest-clamp');
-    await input(game,a,async()=>{await key(a,'Tab','Tab',9,8);await key(a,'Tab','Tab',9,8);await a.cdp.call('Input.insertText',{text:'history-counterpart'});await key(a,'Enter','Enter',13);},'history-newest-clamp');
+    await input(game,a,async()=>{await key(a,'Tab','Tab',9,8);await key(a,'Tab','Tab',9,8);await send(a,'Input.insertText',{text:'history-counterpart'});await key(a,'Enter','Enter',13);},'history-newest-clamp');
     game.check('Tab and Shift Tab navigate two counterpart names without wrapping',a.sent.at(-1)==='/tell Whispc history-counterpart'&&c.texts.some(t=>t.text==='history-counterpart')&&!b.texts.some(t=>t.text==='history-counterpart'));
     await say(game,a,'/tell Nobodyexists offline-three','offline-refused');
-    game.check('offline recipient fails visibly without success echo',a.texts.some(t=>t.text==='Player not found.')&&!a.texts.some(t=>t.text==='offline-three'));
+    game.check('unknown recipient fails visibly without success echo',a.texts.some(t=>t.text==='Player not found.')&&!a.texts.some(t=>t.text==='offline-three'));
     await say(game,a,'/tell Whispa self-four','self-refused');
     game.check('self tell fails visibly',a.texts.some(t=>t.text==='You cannot tell yourself.'));
     await say(game,a,'/tell Whispb','syntax-refused');
@@ -91,7 +96,7 @@ export async function run(game){
     await input(other,b,async()=>{await key(b,'Enter','Enter',13);},'reconnected-empty-prefix');
     game.check('fresh GameSprite resets counterpart history',b.sent.at(-1)==='/tell ');
     await say(game,a,'/tell Whispb reconnected-seven','reconnected-sender');
-    await input(other,b,async()=>{await key(b,'Tab','Tab',9);await b.cdp.call('Input.insertText',{text:'reconnected-eight'});await key(b,'Enter','Enter',13);},'reconnected-recipient');
+    await input(other,b,async()=>{await key(b,'Tab','Tab',9);await send(b,'Input.insertText',{text:'reconnected-eight'});await key(b,'Enter','Enter',13);},'reconnected-recipient');
     game.check('both clients exchange new whispers after reconnect',b.texts.some(t=>t.text==='reconnected-seven')&&a.texts.some(t=>t.text==='reconnected-eight'));
   }finally{
     await writeFile(join(out,'whisper-observations.json'),JSON.stringify({preparedNames:true,events,clients:clients.map(({name,sent,texts})=>({name,sent,texts}))},null,2));
