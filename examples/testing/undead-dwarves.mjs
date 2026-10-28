@@ -13,10 +13,16 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  god=map.entities.find(e=>e.kind===0x640&&[-5,-4,-3,-2,-1,0].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
-  assert(god,'No natural HighPlains camp with a clear approach');
-  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(e=>e.camp===god.camp)));
-  return {...spec,position:{x:god.pos.x-4,y:god.pos.y}};
+  const gods=map.entities.filter(e=>e.kind===0x640);
+  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-gods.json'),JSON.stringify(gods));
+  for(const e of gods){
+    const family=map.entities.filter(m=>m.camp===e.camp),king=family.find(m=>m.kind===0x63e);assert(king);
+    const position=family.map(m=>({x:Math.floor(m.pos.x)+.5,y:Math.floor(m.pos.y)+.5})).find(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(','))&&[e,king].every(m=>Math.hypot(m.pos.x-p.x,m.pos.y-p.y)>1.35));
+    if(!position)continue;
+    god=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(family));
+    return {...spec,position};
+  }
+  throw Error('No natural HighPlains family tile outside God and King stopping ranges');
 }
 export async function run(game){
   const samples=[],shots=new Map();let protectedUntil=0,serial=0;
