@@ -76,8 +76,8 @@ export async function run(game){
   const late=await game.join({...spec,world:start.session.world,position:'spawn'});
   await api({op:'cheat',actor:late.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
   humans.push(late.actor);expiry.set(late.actor,(await game.observe()).game_ms+60000);
-  const lateAt=(await game.observe()).game_ms;
-  await advance(3000,{name:'tomb-late-join-awakened',when:v=>v.game_ms>=lateAt+2500});
+  await advance(3000);
+  await advance(500,{name:'tomb-late-join-awakened',when:()=>true});
   const joined=await late.inspect();await writeFile(join(out,'late-join.json'),JSON.stringify(joined));
   game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.diagnostic.entities.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.diagnostic.entities.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.diagnostic.character.tombs===0);
   const repeated=await save('after-late-join');game.check('late admission does not duplicate or replace awakened bosses',repeated.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3&&bosses.every(e=>repeated.map.entities.some(x=>x.id===e.id)));
@@ -92,9 +92,12 @@ export async function run(game){
     await game.act({keys:[],duration_ms:Math.min(1500,protection-now),target:{entity:nut.id,camera_angle:-Math.PI/4,fire:true}});
   }
   await writeFile(join(out,'nut-phases.json'),JSON.stringify(phases));assert(artifact,'Native combat did not reach Nut artifacts within the bound');
-  await advance(1700);
+  await advance(1700);await protect();
+  const remaining=protection-(await game.observe()).game_ms;
+  if(remaining<500){await advance(remaining);await protect();}
   const drained=await game.inspect();artifact=drained.diagnostic.entities.filter(e=>e.kind>=0xd1c&&e.kind<=0xd1e).sort((a,b)=>Math.hypot(a.pos.x-drained.view.position.x,a.pos.y-drained.view.position.y)-Math.hypot(b.pos.x-drained.view.position.x,b.pos.y-drained.view.position.y))[0];assert(artifact,'A living artifact is required after friendly shots expire');
-  await game.act({keys:[' '],duration_ms:200,target:{entity:artifact.id,camera_angle:-Math.PI/4,fire:false}},{name:'tomb-artifact-stasis',when:()=>true});
+  const orbAt=(await game.observe()).game_ms;
+  await game.act({keys:[' '],duration_ms:500,target:{entity:artifact.id,camera_angle:-Math.PI/4,fire:false}},{name:'tomb-artifact-stasis',when:v=>v.game_ms>=orbAt+300});
   const frozen=await save('artifact-stasis'),actual=frozen.state.diagnostic.entities.find(e=>e.id===artifact.id);
   game.check('native Orb Stasises a naturally spawned Tomb artifact without damage',actual?.statuses['22']&&actual.hp===artifact.hp);
   game.check('artifact combat does not grant premature three-boss completion',frozen.state.diagnostic.character.tombs===0&&frozen.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3);
