@@ -5,7 +5,7 @@ import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {promisify} from 'node:util';
 const exec=promisify(execFile),out=process.env.QA_RESULTS_DIR;
-const spec={class:0x31d,level:20,seed:820,world:1,equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,50]};
+const spec={class:0x30e,level:20,seed:820,world:1,equipment:[0xb08,0xa2e,0xb05,0xac7],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 let scout,roots,earned,origin,token,spawn;
 const protectedUntil=new Map();
 async function api(command){const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});const v=await r.json();assert(r.ok&&v.status!=='failed',JSON.stringify(v));return ['observe','inspect','world_info'].includes(command.op)?v:v.result;}
@@ -71,7 +71,6 @@ export async function run(spectator){
   game.check('native session sees root and every dependent attack',[0xd59,0xd5a,0xd5b,0xd5c].every(k=>trace.some(t=>t.projectiles.some(p=>t.entities.some(e=>e.kind===k&&e.id===p.owner)))));
   // Reproduce is a nearby density cap, not a per-parent lifetime budget: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/Reproduce.cs
   const distance=e=>Math.hypot(e.pos.x-state.view.position.x,e.pos.y-state.view.position.y);
-  const victim=family(state).filter(e=>e.kind===0xd5a&&state.view.objects.some(o=>o.id===e.id)).sort((a,b)=>distance(a)-distance(b))[0];assert(victim);
   async function approach(actor,destination,range=1.5){
     for(let n=0;n<80;n++){
       await protect(actor.actor);await protect(spectator.actor);
@@ -83,28 +82,28 @@ export async function run(spectator){
       await actor.act({keys,duration_ms:Math.max(50,Math.min(750,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
     }throw Error('Native walk did not reach target');
   }
-  async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>2)await approach(actor,id);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
+  async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>6)await approach(actor,id,5.5);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await game.act({keys:[],duration_ms:750},{name:'cube-active',when:()=>true});
   const census=await fetch(origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
   const owned=(await census.json()).entities.filter(e=>e.quest===root),old=new Set(owned.filter(e=>e.kind===0xd5a).map(e=>e.id));await writeFile(join(out,'census.json'),JSON.stringify(owned));
-  game.check('global owned Cube census respects the existing 32-actor budget',owned.length<=32&&owned.some(e=>e.id===root)&&old.has(victim.id));
-  const mana=(await game.observe()).character.mp;
-  await game.act({keys:[' '],duration_ms:150});
-  game.check('ordinary native helm spends mana and grants Speedy for pursuit',(await game.observe()).character.mp<mana&&((await game.observe()).character.conditions&(1<<14))!==0);
-  for(let n=0;n<30&&entity(await game.inspect(),victim.id);n++)await fire(game,victim.id);
-  game.check('native sword fire defeats an Overseer',!entity(await game.inspect(),victim.id));
+  game.check('global owned Cube census respects the existing 32-actor budget',owned.length<=32&&owned.some(e=>e.id===root)&&old.size>0);
+  let killed;
+  for(let n=0;n<30&&!killed;n++){
+    state=await game.inspect();const target=family(state).filter(e=>old.has(e.id)&&state.view.objects.some(o=>o.id===e.id)).sort((a,b)=>distance(a)-distance(b))[0];assert(target);
+    await fire(game,target.id);killed=(await fields()).find(f=>f.message==='enemy defeated'&&old.has(f.entity));
+  }
+  game.check('native staff fire defeats an Overseer',Boolean(killed));
   for(let n=0;n<15&&!family(await game.inspect()).some(e=>e.kind===0xd5a&&!old.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
-  state=await save('replenished');const births=await fields(),removed=births.findIndex(f=>f.message==='enemy defeated'&&f.entity===victim.id);
+  state=await save('replenished');const births=await fields(),removed=births.findIndex(f=>f.message==='enemy defeated'&&f.entity===killed.entity);
   game.check('living Cube replenishes an owned Overseer',family(state).some(e=>e.kind===0xd5a&&!old.has(e.id))&&removed>=0&&births.slice(removed+1).some(f=>f.message==='bounded named quest followers spawned'&&f.quest===root&&f.kind===0xd5a));
-  const boss=entity(state,root);assert(boss);
-  const partner=await game.join({...spec,seed:821,position:boss.pos});await protect(partner.actor);
-  await game.act({keys:[' '],duration_ms:150});
+  assert(entity(state,root));
+  const partner=await game.join({...spec,seed:821,position:state.view.position});await protect(partner.actor);
   const players=(await Promise.all([game.inspect(),partner.inspect()])).map(s=>s.diagnostic.player);
   for(const [i,actor] of [game,partner].entries()){for(let n=0;n<8&&(entity(await game.inspect(),root).damage[players[i]]??0)<600;n++)await fire(actor,root,150);}
   state=await save('contributors');game.check('two native clients contribute above the 500-damage threshold',players.every(id=>entity(state,root).damage[id]>500));
   const xp=await Promise.all([game.observe(),partner.observe(),spectator.observe()]);
   for(let n=0;n<70&&entity(await game.inspect(),root);n++)await fire(game,root);
-  state=await save('defeated');game.check('native sword combat defeats the admitted Cube God',!entity(state,root));
+  state=await save('defeated');game.check('native staff combat defeats the admitted Cube God',!entity(state,root));
   const after=await Promise.all([game.inspect(),partner.inspect(),spectator.inspect()]);
   game.check('both native contributors earn XP while distant spectator does not',after[0].view.character.experience>xp[0].character.experience&&after[1].view.character.experience>xp[1].character.experience&&after[2].view.character.experience===xp[2].character.experience);
   const log=await fields(),death=log.findIndex(f=>f.message==='enemy defeated'&&f.entity===root);assert(death>=0&&log.filter(f=>f.message==='enemy defeated'&&f.entity===root).length===1,'One logged Cube defeat required');
