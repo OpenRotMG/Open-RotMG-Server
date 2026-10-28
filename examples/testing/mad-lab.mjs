@@ -47,7 +47,7 @@ export async function run(game){
   }
   async function defeat(id){
     const before=(await game.inspect()).diagnostic.character.kills;
-    for(let n=0;n<65;n++){
+    for(let n=0;n<100;n++){
       const state=await game.inspect(),e=state.diagnostic.entities.find(e=>e.id===id);
       if(!e){assert(state.diagnostic.character.kills>before,'Enemy left local inspection without observed kill credit: '+id);return;}
       if(e.condition&(1<<23)){await act({keys:[],duration_ms:2000});continue;}
@@ -58,7 +58,7 @@ export async function run(game){
         await walk(blue.pos.x,blue.pos.y);continue;
       }
       const target={entity:id,camera_angle:-Math.PI/4,fire:true};
-      if(distance(e.pos,v.position)>(e.kind===0x976?3:6.5))await walk(e.pos.x-1,e.pos.y+1);
+      if(distance(e.pos,v.position)>(e.kind===0x976?7:6.5))await walk(e.pos.x-1,e.pos.y+1);
       else if(e.kind===0x976){
         await prepare({kind:'vitals',hp:v.character.stats.max_hp,mp:v.character.stats.max_mp});
         if(e.hp>30000&&protectedUntil-v.game_ms>10000)await act(Array.from({length:3},()=>[
