@@ -56,12 +56,13 @@ async function admit(){
       await cheat(admissionActor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
       until=now+60000;
     }
-    const e=[0x668,0x67d,0x678,0xd56,0xd59,0x92d,0x928].map(kind=>m.entities.find(e=>e.kind===kind)).find(Boolean);assert(e,'No bounded admission target remains');
+    const e=[0x668,0x67d,0x678,0xd56,0xd59].map(kind=>m.entities.find(e=>e.kind===kind)).find(Boolean);assert(e,'Bounded simple-hero sample did not admit a Pentaract; this take cannot exercise the scenario');
     const position=[[1,0],[-1,0],[0,1],[0,-1]].map(([x,y])=>({x:e.pos.x+x,y:e.pos.y+y})).find(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')));assert(position);
     await cheat(admissionActor,{kind:'teleport',position});
-    await direct(Math.atan2(e.pos.y-position.y,e.pos.x-position.x));m=await map();
+    await direct(Math.atan2(e.pos.y-position.y,e.pos.x-position.x),1000);m=await map();
     admission.push({target:e.id,kind:e.kind,survived:m.entities.some(t=>t.id===e.id),events:m.entities.filter(t=>[0xd56,0xd59,0xd5f].includes(t.kind))});await save('admission',admission);
   }
+  rootEntity=m.entities.find(e=>e.kind===0xd5f);
   assert(rootEntity,'Bounded ordinary direct hero defeats did not admit Pentaract');await save('admitted',m);
   await cheat(admissionActor,{kind:'teleport',position:safePosition});
   const expire=async()=>{while((await api({op:'observe',actor:admissionActor})).game_ms<until)await direct(0,Math.min(7000,until-(await api({op:'observe',actor:admissionActor})).game_ms+50));};
