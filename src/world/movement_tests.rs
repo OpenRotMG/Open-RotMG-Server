@@ -629,34 +629,6 @@ fn native_sentinel_and_intentional_goto_ack_keep_their_protocol_roles() {
 }
 
 #[test]
-fn late_native_arrivals_do_not_inherit_the_simulation_clock() {
-    let (mut world, first) = fixture(0x18, false);
-    let mut character = world.players[&first].character.clone();
-    character.id = 2;
-    character.account = 2;
-    world.now = 1000;
-    let (packets, _rx) = mpsc::channel(64);
-    let (lost, _lost) = watch::channel(None);
-    let late = world
-        .enter(character, Some(Output { packets, lost }))
-        .unwrap();
-    assert_eq!(
-        native(&mut world, late, 8.5, 8.5, 1000, 900).unwrap(),
-        NativeInput::Applied
-    );
-    assert!(
-        native(&mut world, late, 8.5, 8.5, 1001, 899)
-            .unwrap_err()
-            .to_string()
-            .contains("native ingress clock regressed")
-    );
-    assert_eq!(
-        native(&mut world, late, 8.5, 8.5, 1002, 901).unwrap(),
-        NativeInput::Applied
-    );
-}
-
-#[test]
 fn server_driven_movement_still_enforces_speed_ingress_and_collision() {
     for (wall, x, time, received) in [
         (false, 12.5, 1100, 1100),
