@@ -4,17 +4,29 @@ pub(super) const REQUEST: &[u8] = b"\x06\x05\x0a\x0b\x8f\x01\x27\x26\xd7\x10\x07
 const ACCEPTED: &[u8] = b"\x05\x04\x0a\x0b\x32\x27\x26\x2b\x10\x09\x00\x00\x30\xc3\x02\xc2\x02\xb0\x92\x02\xd2\xd6\xd7\xd0\x30\xd2\x2a\x12\x03\x00\x00\x29\xd0\x76\x11\x10\x00\x00\x60\xc1\x02\x46\xdb\x02\x00\x2c\x65\x2c\xce\x5b\x4f\xef\x02\x02\x47\x00\x00";
 const REJECTED: &[u8] = b"\x05\x04\x0a\x0b\x38\x27\x26\x2b\x10\x08\x00\x00\xc3\x02\xaa\x76\xd2\xc3\x02\x82\xd6\xd7\xd0\x30\xd2\x11\x0d\x00\x00\x60\x56\x46\x62\x00\x4f\x63\x00\xd2\x11\x12\x00\x00\x5d\x1e\x5d\xa9\x01\x60\xa9\x01\x66\x96\x0e\x4a\xa9\x01\x01\x4f\x1e\x01\x47\x00\x00";
 
-pub(super) fn patch(data: &mut [u8], accepted_string: u32) -> Result<()> {
+const RESET_ACCEPTED: &[u8] = b"\x05\x04\x0a\x0b\x52\x27\x26\xd6\x10\x08\x00\x00\x94\x02\xd6\xc3\x02\xa7\xd6\xd2\xd7\xd0\x30\x10\x07\x00\x00\x07\xd6\x1c\xa5\xc2\x02\x74\xd3\x2a\x12\x03\x00\x00\x29\xd2\x76\x11\x27\x00\x00\x60\xc1\x02\x46\xdb\x02\x00\x2c\x65\x2c\xab\x57\x4f\xef\x02\x02\xd3\x11\x12\x00\x00\x5d\x1e\x5d\xa9\x01\x60\xa9\x01\x66\x96\x0e\x4a\xa9\x01\x01\x4f\x1e\x01\x47\x00\x00";
+
+pub(super) fn patch(data: &mut [u8], accepted_string: u32, reset_string: u32) -> Result<()> {
     let request = b"\xd0\x30\x5d\x67\x60\x28\x46\xd8\x02\x00\x2c\x6b\x26\x4a\x67\x03\xd6\xd2\x60\x91\x01\x66\xba\x02\xd0\x66\x8f\x41\x4f\x08\x02\xd2\x60\x9a\x01\x66\xd7\x02\xd0\x66\x8d\x41\x4f\x08\x02\xd2\x2c\xf6\x58\x60\x56\x46\x62\x00\x46\xf0\x05\x00\x4f\x85\x02\x02\xd0\x66\xe3\x1f\x2c\xe6\x29\x4f\xf2\x45\x01\xd0\x66\xe3\x1f\x27\x61\xc9\x01\x47";
     let mut accepted = b"\xd0\x30\xd0\x66\xe3\x1f\x2c".to_vec();
     put_u30(&mut accepted, accepted_string);
     accepted.extend(b"\x4f\xf2\x45\x01\x47");
+    let mut reset = b"\xd0\x30\xd0\x66\xf9\x01\x2c".to_vec();
+    put_u30(&mut reset, reset_string);
+    reset.extend(b"\x4f\xc5\x02\x01\xd0\x4f\xad\x04\x00\x47");
     let rejected =
         b"\xd0\x30\xd0\x66\xe3\x1f\xd1\x66\x55\x4f\xf2\x45\x01\xd0\x66\xe3\x1f\x26\x61\xc9\x01\x47";
     for (name, expected, header, length, code) in [
         ("email request", REQUEST, 6, 143, request.as_slice()),
         ("email acceptance", ACCEPTED, 5, 50, accepted.as_slice()),
         ("email error", REJECTED, 5, 56, rejected.as_slice()),
+        (
+            "password reset acknowledgement",
+            RESET_ACCEPTED,
+            5,
+            82,
+            reset.as_slice(),
+        ),
     ] {
         let positions: Vec<_> = data
             .windows(expected.len())
@@ -43,9 +55,9 @@ mod tests {
     use super::*;
     #[test]
     fn email_feedback_requires_exact_methods_and_preserves_body_layout() {
-        let original = [REQUEST, ACCEPTED, REJECTED].concat();
+        let original = [REQUEST, ACCEPTED, REJECTED, RESET_ACCEPTED].concat();
         let mut patched = original.clone();
-        patch(&mut patched, 20000).unwrap();
+        patch(&mut patched, 20000, 20001).unwrap();
         assert_eq!(patched.len(), original.len());
         assert_eq!(&patched[..6], &original[..6]);
         assert_eq!(&patched[REQUEST.len()..REQUEST.len() + 5], &ACCEPTED[..5]);
@@ -56,12 +68,12 @@ mod tests {
                 .windows(3)
                 .any(|v| v == b"\xd1\x66\x55")
         );
-        for expected in [REQUEST, ACCEPTED, REJECTED] {
+        for expected in [REQUEST, ACCEPTED, REJECTED, RESET_ACCEPTED] {
             let mut ambiguous = [original.as_slice(), expected].concat();
-            assert!(patch(&mut ambiguous, 20000).is_err());
+            assert!(patch(&mut ambiguous, 20000, 20001).is_err());
         }
         let mut changed = original;
         changed[REQUEST.len() + 10] ^= 1;
-        assert!(patch(&mut changed, 20000).is_err());
+        assert!(patch(&mut changed, 20000, 20001).is_err());
     }
 }
