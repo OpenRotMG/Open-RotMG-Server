@@ -36,6 +36,10 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
     await chat(game,'/ignore '+name);game.check('duplicate ignore is idempotent',durable().lists.length===1);
     await chat(peer,'Hidden local message');await chat(peer,'/yell Hidden Nexus yell');await capture('ignore-muted');
     await chat(game,'Outgoing remains visible');await capture('ignore-peer-outgoing',peer);
+    await chat(peer,'/trade '+a.diagnostic.character.name);await capture('ignore-trade-request');
+    await chat(game,'/trade '+name);await capture('ignore-trade-open');await capture('ignore-peer-trade-open',peer);
+    await game.act({keys:[],mouse:{x:650,y:575},duration_ms:500});await capture('ignore-trade-cancelled',peer);
+    game.check('cancelled trade preserves both native inventories',JSON.stringify((await game.inspect()).view.character.items)===JSON.stringify(a.view.character.items)&&JSON.stringify((await peer.inspect()).view.character.items)===JSON.stringify(b.view.character.items));
     await chat(game,'/ignore '+a.diagnostic.character.name);await chat(game,'/ignore MissingPlayer');
     game.check('self and unknown targets do not mutate persisted list',JSON.stringify(durable().lists)===JSON.stringify([[owner,1,target]]));
     const portal=(await peer.inspect()).diagnostic.entities.find(e=>e.kind===0x720);assert(portal);
@@ -47,7 +51,7 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
     const ownPortal=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x720);assert(ownPortal);await walk(ownPortal.pos,game);
     await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1200});
     const privateA=await save('owner-vault'),privateB=await save('peer-vault',peer);
-    game.check('separate private Vaults retain both original living characters',privateA.view.session.world!==privateB.view.session.world&&privateA.view.session.character===a.view.session.character&&privateB.view.session.character===b.view.session.character&&privateA.view.lifecycle.alive&&privateB.view.lifecycle.alive);
+    game.check('separate private Vaults retain both original living characters',privateA.view.map.name==='Vault'&&privateB.view.map.name==='Vault'&&privateA.view.session.world!==privateB.view.session.world&&privateA.view.session.character===a.view.session.character&&privateB.view.session.character===b.view.session.character&&privateA.view.lifecycle.alive&&privateB.view.lifecycle.alive);
     await game.act({keys:['Insert'],duration_ms:1400});await peer.act({keys:['Insert'],duration_ms:1400});
     game.check('normal reconnect retains account ignore row',durable().lists.some(r=>r[0]===owner&&r[2]===target)&&(await game.observe()).world==='Nexus'&&(await peer.observe()).world==='Nexus');
     await chat(peer,'Hidden after reconnect');await capture('ignore-reconnected');
@@ -56,6 +60,7 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
     const logs=(await readFile(join(out,'server.log'),'utf8')).replace(/\x1b\[[0-9;]*m/g,'');
     const deliveries=logs.split('\n').filter(l=>l.includes('public chat delivered')).map(l=>{const account=l.match(/\baccount=(\d+)/),count=l.match(/\brecipients=(\d+)/);assert(account&&count,'Chat delivery log fields missing');return [Number(account[1]),Number(count[1])];});
     game.check('actual chat delivery is suppressed only toward the ignoring recipient, including after reconnect',JSON.stringify(deliveries)===JSON.stringify([[target,2],[target,1],[target,1],[owner,2],[target,1],[target,2],[target,2]]));
+    game.check('ignore does not block reciprocal native trade and ordinary cancellation',logs.includes('native trade started')&&logs.includes('trade cancelled without inventory mutation'));
     await writeFile(join(out,'ignore-durable.json'),JSON.stringify({final,deliveries},null,2));
   }finally{for(const c of connections)c.close();}
 }
