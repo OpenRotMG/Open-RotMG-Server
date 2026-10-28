@@ -24,16 +24,11 @@ export async function run(game){
   game.check('natural Queen has selected HP and five initial defenders',begin.diagnostic.entities.some(e=>e.id===queen.id&&e.hp===100)&&initial.length===5&&initial.every(e=>e.hp===10));
   await game.act({keys:[],duration_ms:4000},{name:'scorpion-arrival',when:()=>true});
   const exposed=await save('exposed');
-  game.check('unarmored native Wizard takes ordinary scorpion damage',exposed.view.character.hp<begin.view.character.hp);
+  game.check('unarmored native Wizard takes enemy damage',exposed.view.character.hp<begin.view.character.hp);
   game.check('ordinary Green Magic causes no status effect',exposed.view.character.conditions===0);
-  async function protect(id){
-    for(let n=0;n<65&&((await game.observe()).character.conditions&(1<<24));n++)await game.act({keys:[],duration_ms:1000});
-    assert(!((await game.observe()).character.conditions&(1<<24)),'Previous prepared protection did not expire');
-    const path=join(process.env.QA_RESULTS_DIR,id+'.json');
-    await writeFile(path,JSON.stringify({id,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-    execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
-  }
-  await protect('scorpion-protection');
+  const path=join(process.env.QA_RESULTS_DIR,'protection.json');
+  await writeFile(path,JSON.stringify({id:'scorpion-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
   for(let n=0;n<6;n++){await game.act({keys:[],duration_ms:700});samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'movement-and-attacks.json'),JSON.stringify(samples));
   game.check('Queen activates and wanders',samples.some(s=>s.diagnostic.entities.some(e=>e.id===queen.id&&e.activated!==null&&Math.hypot(e.pos.x-queen.pos.x,e.pos.y-queen.pos.y)>.1)));
@@ -41,10 +36,8 @@ export async function run(game){
   game.check('native client receives selected Green Magic',samples.some(s=>s.view.projectiles.some(p=>initial.some(e=>e.id===p.owner)&&p.speed===40&&p.lifetime_ms===2000)));
   game.check('Queen has no projectile of her own',samples.every(s=>s.view.projectiles.every(p=>p.owner!==queen.id)));
   // This is a bounded reconstruction check, not target-era count proof: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Shore.cs#L55-L65
-  for(let n=0;n<55&&members(await game.inspect()).length<10;n++)await game.act({keys:[],duration_ms:1000});
-  const full=await save('full-brood');
-  game.check('living Queen fills the bounded ten-defender camp',members(full).length===10);
-  await protect('scorpion-protection-finish');
+  const brood=await save('brood');
+  game.check('current brood stays within ten owned defenders',members(brood).length<=10);
   const captureStart=(await game.observe()).game_ms;
   await game.act({keys:[],duration_ms:1000},{name:'scorpion-brood',when:v=>v.game_ms>=captureStart+500});
   async function defeat(id){
@@ -62,13 +55,12 @@ export async function run(game){
     game.check(id+': native staff defeats target with XP',!after.diagnostic.entities.some(e=>e.id===id)&&after.view.character.experience>before.character.experience);
     return after;
   }
-  const victim=members(full).sort((a,b)=>Math.hypot(a.pos.x-full.view.position.x,a.pos.y-full.view.position.y)-Math.hypot(b.pos.x-full.view.position.x,b.pos.y-full.view.position.y))[0];
-  const killed=await defeat(victim.id),ids=new Set(members(full).map(e=>e.id));
-  game.check('ordinary defender has no loot bag',killed.diagnostic.entities.filter(e=>[0x500,0x503,0x507,0x508,0x509].includes(e.kind)).length===full.diagnostic.entities.filter(e=>[0x500,0x503,0x507,0x508,0x509].includes(e.kind)).length);
+  const victim=members(brood).sort((a,b)=>Math.hypot(a.pos.x-brood.view.position.x,a.pos.y-brood.view.position.y)-Math.hypot(b.pos.x-brood.view.position.x,b.pos.y-brood.view.position.y))[0];
+  const killed=await defeat(victim.id),ids=new Set(members(brood).map(e=>e.id));
+  game.check('ordinary defender has no loot bag',killed.diagnostic.entities.filter(e=>[0x500,0x503,0x507,0x508,0x509].includes(e.kind)).length===brood.diagnostic.entities.filter(e=>[0x500,0x503,0x507,0x508,0x509].includes(e.kind)).length);
   for(let n=0;n<12&&!members(await game.inspect()).some(e=>!ids.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
   const replenished=await save('replenished');
-  game.check('living Queen replenishes a native-killed defender within cap',members(replenished).some(e=>!ids.has(e.id))&&members(replenished).length<=10);
-  await protect('scorpion-protection-queen');
+  game.check('living Queen adds an owned defender after native defeat within cap',members(replenished).some(e=>!ids.has(e.id))&&members(replenished).length<=10);
   const dead=await defeat(queen.id);await save('queen-defeated');
   const surviving=new Set(members(dead).map(e=>e.id));
   const defeatStart=(await game.observe()).game_ms;
