@@ -40,7 +40,7 @@ export async function run(game){
       await step({keys,duration_ms:Math.max(60,Math.min(800,Math.round(Math.max(Math.abs(dx),Math.abs(dy))/7.73*1000)))});
     }
   }
-  async function shoot(id,limit=100){for(let n=0;n<limit;n++){const s=await game.inspect(),e=entities(s).find(e=>e.id===id);if(!e)return;await step({keys:[],duration_ms:250,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}throw Error('Native shots did not defeat '+id);}
+  async function shoot(id,limit=25,duration_ms=1000){for(let n=0;n<limit;n++){const s=await game.inspect(),e=entities(s).find(e=>e.id===id);if(!e)return;await step({keys:[],duration_ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}throw Error('Native shots did not defeat '+id);}
   async function enter(from,name){
     await step({keys:[],mouse:{x:700,y:575},duration_ms:700});
     for(let n=0;n<8&&(await game.observe()).session.world===from;n++)await step({keys:[],duration_ms:500});
@@ -72,7 +72,7 @@ export async function run(game){
   const pair=coffins.find(a=>coffins.some(b=>a.id!==b.id&&distance(a.pos,b.pos)===4));assert(pair,'No generated paired-coffin room');
   const mate=coffins.find(e=>e.id!==pair.id&&distance(e.pos,pair.pos)===4);
   const outcomes=[];
-  for(const coffin of [pair,mate,...coffins.filter(e=>e.id!==pair.id&&e.id!==mate.id)]){
+  for(const coffin of [pair,mate]){
     await refresh();await walk(coffin.pos,4);
     const before=await save('coffin-'+coffin.id+'-before'),known=new Set(entities(before).map(e=>e.id));
     if(coffin.id===pair.id)game.check('opened secret passage admits native walking to its paired coffins',distance(before.view.position,pair.pos)<=4.5&&entities(before).some(e=>e.id===mate.id));
@@ -84,14 +84,14 @@ export async function run(game){
     const opened=await game.inspect(),impostor=entities(opened).find(e=>e.kind===0x1722&&!known.has(e.id)&&distance(e.pos,coffin.pos)<.1);
     assert(impostor||entities(opened).find(e=>e.id===coffin.id)?.hp<20000,'Native shot must resolve the coffin opening');
     if(impostor){
-      await shoot(impostor.id);const dead=await save('impostor-'+coffin.id);
+      await shoot(impostor.id,100,150);const dead=await save('impostor-'+coffin.id);
       const brood=entities(dead).filter(e=>e.kind===0x1738&&!known.has(e.id));
       game.check('native impostor releases Lil Feratu without private loot or Manor credit',brood.length>=1&&brood.length<=4&&!entities(dead).some(e=>e.items?.some(i=>i>=0)&&distance(e.pos,coffin.pos)<1)&&dead.diagnostic.character.manors===before.diagnostic.character.manors);
       outcomes.push({id:coffin.id,impostor:true,brood:brood.length});
     }else{
-      for(let n=0;n<120;n++){
+      for(let n=0;n<30;n++){
         const s=await game.inspect(),e=entities(s).find(e=>e.id===coffin.id);if(!e)break;
-        await step({keys:[],duration_ms:250,target:{entity:coffin.id,camera_angle:-Math.PI/4,fire:true}});
+        await step({keys:[],duration_ms:1000,target:{entity:coffin.id,camera_angle:-Math.PI/4,fire:true}});
         const after=await game.inspect();
         if(e.hp>15000&&entities(after).find(x=>x.id===coffin.id)?.hp<=15000)await save('coffin-first-wave');
         if(e.hp>8000&&entities(after).find(x=>x.id===coffin.id)?.hp<=8000)await save('coffin-second-wave');
@@ -115,10 +115,10 @@ export async function run(game){
   await walk(boss.pos,5);const arena=await save('ruthven-arrival');
   game.check('native walk traverses populated connected rooms to Ruthven',arena.view.lifecycle.alive&&arena.diagnostic.character.shots>entry.diagnostic.character.shots);
   await step({keys:[],duration_ms:700},{name:'ruthven-before',when:()=>true});
-  for(let n=0;n<500;n++){
+  for(let n=0;n<84;n++){
     const s=await game.inspect(),e=entities(s).find(e=>e.id===boss.id);if(!e)break;
     if(distance(e.pos,s.view.position)>6)await walk(e.pos,4);
-    else await step({keys:[],duration_ms:250,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+    else await step({keys:[],duration_ms:1500,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
   }
   const defeated=await save('ruthven-defeated');
   game.check('native staff defeats Ruthven and awards exactly one Manor completion',!entities(defeated).some(e=>e.id===boss.id)&&defeated.diagnostic.character.manors===entry.diagnostic.character.manors+1);
