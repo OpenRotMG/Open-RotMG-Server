@@ -1,7 +1,7 @@
 import {writeSync} from 'node:fs';
 import {readFile, writeFile, readdir, rename, open} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
-import {createHash,randomUUID} from 'node:crypto';
+import {createHash} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 import {nativeClock} from './native-clock.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
@@ -69,20 +69,13 @@ async function eachClient(selected, action) {
 async function connect(spec) {
   if (!config.browserTools) throw new Error('Native control requires the installed managed browser helper path');
   if(!Number.isInteger(spec.port)||spec.port<1024||spec.port>65535||typeof spec.target!=='string'||!Number.isInteger(spec.actor))throw new Error('Each native target requires an explicit local port, target id and durable actor id');
-  const helper=pathToFileURL(config.browserTools),{scriptOwner}=await import(helper.href);
-  const registry=await import(new URL('./tabs.mjs',helper).href),owner=scriptOwner();
-  const tab={...await registry.browserIdentity(spec.port),target:spec.target};
-  await registry.ensureTarget(tab);registry.assertOwner(tab,owner);
-  for(const notice of registry.takeNotices(owner))console.error(notice);
-  const activity='native:'+randomUUID();let activityOpen=false,send;const spans=new AsyncLocalStorage();
-  const methods=new Set(['Network.enable','Runtime.evaluate','Emulation.setFocusEmulationEnabled','Input.dispatchKeyEvent','Input.dispatchMouseEvent']);
-  const activityUse=(operation,work)=>{const start=performance.now();try{return work();}finally{console.error(JSON.stringify({event:'native_browser_activity',operation,wall_ms:performance.now()-start}));}};
-  const managed=(method,params)=>{
-    if(!methods.has(method))throw Error('Unsupported native CDP method: '+method);
-    registry.assertOwner(tab,owner);
+  const {managedCDP, scriptOwner} = await import(pathToFileURL(config.browserTools).href);
+  let send;const spans=new AsyncLocalStorage();
+  const managed=await managedCDP(spec.port,spec.target,scriptOwner(),(method,params)=>{
     const span=spans.getStore();if(span)span.rawStart=performance.now();
     return send(method,params).finally(()=>{if(span)span.rawEnd=performance.now();});
-  };
+  });
+  if(typeof managed.withActivity!=='function')throw Error('Native control requires managed browser helpers with finite withActivity scopes');
   const call=(method,params={})=>{
     const span={start:performance.now()};
     return spans.run(span,async()=>{try{return await managed(method,params);}finally{
@@ -133,11 +126,9 @@ async function connect(spec) {
     const noDispatch=setTimeout(()=>{if(!holdState.started)rejectRelease(Error('Native DOWN was not dispatched before its deadline'));},10000);
     try{await released;return {down,started:holdState.started,released:releasedAt};}finally{clearTimeout(timer);clearTimeout(dragTimer);clearTimeout(noDispatch);holdState=null;}
   }
-  const close=async()=>{closing=true;ws.close();if(activityOpen){activityOpen=false;activityUse('end',()=>registry.finishUse(activity));}};
-  // Registry fsync belongs outside the finite native operation, where it cannot freeze lease renewal or input release.
-  try {activityUse('begin',()=>registry.beginUse(tab,activity));activityOpen=true;await call('Network.enable');}
-  catch(error) {try{await close();}catch(cleanup){throw new AggregateError([error,cleanup],'Native connection and activity cleanup failed');}throw error;}
-  return {...spec,call,evaluate,clock,frames,hold,abort:error=>holdState?.abort(error),close};
+  try { await call('Network.enable'); }
+  catch(error) { closing=true;ws.close();throw error; }
+  return {...spec,call,withActivity:work=>managed.withActivity(work),evaluate,clock,frames,hold,abort:error=>holdState?.abort(error),close:()=>{closing=true;ws.close();}};
 }
 let leaseStarted=false, leaseTimer, leaseRenewal, leaseError;
 async function startLease(){
@@ -314,17 +305,12 @@ async function nativeAct(value) {
   const effects={distance:world_changed?null:Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y),shots:after.verification.shots-before.verification.shots,hp:after.character.hp-before.character.hp,mp:after.character.mp-before.character.mp,inventory_changed:JSON.stringify(after.character.items)!==JSON.stringify(before.character.items),world_changed};
   return {id,steps:stepEvidence,status:value.expect?'outcome_complete':'input_complete',execution:'native',effects,paused:after.paused,pause_scope:'server_and_native',native_clock:'pause_adjusted_page_time',actor:value.actor,state:after};
 }
-let result;
-try {
-  if(config.native!==undefined && !Array.isArray(config.native)) throw new Error('native must be an explicit array');
-  const actors=new Set(),targets=new Set();
-  for(const spec of config.native??[]) {
-    const key=`${spec.port}/${spec.target}`;
-    if(actors.has(spec.actor)||targets.has(key))throw new Error('Native actors and targets must each be unique');
-    actors.add(spec.actor);targets.add(key);clients.push(await connect(spec));
-  }
-  if(clients.length&&command.pauseAfter===false)throw Error('Native participants require bounded operations that pause before returning');
-  const started=performance.now();
+let result,pauseError;
+async function pauseOnError(){
+  if(mayProgress) try {await pauseAll();await endLease();} catch(e){pauseError=String(e);try{await abortLease();}catch(halt){pauseError+='; native safety halt unconfirmed: '+halt;}}
+}
+async function operation(){
+ try{
   if(command.op==='pause') result=await pauseAll();
   else if(command.op==='resume') {if(clients.length)throw Error('Native resume requires a bounded action with automatic pause');await resumeAll();result={paused:false};}
   else if(command.op==='act'&&(command.input||command.sequence)) result=await nativeAct(command);
@@ -340,14 +326,27 @@ try {
     result={...result,paused:true,pause_scope:'server_and_native'};
   } else result=await api(command,id);
   await endLease();
+ }catch(error){await pauseOnError();throw error;}
+}
+try {
+  if(config.native!==undefined && !Array.isArray(config.native)) throw new Error('native must be an explicit array');
+  const actors=new Set(),targets=new Set();
+  for(const spec of config.native??[]) {
+    const key=`${spec.port}/${spec.target}`;
+    if(actors.has(spec.actor)||targets.has(key))throw new Error('Native actors and targets must each be unique');
+    actors.add(spec.actor);targets.add(key);clients.push(await connect(spec));
+  }
+  if(clients.length&&command.pauseAfter===false)throw Error('Native participants require bounded operations that pause before returning');
+  const started=performance.now();
+  // Synchronous browser bookkeeping must finish outside the live safety lease.
+  await clients.reduceRight((next,client)=>()=>client.withActivity(next),operation)();
   result={...result,client_wall_ms:Math.round(performance.now()-started)};
   await save(result);
   console.log(JSON.stringify(mutating?{...result,evidence:path}:result));
 } catch(error) {
-  let pauseError;
-  if(mayProgress) try {await pauseAll();await endLease();} catch(e){pauseError=String(e);try{await abortLease();}catch(halt){pauseError+='; native safety halt unconfirmed: '+halt;}}
+  await pauseOnError();
   const failed={id,status:'failed',error:String(error),pause_error:pauseError};
   try {await save(failed);} catch(e){failed.evidence_error=String(e);}
   console.error(JSON.stringify(failed));
   process.exitCode=1;
-} finally {clearInterval(leaseTimer);await eachClient(clients,c=>c.close());}
+} finally {clearInterval(leaseTimer);for(const c of clients)c.close();}

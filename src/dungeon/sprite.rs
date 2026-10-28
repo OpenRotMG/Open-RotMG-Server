@@ -211,3 +211,47 @@ fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
         cell.object = Some(kind);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    #[test]
+    fn sprite_platforms_remain_connected_through_clearable_trees() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for seed in 0..32 {
+            let map = generate(&content, seed).unwrap();
+            let (sx, sy) = map.spawns[0];
+            let mut reached = vec![false; map.cells.len()];
+            let mut queue = VecDeque::from([(sx as i32, sy as i32)]);
+            while let Some((x, y)) = queue.pop_front() {
+                if x < 0 || y < 0 || x >= map.width || y >= map.height {
+                    continue;
+                }
+                let i = (y * map.width + x) as usize;
+                let cell = &map.cells[i];
+                if reached[i] || content.grounds[&cell.ground] == 0. {
+                    continue;
+                }
+                // Trees can be shot away; only permanent obstacles cut a route.
+                if cell.object.is_some_and(|kind| {
+                    let object = &content.objects[&kind];
+                    object.blocks && !object.destructible
+                }) {
+                    continue;
+                }
+                reached[i] = true;
+                queue.extend(DIRECTIONS.map(|(dx, dy)| (x + dx, y + dy)));
+            }
+            for (i, cell) in map.cells.iter().enumerate() {
+                assert!(
+                    (content.grounds[&cell.ground] == 0. && cell.object.is_none()) || reached[i],
+                    "seed {seed}: inaccessible terrain or object at {},{}",
+                    i as i32 % map.width,
+                    i as i32 / map.width
+                );
+            }
+        }
+    }
+}
