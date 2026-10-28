@@ -55,9 +55,9 @@ export async function run(game){
     game.check('zero-damage boomerang applies Quiet and drains MP through HP protection',(quiet.view.character.conditions&2)!==0&&quiet.view.character.mp===0&&quiet.view.character.hp===arrival.view.character.hp);
     const shots=samples.flatMap(s=>s.view.projectiles).filter(p=>p.owner===root.id);
     game.check('native receives both selected projectile trajectories',shots.some(p=>p.speed===70&&p.lifetime_ms===2000)&&shots.some(p=>p.speed===60&&p.lifetime_ms===2400));
-    // Build118 documents both attacks and the non-attacking children, not exact123.5.1 AI: https://web.archive.org/web/20120520004521id_/http://forums.wildshadow.com/wiki/realm-mad-god/sprite-god
+    // Build118 documents both attacks and the non-attacking children, not exact123.5.1 AI: https://web.archive.org/web/20120528162648id_/http://forums.wildshadow.com/wiki/realm-mad-god/sprite-god
     game.check('Purple Magic forms four-shot fans with ten-degree gaps',samples.some(s=>{
-      const groups=new Map();for(const p of s.view.projectiles.filter(p=>p.owner===root.id&&p.speed===70)){const key=p.start_time_ms+':'+p.start.x+':'+p.start.y;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p.angle);}
+      const groups=new Map();for(const p of s.view.projectiles.filter(p=>p.owner===root.id&&p.speed===70)){const key=p.start.x+':'+p.start.y;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p.angle);}
       return [...groups.values()].some(a=>a.length===4&&a.sort((a,b)=>a-b).every((v,i)=>i===0||Math.abs(v-a[i-1]-Math.PI/18)<.001));
     }));
     const initialChildren=children(arrival);
@@ -72,7 +72,7 @@ export async function run(game){
     game.check('ordinary native fire defeats parent and earns at least200 XP',!enemy(dead)&&dead.view.character.experience>=beforeKill.view.character.experience+200);
     const orphan=children(dead)[0];assert(orphan,'Parent defeat should leave surviving children');
     await act({keys:[],duration_ms:11000});const orphaned=await game.inspect();
-    game.check('orphan survives and wanders after parent death',enemy(orphaned,orphan.id)&&Math.hypot(enemy(orphaned,orphan.id).pos.x-orphan.pos.x,enemy(orphaned,orphan.id).pos.y-orphan.pos.y)>.2);
+    game.check('orphan survives and wanders without new family births after parent death',enemy(orphaned,orphan.id)&&Math.hypot(enemy(orphaned,orphan.id).pos.x-orphan.pos.x,enemy(orphaned,orphan.id).pos.y-orphan.pos.y)>.2&&children(orphaned).every(e=>children(dead).some(c=>c.id===e.id)));
     game.check('Quiet expires and MP regeneration resumes after parent defeat',!(orphaned.view.character.conditions&2)&&orphaned.view.character.mp>0);
     game.check('parent removal cannot award XP twice',!enemy(orphaned)&&orphaned.view.character.experience===dead.view.character.experience);
     await kill(orphan.id);const end=await game.inspect();
