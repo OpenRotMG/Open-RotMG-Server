@@ -5967,6 +5967,7 @@ impl World {
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
+            // The comparator's 0.01 threshold tests integer damage, not an HP fraction: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
             0
         } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
