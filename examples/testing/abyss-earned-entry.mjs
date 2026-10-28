@@ -30,13 +30,14 @@ export async function run(game){
     for(let n=0;n<300;n++){
       const v=await game.observe(),dx=goal.x-v.position.x,dy=goal.y-v.position.y;if(Math.hypot(dx,dy)<.6)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;await protect();
-      await game.act({keys:[Math.abs(x)>.2?(x>0?'d':'a'):null,Math.abs(y)>.2?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});
+      await game.act({keys:[Math.abs(x)>.2?(x>0?'d':'a'):null,Math.abs(y)>.2?(y>0?'s':'w'):null].filter(Boolean),duration_ms:Math.max(50,Math.min(500,Math.round(Math.hypot(dx,dy)/7.5*1000)))});
     }
     throw Error('Native approach blocked');
   }
   const attempts=[];let portal;
   for(const medusa of medusas){
     await protect();
+    const prepared=await game.observe();await command({op:'cheat',actor:game.actor,change:{kind:'vitals',hp:prepared.character.stats.max_hp,mp:prepared.character.stats.max_mp}});
     await walk({x:medusa.pos.x-4,y:medusa.pos.y});
     for(let n=0;n<20;n++){
       await protect();const s=await game.inspect(),enemy=s.diagnostic.entities.find(e=>e.id===medusa.id);if(!enemy)break;
@@ -64,5 +65,5 @@ export async function run(game){
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
   const returned=await game.inspect();
   game.check('Cowardice escape returns to the original Realm without clear credit',returned.view.session.world===start.session.world&&returned.view.lifecycle.alive&&returned.diagnostic.character.abysses===0);
-  await writeFile(join(out,'earned-entry.json'),JSON.stringify({attempts,portal,entered,returned,scope:'Prepared level/gear/invincibility, one scout-selected starting position and bounded HP preparation during renewal. Native walking/kills, natural drop rolls, portal use and exit; not earned leveling or a drop-rate estimate.'}));
+  await writeFile(join(out,'earned-entry.json'),JSON.stringify({attempts,portal,entered,returned,scope:'Prepared level/gear/invincibility, one scout-selected starting position, HP/MP preparation before each target and bounded HP preparation during renewal. Native walking/kills, natural drop rolls, portal use and exit; not earned leveling or a drop-rate estimate.'}));
 }
