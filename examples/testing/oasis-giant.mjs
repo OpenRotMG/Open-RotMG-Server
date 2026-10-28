@@ -64,7 +64,7 @@ export async function run(game){
   state=await save('follower-defeated');
   game.check('native bow fire defeats an owned follower',!state.diagnostic.entities.some(e=>e.id===victim.id));
   const survivors=children(state).map(e=>e.id);await idle(10000);state=await save('no-replenishment');
-  game.check('defeated followers do not replenish beyond the lifetime birth cap',JSON.stringify(children(state).map(e=>e.id))===JSON.stringify(survivors));
+  game.check('defeated followers do not replenish beyond the lifetime birth cap',children(state).length===survivors.length&&children(state).every(e=>survivors.includes(e.id)));
   const xp=state.view.character.experience;
   for(let n=0;n<30&&(await game.inspect()).diagnostic.entities.some(e=>e.id===boss.id);n++)await fire(boss.id);
   await idle(500);state=await save('giant-defeated');
