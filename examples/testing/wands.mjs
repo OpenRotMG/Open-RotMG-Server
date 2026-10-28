@@ -54,9 +54,14 @@ export async function run(game){
   await writeFile(join(out,'sorcerer-damage.json'),JSON.stringify({preparedProtection:true,before:sorcererBefore,after:sorcererAfter}));
   game.check('Sorcerer can fire the same slot-eight wand',sorcererAfter.diagnostic.character.shots>sorcererBefore.diagnostic.character.shots);
   game.check('native wand shots damage an ordinary enemy',sorcererBefore.diagnostic.entities.some(e=>sorcererAfter.diagnostic.entities.find(q=>q.id===e.id)?.hp<e.hp));
-  const wizard=await game.join({...spec,class:0x30e,stats:[670,385,75,25,50,75,40,60],world:initial.view.session.world,equipment:[-1,-1,-1,-1],backpack:[0xa04,-1,-1,-1,-1,-1,-1,-1]});
+  const wizard=await game.join({...spec,class:0x30e,stats:[670,385,75,25,50,75,40,60],world:initial.view.session.world,equipment:[-1,-1,-1,-1],backpack:[0xa04,0xa97,-1,-1,-1,-1,-1,-1]});
+  await wizard.act({keys:[],duration_ms:2500});
+  const wizardInitial=await wizard.observe();
+  await wizard.act({keys:[],duration_ms:350,drag:{from:{x:678,y:428},to:{x:634,y:385}}});
   const wizardBefore=await wizard.observe();
+  game.check('Wizard accepts compatible staff before refusal check',wizardBefore.character.items[0]===0xa97&&wizardBefore.character.items[5]===-1&&wizardBefore.character.inventory_revision===wizardInitial.character.inventory_revision+1);
   await wizard.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:634,y:385}}});
   const wizardAfter=await wizard.observe();
+  await writeFile(join(out,'wizard-refusal.json'),JSON.stringify({initial:wizardInitial,before:wizardBefore,after:wizardAfter}));
   game.check('Wizard refuses wand atomically',JSON.stringify(wizardAfter.character.items)===JSON.stringify(wizardBefore.character.items)&&wizardAfter.character.inventory_revision===wizardBefore.character.inventory_revision);
 }
