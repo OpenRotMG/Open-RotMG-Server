@@ -715,10 +715,11 @@ impl World {
         }
     }
     pub(super) fn ocean_response(&mut self, speaker: i32, text: &str) -> Result<()> {
+        // The period answer is in the image hovertext: https://web.archive.org/web/20120613202818id_/http://forums.wildshadow.com/wiki/realm-mad-god/thessal-mermaid-goddess
         if !text
             .trim()
             .trim_end_matches('.')
-            .eq_ignore_ascii_case("Yes, he lives")
+            .eq_ignore_ascii_case("He lives and reigns and conquers the world")
         {
             return Ok(());
         }
@@ -728,6 +729,7 @@ impl World {
             .filter(|e| {
                 e.kind == 0x1704
                     && e.stage == Some(0)
+                    && e.expires.is_some_and(|deadline| self.now < deadline)
                     && p.known.contains(&e.id)
                     && e.pos.distance(p.pos) < 10.
             })
