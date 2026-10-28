@@ -6017,7 +6017,9 @@ impl World {
             // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
             return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
-        if crate::loot::potion_damage(defeated.kind).is_some() {
+        if crate::loot::potion_damage(defeated.kind).is_some()
+            || matches!(defeated.kind, 0x91d | 0x91e)
+        {
             let loot =
                 crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
             return self.god_loot_bags(defeated.pos, loot);
@@ -6377,7 +6379,8 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
                 0x617 => 12.,
-                0x61a => 10.5,
+                // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
+                0x61a => 12.,
                 0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
