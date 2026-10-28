@@ -70,10 +70,10 @@ export async function run(game){
   async function refreshRegister(player){await player.act({keys:['s'],duration_ms:450});await player.act({keys:['w'],duration_ms:450});}
   async function walk(player,x,y){
     for(let i=0;i<80;i++){
-      const p=(await player.observe()).position,dx=x-p.x,dy=y-p.y,d=Math.hypot(dx,dy);if(d<.25)return;
+      const p=(await player.observe()).position,dx=x-p.x,dy=y-p.y,d=Math.hypot(dx,dy);if(d<.4)return;
       const sx=(dx-dy)/Math.SQRT2,sy=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(sx)>.08)keys.push(sx>0?'d':'a');if(Math.abs(sy)>.08)keys.push(sy>0?'s':'w');
-      await player.act({keys,duration_ms:Math.min(650,Math.max(50,Math.round(d*120)))});
+      await player.act({keys,duration_ms:Math.min(650,Math.max(20,Math.round(d*80)))});
     }
     assert.fail('Native walk did not reach '+JSON.stringify({x,y,position:(await player.observe()).position}));
   }
@@ -108,7 +108,7 @@ export async function run(game){
     await walk(player,78.5,42.5);await walk(player,78.5,77.5);await walk(player,76.5,77.5);
     await button(player,index,'enter-guild-hall',700,580);
     game.check('ordinary portal admits current guild member '+index,(await player.observe()).world==='Guild Hall');
-    await walk(player,14.5,22.5);await walk(player,14.5,8.2);
+    await walk(player,14.5,22.5);await walk(player,14.5,8.0);
   }
   await button(other,2,'open-chronicle',700,580);await capture(other,'lower-rank-removal');
   await button(other,2,'open-removal-cancel',746,158);await button(other,2,'cancel-removal',325,340);
@@ -122,7 +122,7 @@ export async function run(game){
   game.check('cross-world invitation is refused',has(0,'Player is not nearby.'));
   await peer.act({keys:['Insert'],duration_ms:1000});await peer.act({keys:[],duration_ms:1500});
   game.check('reconnect retains removed membership and living identity',(await peer.observe()).world==='Nexus'&&(await peer.observe()).lifecycle.alive&&!(await members()).some(r=>r[0]==='GuildBeta'));
-  await walk(peer,78.5,42.5);await walk(peer,109.5,42.2);
+  await walk(peer,78.5,42.5);await walk(peer,109.5,42.0);
   await chat(game,0,'/invite GuildBeta');
   for(const duration_ms of [10000,10000,1500])await peer.act({keys:[],duration_ms});
   await capture(peer,'invitation-panel-expired');
