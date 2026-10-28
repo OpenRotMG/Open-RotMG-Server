@@ -33,8 +33,7 @@ impl World {
         Ok(())
     }
 
-    // Silent recovery is described by the period guide; the later reference supplies the 5s reconstruction timer.
-    // https://web.archive.org/web/20121201000000id_/http://forums.wildshadow.com/wiki/realm-mad-god/masked-party-god
+    // Silent recovery is documented, but 5s/full-health and stun suppression remain reconstructions: https://gaming.stackexchange.com/a/231896
     pub(super) fn beach_mechanics(&mut self, id: i32) -> Result<()> {
         if self.entities[&id].kind == BUM {
             return Ok(());
