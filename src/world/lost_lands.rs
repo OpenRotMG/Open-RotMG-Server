@@ -284,7 +284,7 @@ fn lost_lands_activation_protection_and_final_credit() {
             .unwrap(),
         0
     );
-    let xp = w.players[&player].character.exp;
+    let xp = w.players[&player].experience_queued;
     assert!(w.critical_deaths.is_empty());
     w.now += 1999;
     w.landmark_mechanics(root, target, 50).unwrap();
@@ -296,6 +296,6 @@ fn lost_lands_activation_protection_and_final_credit() {
     w.finish_timed_defeat(root).unwrap();
     assert!(!w.entities.contains_key(&root));
     assert_eq!(w.critical_deaths, vec![root]);
-    assert!(w.players[&player].character.exp > xp);
+    assert!(w.players[&player].experience_queued > xp);
     assert_eq!(w.players[&player].character.kills, 9);
 }
