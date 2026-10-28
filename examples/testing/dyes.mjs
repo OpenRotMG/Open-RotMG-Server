@@ -32,12 +32,12 @@ export async function run(game){
     const before=await save(name+'-before-preview',client);await capture(client,name+'-before-preview');
     game.check(name+' starts clear of all appearance merchants',clearPreview(before));
     const merchant=before.diagnostic.entities.find(e=>e.extra_stats.some(([id,value])=>id===34&&value===stock));assert(merchant);
-    await client.act({keys:['w'],duration_ms:160});
+    await client.act({keys:['w','d'],duration_ms:160});
     await client.act({keys:[],duration_ms:400});
     const preview=await save(name+'-preview',client);await capture(client,name+'-preview');
     game.check(name+' preview enters the selected merchant radius',Math.hypot(preview.view.position.x-merchant.pos.x,preview.view.position.y-merchant.pos.y)<1);
     // Selected Player/Merchant render proximity previews without changing Tex1/Tex2: https://github.com/OpenRotMG/Open-RotMG-Client/blob/39acbfbf3bf545c397d6ac94f0a9430d6d660ac2/client.swf
-    await client.act({keys:['s'],duration_ms:160});await client.act({keys:[],duration_ms:400});
+    await client.act({keys:['s','a'],duration_ms:160});await client.act({keys:[],duration_ms:400});
     const cancelled=await save(name+'-cancelled',client);await capture(client,name+'-cancelled');
     game.check(name+' preview cancels clear of every appearance merchant',clearPreview(cancelled));
     for(const state of [before,preview,cancelled])game.check(name+' preview never consumes or persists the trial color',state.diagnostic.character.tex1===0x01ff0000&&state.diagnostic.character.tex2===0x010000ff&&JSON.stringify(state.view.character.items)===JSON.stringify(before.view.character.items)&&state.view.character.inventory_revision===before.view.character.inventory_revision);
