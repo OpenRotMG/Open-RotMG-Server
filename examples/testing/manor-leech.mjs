@@ -28,6 +28,8 @@ export async function run(game){
   const headers={Authorization:'Bearer '+(await readFile(output('native/state/control.token'),'utf8')).trim(),'Content-Type':'application/json'};
   const response=await fetch(report.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:10000}}})});
   const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));await writeFile(output('protection.json'),JSON.stringify(receipt));
+  for(let n=0;n<30&&(await game.inspect()).diagnostic.own_projectiles.length;n++)await game.act({keys:[],duration_ms:100});
+  assert.equal((await game.inspect()).diagnostic.own_projectiles.length,0,'Player shots must retire before the blocked-hit observation');
   const protectedState=await sample('protected');
   await game.act({keys:[],duration_ms:3000},{name:'ruthven-leech',when:()=>true});
   const blocked=await sample('blocked');
