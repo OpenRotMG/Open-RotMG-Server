@@ -36,7 +36,7 @@ export async function run(observer){
   const protectedUntil=new Map();
   async function protect(actor){
     const before=await actor.observe();let now=before.game_ms,restore;const until=protectedUntil.get(actor.actor)??0;
-    if(actor.actor===admissionActor&&now<until&&until-now<5000){
+    if(actor.actor===admissionActor&&now<until&&until-now<6000){
       restore=before.position;
       await cheat(actor,{kind:'teleport',position:safePosition});
       await observer.act({keys:[],duration_ms:until-now+100});
@@ -62,11 +62,11 @@ export async function run(observer){
     for(let n=0;n<80;n++){
       await protect(observer);await protect({actor:admissionActor,observe:()=>api({op:'observe',actor:admissionActor})});
       const scene=await api({op:'inspect',actor:admissionActor});
-      const target=scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
+      const target=scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x924,0x91d].includes(e.kind))||scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
       if(!target)break;
       const position=approachPoint(target.pos);
       await cheat({actor:admissionActor},{kind:'teleport',position});
-      await direct({command:'shoot',angle:Math.atan2(target.pos.y-position.y,target.pos.x-position.x)},1000);
+      await direct({command:'shoot',angle:Math.atan2(target.pos.y-position.y,target.pos.x-position.x)},3000);
       admission=(await events()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd56);if(admission)break;
     }
     if(admission)break;
