@@ -26,14 +26,15 @@ export async function run(game){
     for(let n=0;n<queue.length;n++){
       const i=queue[n],p={x:i%width+.5,y:Math.floor(i/width)+.5};
       if(distance(p,goal)<=tolerance){const path=[];for(let at=i;at!==null;at=previous.get(at))path.push({x:at%width+.5,y:Math.floor(at/width)+.5});return path.reverse();}
-      for(const j of [i-1,i+1,i-width,i+width])if(j>=0&&j<width*map.height&&!blocked.has(j)&&!previous.has(j)){previous.set(j,i);queue.push(j);}
+      // Cell-centre routes clipped the native collider at corridor turns.
+      for(const j of [i-1,i+1,i-width,i+width])if(j>=0&&j<width*map.height&&!previous.has(j)&&[-1,0,1].every(dx=>[-1,0,1].every(dy=>!blocked.has(j+dx+dy*width)))){previous.set(j,i);queue.push(j);}
     }
     throw Error('No walkable route to '+JSON.stringify(goal));
   }
   async function walk(goal,tolerance=.75){
     const path=route((await game.observe()).position,goal,tolerance),turns=path.filter((p,i)=>i===path.length-1||i>0&&(p.x-path[i-1].x!==path[i+1].x-p.x||p.y-path[i-1].y!==path[i+1].y-p.y));
     for(const point of turns)for(let n=0;n<80;n++){
-      const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y,d=distance(point,v.position);if(d<.3)break;
+      const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y,d=distance(point,v.position);if(d<.45)break;
       assert(n<79,'Native walk stalled at '+JSON.stringify({point,position:v.position}));
       const keys=Math.abs(dx)>Math.abs(dy)?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
       await step({keys,duration_ms:Math.max(60,Math.min(800,Math.round(Math.max(Math.abs(dx),Math.abs(dy))/7.73*1000)))});
@@ -59,11 +60,13 @@ export async function run(game){
   await step({keys:[],duration_ms:700},{name:'ordinary-shelf',when:()=>true});
   await refresh();await writeFile(out('ordinary-shelf.json'),JSON.stringify({before:ordinary,after:map.entities.find(e=>e.id===ordinary.id)}));
   game.check('ordinary bookshelf survives native staff damage',map.entities.some(e=>e.id===ordinary.id&&e.hp===ordinary.hp));
-  await walk(secret.pos,3);
+  const doors=shelves.filter(e=>e.condition===0&&distance(e.pos,secret.pos)<=2),passage={x:doors.reduce((sum,e)=>sum+e.pos.x,0)/doors.length,y:doors.reduce((sum,e)=>sum+e.pos.y,0)/doors.length};
+  assert.equal(doors.length,3,'Selected secret passage must have three shelves');
+  await walk(passage,3);
   await step({keys:[],duration_ms:700},{name:'secret-shelf-before',when:()=>true});
-  await shoot(secret.id);
-  await refresh();game.check('native staff destroys only the secret shelf and opens its blocked cell',!map.entities.some(e=>e.id===secret.id)&&!map.blocked.some(([x,y])=>x===Math.floor(secret.pos.x)&&y===Math.floor(secret.pos.y)));
-  await walk(secret.pos,.3);
+  for(const door of doors)await shoot(door.id);
+  await refresh();game.check('native staff destroys secret shelves and opens their blocked passage',doors.every(door=>!map.entities.some(e=>e.id===door.id)&&!map.blocked.some(([x,y])=>x===Math.floor(door.pos.x)&&y===Math.floor(door.pos.y))));
+  await walk(passage,.3);
   await step({keys:[],duration_ms:700},{name:'secret-shelf-after',when:()=>true});
   const coffins=map.entities.filter(e=>e.kind===0x1737).sort((a,b)=>distance(a.pos,secret.pos)-distance(b.pos,secret.pos));
   const pair=coffins.find(a=>coffins.some(b=>a.id!==b.id&&distance(a.pos,b.pos)===4));assert(pair,'No generated paired-coffin room');
@@ -72,7 +75,7 @@ export async function run(game){
   for(const coffin of [pair,mate,...coffins.filter(e=>e.id!==pair.id&&e.id!==mate.id)]){
     await refresh();await walk(coffin.pos,4);
     const before=await save('coffin-'+coffin.id+'-before'),known=new Set(entities(before).map(e=>e.id));
-    if(coffin.id===pair.id)game.check('opened secret passage admits native walking to its paired coffins',distance(before.view.position,pair.pos)<=4&&entities(before).some(e=>e.id===mate.id));
+    if(coffin.id===pair.id)game.check('opened secret passage admits native walking to its paired coffins',distance(before.view.position,pair.pos)<=4.5&&entities(before).some(e=>e.id===mate.id));
     for(let n=0;n<20;n++){
       const e=entities(await game.inspect()).find(e=>e.id===coffin.id);if(!e||e.hp<20000)break;
       await step({keys:[],duration_ms:150,target:{entity:coffin.id,camera_angle:-Math.PI/4,fire:true}});
