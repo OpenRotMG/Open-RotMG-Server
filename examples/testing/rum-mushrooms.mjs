@@ -15,17 +15,17 @@ export async function run(game){
     for(const result of results)if(result.status==='rejected')throw result.reason;
     samples.push(await game.observe());
   }
-  async function until(time){while((await game.observe()).game_ms<time)await act({keys:[],duration_ms:Math.min(8000,time-(await game.observe()).game_ms)});}
+  async function until(time){while((await game.observe()).game_ms<time)await act({keys:[],duration_ms:Math.min(1000,time-(await game.observe()).game_ms)});}
   const useIndex=slot=>samples.findIndex(v=>v.character.items[slot]===-1);
   const used=slot=>samples[useIndex(slot)];
   await act({keys:[],duration_ms:2000},{name:'sober',when:v=>v.game_ms>initial.game_ms+500});
   await act({keys:['2'],duration_ms:2000},{name:'mushroom',when:v=>Boolean(v.character.conditions&hallucinating)});
   game.check('Mushroom alone applies Hallucinating',samples.some(v=>v.character.conditions===hallucinating));
-  await act([step(['1'],100),step([],1000),step(['3'],100),step([],700),step(['4'],100),step([],6000)],{name:'rum-and-ghost',when:v=>v.character.conditions===(drunk|hallucinating|invisible)});
+  await act([step(['1'],100),step(['3'],100),step([],300),step(['4'],100)]);
   game.check('Rum and Ghost Rum coexist with Mushroom',samples.some(v=>v.character.conditions===(drunk|hallucinating|invisible)));
-  game.check('second Ghost Rum is used while the first invisibility is active',useIndex(7)>0&&Boolean(samples[useIndex(7)-1].character.conditions&invisible));
-  const ghostWindow=samples.filter(v=>v.game_ms>used(6).game_ms+4200&&v.game_ms<used(7).game_ms+3500);
-  game.check('refreshed invisibility outlasts first Ghost Rum deadline',ghostWindow.length>0&&ghostWindow.every(v=>v.character.conditions&invisible));
+  game.check('second Ghost Rum is used while the first invisibility is active',useIndex(7)>0&&Boolean(samples[useIndex(7)-1].character.conditions&invisible)&&used(7).game_ms-used(6).game_ms>500);
+  await until(used(7).game_ms+5000);
+  bracket(7,invisible,4000,'refreshed Ghost Invisible expiration');
   await until(used(4).game_ms+18000);
   game.check('short Ghost Rum does not truncate the longer Drunk',Boolean((await game.observe()).character.conditions&drunk));
   await act([step(['5'],100),step(['6'],100),step([],1000)]);
@@ -38,7 +38,8 @@ export async function run(game){
   }
   game.check('both long effects expire without another item',(await game.observe()).character.conditions===0);
   // Keep overlap qualified: Kithio replaces timers; our engine retains later deadlines (https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Entity.cs#L377-L394).
-  await act([step(['7'],100),step([],9000)],{name:'ghost-alone',when:v=>v.character.conditions===(drunk|invisible)});
+  await act({keys:['7'],duration_ms:2000},{name:'ghost-alone',when:v=>v.character.conditions===(drunk|invisible)});
+  await until(used(10).game_ms+7000);
   bracket(10,invisible,4000,'Ghost Invisible expiration');bracket(10,drunk,6000,'Ghost Drunk expiration');
   game.check('Ghost Invisible expires before its Drunk',samples.some(v=>v.game_ms>used(10).game_ms&&v.character.conditions===drunk));
   const consumed=await game.observe();
