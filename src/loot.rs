@@ -1166,7 +1166,9 @@ pub(crate) fn god_loot(
 }
 
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if potion_damage(kind).is_some() || matches!(kind, 0x91d | 0x91e) {
+    // Sprite tier candidates roll independently, not as an exclusive choice: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L77-L86
+    let per_item = potion_damage(kind).is_some() || matches!(kind, 0x624..=0x626 | 0x91d | 0x91e);
+    let mut items = if per_item {
         god_equipment(content, kind, rng)
     } else if independent(kind) {
         let mut items = Vec::new();
@@ -1353,6 +1355,35 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn realm_sprites_keep_distinct_independent_public_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, tier, slots, chance) in [
+            (0x624, 5, WEAPONS, 0.02),
+            (0x625, 2, ABILITIES, 0.04),
+            (0x626, 6, ARMOR, 0.01),
+        ] {
+            assert!(
+                matches!(table(kind), [(p, Pick::Tier(t, s)), (q, Pick::Item(0xa23))]
+                if *p == chance && *t == tier && *s == slots && *q == 0.05)
+            );
+            assert!(period_surface(kind) && !private(kind));
+            let pool = candidates(&content, Pick::Tier(tier, slots));
+            assert!(!pool.is_empty());
+            let all = rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0));
+            assert_eq!(all.len(), pool.len() + 1);
+            assert!(pool.iter().all(|item| all.contains(item)) && all.contains(&0xa23));
+            assert!(
+                rewards(
+                    &content,
+                    kind,
+                    &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+                )
+                .is_empty()
+            );
+        }
+    }
 
     #[test]
     fn nomad_has_one_public_four_percent_magic_potion_roll() {
