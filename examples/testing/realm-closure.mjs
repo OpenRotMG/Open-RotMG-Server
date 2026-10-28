@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 
-const out=process.env.QA_RESULTS_DIR;
+const out=process.env.QA_RESULTS_DIR,attackBonus=1000;
 const spec={class:0x307,level:20,seed:787,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 const roots=new Set([0x668,0x67d,0x91f,0x91b,0x928,0x675,0x678,0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37]);
 const leaders=new Set([...roots,0x920,0x91c,0x92d,0x6c1,0x6c2]);
@@ -52,7 +52,7 @@ export async function run(game){
       await cheat(actor,{kind:'protection',condition:'invincible',duration_ms:60000});protection.set(actor,now+60000);
     }
     for(const client of clients)if(now>=(attack.get(client.actor)??0)){
-      await cheat(client.actor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});attack.set(client.actor,now+60000);
+      await cheat(client.actor,{kind:'stat_modifier',index:2,amount:attackBonus,duration_ms:60000});attack.set(client.actor,now+60000);
     }
     return Math.min(...protection.values())-now;
   }
@@ -74,7 +74,7 @@ export async function run(game){
   const menus=y=>[0,1].map(i=>clients.map(client=>menu(client,y)[i]));
   await act(game,{keys:[],duration_ms:800});await act(game,menus(432));
   for(const client of clients)game.check('native party lock persists for scout and account '+(await client.observe()).session.account,locked((await client.observe()).session.account));
-  await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout}));
+  await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout,assistance:{attack_bonus:attackBonus,protection_ms:60000}}));
   opening.blocked.length=0;opening.entities.length=0;
   await act(game,{keys:[],duration_ms:500},{name:'realm-opening',when:()=>true});await save('opening');
   async function travel(anchor){
@@ -123,10 +123,11 @@ export async function run(game){
     for(let step=0;step<100;step++){
       if((await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next)){completed=true;break;}
       const state=await api({op:'inspect',actor:scout.actor}),family=state.diagnostic.entities.filter(e=>e.id===next||e.quest===next),vulnerable=family.filter(e=>e.hp>0&&!(e.condition&((1<<21)|(1<<23)|(1<<24))));
-      const target=vulnerable.find(e=>e.kind===0x91d)??vulnerable.find(e=>leaders.has(e.kind)||[0x929,0xd5e,0xd62].includes(e.kind));
+      const views=await Promise.all(clients.map(c=>c.observe())),position=views[0].position;
+      vulnerable.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
+      const target=vulnerable.find(e=>e.kind===0x91d)??vulnerable.find(e=>leaders.has(e.kind))??vulnerable.find(e=>[0x929,0xd5e,0xd62].includes(e.kind));
       const anchor=target??family.find(e=>leaders.has(e.kind));
       if(!anchor){await act(game,{keys:[],duration_ms:1000});continue;}
-      const views=await Promise.all(clients.map(c=>c.observe()));
       if(views.some(v=>Math.hypot(v.position.x-anchor.pos.x,v.position.y-anchor.pos.y)>5.5)){await approach(anchor.pos);continue;}
       if(target){
         const duration_ms=target.kind===0xd5e?1000:1500,states=await Promise.all(clients.map(c=>c.inspect()));
